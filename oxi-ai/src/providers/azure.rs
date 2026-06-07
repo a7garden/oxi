@@ -1,17 +1,17 @@
 //! Azure OpenAI provider implementation
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
-    StreamOptions, Usage, error::ProviderError,
+    StreamOptions, StreamResult, Usage, error::ProviderError,
 };
 
 use super::shared_client;
@@ -141,87 +141,93 @@ impl Default for AzureProvider {
     }
 }
 
-#[async_trait]
 impl Provider for AzureProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        // Build URL
-        let url = self.build_url(model)?;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            // Build URL
+            let url = self.build_url(model)?;
 
-        // Get API key
-        let api_key = self.get_api_key(&options)?;
+            // Get API key
+            let api_key = self.get_api_key(&options)?;
 
-        // Build messages
-        let messages = build_messages(context)?;
+            // Build messages
+            let messages = build_messages(context)?;
 
-        // Build request body
-        let mut body = serde_json::json!({
-            "messages": messages,
-            "stream": true,
-        });
+            // Build request body
+            let mut body = serde_json::json!({
+                "messages": messages,
+                "stream": true,
+            });
 
-        // Add model if not already in URL (some deployments use it)
-        if model.id != "default" && model.id != "azure" {
-            body["model"] = serde_json::json!(model.id);
-        }
-
-        // Add optional parameters
-        if let Some(ref opts) = options {
-            if let Some(temp) = opts.temperature {
-                body["temperature"] = serde_json::json!(temp);
+            // Add model if not already in URL (some deployments use it)
+            if model.id != "default" && model.id != "azure" {
+                body["model"] = serde_json::json!(model.id);
             }
 
-            if let Some(max) = opts.max_tokens {
-                body["max_tokens"] = serde_json::json!(max);
-            }
-        }
-
-        // Add tools if present
-        if !context.tools.is_empty() {
-            body["tools"] = build_tools(&context.tools)?;
-        }
-
-        // Build headers
-        let headers = self.build_headers(&api_key, &options);
-
-        // Make request
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
-
-        // Create event stream
-        let provider_name = model.provider.clone();
-        let model_id = model.id.clone();
-
-        let stream = response.bytes_stream().flat_map(
-            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
+            // Add optional parameters
+            if let Some(ref opts) = options {
+                if let Some(temp) = opts.temperature {
+                    body["temperature"] = serde_json::json!(temp);
                 }
-                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                    reason: StopReason::Error,
-                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                }]),
-            },
-        );
 
-        Ok(Box::pin(stream))
+                if let Some(max) = opts.max_tokens {
+                    body["max_tokens"] = serde_json::json!(max);
+                }
+            }
+
+            // Add tools if present
+            if !context.tools.is_empty() {
+                body["tools"] = build_tools(&context.tools)?;
+            }
+
+            // Build headers
+            let headers = self.build_headers(&api_key, &options);
+
+            // Make request
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
+
+            // Create event stream
+            let provider_name = model.provider.clone();
+            let model_id = model.id.clone();
+
+            let stream =
+                response
+                    .bytes_stream()
+                    .flat_map(move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                        Ok(bytes) => {
+                            let text = String::from_utf8_lossy(&bytes).to_string();
+                            futures::stream::iter(parse_sse_events(
+                                &text,
+                                &provider_name,
+                                &model_id,
+                            ))
+                        }
+                        Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                        }]),
+                    });
+
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -389,10 +395,10 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         .content
                         .iter()
                         .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                    if let Some(idx) = last_text_idx {
-                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
-                            t.text.push_str(content);
-                        }
+                    if let Some(idx) = last_text_idx
+                        && let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                    {
+                        t.text.push_str(content);
                     } else {
                         partial_message
                             .content

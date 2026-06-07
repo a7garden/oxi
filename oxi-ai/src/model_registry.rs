@@ -5,9 +5,9 @@
 //! for custom OpenAI-compatible providers.
 
 use crate::{Api, CompatSettings, Cost, InputModality, MaxTokensField, Model, ThinkingFormat};
-use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// Extract the model name after the last '/', or return the whole id if no '/' is present.
 fn extract_model_name(id: &str) -> &str {
@@ -46,7 +46,7 @@ fn default_compat_for_provider(provider: &str) -> Option<CompatSettings> {
 }
 
 /// Global model registry (static built-in models)
-static STATIC_MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
+static STATIC_MODELS: LazyLock<HashMap<String, Model>> = LazyLock::new(|| {
     let mut map = HashMap::new();
 
     // OpenAI models
@@ -852,7 +852,7 @@ impl ModelRegistry {
 // ── Global registry instance ────────────────────────────────────────
 
 /// Global model registry instance (for convenience functions).
-static GLOBAL_REGISTRY: Lazy<ModelRegistry> = Lazy::new(ModelRegistry::from_static);
+static GLOBAL_REGISTRY: LazyLock<ModelRegistry> = LazyLock::new(ModelRegistry::from_static);
 
 // ── Convenience functions using global registry ─────────────────────
 

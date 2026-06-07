@@ -1,9 +1,10 @@
 //! Rule-based `CapabilityResolver` — TOML config maps subjects to tool lists.
 
-use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::CapabilityResolver;
@@ -74,16 +75,24 @@ impl TomlCapabilityResolver {
     }
 }
 
-#[async_trait]
 impl CapabilityResolver for TomlCapabilityResolver {
-    async fn visible_tools(&self, subject: &str) -> Result<Vec<String>, SdkError> {
+    fn visible_tools(
+        &self,
+        subject: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SdkError>> + Send + '_>> {
+        let result = self.resolve_sync(subject);
+        Box::pin(async move { Ok(result) })
+    }
+}
+
+impl TomlCapabilityResolver {
+    fn resolve_sync(&self, subject: &str) -> Vec<String> {
         let g = self.subjects.read();
         // Exact match first.
         if let Some(list) = g.get(subject) {
-            return Ok(list.clone());
+            return list.clone();
         }
         // Wildcard suffix: keys ending with `*` are defaults.
-        // Order: most specific prefix wins.
         let mut best: Option<&Vec<String>> = None;
         for (key, list) in g.iter() {
             if let Some(prefix) = key.strip_suffix('*')
@@ -93,7 +102,7 @@ impl CapabilityResolver for TomlCapabilityResolver {
                 best = Some(list);
             }
         }
-        Ok(best.cloned().unwrap_or_default())
+        best.cloned().unwrap_or_default()
     }
 }
 

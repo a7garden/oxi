@@ -6,10 +6,11 @@
 /// Uses `oxibrowser::SearchResult` as the canonical result type, shared across
 /// web_search, github, and get_search_results tools.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -108,7 +109,6 @@ impl GetSearchResultsTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for GetSearchResultsTool {
     fn name(&self) -> &str {
         "get_search_results"
@@ -135,48 +135,50 @@ impl AgentTool for GetSearchResultsTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let search_id = params["searchId"]
-            .as_str()
-            .ok_or_else(|| "Missing required parameter: searchId".to_string())?;
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let search_id = params["searchId"]
+                .as_str()
+                .ok_or_else(|| "Missing required parameter: searchId".to_string())?;
 
-        let (query, results) = self
-            .cache
-            .get(search_id)
-            .ok_or_else(|| format!("Search not found for ID: {}", search_id))?;
+            let (query, results) = self
+                .cache
+                .get(search_id)
+                .ok_or_else(|| format!("Search not found for ID: {}", search_id))?;
 
-        let mut output = format!("Cached results for: \"{}\"\n\n", query);
-        for (i, result) in results.iter().enumerate() {
-            output.push_str(&format!(
-                "{}. **{}**\n   {}\n   {}\n\n",
-                i + 1,
-                result.title,
-                result.url,
-                result.snippet
-            ));
-        }
+            let mut output = format!("Cached results for: \"{}\"\n\n", query);
+            for (i, result) in results.iter().enumerate() {
+                output.push_str(&format!(
+                    "{}. **{}**\n   {}\n   {}\n\n",
+                    i + 1,
+                    result.title,
+                    result.url,
+                    result.snippet
+                ));
+            }
 
-        let results_json: Vec<Value> = results
-            .iter()
-            .map(|r| {
-                json!({
-                    "title": r.title,
-                    "url": r.url,
-                    "snippet": r.snippet,
-                    "source": r.source,
+            let results_json: Vec<Value> = results
+                .iter()
+                .map(|r| {
+                    json!({
+                        "title": r.title,
+                        "url": r.url,
+                        "snippet": r.snippet,
+                        "source": r.source,
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        Ok(AgentToolResult::success(output).with_metadata(
-            json!({ "results": results_json, "query": query, "searchId": search_id }),
-        ))
+            Ok(AgentToolResult::success(output).with_metadata(
+                json!({ "results": results_json, "query": query, "searchId": search_id }),
+            ))
+        })
     }
 }
 

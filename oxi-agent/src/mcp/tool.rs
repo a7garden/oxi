@@ -5,13 +5,14 @@
 //! different parameters to search, describe, connect, and call MCP tools.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolContext};
-use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::McpManager;
 use super::content;
+use std::future::Future;
+use std::pin::Pin;
 
 /// The unified MCP gateway tool.
 ///
@@ -31,7 +32,6 @@ impl McpTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for McpTool {
     fn name(&self) -> &str {
         "mcp"
@@ -86,55 +86,57 @@ impl AgentTool for McpTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, String> {
-        let obj = params
-            .as_object()
-            .ok_or("Parameters must be a JSON object")?;
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let obj = params
+                .as_object()
+                .ok_or("Parameters must be a JSON object")?;
 
-        // Parse optional args
-        let parsed_args = if let Some(args_val) = obj.get("args").and_then(|v| v.as_str()) {
-            serde_json::from_str::<Value>(args_val)
-                .map_err(|e| format!("Invalid args JSON: {}", e))?
-        } else {
-            Value::Object(serde_json::Map::new())
-        };
+            // Parse optional args
+            let parsed_args = if let Some(args_val) = obj.get("args").and_then(|v| v.as_str()) {
+                serde_json::from_str::<Value>(args_val)
+                    .map_err(|e| format!("Invalid args JSON: {}", e))?
+            } else {
+                Value::Object(serde_json::Map::new())
+            };
 
-        // ── Route by priority ─────────────────────────────────────
-        if let Some(action) = obj.get("action").and_then(|v| v.as_str()) {
-            return self.handle_action(action).await;
-        }
+            // ── Route by priority ─────────────────────────────────────
+            if let Some(action) = obj.get("action").and_then(|v| v.as_str()) {
+                return self.handle_action(action).await;
+            }
 
-        if let Some(tool_name) = obj.get("tool").and_then(|v| v.as_str()) {
-            let server = obj.get("server").and_then(|v| v.as_str());
-            return self.handle_call(tool_name, parsed_args, server).await;
-        }
+            if let Some(tool_name) = obj.get("tool").and_then(|v| v.as_str()) {
+                let server = obj.get("server").and_then(|v| v.as_str());
+                return self.handle_call(tool_name, parsed_args, server).await;
+            }
 
-        if let Some(server_name) = obj.get("connect").and_then(|v| v.as_str()) {
-            return self.handle_connect(server_name).await;
-        }
+            if let Some(server_name) = obj.get("connect").and_then(|v| v.as_str()) {
+                return self.handle_connect(server_name).await;
+            }
 
-        if let Some(tool_name) = obj.get("describe").and_then(|v| v.as_str()) {
-            return self.handle_describe(tool_name).await;
-        }
+            if let Some(tool_name) = obj.get("describe").and_then(|v| v.as_str()) {
+                return self.handle_describe(tool_name).await;
+            }
 
-        if let Some(query) = obj.get("search").and_then(|v| v.as_str()) {
-            let regex = obj.get("regex").and_then(|v| v.as_bool()).unwrap_or(false);
-            let server = obj.get("server").and_then(|v| v.as_str());
-            return self.handle_search(query, regex, server).await;
-        }
+            if let Some(query) = obj.get("search").and_then(|v| v.as_str()) {
+                let regex = obj.get("regex").and_then(|v| v.as_bool()).unwrap_or(false);
+                let server = obj.get("server").and_then(|v| v.as_str());
+                return self.handle_search(query, regex, server).await;
+            }
 
-        if let Some(server_name) = obj.get("server").and_then(|v| v.as_str()) {
-            return self.handle_list(server_name).await;
-        }
+            if let Some(server_name) = obj.get("server").and_then(|v| v.as_str()) {
+                return self.handle_list(server_name).await;
+            }
 
-        // Default: status
-        self.handle_status().await
+            // Default: status
+            self.handle_status().await
+        })
     }
 }
 

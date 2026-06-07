@@ -19,9 +19,10 @@
 //! Resolution order per request: `deny` → `require_approval` → `Allow`.
 //! Patterns are matched as substrings on `request.action`.
 
-use async_trait::async_trait;
 use serde::Deserialize;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::{AccessDecision, AccessGate, ToolCallRequest};
@@ -94,27 +95,37 @@ impl SimpleAccessGate {
     }
 }
 
-#[async_trait]
 impl AccessGate for SimpleAccessGate {
-    async fn check(&self, request: &ToolCallRequest) -> Result<AccessDecision, SdkError> {
+    fn check(
+        &self,
+        request: &ToolCallRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<AccessDecision, SdkError>> + Send + '_>> {
+        let decision = self.check_sync(request);
+        Box::pin(async move { Ok(decision) })
+    }
+}
+
+impl SimpleAccessGate {
+    fn check_sync(&self, request: &ToolCallRequest) -> AccessDecision {
         let rules = self.rules.read();
-        if let Some(rule) = rules.rules.get(&request.tool) {
-            for pat in &rule.deny {
-                if request.action.contains(pat) {
-                    return Ok(AccessDecision::Deny {
-                        reason: format!("matches deny pattern: {pat}"),
-                    });
-                }
-            }
-            for pat in &rule.require_approval {
-                if request.action.contains(pat) {
-                    return Ok(AccessDecision::RequireApproval {
-                        reason: format!("matches approval pattern: {pat}"),
-                    });
-                }
+        let Some(rule) = rules.rules.get(&request.tool) else {
+            return AccessDecision::Allow;
+        };
+        for pat in &rule.deny {
+            if request.action.contains(pat) {
+                return AccessDecision::Deny {
+                    reason: format!("matches deny pattern: {pat}"),
+                };
             }
         }
-        Ok(AccessDecision::Allow)
+        for pat in &rule.require_approval {
+            if request.action.contains(pat) {
+                return AccessDecision::RequireApproval {
+                    reason: format!("matches approval pattern: {pat}"),
+                };
+            }
+        }
+        AccessDecision::Allow
     }
 }
 

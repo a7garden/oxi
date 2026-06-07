@@ -1,6 +1,5 @@
 //! File-based `ConfigStore` — single TOML file with dotted-key flattening.
 
-use async_trait::async_trait;
 use parking_lot::RwLock;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
@@ -143,7 +142,6 @@ fn json_to_toml(v: JsonValue) -> toml::Value {
     }
 }
 
-#[async_trait]
 impl ConfigStore for FileConfigStore {
     fn get(&self, key: &str) -> Result<Option<PortValue>, SdkError> {
         Ok(self.state.read().get(key).cloned())

@@ -5,11 +5,12 @@
 
 use super::http_client::shared_http_client;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose};
 use oxi_ai::types::{ImageGenerationRequest, ImageGenerationResponse};
 use serde_json::{Value, json};
 use std::env;
+use std::future::Future;
+use std::pin::Pin;
 
 /// Default image generation model.
 const DEFAULT_MODEL: &str = "black-forest-labs/flux-1-dev";
@@ -171,7 +172,6 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, ToolError> {
     Ok(out)
 }
 
-#[async_trait]
 impl AgentTool for GenerateImageTool {
     fn name(&self) -> &str {
         "generate_image"
@@ -214,80 +214,82 @@ impl AgentTool for GenerateImageTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        // Parse parameters
-        let prompt: String = params
-            .get("prompt")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing required parameter: prompt".to_string())?
-            .to_string();
-
-        if prompt.is_empty() {
-            return Err("Prompt cannot be empty".to_string());
-        }
-
-        if prompt.chars().count() > MAX_PROMPT_LEN {
-            tracing::warn!(
-                "Prompt length {} exceeds recommended max {}",
-                prompt.chars().count(),
-                MAX_PROMPT_LEN
-            );
-        }
-
-        let request = ImageGenerationRequest {
-            prompt: prompt.clone(),
-            model: params
-                .get("model")
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            // Parse parameters
+            let prompt: String = params
+                .get("prompt")
                 .and_then(|v| v.as_str())
-                .map(String::from),
-            size: params
-                .get("size")
-                .and_then(|v| v.as_str())
-                .map(String::from),
-            n: params.get("n").and_then(|v| v.as_u64()).map(|v| v as u32),
-            response_format: Some("b64_json".to_string()),
-        };
+                .ok_or_else(|| "Missing required parameter: prompt".to_string())?
+                .to_string();
 
-        let api_key = env::var("OPENROUTER_API_KEY")
-            .or_else(|_| env::var("OPENAI_API_KEY"))
-            .map_err(|_| {
-                "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. \
-                 Please set your API key before using the image generation tool."
-            })?;
+            if prompt.is_empty() {
+                return Err("Prompt cannot be empty".to_string());
+            }
 
-        let response = self.call_openrouter(&api_key, &request).await?;
+            if prompt.chars().count() > MAX_PROMPT_LEN {
+                tracing::warn!(
+                    "Prompt length {} exceeds recommended max {}",
+                    prompt.chars().count(),
+                    MAX_PROMPT_LEN
+                );
+            }
 
-        if response.images.is_empty() {
-            return Ok(AgentToolResult::success(
-                "Image generation completed but returned no images.",
-            ));
-        }
+            let request = ImageGenerationRequest {
+                prompt: prompt.clone(),
+                model: params
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                size: params
+                    .get("size")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                n: params.get("n").and_then(|v| v.as_u64()).map(|v| v as u32),
+                response_format: Some("b64_json".to_string()),
+            };
 
-        // Format response for the agent
-        let n_images = response.images.len();
-        let mut output = format!("Generated {} image(s).\n\n", n_images);
+            let api_key = env::var("OPENROUTER_API_KEY")
+                .or_else(|_| env::var("OPENAI_API_KEY"))
+                .map_err(|_| {
+                    "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. \
+                     Please set your API key before using the image generation tool."
+                })?;
 
-        if let Some(ref revised) = response.revised_prompt {
-            output.push_str(&format!("Revised prompt: {}\n\n", revised));
-        }
+            let response = self.call_openrouter(&api_key, &request).await?;
 
-        for (i, img_data) in response.images.iter().enumerate() {
-            let b64 = general_purpose::STANDARD.encode(img_data);
-            output.push_str(&format!(
-                "Image {} ({} bytes, base64):\n{}\n\n",
-                i + 1,
-                img_data.len(),
-                b64
-            ));
-        }
+            if response.images.is_empty() {
+                return Ok(AgentToolResult::success(
+                    "Image generation completed but returned no images.",
+                ));
+            }
 
-        Ok(AgentToolResult::success(output.trim_end()))
+            // Format response for the agent
+            let n_images = response.images.len();
+            let mut output = format!("Generated {} image(s).\n\n", n_images);
+
+            if let Some(ref revised) = response.revised_prompt {
+                output.push_str(&format!("Revised prompt: {}\n\n", revised));
+            }
+
+            for (i, img_data) in response.images.iter().enumerate() {
+                let b64 = general_purpose::STANDARD.encode(img_data);
+                output.push_str(&format!(
+                    "Image {} ({} bytes, base64):\n{}\n\n",
+                    i + 1,
+                    img_data.len(),
+                    b64
+                ));
+            }
+
+            Ok(AgentToolResult::success(output.trim_end()))
+        })
     }
 }
 

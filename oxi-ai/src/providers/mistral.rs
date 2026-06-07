@@ -4,18 +4,18 @@
 //! - Tool call IDs are 9 characters (vs longer UUIDs from OpenAI)
 //! - API key is read from MISTRAL_API_KEY environment variable
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderError, ProviderEvent,
-    StopReason, StreamOptions, Usage,
+    StopReason, StreamOptions, StreamResult, Usage,
 };
 
 use super::shared_client;
@@ -90,111 +90,117 @@ impl Default for MistralProvider {
     }
 }
 
-#[async_trait]
 impl Provider for MistralProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
 
-        // Build the request URL
-        let base_url = if model.base_url.is_empty() {
-            MISTRAL_API_URL.to_string()
-        } else {
-            model.base_url.trim_end_matches('/').to_string()
-        };
-        let url = format!("{}/chat/completions", base_url);
+            // Build the request URL
+            let base_url = if model.base_url.is_empty() {
+                MISTRAL_API_URL.to_string()
+            } else {
+                model.base_url.trim_end_matches('/').to_string()
+            };
+            let url = format!("{}/chat/completions", base_url);
 
-        // Get API key
-        let api_key = options
-            .api_key
-            .as_ref()
-            .or(self.api_key.as_ref())
-            .ok_or(ProviderError::MissingApiKey)?;
+            // Get API key
+            let api_key = options
+                .api_key
+                .as_ref()
+                .or(self.api_key.as_ref())
+                .ok_or(ProviderError::MissingApiKey)?;
 
-        // Build messages with normalized tool call IDs
-        let messages = build_messages(context)?;
+            // Build messages with normalized tool call IDs
+            let messages = build_messages(context)?;
 
-        // Build request body
-        let mut body = serde_json::json!({
-            "model": model.id,
-            "messages": messages,
-            "stream": true,
-        });
+            // Build request body
+            let mut body = serde_json::json!({
+                "model": model.id,
+                "messages": messages,
+                "stream": true,
+            });
 
-        // Add optional parameters
-        if let Some(temp) = options.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-
-        if let Some(max) = options.max_tokens {
-            body["max_tokens"] = serde_json::json!(max);
-        }
-
-        // Add tools if present
-        if !context.tools.is_empty() {
-            body["tools"] = build_tools(&context.tools)?;
-        }
-
-        // Build headers
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
-                .parse()
-                .expect("valid bearer header"),
-        );
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            "application/json".parse().expect("valid header value"),
-        );
-
-        for (k, v) in &options.headers {
-            if let (Ok(name), Ok(value)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                headers.insert(name, value);
+            // Add optional parameters
+            if let Some(temp) = options.temperature {
+                body["temperature"] = serde_json::json!(temp);
             }
-        }
 
-        // Make request
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
+            if let Some(max) = options.max_tokens {
+                body["max_tokens"] = serde_json::json!(max);
+            }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
+            // Add tools if present
+            if !context.tools.is_empty() {
+                body["tools"] = build_tools(&context.tools)?;
+            }
 
-        // Create event stream
-        let provider_name = model.provider.clone();
-        let model_id = model.id.clone();
+            // Build headers
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", api_key)
+                    .parse()
+                    .expect("valid bearer header"),
+            );
+            headers.insert(
+                reqwest::header::CONTENT_TYPE,
+                "application/json".parse().expect("valid header value"),
+            );
 
-        let stream = response.bytes_stream().flat_map(
-            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
+            for (k, v) in &options.headers {
+                if let (Ok(name), Ok(value)) = (
+                    k.parse::<reqwest::header::HeaderName>(),
+                    v.parse::<reqwest::header::HeaderValue>(),
+                ) {
+                    headers.insert(name, value);
                 }
-                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                    reason: StopReason::Error,
-                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                }]),
-            },
-        );
+            }
 
-        Ok(Box::pin(stream))
+            // Make request
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
+
+            // Create event stream
+            let provider_name = model.provider.clone();
+            let model_id = model.id.clone();
+
+            let stream =
+                response
+                    .bytes_stream()
+                    .flat_map(move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                        Ok(bytes) => {
+                            let text = String::from_utf8_lossy(&bytes).to_string();
+                            futures::stream::iter(parse_sse_events(
+                                &text,
+                                &provider_name,
+                                &model_id,
+                            ))
+                        }
+                        Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                        }]),
+                    });
+
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -377,10 +383,10 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         .content
                         .iter()
                         .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                    if let Some(idx) = last_text_idx {
-                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
-                            t.text.push_str(content);
-                        }
+                    if let Some(idx) = last_text_idx
+                        && let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                    {
+                        t.text.push_str(content);
                     } else {
                         partial_message
                             .content

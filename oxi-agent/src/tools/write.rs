@@ -10,9 +10,10 @@ use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -169,7 +170,6 @@ impl Default for WriteTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for WriteTool {
     fn name(&self) -> &str {
         "write"
@@ -208,35 +208,37 @@ impl AgentTool for WriteTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let path = params
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing required parameter: path".to_string())?;
+        ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let path = params
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-        let content = params
-            .get("content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing required parameter: content".to_string())?;
+            let content = params
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing required parameter: content".to_string())?;
 
-        let append = params
-            .get("append")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+            let append = params
+                .get("append")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
-        // Use root_dir if set, else ctx.root()
-        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+            // Use root_dir if set, else ctx.root()
+            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-        match Self::write_file_impl(root, path, content, append).await {
-            Ok(msg) => Ok(AgentToolResult::success(msg)),
-            Err(e) => Ok(AgentToolResult::error(e)),
-        }
+            match Self::write_file_impl(root, path, content, append).await {
+                Ok(msg) => Ok(AgentToolResult::success(msg)),
+                Err(e) => Ok(AgentToolResult::error(e)),
+            }
+        })
     }
 }
 

@@ -3,10 +3,10 @@
 //! This provider uses Google Cloud authentication (service account or gcloud CLI)
 //! to access Vertex AI models via the Gemini API.
 
-use async_trait::async_trait;
 use futures::Stream;
 use futures::stream::StreamExt;
 use reqwest::Client;
+use std::future::Future;
 use std::pin::Pin;
 
 use super::google_shared::{
@@ -14,7 +14,7 @@ use super::google_shared::{
 };
 use super::openai::split_complete_lines;
 use super::shared_client;
-use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
+use super::{Provider, ProviderError, ProviderEvent, StreamOptions, StreamResult};
 use crate::{Api, Context, Model, StopReason};
 
 /// Google Vertex AI provider
@@ -137,77 +137,78 @@ impl Default for VertexProvider {
     }
 }
 
-#[async_trait]
 impl Provider for VertexProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
-        let access_token = self.get_access_token().await?;
-        let project_id = Self::get_project_id()?;
-        let region = Self::get_region();
-        let model_id = &model.id;
-        let url = format!(
-            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:streamGenerateContent",
-            region, project_id, region, model_id
-        );
-        let contents = convert_messages(context)?;
-        let tools_json = convert_tools(&context.tools, false);
-        let body = build_request_body(
-            &contents,
-            context.system_prompt.as_deref(),
-            tools_json.as_ref(),
-            options.temperature,
-            options.max_tokens,
-        );
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
-        let model_name = model.id.clone();
-        // Use split_complete_lines for safe UTF-8 boundary handling
-        let stream = response
-            .bytes_stream()
-            .scan(
-                Vec::new(), // pending_bytes
-                move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
-                    let events = match chunk {
-                        Ok(bytes) => {
-                            let mut combined =
-                                Vec::with_capacity(pending_bytes.len() + bytes.len());
-                            combined.extend_from_slice(pending_bytes);
-                            combined.extend_from_slice(&bytes);
-                            let (text, trailing) = split_complete_lines(&combined);
-                            *pending_bytes = trailing;
-                            parse_google_events(&text, Api::GoogleVertex, "vertex", &model_name)
-                        }
-                        Err(e) => vec![ProviderEvent::Error {
-                            reason: StopReason::Error,
-                            error: create_error_message(
-                                Api::GoogleVertex,
-                                "vertex",
-                                &e.to_string(),
-                            ),
-                        }],
-                    };
-                    async move { Some(futures::stream::iter(events)) }
-                },
-            )
-            .flatten();
-        Ok(Box::pin(stream))
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
+            let access_token = self.get_access_token().await?;
+            let project_id = Self::get_project_id()?;
+            let region = Self::get_region();
+            let model_id = &model.id;
+            let url = format!(
+                "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:streamGenerateContent",
+                region, project_id, region, model_id
+            );
+            let contents = convert_messages(context)?;
+            let tools_json = convert_tools(&context.tools, false);
+            let body = build_request_body(
+                &contents,
+                context.system_prompt.as_deref(),
+                tools_json.as_ref(),
+                options.temperature,
+                options.max_tokens,
+            );
+            let response = self
+                .client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
+            let model_name = model.id.clone();
+            // Use split_complete_lines for safe UTF-8 boundary handling
+            let stream = response
+                .bytes_stream()
+                .scan(
+                    Vec::new(), // pending_bytes
+                    move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                        let events = match chunk {
+                            Ok(bytes) => {
+                                let mut combined =
+                                    Vec::with_capacity(pending_bytes.len() + bytes.len());
+                                combined.extend_from_slice(pending_bytes);
+                                combined.extend_from_slice(&bytes);
+                                let (text, trailing) = split_complete_lines(&combined);
+                                *pending_bytes = trailing;
+                                parse_google_events(&text, Api::GoogleVertex, "vertex", &model_name)
+                            }
+                            Err(e) => vec![ProviderEvent::Error {
+                                reason: StopReason::Error,
+                                error: create_error_message(
+                                    Api::GoogleVertex,
+                                    "vertex",
+                                    &e.to_string(),
+                                ),
+                            }],
+                        };
+                        async move { Some(futures::stream::iter(events)) }
+                    },
+                )
+                .flatten();
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {

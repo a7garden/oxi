@@ -5,9 +5,10 @@
 //! drive firing via a separate background task. This impl is sufficient
 //! for tests and for products that drive cron from their own loop.
 
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::{CronJob, CronScheduler};
@@ -36,20 +37,26 @@ impl InMemoryCronScheduler {
     }
 }
 
-#[async_trait]
 impl CronScheduler for InMemoryCronScheduler {
-    async fn register(&self, job: CronJob) -> Result<(), SdkError> {
+    fn register(
+        &self,
+        job: CronJob,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         self.jobs.lock().insert(job.id.clone(), job);
-        Ok(())
+        Box::pin(async { Ok(()) })
     }
 
-    async fn unregister(&self, id: &str) -> Result<(), SdkError> {
+    fn unregister(
+        &self,
+        id: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         self.jobs.lock().remove(id);
-        Ok(())
+        Box::pin(async { Ok(()) })
     }
 
-    async fn list(&self) -> Result<Vec<CronJob>, SdkError> {
-        Ok(self.jobs.lock().values().cloned().collect())
+    fn list(&self) -> Pin<Box<dyn Future<Output = Result<Vec<CronJob>, SdkError>> + Send + '_>> {
+        let jobs = self.jobs.lock().values().cloned().collect();
+        Box::pin(async { Ok(jobs) })
     }
 }
 

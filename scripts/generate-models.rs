@@ -390,8 +390,9 @@ fn main() {
 
     // Find an anthropic model for test
     let anthropic_provider = db.providers.iter().find(|p| p.name == "anthropic");
-    if let Some(ap) = anthropic_provider {
-        if let Some(sample) = ap.models.iter().find(|m| m.id.contains("sonnet")) {
+    if let Some(ap) = anthropic_provider
+        && let Some(sample) = ap.models.iter().find(|m| m.id.contains("sonnet"))
+    {
             out.push_str(&format!(
                 "    #[test]\n\
                  \x20   fn test_get_anthropic_model() {{\n\
@@ -408,8 +409,9 @@ fn main() {
 
     // Find an openai model for test
     let openai_provider = db.providers.iter().find(|p| p.name == "openai");
-    if let Some(op) = openai_provider {
-        if let Some(sample) = op.models.iter().find(|m| m.id == "gpt-4o") {
+    if let Some(op) = openai_provider
+        && let Some(sample) = op.models.iter().find(|m| m.id == "gpt-4o")
+    {
             out.push_str(&format!(
                 "    #[test]\n\
                  \x20   fn test_get_openai_model() {{\n\

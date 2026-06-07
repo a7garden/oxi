@@ -91,9 +91,10 @@ pub fn generate_branch_summary(messages: &[Message], n: usize) -> String {
     format!("[Branch summary of {} msgs] {}", messages.len(), summary)
 }
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -407,14 +408,17 @@ impl std::fmt::Display for CompactionError {
 impl std::error::Error for CompactionError {}
 
 /// Trait for context compaction implementations
-#[async_trait]
 pub trait Compactor: Send + Sync {
     /// Compact messages, returning a summary and kept messages
-    async fn compact(
-        &self,
-        messages: &[Message],
-        instruction: Option<&str>,
-    ) -> std::result::Result<CompactedContext, CompactionError>;
+    fn compact<'a>(
+        &'a self,
+        messages: &'a [Message],
+        instruction: Option<&'a str>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<CompactedContext, CompactionError>> + Send + 'a,
+        >,
+    >;
 
     /// Estimate the token count of messages
     fn estimate_tokens(&self, messages: &[Message]) -> usize {
@@ -648,47 +652,52 @@ impl LlmCompactor {
     }
 }
 
-#[async_trait]
 impl Compactor for LlmCompactor {
-    async fn compact(
-        &self,
-        messages: &[Message],
-        instruction: Option<&str>,
-    ) -> std::result::Result<CompactedContext, CompactionError> {
-        // Check minimum requirements
-        if messages.is_empty() {
-            return Err(CompactionError::NoMessagesToCompact);
-        }
+    fn compact<'a>(
+        &'a self,
+        messages: &'a [Message],
+        instruction: Option<&'a str>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<CompactedContext, CompactionError>> + Send + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            // Check minimum requirements
+            if messages.is_empty() {
+                return Err(CompactionError::NoMessagesToCompact);
+            }
 
-        if messages.len() <= self.config.keep_recent {
-            // Not enough messages to compact, return as-is with zero compaction
-            let original_tokens = self.estimate_tokens(messages);
-            return Ok(CompactedContext::new(
-                String::new(),
-                messages.to_vec(),
-                0,
-                CompactionMetadata::new(
-                    original_tokens,
-                    original_tokens,
+            if messages.len() <= self.config.keep_recent {
+                // Not enough messages to compact, return as-is with zero compaction
+                let original_tokens = self.estimate_tokens(messages);
+                return Ok(CompactedContext::new(
+                    String::new(),
+                    messages.to_vec(),
                     0,
-                    messages.len(),
-                    self.config.target_ratio,
-                ),
-            ));
-        }
+                    CompactionMetadata::new(
+                        original_tokens,
+                        original_tokens,
+                        0,
+                        messages.len(),
+                        self.config.target_ratio,
+                    ),
+                ));
+            }
 
-        // Split into old messages (to compact) and recent messages (to keep)
-        let keep_count = self.config.keep_recent.min(messages.len());
-        let old_messages: Vec<Message> = messages[..messages.len() - keep_count].to_vec();
-        let recent_messages: Vec<Message> = messages[messages.len() - keep_count..].to_vec();
+            // Split into old messages (to compact) and recent messages (to keep)
+            let keep_count = self.config.keep_recent.min(messages.len());
+            let old_messages: Vec<Message> = messages[..messages.len() - keep_count].to_vec();
+            let recent_messages: Vec<Message> = messages[messages.len() - keep_count..].to_vec();
 
-        if old_messages.is_empty() {
-            return Err(CompactionError::NoMessagesToCompact);
-        }
+            if old_messages.is_empty() {
+                return Err(CompactionError::NoMessagesToCompact);
+            }
 
-        // Handle LLM failure gracefully
-        self.compact_with_fallback(&old_messages, &recent_messages, instruction)
-            .await
+            // Handle LLM failure gracefully
+            self.compact_with_fallback(&old_messages, &recent_messages, instruction)
+                .await
+        })
     }
 }
 

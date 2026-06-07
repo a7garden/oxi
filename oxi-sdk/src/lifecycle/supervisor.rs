@@ -739,27 +739,25 @@ impl AgentSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
 
     // ── Mocks ──────────────────────────────────────────────
 
     fn mock_resolver() -> Arc<dyn ProviderResolver> {
         struct MockProvider;
-        #[async_trait::async_trait]
         impl oxi_ai::Provider for MockProvider {
             fn name(&self) -> &str {
                 "mock"
             }
-            async fn stream(
-                &self,
-                _model: &oxi_ai::Model,
-                _context: &oxi_ai::Context,
+            fn stream<'a>(
+                &'a self,
+                _model: &'a oxi_ai::Model,
+                _context: &'a oxi_ai::Context,
                 _options: Option<oxi_ai::StreamOptions>,
-            ) -> Result<
-                std::pin::Pin<Box<dyn futures::Stream<Item = oxi_ai::ProviderEvent> + Send>>,
-                oxi_ai::ProviderError,
-            > {
-                Err(oxi_ai::ProviderError::NotImplemented("mock".into()))
+            ) -> Pin<Box<dyn Future<Output = oxi_ai::StreamResult> + Send + 'a>> {
+                Box::pin(async move { Err(oxi_ai::ProviderError::NotImplemented("mock".into())) })
             }
         }
 
@@ -783,19 +781,28 @@ mod tests {
 
     struct NoopStore;
 
-    #[async_trait::async_trait]
     impl SnapshotStore for NoopStore {
-        async fn save(&self, _snapshot: &AgentSnapshot) -> anyhow::Result<()> {
-            Ok(())
+        fn save<'a>(
+            &'a self,
+            _snapshot: &'a AgentSnapshot,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
         }
-        async fn load(&self, _agent_id: &str) -> anyhow::Result<Option<AgentSnapshot>> {
-            Ok(None)
+        fn load<'a>(
+            &'a self,
+            _agent_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<AgentSnapshot>>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(None) })
         }
-        async fn list(&self) -> anyhow::Result<Vec<String>> {
-            Ok(vec![])
+        fn list(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<String>>> + Send + '_>> {
+            Box::pin(async { Ok(vec![]) })
         }
-        async fn delete(&self, _agent_id: &str) -> anyhow::Result<()> {
-            Ok(())
+        fn delete<'a>(
+            &'a self,
+            _agent_id: &'a str,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
         }
     }
 

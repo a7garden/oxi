@@ -1,9 +1,9 @@
 //! Google Generative AI provider (Gemini API)
 
-use async_trait::async_trait;
 use futures::Stream;
 use futures::stream::StreamExt;
 use reqwest::Client;
+use std::future::Future;
 use std::pin::Pin;
 
 use super::google_shared::{
@@ -11,7 +11,7 @@ use super::google_shared::{
 };
 use super::openai::split_complete_lines;
 use super::shared_client;
-use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
+use super::{Provider, ProviderError, ProviderEvent, StreamOptions, StreamResult};
 use crate::{Api, Context, Model, StopReason};
 
 /// Google Generative AI provider
@@ -39,142 +39,143 @@ impl Default for GoogleProvider {
     }
 }
 
-#[async_trait]
 impl Provider for GoogleProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
 
-        // Get API key
-        let api_key = options
-            .api_key
-            .as_ref()
-            .or(self.api_key.as_ref())
-            .ok_or_else(|| ProviderError::MissingApiKey)?;
-
-        // Build the request URL (without key - uses header instead for security)
-        let model_id = &model.id;
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
-            model_id
-        );
-
-        // Build contents using shared conversion
-        let contents = convert_messages(context)?;
-
-        // Build tools using shared conversion
-        let tools_json = convert_tools(&context.tools, false);
-
-        // Build request body using shared helper
-        let mut body = build_request_body(
-            &contents,
-            context.system_prompt.as_deref(),
-            tools_json.as_ref(),
-            options.temperature,
-            options.max_tokens,
-        );
-
-        // ── Google thinking config (via ProviderOptions) ────────────────
-        // When the model supports reasoning, apply thinkingConfig from
-        // provider_options.google. Mirrors opencode's Gemini thinking support.
-        if model.reasoning {
-            let google_opts = options
-                .provider_options
+            // Get API key
+            let api_key = options
+                .api_key
                 .as_ref()
-                .and_then(|po| po.google.as_ref());
+                .or(self.api_key.as_ref())
+                .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-            let mut thinking_config = serde_json::json!({});
+            // Build the request URL (without key - uses header instead for security)
+            let model_id = &model.id;
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+                model_id
+            );
 
-            // Include thoughts (always true for reasoning models)
-            thinking_config["includeThoughts"] = serde_json::json!(true);
+            // Build contents using shared conversion
+            let contents = convert_messages(context)?;
 
-            if let Some(opts) = google_opts {
-                if let Some(ref level) = opts.thinking_level {
-                    thinking_config["thinkingLevel"] = serde_json::json!(level);
+            // Build tools using shared conversion
+            let tools_json = convert_tools(&context.tools, false);
+
+            // Build request body using shared helper
+            let mut body = build_request_body(
+                &contents,
+                context.system_prompt.as_deref(),
+                tools_json.as_ref(),
+                options.temperature,
+                options.max_tokens,
+            );
+
+            // ── Google thinking config (via ProviderOptions) ────────────────
+            // When the model supports reasoning, apply thinkingConfig from
+            // provider_options.google. Mirrors opencode's Gemini thinking support.
+            if model.reasoning {
+                let google_opts = options
+                    .provider_options
+                    .as_ref()
+                    .and_then(|po| po.google.as_ref());
+
+                let mut thinking_config = serde_json::json!({});
+
+                // Include thoughts (always true for reasoning models)
+                thinking_config["includeThoughts"] = serde_json::json!(true);
+
+                if let Some(opts) = google_opts {
+                    if let Some(ref level) = opts.thinking_level {
+                        thinking_config["thinkingLevel"] = serde_json::json!(level);
+                    }
+                    if let Some(budget) = opts.thinking_budget {
+                        thinking_config["thinkingBudget"] = serde_json::json!(budget);
+                    }
+                } else if let Some(ref level) = options.thinking_level {
+                    // Fallback: derive from thinking_level
+                    if let Some(effort) = level.as_str() {
+                        thinking_config["thinkingLevel"] = serde_json::json!(effort);
+                    }
                 }
-                if let Some(budget) = opts.thinking_budget {
-                    thinking_config["thinkingBudget"] = serde_json::json!(budget);
-                }
-            } else if let Some(ref level) = options.thinking_level {
-                // Fallback: derive from thinking_level
-                if let Some(effort) = level.as_str() {
-                    thinking_config["thinkingLevel"] = serde_json::json!(effort);
+
+                // Merge into generationConfig
+                if let Some(gc) = body.get_mut("generationConfig") {
+                    if let serde_json::Value::Object(map) = gc {
+                        map.insert("thinkingConfig".to_string(), thinking_config);
+                    }
+                } else {
+                    body["generationConfig"] = serde_json::json!({
+                        "thinkingConfig": thinking_config,
+                    });
                 }
             }
 
-            // Merge into generationConfig
-            if let Some(gc) = body.get_mut("generationConfig") {
-                if let serde_json::Value::Object(map) = gc {
-                    map.insert("thinkingConfig".to_string(), thinking_config);
-                }
-            } else {
-                body["generationConfig"] = serde_json::json!({
-                    "thinkingConfig": thinking_config,
-                });
+            // Make request with API key in header (not URL query param)
+            let response = self
+                .client
+                .post(&url)
+                .header("x-goog-api-key", api_key)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
             }
-        }
 
-        // Make request with API key in header (not URL query param)
-        let response = self
-            .client
-            .post(&url)
-            .header("x-goog-api-key", api_key)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
+            // Create event stream — use split_complete_lines (like OpenAI provider)
+            // to handle UTF-8 boundaries safely.  Google SSE lines can be split
+            // across HTTP chunks at arbitrary byte boundaries.
+            let model_name = model.id.clone();
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
+            let stream = response
+                .bytes_stream()
+                .scan(
+                    Vec::new(), // pending_bytes
+                    move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                        let events = match chunk {
+                            Ok(bytes) => {
+                                let mut combined =
+                                    Vec::with_capacity(pending_bytes.len() + bytes.len());
+                                combined.extend_from_slice(pending_bytes);
+                                combined.extend_from_slice(&bytes);
+                                let (text, trailing) = split_complete_lines(&combined);
+                                *pending_bytes = trailing;
+                                parse_google_events(
+                                    &text,
+                                    Api::GoogleGenerativeAi,
+                                    "google",
+                                    &model_name,
+                                )
+                            }
+                            Err(e) => vec![ProviderEvent::Error {
+                                reason: StopReason::Error,
+                                error: create_error_message(
+                                    Api::GoogleGenerativeAi,
+                                    "google",
+                                    &e.to_string(),
+                                ),
+                            }],
+                        };
+                        async move { Some(futures::stream::iter(events)) }
+                    },
+                )
+                .flatten();
 
-        // Create event stream — use split_complete_lines (like OpenAI provider)
-        // to handle UTF-8 boundaries safely.  Google SSE lines can be split
-        // across HTTP chunks at arbitrary byte boundaries.
-        let model_name = model.id.clone();
-
-        let stream = response
-            .bytes_stream()
-            .scan(
-                Vec::new(), // pending_bytes
-                move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
-                    let events = match chunk {
-                        Ok(bytes) => {
-                            let mut combined =
-                                Vec::with_capacity(pending_bytes.len() + bytes.len());
-                            combined.extend_from_slice(pending_bytes);
-                            combined.extend_from_slice(&bytes);
-                            let (text, trailing) = split_complete_lines(&combined);
-                            *pending_bytes = trailing;
-                            parse_google_events(
-                                &text,
-                                Api::GoogleGenerativeAi,
-                                "google",
-                                &model_name,
-                            )
-                        }
-                        Err(e) => vec![ProviderEvent::Error {
-                            reason: StopReason::Error,
-                            error: create_error_message(
-                                Api::GoogleGenerativeAi,
-                                "google",
-                                &e.to_string(),
-                            ),
-                        }],
-                    };
-                    async move { Some(futures::stream::iter(events)) }
-                },
-            )
-            .flatten();
-
-        Ok(Box::pin(stream))
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {

@@ -2,6 +2,8 @@
 
 use oxi_agent::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// Handler function type for ClosureTool.
@@ -13,9 +15,8 @@ pub type AsyncToolHandler = Arc<
     dyn Fn(
             Value,
             &ToolContext,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-        > + Send
+        ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>>
+        + Send
         + Sync,
 >;
 
@@ -68,9 +69,9 @@ impl ClosureTool {
         handler: impl Fn(
             Value,
             &ToolContext,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-        > + Send
+        )
+            -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>>
+        + Send
         + Sync
         + 'static,
     ) -> Self {
@@ -83,7 +84,6 @@ impl ClosureTool {
     }
 }
 
-#[async_trait::async_trait]
 impl AgentTool for ClosureTool {
     fn name(&self) -> &str {
         &self.name
@@ -101,13 +101,13 @@ impl AgentTool for ClosureTool {
         self.schema.clone()
     }
 
-    async fn execute(
-        &self,
-        _tool_call_id: &str,
+    fn execute<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
         params: Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        (self.handler)(params, ctx).await
+        ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        (self.handler)(params, ctx)
     }
 }

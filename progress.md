@@ -4,35 +4,41 @@
 In Progress
 
 ## Tasks
-- [x] #3: A2A message logging implementation
-- [x] #2: oxios-web Chat API tool_calls 연결
-- [x] #4: oxios-cli 모델/페르소나 전환 구현
 
-## Files Changed
+### Phase 2: Apply Rust 2024 let chains across the entire oxi workspace
+- [x] Task 1: Identified 15 safe conversion candidates across all workspace crates
+- [x] Task 2: Converted nested `if let` → `if let A && let B { }` let chains
+- [x] Task 3: Verified all conversions — no semantic changes, no test failures
+- [x] Verification: cargo fmt, clippy, nextest (2116/2116 passed)
 
-### #3: A2A message logging
-- `crates/oxios-kernel/src/a2a/mod.rs` — Added `A2AMessageLogEntry` struct, `message_log` field to `A2AProtocol`, `append_log`/`get_message_log` methods, logging in `send_message` and `execute_delegation`
-- `crates/oxios-kernel/src/kernel_handle/a2a_api.rs` — Added `get_message_log` facade method
-- `surface/oxios-web/src/routes/a2a.rs` — Implemented `handle_a2a_messages` returning real log entries, updated `handle_a2a_topology` to derive edges from log
+### Phase 3: Replace `once_cell::sync::Lazy` with `std::sync::LazyLock` and remove unused dependencies
+- [x] Task 1: Replace `once_cell::sync::Lazy` in oxi-ai (4 statics across 3 files)
+- [x] Task 2: Remove unused dependencies (once_cell, lazy_static, tokio-test)
+- [x] Verification: cargo fmt, clippy, nextest, cargo tree checks all pass
 
-### #2: Chat API tool_calls 연결
-- `crates/oxios-ouroboros/src/protocol.rs` — Added `ToolCallRecord` struct and `tool_calls: Vec<ToolCallRecord>` field to `ExecutionResult`
-- `crates/oxios-ouroboros/src/lib.rs` — Exported `ToolCallRecord`
-- `crates/oxios-ouroboros/src/ouroboros_engine.rs` — Added `tool_calls: vec![]` to placeholder `ExecutionResult`
-- `crates/oxios-kernel/src/agent_runtime.rs` — Updated `run_agent` to return trajectory_steps; mapped trajectory_steps → `ToolCallRecord` in `ExecutionResult`
-- `crates/oxios-kernel/src/supervisor.rs` — Added `tool_calls: vec![]` to all 3 `ExecutionResult` construction sites
-- `crates/oxios-kernel/src/orchestrator.rs` — Added `tool_calls` field to `OrchestrationResult`; propagated `final_result.tool_calls` in main execution path
-- `crates/oxios-gateway/src/gateway.rs` — Serialized `tool_calls` JSON into `OutgoingMessage.metadata["tool_calls"]` in `dispatch()`
-- `surface/oxios-web/src/routes/chat.rs` — No changes needed (already reads `msg.metadata.get("tool_calls")`)
+## Files Changed (Phase 2)
+- `scripts/generate-models.rs` — 2 conversions (anthropic + openai model lookups)
+- `oxi-ai/benches/sse_parsing.rs` — 1 conversion (delta + content)
+- `oxi-ai/src/providers/openai.rs` — 2 conversions (idx+Text, idx+Thinking)
+- `oxi-ai/src/providers/anthropic.rs` — 2 conversions (idx+Text, idx+Thinking)
+- `oxi-ai/src/providers/mistral.rs` — 1 conversion (idx+Text)
+- `oxi-ai/src/providers/azure.rs` — 1 conversion (idx+Text)
+- `oxi-ai/src/providers/openai_responses.rs` — 1 conversion (idx+Text)
+- `oxi-ai/src/providers/google_shared.rs` — 2 conversions (idx+Thinking, idx+Text)
+- `oxi-ai/src/providers/bedrock.rs` — 2 conversions (idx+Text, idx+Thinking)
+- `oxi-cli/src/main.rs` — 1 conversion (branch_info + parent_session_id)
+- `oxi-cli/src/skills/mod.rs` — 1 conversion (frontmatter parsing)
+
+## Files Changed (Phase 3)
+- `oxi-ai/src/model_registry.rs` — `Lazy` → `LazyLock` (STATIC_MODELS, GLOBAL_REGISTRY)
+- `oxi-ai/src/env_api_keys.rs` — `Lazy` → `LazyLock` (VERTEX_ADC_CHECK)
+- `oxi-ai/src/providers/mod.rs` — `Lazy` → `LazyLock` (CUSTOM_PROVIDERS)
+- `oxi-ai/Cargo.toml` — removed `once_cell = "1"`, removed `tokio-test = "0.4"`
+- `oxi-cli/Cargo.toml` — removed `once_cell = "1"`, removed `lazy_static = "1.4"`
 
 ## Notes
-- Full `cargo check --workspace` passes with no new errors
-- chat.rs TODO at line ~570 still reads tool_calls from metadata (now populated by gateway)
-- Session tool-calls endpoint (`GET /api/sessions/{id}/tool-calls`) still returns empty array — would need session persistence of tool_calls to populate
-
-### #4: oxios-cli 모델/페르소나 전환 구현
-- `crates/oxios-gateway/src/meta.rs` — Added `ACTION`, `MODEL_ID`, `PERSONA_ID` metadata key constants
-- `crates/oxios-gateway/src/gateway.rs` — Added `engine_api` and `persona_api` Optional Arc fields to `Gateway`, added `with_apis()` constructor, added action-based routing in `dispatch()` (checks `metadata["action"]` before orchestrator routing), added `dispatch_switch_model()` and `dispatch_switch_persona()` handler methods
-- `channels/oxios-cli/src/channel.rs` — Added `send_switch_model()` and `send_switch_persona()` methods to `CliChannelHandle` that send `IncomingMessage` with action metadata
-- `channels/oxios-cli/src/interactive.rs` — Wired `MetaCommand::Model(Some(name))` and `MetaCommand::Persona(Some(name))` to call the new handle methods, removing the TODO comments
-- `src/kernel.rs` — Updated `Kernel::new()` to use `Gateway::with_apis()` with Arc-wrapped EngineApi and PersonaApi
+- Phase 2: 24 additional candidates were NOT converted due to else branches, extra statements between if-lets, or semantic changes. See `phase2-let-chains.md` for full analysis.
+- `async-trait` was not present in oxi-cli Cargo.toml (already removed or never added)
+- `once_cell` and `lazy_static` still appear as transitive deps (from tracing-subscriber, etc.) but no workspace member declares them directly
+- MSRV 1.96 is well above `LazyLock` stabilization (1.80)
+- All 2116 tests pass, clippy clean, fmt clean

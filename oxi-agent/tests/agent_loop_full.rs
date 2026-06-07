@@ -9,16 +9,16 @@
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
     use futures::Stream;
     use oxi_agent::{
         AgentEvent, AgentLoop, AgentLoopConfig, CompactionStrategy, SharedState, ToolExecutionMode,
         tools::{AgentTool, AgentToolResult, ToolRegistry},
     };
     use oxi_ai::{
-        AssistantMessage, ContentBlock, Message, Provider, ProviderEvent, StopReason, TextContent,
-        ToolCall, UserMessage,
+        AssistantMessage, ContentBlock, Message, Provider, ProviderEvent, StopReason, StreamResult,
+        TextContent, ToolCall, UserMessage,
     };
+    use std::future::Future;
     use std::pin::Pin;
     use std::sync::{
         Arc,
@@ -52,23 +52,23 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl Provider for MockProvider {
-        async fn stream(
-            &self,
-            _model: &oxi_ai::Model,
-            _context: &oxi_ai::Context,
+        fn stream<'a>(
+            &'a self,
+            _model: &'a oxi_ai::Model,
+            _context: &'a oxi_ai::Context,
             _options: Option<oxi_ai::StreamOptions>,
-        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, oxi_ai::ProviderError>
-        {
-            let idx = self.call_count.fetch_add(1, Ordering::Relaxed) % self.responses.len();
-            let response = self.responses[idx].content.clone();
+        ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+            Box::pin(async move {
+                let idx = self.call_count.fetch_add(1, Ordering::Relaxed) % self.responses.len();
+                let response = self.responses[idx].content.clone();
 
-            let stream = MockStream {
-                text: response,
-                done: false,
-            };
-            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+                let stream = MockStream {
+                    text: response,
+                    done: false,
+                };
+                Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+            })
         }
 
         fn name(&self) -> &str {
@@ -129,51 +129,52 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl Provider for MultiTurnToolProvider {
-        async fn stream(
-            &self,
-            _model: &oxi_ai::Model,
-            _context: &oxi_ai::Context,
+        fn stream<'a>(
+            &'a self,
+            _model: &'a oxi_ai::Model,
+            _context: &'a oxi_ai::Context,
             _options: Option<oxi_ai::StreamOptions>,
-        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, oxi_ai::ProviderError>
-        {
-            let idx = self
-                .call_count
-                .fetch_add(1, Ordering::Relaxed)
-                .min(self.responses.len() - 1);
-            let response = self.responses[idx].clone();
+        ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+            Box::pin(async move {
+                let idx = self
+                    .call_count
+                    .fetch_add(1, Ordering::Relaxed)
+                    .min(self.responses.len() - 1);
+                let response = self.responses[idx].clone();
 
-            let mut assistant =
-                AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
+                let mut assistant =
+                    AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
 
-            let mut content_blocks: Vec<ContentBlock> = Vec::new();
-            if let Some(text) = &response.text {
-                content_blocks.push(ContentBlock::Text(TextContent::new(text.clone())));
-            }
-            for tc in &response.tool_calls {
-                content_blocks.push(ContentBlock::ToolCall(tc.clone()));
-            }
-            assistant.content = content_blocks;
+                let mut content_blocks: Vec<ContentBlock> = Vec::new();
+                if let Some(text) = &response.text {
+                    content_blocks.push(ContentBlock::Text(TextContent::new(text.clone())));
+                }
+                for tc in &response.tool_calls {
+                    content_blocks.push(ContentBlock::ToolCall(tc.clone()));
+                }
+                assistant.content = content_blocks;
 
-            let stop_reason = if response.tool_calls.is_empty() {
-                StopReason::Stop
-            } else {
-                StopReason::ToolUse
-            };
-            assistant.stop_reason = stop_reason;
+                let stop_reason = if response.tool_calls.is_empty() {
+                    StopReason::Stop
+                } else {
+                    StopReason::ToolUse
+                };
+                assistant.stop_reason = stop_reason;
 
-            let events: Vec<ProviderEvent> = vec![
-                ProviderEvent::Start {
-                    partial: std::sync::Arc::new(assistant.clone()),
-                },
-                ProviderEvent::Done {
-                    reason: stop_reason,
-                    message: assistant,
-                },
-            ];
+                let events: Vec<ProviderEvent> = vec![
+                    ProviderEvent::Start {
+                        partial: std::sync::Arc::new(assistant.clone()),
+                    },
+                    ProviderEvent::Done {
+                        reason: stop_reason,
+                        message: assistant,
+                    },
+                ];
 
-            Ok(Box::pin(futures::stream::iter(events)))
+                Ok(Box::pin(futures::stream::iter(events))
+                    as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+            })
         }
 
         fn name(&self) -> &str {
@@ -186,7 +187,6 @@ mod tests {
     /// Simple echo tool that returns the message argument
     struct EchoTool;
 
-    #[async_trait]
     impl AgentTool for EchoTool {
         fn name(&self) -> &str {
             "echo"
@@ -213,18 +213,20 @@ mod tests {
             })
         }
 
-        async fn execute(
-            &self,
-            _tool_call_id: &str,
+        fn execute<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
             params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            _ctx: &oxi_agent::ToolContext,
-        ) -> Result<AgentToolResult, String> {
-            let msg = params
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("<no message>");
-            Ok(AgentToolResult::success(format!("Echo: {}", msg)))
+            _ctx: &'a oxi_agent::ToolContext,
+        ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
+            Box::pin(async move {
+                let msg = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<no message>");
+                Ok(AgentToolResult::success(format!("Echo: {}", msg)))
+            })
         }
     }
 
@@ -239,7 +241,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl AgentTool for CountingTool {
         fn name(&self) -> &str {
             "count"
@@ -261,15 +262,17 @@ mod tests {
             })
         }
 
-        async fn execute(
-            &self,
-            _tool_call_id: &str,
+        fn execute<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
             _params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            _ctx: &oxi_agent::ToolContext,
-        ) -> Result<AgentToolResult, String> {
-            let count = self.call_count.fetch_add(1, Ordering::Relaxed);
-            Ok(AgentToolResult::success(format!("Call #{}", count + 1)))
+            _ctx: &'a oxi_agent::ToolContext,
+        ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
+            Box::pin(async move {
+                let count = self.call_count.fetch_add(1, Ordering::Relaxed);
+                Ok(AgentToolResult::success(format!("Call #{}", count + 1)))
+            })
         }
     }
 

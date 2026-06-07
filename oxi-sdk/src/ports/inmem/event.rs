@@ -3,7 +3,8 @@
 //! - `InProcessEventBus`: tokio broadcast channel (no broker, no network)
 //! - `NullEventBus`: accepts publish, drops everything (for tests)
 
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::SdkError;
@@ -30,15 +31,21 @@ impl InProcessEventBus {
     }
 }
 
-#[async_trait]
 impl EventBus for InProcessEventBus {
-    async fn publish(&self, topic: &EventTopic, payload: EventPayload) -> Result<(), SdkError> {
+    fn publish(
+        &self,
+        topic: &EventTopic,
+        payload: EventPayload,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         // Best-effort: no active subscribers is not an error.
         let _ = self.tx.send((topic.clone(), payload));
-        Ok(())
+        Box::pin(async { Ok(()) })
     }
 
-    async fn subscribe(&self, _topic: &EventTopic) -> Result<SubscriptionHandle, SdkError> {
+    fn subscribe(
+        &self,
+        _topic: &EventTopic,
+    ) -> Pin<Box<dyn Future<Output = Result<SubscriptionHandle, SdkError>> + Send + '_>> {
         let mut rx = self.tx.subscribe();
         let (tx, rx2) = tokio::sync::mpsc::channel(64);
         tokio::spawn(async move {
@@ -48,7 +55,7 @@ impl EventBus for InProcessEventBus {
                 }
             }
         });
-        Ok(SubscriptionHandle::from_receiver(rx2))
+        Box::pin(async { Ok(SubscriptionHandle::from_receiver(rx2)) })
     }
 }
 

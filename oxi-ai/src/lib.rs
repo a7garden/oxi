@@ -41,7 +41,7 @@ pub mod prelude {
     pub use crate::context::Context;
     pub use crate::error::{Error, Result};
     pub use crate::messages::*;
-    pub use crate::providers::{Provider, ProviderEvent, StreamOptions};
+    pub use crate::providers::{Provider, ProviderEvent, StreamOptions, StreamResult};
     pub use crate::tools::{Tool, validate_args};
     pub use crate::types::*;
 }
@@ -65,7 +65,7 @@ pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
 pub use providers::{
-    Provider, ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions,
+    Provider, ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions, StreamResult,
     custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider,
 };
 

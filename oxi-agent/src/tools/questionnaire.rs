@@ -11,12 +11,13 @@
 //!   oneshot `Sender`. The tool's `execute()` receives it via `rx.await`.
 //! - Abort (Ctrl+C) is handled via `tokio::select!` with the abort signal.
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use std::future::Future;
+use std::pin::Pin;
 
 /// Shared bridge between the questionnaire tool (agent thread) and the TUI
 /// overlay (main thread). Created in `oxi-cli`, injected into both the tool
@@ -159,7 +160,6 @@ impl Clone for QuestionnaireTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for QuestionnaireTool {
     fn name(&self) -> &str {
         "questionnaire"
@@ -240,34 +240,36 @@ impl AgentTool for QuestionnaireTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: serde_json::Value,
         signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        // 1. Parse and validate
-        let questions = parse_questions(&params)?;
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            // 1. Parse and validate
+            let questions = parse_questions(&params)?;
 
-        // 2. Create oneshot channel
-        let (tx, rx) = oneshot::channel();
+            // 2. Create oneshot channel
+            let (tx, rx) = oneshot::channel();
 
-        // 3. Store in bridge — TUI polls it on the main thread
-        if !self.bridge.set(PendingQuestionnaire {
-            questions,
-            responder: tx,
-        }) {
-            return Ok(AgentToolResult::error(
-                "Another questionnaire is already pending",
-            ));
-        }
+            // 3. Store in bridge — TUI polls it on the main thread
+            if !self.bridge.set(PendingQuestionnaire {
+                questions,
+                responder: tx,
+            }) {
+                return Ok(AgentToolResult::error(
+                    "Another questionnaire is already pending",
+                ));
+            }
 
-        // 4. Wait for user response — handle abort via tokio::select!
-        let result = select_with_abort(rx, signal, &self.bridge).await;
+            // 4. Wait for user response — handle abort via tokio::select!
+            let result = select_with_abort(rx, signal, &self.bridge).await;
 
-        // 5. Format result
-        result
+            // 5. Format result
+            result
+        })
     }
 }
 

@@ -9,9 +9,10 @@
 /// - Process tree kill on abort/cancel via signal
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
-use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
@@ -486,7 +487,6 @@ impl Default for BashTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for BashTool {
     fn name(&self) -> &str {
         "bash"
@@ -534,32 +534,34 @@ impl AgentTool for BashTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let command = params
-            .get("command")
-            .and_then(|v: &Value| v.as_str())
-            .ok_or_else(|| "Missing required parameter: command".to_string())?;
+        ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let command = params
+                .get("command")
+                .and_then(|v: &Value| v.as_str())
+                .ok_or_else(|| "Missing required parameter: command".to_string())?;
 
-        let cwd = params.get("cwd").and_then(|v: &Value| v.as_str());
-        let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
-        let env = params.get("env").and_then(|v: &Value| v.as_object());
+            let cwd = params.get("cwd").and_then(|v: &Value| v.as_str());
+            let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
+            let env = params.get("env").and_then(|v: &Value| v.as_object());
 
-        let progress_cb = self
-            .progress_callback
-            .lock()
-            .expect("progress callback lock poisoned")
-            .clone();
+            let progress_cb = self
+                .progress_callback
+                .lock()
+                .expect("progress callback lock poisoned")
+                .clone();
 
-        // Use root_dir if set, else ctx.root()
-        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+            // Use root_dir if set, else ctx.root()
+            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-        Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
+            Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
+        })
     }
 
     fn on_progress(&self, callback: ProgressCallback) {

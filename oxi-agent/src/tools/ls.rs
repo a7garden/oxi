@@ -2,9 +2,10 @@ use super::path_security::PathGuard;
 /// Ls tool - list directory contents
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::tools::truncate::{TruncationOptions, format_bytes, truncate_head};
-use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -203,7 +204,6 @@ impl Default for LsTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for LsTool {
     fn name(&self) -> &str {
         "ls"
@@ -249,40 +249,42 @@ impl AgentTool for LsTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let path = params
-            .get("path")
-            .and_then(|v: &Value| v.as_str())
-            .unwrap_or(".");
+        ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let path = params
+                .get("path")
+                .and_then(|v: &Value| v.as_str())
+                .unwrap_or(".");
 
-        let all = params
-            .get("all")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
+            let all = params
+                .get("all")
+                .and_then(|v: &Value| v.as_bool())
+                .unwrap_or(false);
 
-        let long_format = params
-            .get("long")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
+            let long_format = params
+                .get("long")
+                .and_then(|v: &Value| v.as_bool())
+                .unwrap_or(false);
 
-        let entry_limit = params
-            .get("limit")
-            .and_then(|v: &Value| v.as_u64())
-            .map(|l| l as usize);
+            let entry_limit = params
+                .get("limit")
+                .and_then(|v: &Value| v.as_u64())
+                .map(|l| l as usize);
 
-        // Use root_dir if set, else ctx.root()
-        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+            // Use root_dir if set, else ctx.root()
+            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-        match Self::ls_impl(root, path, all, long_format, entry_limit).await {
-            Ok(output) => Ok(AgentToolResult::success(output)),
-            Err(e) => Ok(AgentToolResult::error(e)),
-        }
+            match Self::ls_impl(root, path, all, long_format, entry_limit).await {
+                Ok(output) => Ok(AgentToolResult::success(output)),
+                Err(e) => Ok(AgentToolResult::error(e)),
+            }
+        })
     }
 }
 

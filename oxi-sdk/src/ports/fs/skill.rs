@@ -1,7 +1,8 @@
 //! File-based `SkillLoader` — discovers `SKILL.md` files under a root directory.
 
-use async_trait::async_trait;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::{Skill, SkillLoader, SkillMeta};
@@ -43,15 +44,17 @@ impl FileSkillLoader {
     }
 }
 
-#[async_trait]
 impl SkillLoader for FileSkillLoader {
-    async fn list(&self) -> Result<Vec<SkillMeta>, SdkError> {
+    fn list(&self) -> Pin<Box<dyn Future<Output = Result<Vec<SkillMeta>, SdkError>> + Send + '_>> {
         let mut out = Vec::new();
         for root in &self.roots {
             if !root.exists() {
                 continue;
             }
-            let entries = std::fs::read_dir(root).map_err(scan_err)?;
+            let entries = match std::fs::read_dir(root) {
+                Ok(e) => e,
+                Err(e) => return Box::pin(async { Err(scan_err(e)) }),
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 if !path.is_dir() {
@@ -69,22 +72,29 @@ impl SkillLoader for FileSkillLoader {
                 }
             }
         }
-        Ok(out)
+        Box::pin(async { Ok(out) })
     }
 
-    async fn load(&self, name: &str) -> Result<Option<Skill>, SdkError> {
+    fn load(
+        &self,
+        name: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Skill>, SdkError>> + Send + '_>> {
         for root in &self.roots {
             let path = root.join(name).join("SKILL.md");
             if path.exists() {
-                let text = std::fs::read_to_string(&path).map_err(read_err)?;
-                let meta = parse_meta(name, &path).map_err(parse_err)?;
+                let text = match std::fs::read_to_string(&path) {
+                    Ok(t) => t,
+                    Err(e) => return Box::pin(async { Err(read_err(e)) }),
+                };
+                let meta = match parse_meta(name, &path) {
+                    Ok(m) => m,
+                    Err(e) => return Box::pin(async { Err(e) }),
+                };
                 let body = strip_frontmatter(&text);
-                return Ok(Some(Skill { meta, body }));
+                return Box::pin(async { Ok(Some(Skill { meta, body })) });
             }
-            let _ = (root, name);
-            let _ = Path::new("");
         }
-        Ok(None)
+        Box::pin(async { Ok(None) })
     }
 }
 
@@ -128,9 +138,6 @@ fn read_err(e: std::io::Error) -> SdkError {
 }
 fn scan_err(e: std::io::Error) -> SdkError {
     SdkError::Internal(anyhow::anyhow!(e))
-}
-fn parse_err(e: SdkError) -> SdkError {
-    e
 }
 
 #[cfg(test)]

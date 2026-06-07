@@ -160,15 +160,13 @@ impl SkillManager {
         let location = path.parent().unwrap_or(path).to_path_buf();
 
         // Parse YAML frontmatter (--- ... ---)
-        let (frontmatter, body) = if let Some(rest) = raw.strip_prefix("---") {
-            if let Some(end) = rest.find("\n---") {
-                let yaml_str = &rest[..end];
-                let body = rest[end + 4..].trim_start().to_string();
-                let fm: SkillFrontmatter = serde_yaml::from_str(yaml_str).unwrap_or_default();
-                (fm, body)
-            } else {
-                (SkillFrontmatter::default(), raw.clone())
-            }
+        let (frontmatter, body) = if let Some(rest) = raw.strip_prefix("---")
+            && let Some(end) = rest.find("\n---")
+        {
+            let yaml_str = &rest[..end];
+            let body = rest[end + 4..].trim_start().to_string();
+            let fm: SkillFrontmatter = serde_yaml::from_str(yaml_str).unwrap_or_default();
+            (fm, body)
         } else {
             (SkillFrontmatter::default(), raw.clone())
         };

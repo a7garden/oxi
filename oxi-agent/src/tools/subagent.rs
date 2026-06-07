@@ -8,11 +8,12 @@
 ///     Agent definitions are markdown files with YAML frontmatter,
 ///     discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
@@ -707,7 +708,6 @@ impl SubagentTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for SubagentTool {
     fn name(&self) -> &str {
         "subagent"
@@ -779,74 +779,91 @@ impl AgentTool for SubagentTool {
         *self.progress_callback.lock() = Some(callback);
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        // Use explicit cwd if set, else ctx.root()
-        let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
+        ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            // Use explicit cwd if set, else ctx.root()
+            let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
 
-        let scope: AgentScope = params
-            .get("agentScope")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or(AgentScope::User);
+            let scope: AgentScope = params
+                .get("agentScope")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or(AgentScope::User);
 
-        let agents = discover_agents(effective_cwd, scope);
-        let binary = self.get_binary();
-        let progress = self.progress_callback.lock().clone();
+            let agents = discover_agents(effective_cwd, scope);
+            let binary = self.get_binary();
+            let progress = self.progress_callback.lock().clone();
 
-        let has_chain = params["chain"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false);
-        let has_tasks = params["tasks"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false);
-        let has_single = params["agent"].is_string() && params["task"].is_string();
+            let has_chain = params["chain"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            let has_tasks = params["tasks"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            let has_single = params["agent"].is_string() && params["task"].is_string();
 
-        let mode_count = [has_chain, has_tasks, has_single]
-            .iter()
-            .filter(|&&x| x)
-            .count();
-
-        if mode_count != 1 {
-            let available = agents
+            let mode_count = [has_chain, has_tasks, has_single]
                 .iter()
-                .map(|a| format!("{} ({})", a.name, a.source))
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Ok(AgentToolResult::error(format!(
-                "Provide exactly one mode: agent+task, tasks, or chain.\nAvailable agents: {}",
-                if available.is_empty() {
-                    "none".to_string()
-                } else {
-                    available
-                }
-            )));
-        }
+                .filter(|&&x| x)
+                .count();
 
-        // ── Chain mode ──
-        if has_chain {
-            return execute_chain_mode(effective_cwd, &agents, params, &binary, progress, signal)
+            if mode_count != 1 {
+                let available = agents
+                    .iter()
+                    .map(|a| format!("{} ({})", a.name, a.source))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Ok(AgentToolResult::error(format!(
+                    "Provide exactly one mode: agent+task, tasks, or chain.\nAvailable agents: {}",
+                    if available.is_empty() {
+                        "none".to_string()
+                    } else {
+                        available
+                    }
+                )));
+            }
+
+            // ── Chain mode ──
+            if has_chain {
+                return execute_chain_mode(
+                    effective_cwd,
+                    &agents,
+                    params,
+                    &binary,
+                    progress,
+                    signal,
+                )
                 .await;
-        }
+            }
 
-        // ── Parallel mode ──
-        if has_tasks {
-            return execute_parallel_mode(effective_cwd, &agents, params, &binary, progress).await;
-        }
+            // ── Parallel mode ──
+            if has_tasks {
+                return execute_parallel_mode(effective_cwd, &agents, params, &binary, progress)
+                    .await;
+            }
 
-        // ── Single mode ──
-        if has_single {
-            return execute_single_mode(effective_cwd, &agents, params, &binary, progress, signal)
+            // ── Single mode ──
+            if has_single {
+                return execute_single_mode(
+                    effective_cwd,
+                    &agents,
+                    params,
+                    &binary,
+                    progress,
+                    signal,
+                )
                 .await;
-        }
+            }
 
-        Ok(AgentToolResult::error("Invalid parameters".to_string()))
+            Ok(AgentToolResult::error("Invalid parameters".to_string()))
+        })
     }
 }
 

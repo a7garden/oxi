@@ -1,11 +1,12 @@
 //! File-based `AuthProvider` — single JSON file holding API keys and OAuth
 //! tokens per provider.
 
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::{AuthProvider, OAuthToken};
@@ -126,19 +127,30 @@ impl FileAuthProvider {
     }
 }
 
-#[async_trait]
 impl AuthProvider for FileAuthProvider {
-    async fn get_api_key(&self, provider: &str) -> Result<Option<String>, SdkError> {
-        Ok(self.resolve_api_key(provider))
+    fn get_api_key(
+        &self,
+        provider: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, SdkError>> + Send + '_>> {
+        let result = self.resolve_api_key(provider);
+        Box::pin(async move { Ok(result) })
     }
 
-    async fn set_api_key(&self, provider: &str, key: &str) -> Result<(), SdkError> {
+    fn set_api_key(
+        &self,
+        provider: &str,
+        key: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         let mut s = self.state.lock();
         s.providers.entry(provider.to_string()).or_default().api_key = Some(key.to_string());
-        s.save(&self.path).map_err(|e| SdkError::Internal(e.into()))
+        let result = s.save(&self.path).map_err(|e| SdkError::Internal(e.into()));
+        Box::pin(async { result })
     }
 
-    async fn delete_api_key(&self, provider: &str) -> Result<(), SdkError> {
+    fn delete_api_key(
+        &self,
+        provider: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         let mut s = self.state.lock();
         if let Some(entry) = s.providers.get_mut(provider) {
             entry.api_key = None;
@@ -146,23 +158,36 @@ impl AuthProvider for FileAuthProvider {
                 s.providers.remove(provider);
             }
         }
-        s.save(&self.path).map_err(|e| SdkError::Internal(e.into()))
+        let result = s.save(&self.path).map_err(|e| SdkError::Internal(e.into()));
+        Box::pin(async { result })
     }
 
-    async fn get_oauth(&self, provider: &str) -> Result<Option<OAuthToken>, SdkError> {
+    fn get_oauth(
+        &self,
+        provider: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<OAuthToken>, SdkError>> + Send + '_>> {
         let s = self.state.lock();
-        Ok(s.providers.get(provider).and_then(|e| e.oauth.clone()))
+        let result = s.providers.get(provider).and_then(|e| e.oauth.clone());
+        Box::pin(async move { Ok(result) })
     }
 
-    async fn set_oauth(&self, provider: &str, token: OAuthToken) -> Result<(), SdkError> {
+    fn set_oauth(
+        &self,
+        provider: &str,
+        token: OAuthToken,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         let mut s = self.state.lock();
         s.providers.entry(provider.to_string()).or_default().oauth = Some(token);
-        s.save(&self.path).map_err(|e| SdkError::Internal(e.into()))
+        let result = s.save(&self.path).map_err(|e| SdkError::Internal(e.into()));
+        Box::pin(async { result })
     }
 
-    async fn list_providers(&self) -> Result<Vec<String>, SdkError> {
+    fn list_providers(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SdkError>> + Send + '_>> {
         let s = self.state.lock();
-        Ok(s.providers.keys().cloned().collect())
+        let result = s.providers.keys().cloned().collect();
+        Box::pin(async move { Ok(result) })
     }
 }
 

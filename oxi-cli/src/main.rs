@@ -1100,12 +1100,10 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
     let tree = manager.get_tree(id)?;
     let branch_info = manager.get_branch_info(id).await?;
 
-    if let Some(info) = branch_info {
-        if let Some(ref pid) = info.parent_session_id {
-            println!("Session: {} (branched from {})", id, pid);
-        } else {
-            println!("Session: {} (root)", id);
-        }
+    if let Some(info) = branch_info
+        && let Some(ref pid) = info.parent_session_id
+    {
+        println!("Session: {} (branched from {})", id, pid);
     } else {
         println!("Session: {} (root)", id);
     }

@@ -1,11 +1,12 @@
 //! Agent snapshotting for suspend/resume persistence.
 
 use crate::lifecycle::MetricsSnapshot;
-use async_trait::async_trait;
 use oxi_agent::{AgentConfig, AgentState, ToolRegistry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 /// A complete snapshot of an agent at a point in time.
 ///
@@ -128,20 +129,27 @@ pub struct ToolManifestEntry {
 /// Trait for persisting and retrieving agent snapshots.
 ///
 /// Implementations may store to filesystem, database, or network.
-/// Uses `async_trait` per project conventions.
-#[async_trait]
 pub trait SnapshotStore: Send + Sync {
     /// Persist a snapshot.
-    async fn save(&self, snapshot: &AgentSnapshot) -> anyhow::Result<()>;
+    fn save<'a>(
+        &'a self,
+        snapshot: &'a AgentSnapshot,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
 
     /// Retrieve a snapshot by agent ID.
-    async fn load(&self, agent_id: &str) -> anyhow::Result<Option<AgentSnapshot>>;
+    fn load<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<AgentSnapshot>>> + Send + 'a>>;
 
     /// List all agent IDs with stored snapshots.
-    async fn list(&self) -> anyhow::Result<Vec<String>>;
+    fn list(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<String>>> + Send + '_>>;
 
     /// Delete a snapshot by agent ID.
-    async fn delete(&self, agent_id: &str) -> anyhow::Result<()>;
+    fn delete<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
 }
 
 // ── FileSnapshotStore ──────────────────────────────────────────────
@@ -169,44 +177,60 @@ impl FileSnapshotStore {
     }
 }
 
-#[async_trait]
 impl SnapshotStore for FileSnapshotStore {
-    async fn save(&self, snapshot: &AgentSnapshot) -> anyhow::Result<()> {
-        let path = self.snapshot_path(&snapshot.agent_id);
-        let bytes = serde_json::to_vec_pretty(snapshot)?;
-        tokio::fs::write(&path, bytes).await?;
-        Ok(())
+    fn save<'a>(
+        &'a self,
+        snapshot: &'a AgentSnapshot,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(async {
+            let path = self.snapshot_path(&snapshot.agent_id);
+            let bytes = serde_json::to_vec_pretty(snapshot)?;
+            tokio::fs::write(&path, bytes).await?;
+            Ok(())
+        })
     }
 
-    async fn load(&self, agent_id: &str) -> anyhow::Result<Option<AgentSnapshot>> {
-        let path = self.snapshot_path(agent_id);
-        if !path.is_file() {
-            return Ok(None);
-        }
-        let bytes = tokio::fs::read(&path).await?;
-        let snapshot: AgentSnapshot = serde_json::from_slice(&bytes)?;
-        Ok(Some(snapshot))
-    }
-
-    async fn list(&self) -> anyhow::Result<Vec<String>> {
-        let mut entries = Vec::new();
-        let mut dir = tokio::fs::read_dir(&self.base_dir).await?;
-        while let Some(entry) = dir.next_entry().await? {
-            if entry.path().extension().is_some_and(|e| e == "json")
-                && let Some(name) = entry.path().file_stem()
-            {
-                entries.push(name.to_string_lossy().to_string());
+    fn load<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<AgentSnapshot>>> + Send + 'a>> {
+        Box::pin(async {
+            let path = self.snapshot_path(agent_id);
+            if !path.is_file() {
+                return Ok(None);
             }
-        }
-        Ok(entries)
+            let bytes = tokio::fs::read(&path).await?;
+            let snapshot: AgentSnapshot = serde_json::from_slice(&bytes)?;
+            Ok(Some(snapshot))
+        })
     }
 
-    async fn delete(&self, agent_id: &str) -> anyhow::Result<()> {
-        let path = self.snapshot_path(agent_id);
-        if path.is_file() {
-            tokio::fs::remove_file(&path).await?;
-        }
-        Ok(())
+    fn list(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<String>>> + Send + '_>> {
+        Box::pin(async {
+            let mut entries = Vec::new();
+            let mut dir = tokio::fs::read_dir(&self.base_dir).await?;
+            while let Some(entry) = dir.next_entry().await? {
+                if entry.path().extension().is_some_and(|e| e == "json")
+                    && let Some(name) = entry.path().file_stem()
+                {
+                    entries.push(name.to_string_lossy().to_string());
+                }
+            }
+            Ok(entries)
+        })
+    }
+
+    fn delete<'a>(
+        &'a self,
+        agent_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(async {
+            let path = self.snapshot_path(agent_id);
+            if path.is_file() {
+                tokio::fs::remove_file(&path).await?;
+            }
+            Ok(())
+        })
     }
 }
 

@@ -1,10 +1,11 @@
 use super::path_security::PathGuard;
 /// Grep tool - search files for patterns
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 use regex::RegexBuilder;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -319,7 +320,6 @@ impl Default for GrepTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for GrepTool {
     fn name(&self) -> &str {
         "grep"
@@ -378,72 +378,74 @@ impl AgentTool for GrepTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let pattern = params
-            .get("pattern")
-            .and_then(|v: &Value| v.as_str())
-            .ok_or_else(|| "Missing required parameter: pattern".to_string())?;
+        ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let pattern = params
+                .get("pattern")
+                .and_then(|v: &Value| v.as_str())
+                .ok_or_else(|| "Missing required parameter: pattern".to_string())?;
 
-        let path = params
-            .get("path")
-            .and_then(|v: &Value| v.as_str())
-            .unwrap_or(".");
+            let path = params
+                .get("path")
+                .and_then(|v: &Value| v.as_str())
+                .unwrap_or(".");
 
-        let case_insensitive = params
-            .get("case_insensitive")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
+            let case_insensitive = params
+                .get("case_insensitive")
+                .and_then(|v: &Value| v.as_bool())
+                .unwrap_or(false);
 
-        let literal = params
-            .get("literal")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
+            let literal = params
+                .get("literal")
+                .and_then(|v: &Value| v.as_bool())
+                .unwrap_or(false);
 
-        let context = params
-            .get("context")
-            .and_then(|v: &Value| v.as_u64())
-            .unwrap_or(0) as usize;
+            let context = params
+                .get("context")
+                .and_then(|v: &Value| v.as_u64())
+                .unwrap_or(0) as usize;
 
-        let include = params.get("include").and_then(|v: &Value| v.as_str());
+            let include = params.get("include").and_then(|v: &Value| v.as_str());
 
-        let max_results = params
-            .get("max_results")
-            .and_then(|v: &Value| v.as_u64())
-            .unwrap_or(100) as usize;
+            let max_results = params
+                .get("max_results")
+                .and_then(|v: &Value| v.as_u64())
+                .unwrap_or(100) as usize;
 
-        // Use root_dir if set, else ctx.root()
-        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+            // Use root_dir if set, else ctx.root()
+            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-        match Self::grep_impl(
-            root,
-            pattern,
-            path,
-            case_insensitive,
-            literal,
-            context,
-            context,
-            include,
-            max_results,
-        )
-        .await
-        {
-            Ok((output, lines_truncated)) => {
-                let mut result = AgentToolResult::success(output);
-                if lines_truncated {
-                    result.metadata = Some(json!({
-                        "lines_truncated": true,
-                        "message": "Some lines truncated to 500 chars. Use read tool to see full lines."
-                    }));
+            match Self::grep_impl(
+                root,
+                pattern,
+                path,
+                case_insensitive,
+                literal,
+                context,
+                context,
+                include,
+                max_results,
+            )
+            .await
+            {
+                Ok((output, lines_truncated)) => {
+                    let mut result = AgentToolResult::success(output);
+                    if lines_truncated {
+                        result.metadata = Some(json!({
+                            "lines_truncated": true,
+                            "message": "Some lines truncated to 500 chars. Use read tool to see full lines."
+                        }));
+                    }
+                    Ok(result)
                 }
-                Ok(result)
+                Err(e) => Ok(AgentToolResult::error(e)),
             }
-            Err(e) => Ok(AgentToolResult::error(e)),
-        }
+        })
     }
 }

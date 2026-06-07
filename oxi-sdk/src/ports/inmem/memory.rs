@@ -8,9 +8,10 @@
 //! For durable memory, implement `oxi_sdk::ports::MemoryStore` against
 //! SQLite/Redis/vector DB.
 
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::{MemoryEntry, MemoryStore};
@@ -41,29 +42,41 @@ impl InMemoryMemoryStore {
     }
 }
 
-#[async_trait]
 impl MemoryStore for InMemoryMemoryStore {
-    async fn put(&self, entry: MemoryEntry) -> Result<(), SdkError> {
+    fn put(
+        &self,
+        entry: MemoryEntry,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         self.inner.lock().insert(entry.id.clone(), entry);
-        Ok(())
+        Box::pin(async { Ok(()) })
     }
 
-    async fn list(&self, subject: &str) -> Result<Vec<MemoryEntry>, SdkError> {
+    fn list(
+        &self,
+        subject: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryEntry>, SdkError>> + Send + '_>> {
         let g = self.inner.lock();
-        Ok(g.values()
+        let result: Vec<MemoryEntry> = g
+            .values()
             .filter(|e| e.subject == subject)
             .cloned()
-            .collect())
+            .collect();
+        Box::pin(async { Ok(result) })
     }
 
-    async fn search(&self, query: &[f32], k: usize) -> Result<Vec<MemoryEntry>, SdkError> {
+    fn search(
+        &self,
+        query: &[f32],
+        k: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryEntry>, SdkError>> + Send + '_>> {
         let g = self.inner.lock();
         let mut scored: Vec<_> = g
             .values()
             .filter_map(|e| e.embedding.as_ref().map(|emb| (e, cosine(query, emb))))
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(scored.into_iter().take(k).map(|(e, _)| e.clone()).collect())
+        let result: Vec<MemoryEntry> = scored.into_iter().take(k).map(|(e, _)| e.clone()).collect();
+        Box::pin(async { Ok(result) })
     }
 }
 

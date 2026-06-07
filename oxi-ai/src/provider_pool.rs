@@ -4,9 +4,8 @@
 //! a simple sliding-window rate limiter (RPM). Used when multiple agents
 //! share a single API key and need coordinated access.
 
-use crate::{Context, Model, Provider, ProviderError, ProviderEvent, StreamOptions};
-use async_trait::async_trait;
-use futures::Stream;
+use crate::{Context, Model, Provider, ProviderError, StreamOptions, StreamResult};
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -114,48 +113,49 @@ impl ProviderPool {
     }
 }
 
-#[async_trait]
 impl Provider for ProviderPool {
     fn name(&self) -> &str {
         &self.pool_name
     }
 
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        // 1. Acquire concurrency permit
-        let _permit = self
-            .semaphore
-            .acquire()
-            .await
-            .map_err(|_| ProviderError::RateLimited {
-                retry_after: Some(Duration::from_secs(5)),
-            })?;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            // 1. Acquire concurrency permit
+            let _permit =
+                self.semaphore
+                    .acquire()
+                    .await
+                    .map_err(|_| ProviderError::RateLimited {
+                        retry_after: Some(Duration::from_secs(5)),
+                    })?;
 
-        // 2. Rate-limit check with simple backoff
-        {
-            let mut limiter = self.limiter.lock().await;
-            if !limiter.can_proceed() {
-                // Simple: wait 1 second and retry once
-                drop(limiter);
-                tokio::time::sleep(Duration::from_secs(1)).await;
+            // 2. Rate-limit check with simple backoff
+            {
                 let mut limiter = self.limiter.lock().await;
                 if !limiter.can_proceed() {
-                    return Err(ProviderError::RateLimited {
-                        retry_after: Some(Duration::from_secs(5)),
-                    });
+                    // Simple: wait 1 second and retry once
+                    drop(limiter);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let mut limiter = self.limiter.lock().await;
+                    if !limiter.can_proceed() {
+                        return Err(ProviderError::RateLimited {
+                            retry_after: Some(Duration::from_secs(5)),
+                        });
+                    }
+                    limiter.record();
+                } else {
+                    limiter.record();
                 }
-                limiter.record();
-            } else {
-                limiter.record();
             }
-        }
 
-        // 3. Delegate to inner provider
-        self.inner.stream(model, context, options).await
+            // 3. Delegate to inner provider
+            self.inner.stream(model, context, options).await
+        })
     }
 }
 

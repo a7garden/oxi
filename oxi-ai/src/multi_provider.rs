@@ -55,8 +55,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::Stream;
+use std::future::Future;
 use std::pin::Pin;
 
 use crate::{
@@ -67,7 +67,7 @@ use crate::{
     error::ProviderError,
     fallback_chain::FallbackChain,
     model_db::ModelEntry,
-    providers::{FallbackReason, Provider, ProviderEvent, StreamOptions},
+    providers::{FallbackReason, Provider, ProviderEvent, StreamOptions, StreamResult},
 };
 
 // ============================================================================
@@ -615,7 +615,6 @@ fn error_to_fallback_reason(error: &ProviderError) -> FallbackReason {
 // Provider Trait Implementation
 // ============================================================================
 
-#[async_trait]
 impl Provider for MultiProvider {
     /// Stream assistant message events with intelligent routing.
     ///
@@ -631,165 +630,167 @@ impl Provider for MultiProvider {
     /// - On retryable error: record failure, retry or move to next
     /// - On non-retryable error: return immediately
     /// - On success: record success to breaker, return stream
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        // Build candidate list based on priority order
-        let candidates = self.build_candidate_list(model, context).await?;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            // Build candidate list based on priority order
+            let candidates = self.build_candidate_list(model, context).await?;
 
-        // Try each candidate in order
-        let mut errors: Vec<(String, ProviderError)> = Vec::new();
-        let mut current_candidate_idx: usize = 0;
+            // Try each candidate in order
+            let mut errors: Vec<(String, ProviderError)> = Vec::new();
+            let mut current_candidate_idx: usize = 0;
 
-        while current_candidate_idx < candidates.len() {
-            let candidate = &candidates[current_candidate_idx];
-            let provider_name = &candidate.provider;
-            let candidate_model = candidate.model.clone();
+            while current_candidate_idx < candidates.len() {
+                let candidate = &candidates[current_candidate_idx];
+                let provider_name = &candidate.provider;
+                let candidate_model = candidate.model.clone();
 
-            // Get provider
-            let Some(provider) = self.providers.get(provider_name) else {
-                current_candidate_idx += 1;
-                continue;
-            };
+                // Get provider
+                let Some(provider) = self.providers.get(provider_name) else {
+                    current_candidate_idx += 1;
+                    continue;
+                };
 
-            // Check circuit breaker
-            if let Some(breaker) = self.breakers.get(provider_name) {
-                match breaker.allow_request() {
-                    Ok(()) => {
-                        // Circuit allows request, proceed
-                    }
-                    Err(e) => {
-                        // Circuit is open - skip this provider
-                        tracing::debug!(
-                            provider = %provider_name,
-                            remaining = ?e.remaining,
-                            "Circuit breaker open, skipping provider"
-                        );
-                        current_candidate_idx += 1;
-                        continue;
+                // Check circuit breaker
+                if let Some(breaker) = self.breakers.get(provider_name) {
+                    match breaker.allow_request() {
+                        Ok(()) => {
+                            // Circuit allows request, proceed
+                        }
+                        Err(e) => {
+                            // Circuit is open - skip this provider
+                            tracing::debug!(
+                                provider = %provider_name,
+                                remaining = ?e.remaining,
+                                "Circuit breaker open, skipping provider"
+                            );
+                            current_candidate_idx += 1;
+                            continue;
+                        }
                     }
                 }
-            }
 
-            // Try to stream with retries
-            let mut retry_count = 0;
-            let max_retries = self.config.max_retries_per_model;
+                // Try to stream with retries
+                let mut retry_count = 0;
+                let max_retries = self.config.max_retries_per_model;
 
-            loop {
-                match provider
-                    .stream(&candidate_model, context, options.clone())
-                    .await
-                {
-                    Ok(inner_stream) => {
-                        // Success! Record to circuit breaker
-                        if let Some(breaker) = self.breakers.get(provider_name) {
-                            breaker.record_success();
-                        }
-                        tracing::debug!(
-                            provider = %provider_name,
-                            model = %candidate_model.id,
-                            "MultiProvider: stream successful"
-                        );
-
-                        // Wrap stream with fallback event if we attempted a previous candidate
-                        if current_candidate_idx > 0 {
-                            let from_model = format!(
-                                "{}/{}",
-                                candidates[current_candidate_idx - 1].provider,
-                                candidates[current_candidate_idx - 1].model.id
-                            );
-                            let to_model = format!("{}/{}", provider_name, candidate_model.id);
-                            let reason = errors
-                                .last()
-                                .map(|(_, e)| error_to_fallback_reason(e))
-                                .unwrap_or(FallbackReason::Unknown);
-
-                            let wrapped =
-                                FallbackStream::new(from_model, to_model, reason, inner_stream);
-                            return Ok(Box::pin(wrapped) as Pin<Box<_>>);
-                        }
-
-                        return Ok(inner_stream);
-                    }
-                    Err(e) => {
-                        // Check if error is retryable
-                        if e.is_retryable() && retry_count < max_retries {
-                            // Retryable error - record failure and retry
-                            retry_count += 1;
+                loop {
+                    match provider
+                        .stream(&candidate_model, context, options.clone())
+                        .await
+                    {
+                        Ok(inner_stream) => {
+                            // Success! Record to circuit breaker
                             if let Some(breaker) = self.breakers.get(provider_name) {
-                                breaker.record_failure();
+                                breaker.record_success();
                             }
                             tracing::debug!(
                                 provider = %provider_name,
                                 model = %candidate_model.id,
-                                error = %e,
-                                retry = retry_count,
-                                "Retryable error, retrying"
+                                "MultiProvider: stream successful"
                             );
-                            continue;
-                        }
 
-                        // Non-retryable error or max retries exceeded
-                        if !e.is_retryable() {
-                            // Non-retryable errors (400, 401, 403, etc.) don't record failure
-                            // Return immediately - these won't be fixed by retrying
-                            tracing::warn!(
+                            // Wrap stream with fallback event if we attempted a previous candidate
+                            if current_candidate_idx > 0 {
+                                let from_model = format!(
+                                    "{}/{}",
+                                    candidates[current_candidate_idx - 1].provider,
+                                    candidates[current_candidate_idx - 1].model.id
+                                );
+                                let to_model = format!("{}/{}", provider_name, candidate_model.id);
+                                let reason = errors
+                                    .last()
+                                    .map(|(_, e)| error_to_fallback_reason(e))
+                                    .unwrap_or(FallbackReason::Unknown);
+
+                                let wrapped =
+                                    FallbackStream::new(from_model, to_model, reason, inner_stream);
+                                return Ok(Box::pin(wrapped) as Pin<Box<_>>);
+                            }
+
+                            return Ok(inner_stream);
+                        }
+                        Err(e) => {
+                            // Check if error is retryable
+                            if e.is_retryable() && retry_count < max_retries {
+                                // Retryable error - record failure and retry
+                                retry_count += 1;
+                                if let Some(breaker) = self.breakers.get(provider_name) {
+                                    breaker.record_failure();
+                                }
+                                tracing::debug!(
+                                    provider = %provider_name,
+                                    model = %candidate_model.id,
+                                    error = %e,
+                                    retry = retry_count,
+                                    "Retryable error, retrying"
+                                );
+                                continue;
+                            }
+
+                            // Non-retryable error or max retries exceeded
+                            if !e.is_retryable() {
+                                // Non-retryable errors (400, 401, 403, etc.) don't record failure
+                                // Return immediately - these won't be fixed by retrying
+                                tracing::warn!(
+                                    provider = %provider_name,
+                                    model = %candidate_model.id,
+                                    error = %e,
+                                    "Non-retryable error, returning immediately"
+                                );
+                                return Err(e);
+                            }
+
+                            // Max retries exceeded - try next candidate
+                            tracing::debug!(
                                 provider = %provider_name,
                                 model = %candidate_model.id,
                                 error = %e,
-                                "Non-retryable error, returning immediately"
+                                retries = retry_count,
+                                "Max retries exceeded, trying next candidate"
                             );
-                            return Err(e);
+                            errors.push((format!("{}/{}", provider_name, candidate_model.id), e));
+                            break;
                         }
-
-                        // Max retries exceeded - try next candidate
-                        tracing::debug!(
-                            provider = %provider_name,
-                            model = %candidate_model.id,
-                            error = %e,
-                            retries = retry_count,
-                            "Max retries exceeded, trying next candidate"
-                        );
-                        errors.push((format!("{}/{}", provider_name, candidate_model.id), e));
-                        break;
                     }
                 }
+
+                current_candidate_idx += 1;
             }
 
-            current_candidate_idx += 1;
-        }
-
-        // All candidates exhausted
-        if errors.is_empty() {
-            if self.providers.is_empty() {
-                Err(ProviderError::UnknownProvider(
-                    "multi-provider: no providers registered".to_string(),
-                ))
+            // All candidates exhausted
+            if errors.is_empty() {
+                if self.providers.is_empty() {
+                    Err(ProviderError::UnknownProvider(
+                        "multi-provider: no providers registered".to_string(),
+                    ))
+                } else {
+                    Err(ProviderError::UnknownProvider(
+                        "multi-provider: no model could be routed".to_string(),
+                    ))
+                }
             } else {
-                Err(ProviderError::UnknownProvider(
-                    "multi-provider: no model could be routed".to_string(),
-                ))
+                // Emit FallbackExhausted event
+                let models_tried: Vec<String> = errors.iter().map(|(m, _)| m.clone()).collect();
+                let final_error = errors
+                    .last()
+                    .map(|(_, e)| e.to_string())
+                    .unwrap_or_else(|| "Unknown error".to_string());
+
+                tracing::warn!(
+                    models_tried = ?models_tried,
+                    error = %final_error,
+                    "All fallback models exhausted"
+                );
+
+                let stream = FallbackExhaustedStream::new(models_tried, final_error);
+                Ok(Box::pin(stream) as Pin<Box<_>>)
             }
-        } else {
-            // Emit FallbackExhausted event
-            let models_tried: Vec<String> = errors.iter().map(|(m, _)| m.clone()).collect();
-            let final_error = errors
-                .last()
-                .map(|(_, e)| e.to_string())
-                .unwrap_or_else(|| "Unknown error".to_string());
-
-            tracing::warn!(
-                models_tried = ?models_tried,
-                error = %final_error,
-                "All fallback models exhausted"
-            );
-
-            let stream = FallbackExhaustedStream::new(models_tried, final_error);
-            Ok(Box::pin(stream) as Pin<Box<_>>)
-        }
+        })
     }
 
     /// Returns "multi-provider" as the provider name.
@@ -1119,16 +1120,14 @@ mod tests {
 
         // Register a mock provider
         struct MockProvider;
-        #[async_trait]
         impl Provider for MockProvider {
-            async fn stream(
-                &self,
-                _model: &Model,
-                _context: &Context,
+            fn stream<'a>(
+                &'a self,
+                _model: &'a Model,
+                _context: &'a Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
-            {
-                unreachable!("Mock provider - not called in this test")
+            ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+                Box::pin(async move { unreachable!("Mock provider - not called in this test") })
             }
 
             fn name(&self) -> &str {
@@ -1149,16 +1148,14 @@ mod tests {
         let mut provider = MultiProvider::new(MultiProviderConfig::default());
 
         struct MockProvider;
-        #[async_trait]
         impl Provider for MockProvider {
-            async fn stream(
-                &self,
-                _model: &Model,
-                _context: &Context,
+            fn stream<'a>(
+                &'a self,
+                _model: &'a Model,
+                _context: &'a Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
-            {
-                unreachable!("Mock provider")
+            ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+                Box::pin(async move { unreachable!("Mock provider") })
             }
 
             fn name(&self) -> &str {
@@ -1195,16 +1192,14 @@ mod tests {
         let mut provider = MultiProvider::new(MultiProviderConfig::default());
 
         struct MockProvider;
-        #[async_trait]
         impl Provider for MockProvider {
-            async fn stream(
-                &self,
-                _model: &Model,
-                _context: &Context,
+            fn stream<'a>(
+                &'a self,
+                _model: &'a Model,
+                _context: &'a Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
-            {
-                unreachable!("Mock provider")
+            ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+                Box::pin(async move { unreachable!("Mock provider") })
             }
 
             fn name(&self) -> &str {
@@ -1255,16 +1250,14 @@ mod tests {
         let mut provider = MultiProvider::new(MultiProviderConfig::default());
 
         struct MockProvider;
-        #[async_trait]
         impl Provider for MockProvider {
-            async fn stream(
-                &self,
-                _model: &Model,
-                _context: &Context,
+            fn stream<'a>(
+                &'a self,
+                _model: &'a Model,
+                _context: &'a Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
-            {
-                unreachable!("Mock provider")
+            ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+                Box::pin(async move { unreachable!("Mock provider") })
             }
 
             fn name(&self) -> &str {

@@ -10,11 +10,12 @@ use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -450,7 +451,6 @@ impl BrowseScriptTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for BrowseScriptTool {
     fn name(&self) -> &str {
         "browse_script"
@@ -500,92 +500,96 @@ impl AgentTool for BrowseScriptTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let script_input = params["script"]
-            .as_str()
-            .ok_or_else(|| "Missing required parameter: script".to_string())?;
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let script_input = params["script"]
+                .as_str()
+                .ok_or_else(|| "Missing required parameter: script".to_string())?;
 
-        let timeout_secs = params["timeout"].as_u64().unwrap_or(60);
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+            let timeout_secs = params["timeout"].as_u64().unwrap_or(60);
+            let deadline =
+                tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
 
-        // Load script from file if it's a path
-        let yaml = if Path::new(script_input).exists() {
-            std::fs::read_to_string(script_input)
-                .map_err(|e| format!("Failed to read script file: {}", e))?
-        } else {
-            script_input.to_string()
-        };
+            // Load script from file if it's a path
+            let yaml = if Path::new(script_input).exists() {
+                std::fs::read_to_string(script_input)
+                    .map_err(|e| format!("Failed to read script file: {}", e))?
+            } else {
+                script_input.to_string()
+            };
 
-        let steps = parse_steps(&yaml)?;
-        if steps.is_empty() {
-            return Err("Script contains no steps".into());
-        }
+            let steps = parse_steps(&yaml)?;
+            if steps.is_empty() {
+                return Err("Script contains no steps".into());
+            }
 
-        tracing::info!(steps = steps.len(), "executing browse script");
+            tracing::info!(steps = steps.len(), "executing browse script");
 
-        // Take the pending progress callback for step-level emission.
-        // The browse callback is registered on the registry separately.
-        let progress_cb = self.callbacks.take_progress();
+            // Take the pending progress callback for step-level emission.
+            // The browse callback is registered on the registry separately.
+            let progress_cb = self.callbacks.take_progress();
 
-        // Open one tab for the entire script
-        let raw_tab = self
-            .engine
-            .new_tab()
-            .await
-            .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+            // Open one tab for the entire script
+            let raw_tab = self
+                .engine
+                .new_tab()
+                .await
+                .map_err(|e| format!("Failed to open browser tab: {}", e))?;
 
-        let tab_id = raw_tab.tab_id();
-        *self.tab_id_slot.lock().lock() = Some(tab_id);
+            let tab_id = raw_tab.tab_id();
+            *self.tab_id_slot.lock().lock() = Some(tab_id);
 
-        // Register progress callback on the registry for BrowserEvent routing.
-        if let Some(ref cb) = progress_cb {
-            let registry = self.engine.callback_registry();
-            registry.set(tab_id, cb.clone());
-        }
-        // Register browse callback (still pending, not taken by take_progress).
-        self.callbacks
-            .register_browse_on_registry(tab_id, self.engine.callback_registry().as_ref());
+            // Register progress callback on the registry for BrowserEvent routing.
+            if let Some(ref cb) = progress_cb {
+                let registry = self.engine.callback_registry();
+                registry.set(tab_id, cb.clone());
+            }
+            // Register browse callback (still pending, not taken by take_progress).
+            self.callbacks
+                .register_browse_on_registry(tab_id, self.engine.callback_registry().as_ref());
 
-        let guard = TabGuard::new(raw_tab);
+            let guard = TabGuard::new(raw_tab);
 
-        let script_result = execute_steps(
-            guard.tab(),
-            &steps,
-            &self.config,
-            deadline,
-            progress_cb.as_ref(),
-        )
-        .await?;
+            let script_result = execute_steps(
+                guard.tab(),
+                &steps,
+                &self.config,
+                deadline,
+                progress_cb.as_ref(),
+            )
+            .await?;
 
-        // Build output
-        let mut output_parts = Vec::new();
-        if !script_result.outputs.is_empty() {
-            output_parts.push(script_result.outputs.join("\n"));
-        }
+            // Build output
+            let mut output_parts = Vec::new();
+            if !script_result.outputs.is_empty() {
+                output_parts.push(script_result.outputs.join("\n"));
+            }
 
-        let metadata = json!({
-            "steps_executed": steps.len(),
-            "variables": script_result.variables,
-        });
+            let metadata = json!({
+                "steps_executed": steps.len(),
+                "variables": script_result.variables,
+            });
 
-        let mut result = AgentToolResult::success(output_parts.join("\n")).with_metadata(metadata);
+            let mut result =
+                AgentToolResult::success(output_parts.join("\n")).with_metadata(metadata);
 
-        // Attach screenshot if captured
-        if let Some(png) = script_result.screenshot {
-            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
-            let img = oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));
-            result = result.with_content_blocks(vec![img]);
-        }
+            // Attach screenshot if captured
+            if let Some(png) = script_result.screenshot {
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
+                let img = oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));
+                result = result.with_content_blocks(vec![img]);
+            }
 
-        guard.close().await;
-        *self.tab_id_slot.lock().lock() = None;
-        Ok(result)
+            guard.close().await;
+            *self.tab_id_slot.lock().lock() = None;
+            Ok(result)
+        })
     }
 }
 

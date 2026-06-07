@@ -1,11 +1,11 @@
 //! OpenAI-compatible provider implementation
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Message, MessageContent, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, ToolCall,
+    ProviderEvent, StopReason, StreamOptions, StreamResult, TextContent, ThinkingContent, ToolCall,
     ToolResultMessage, Usage, error::ProviderError,
 };
 
@@ -103,319 +103,229 @@ impl Default for OpenAiProvider {
     }
 }
 
-#[async_trait]
 impl Provider for OpenAiProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
 
-        // Build the request
-        let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
-        let url = format!("{}/chat/completions", effective_base_url);
+            // Build the request
+            let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
+            let url = format!("{}/chat/completions", effective_base_url);
 
-        // Get API key
-        let api_key = options
-            .api_key
-            .as_ref()
-            .or(self.api_key.as_ref())
-            .ok_or_else(|| ProviderError::MissingApiKey)?;
-
-        // Build messages (apply provider-specific normalization)
-        let normalized = normalize_messages(&context.messages, &model.provider, &model.id);
-        let messages = build_messages_from_normalized(&context.system_prompt, &normalized)?;
-
-        // Build request body
-        let mut body = serde_json::json!({
-            "model": model.id,
-            "messages": messages,
-            "stream": true,
-            "stream_options": { "include_usage": true },
-        });
-
-        // Add optional parameters
-        if let Some(temp) = options.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-
-        if let Some(max) = options.max_tokens {
-            // Use max_completion_tokens for OpenAI (newer API field).
-            // Some providers still use max_tokens; we keep both for compat.
-            body["max_completion_tokens"] = serde_json::json!(max);
-            body["max_tokens"] = serde_json::json!(max);
-        }
-
-        // Add tools if present
-        if !context.tools.is_empty() {
-            body["tools"] = build_tools(&context.tools)?;
-        }
-
-        // ── Reasoning effort (o1/o3/o4 models) ──────────────────────────
-        // When thinking_level is set and the model supports reasoning,
-        // include `reasoning_effort` in the request body.
-        // Also checks provider_options.openai for fine-grained control.
-        if model.reasoning {
-            let openai_opts = options
-                .provider_options
+            // Get API key
+            let api_key = options
+                .api_key
                 .as_ref()
-                .and_then(|po| po.openai.as_ref());
+                .or(self.api_key.as_ref())
+                .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-            let effort = openai_opts
-                .and_then(|o| o.reasoning_effort.clone())
-                .or_else(|| {
-                    options
-                        .thinking_level
-                        .as_ref()
-                        .and_then(|l| l.as_str().map(String::from))
-                });
+            // Build messages (apply provider-specific normalization)
+            let normalized = normalize_messages(&context.messages, &model.provider, &model.id);
+            let messages = build_messages_from_normalized(&context.system_prompt, &normalized)?;
 
-            if let Some(effort_str) = effort {
-                body["reasoning_effort"] = serde_json::json!(effort_str);
+            // Build request body
+            let mut body = serde_json::json!({
+                "model": model.id,
+                "messages": messages,
+                "stream": true,
+                "stream_options": { "include_usage": true },
+            });
+
+            // Add optional parameters
+            if let Some(temp) = options.temperature {
+                body["temperature"] = serde_json::json!(temp);
             }
-        }
 
-        // ── ZAI-specific parameters ──────────────────────────────────
-        // Mirror pi's detectCompat: when provider is ZAI (or base_url contains
-        // api.z.ai), send enable_thinking and tool_stream.
-        if is_zai(model) {
-            if model.reasoning {
-                body["enable_thinking"] = serde_json::json!(true);
+            if let Some(max) = options.max_tokens {
+                // Use max_completion_tokens for OpenAI (newer API field).
+                // Some providers still use max_tokens; we keep both for compat.
+                body["max_completion_tokens"] = serde_json::json!(max);
+                body["max_tokens"] = serde_json::json!(max);
             }
+
+            // Add tools if present
             if !context.tools.is_empty() {
-                body["tool_stream"] = serde_json::json!(true);
+                body["tools"] = build_tools(&context.tools)?;
             }
-        }
 
-        tracing::info!(
-            "Sending request to {} model={} body_len={} enable_thinking={} tool_stream={}",
-            url,
-            model.id,
-            body.to_string().len(),
-            body.get("enable_thinking").is_some(),
-            body.get("tool_stream").is_some()
-        );
-        tracing::debug!("Request body: {}", body.to_string());
+            // ── Reasoning effort (o1/o3/o4 models) ──────────────────────────
+            // When thinking_level is set and the model supports reasoning,
+            // include `reasoning_effort` in the request body.
+            // Also checks provider_options.openai for fine-grained control.
+            if model.reasoning {
+                let openai_opts = options
+                    .provider_options
+                    .as_ref()
+                    .and_then(|po| po.openai.as_ref());
 
-        // Build headers
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
-                .parse()
-                .expect("valid bearer header"),
-        );
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            "application/json".parse().expect("valid header value"),
-        );
+                let effort = openai_opts
+                    .and_then(|o| o.reasoning_effort.clone())
+                    .or_else(|| {
+                        options
+                            .thinking_level
+                            .as_ref()
+                            .and_then(|l| l.as_str().map(String::from))
+                    });
 
-        // Provider-level default headers (e.g. OpenRouter HTTP-Referer)
-        for (k, v) in &self.extra_headers {
-            if let (Ok(name), Ok(value)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                headers.insert(name, value);
+                if let Some(effort_str) = effort {
+                    body["reasoning_effort"] = serde_json::json!(effort_str);
+                }
             }
-        }
 
-        // Per-request headers (from StreamOptions)
-        for (k, v) in &options.headers {
-            if let (Ok(name), Ok(value)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                headers.insert(name, value);
+            // ── ZAI-specific parameters ──────────────────────────────────
+            // Mirror pi's detectCompat: when provider is ZAI (or base_url contains
+            // api.z.ai), send enable_thinking and tool_stream.
+            if is_zai(model) {
+                if model.reasoning {
+                    body["enable_thinking"] = serde_json::json!(true);
+                }
+                if !context.tools.is_empty() {
+                    body["tool_stream"] = serde_json::json!(true);
+                }
             }
-        }
 
-        // Make request
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
+            tracing::info!(
+                "Sending request to {} model={} body_len={} enable_thinking={} tool_stream={}",
+                url,
+                model.id,
+                body.to_string().len(),
+                body.get("enable_thinking").is_some(),
+                body.get("tool_stream").is_some()
+            );
+            tracing::debug!("Request body: {}", body.to_string());
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
+            // Build headers
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", api_key)
+                    .parse()
+                    .expect("valid bearer header"),
+            );
+            headers.insert(
+                reqwest::header::CONTENT_TYPE,
+                "application/json".parse().expect("valid header value"),
+            );
 
-        // Create event stream
-        let provider_name = model.provider.clone();
-        let model_id = model.id.clone();
+            // Provider-level default headers (e.g. OpenRouter HTTP-Referer)
+            for (k, v) in &self.extra_headers {
+                if let (Ok(name), Ok(value)) = (
+                    k.parse::<reqwest::header::HeaderName>(),
+                    v.parse::<reqwest::header::HeaderValue>(),
+                ) {
+                    headers.insert(name, value);
+                }
+            }
 
-        // Emit Start event once at the beginning of the stream (matches pi's behavior)
-        let start_event = ProviderEvent::Start {
-            partial: Arc::new(AssistantMessage::new(
-                Api::OpenAiCompletions,
-                &provider_name,
-                &model_id,
-            )),
-        };
+            // Per-request headers (from StreamOptions)
+            for (k, v) in &options.headers {
+                if let (Ok(name), Ok(value)) = (
+                    k.parse::<reqwest::header::HeaderName>(),
+                    v.parse::<reqwest::header::HeaderValue>(),
+                ) {
+                    headers.insert(name, value);
+                }
+            }
 
-        // Stateful stream parser that accumulates tool calls across chunks.
-        // OpenAI sends tool calls as multiple deltas (id, name, arguments fragments)
-        // that must be reassembled before emitting ToolCallEnd.
-        //
-        // State:
-        //   pending_bytes     – incomplete UTF-8 bytes from the previous HTTP chunk
-        //   pending_tc_index  – accumulated tool calls keyed by streaming index
-        //   pending_tc_id     – secondary lookup by tool-call ID (ZAI et al. may
-        //                       omit the index on continuation deltas)
-        //   thinking_started  – whether ThinkingStart has been emitted
-        let stream = response
-            .bytes_stream()
-            .scan(
-                (
-                    Vec::new(),
-                    std::collections::HashMap::<usize, (String, String, String)>::new(),
-                    std::collections::HashMap::<String, usize>::new(), // id → index
-                    false,
-                    AssistantMessage::new(Api::OpenAiCompletions, &provider_name, &model_id),
-                ),
-                move |(
-                    pending_bytes,
-                    pending_tc,
-                    tc_id_to_index,
-                    thinking_started,
-                    accumulated_output,
-                ),
-                      chunk: Result<Bytes, reqwest::Error>| {
-                    let events = match chunk {
-                        Ok(bytes) => {
-                            // Prepend any incomplete bytes from previous chunk
-                            let mut combined =
-                                Vec::with_capacity(pending_bytes.len() + bytes.len());
-                            combined.extend_from_slice(pending_bytes);
-                            combined.extend_from_slice(&bytes);
+            // Make request
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
 
-                            // Split into complete lines (ending with \n) and trailing incomplete data.
-                            // This prevents JSON parse failures from partial SSE lines
-                            // that were split across HTTP chunks.
-                            let (text, trailing) = split_complete_lines(&combined);
-                            *pending_bytes = trailing;
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
 
-                            tracing::debug!(
-                                "parse_sse_events input: {} bytes, {} lines",
-                                text.len(),
-                                text.lines().count()
-                            );
-                            let raw_events = parse_sse_events(
-                                &text,
-                                &provider_name,
-                                &model_id,
-                                accumulated_output,
-                            );
-                            tracing::debug!("parse_sse_events output: {} events", raw_events.len());
+            // Create event stream
+            let provider_name = model.provider.clone();
+            let model_id = model.id.clone();
 
-                            // Post-process: accumulate tool call deltas, inject ThinkingStart once
-                            let mut processed = Vec::new();
-                            for event in raw_events {
-                                match &event {
-                                    ProviderEvent::ThinkingDelta { content_index, .. } => {
-                                        // Inject ThinkingStart before the first ThinkingDelta
-                                        if !*thinking_started {
-                                            *thinking_started = true;
-                                            processed.push(ProviderEvent::ThinkingStart {
-                                                content_index: *content_index,
-                                                partial: Arc::new(AssistantMessage::new(
-                                                    Api::OpenAiCompletions,
-                                                    &provider_name,
-                                                    &model_id,
-                                                )),
-                                            });
-                                        }
-                                        processed.push(event);
-                                    }
-                                    ProviderEvent::ToolCallStart {
-                                        content_index,
-                                        tool_call_id,
-                                        tool_name,
-                                        ..
-                                    } => {
-                                        let entry =
-                                            pending_tc.entry(*content_index).or_insert_with(|| {
-                                                (String::new(), String::new(), String::new())
-                                            });
-                                        if let Some(id) = tool_call_id
-                                            && !id.is_empty()
-                                        {
-                                            entry.0 = id.clone();
-                                            tc_id_to_index.insert(id.clone(), *content_index);
-                                        }
-                                        if let Some(name) = tool_name
-                                            && !name.is_empty()
-                                        {
-                                            entry.1 = name.clone();
-                                        }
-                                        processed.push(event);
-                                    }
-                                    ProviderEvent::ToolCallDelta {
-                                        content_index,
-                                        delta,
-                                        ..
-                                    } => {
-                                        // Dual-map lookup: prefer index, fall back to ID
-                                        let idx = if pending_tc.contains_key(content_index) {
-                                            *content_index
-                                        } else {
-                                            // Scan id→index map for a match
-                                            tc_id_to_index
-                                                .values()
-                                                .copied()
-                                                .find(|i| *i == *content_index)
-                                                .unwrap_or(*content_index)
-                                        };
-                                        let entry = pending_tc.entry(idx).or_insert_with(|| {
-                                            (String::new(), String::new(), String::new())
-                                        });
-                                        tracing::debug!(
-                                            "[TC-DELTA] idx={}, delta_len={}, accumulated_len={}",
-                                            idx,
-                                            delta.len(),
-                                            entry.2.len() + delta.len()
-                                        );
-                                        entry.2.push_str(delta);
-                                        processed.push(event);
-                                    }
-                                    ProviderEvent::ToolCallEnd { .. } => {
-                                        // Already a ToolCallEnd from parse_sse_events
-                                        processed.push(event);
-                                    }
-                                    ProviderEvent::Done { reason, .. } => {
-                                        // Before Done, emit ToolCallEnd for all accumulated tool calls
-                                        if matches!(reason, StopReason::ToolUse) {
-                                            let mut indices: Vec<usize> =
-                                                pending_tc.keys().copied().collect();
-                                            indices.sort();
-                                            for idx in indices {
-                                                let (id, name, arguments) = &pending_tc[&idx];
-                                                tracing::debug!(
-                                                    "[TC-END] idx={}, id={}, name={}, args_len={}",
-                                                    idx,
-                                                    id.len(),
-                                                    name.len(),
-                                                    arguments.len()
-                                                );
-                                                let args_value = parse_streaming_json(arguments);
-                                                processed.push(ProviderEvent::ToolCallEnd {
-                                                    content_index: idx,
-                                                    tool_call: crate::ToolCall {
-                                                        content_type:
-                                                            crate::messages::ToolCallType::ToolCall,
-                                                        id: id.clone(),
-                                                        name: name.clone(),
-                                                        arguments: args_value,
-                                                        thought_signature: None,
-                                                    },
+            // Emit Start event once at the beginning of the stream (matches pi's behavior)
+            let start_event = ProviderEvent::Start {
+                partial: Arc::new(AssistantMessage::new(
+                    Api::OpenAiCompletions,
+                    &provider_name,
+                    &model_id,
+                )),
+            };
+
+            // Stateful stream parser that accumulates tool calls across chunks.
+            // OpenAI sends tool calls as multiple deltas (id, name, arguments fragments)
+            // that must be reassembled before emitting ToolCallEnd.
+            //
+            // State:
+            //   pending_bytes     – incomplete UTF-8 bytes from the previous HTTP chunk
+            //   pending_tc_index  – accumulated tool calls keyed by streaming index
+            //   pending_tc_id     – secondary lookup by tool-call ID (ZAI et al. may
+            //                       omit the index on continuation deltas)
+            //   thinking_started  – whether ThinkingStart has been emitted
+            let stream = response
+                .bytes_stream()
+                .scan(
+                    (
+                        Vec::new(),
+                        std::collections::HashMap::<usize, (String, String, String)>::new(),
+                        std::collections::HashMap::<String, usize>::new(), // id → index
+                        false,
+                        AssistantMessage::new(Api::OpenAiCompletions, &provider_name, &model_id),
+                    ),
+                    move |(
+                        pending_bytes,
+                        pending_tc,
+                        tc_id_to_index,
+                        thinking_started,
+                        accumulated_output,
+                    ),
+                          chunk: Result<Bytes, reqwest::Error>| {
+                        let events = match chunk {
+                            Ok(bytes) => {
+                                // Prepend any incomplete bytes from previous chunk
+                                let mut combined =
+                                    Vec::with_capacity(pending_bytes.len() + bytes.len());
+                                combined.extend_from_slice(pending_bytes);
+                                combined.extend_from_slice(&bytes);
+
+                                // Split into complete lines (ending with \n) and trailing incomplete data.
+                                // This prevents JSON parse failures from partial SSE lines
+                                // that were split across HTTP chunks.
+                                let (text, trailing) = split_complete_lines(&combined);
+                                *pending_bytes = trailing;
+
+                                tracing::debug!(
+                                    "parse_sse_events input: {} bytes, {} lines",
+                                    text.len(),
+                                    text.lines().count()
+                                );
+                                let raw_events = parse_sse_events(
+                                    &text,
+                                    &provider_name,
+                                    &model_id,
+                                    accumulated_output,
+                                );
+                                tracing::debug!("parse_sse_events output: {} events", raw_events.len());
+
+                                // Post-process: accumulate tool call deltas, inject ThinkingStart once
+                                let mut processed = Vec::new();
+                                for event in raw_events {
+                                    match &event {
+                                        ProviderEvent::ThinkingDelta { content_index, .. } => {
+                                            // Inject ThinkingStart before the first ThinkingDelta
+                                            if !*thinking_started {
+                                                *thinking_started = true;
+                                                processed.push(ProviderEvent::ThinkingStart {
+                                                    content_index: *content_index,
                                                     partial: Arc::new(AssistantMessage::new(
                                                         Api::OpenAiCompletions,
                                                         &provider_name,
@@ -423,41 +333,132 @@ impl Provider for OpenAiProvider {
                                                     )),
                                                 });
                                             }
+                                            processed.push(event);
                                         }
-                                        // Clear pending_tc for the next stream/turn.
-                                        // Without this, tool call arguments from the previous
-                                        // turn leak into the next turn's accumulation.
-                                        pending_tc.clear();
-                                        tc_id_to_index.clear();
-                                        processed.push(event);
-                                    }
-                                    _ => {
-                                        processed.push(event);
+                                        ProviderEvent::ToolCallStart {
+                                            content_index,
+                                            tool_call_id,
+                                            tool_name,
+                                            ..
+                                        } => {
+                                            let entry =
+                                                pending_tc.entry(*content_index).or_insert_with(|| {
+                                                    (String::new(), String::new(), String::new())
+                                                });
+                                            if let Some(id) = tool_call_id
+                                                && !id.is_empty()
+                                            {
+                                                entry.0 = id.clone();
+                                                tc_id_to_index.insert(id.clone(), *content_index);
+                                            }
+                                            if let Some(name) = tool_name
+                                                && !name.is_empty()
+                                            {
+                                                entry.1 = name.clone();
+                                            }
+                                            processed.push(event);
+                                        }
+                                        ProviderEvent::ToolCallDelta {
+                                            content_index,
+                                            delta,
+                                            ..
+                                        } => {
+                                            // Dual-map lookup: prefer index, fall back to ID
+                                            let idx = if pending_tc.contains_key(content_index) {
+                                                *content_index
+                                            } else {
+                                                // Scan id→index map for a match
+                                                tc_id_to_index
+                                                    .values()
+                                                    .copied()
+                                                    .find(|i| *i == *content_index)
+                                                    .unwrap_or(*content_index)
+                                            };
+                                            let entry = pending_tc.entry(idx).or_insert_with(|| {
+                                                (String::new(), String::new(), String::new())
+                                            });
+                                            tracing::debug!(
+                                                "[TC-DELTA] idx={}, delta_len={}, accumulated_len={}",
+                                                idx,
+                                                delta.len(),
+                                                entry.2.len() + delta.len()
+                                            );
+                                            entry.2.push_str(delta);
+                                            processed.push(event);
+                                        }
+                                        ProviderEvent::ToolCallEnd { .. } => {
+                                            // Already a ToolCallEnd from parse_sse_events
+                                            processed.push(event);
+                                        }
+                                        ProviderEvent::Done { reason, .. } => {
+                                            // Before Done, emit ToolCallEnd for all accumulated tool calls
+                                            if matches!(reason, StopReason::ToolUse) {
+                                                let mut indices: Vec<usize> =
+                                                    pending_tc.keys().copied().collect();
+                                                indices.sort();
+                                                for idx in indices {
+                                                    let (id, name, arguments) = &pending_tc[&idx];
+                                                    tracing::debug!(
+                                                        "[TC-END] idx={}, id={}, name={}, args_len={}",
+                                                        idx,
+                                                        id.len(),
+                                                        name.len(),
+                                                        arguments.len()
+                                                    );
+                                                    let args_value = parse_streaming_json(arguments);
+                                                    processed.push(ProviderEvent::ToolCallEnd {
+                                                        content_index: idx,
+                                                        tool_call: crate::ToolCall {
+                                                            content_type:
+                                                                crate::messages::ToolCallType::ToolCall,
+                                                            id: id.clone(),
+                                                            name: name.clone(),
+                                                            arguments: args_value,
+                                                            thought_signature: None,
+                                                        },
+                                                        partial: Arc::new(AssistantMessage::new(
+                                                            Api::OpenAiCompletions,
+                                                            &provider_name,
+                                                            &model_id,
+                                                        )),
+                                                    });
+                                                }
+                                            }
+                                            // Clear pending_tc for the next stream/turn.
+                                            // Without this, tool call arguments from the previous
+                                            // turn leak into the next turn's accumulation.
+                                            pending_tc.clear();
+                                            tc_id_to_index.clear();
+                                            processed.push(event);
+                                        }
+                                        _ => {
+                                            processed.push(event);
+                                        }
                                     }
                                 }
+                                processed
                             }
-                            processed
-                        }
-                        Err(e) => {
-                            vec![ProviderEvent::Error {
-                                reason: StopReason::Error,
-                                error: create_error_message(
-                                    &e.to_string(),
-                                    &provider_name,
-                                    &model_id,
-                                ),
-                            }]
-                        }
-                    };
-                    // Return Some to continue, wrap events in an iterator
-                    async move { Some(futures::stream::iter(events)) }
-                },
-            )
-            .flatten();
+                            Err(e) => {
+                                vec![ProviderEvent::Error {
+                                    reason: StopReason::Error,
+                                    error: create_error_message(
+                                        &e.to_string(),
+                                        &provider_name,
+                                        &model_id,
+                                    ),
+                                }]
+                            }
+                        };
+                        // Return Some to continue, wrap events in an iterator
+                        async move { Some(futures::stream::iter(events)) }
+                    },
+                )
+                .flatten();
 
-        // Prepend Start event to the stream
-        let stream_with_start = futures::stream::once(async move { start_event }).chain(stream);
-        Ok(Box::pin(stream_with_start))
+            // Prepend Start event to the stream
+            let stream_with_start = futures::stream::once(async move { start_event }).chain(stream);
+            Ok(Box::pin(stream_with_start) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -731,10 +732,10 @@ fn parse_sse_events(
                         .content
                         .iter()
                         .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                    if let Some(idx) = last_text_idx {
-                        if let ContentBlock::Text(t) = &mut output.content[idx] {
-                            t.text.push_str(content);
-                        }
+                    if let Some(idx) = last_text_idx
+                        && let ContentBlock::Text(t) = &mut output.content[idx]
+                    {
+                        t.text.push_str(content);
                     } else {
                         output
                             .content
@@ -756,10 +757,10 @@ fn parse_sse_events(
                         .content
                         .iter()
                         .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
-                    if let Some(idx) = last_think_idx {
-                        if let ContentBlock::Thinking(t) = &mut output.content[idx] {
-                            t.thinking.push_str(reasoning);
-                        }
+                    if let Some(idx) = last_think_idx
+                        && let ContentBlock::Thinking(t) = &mut output.content[idx]
+                    {
+                        t.thinking.push_str(reasoning);
                     } else {
                         output
                             .content

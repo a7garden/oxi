@@ -2,15 +2,14 @@
 //!
 //! Run with: cargo run -p oxi-agent --example custom_tool
 
-use async_trait::async_trait;
 use oxi_agent::{AgentTool, AgentToolResult, ToolContext};
 use serde_json::{Value, json};
+use std::pin::Pin;
 use tokio::sync::oneshot;
 
 /// A simple custom tool that echoes back the input parameters.
 struct EchoTool;
 
-#[async_trait]
 impl AgentTool for EchoTool {
     fn name(&self) -> &str {
         "echo"
@@ -41,18 +40,20 @@ impl AgentTool for EchoTool {
         false
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, String> {
-        let msg = params
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("no message");
-        Ok(AgentToolResult::success(json!({"echo": msg}).to_string()))
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let msg = params
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("no message");
+            Ok(AgentToolResult::success(json!({"echo": msg}).to_string()))
+        })
     }
 }
 

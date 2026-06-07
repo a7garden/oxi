@@ -2,22 +2,24 @@
 
 use crate::error::ProviderError;
 use crate::{Context, Model, ProviderEvent, StreamOptions};
-use async_trait::async_trait;
 use futures::Stream;
+use std::future::Future;
 use std::pin::Pin;
+
+/// Stream result type alias
+pub type StreamResult = Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>;
 
 /// LLM provider trait
 ///
 /// Implement this trait to add support for new LLM providers.
-#[async_trait]
 pub trait Provider: Send + Sync + 'static {
     /// Stream assistant message events
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>>;
 
     /// Get the provider name
     fn name(&self) -> &str;

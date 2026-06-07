@@ -376,12 +376,11 @@ pub fn parse_google_events(
                                     .content
                                     .iter()
                                     .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
-                                if let Some(idx) = last_think_idx {
-                                    if let ContentBlock::Thinking(t) =
+                                if let Some(idx) = last_think_idx
+                                    && let ContentBlock::Thinking(t) =
                                         &mut partial_message.content[idx]
-                                    {
-                                        t.thinking.push_str(text);
-                                    }
+                                {
+                                    t.thinking.push_str(text);
                                 } else {
                                     partial_message.content.push(ContentBlock::Thinking(
                                         ThinkingContent::new(text.clone()),
@@ -398,11 +397,10 @@ pub fn parse_google_events(
                                     .content
                                     .iter()
                                     .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                                if let Some(idx) = last_text_idx {
-                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx]
-                                    {
-                                        t.text.push_str(text);
-                                    }
+                                if let Some(idx) = last_text_idx
+                                    && let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                                {
+                                    t.text.push_str(text);
                                 } else {
                                     partial_message
                                         .content

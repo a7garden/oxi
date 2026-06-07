@@ -14,8 +14,9 @@
 //!
 //! The system prompt body is everything after the closing `---`.
 
-use async_trait::async_trait;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use crate::SdkError;
 use crate::ports::{Persona, PersonaProvider};
@@ -40,14 +41,16 @@ impl FilePersonaProvider {
     }
 }
 
-#[async_trait]
 impl PersonaProvider for FilePersonaProvider {
-    async fn list(&self) -> Result<Vec<Persona>, SdkError> {
+    fn list(&self) -> Pin<Box<dyn Future<Output = Result<Vec<Persona>, SdkError>> + Send + '_>> {
         if !self.root.exists() {
-            return Ok(Vec::new());
+            return Box::pin(async { Ok(Vec::new()) });
         }
         let mut out = Vec::new();
-        let entries = std::fs::read_dir(&self.root).map_err(scan_err)?;
+        let entries = match std::fs::read_dir(&self.root) {
+            Ok(e) => e,
+            Err(e) => return Box::pin(async { Err(scan_err(e)) }),
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() {
@@ -62,16 +65,21 @@ impl PersonaProvider for FilePersonaProvider {
                 out.push(p);
             }
         }
-        Ok(out)
+        Box::pin(async { Ok(out) })
     }
 
-    async fn get(&self, name: &str) -> Result<Option<Persona>, SdkError> {
+    fn get(
+        &self,
+        name: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Persona>, SdkError>> + Send + '_>> {
         let path = self.root.join(format!("{name}.md"));
         if !path.exists() {
-            return Ok(None);
+            return Box::pin(async { Ok(None) });
         }
-        let p = parse_persona(name, &path)?;
-        Ok(Some(p))
+        match parse_persona(name, &path) {
+            Ok(p) => Box::pin(async { Ok(Some(p)) }),
+            Err(e) => Box::pin(async { Err(e) }),
+        }
     }
 }
 

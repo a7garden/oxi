@@ -1,13 +1,13 @@
 /// Integration tests for oxi-agent
 use crate::types::{ToolCall, ToolDefinition, ToolResult};
 use crate::{Agent, AgentConfig, AgentEvent, AgentState, ToolRegistry};
-use async_trait::async_trait;
 use futures::Stream;
 use oxi_ai::{
-    Api, ContentBlock, Context, Provider, ProviderEvent, StopReason, TextContent, ThinkingContent,
-    transform_for_provider,
+    Api, ContentBlock, Context, Provider, ProviderEvent, StopReason, StreamResult, TextContent,
+    ThinkingContent, transform_for_provider,
 };
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskContext, Poll};
@@ -32,31 +32,29 @@ impl MockProvider {
     }
 }
 
-#[async_trait]
 impl Provider for MockProvider {
-    async fn stream(
-        &self,
-        _model: &oxi_ai::Model,
-        _context: &Context,
+    fn stream<'a>(
+        &'a self,
+        _model: &'a oxi_ai::Model,
+        _context: &'a Context,
         _options: Option<oxi_ai::StreamOptions>,
-    ) -> std::result::Result<
-        std::pin::Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
-        oxi_ai::ProviderError,
-    > {
-        let mut call_count = self.call_count.lock().unwrap();
-        *call_count += 1;
-        let idx = (*call_count - 1) % self.responses.len();
-        let response = self.responses[idx].clone();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let mut call_count = self.call_count.lock().unwrap();
+            *call_count += 1;
+            let idx = (*call_count - 1) % self.responses.len();
+            let response = self.responses[idx].clone();
 
-        let stream = MockStream {
-            text: response.content,
-            done: false,
-        };
+            let stream = MockStream {
+                text: response.content,
+                done: false,
+            };
 
-        Ok(Box::pin(stream)
-            as Pin<
-                Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
-            >)
+            Ok(Box::pin(stream)
+                as Pin<
+                    Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
+                >)
+        })
     }
 
     fn name(&self) -> &str {
@@ -405,33 +403,31 @@ impl ApiAwareMockProvider {
     }
 }
 
-#[async_trait]
 impl Provider for ApiAwareMockProvider {
-    async fn stream(
-        &self,
-        model: &oxi_ai::Model,
-        _context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a oxi_ai::Model,
+        _context: &'a Context,
         _options: Option<oxi_ai::StreamOptions>,
-    ) -> std::result::Result<
-        std::pin::Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
-        oxi_ai::ProviderError,
-    > {
-        let mut call_count = self.call_count.lock().unwrap();
-        *call_count += 1;
-        let idx = (*call_count - 1) % self.responses.len();
-        let response = self.responses[idx].clone();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let mut call_count = self.call_count.lock().unwrap();
+            *call_count += 1;
+            let idx = (*call_count - 1) % self.responses.len();
+            let response = self.responses[idx].clone();
 
-        *self.last_api.lock().unwrap() = Some(model.api);
+            *self.last_api.lock().unwrap() = Some(model.api);
 
-        let stream = MockStream {
-            text: response.content,
-            done: false,
-        };
+            let stream = MockStream {
+                text: response.content,
+                done: false,
+            };
 
-        Ok(Box::pin(stream)
-            as Pin<
-                Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
-            >)
+            Ok(Box::pin(stream)
+                as Pin<
+                    Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
+                >)
+        })
     }
 
     fn name(&self) -> &str {
@@ -562,52 +558,51 @@ impl MultiTurnToolProvider {
     }
 }
 
-#[async_trait]
 impl Provider for MultiTurnToolProvider {
-    async fn stream(
-        &self,
-        _model: &oxi_ai::Model,
-        _context: &Context,
+    fn stream<'a>(
+        &'a self,
+        _model: &'a oxi_ai::Model,
+        _context: &'a Context,
         _options: Option<oxi_ai::StreamOptions>,
-    ) -> std::result::Result<
-        Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
-        oxi_ai::ProviderError,
-    > {
-        let mut call_count = self.call_count.lock().unwrap();
-        *call_count += 1;
-        let idx = (*call_count - 1).min(self.responses.len() - 1);
-        let response = self.responses[idx].clone();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let mut call_count = self.call_count.lock().unwrap();
+            *call_count += 1;
+            let idx = (*call_count - 1).min(self.responses.len() - 1);
+            let response = self.responses[idx].clone();
 
-        let mut assistant =
-            oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
+            let mut assistant =
+                oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
 
-        let mut content_blocks: Vec<ContentBlock> = Vec::new();
-        if let Some(text) = &response.text {
-            content_blocks.push(ContentBlock::Text(TextContent::new(text.clone())));
-        }
-        for tc in &response.tool_calls {
-            content_blocks.push(ContentBlock::ToolCall(tc.clone()));
-        }
-        assistant.content = content_blocks;
+            let mut content_blocks: Vec<ContentBlock> = Vec::new();
+            if let Some(text) = &response.text {
+                content_blocks.push(ContentBlock::Text(TextContent::new(text.clone())));
+            }
+            for tc in &response.tool_calls {
+                content_blocks.push(ContentBlock::ToolCall(tc.clone()));
+            }
+            assistant.content = content_blocks;
 
-        let stop_reason = if response.tool_calls.is_empty() {
-            StopReason::Stop
-        } else {
-            StopReason::ToolUse
-        };
-        assistant.stop_reason = stop_reason;
+            let stop_reason = if response.tool_calls.is_empty() {
+                StopReason::Stop
+            } else {
+                StopReason::ToolUse
+            };
+            assistant.stop_reason = stop_reason;
 
-        let events: Vec<ProviderEvent> = vec![
-            ProviderEvent::Start {
-                partial: std::sync::Arc::new(assistant.clone()),
-            },
-            ProviderEvent::Done {
-                reason: stop_reason,
-                message: assistant,
-            },
-        ];
+            let events: Vec<ProviderEvent> = vec![
+                ProviderEvent::Start {
+                    partial: std::sync::Arc::new(assistant.clone()),
+                },
+                ProviderEvent::Done {
+                    reason: stop_reason,
+                    message: assistant,
+                },
+            ];
 
-        Ok(Box::pin(futures::stream::iter(events)))
+            Ok(Box::pin(futures::stream::iter(events))
+                as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -615,10 +610,8 @@ impl Provider for MultiTurnToolProvider {
     }
 }
 
-/// A simple tool that echoes its arguments back.
 struct EchoTool;
 
-#[async_trait]
 impl crate::tools::AgentTool for EchoTool {
     fn name(&self) -> &str {
         "echo"
@@ -642,21 +635,29 @@ impl crate::tools::AgentTool for EchoTool {
         })
     }
 
-    async fn execute(
-        &self,
-        _tool_call_id: &str,
+    fn execute<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
         params: serde_json::Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        _ctx: &crate::tools::ToolContext,
-    ) -> std::result::Result<crate::tools::AgentToolResult, String> {
-        let msg = params
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("<no message>");
-        Ok(crate::tools::AgentToolResult::success(format!(
-            "Echo: {}",
-            msg
-        )))
+        _ctx: &'a crate::tools::ToolContext,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<crate::tools::AgentToolResult, String>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let msg = params
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<no message>");
+            Ok(crate::tools::AgentToolResult::success(format!(
+                "Echo: {}",
+                msg
+            )))
+        })
     }
 }
 
@@ -677,42 +678,40 @@ impl RetryableProvider {
     }
 }
 
-#[async_trait]
 impl Provider for RetryableProvider {
-    async fn stream(
-        &self,
-        _model: &oxi_ai::Model,
-        _context: &Context,
+    fn stream<'a>(
+        &'a self,
+        _model: &'a oxi_ai::Model,
+        _context: &'a Context,
         _options: Option<oxi_ai::StreamOptions>,
-    ) -> std::result::Result<
-        Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
-        oxi_ai::ProviderError,
-    > {
-        let mut call_count = self.call_count.lock().unwrap();
-        *call_count += 1;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let mut call_count = self.call_count.lock().unwrap();
+            *call_count += 1;
 
-        if *call_count <= self.fail_count {
-            return Err(oxi_ai::ProviderError::HttpError(
-                429,
-                "rate limited".to_string(),
-            ));
-        }
+            if *call_count <= self.fail_count {
+                return Err(oxi_ai::ProviderError::HttpError(
+                    429,
+                    "rate limited".to_string(),
+                ));
+            }
 
-        let mut assistant =
-            oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
-        assistant.content = vec![ContentBlock::Text(TextContent::new(
-            self.success_response.clone(),
-        ))];
+            let mut assistant =
+                oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
+            assistant.content = vec![ContentBlock::Text(TextContent::new(
+                self.success_response.clone(),
+            ))];
 
-        let stream = MockStream {
-            text: self.success_response.clone(),
-            done: false,
-        };
+            let stream = MockStream {
+                text: self.success_response.clone(),
+                done: false,
+            };
 
-        Ok(Box::pin(stream)
-            as Pin<
-                Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
-            >)
+            Ok(Box::pin(stream)
+                as Pin<
+                    Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
+                >)
+        })
     }
 
     fn name(&self) -> &str {
@@ -723,20 +722,18 @@ impl Provider for RetryableProvider {
 /// Provider that always returns a provider-level error (non-retryable).
 struct AlwaysErrorProvider;
 
-#[async_trait]
 impl Provider for AlwaysErrorProvider {
-    async fn stream(
-        &self,
-        _model: &oxi_ai::Model,
-        _context: &Context,
+    fn stream<'a>(
+        &'a self,
+        _model: &'a oxi_ai::Model,
+        _context: &'a Context,
         _options: Option<oxi_ai::StreamOptions>,
-    ) -> std::result::Result<
-        Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
-        oxi_ai::ProviderError,
-    > {
-        Err(oxi_ai::ProviderError::StreamError(
-            "permanent error".to_string(),
-        ))
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            Err(oxi_ai::ProviderError::StreamError(
+                "permanent error".to_string(),
+            ))
+        })
     }
 
     fn name(&self) -> &str {

@@ -52,14 +52,14 @@ pub use openai::normalize_messages;
 pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]
 pub use options::{ProviderOptions, StreamOptions, ThinkingBudgets};
-pub use trait_def::Provider;
+pub use trait_def::{Provider, StreamResult};
 #[allow(unused_imports)]
 pub use vertex::VertexProvider;
 
-use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 /// Shared client singleton.
 pub fn shared_client() -> &'static reqwest::Client {
@@ -208,8 +208,8 @@ impl ProviderRegistry {
 ///
 /// Custom providers registered via [`register_provider`] are stored here
 /// and take priority over built-in providers in [`get_provider`].
-static CUSTOM_PROVIDERS: Lazy<RwLock<HashMap<String, Arc<dyn Provider>>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
+static CUSTOM_PROVIDERS: LazyLock<RwLock<HashMap<String, Arc<dyn Provider>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Register a custom provider at runtime (global registry).
 ///
@@ -262,15 +262,14 @@ pub fn get_provider_arc(name: &str) -> Option<Arc<dyn Provider>> {
 /// Wrapper that lets us return a cloned `Arc<dyn Provider>` as `Box<dyn Provider>`.
 struct ArcedProvider(Arc<dyn Provider>);
 
-#[async_trait::async_trait]
 impl Provider for ArcedProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        self.0.stream(model, context, options).await
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move { self.0.stream(model, context, options).await })
     }
 
     fn name(&self) -> &str {

@@ -843,13 +843,13 @@ impl ProxyEventStripper {
                 partial,
             } => {
                 self.content_index = *content_index;
-                if let Some(block) = partial.content.get(*content_index) {
-                    if let ContentBlock::ToolCall(tc) = block {
-                        self.content_type = ContentType::ToolCall {
-                            id: tc.id.clone(),
-                            name: tc.name.clone(),
-                        };
-                    }
+                if let Some(block) = partial.content.get(*content_index)
+                    && let ContentBlock::ToolCall(tc) = block
+                {
+                    self.content_type = ContentType::ToolCall {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                    };
                 }
                 self.in_content = true;
 

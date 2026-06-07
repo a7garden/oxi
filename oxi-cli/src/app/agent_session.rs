@@ -1142,12 +1142,11 @@ impl std::ops::Deref for AgentSessionHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use futures::Stream;
     use oxi_agent::AgentConfig;
     use oxi_sdk::{Model, Provider, ProviderError, ProviderEvent};
+    use std::future::Future;
     use std::pin::Pin;
-
     use std::task::{Context as TaskContext, Poll};
 
     // ── Mock Provider ─────────────────────────────────────────────────
@@ -1164,15 +1163,28 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl Provider for MockProvider {
-        async fn stream(
-            &self,
-            _model: &Model,
-            _context: &oxi_sdk::Context,
+        fn stream<'a>(
+            &'a self,
+            _model: &'a Model,
+            _context: &'a oxi_sdk::Context,
             _options: Option<oxi_sdk::StreamOptions>,
-        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-            Ok(Box::pin(EmptyStream))
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<
+                            Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>,
+                            ProviderError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                Ok::<_, ProviderError>(
+                    Box::pin(EmptyStream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>
+                )
+            })
         }
 
         fn name(&self) -> &str {

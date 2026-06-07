@@ -5,6 +5,8 @@
 //! `#[cfg(feature = "native-browser")]`.
 
 use super::config::BrowseConfig;
+use std::future::Future;
+use std::pin::Pin;
 
 /// Extract the `tab_id` from any `BrowserEvent` variant.
 fn extract_event_tab_id(event: &oxibrowser_core::BrowserEvent) -> uuid::Uuid {
@@ -69,7 +71,6 @@ fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<B
 use super::engine::{
     BrowseProgress, BrowserError, BrowserTab as BrowserTabTrait, PageContent, TabCallbackRegistry,
 };
-use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -161,7 +162,7 @@ impl OxiBrowserEngine {
 }
 
 impl Default for OxiBrowserEngine {
-    fn default() -> Self {
+    fn default<'a>() -> Self {
         // Default cannot be async, so use blocking runtime.
         // Prefer `OxiBrowserEngine::new().await` in async contexts.
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
@@ -170,43 +171,49 @@ impl Default for OxiBrowserEngine {
     }
 }
 
-#[async_trait]
 impl super::engine::BrowserEngine for OxiBrowserEngine {
-    async fn new_tab(&self) -> Result<Box<dyn BrowserTabTrait>, BrowserError> {
-        let tab = self
-            .browser
-            .new_tab()
-            .await
-            .map_err(|e| BrowserError::Backend(format!("Failed to create tab: {}", e)))?;
-        let tab_id = tab.tab_id();
-        Ok(Box::new(OxiTab {
-            inner: tab,
-            config: self.config.clone(),
-            tab_id,
-            registry: Arc::clone(&self.progress),
-        }))
+    fn new_tab<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn BrowserTabTrait>, BrowserError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let tab = self
+                .browser
+                .new_tab()
+                .await
+                .map_err(|e| BrowserError::Backend(format!("Failed to create tab: {}", e)))?;
+            let tab_id = tab.tab_id();
+            Ok(Box::new(OxiTab {
+                inner: tab,
+                config: self.config.clone(),
+                tab_id,
+                registry: Arc::clone(&self.progress),
+            }))
+        })
     }
 
-    async fn close(&self) -> Result<(), BrowserError> {
-        // Close the browser first. After this returns, the browser's internal
-        // event_tx is dropped — but the broadcast channel itself stays alive
-        // because the spawned event task holds its own sender clone. We need
-        // to cancel the task explicitly to make `close()` mean "fully shut
-        // down". The task will then exit with no further events forwarded.
-        self.browser
-            .close()
-            .await
-            .map_err(|e| BrowserError::Backend(format!("Browser close failed: {}", e)))?;
+    fn close<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            // Close the browser first. After this returns, the browser's internal
+            // event_tx is dropped — but the broadcast channel itself stays alive
+            // because the spawned event task holds its own sender clone. We need
+            // to cancel the task explicitly to make `close()` mean "fully shut
+            // down". The task will then exit with no further events forwarded.
+            self.browser
+                .close()
+                .await
+                .map_err(|e| BrowserError::Backend(format!("Browser close failed: {}", e)))?;
 
-        if let Some(handle) = self.event_task.lock().await.take() {
-            handle.abort();
-            let _ = handle.await; // ignore JoinError from abort
-        }
-        Ok(())
+            if let Some(handle) = self.event_task.lock().await.take() {
+                handle.abort();
+                let _ = handle.await; // ignore JoinError from abort
+            }
+            Ok(())
+        })
     }
 
-    async fn is_alive(&self) -> bool {
-        self.browser.is_open()
+    fn is_alive<'a>(&'a self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move { self.browser.is_open() })
     }
 
     fn callback_registry(&self) -> Arc<TabCallbackRegistry> {
@@ -244,216 +251,350 @@ impl OxiTab {
     }
 
     /// Return this tab's stable ID.
-    pub fn tab_id(&self) -> uuid::Uuid {
+    pub fn tab_id(&'a self) -> uuid::Uuid {
         self.tab_id
     }
 }
 
-#[async_trait]
 impl BrowserTabTrait for OxiTab {
-    async fn goto(&self, url: &str) -> Result<PageContent, BrowserError> {
-        let page = self
-            .inner
-            .goto(url)
-            .await
-            .map_err(|e| BrowserError::Navigation(e.to_string()))?;
-        Ok(browse_result_to_page_content(page))
+    fn goto<'a>(
+        &'a self,
+        url: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            let page = self
+                .inner
+                .goto(url)
+                .await
+                .map_err(|e| BrowserError::Navigation(e.to_string()))?;
+            Ok(browse_result_to_page_content(page))
+        })
     }
 
-    async fn click(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .click(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn click<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .click(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn type_(&self, selector: &str, text: &str) -> Result<(), BrowserError> {
-        self.inner
-            .r#type(selector, text)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn type_<'a>(
+        &'a self,
+        selector: &str,
+        text: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .r#type(selector, text)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn fill(&self, selector: &str, value: &str) -> Result<(), BrowserError> {
-        self.inner
-            .fill(selector, value)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn fill<'a>(
+        &'a self,
+        selector: &str,
+        value: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .fill(selector, value)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn press(&self, combo: &str) -> Result<(), BrowserError> {
-        self.inner
-            .press(combo)
-            .await
-            .map_err(|e| BrowserError::Evaluation(e.to_string()))
+    fn press<'a>(
+        &'a self,
+        combo: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .press(combo)
+                .await
+                .map_err(|e| BrowserError::Evaluation(e.to_string()))
+        })
     }
 
-    async fn wait_for(&self, selector: &str, timeout_ms: u64) -> Result<(), BrowserError> {
-        self.inner
-            .wait_for(selector, timeout_ms)
-            .await
-            .map_err(|e| BrowserError::Timeout(e.to_string()))
+    fn wait_for<'a>(
+        &'a self,
+        selector: &str,
+        timeout_ms: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .wait_for(selector, timeout_ms)
+                .await
+                .map_err(|e| BrowserError::Timeout(e.to_string()))
+        })
     }
 
-    async fn content(&self) -> Result<PageContent, BrowserError> {
-        let page = self
-            .inner
-            .content()
-            .await
-            .map_err(|e| BrowserError::Backend(e.to_string()))?;
-        Ok(browse_result_to_page_content(page))
+    fn content<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            let page = self
+                .inner
+                .content()
+                .await
+                .map_err(|e| BrowserError::Backend(e.to_string()))?;
+            Ok(browse_result_to_page_content(page))
+        })
     }
 
-    async fn query_all(&self, selector: &str) -> Result<Vec<String>, BrowserError> {
-        self.inner
-            .query_all(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn query_all<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .query_all(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn evaluate(&self, js: &str) -> Result<Value, BrowserError> {
-        self.inner
-            .evaluate(js)
-            .await
-            .map_err(|e| BrowserError::Evaluation(e.to_string()))
+    fn evaluate<'a>(
+        &'a self,
+        js: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .evaluate(js)
+                .await
+                .map_err(|e| BrowserError::Evaluation(e.to_string()))
+        })
     }
 
-    async fn screenshot(&self, width: u32) -> Result<Vec<u8>, BrowserError> {
-        self.inner
-            .screenshot(width)
-            .await
-            .map_err(|e| BrowserError::Screenshot(e.to_string()))
+    fn screenshot<'a>(
+        &'a self,
+        width: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .screenshot(width)
+                .await
+                .map_err(|e| BrowserError::Screenshot(e.to_string()))
+        })
     }
 
-    async fn close(&self) -> Result<(), BrowserError> {
-        self.inner
-            .close()
-            .await
-            .map_err(|e| BrowserError::TabClosed(e.to_string()))
+    fn close<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .close()
+                .await
+                .map_err(|e| BrowserError::TabClosed(e.to_string()))
+        })
     }
 
     // ── Navigation — oxibrowser native history management ──────────────
 
-    async fn back(&self) -> Result<PageContent, BrowserError> {
-        let page = self
-            .inner
-            .back()
-            .await
-            .map_err(|e| BrowserError::Navigation(e.to_string()))?;
-        Ok(browse_result_to_page_content(page))
+    fn back<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            let page = self
+                .inner
+                .back()
+                .await
+                .map_err(|e| BrowserError::Navigation(e.to_string()))?;
+            Ok(browse_result_to_page_content(page))
+        })
     }
 
-    async fn forward(&self) -> Result<PageContent, BrowserError> {
-        let page = self
-            .inner
-            .forward()
-            .await
-            .map_err(|e| BrowserError::Navigation(e.to_string()))?;
-        Ok(browse_result_to_page_content(page))
+    fn forward<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            let page = self
+                .inner
+                .forward()
+                .await
+                .map_err(|e| BrowserError::Navigation(e.to_string()))?;
+            Ok(browse_result_to_page_content(page))
+        })
     }
 
-    async fn reload(&self) -> Result<PageContent, BrowserError> {
-        let page = self
-            .inner
-            .reload()
-            .await
-            .map_err(|e| BrowserError::Navigation(e.to_string()))?;
-        Ok(browse_result_to_page_content(page))
+    fn reload<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            let page = self
+                .inner
+                .reload()
+                .await
+                .map_err(|e| BrowserError::Navigation(e.to_string()))?;
+            Ok(browse_result_to_page_content(page))
+        })
     }
 
     // ── Form interaction — oxibrowser native implementations ──────────
 
-    async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError> {
-        self.inner
-            .select_option(selector, value)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn select_option<'a>(
+        &'a self,
+        selector: &str,
+        value: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .select_option(selector, value)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn check(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .check(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn check<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .check(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn uncheck(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .uncheck(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn uncheck<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .uncheck(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
     // ── Advanced interaction — oxibrowser native ──────────────────────
 
-    async fn clear(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .clear_input(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn clear<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .clear_input(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn hover(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .hover(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn hover<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .hover(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn double_click(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .double_click(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn double_click<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .double_click(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn right_click(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .right_click(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn right_click<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .right_click(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn scroll(&self, delta_x: f64, delta_y: f64) -> Result<(), BrowserError> {
-        self.inner
-            .scroll(delta_x, delta_y)
-            .await
-            .map_err(|e| BrowserError::Evaluation(e.to_string()))
+    fn scroll<'a>(
+        &'a self,
+        delta_x: f64,
+        delta_y: f64,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .scroll(delta_x, delta_y)
+                .await
+                .map_err(|e| BrowserError::Evaluation(e.to_string()))
+        })
     }
 
-    async fn scroll_into_view(&self, selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .scroll_into_view(selector, true)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn scroll_into_view<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .scroll_into_view(selector, true)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn drag(&self, from_selector: &str, to_selector: &str) -> Result<(), BrowserError> {
-        self.inner
-            .drag(from_selector, to_selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn drag<'a>(
+        &'a self,
+        from_selector: &str,
+        to_selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .drag(from_selector, to_selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn upload_file(&self, selector: &str, path: &str) -> Result<(), BrowserError> {
-        self.inner
-            .upload_file(selector, path)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn upload_file<'a>(
+        &'a self,
+        selector: &str,
+        path: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .upload_file(selector, path)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn get_value(&self, selector: &str) -> Result<String, BrowserError> {
-        self.inner
-            .get_value(selector)
-            .await
-            .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+    fn get_value<'a>(
+        &'a self,
+        selector: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<String, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .get_value(selector)
+                .await
+                .map_err(|e| BrowserError::ElementNotFound(e.to_string()))
+        })
     }
 
-    async fn evaluate_await(&self, js: &str) -> Result<Value, BrowserError> {
-        self.inner
-            .evaluate_await(js)
-            .await
-            .map_err(|e| BrowserError::Evaluation(e.to_string()))
+    fn evaluate_await(
+        &self,
+        js: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, BrowserError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inner
+                .evaluate_await(js)
+                .await
+                .map_err(|e| BrowserError::Evaluation(e.to_string()))
+        })
     }
 
     fn is_closed(&self) -> bool {

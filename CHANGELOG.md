@@ -5,6 +5,27 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-06-07
+
+### Changed — Rust 2024 edition modernization
+
+- **`async-trait` crate removed**: All 104 `#[async_trait]` annotations across
+  59 files replaced with native `async fn` in trait (stable since Rust 1.75).
+  Trait methods now return `Pin<Box<dyn Future + Send>>` explicitly, eliminating
+  macro expansion overhead and improving debuggability.
+- **`once_cell::sync::Lazy` → `std::sync::LazyLock`**: All 4 uses in `oxi-ai`
+  replaced with the standard library equivalent (stable since Rust 1.80).
+- **Rust 2024 let chains**: 16 nested `if let` patterns flattened to
+  `if let A && let B` syntax across the workspace.
+- **oxibrowser upgraded** from 0.14.1 to **0.15.0** (edition 2024 update).
+
+### Removed dependencies
+
+- `async-trait` — from all 4 crates (oxi-ai, oxi-agent, oxi-sdk, oxi-cli)
+- `once_cell` — from oxi-ai (replaced by `std::sync::LazyLock`)
+- `lazy_static` — from oxi-cli (unused)
+- `tokio-test` — from oxi-ai, oxi-agent (unused)
+
 ## [Unreleased]
 
 ### Changed — Edition upgrade (2024 edition)

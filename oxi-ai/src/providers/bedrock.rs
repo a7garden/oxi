@@ -3,20 +3,20 @@
 //! This provider uses AWS SigV4 authentication with the Bedrock ConverseStream API.
 //! Supports Claude, Mistral, and other Bedrock models.
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
-    StreamOptions, Usage, error::ProviderError,
+    StreamOptions, StreamResult, Usage, error::ProviderError,
 };
 
 use super::shared_client;
@@ -373,116 +373,122 @@ fn urlencoding_encode(s: &str) -> String {
     result
 }
 
-#[async_trait]
 impl Provider for BedrockProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
 
-        // Get credentials
-        let (access_key, secret_key, region) = self.get_credentials()?;
-        let session_token = self.get_session_token();
+            // Get credentials
+            let (access_key, secret_key, region) = self.get_credentials()?;
+            let session_token = self.get_session_token();
 
-        // Get endpoint
-        let url = self.get_endpoint(model, &region);
+            // Get endpoint
+            let url = self.get_endpoint(model, &region);
 
-        // Build messages
-        let messages = build_bedrock_messages(context)?;
+            // Build messages
+            let messages = build_bedrock_messages(context)?;
 
-        // Build request body
-        let mut body = serde_json::json!({
-            "messages": messages,
-        });
+            // Build request body
+            let mut body = serde_json::json!({
+                "messages": messages,
+            });
 
-        // Add system prompt
-        if let Some(ref prompt) = context.system_prompt {
-            body["system"] = serde_json::json!([{
-                "text": prompt,
-            }]);
-        }
+            // Add system prompt
+            if let Some(ref prompt) = context.system_prompt {
+                body["system"] = serde_json::json!([{
+                    "text": prompt,
+                }]);
+            }
 
-        // Add inference config
-        let mut inference_config = serde_json::json!({});
-        if let Some(temp) = options.temperature {
-            inference_config["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(max) = options.max_tokens {
-            inference_config["maxTokens"] = serde_json::json!(max);
-        }
-        body["inferenceConfig"] = inference_config;
+            // Add inference config
+            let mut inference_config = serde_json::json!({});
+            if let Some(temp) = options.temperature {
+                inference_config["temperature"] = serde_json::json!(temp);
+            }
+            if let Some(max) = options.max_tokens {
+                inference_config["maxTokens"] = serde_json::json!(max);
+            }
+            body["inferenceConfig"] = inference_config;
 
-        // Add tool config if tools are present
-        if !context.tools.is_empty() {
-            body["toolConfig"] = build_bedrock_tool_config(&context.tools)?;
-        }
+            // Add tool config if tools are present
+            if !context.tools.is_empty() {
+                body["toolConfig"] = build_bedrock_tool_config(&context.tools)?;
+            }
 
-        let body_bytes = serde_json::to_vec(&body)?;
+            let body_bytes = serde_json::to_vec(&body)?;
 
-        // Build headers
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            "application/json".parse().expect("valid header value"),
-        );
-
-        // Add session token if present (for temporary credentials)
-        if let Some(token) = session_token {
+            // Build headers
+            let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
-                "x-amz-security-token",
-                token.parse().expect("valid header value"),
+                reqwest::header::CONTENT_TYPE,
+                "application/json".parse().expect("valid header value"),
             );
-        }
 
-        // Sign the request
-        self.sign_request(
-            "POST",
-            &url,
-            &mut headers,
-            &body_bytes,
-            &access_key,
-            &secret_key,
-            &region,
-            "bedrock",
-        )?;
+            // Add session token if present (for temporary credentials)
+            if let Some(token) = session_token {
+                headers.insert(
+                    "x-amz-security-token",
+                    token.parse().expect("valid header value"),
+                );
+            }
 
-        // Make request
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .body(body_bytes)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
+            // Sign the request
+            self.sign_request(
+                "POST",
+                &url,
+                &mut headers,
+                &body_bytes,
+                &access_key,
+                &secret_key,
+                &region,
+                "bedrock",
+            )?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
+            // Make request
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .body(body_bytes)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
 
-        // Create event stream
-        let provider_name = "bedrock".to_string();
-        let model_id = model.id.clone();
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
 
-        let stream = response.bytes_stream().flat_map(
-            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    futures::stream::iter(parse_bedrock_events(&text, &provider_name, &model_id))
-                }
-                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                    reason: StopReason::Error,
-                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                }]),
-            },
-        );
+            // Create event stream
+            let provider_name = "bedrock".to_string();
+            let model_id = model.id.clone();
 
-        Ok(Box::pin(stream))
+            let stream =
+                response
+                    .bytes_stream()
+                    .flat_map(move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                        Ok(bytes) => {
+                            let text = String::from_utf8_lossy(&bytes).to_string();
+                            futures::stream::iter(parse_bedrock_events(
+                                &text,
+                                &provider_name,
+                                &model_id,
+                            ))
+                        }
+                        Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                        }]),
+                    });
+
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -687,11 +693,10 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                     .content
                                     .iter()
                                     .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                                if let Some(idx) = last_text_idx {
-                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx]
-                                    {
-                                        t.text.push_str(text);
-                                    }
+                                if let Some(idx) = last_text_idx
+                                    && let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                                {
+                                    t.text.push_str(text);
                                 } else {
                                     partial_message.content.push(ContentBlock::Text(
                                         crate::TextContent::new(text.clone()),
@@ -731,12 +736,11 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                     .content
                                     .iter()
                                     .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
-                                if let Some(idx) = last_think_idx {
-                                    if let ContentBlock::Thinking(t) =
+                                if let Some(idx) = last_think_idx
+                                    && let ContentBlock::Thinking(t) =
                                         &mut partial_message.content[idx]
-                                    {
-                                        t.thinking.push_str(thinking);
-                                    }
+                                {
+                                    t.thinking.push_str(thinking);
                                 } else {
                                     partial_message.content.push(ContentBlock::Thinking(
                                         crate::ThinkingContent::new(thinking.clone()),

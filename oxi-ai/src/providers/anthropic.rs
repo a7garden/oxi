@@ -1,10 +1,10 @@
 //! Anthropic provider implementation
 
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -13,7 +13,8 @@ use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
-    StreamOptions, TextContent, ThinkingContent, ToolCall, Usage, error::ProviderError,
+    StreamOptions, StreamResult, TextContent, ThinkingContent, ToolCall, Usage,
+    error::ProviderError,
 };
 
 /// Anthropic provider
@@ -128,367 +129,368 @@ impl Default for AnthropicProvider {
     }
 }
 
-#[async_trait]
 impl Provider for AnthropicProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
 
-        // Build the request – use provider base_url override, fall back to model.base_url
-        let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
-        let url = format!("{}/v1/messages", effective_base_url);
+            // Build the request – use provider base_url override, fall back to model.base_url
+            let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
+            let url = format!("{}/v1/messages", effective_base_url);
 
-        // Get API key
-        let api_key = options
-            .api_key
-            .as_ref()
-            .or(self.api_key.as_ref())
-            .ok_or_else(|| ProviderError::MissingApiKey)?;
-
-        // Build messages (apply provider-specific normalization for
-        // Anthropic: filter empty content, reorder tool_use blocks)
-        let normalized = crate::providers::openai::normalize_messages(
-            &context.messages,
-            &model.provider,
-            &model.id,
-        );
-        let messages =
-            build_anthropic_messages_from_normalized(&context.system_prompt, &normalized)?;
-
-        // Build request body
-        let mut body = serde_json::json!({
-            "model": model.id,
-            "messages": messages,
-            "stream": true,
-        });
-
-        // Add system prompt
-        if let Some(ref prompt) = context.system_prompt {
-            body["system"] = serde_json::json!(prompt);
-        }
-
-        // Add optional parameters
-        // Temperature is incompatible with extended thinking (adaptive or
-        // budget-based). Only send when thinking is not active.
-        // Matches pi: `if (options?.temperature !== undefined && !options?.thinkingEnabled)`
-        let thinking_active = body.get("thinking").is_some();
-        if let Some(temp) = options.temperature
-            && !thinking_active
-        {
-            body["temperature"] = serde_json::json!(temp);
-        }
-
-        if let Some(max) = options.max_tokens {
-            body["max_tokens"] = serde_json::json!(max);
-        }
-
-        // Add tools if present
-        if !context.tools.is_empty() {
-            body["tools"] = build_anthropic_tools(&context.tools)?;
-        }
-
-        // ── Thinking / Extended Reasoning ──────────────────────────────
-        // Supports two modes via provider_options.anthropic:
-        //   1. "enabled" with explicit budget_tokens (from thinking_level or custom)
-        //   2. "adaptive" with effort level (Anthropic dynamically allocates budget)
-        //
-        // Falls back to thinking_level-based budget when provider_options is absent.
-        //
-        // IMPORTANT: Only send the `thinking` parameter when connected to the
-        // native Anthropic API (`self.native == true`). Third-party compatible
-        // providers (MiniMax, etc.) may generate thinking content natively but
-        // don't support the explicit `thinking` request parameter — sending it
-        // can cause incomplete responses or prevent tool calls.
-        if model.reasoning && self.native {
-            // Check provider_options first for fine-grained control
-            let anthropic_opts = options
-                .provider_options
+            // Get API key
+            let api_key = options
+                .api_key
                 .as_ref()
-                .and_then(|po| po.anthropic.as_ref());
+                .or(self.api_key.as_ref())
+                .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-            if let Some(opts) = anthropic_opts {
-                // Provider-level override
-                match opts.thinking_type.as_deref() {
-                    Some("adaptive") => {
-                        // Adaptive thinking — Anthropic chooses budget
+            // Build messages (apply provider-specific normalization for
+            // Anthropic: filter empty content, reorder tool_use blocks)
+            let normalized = crate::providers::openai::normalize_messages(
+                &context.messages,
+                &model.provider,
+                &model.id,
+            );
+            let messages =
+                build_anthropic_messages_from_normalized(&context.system_prompt, &normalized)?;
+
+            // Build request body
+            let mut body = serde_json::json!({
+                "model": model.id,
+                "messages": messages,
+                "stream": true,
+            });
+
+            // Add system prompt
+            if let Some(ref prompt) = context.system_prompt {
+                body["system"] = serde_json::json!(prompt);
+            }
+
+            // Add optional parameters
+            // Temperature is incompatible with extended thinking (adaptive or
+            // budget-based). Only send when thinking is not active.
+            // Matches pi: `if (options?.temperature !== undefined && !options?.thinkingEnabled)`
+            let thinking_active = body.get("thinking").is_some();
+            if let Some(temp) = options.temperature
+                && !thinking_active
+            {
+                body["temperature"] = serde_json::json!(temp);
+            }
+
+            if let Some(max) = options.max_tokens {
+                body["max_tokens"] = serde_json::json!(max);
+            }
+
+            // Add tools if present
+            if !context.tools.is_empty() {
+                body["tools"] = build_anthropic_tools(&context.tools)?;
+            }
+
+            // ── Thinking / Extended Reasoning ──────────────────────────────
+            // Supports two modes via provider_options.anthropic:
+            //   1. "enabled" with explicit budget_tokens (from thinking_level or custom)
+            //   2. "adaptive" with effort level (Anthropic dynamically allocates budget)
+            //
+            // Falls back to thinking_level-based budget when provider_options is absent.
+            //
+            // IMPORTANT: Only send the `thinking` parameter when connected to the
+            // native Anthropic API (`self.native == true`). Third-party compatible
+            // providers (MiniMax, etc.) may generate thinking content natively but
+            // don't support the explicit `thinking` request parameter — sending it
+            // can cause incomplete responses or prevent tool calls.
+            if model.reasoning && self.native {
+                // Check provider_options first for fine-grained control
+                let anthropic_opts = options
+                    .provider_options
+                    .as_ref()
+                    .and_then(|po| po.anthropic.as_ref());
+
+                if let Some(opts) = anthropic_opts {
+                    // Provider-level override
+                    match opts.thinking_type.as_deref() {
+                        Some("adaptive") => {
+                            // Adaptive thinking — Anthropic chooses budget
+                            body["thinking"] = serde_json::json!({
+                                "type": "adaptive",
+                            });
+                            if let Some(ref effort) = opts.effort {
+                                // effort is not a body param but could influence
+                                // max_tokens allocation
+                                let budget = match effort.as_str() {
+                                    "max" => model.max_tokens.min(31999),
+                                    "xhigh" => (model.max_tokens * 4 / 5).min(31999),
+                                    "high" => (model.max_tokens / 2).min(31999),
+                                    "medium" => (model.max_tokens / 4).min(16000),
+                                    "low" => (model.max_tokens / 8).min(8000),
+                                    _ => (model.max_tokens / 4).min(16000),
+                                };
+                                if body.get("max_tokens").is_none() {
+                                    body["max_tokens"] =
+                                        serde_json::json!((budget + 1024).min(model.max_tokens));
+                                }
+                            }
+                        }
+                        Some("enabled") => {
+                            // Explicit budget from provider_options or thinking_level
+                            let budget = opts.thinking_budget.unwrap_or_else(|| {
+                                compute_thinking_budget(&options.thinking_level, model.max_tokens)
+                            });
+                            if budget > 0 {
+                                if body.get("max_tokens").is_none() {
+                                    body["max_tokens"] =
+                                        serde_json::json!((budget + 1024).min(model.max_tokens));
+                                }
+                                body["thinking"] = serde_json::json!({
+                                    "type": "enabled",
+                                    "budget_tokens": budget,
+                                });
+                            }
+                        }
+                        _ => {
+                            // No explicit thinking_type — use thinking_level fallback
+                            let budget =
+                                compute_thinking_budget(&options.thinking_level, model.max_tokens);
+                            if budget > 0 {
+                                if body.get("max_tokens").is_none() {
+                                    body["max_tokens"] =
+                                        serde_json::json!((budget + 1024).min(model.max_tokens));
+                                }
+                                body["thinking"] = serde_json::json!({
+                                    "type": "enabled",
+                                    "budget_tokens": budget,
+                                });
+                            }
+                        }
+                    }
+                } else if let Some(ref level) = options.thinking_level {
+                    // No provider_options — use thinking_level directly
+                    let budget = compute_thinking_budget(&Some(*level), model.max_tokens);
+                    if budget > 0 {
+                        if body.get("max_tokens").is_none() {
+                            body["max_tokens"] =
+                                serde_json::json!((budget + 1024).min(model.max_tokens));
+                        }
                         body["thinking"] = serde_json::json!({
-                            "type": "adaptive",
+                            "type": "enabled",
+                            "budget_tokens": budget,
                         });
-                        if let Some(ref effort) = opts.effort {
-                            // effort is not a body param but could influence
-                            // max_tokens allocation
-                            let budget = match effort.as_str() {
-                                "max" => model.max_tokens.min(31999),
-                                "xhigh" => (model.max_tokens * 4 / 5).min(31999),
-                                "high" => (model.max_tokens / 2).min(31999),
-                                "medium" => (model.max_tokens / 4).min(16000),
-                                "low" => (model.max_tokens / 8).min(8000),
-                                _ => (model.max_tokens / 4).min(16000),
-                            };
-                            if body.get("max_tokens").is_none() {
-                                body["max_tokens"] =
-                                    serde_json::json!((budget + 1024).min(model.max_tokens));
-                            }
-                        }
-                    }
-                    Some("enabled") => {
-                        // Explicit budget from provider_options or thinking_level
-                        let budget = opts.thinking_budget.unwrap_or_else(|| {
-                            compute_thinking_budget(&options.thinking_level, model.max_tokens)
-                        });
-                        if budget > 0 {
-                            if body.get("max_tokens").is_none() {
-                                body["max_tokens"] =
-                                    serde_json::json!((budget + 1024).min(model.max_tokens));
-                            }
-                            body["thinking"] = serde_json::json!({
-                                "type": "enabled",
-                                "budget_tokens": budget,
-                            });
-                        }
-                    }
-                    _ => {
-                        // No explicit thinking_type — use thinking_level fallback
-                        let budget =
-                            compute_thinking_budget(&options.thinking_level, model.max_tokens);
-                        if budget > 0 {
-                            if body.get("max_tokens").is_none() {
-                                body["max_tokens"] =
-                                    serde_json::json!((budget + 1024).min(model.max_tokens));
-                            }
-                            body["thinking"] = serde_json::json!({
-                                "type": "enabled",
-                                "budget_tokens": budget,
-                            });
-                        }
                     }
                 }
-            } else if let Some(ref level) = options.thinking_level {
-                // No provider_options — use thinking_level directly
-                let budget = compute_thinking_budget(&Some(*level), model.max_tokens);
-                if budget > 0 {
-                    if body.get("max_tokens").is_none() {
-                        body["max_tokens"] =
-                            serde_json::json!((budget + 1024).min(model.max_tokens));
-                    }
-                    body["thinking"] = serde_json::json!({
-                        "type": "enabled",
-                        "budget_tokens": budget,
-                    });
-                }
-            }
-        }
-
-        // Ensure max_tokens is always set (Anthropic requires it)
-        // For reasoning models, ensure max_tokens is large enough for
-        // the model to think AND respond. opencode uses OUTPUT_TOKEN_MAX = 32_000
-        // for MiniMax and other reasoning models.
-        //
-        // When the caller sets a small max_tokens (e.g., 4096 default),
-        // reasoning models like MiniMax may think for thousands of tokens
-        // and then stop before generating tool calls because they calculate
-        // they won't have enough room. Bumping to a minimum of 16_384 for
-        // reasoning models ensures the model has space to think + call tools.
-        if model.reasoning
-            && let Some(current) = body.get("max_tokens").and_then(|v| v.as_u64())
-            && current < 16_384
-        {
-            body["max_tokens"] = serde_json::json!(model.max_tokens.min(32_768));
-        }
-        if body.get("max_tokens").is_none() {
-            body["max_tokens"] = serde_json::json!(model.max_tokens.min(16384));
-        }
-
-        // ── Cache Control ─────────────────────────────────────────────
-        // When cache_retention is set, add cache_control breakpoints to
-        // the system prompt and last few messages.
-        //
-        // Anthropic allows at most 4 cache_control breakpoints per request.
-        // We use a counter to enforce this limit, allocating in priority
-        // order: system prompt → last message → second-to-last message.
-        // Mirrors opencode's Cache.Breakpoints with ANTHROPIC_BREAKPOINT_CAP.
-        const ANTHROPIC_BREAKPOINT_CAP: usize = 4;
-        let want_cache = options.cache_retention == Some(crate::CacheRetention::Short)
-            || options.cache_retention == Some(crate::CacheRetention::Long);
-
-        if want_cache {
-            let mut remaining = ANTHROPIC_BREAKPOINT_CAP;
-            let cache_marker = serde_json::json!({ "type": "ephemeral" });
-
-            // 1. System prompt (highest priority)
-            if remaining > 0
-                && let Some(system) = body.get_mut("system")
-                && system.is_string()
-            {
-                *system = serde_json::json!([{
-                    "type": "text",
-                    "text": system,
-                    "cache_control": cache_marker.clone(),
-                }]);
-                remaining -= 1;
             }
 
-            // 2. Last message (high priority)
-            if remaining > 0
-                && let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut())
+            // Ensure max_tokens is always set (Anthropic requires it)
+            // For reasoning models, ensure max_tokens is large enough for
+            // the model to think AND respond. opencode uses OUTPUT_TOKEN_MAX = 32_000
+            // for MiniMax and other reasoning models.
+            //
+            // When the caller sets a small max_tokens (e.g., 4096 default),
+            // reasoning models like MiniMax may think for thousands of tokens
+            // and then stop before generating tool calls because they calculate
+            // they won't have enough room. Bumping to a minimum of 16_384 for
+            // reasoning models ensures the model has space to think + call tools.
+            if model.reasoning
+                && let Some(current) = body.get("max_tokens").and_then(|v| v.as_u64())
+                && current < 16_384
             {
-                if let Some(last_msg) = messages.last_mut()
-                    && let Some(content) = last_msg.get_mut("content")
+                body["max_tokens"] = serde_json::json!(model.max_tokens.min(32_768));
+            }
+            if body.get("max_tokens").is_none() {
+                body["max_tokens"] = serde_json::json!(model.max_tokens.min(16384));
+            }
+
+            // ── Cache Control ─────────────────────────────────────────────
+            // When cache_retention is set, add cache_control breakpoints to
+            // the system prompt and last few messages.
+            //
+            // Anthropic allows at most 4 cache_control breakpoints per request.
+            // We use a counter to enforce this limit, allocating in priority
+            // order: system prompt → last message → second-to-last message.
+            // Mirrors opencode's Cache.Breakpoints with ANTHROPIC_BREAKPOINT_CAP.
+            const ANTHROPIC_BREAKPOINT_CAP: usize = 4;
+            let want_cache = options.cache_retention == Some(crate::CacheRetention::Short)
+                || options.cache_retention == Some(crate::CacheRetention::Long);
+
+            if want_cache {
+                let mut remaining = ANTHROPIC_BREAKPOINT_CAP;
+                let cache_marker = serde_json::json!({ "type": "ephemeral" });
+
+                // 1. System prompt (highest priority)
+                if remaining > 0
+                    && let Some(system) = body.get_mut("system")
+                    && system.is_string()
                 {
-                    if let Some(parts) = content.as_array_mut() {
-                        if let Some(last_part) = parts.last_mut() {
-                            last_part["cache_control"] = cache_marker.clone();
+                    *system = serde_json::json!([{
+                        "type": "text",
+                        "text": system,
+                        "cache_control": cache_marker.clone(),
+                    }]);
+                    remaining -= 1;
+                }
+
+                // 2. Last message (high priority)
+                if remaining > 0
+                    && let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut())
+                {
+                    if let Some(last_msg) = messages.last_mut()
+                        && let Some(content) = last_msg.get_mut("content")
+                    {
+                        if let Some(parts) = content.as_array_mut() {
+                            if let Some(last_part) = parts.last_mut() {
+                                last_part["cache_control"] = cache_marker.clone();
+                                remaining -= 1;
+                            }
+                        } else if content.is_string() {
+                            let text = content.take();
+                            *content = serde_json::json!([{
+                                "type": "text",
+                                "text": text,
+                                "cache_control": cache_marker.clone(),
+                            }]);
                             remaining -= 1;
                         }
-                    } else if content.is_string() {
-                        let text = content.take();
-                        *content = serde_json::json!([{
-                            "type": "text",
-                            "text": text,
-                            "cache_control": cache_marker.clone(),
-                        }]);
-                        remaining -= 1;
                     }
-                }
 
-                // 3. Second-to-last message (tool results)
-                if remaining > 0 {
-                    let msg_count = messages.len();
-                    if msg_count >= 3
-                        && let Some(msg) = messages.get_mut(msg_count - 3)
-                        && let Some(content) = msg.get_mut("content")
-                        && let Some(parts) = content.as_array_mut()
-                        && let Some(last_part) = parts.last_mut()
-                    {
-                        last_part["cache_control"] = cache_marker;
-                        remaining -= 1;
-                    }
-                }
-            }
-
-            if remaining < ANTHROPIC_BREAKPOINT_CAP {
-                tracing::debug!(
-                    used = ANTHROPIC_BREAKPOINT_CAP - remaining,
-                    cap = ANTHROPIC_BREAKPOINT_CAP,
-                    "Anthropic cache breakpoints applied"
-                );
-            }
-        }
-
-        // Build headers
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("x-api-key", api_key.parse().expect("valid header value"));
-        headers.insert(
-            "content-type",
-            "application/json".parse().expect("valid header value"),
-        );
-
-        // Provider-level default headers (e.g. anthropic-version, anthropic-beta)
-        for (k, v) in &self.extra_headers {
-            if let (Ok(name), Ok(value)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                headers.insert(name, value);
-            }
-        }
-
-        // Per-request headers (from StreamOptions)
-        for (k, v) in &options.headers {
-            if let (Ok(name), Ok(value)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                headers.insert(name, value);
-            }
-        }
-
-        // Make request
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
-
-        // Create event stream
-        let model_name = model.id.clone();
-
-        // Stateful scan: persists partial_message and usage ACROSS chunks.
-        //
-        // Previous implementation created a fresh partial_message per chunk,
-        // which caused content loss at chunk boundaries. When an HTTP response
-        // is split into multiple chunks, content_block_delta events from
-        // earlier chunks would be lost because the new chunk's partial_message
-        // started empty. This particularly affected compatible providers
-        // (MiniMax, etc.) that split responses across many small chunks.
-        //
-        // pi (TypeScript) avoids this by keeping a single `output` object
-        // across the entire stream. We replicate that pattern here by
-        // including partial_message in the scan state.
-        //
-        // Tool calls are tracked in `pending_tool_calls` so that partial JSON
-        // arguments are accumulated across `input_json_delta` events and
-        // finalized when `content_block_stop` fires.
-
-        struct AnthropicScanState {
-            pending_bytes: Vec<u8>,
-            partial: AssistantMessage,
-            usage: Usage,
-            /// In-flight tool calls keyed by content block index.
-            pending_tool_calls: std::collections::HashMap<usize, AnthropicPendingToolCall>,
-        }
-
-        let initial_state = AnthropicScanState {
-            pending_bytes: Vec::new(),
-            partial: AssistantMessage::new(Api::AnthropicMessages, "anthropic", &model_name),
-            usage: Usage::default(),
-            pending_tool_calls: std::collections::HashMap::new(),
-        };
-
-        let stream = response
-            .bytes_stream()
-            .scan(
-                initial_state,
-                move |state, chunk: Result<bytes::Bytes, reqwest::Error>| {
-                    let events = match chunk {
-                        Ok(bytes) => {
-                            let mut combined =
-                                Vec::with_capacity(state.pending_bytes.len() + bytes.len());
-                            combined.extend_from_slice(&state.pending_bytes);
-                            combined.extend_from_slice(&bytes);
-                            let (text, trailing) = split_complete_lines(&combined);
-                            state.pending_bytes = trailing;
-                            parse_anthropic_events_stateful(
-                                &text,
-                                &mut state.partial,
-                                &mut state.usage,
-                                &mut state.pending_tool_calls,
-                            )
+                    // 3. Second-to-last message (tool results)
+                    if remaining > 0 {
+                        let msg_count = messages.len();
+                        if msg_count >= 3
+                            && let Some(msg) = messages.get_mut(msg_count - 3)
+                            && let Some(content) = msg.get_mut("content")
+                            && let Some(parts) = content.as_array_mut()
+                            && let Some(last_part) = parts.last_mut()
+                        {
+                            last_part["cache_control"] = cache_marker;
+                            remaining -= 1;
                         }
-                        Err(e) => vec![ProviderEvent::Error {
-                            reason: StopReason::Error,
-                            error: create_error_message(&e.to_string()),
-                        }],
-                    };
-                    async move { Some(futures::stream::iter(events)) }
-                },
-            )
-            .flatten();
+                    }
+                }
 
-        Ok(Box::pin(stream))
+                if remaining < ANTHROPIC_BREAKPOINT_CAP {
+                    tracing::debug!(
+                        used = ANTHROPIC_BREAKPOINT_CAP - remaining,
+                        cap = ANTHROPIC_BREAKPOINT_CAP,
+                        "Anthropic cache breakpoints applied"
+                    );
+                }
+            }
+
+            // Build headers
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("x-api-key", api_key.parse().expect("valid header value"));
+            headers.insert(
+                "content-type",
+                "application/json".parse().expect("valid header value"),
+            );
+
+            // Provider-level default headers (e.g. anthropic-version, anthropic-beta)
+            for (k, v) in &self.extra_headers {
+                if let (Ok(name), Ok(value)) = (
+                    k.parse::<reqwest::header::HeaderName>(),
+                    v.parse::<reqwest::header::HeaderValue>(),
+                ) {
+                    headers.insert(name, value);
+                }
+            }
+
+            // Per-request headers (from StreamOptions)
+            for (k, v) in &options.headers {
+                if let (Ok(name), Ok(value)) = (
+                    k.parse::<reqwest::header::HeaderName>(),
+                    v.parse::<reqwest::header::HeaderValue>(),
+                ) {
+                    headers.insert(name, value);
+                }
+            }
+
+            // Make request
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
+
+            // Create event stream
+            let model_name = model.id.clone();
+
+            // Stateful scan: persists partial_message and usage ACROSS chunks.
+            //
+            // Previous implementation created a fresh partial_message per chunk,
+            // which caused content loss at chunk boundaries. When an HTTP response
+            // is split into multiple chunks, content_block_delta events from
+            // earlier chunks would be lost because the new chunk's partial_message
+            // started empty. This particularly affected compatible providers
+            // (MiniMax, etc.) that split responses across many small chunks.
+            //
+            // pi (TypeScript) avoids this by keeping a single `output` object
+            // across the entire stream. We replicate that pattern here by
+            // including partial_message in the scan state.
+            //
+            // Tool calls are tracked in `pending_tool_calls` so that partial JSON
+            // arguments are accumulated across `input_json_delta` events and
+            // finalized when `content_block_stop` fires.
+
+            struct AnthropicScanState {
+                pending_bytes: Vec<u8>,
+                partial: AssistantMessage,
+                usage: Usage,
+                /// In-flight tool calls keyed by content block index.
+                pending_tool_calls: std::collections::HashMap<usize, AnthropicPendingToolCall>,
+            }
+
+            let initial_state = AnthropicScanState {
+                pending_bytes: Vec::new(),
+                partial: AssistantMessage::new(Api::AnthropicMessages, "anthropic", &model_name),
+                usage: Usage::default(),
+                pending_tool_calls: std::collections::HashMap::new(),
+            };
+
+            let stream = response
+                .bytes_stream()
+                .scan(
+                    initial_state,
+                    move |state, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                        let events = match chunk {
+                            Ok(bytes) => {
+                                let mut combined =
+                                    Vec::with_capacity(state.pending_bytes.len() + bytes.len());
+                                combined.extend_from_slice(&state.pending_bytes);
+                                combined.extend_from_slice(&bytes);
+                                let (text, trailing) = split_complete_lines(&combined);
+                                state.pending_bytes = trailing;
+                                parse_anthropic_events_stateful(
+                                    &text,
+                                    &mut state.partial,
+                                    &mut state.usage,
+                                    &mut state.pending_tool_calls,
+                                )
+                            }
+                            Err(e) => vec![ProviderEvent::Error {
+                                reason: StopReason::Error,
+                                error: create_error_message(&e.to_string()),
+                            }],
+                        };
+                        async move { Some(futures::stream::iter(events)) }
+                    },
+                )
+                .flatten();
+
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -819,11 +821,10 @@ fn parse_anthropic_events_stateful(
                                     .content
                                     .iter()
                                     .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                                if let Some(idx) = last_text_idx {
-                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx]
-                                    {
-                                        t.text.push_str(text);
-                                    }
+                                if let Some(idx) = last_text_idx
+                                    && let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                                {
+                                    t.text.push_str(text);
                                 } else {
                                     partial_message
                                         .content
@@ -842,12 +843,11 @@ fn parse_anthropic_events_stateful(
                                     .content
                                     .iter()
                                     .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
-                                if let Some(idx) = last_think_idx {
-                                    if let ContentBlock::Thinking(t) =
+                                if let Some(idx) = last_think_idx
+                                    && let ContentBlock::Thinking(t) =
                                         &mut partial_message.content[idx]
-                                    {
-                                        t.thinking.push_str(text);
-                                    }
+                                {
+                                    t.thinking.push_str(text);
                                 } else {
                                     partial_message.content.push(ContentBlock::Thinking(
                                         ThinkingContent::new(text.clone()),

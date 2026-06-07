@@ -4,10 +4,10 @@
 //! implements the `AgentTool` trait. Tool execution is delegated to the
 //! WASM extension via `WasmExtensionManager::execute_tool`.
 
-use anyhow::Result;
-use async_trait::async_trait;
 use oxi_agent::{AgentTool, AgentToolResult, ToolError};
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -38,7 +38,6 @@ impl WasmTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for WasmTool {
     fn name(&self) -> &str {
         &self.tool_name
@@ -53,46 +52,49 @@ impl AgentTool for WasmTool {
         self.schema.clone()
     }
 
-    async fn execute(
-        &self,
-        _tool_call_id: &str,
+    fn execute<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &oxi_agent::ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let manager = self.manager.clone();
-        let tool_name = self.tool_name.clone();
+        _ctx: &'a oxi_agent::ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let manager = self.manager.clone();
+            let tool_name = self.tool_name.clone();
 
-        let result = tokio::task::spawn_blocking(move || manager.execute_tool(&tool_name, params))
-            .await
-            .map_err(|e| format!("WASM execution panicked: {}", e))?;
+            let result =
+                tokio::task::spawn_blocking(move || manager.execute_tool(&tool_name, params))
+                    .await
+                    .map_err(|e| format!("WASM execution panicked: {}", e))?;
 
-        match result {
-            Ok(value) => {
-                let success = value
-                    .get("success")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                let output = value
-                    .get("output")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(no output)")
-                    .to_string();
+            match result {
+                Ok(value) => {
+                    let success = value
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    let output = value
+                        .get("output")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(no output)")
+                        .to_string();
 
-                if success {
-                    let mut tool_result = AgentToolResult::success(output);
-                    if let Some(meta) = value.get("metadata").cloned() {
-                        tool_result = tool_result.with_metadata(meta);
+                    if success {
+                        let mut tool_result = AgentToolResult::success(output);
+                        if let Some(meta) = value.get("metadata").cloned() {
+                            tool_result = tool_result.with_metadata(meta);
+                        }
+                        Ok(tool_result)
+                    } else {
+                        Ok(AgentToolResult::error(output))
                     }
-                    Ok(tool_result)
-                } else {
-                    Ok(AgentToolResult::error(output))
                 }
+                Err(e) => Ok(AgentToolResult::error(format!(
+                    "WASM tool '{}' error: {}",
+                    self.tool_name, e
+                ))),
             }
-            Err(e) => Ok(AgentToolResult::error(format!(
-                "WASM tool '{}' error: {}",
-                self.tool_name, e
-            ))),
-        }
+        })
     }
 }

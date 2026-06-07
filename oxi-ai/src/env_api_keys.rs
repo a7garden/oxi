@@ -14,13 +14,13 @@
 //!   4. Ambient credentials (AWS IAM, Google ADC)
 //!   5. Environment variable ← this module
 
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::sync::LazyLock;
 
 /// Cache for Vertex ADC credentials check (expensive fs check)
-static VERTEX_ADC_CHECK: Lazy<bool> = Lazy::new(check_vertex_adc_credentials);
+static VERTEX_ADC_CHECK: LazyLock<bool> = LazyLock::new(check_vertex_adc_credentials);
 
 /// Check if Vertex AI Application Default Credentials exist
 fn check_vertex_adc_credentials() -> bool {

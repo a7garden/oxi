@@ -7,18 +7,18 @@
 //! - Tool calls use `type: "function_call"` with `call_id`
 //! - Supports reasoning/thinking with effort levels
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
-    StreamOptions, Usage, error::ProviderError,
+    StreamOptions, StreamResult, Usage, error::ProviderError,
 };
 
 use super::shared_client;
@@ -70,166 +70,172 @@ impl Default for OpenAiResponsesProvider {
     }
 }
 
-#[async_trait]
 impl Provider for OpenAiResponsesProvider {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let options = options.unwrap_or_default();
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let options = options.unwrap_or_default();
 
-        // Build the request URL
-        let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
-        let url = format!("{}/responses", effective_base_url);
+            // Build the request URL
+            let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
+            let url = format!("{}/responses", effective_base_url);
 
-        // Get API key
-        let api_key = options
-            .api_key
-            .as_ref()
-            .or(self.api_key.as_ref())
-            .ok_or_else(|| ProviderError::MissingApiKey)?;
+            // Get API key
+            let api_key = options
+                .api_key
+                .as_ref()
+                .or(self.api_key.as_ref())
+                .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-        // Build input array (replaces messages in Responses API)
-        let input = build_input(context)?;
+            // Build input array (replaces messages in Responses API)
+            let input = build_input(context)?;
 
-        // Build request body
-        let mut body = serde_json::json!({
-            "model": model.id,
-            "input": input,
-            "stream": true,
-        });
+            // Build request body
+            let mut body = serde_json::json!({
+                "model": model.id,
+                "input": input,
+                "stream": true,
+            });
 
-        // Add optional parameters
-        if let Some(temp) = options.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-
-        if let Some(max) = options.max_tokens {
-            body["max_output_tokens"] = serde_json::json!(max);
-            body["max_tokens"] = serde_json::json!(max);
-        }
-
-        // Add tools if present
-        if !context.tools.is_empty() {
-            body["tools"] = build_tools(&context.tools);
-        }
-
-        // Add reasoning if enabled via thinking level or provider_options.openai
-        let openai_opts = options
-            .provider_options
-            .as_ref()
-            .and_then(|po| po.openai.as_ref());
-
-        if let Some(opts) = openai_opts {
-            // Fine-grained OpenAI control via provider_options
-            let effort = opts
-                .reasoning_effort
-                .as_deref()
-                .or_else(|| options.thinking_level.as_ref().and_then(|l| l.as_str()));
-            let summary = opts.reasoning_summary.as_deref().unwrap_or("auto");
-
-            if let Some(effort_str) = effort {
-                body["reasoning"] = serde_json::json!({
-                    "effort": effort_str,
-                    "summary": summary,
-                });
+            // Add optional parameters
+            if let Some(temp) = options.temperature {
+                body["temperature"] = serde_json::json!(temp);
             }
 
-            // Store flag
-            if let Some(store) = opts.store {
-                body["store"] = serde_json::json!(store);
+            if let Some(max) = options.max_tokens {
+                body["max_output_tokens"] = serde_json::json!(max);
+                body["max_tokens"] = serde_json::json!(max);
             }
 
-            // Encrypted reasoning content
-            if opts.include_encrypted_reasoning.unwrap_or(false) {
-                body["include"] = serde_json::json!(["reasoning.encrypted_content"]);
+            // Add tools if present
+            if !context.tools.is_empty() {
+                body["tools"] = build_tools(&context.tools);
             }
 
-            // Text verbosity
-            if let Some(ref verbosity) = opts.text_verbosity {
-                body["text"] = serde_json::json!({ "verbosity": verbosity });
-            }
+            // Add reasoning if enabled via thinking level or provider_options.openai
+            let openai_opts = options
+                .provider_options
+                .as_ref()
+                .and_then(|po| po.openai.as_ref());
 
-            // Prompt cache key
-            if let Some(ref key) = opts.prompt_cache_key {
-                body["prompt_cache_key"] = serde_json::json!(key);
-            }
-        } else if let Some(ref thinking_level) = options.thinking_level {
-            // Fallback: thinking_level only
-            if thinking_level != &crate::ThinkingLevel::Off
-                && let Some(effort) = thinking_level.as_str()
-            {
-                body["reasoning"] = serde_json::json!({
-                    "effort": effort,
-                    "summary": "auto",
-                });
-            }
+            if let Some(opts) = openai_opts {
+                // Fine-grained OpenAI control via provider_options
+                let effort = opts
+                    .reasoning_effort
+                    .as_deref()
+                    .or_else(|| options.thinking_level.as_ref().and_then(|l| l.as_str()));
+                let summary = opts.reasoning_summary.as_deref().unwrap_or("auto");
 
-            // Include encrypted reasoning content for session continuity
-            if options.thinking_level.is_some() {
-                body["include"] = serde_json::json!(["reasoning.encrypted_content"]);
-            }
-        }
-
-        // Build headers
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
-                .parse()
-                .expect("valid bearer header"),
-        );
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            "application/json".parse().expect("valid header value"),
-        );
-
-        // Add custom headers
-        for (k, v) in &options.headers {
-            if let (Ok(name), Ok(value)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                headers.insert(name, value);
-            }
-        }
-
-        // Make request
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .map_err(ProviderError::RequestFailed)?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
-            return Err(ProviderError::HttpError(status.as_u16(), body));
-        }
-
-        // Create event stream
-        let provider_name = model.provider.clone();
-        let model_id = model.id.clone();
-
-        let stream = response.bytes_stream().flat_map(
-            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
+                if let Some(effort_str) = effort {
+                    body["reasoning"] = serde_json::json!({
+                        "effort": effort_str,
+                        "summary": summary,
+                    });
                 }
-                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                    reason: StopReason::Error,
-                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                }]),
-            },
-        );
 
-        Ok(Box::pin(stream))
+                // Store flag
+                if let Some(store) = opts.store {
+                    body["store"] = serde_json::json!(store);
+                }
+
+                // Encrypted reasoning content
+                if opts.include_encrypted_reasoning.unwrap_or(false) {
+                    body["include"] = serde_json::json!(["reasoning.encrypted_content"]);
+                }
+
+                // Text verbosity
+                if let Some(ref verbosity) = opts.text_verbosity {
+                    body["text"] = serde_json::json!({ "verbosity": verbosity });
+                }
+
+                // Prompt cache key
+                if let Some(ref key) = opts.prompt_cache_key {
+                    body["prompt_cache_key"] = serde_json::json!(key);
+                }
+            } else if let Some(ref thinking_level) = options.thinking_level {
+                // Fallback: thinking_level only
+                if thinking_level != &crate::ThinkingLevel::Off
+                    && let Some(effort) = thinking_level.as_str()
+                {
+                    body["reasoning"] = serde_json::json!({
+                        "effort": effort,
+                        "summary": "auto",
+                    });
+                }
+
+                // Include encrypted reasoning content for session continuity
+                if options.thinking_level.is_some() {
+                    body["include"] = serde_json::json!(["reasoning.encrypted_content"]);
+                }
+            }
+
+            // Build headers
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", api_key)
+                    .parse()
+                    .expect("valid bearer header"),
+            );
+            headers.insert(
+                reqwest::header::CONTENT_TYPE,
+                "application/json".parse().expect("valid header value"),
+            );
+
+            // Add custom headers
+            for (k, v) in &options.headers {
+                if let (Ok(name), Ok(value)) = (
+                    k.parse::<reqwest::header::HeaderName>(),
+                    v.parse::<reqwest::header::HeaderValue>(),
+                ) {
+                    headers.insert(name, value);
+                }
+            }
+
+            // Make request
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await
+                .map_err(ProviderError::RequestFailed)?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body: String = response.text().await.unwrap_or_default();
+                return Err(ProviderError::HttpError(status.as_u16(), body));
+            }
+
+            // Create event stream
+            let provider_name = model.provider.clone();
+            let model_id = model.id.clone();
+
+            let stream =
+                response
+                    .bytes_stream()
+                    .flat_map(move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                        Ok(bytes) => {
+                            let text = String::from_utf8_lossy(&bytes).to_string();
+                            futures::stream::iter(parse_sse_events(
+                                &text,
+                                &provider_name,
+                                &model_id,
+                            ))
+                        }
+                        Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                        }]),
+                    });
+
+            Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
     }
 
     fn name(&self) -> &str {
@@ -490,10 +496,10 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         .content
                         .iter()
                         .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                    if let Some(idx) = last_text_idx {
-                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
-                            t.text.push_str(&text);
-                        }
+                    if let Some(idx) = last_text_idx
+                        && let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                    {
+                        t.text.push_str(&text);
                     } else {
                         partial_message
                             .content

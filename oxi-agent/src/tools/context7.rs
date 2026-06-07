@@ -15,9 +15,10 @@
 
 use crate::tools::http_client::shared_http_client;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext};
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
 
@@ -126,7 +127,6 @@ impl Context7ResolveLibraryIdTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for Context7ResolveLibraryIdTool {
     fn name(&self) -> &str {
         "context7_resolve-library-id"
@@ -177,58 +177,60 @@ impl AgentTool for Context7ResolveLibraryIdTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, String> {
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: query")?;
-        let library_name = params
-            .get("libraryName")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: libraryName")?;
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let query = params
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing required parameter: query")?;
+            let library_name = params
+                .get("libraryName")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing required parameter: libraryName")?;
 
-        let mut request = client()
-            .get(format!("{}/v2/libs/search", api_base_url()))
-            .query(&[("query", query), ("libraryName", library_name)]);
+            let mut request = client()
+                .get(format!("{}/v2/libs/search", api_base_url()))
+                .query(&[("query", query), ("libraryName", library_name)]);
 
-        if let Some(ref key) = *api_key() {
-            request = request.bearer_auth(key);
-        }
+            if let Some(ref key) = *api_key() {
+                request = request.bearer_auth(key);
+            }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| format!("Context7 API request failed: {}", e))?;
+            let response = request
+                .send()
+                .await
+                .map_err(|e| format!("Context7 API request failed: {}", e))?;
 
-        if !response.status().is_success() {
-            return Ok(map_error(response).await);
-        }
+            if !response.status().is_success() {
+                return Ok(map_error(response).await);
+            }
 
-        let search: SearchResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse Context7 response: {}", e))?;
+            let search: SearchResponse = response
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse Context7 response: {}", e))?;
 
-        if let Some(error) = search.error {
-            return Ok(AgentToolResult::error(error));
-        }
+            if let Some(error) = search.error {
+                return Ok(AgentToolResult::error(error));
+            }
 
-        if search.results.is_empty() {
-            return Ok(AgentToolResult::success(format!(
-                "No libraries found matching \"{}\". Try a different search term.",
-                library_name
-            )));
-        }
+            if search.results.is_empty() {
+                return Ok(AgentToolResult::success(format!(
+                    "No libraries found matching \"{}\". Try a different search term.",
+                    library_name
+                )));
+            }
 
-        Ok(AgentToolResult::success(format_search_results(
-            &search.results,
-        )))
+            Ok(AgentToolResult::success(format_search_results(
+                &search.results,
+            )))
+        })
     }
 }
 
@@ -250,7 +252,6 @@ impl Context7QueryDocsTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for Context7QueryDocsTool {
     fn name(&self) -> &str {
         "context7_query-docs"
@@ -288,62 +289,64 @@ impl AgentTool for Context7QueryDocsTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, String> {
-        let library_id = params
-            .get("libraryId")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: libraryId")?;
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: query")?;
-        let research_mode = params
-            .get("researchMode")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let library_id = params
+                .get("libraryId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing required parameter: libraryId")?;
+            let query = params
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing required parameter: query")?;
+            let research_mode = params
+                .get("researchMode")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
-        let mut request = client()
-            .get(format!("{}/v2/context", api_base_url()))
-            .query(&[("query", query), ("libraryId", library_id)]);
+            let mut request = client()
+                .get(format!("{}/v2/context", api_base_url()))
+                .query(&[("query", query), ("libraryId", library_id)]);
 
-        if let Some(ref key) = *api_key() {
-            request = request.bearer_auth(key);
-        }
+            if let Some(ref key) = *api_key() {
+                request = request.bearer_auth(key);
+            }
 
-        if research_mode {
-            request = request.query(&[("researchMode", "true")]);
-        }
+            if research_mode {
+                request = request.query(&[("researchMode", "true")]);
+            }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| format!("Context7 API request failed: {}", e))?;
+            let response = request
+                .send()
+                .await
+                .map_err(|e| format!("Context7 API request failed: {}", e))?;
 
-        if !response.status().is_success() {
-            return Ok(map_error(response).await);
-        }
+            if !response.status().is_success() {
+                return Ok(map_error(response).await);
+            }
 
-        let text = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read Context7 response: {}", e))?;
+            let text = response
+                .text()
+                .await
+                .map_err(|e| format!("Failed to read Context7 response: {}", e))?;
 
-        if text.is_empty() {
-            return Ok(AgentToolResult::success(format!(
-                "No documentation found for library \"{}\". \
-                 This might be because the library ID is invalid. \
-                 Use context7_resolve-library-id to get a valid ID.",
-                library_id
-            )));
-        }
+            if text.is_empty() {
+                return Ok(AgentToolResult::success(format!(
+                    "No documentation found for library \"{}\". \
+                     This might be because the library ID is invalid. \
+                     Use context7_resolve-library-id to get a valid ID.",
+                    library_id
+                )));
+            }
 
-        Ok(AgentToolResult::success(text))
+            Ok(AgentToolResult::success(text))
+        })
     }
 }
 

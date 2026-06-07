@@ -19,7 +19,7 @@ use crate::messages::Message;
 use crate::providers::ProviderRegistry;
 use crate::providers::StreamOptions;
 use crate::types::Model;
-use crate::{Api, Provider, ProviderEvent, ThinkingLevel, register_model, register_provider};
+use crate::{Api, Provider, StreamResult, ThinkingLevel, register_model, register_provider};
 
 /// Global router state snapshot — updated after each routing decision.
 static ROUTER_SNAPSHOT: parking_lot::RwLock<Option<RouterSnapshot>> =
@@ -39,8 +39,8 @@ pub struct RouterSnapshot {
     pub turn_count: usize,
     pub profile: Option<String>,
 }
-use futures::Stream;
 use parking_lot::RwLock;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -429,158 +429,161 @@ impl RouterProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl Provider for RouterProvider {
     fn name(&self) -> &str {
         "router"
     }
 
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
-        let profile_name = &model.id;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        Box::pin(async move {
+            let profile_name = &model.id;
 
-        // 1. Route through pipeline.
-        let (score, tier, phase, method) = self.pipeline.write().route(context);
+            // 1. Route through pipeline.
+            let (score, tier, phase, method) = self.pipeline.write().route(context);
 
-        // 2. Resolve tier config.
-        let tier_config = match self
-            .profiles
-            .read()
-            .tier_config(profile_name, tier)
-            .cloned()
-        {
-            Some(tc) => tc,
-            None => {
-                return Err(ProviderError::StreamError(format!(
-                    "Router profile '{}' is not configured. \
-                     Run /router setup or edit ~/.oxi/settings.toml",
-                    profile_name
-                )));
-            }
-        };
-
-        // 3. LLM classifier for ambiguous scores (optional).
-        let (score, tier, method) = {
-            let classifier_model = self.pipeline.read().classifier_model();
-            if (0.25..0.75).contains(&score) && classifier_model.is_some() {
-                let input = classifier::ClassifierInput {
-                    message: context
-                        .messages
-                        .iter()
-                        .rev()
-                        .find_map(|m| match m {
-                            Message::User(u) => Some(u.content.as_str().unwrap_or("").to_string()),
-                            _ => None,
-                        })
-                        .unwrap_or_default(),
-                    context_tokens: 0, // filled below
-                    turn_count: self.pipeline.read().history().len(),
-                    available_tools: vec![],
-                };
-                let llm = classifier::LlmClassifier::new(classifier_model);
-                match llm.classify(&input, score).await {
-                    Ok(llm_score) => {
-                        let llm_tier = RoutingScore(llm_score).to_tier(0.65, 0.35);
-                        tracing::info!(
-                            "LLM classifier: score {score:.2} → {llm_score:.2}, tier {tier:?} → {llm_tier:?}"
-                        );
-                        (llm_score, llm_tier, DecisionMethod::LlmClassifier)
-                    }
-                    Err(e) => {
-                        tracing::warn!("LLM classifier failed: {e}, using heuristic score");
-                        (score, tier, method)
-                    }
+            // 2. Resolve tier config.
+            let tier_config = match self
+                .profiles
+                .read()
+                .tier_config(profile_name, tier)
+                .cloned()
+            {
+                Some(tc) => tc,
+                None => {
+                    return Err(ProviderError::StreamError(format!(
+                        "Router profile '{}' is not configured. \
+                         Run /router setup or edit ~/.oxi/settings.toml",
+                        profile_name
+                    )));
                 }
+            };
+
+            // 3. LLM classifier for ambiguous scores (optional).
+            let (score, tier, method) = {
+                let classifier_model = self.pipeline.read().classifier_model();
+                if (0.25..0.75).contains(&score) && classifier_model.is_some() {
+                    let input = classifier::ClassifierInput {
+                        message: context
+                            .messages
+                            .iter()
+                            .rev()
+                            .find_map(|m| match m {
+                                Message::User(u) => {
+                                    Some(u.content.as_str().unwrap_or("").to_string())
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default(),
+                        context_tokens: 0, // filled below
+                        turn_count: self.pipeline.read().history().len(),
+                        available_tools: vec![],
+                    };
+                    let llm = classifier::LlmClassifier::new(classifier_model);
+                    match llm.classify(&input, score).await {
+                        Ok(llm_score) => {
+                            let llm_tier = RoutingScore(llm_score).to_tier(0.65, 0.35);
+                            tracing::info!(
+                                "LLM classifier: score {score:.2} → {llm_score:.2}, tier {tier:?} → {llm_tier:?}"
+                            );
+                            (llm_score, llm_tier, DecisionMethod::LlmClassifier)
+                        }
+                        Err(e) => {
+                            tracing::warn!("LLM classifier failed: {e}, using heuristic score");
+                            (score, tier, method)
+                        }
+                    }
+                } else {
+                    (score, tier, method)
+                }
+            };
+
+            // 4. Resolve tier config.
+            let pm = parse_tier_model(&tier_config).unwrap_or_else(|| ProviderModel {
+                provider: model.provider.clone(),
+                model_id: model.id.clone(),
+            });
+
+            // 4. Record decision.
+            let decision = RoutingDecision {
+                profile: profile_name.clone(),
+                tier,
+                phase,
+                target_provider: pm.provider.clone(),
+                target_model_id: pm.model_id.clone(),
+                target_label: tier_config.model.clone(),
+                reasoning: format!(
+                    "tier={tier:?}, score={score:.2}, method={method:?}, provider={}, model={}",
+                    pm.provider, pm.model_id
+                ),
+                thinking: tier_config.thinking.unwrap_or(ThinkingLevel::Off),
+                timestamp: chrono::Utc::now().timestamp_millis(),
+                score,
+                is_fallback: false,
+                is_context_triggered: method == DecisionMethod::ContextUpgrade,
+                is_budget_forced: method == DecisionMethod::BudgetDowngrade,
+                is_vision_triggered: false,
+                vision_images: 0,
+                decision_method: method,
+            };
+            self.pipeline.write().record_decision(decision);
+            self.update_snapshot();
+
+            // 4. Resolve target provider.
+            let target_provider = self
+                .resolve_provider(&pm.provider)
+                .ok_or_else(|| ProviderError::UnknownProvider(pm.provider.clone()))?;
+
+            // 5. Build target model.
+            let target_model = build_target_model(&pm, tier_config.thinking.is_some());
+
+            // 6. Inject thinking.
+            let mut opts = options.unwrap_or_default();
+            if let Some(thinking) = tier_config.thinking {
+                opts.thinking_level = Some(thinking);
+            }
+
+            // 7. Truncate context if needed (preserve first message — system prompt).
+            let estimated_chars: usize = context.messages.iter().map(message_chars).sum();
+            let estimated_tokens = estimated_chars / 4;
+            let adjusted_context = if estimated_tokens > target_model.context_window {
+                let mut ctx = context.clone();
+                let max_chars = target_model.context_window * 3;
+                let mut total: usize = ctx.messages.iter().map(message_chars).sum();
+                while total > max_chars && ctx.messages.len() > 2 {
+                    let removed = ctx.messages.remove(1);
+                    total -= message_chars(&removed);
+                }
+                ctx
             } else {
-                (score, tier, method)
-            }
-        };
+                context.clone()
+            };
 
-        // 4. Resolve tier config.
-        let pm = parse_tier_model(&tier_config).unwrap_or_else(|| ProviderModel {
-            provider: model.provider.clone(),
-            model_id: model.id.clone(),
-        });
-
-        // 4. Record decision.
-        let decision = RoutingDecision {
-            profile: profile_name.clone(),
-            tier,
-            phase,
-            target_provider: pm.provider.clone(),
-            target_model_id: pm.model_id.clone(),
-            target_label: tier_config.model.clone(),
-            reasoning: format!(
-                "tier={tier:?}, score={score:.2}, method={method:?}, provider={}, model={}",
-                pm.provider, pm.model_id
-            ),
-            thinking: tier_config.thinking.unwrap_or(ThinkingLevel::Off),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-            score,
-            is_fallback: false,
-            is_context_triggered: method == DecisionMethod::ContextUpgrade,
-            is_budget_forced: method == DecisionMethod::BudgetDowngrade,
-            is_vision_triggered: false,
-            vision_images: 0,
-            decision_method: method,
-        };
-        self.pipeline.write().record_decision(decision);
-        self.update_snapshot();
-
-        // 4. Resolve target provider.
-        let target_provider = self
-            .resolve_provider(&pm.provider)
-            .ok_or_else(|| ProviderError::UnknownProvider(pm.provider.clone()))?;
-
-        // 5. Build target model.
-        let target_model = build_target_model(&pm, tier_config.thinking.is_some());
-
-        // 6. Inject thinking.
-        let mut opts = options.unwrap_or_default();
-        if let Some(thinking) = tier_config.thinking {
-            opts.thinking_level = Some(thinking);
-        }
-
-        // 7. Truncate context if needed (preserve first message — system prompt).
-        let estimated_chars: usize = context.messages.iter().map(message_chars).sum();
-        let estimated_tokens = estimated_chars / 4;
-        let adjusted_context = if estimated_tokens > target_model.context_window {
-            let mut ctx = context.clone();
-            let max_chars = target_model.context_window * 3;
-            let mut total: usize = ctx.messages.iter().map(message_chars).sum();
-            while total > max_chars && ctx.messages.len() > 2 {
-                let removed = ctx.messages.remove(1);
-                total -= message_chars(&removed);
-            }
-            ctx
-        } else {
-            context.clone()
-        };
-
-        // 8. Try primary model.
-        match target_provider
-            .stream(&target_model, &adjusted_context, Some(opts.clone()))
-            .await
-        {
-            Ok(stream) => Ok(stream),
-            Err(primary_err) => {
-                if tier_config.fallbacks.is_empty() {
-                    return Err(primary_err);
+            // 8. Try primary model.
+            match target_provider
+                .stream(&target_model, &adjusted_context, Some(opts.clone()))
+                .await
+            {
+                Ok(stream) => Ok(stream),
+                Err(primary_err) => {
+                    if tier_config.fallbacks.is_empty() {
+                        return Err(primary_err);
+                    }
+                    let chain = FallbackChain::new(tier_config.fallbacks.clone());
+                    chain
+                        .try_models_with_resolver(
+                            |name| self.resolve_provider(name),
+                            &adjusted_context,
+                            Some(opts),
+                        )
+                        .await
                 }
-                let chain = FallbackChain::new(tier_config.fallbacks.clone());
-                chain
-                    .try_models_with_resolver(
-                        |name| self.resolve_provider(name),
-                        &adjusted_context,
-                        Some(opts),
-                    )
-                    .await
             }
-        }
+        })
     }
 }
 

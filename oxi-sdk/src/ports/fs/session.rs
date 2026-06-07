@@ -1,7 +1,8 @@
 //! File-based `StateStore` — append-only JSONL files in a directory.
 
-use async_trait::async_trait;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::SdkError;
@@ -60,48 +61,69 @@ impl FileStateStore {
     }
 }
 
-#[async_trait]
 impl StateStore for FileStateStore {
-    async fn append(&self, entry: PortValue) -> Result<PortId, SdkError> {
-        let id = uuid::Uuid::new_v4().to_string();
-        self._append_with_id(&id, entry).await?;
-        Ok(id)
+    fn append(
+        &self,
+        entry: PortValue,
+    ) -> Pin<Box<dyn Future<Output = Result<PortId, SdkError>> + Send + '_>> {
+        Box::pin(async {
+            let id = uuid::Uuid::new_v4().to_string();
+            self._append_with_id(&id, entry).await?;
+            Ok(id)
+        })
     }
 
-    async fn load(&self, id: &PortId) -> Result<Option<PortValue>, SdkError> {
+    fn load(
+        &self,
+        id: &PortId,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<PortValue>, SdkError>> + Send + '_>> {
         let path = self.path_for(id);
-        if !path.exists() {
-            return Ok(None);
-        }
-        let bytes = tokio::fs::read(&path).await.map_err(io_to_sdk)?;
-        let value: PortValue = serde_json::from_slice(&bytes).map_err(decode_to_sdk)?;
-        Ok(Some(value))
-    }
-
-    async fn list(&self, prefix: &str) -> Result<Vec<PortId>, SdkError> {
-        if !self.dir.exists() {
-            return Ok(Vec::new());
-        }
-        let mut ids = Vec::new();
-        let mut rd = tokio::fs::read_dir(&self.dir).await.map_err(io_to_sdk)?;
-        while let Some(entry) = rd.next_entry().await.map_err(io_to_sdk)? {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if let Some(stem) = name.strip_suffix(".json")
-                && (prefix.is_empty() || stem.starts_with(prefix))
-            {
-                ids.push(stem.to_string());
+        Box::pin(async move {
+            if !path.exists() {
+                return Ok(None);
             }
-        }
-        Ok(ids)
+            let bytes = tokio::fs::read(&path).await.map_err(io_to_sdk)?;
+            let value: PortValue = serde_json::from_slice(&bytes).map_err(decode_to_sdk)?;
+            Ok(Some(value))
+        })
     }
 
-    async fn delete(&self, id: &PortId) -> Result<(), SdkError> {
+    fn list(
+        &self,
+        prefix: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PortId>, SdkError>> + Send + '_>> {
+        let dir = self.dir.clone();
+        let prefix = prefix.to_string();
+        Box::pin(async move {
+            if !dir.exists() {
+                return Ok(Vec::new());
+            }
+            let mut ids = Vec::new();
+            let mut rd = tokio::fs::read_dir(&dir).await.map_err(io_to_sdk)?;
+            while let Some(entry) = rd.next_entry().await.map_err(io_to_sdk)? {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if let Some(stem) = name.strip_suffix(".json")
+                    && (prefix.is_empty() || stem.starts_with(prefix.as_str()))
+                {
+                    ids.push(stem.to_string());
+                }
+            }
+            Ok(ids)
+        })
+    }
+
+    fn delete(
+        &self,
+        id: &PortId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
         let path = self.path_for(id);
-        if path.exists() {
-            tokio::fs::remove_file(&path).await.map_err(io_to_sdk)?;
-        }
-        Ok(())
+        Box::pin(async move {
+            if path.exists() {
+                tokio::fs::remove_file(&path).await.map_err(io_to_sdk)?;
+            }
+            Ok(())
+        })
     }
 }
 

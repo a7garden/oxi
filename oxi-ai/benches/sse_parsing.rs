@@ -102,14 +102,14 @@ mod openai_parser {
             };
 
             for choice in &chunk.choices {
-                if let Some(delta) = &choice.delta {
-                    if let Some(content) = &delta.content {
-                        events.push(ProviderEvent::TextDelta {
-                            content_index: choice.index,
-                            delta: content.clone(),
-                            partial: Arc::new(partial_message.clone()),
-                        });
-                    }
+                if let Some(delta) = &choice.delta
+                    && let Some(content) = &delta.content
+                {
+                    events.push(ProviderEvent::TextDelta {
+                        content_index: choice.index,
+                        delta: content.clone(),
+                        partial: Arc::new(partial_message.clone()),
+                    });
                 }
 
                 if choice.finish_reason.is_some() {

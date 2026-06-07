@@ -7,13 +7,14 @@ mod tests {
         tools::{AgentTool, AgentToolResult, ToolContext, ToolRegistry},
     };
     use oxi_ai::CompactionStrategy;
+    use std::future::Future;
     use std::path::PathBuf;
+    use std::pin::Pin;
 
     // ── Mock Tool ─────────────────────────────────────────────────────
 
     struct EchoTool;
 
-    #[async_trait::async_trait]
     impl AgentTool for EchoTool {
         fn name(&self) -> &str {
             "echo"
@@ -27,17 +28,25 @@ mod tests {
         fn parameters_schema(&self) -> serde_json::Value {
             serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}})
         }
-        async fn execute(
-            &self,
-            _tool_call_id: &str,
+        fn execute<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
             params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            _ctx: &ToolContext,
-        ) -> Result<AgentToolResult, oxi_agent::tools::ToolError> {
-            Ok(AgentToolResult::success(format!(
-                "Echo: {}",
-                params["text"].as_str().unwrap_or("")
-            )))
+            _ctx: &'a ToolContext,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<AgentToolResult, oxi_agent::tools::ToolError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                Ok(AgentToolResult::success(format!(
+                    "Echo: {}",
+                    params["text"].as_str().unwrap_or("")
+                )))
+            })
         }
     }
 

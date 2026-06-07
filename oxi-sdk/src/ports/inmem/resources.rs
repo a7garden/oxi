@@ -1,6 +1,7 @@
 //! `ResourceMonitor` backed by `sysinfo` (optional dependency-free stub here).
 
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -54,15 +55,20 @@ impl CountingResourceMonitor {
     }
 }
 
-#[async_trait]
 impl ResourceMonitor for CountingResourceMonitor {
-    async fn snapshot(&self) -> Result<ResourceUsage, SdkError> {
-        Ok(ResourceUsage {
-            cpu_percent: 0.0,
-            memory_bytes: 0,
-            disk_bytes: 0,
-            active_agents: self.active_agents.load(Ordering::Relaxed) as usize,
-            tokens_consumed: self.tokens.load(Ordering::Relaxed),
+    fn snapshot(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceUsage, SdkError>> + Send + '_>> {
+        let active = self.active_agents.load(Ordering::Relaxed) as usize;
+        let tokens = self.tokens.load(Ordering::Relaxed);
+        Box::pin(async move {
+            Ok(ResourceUsage {
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                disk_bytes: 0,
+                active_agents: active,
+                tokens_consumed: tokens,
+            })
         })
     }
 }

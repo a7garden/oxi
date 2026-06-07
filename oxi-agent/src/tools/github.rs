@@ -11,8 +11,9 @@ use super::search_cache::{SearchCache, SearchResult};
 /// Prerequisites: `gh` CLI installed and authenticated (`gh auth status`).
 /// Disable via `disabled_tools = ["github"]` or `OXI_DISABLED_TOOLS=github`.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -710,7 +711,6 @@ impl GitHubTool {
     }
 }
 
-#[async_trait]
 impl AgentTool for GitHubTool {
     fn name(&self) -> &str {
         "github"
@@ -802,46 +802,48 @@ impl AgentTool for GitHubTool {
         })
     }
 
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let action = params["action"].as_str().unwrap_or("search");
+        _ctx: &'a ToolContext,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            let action = params["action"].as_str().unwrap_or("search");
 
-        match action {
-            "search" => {
-                let result = gh_search(&params).await?;
-                // Cache search results
-                if let Some(query) = params["query"].as_str() {
-                    let kind = params["kind"].as_str().unwrap_or("repos");
-                    let search_id = self.cache.insert(
-                        &format!("github:{}:{}", kind, query),
-                        vec![SearchResult {
-                            title: format!("GitHub {} search: {}", kind, query),
-                            url: String::new(),
-                            snippet: result.output.chars().take(200).collect(),
-                            source: "GitHub".to_string(),
-                            extra: None,
-                        }],
-                    );
-                    return Ok(result.with_metadata(json!({
-                        "searchId": search_id,
-                    })));
+            match action {
+                "search" => {
+                    let result = gh_search(&params).await?;
+                    // Cache search results
+                    if let Some(query) = params["query"].as_str() {
+                        let kind = params["kind"].as_str().unwrap_or("repos");
+                        let search_id = self.cache.insert(
+                            &format!("github:{}:{}", kind, query),
+                            vec![SearchResult {
+                                title: format!("GitHub {} search: {}", kind, query),
+                                url: String::new(),
+                                snippet: result.output.chars().take(200).collect(),
+                                source: "GitHub".to_string(),
+                                extra: None,
+                            }],
+                        );
+                        return Ok(result.with_metadata(json!({
+                            "searchId": search_id,
+                        })));
+                    }
+                    Ok(result)
                 }
-                Ok(result)
+                "issue" => gh_issue(&params).await,
+                "pr" => gh_pr(&params).await,
+                "repo" => gh_repo(&params).await,
+                "run" => gh_run(&params).await,
+                other => Err(format!(
+                    "Unknown action '{}'. Use: search, issue, pr, repo, run",
+                    other
+                )),
             }
-            "issue" => gh_issue(&params).await,
-            "pr" => gh_pr(&params).await,
-            "repo" => gh_repo(&params).await,
-            "run" => gh_run(&params).await,
-            other => Err(format!(
-                "Unknown action '{}'. Use: search, issue, pr, repo, run",
-                other
-            )),
-        }
+        })
     }
 }
 

@@ -89,8 +89,9 @@ impl Drop for TabGuard {
 mod tests {
     use super::*;
     use crate::tools::browse::engine::{BrowserError, PageContent};
-    use async_trait::async_trait;
     use serde_json::Value;
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -101,7 +102,7 @@ mod tests {
     }
 
     impl MockTab {
-        fn new() -> (Self, Arc<AtomicBool>) {
+        fn new<'a>() -> (Self, Arc<AtomicBool>) {
             let closed = Arc::new(AtomicBool::new(false));
             (
                 Self {
@@ -112,89 +113,173 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl BrowserTab for MockTab {
-        async fn goto(&self, _url: &str) -> Result<PageContent, BrowserError> {
-            Ok(PageContent::empty())
+        fn goto<'a>(
+            &'a self,
+            _url: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(PageContent::empty()) })
         }
-        async fn click(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn click<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn type_(&self, _selector: &str, _text: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn type_<'a>(
+            &'a self,
+            _selector: &str,
+            _text: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn fill(&self, _selector: &str, _value: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn fill<'a>(
+            &'a self,
+            _selector: &str,
+            _value: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn press(&self, _combo: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn press<'a>(
+            &'a self,
+            _combo: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn wait_for(&self, _selector: &str, _timeout_ms: u64) -> Result<(), BrowserError> {
-            Ok(())
+        fn wait_for<'a>(
+            &'a self,
+            _selector: &str,
+            _timeout_ms: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn content(&self) -> Result<PageContent, BrowserError> {
-            Ok(PageContent::empty())
+        fn content<'a>(
+            &'a self,
+        ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(PageContent::empty()) })
         }
-        async fn query_all(&self, _selector: &str) -> Result<Vec<String>, BrowserError> {
-            Ok(vec![])
+        fn query_all<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(vec![]) })
         }
-        async fn evaluate(&self, _js: &str) -> Result<Value, BrowserError> {
-            Ok(Value::Null)
+        fn evaluate<'a>(
+            &'a self,
+            _js: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(Value::Null) })
         }
-        async fn screenshot(&self, _width: u32) -> Result<Vec<u8>, BrowserError> {
-            Ok(vec![])
+        fn screenshot<'a>(
+            &'a self,
+            _width: u32,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(vec![]) })
         }
-        async fn close(&self) -> Result<(), BrowserError> {
-            self.closed.store(true, Ordering::SeqCst);
-            Ok(())
+        fn close<'a>(
+            &'a self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move {
+                self.closed.store(true, Ordering::SeqCst);
+                Ok(())
+            })
         }
-        async fn back(&self) -> Result<PageContent, BrowserError> {
-            Ok(PageContent::empty())
+        fn back<'a>(
+            &'a self,
+        ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(PageContent::empty()) })
         }
-        async fn forward(&self) -> Result<PageContent, BrowserError> {
-            Ok(PageContent::empty())
+        fn forward<'a>(
+            &'a self,
+        ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(PageContent::empty()) })
         }
-        async fn reload(&self) -> Result<PageContent, BrowserError> {
-            Ok(PageContent::empty())
+        fn reload<'a>(
+            &'a self,
+        ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(PageContent::empty()) })
         }
-        async fn select_option(&self, _selector: &str, _value: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn select_option<'a>(
+            &'a self,
+            _selector: &str,
+            _value: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn check(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn check<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn uncheck(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn uncheck<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn clear(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn clear<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn hover(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn hover<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn double_click(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn double_click<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn right_click(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn right_click<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn scroll(&self, _delta_x: f64, _delta_y: f64) -> Result<(), BrowserError> {
-            Ok(())
+        fn scroll<'a>(
+            &'a self,
+            _delta_x: f64,
+            _delta_y: f64,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn scroll_into_view(&self, _selector: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn scroll_into_view<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn drag(&self, _from: &str, _to: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn drag<'a>(
+            &'a self,
+            _from: &str,
+            _to: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn upload_file(&self, _selector: &str, _path: &str) -> Result<(), BrowserError> {
-            Ok(())
+        fn upload_file<'a>(
+            &'a self,
+            _selector: &str,
+            _path: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
         }
-        async fn get_value(&self, _selector: &str) -> Result<String, BrowserError> {
-            Ok(String::new())
+        fn get_value<'a>(
+            &'a self,
+            _selector: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<String, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(String::new()) })
         }
-        async fn evaluate_await(&self, _js: &str) -> Result<Value, BrowserError> {
-            Ok(Value::Null)
+        fn evaluate_await<'a>(
+            &'a self,
+            _js: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, BrowserError>> + Send + 'a>> {
+            Box::pin(async move { Ok(Value::Null) })
         }
         fn is_closed(&self) -> bool {
             self.closed.load(Ordering::SeqCst)
