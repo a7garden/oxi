@@ -10,12 +10,15 @@ A Rust port of [pi](https://github.com/earendil-works/pi) by Mario Zechner.
 Multi-provider · Streaming-first · Extensible · Session persistence
 
 [![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
+[![Test](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/test.yml?style=flat-square&label=tests)](https://github.com/a7garden/oxi/actions)
+[![codecov](https://img.shields.io/codecov/c/github/a7garden/oxi?style=flat-square&label=coverage)](https://codecov.io/gh/a7garden/oxi)
 [![Crates.io](https://img.shields.io/crates/v/oxi-cli?style=flat-square&label=crates.io)](https://crates.io/crates/oxi-cli)
 [![docs.rs](https://img.shields.io/docsrs/oxi-cli?style=flat-square&label=docs.rs)](https://docs.rs/oxi-cli)
 [![GitHub release](https://img.shields.io/github/v/release/a7garden/oxi?style=flat-square&include_prereleases&label=release)](https://github.com/a7garden/oxi/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
 [![GitHub stars](https://img.shields.io/github/stars/a7garden/oxi?style=flat-square)](https://github.com/a7garden/oxi/stargazers)
 [![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/)
+[![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-1.5-blue?style=flat-square)](docs/rfcs/RFC-005-CI-CD-INFRA.md)
 
 [Getting Started](#getting-started) · [Architecture](#architecture) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
@@ -45,13 +48,42 @@ It brings the power of LLM-based coding assistants directly to your terminal —
 
 ### Install
 
+**cargo install** (any Rust toolchain ≥ 1.82):
 ```bash
-# Build from source (requires Rust 1.82+)
+cargo install oxi-cli
+```
+
+**cargo binstall** (10-100x faster — uses prebuilt binary from the GitHub release):
+```bash
+cargo install cargo-binstall
+cargo binstall oxi-cli
+```
+
+**Pre-built binaries** (Linux, macOS, Windows — 7 targets):
+```bash
+# Linux x86_64
+curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/x86_64-unknown-linux-gnu.tar.gz \
+  | tar xz -C /usr/local/bin
+```
+Or download from the [Releases page](https://github.com/a7garden/oxi/releases).
+Each release ships with `SHA256SUMS` and (once the GPG key is configured)
+`SHA256SUMS.asc` for verification.
+
+**Build from source** (last resort):
+```bash
 git clone https://github.com/a7garden/oxi.git
 cd oxi && cargo build --release
-
-# The binary is at target/release/oxi
 cp target/release/oxi /usr/local/bin/
+```
+
+### Verify a downloaded binary
+
+```bash
+# Once a release is published with GPG signature:
+curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/SHA256SUMS -o SHA256SUMS
+curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/SHA256SUMS.asc -o SHA256SUMS.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS 2>/dev/null | grep x86_64-unknown-linux-gnu
 ```
 
 ### Configure
@@ -213,3 +245,9 @@ are derived from the original pi project (MIT License). See [NOTICE.md](NOTICE.m
 ## License
 
 [MIT](LICENSE.md) © 2025 Mario Zechner, 2025–2026 oxi contributors
+
+## Sponsorship
+
+oxi is developed and maintained by volunteers. If oxi saves you time or
+makes your workflow better, consider [sponsoring the project](https://github.com/sponsors/a7garden)
+to fund continued work on providers, the agent loop, and the TUI.

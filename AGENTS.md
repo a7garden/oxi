@@ -11,6 +11,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Version | 0.30.0 (latest release: 0.30.0) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
+| Workflows | `ci.yml` (5+2 jobs: fmt/clippy/smoke-test/audit/deny + msrv/coverage/doc), `test.yml` (3-OS matrix + doc), `pr-gate.yml`, `release.yml` (7-target + SHA256SUMS + GPG + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |
 
 > The legacy `oxi-store` crate (settings, sessions, auth) was absorbed
 > into `oxi-cli/src/store/` as a self-contained sub-module. The legacy
@@ -206,6 +207,15 @@ Extension system (`src/extensions/types.rs`):
 
 - `cargo fmt` before every commit — no exceptions.
 - `cargo clippy --workspace -- -D warnings` must pass clean.
+  `clippy --all-targets` is **not** enforced yet (test/bench code has
+  pre-existing `unwrap()` and pedantic lints) — see "Pre-existing TODO"
+  below.
+- **Pre-commit hooks** — `.pre-commit-config.yaml` mirrors the ci.yml
+  gate. Install once: `pre-commit install`. On every `git commit`,
+  trailing whitespace, EOF, YAML/TOML lint, merge-conflict, large
+  files, private-key scan, and `cargo fmt --check` /
+  `cargo clippy --all-targets` run automatically. PRs that fail
+  locally fail remotely too.
 - Module structure: `mod.rs` re-exports public API, implementation in sibling files.
 - Prefer `anyhow::Result` for application code, custom error enums (`thiserror`) for library crates.
   - **Library crates** (oxi-ai, oxi-agent, oxi-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
@@ -289,6 +299,40 @@ cargo test --workspace --doc         # Doc tests
 | MCP config | `~/.config/oxi/mcp.json` or `.oxi/mcp.json` |
 | Logs | `~/.oxi/logs/` |
 | Nextest config | `.config/nextest.toml` |
+| Pre-commit config | `.pre-commit-config.yaml` |
+| Issue labels | `.github/labels.yml` (synced by `labels.yml` workflow) |
+| Funding | `.github/FUNDING.yml` |
+
+## CI/CD & Release Pipeline
+
+oxi ships a multi-stage pipeline. The full source is under
+`.github/workflows/`:
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `smoke-test`, `audit`, `deny`, `msrv`, `coverage`, `doc`. ~2-3 min for the fast jobs. |
+| `test.yml` | PR + push to main + release | Full nextest matrix on **ubuntu + macos + windows**, plus doc tests. Replaces the older "smoke on PR, full on main" split. |
+| `pr-gate.yml` | PR opened/synchronized/reopened | Conventional-Commit title, PR size ≤ 4000 lines, no merge commits, issue linkage. |
+| `release.yml` | `v*` tag push | 7-target build matrix, `tag-check` (rejects stale tags), `SHA256SUMS` + GPG signature (conditional on secrets) + CycloneDX SBOM, GitHub Release. |
+| `build-binaries.yml` | weekly cron + manual | Continuous binary build (no release artifact) for sanity. |
+| `publish.yml` | `release: published` + manual | `cargo publish` to crates.io in topological order with a dry-run pre-flight. Requires `CARGO_TOKEN`. |
+| `sbom.yml` | push to main + release | Generates CycloneDX 1.5 SBOM and submits it to GitHub's dependency-graph API. |
+| `labels.yml` | weekly + labels.yml change | Syncs `.github/labels.yml` to the repo's label set via `github/issue-labeler`. |
+
+### Required GitHub Secrets
+
+| Secret | Used by | Required? | How to create |
+|--------|---------|:---:|---------------|
+| `CARGO_TOKEN` | `publish.yml` | ✅ **Yes** (to publish) | <https://crates.io/settings/tokens>, scope: publish |
+| `GPG_PRIVATE_KEY` | `release.yml` | ⚠️ Optional | `gpg --armor --export-secret-keys <KEYID>`. Skip → SHA256SUMS generated unsigned. |
+| `GPG_PASSPHRASE` | `release.yml` | ⚠️ Optional | Passphrase for the above key (or empty). |
+| `GPG_FINGERPRINT` | `release.yml` | ⚠️ Optional | `gpg --fingerprint` |
+| `CODECOV_TOKEN` | `ci.yml` (coverage) | ❌ Optional | <https://codecov.io> — only required for private repos. |
+
+Without **any** secret, the pipeline still runs `ci.yml`, `test.yml`,
+`pr-gate.yml`, `release.yml` (with unsigned SHA256SUMS + SBOM),
+`build-binaries.yml`, `sbom.yml`, and `labels.yml`. Only
+`publish.yml` (crates.io) and binary signing require secrets.
 
 ## Design Principles
 

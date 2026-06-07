@@ -26,6 +26,15 @@ guidelines and instructions for contributing.
    ```bash
    git checkout -b feat/my-feature
    ```
+4. **Install the pre-commit hooks** (mirrors the CI gate locally):
+   ```bash
+   pip install pre-commit        # or: brew install pre-commit
+   pre-commit install
+   ```
+   On every `git commit`, this runs `cargo fmt --check`, `cargo clippy
+   --all-targets -- -D warnings`, YAML/TOML lint, large-file scan, and
+   blocks accidental private-key commits. Run on demand with
+   `pre-commit run --all-files`.
 
 ## Development Setup
 
@@ -155,16 +164,35 @@ chore(deps): bump reqwest to 0.12.28
    cargo clippy --workspace -- -D warnings
    cargo test --workspace
    ```
+   (or just `pre-commit run --all-files` once the hooks are installed).
 
 2. **Update documentation** if your change affects public API or behavior.
 
 3. **Add a CHANGELOG entry** under `[Unreleased]` in `CHANGELOG.md`.
 
-4. **Keep PRs focused** — one concern per PR is preferred.
+4. **Apply labels** — when opening a PR, apply at least one `area:*`
+   label and one `type:*` label. The label set is defined in
+   `.github/labels.yml` and is auto-synced by the `labels.yml` workflow.
+   If you'd like a label that doesn't exist yet, open a small PR
+   adding it to that file.
 
-5. **Respond to reviews** promptly and be open to feedback.
+5. **Link an issue** — reference `Fixes #123` or `Closes #123` in the
+   PR body. The `pr-gate.yml` workflow warns (not blocks) when no
+   issue is linked, but traceability makes triage much smoother.
 
-6. **Squash commits** if requested during review.
+6. **Keep PRs focused** — one concern per PR is preferred. The
+   `pr-gate.yml` workflow **blocks** PRs over 4000 lines changed and
+   warns above 2000.
+
+7. **PR title must follow Conventional Commits** — `pr-gate.yml`
+   enforces one of: `feat`, `fix`, `docs`, `refactor`, `perf`,
+   `test`, `chore`, `ci`, `build`, `style`, `revert`, optionally
+   followed by `(scope)`, optionally a `!` for breaking changes, then
+   `: <subject>`. Example: `feat(agent): add parallel tool execution`.
+
+8. **Respond to reviews** promptly and be open to feedback.
+
+9. **Squash commits** if requested during review.
 
 ### PR Template
 

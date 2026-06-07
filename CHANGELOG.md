@@ -5,6 +5,69 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — CI/CD & Supply Chain
+
+- **`release.yml` enhancements**:
+  - New `tag-check` job rejects tags not reachable from `origin/main`
+    (defense against force-pushed stale tags).
+  - Release job now generates `SHA256SUMS` next to binaries.
+  - GPG detached signature (`SHA256SUMS.asc`) when `GPG_PRIVATE_KEY`,
+    `GPG_PASSPHRASE`, and `GPG_FINGERPRINT` secrets are configured.
+  - CycloneDX 1.5 SBOM (`oxi.cdx.json`) attached to the GitHub release.
+- **`publish.yml`** (new) — publishes all 5 workspace crates to
+  `crates.io` in topological order on `release: published`, with a
+  dry-run `cargo package --no-verify` pre-flight. Requires `CARGO_TOKEN`
+  secret. Run `workflow_dispatch` for a manual dry run.
+  **Scope decision (2026-06-07):** crates.io is the only distribution
+  channel. Homebrew/Scoop tap automation is intentionally not
+  implemented.
+- **`sbom.yml`** (new) — generates a CycloneDX SBOM on every push to
+  `main`, submits it to GitHub's dependency-graph API (so Dependabot
+  sees transitive crates), and uploads the JSON as a workflow artifact.
+- **`labels.yml`** (new) — single source of truth for issue labels
+  (priority, area, status, type, provider). 30+ labels, including
+  `good first issue` and `help wanted`. Synced to the repo by
+  `labels.yml` workflow (weekly + on labels.yml change).
+- **`FUNDING.yml`** (new) — surfaces a "Sponsor" button on the repo
+  page (GitHub Sponsors).
+- **`.pre-commit-config.yaml`** (new) — local pre-commit hooks that
+  mirror the ci.yml gate: trailing whitespace, EOF, YAML/TOML lint,
+  merge-conflict, large files, private keys, no-commit-to-main,
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`.
+- **`ci.yml` enhancements**:
+  - `clippy` now runs with `--all-targets` (catches test/bench lints).
+  - `smoke-test` now has a 15-min timeout.
+  - New `msrv` job verifies the workspace builds on Rust 1.82.
+  - New `coverage` job (informational, main-only) generates
+    `lcov.info` via `cargo-llvm-cov` and uploads to Codecov.
+  - New `doc` job builds `cargo doc --no-deps` with
+    `RUSTDOCFLAGS="-D warnings"`.
+- **`test.yml` enhancements**:
+  - Triggered on `pull_request` (was: main-only). Every PR now runs
+    the full nextest matrix.
+  - Matrix now includes `windows-latest` (was: ubuntu + macos only).
+
+### Changed — Repository Hygiene
+
+- **Dependabot groups** — `dependabot.yml` now groups all cargo
+  patches into a single weekly PR (with separate major-bump group),
+  and groups all GitHub Actions updates similarly. Reduces PR
+  noise from 3-5/week to 1-2/week.
+- **Removed `[patch.crates-io]` from `Cargo.toml`** — workspace
+  members are auto-resolved via `members`, and the explicit patches
+  blocked `cargo publish`. This is a prerequisite for `publish.yml`.
+
+### Added — Issue/PR Workflow
+
+- **30+ standardized issue labels** — `priority: critical/high/medium/low`,
+  `area: ai/agent/tui/sdk/cli/ci/docs/extensions/security`,
+  `status: needs-triage/in-progress/review/blocked`,
+  `type: regression/performance/refactor/breaking-change`,
+  `provider: anthropic/openai/google/other`, plus `good first issue`,
+  `help wanted`, `dependencies`, `release`.
+
 ## [0.30.0] - 2026-06-06
 
 ### Changed — oxi-agent
