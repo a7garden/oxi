@@ -46,7 +46,7 @@ jobs:
             archive_ext: zip
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -83,7 +83,7 @@ jobs:
           7z a ../../../oxi-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
         shell: pwsh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: oxi-${{ matrix.target }}
           path: oxi-${{ matrix.target }}.${{ matrix.archive_ext }}
