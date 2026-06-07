@@ -114,14 +114,14 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         # SPDX/CycloneDX SBOM for compliance with supply-chain transparency
         # frameworks (US EO 14028, EU CRA, etc.).
-        working-directory: artifacts
+        # Run from repo root (where Cargo.toml lives), then copy output to artifacts/.
         run: |
           cargo install --locked cargo-cyclonedx --version "^0.5"
           cargo cyclonedx --format json --override-filename oxi --spec-version 1.5 \
             || cargo cyclonedx --format json --override-filename oxi
           # cargo-cyclonedx writes to target/ by default; relocate.
-          find . -maxdepth 4 -name 'oxi.cdx.json' -exec cp {} . \;
-          ls -la oxi.cdx.json || echo "::warning::SBOM generation failed; continuing without."
+          find . -maxdepth 5 -name 'oxi.cdx.json' -exec cp {} artifacts/ \;
+          ls -la artifacts/oxi.cdx.json || echo "::warning::SBOM generation failed; continuing without."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
