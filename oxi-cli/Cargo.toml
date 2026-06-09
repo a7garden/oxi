@@ -26,7 +26,8 @@ oxi-agent = { version = "0.31.1", path = "../oxi-agent" }
 oxi-sdk = { version = "0.31.1", path = "../oxi-sdk" }
 oxi-tui = { version = "0.31.1", path = "../oxi-tui" }
 
-# Async runtime
+# Async
+async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 

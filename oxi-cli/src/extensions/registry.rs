@@ -24,9 +24,7 @@ use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
 type ToolType = dyn oxi_agent::AgentTool;
@@ -831,6 +829,7 @@ struct WrappedTool {
     runner_state: Arc<RwLock<RunnerState>>,
 }
 
+#[async_trait::async_trait]
 impl oxi_agent::AgentTool for WrappedTool {
     fn name(&self) -> &str {
         self.inner.name()
@@ -844,14 +843,13 @@ impl oxi_agent::AgentTool for WrappedTool {
     fn parameters_schema(&self) -> Value {
         self.inner.parameters_schema()
     }
-    fn execute<'a>(
-        &'a self,
-        tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        tool_call_id: &str,
         params: Value,
         signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        ctx: &'a oxi_agent::ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, oxi_agent::ToolError>> + Send + 'a>>
-    {
-        Box::pin(async move { self.inner.execute(tool_call_id, params, signal, ctx).await })
+        ctx: &oxi_agent::ToolContext,
+    ) -> Result<AgentToolResult, oxi_agent::ToolError> {
+        self.inner.execute(tool_call_id, params, signal, ctx).await
     }
 }
