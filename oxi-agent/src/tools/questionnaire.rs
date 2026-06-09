@@ -250,24 +250,24 @@ impl AgentTool for QuestionnaireTool {
         // 1. Parse and validate
         let questions = parse_questions(&params)?;
 
-            // 2. Create oneshot channel
-            let (tx, rx) = oneshot::channel();
+        // 2. Create oneshot channel
+        let (tx, rx) = oneshot::channel();
 
-            // 3. Store in bridge — TUI polls it on the main thread
-            if !self.bridge.set(PendingQuestionnaire {
-                questions,
-                responder: tx,
-            }) {
-                return Ok(AgentToolResult::error(
-                    "Another questionnaire is already pending",
-                ));
-            }
+        // 3. Store in bridge — TUI polls it on the main thread
+        if !self.bridge.set(PendingQuestionnaire {
+            questions,
+            responder: tx,
+        }) {
+            return Ok(AgentToolResult::error(
+                "Another questionnaire is already pending",
+            ));
+        }
 
-            // 4. Wait for user response — handle abort via tokio::select!
-            let result = select_with_abort(rx, signal, &self.bridge).await;
+        // 4. Wait for user response — handle abort via tokio::select!
+        let result = select_with_abort(rx, signal, &self.bridge).await;
 
-            // 5. Format result
-            result
+        // 5. Format result
+        result
     }
 }
 

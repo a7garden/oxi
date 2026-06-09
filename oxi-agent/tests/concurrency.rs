@@ -1,10 +1,10 @@
 //! Concurrency tests for SharedState and ToolRegistry.
 //! Verifies thread-safety of shared mutable state under concurrent access.
 
+use async_trait::async_trait;
 use oxi_agent::AgentTool;
 use oxi_agent::state::SharedState;
 use oxi_agent::tools::ToolRegistry;
-use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::thread;

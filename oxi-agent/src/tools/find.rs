@@ -358,55 +358,55 @@ impl AgentTool for FindTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path = params
-                .get("path")
-                .and_then(|v: &Value| v.as_str())
-                .ok_or_else(|| "Missing required parameter: path".to_string())?;
+            .get("path")
+            .and_then(|v: &Value| v.as_str())
+            .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-            let name = params.get("name").and_then(|v: &Value| v.as_str());
-            let file_type = params.get("type").and_then(|v: &Value| v.as_str());
-            let max_depth = params
-                .get("max_depth")
-                .and_then(|v: &Value| v.as_u64())
-                .map(|d| d as usize);
-            let max_results = params
-                .get("max_results")
-                .and_then(|v: &Value| v.as_u64())
-                .unwrap_or(100) as usize;
+        let name = params.get("name").and_then(|v: &Value| v.as_str());
+        let file_type = params.get("type").and_then(|v: &Value| v.as_str());
+        let max_depth = params
+            .get("max_depth")
+            .and_then(|v: &Value| v.as_u64())
+            .map(|d| d as usize);
+        let max_results = params
+            .get("max_results")
+            .and_then(|v: &Value| v.as_u64())
+            .unwrap_or(100) as usize;
 
-            // Parse exclude patterns
-            let exclude: Vec<String> = params
-                .get("exclude")
-                .and_then(|v: &Value| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
+        // Parse exclude patterns
+        let exclude: Vec<String> = params
+            .get("exclude")
+            .and_then(|v: &Value| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
 
-            let follow_symlinks = params
-                .get("follow_symlinks")
-                .and_then(|v: &Value| v.as_bool())
-                .unwrap_or(false);
+        let follow_symlinks = params
+            .get("follow_symlinks")
+            .and_then(|v: &Value| v.as_bool())
+            .unwrap_or(false);
 
-            // Use root_dir if set, else ctx.root()
-            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-            match Self::find_impl(
-                root,
-                path,
-                name,
-                file_type,
-                max_depth,
-                max_results,
-                &exclude,
-                follow_symlinks,
-            )
-            .await
-            {
-                Ok(output) => Ok(AgentToolResult::success(output)),
-                Err(e) => Ok(AgentToolResult::error(e)),
-            }
+        match Self::find_impl(
+            root,
+            path,
+            name,
+            file_type,
+            max_depth,
+            max_results,
+            &exclude,
+            follow_symlinks,
+        )
+        .await
+        {
+            Ok(output) => Ok(AgentToolResult::success(output)),
+            Err(e) => Ok(AgentToolResult::error(e)),
+        }
     }
 }
 

@@ -2,9 +2,9 @@
 /// Agent tools system
 /// This module provides the tool abstraction layer and built-in tools.
 use crate::types::ToolDefinition;
+use async_trait::async_trait;
 use serde_json::Value;
 use std::fmt;
-use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::oneshot;

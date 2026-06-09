@@ -542,24 +542,24 @@ impl AgentTool for BashTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let command = params
-                .get("command")
-                .and_then(|v: &Value| v.as_str())
-                .ok_or_else(|| "Missing required parameter: command".to_string())?;
+            .get("command")
+            .and_then(|v: &Value| v.as_str())
+            .ok_or_else(|| "Missing required parameter: command".to_string())?;
 
-            let cwd = params.get("cwd").and_then(|v: &Value| v.as_str());
-            let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
-            let env = params.get("env").and_then(|v: &Value| v.as_object());
+        let cwd = params.get("cwd").and_then(|v: &Value| v.as_str());
+        let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
+        let env = params.get("env").and_then(|v: &Value| v.as_object());
 
-            let progress_cb = self
-                .progress_callback
-                .lock()
-                .expect("progress callback lock poisoned")
-                .clone();
+        let progress_cb = self
+            .progress_callback
+            .lock()
+            .expect("progress callback lock poisoned")
+            .clone();
 
-            // Use root_dir if set, else ctx.root()
-            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-            Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
+        Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
     }
 
     fn on_progress(&self, callback: ProgressCallback) {

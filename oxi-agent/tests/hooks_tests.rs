@@ -2,11 +2,11 @@
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use oxi_agent::{
         AgentLoopConfig, SharedState,
         tools::{AgentTool, AgentToolResult, ToolContext, ToolRegistry},
     };
-    use async_trait::async_trait;
     use oxi_ai::CompactionStrategy;
     use std::path::PathBuf;
 

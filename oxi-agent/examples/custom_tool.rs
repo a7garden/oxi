@@ -2,8 +2,8 @@
 //!
 //! Run with: cargo run -p oxi-agent --example custom_tool
 
-use oxi_agent::{AgentTool, AgentToolResult, ToolContext};
 use async_trait::async_trait;
+use oxi_agent::{AgentTool, AgentToolResult, ToolContext};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 

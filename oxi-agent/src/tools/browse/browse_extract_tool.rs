@@ -122,30 +122,30 @@ impl AgentTool for BrowseExtractTool {
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let url = params["url"]
-                .as_str()
-                .ok_or_else(|| "Missing required parameter: url".to_string())?;
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: url".to_string())?;
 
-            let selector = params["selector"]
-                .as_str()
-                .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+        let selector = params["selector"]
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: selector".to_string())?;
 
-            let extract = params["extract"].as_str().unwrap_or("text");
-            let all = params["all"].as_bool().unwrap_or(true);
-            let timeout_secs = params["timeout"]
-                .as_u64()
-                .unwrap_or(self.config.page_timeout_secs);
+        let extract = params["extract"].as_str().unwrap_or("text");
+        let all = params["all"].as_bool().unwrap_or(true);
+        let timeout_secs = params["timeout"]
+            .as_u64()
+            .unwrap_or(self.config.page_timeout_secs);
 
-            tracing::info!(url = %url, selector = %selector, extract = %extract, "extracting page data");
+        tracing::info!(url = %url, selector = %selector, extract = %extract, "extracting page data");
 
-            // Wrap the entire operation in a timeout
-            let output = tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs),
-                self.extract_from_new_tab(url, selector, extract, all),
-            )
-            .await
-            .map_err(|_| format!("Extract timed out after {}s", timeout_secs))??;
+        // Wrap the entire operation in a timeout
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            self.extract_from_new_tab(url, selector, extract, all),
+        )
+        .await
+        .map_err(|_| format!("Extract timed out after {}s", timeout_secs))??;
 
-            Ok(output)
+        Ok(output)
     }
 }
 

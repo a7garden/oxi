@@ -216,27 +216,27 @@ impl AgentTool for WriteTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path = params
-                .get("path")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "Missing required parameter: path".to_string())?;
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-            let content = params
-                .get("content")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "Missing required parameter: content".to_string())?;
+        let content = params
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required parameter: content".to_string())?;
 
-            let append = params
-                .get("append")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+        let append = params
+            .get("append")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-            // Use root_dir if set, else ctx.root()
-            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-            match Self::write_file_impl(root, path, content, append).await {
-                Ok(msg) => Ok(AgentToolResult::success(msg)),
-                Err(e) => Ok(AgentToolResult::error(e)),
-            }
+        match Self::write_file_impl(root, path, content, append).await {
+            Ok(msg) => Ok(AgentToolResult::success(msg)),
+            Err(e) => Ok(AgentToolResult::error(e)),
+        }
     }
 }
 

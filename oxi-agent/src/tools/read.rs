@@ -307,55 +307,55 @@ impl AgentTool for ReadTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path_str = params
-                .get("path")
-                .and_then(|v: &Value| v.as_str())
-                .ok_or_else(|| "Missing required parameter: path".to_string())?;
+            .get("path")
+            .and_then(|v: &Value| v.as_str())
+            .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-            let offset = params
-                .get("offset")
-                .and_then(|v| v.as_u64())
-                .map(|n| n as usize);
+        let offset = params
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
 
-            let limit = params
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .map(|n| n as usize);
+        let limit = params
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
 
-            // Security: validate path with PathGuard (use root_dir if set, else ctx)
-            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-            let guard = PathGuard::new(root);
-            let validated = guard
-                .validate_traversal(Path::new(path_str))
-                .map_err(|e| e.to_string())?;
-            let path = validated.as_path();
+        // Security: validate path with PathGuard (use root_dir if set, else ctx)
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        let guard = PathGuard::new(root);
+        let validated = guard
+            .validate_traversal(Path::new(path_str))
+            .map_err(|e| e.to_string())?;
+        let path = validated.as_path();
 
-            // Check if path exists and is a directory
-            match fs::metadata(path).await {
-                Ok(meta) if meta.is_dir() => {
-                    return Err("Cannot read a directory, use read_dir instead".to_string());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(format!("File not found: {}", path.display()));
-                }
-                Err(e) => {
-                    return Err(format!("Cannot access file: {}", e));
-                }
-                _ => {}
+        // Check if path exists and is a directory
+        match fs::metadata(path).await {
+            Ok(meta) if meta.is_dir() => {
+                return Err("Cannot read a directory, use read_dir instead".to_string());
             }
-
-            let progress_cb = self
-                .progress_callback
-                .lock()
-                .expect("progress callback lock poisoned")
-                .clone();
-
-            // Check if it's an image file
-            if Self::image_mime_type(path).is_some() {
-                return Self::read_image(path, &progress_cb).await;
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(format!("File not found: {}", path.display()));
             }
+            Err(e) => {
+                return Err(format!("Cannot access file: {}", e));
+            }
+            _ => {}
+        }
 
-            // Otherwise, read as text
-            Self::read_text(path, offset, limit, &progress_cb).await
+        let progress_cb = self
+            .progress_callback
+            .lock()
+            .expect("progress callback lock poisoned")
+            .clone();
+
+        // Check if it's an image file
+        if Self::image_mime_type(path).is_some() {
+            return Self::read_image(path, &progress_cb).await;
+        }
+
+        // Otherwise, read as text
+        Self::read_text(path, offset, limit, &progress_cb).await
     }
 
     fn on_progress(&self, callback: ProgressCallback) {

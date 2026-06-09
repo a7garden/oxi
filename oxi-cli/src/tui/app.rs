@@ -886,6 +886,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                 "[TUI] Worker: received prompt, calling agent.run_with_channel"
                             );
                             tracing::info!("[TUI] Received prompt, starting agent run");
+
+                            // Refresh API key from auth storage before each run.
+                            // This ensures a key entered via the provider overlay
+                            // mid-session is picked up without restarting.
+                            if let Err(e) = session_handle.refresh_api_key() {
+                                tracing::warn!("[TUI] Failed to refresh API key: {}", e);
+                            }
+
                             let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
                             let ui_fwd = ui_tx_for_thread.clone();
                             let session_h = session_handle.clone_handle();

@@ -469,6 +469,19 @@ impl AgentSession {
     // Model management
     // ══════════════════════════════════════════════════════════════════
 
+    /// Refresh the API key from auth storage for the current provider.
+    ///
+    /// Call this before sending a prompt to ensure the latest stored key
+    /// is used (e.g. after the user entered a key via the provider overlay).
+    pub fn refresh_api_key(&self) -> Result<()> {
+        let model_id = self.model_id();
+        let parts: Vec<&str> = model_id.split('/').collect();
+        let provider = parts.first().map(|s| s.to_string()).unwrap_or_default();
+        let api_key = crate::store::auth_storage::shared_auth_storage().get_api_key(&provider);
+        self.agent.refresh_api_key(api_key);
+        Ok(())
+    }
+
     /// Switch model mid-conversation.
     pub fn set_model(&self, model_id: &str) -> Result<()> {
         let parts: Vec<&str> = model_id.split('/').collect();

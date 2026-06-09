@@ -386,64 +386,64 @@ impl AgentTool for GrepTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let pattern = params
-                .get("pattern")
-                .and_then(|v: &Value| v.as_str())
-                .ok_or_else(|| "Missing required parameter: pattern".to_string())?;
+            .get("pattern")
+            .and_then(|v: &Value| v.as_str())
+            .ok_or_else(|| "Missing required parameter: pattern".to_string())?;
 
-            let path = params
-                .get("path")
-                .and_then(|v: &Value| v.as_str())
-                .unwrap_or(".");
+        let path = params
+            .get("path")
+            .and_then(|v: &Value| v.as_str())
+            .unwrap_or(".");
 
-            let case_insensitive = params
-                .get("case_insensitive")
-                .and_then(|v: &Value| v.as_bool())
-                .unwrap_or(false);
+        let case_insensitive = params
+            .get("case_insensitive")
+            .and_then(|v: &Value| v.as_bool())
+            .unwrap_or(false);
 
-            let literal = params
-                .get("literal")
-                .and_then(|v: &Value| v.as_bool())
-                .unwrap_or(false);
+        let literal = params
+            .get("literal")
+            .and_then(|v: &Value| v.as_bool())
+            .unwrap_or(false);
 
-            let context = params
-                .get("context")
-                .and_then(|v: &Value| v.as_u64())
-                .unwrap_or(0) as usize;
+        let context = params
+            .get("context")
+            .and_then(|v: &Value| v.as_u64())
+            .unwrap_or(0) as usize;
 
-            let include = params.get("include").and_then(|v: &Value| v.as_str());
+        let include = params.get("include").and_then(|v: &Value| v.as_str());
 
-            let max_results = params
-                .get("max_results")
-                .and_then(|v: &Value| v.as_u64())
-                .unwrap_or(100) as usize;
+        let max_results = params
+            .get("max_results")
+            .and_then(|v: &Value| v.as_u64())
+            .unwrap_or(100) as usize;
 
-            // Use root_dir if set, else ctx.root()
-            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-            match Self::grep_impl(
-                root,
-                pattern,
-                path,
-                case_insensitive,
-                literal,
-                context,
-                context,
-                include,
-                max_results,
-            )
-            .await
-            {
-                Ok((output, lines_truncated)) => {
-                    let mut result = AgentToolResult::success(output);
-                    if lines_truncated {
-                        result.metadata = Some(json!({
-                            "lines_truncated": true,
-                            "message": "Some lines truncated to 500 chars. Use read tool to see full lines."
-                        }));
-                    }
-                    Ok(result)
+        match Self::grep_impl(
+            root,
+            pattern,
+            path,
+            case_insensitive,
+            literal,
+            context,
+            context,
+            include,
+            max_results,
+        )
+        .await
+        {
+            Ok((output, lines_truncated)) => {
+                let mut result = AgentToolResult::success(output);
+                if lines_truncated {
+                    result.metadata = Some(json!({
+                        "lines_truncated": true,
+                        "message": "Some lines truncated to 500 chars. Use read tool to see full lines."
+                    }));
                 }
-                Err(e) => Ok(AgentToolResult::error(e)),
+                Ok(result)
             }
+            Err(e) => Ok(AgentToolResult::error(e)),
+        }
     }
 }

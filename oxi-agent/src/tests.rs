@@ -645,13 +645,13 @@ impl crate::tools::AgentTool for EchoTool {
         _ctx: &crate::tools::ToolContext,
     ) -> std::result::Result<crate::tools::AgentToolResult, String> {
         let msg = params
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("<no message>");
-            Ok(crate::tools::AgentToolResult::success(format!(
-                "Echo: {}",
-                msg
-            )))
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<no message>");
+        Ok(crate::tools::AgentToolResult::success(format!(
+            "Echo: {}",
+            msg
+        )))
     }
 }
 

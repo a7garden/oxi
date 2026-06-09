@@ -255,457 +255,452 @@ impl AgentTool for BrowseSessionTool {
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let action = params["action"]
-                .as_str()
-                .ok_or_else(|| "Missing required parameter: action".to_string())?;
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: action".to_string())?;
 
-            let url = params["url"].as_str();
-            let selector = params["selector"].as_str();
-            let value = params["value"].as_str();
-            let combo = params["combo"].as_str();
-            let pixels = params["pixels"].as_u64().unwrap_or(300);
-            let javascript = params["javascript"].as_str();
-            let format = params["format"].as_str().unwrap_or("markdown");
-            let timeout_ms = params["timeout_ms"]
-                .as_u64()
-                .unwrap_or(self.config.default_wait_timeout_ms);
-            let width = params["width"]
-                .as_u64()
-                .unwrap_or(self.config.screenshot_width as u64) as u32;
-            let from_selector = params["from_selector"].as_str();
-            let to_selector = params["to_selector"].as_str();
-            let file_path = params["file_path"].as_str();
+        let url = params["url"].as_str();
+        let selector = params["selector"].as_str();
+        let value = params["value"].as_str();
+        let combo = params["combo"].as_str();
+        let pixels = params["pixels"].as_u64().unwrap_or(300);
+        let javascript = params["javascript"].as_str();
+        let format = params["format"].as_str().unwrap_or("markdown");
+        let timeout_ms = params["timeout_ms"]
+            .as_u64()
+            .unwrap_or(self.config.default_wait_timeout_ms);
+        let width = params["width"]
+            .as_u64()
+            .unwrap_or(self.config.screenshot_width as u64) as u32;
+        let from_selector = params["from_selector"].as_str();
+        let to_selector = params["to_selector"].as_str();
+        let file_path = params["file_path"].as_str();
 
-            tracing::info!(action = %action, "browse_session action");
+        tracing::info!(action = %action, "browse_session action");
 
-            self.touch().await;
+        self.touch().await;
 
-            match action {
-                // ── Lifecycle ────────────────────────────────────────────
-                "open" => {
-                    let mut slot = self.tab.lock().await;
-                    // If a session is already open, close it first
-                    if let Some(old_guard) = slot.take() {
-                        tracing::warn!("browse_session: closing previous session on re-open");
-                        old_guard.close().await;
+        match action {
+            // ── Lifecycle ────────────────────────────────────────────
+            "open" => {
+                let mut slot = self.tab.lock().await;
+                // If a session is already open, close it first
+                if let Some(old_guard) = slot.take() {
+                    tracing::warn!("browse_session: closing previous session on re-open");
+                    old_guard.close().await;
+                }
+                let raw_tab = self
+                    .engine
+                    .new_tab()
+                    .await
+                    .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+
+                // Store tab_id so the agent loop can include it in
+                // ToolExecutionUpdate events.
+                let tab_id = raw_tab.tab_id();
+                *self.tab_id_slot.lock().lock() = Some(tab_id);
+
+                // Register progress callbacks on the new tab via the
+                // engine's registry. BrowserEvents for this tab will
+                // flow through to ToolExecutionUpdate.
+                self.callbacks
+                    .register_on_registry(tab_id, self.engine.callback_registry().as_ref());
+
+                let guard = TabGuard::new(raw_tab);
+                *slot = Some(guard);
+                Ok(json_ok())
+            }
+
+            "close" => {
+                let mut slot = self.tab.lock().await;
+                match slot.take() {
+                    Some(guard) => {
+                        guard.close().await;
+                        // Clear the tab_id slot
+                        *self.tab_id_slot.lock().lock() = None;
+                        Ok(json_ok())
                     }
-                    let raw_tab = self
-                        .engine
-                        .new_tab()
+                    None => Ok(json_error("no active session to close")),
+                }
+            }
+
+            // ── Navigation ──────────────────────────────────────────
+            "goto" => {
+                self.check_idle_timeout().await?;
+                let url = url.ok_or_else(|| "Missing required parameter: url".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let page = tab.goto(url).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                    "status_code": page.status,
+                }))))
+            }
+
+            "back" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let _ = tab.evaluate("history.back()").await;
+                let page = tab.content().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                }))))
+            }
+
+            "forward" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let _ = tab.evaluate("history.forward()").await;
+                let page = tab.content().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                }))))
+            }
+
+            "reload" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let _ = tab.evaluate("location.reload()").await;
+                let page = tab.content().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                }))))
+            }
+
+            // ── DOM interaction ─────────────────────────────────────
+            "click" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.click(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "fill" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let val = value.ok_or_else(|| "Missing required parameter: value".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.fill(sel, val).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "type" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let val = value.ok_or_else(|| "Missing required parameter: value".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.type_(sel, val).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "clear" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.clear(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "press" => {
+                self.check_idle_timeout().await?;
+                let c = combo.ok_or_else(|| "Missing required parameter: combo".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.press(c).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "select" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let val = value.ok_or_else(|| "Missing required parameter: value".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.select_option(sel, val).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "check" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.check(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "uncheck" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.uncheck(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "scroll" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.scroll(0.0, pixels as f64).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            // ── Wait ────────────────────────────────────────────────
+            "wait_for" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.wait_for(sel, timeout_ms).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            // ── Read ────────────────────────────────────────────────
+            "content" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let page = tab.content().await.map_err(browser_err)?;
+
+                let content = match format {
+                    "html" => {
+                        if let Some(sel) = selector {
+                            tab.query_all(sel).await.map_err(browser_err)?.join("\n\n")
+                        } else {
+                            page.html.clone()
+                        }
+                    }
+                    "links" => {
+                        let links = if let Some(sel) = selector {
+                            let js = helpers::js_links_within(sel);
+                            let value = tab.evaluate(&js).await.map_err(browser_err)?;
+                            helpers::parse_link_values(value)
+                        } else {
+                            helpers::extract_links(tab)
+                                .await
+                                .map_err(|e: ToolError| e)?
+                        };
+                        helpers::format_links(&links)
+                    }
+                    "text" => {
+                        if let Some(sel) = selector {
+                            tab.query_all(sel).await.map_err(browser_err)?.join("\n")
+                        } else {
+                            page.markdown.clone()
+                        }
+                    }
+                    _ => {
+                        // "markdown" (default)
+                        if let Some(sel) = selector {
+                            tab.query_all(sel).await.map_err(browser_err)?.join("\n\n")
+                        } else {
+                            page.markdown.clone()
+                        }
+                    }
+                };
+
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                    "content": content,
+                }))))
+            }
+
+            "query_all" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let results = tab.query_all(sel).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "results": results,
+                }))))
+            }
+
+            "extract_links" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+
+                let links = if let Some(sel) = selector {
+                    let js = helpers::js_links_within(sel);
+                    let value = tab.evaluate(&js).await.map_err(browser_err)?;
+                    helpers::parse_link_values(value)
+                } else {
+                    helpers::extract_links(tab)
                         .await
-                        .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+                        .map_err(|e: ToolError| e)?
+                };
 
-                    // Store tab_id so the agent loop can include it in
-                    // ToolExecutionUpdate events.
-                    let tab_id = raw_tab.tab_id();
-                    *self.tab_id_slot.lock().lock() = Some(tab_id);
+                let json_links: Vec<Value> = links
+                    .iter()
+                    .map(|(text, href)| json!({ "text": text, "href": href }))
+                    .collect();
 
-                    // Register progress callbacks on the new tab via the
-                    // engine's registry. BrowserEvents for this tab will
-                    // flow through to ToolExecutionUpdate.
-                    self.callbacks
-                        .register_on_registry(tab_id, self.engine.callback_registry().as_ref());
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "links": json_links,
+                }))))
+            }
 
-                    let guard = TabGuard::new(raw_tab);
-                    *slot = Some(guard);
-                    Ok(json_ok())
-                }
+            // ── Evaluate ────────────────────────────────────────────
+            "evaluate" => {
+                self.check_idle_timeout().await?;
+                let js = javascript
+                    .ok_or_else(|| "Missing required parameter: javascript".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let result_val = tab.evaluate(js).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "result": result_val,
+                }))))
+            }
 
-                "close" => {
-                    let mut slot = self.tab.lock().await;
-                    match slot.take() {
-                        Some(guard) => {
-                            guard.close().await;
-                            // Clear the tab_id slot
-                            *self.tab_id_slot.lock().lock() = None;
-                            Ok(json_ok())
-                        }
-                        None => Ok(json_error("no active session to close")),
-                    }
-                }
+            "evaluate_await" => {
+                self.check_idle_timeout().await?;
+                let js = javascript
+                    .ok_or_else(|| "Missing required parameter: javascript".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let result_val = tab.evaluate_await(js).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "result": result_val,
+                }))))
+            }
 
-                // ── Navigation ──────────────────────────────────────────
-                "goto" => {
-                    self.check_idle_timeout().await?;
-                    let url = url.ok_or_else(|| "Missing required parameter: url".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let page = tab.goto(url).await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "url": page.url,
-                        "title": page.title,
-                        "status_code": page.status,
-                    }))))
-                }
+            // ── Screenshot ──────────────────────────────────────────
+            "screenshot" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let png = tab.screenshot(width).await.map_err(browser_err)?;
+                let size_bytes = png.len();
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
+                let img = oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));
 
-                "back" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let _ = tab.evaluate("history.back()").await;
-                    let page = tab.content().await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "url": page.url,
-                        "title": page.title,
-                    }))))
-                }
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "size_bytes": size_bytes,
+                })))
+                .with_content_blocks(vec![img]))
+            }
 
-                "forward" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let _ = tab.evaluate("history.forward()").await;
-                    let page = tab.content().await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "url": page.url,
-                        "title": page.title,
-                    }))))
-                }
+            // ── Extended DOM actions ──────────────────────────────
+            "scroll_into_view" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.scroll_into_view(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
 
-                "reload" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let _ = tab.evaluate("location.reload()").await;
-                    let page = tab.content().await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "url": page.url,
-                        "title": page.title,
-                    }))))
-                }
+            "hover" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.hover(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
 
-                // ── DOM interaction ─────────────────────────────────────
-                "click" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.click(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
+            "double_click" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.double_click(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
 
-                "fill" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let val =
-                        value.ok_or_else(|| "Missing required parameter: value".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.fill(sel, val).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
+            "right_click" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.right_click(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
 
-                "type" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let val =
-                        value.ok_or_else(|| "Missing required parameter: value".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.type_(sel, val).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
+            "drag" => {
+                self.check_idle_timeout().await?;
+                let from = from_selector
+                    .ok_or_else(|| "Missing required parameter: from_selector".to_string())?;
+                let to = to_selector
+                    .ok_or_else(|| "Missing required parameter: to_selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.drag(from, to).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
 
-                "clear" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.clear(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
+            "upload_file" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let path =
+                    file_path.ok_or_else(|| "Missing required parameter: file_path".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.upload_file(sel, path).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
 
-                "press" => {
-                    self.check_idle_timeout().await?;
-                    let c = combo.ok_or_else(|| "Missing required parameter: combo".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.press(c).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
+            "get_value" => {
+                self.check_idle_timeout().await?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let result_val = tab.get_value(sel).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "value": result_val,
+                }))))
+            }
 
-                "select" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let val =
-                        value.ok_or_else(|| "Missing required parameter: value".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.select_option(sel, val).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "check" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.check(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "uncheck" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.uncheck(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "scroll" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.scroll(0.0, pixels as f64).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                // ── Wait ────────────────────────────────────────────────
-                "wait_for" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.wait_for(sel, timeout_ms).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                // ── Read ────────────────────────────────────────────────
-                "content" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let page = tab.content().await.map_err(browser_err)?;
-
-                    let content = match format {
-                        "html" => {
-                            if let Some(sel) = selector {
-                                tab.query_all(sel).await.map_err(browser_err)?.join("\n\n")
-                            } else {
-                                page.html.clone()
-                            }
-                        }
-                        "links" => {
-                            let links = if let Some(sel) = selector {
-                                let js = helpers::js_links_within(sel);
-                                let value = tab.evaluate(&js).await.map_err(browser_err)?;
-                                helpers::parse_link_values(value)
-                            } else {
-                                helpers::extract_links(tab)
-                                    .await
-                                    .map_err(|e: ToolError| e)?
-                            };
-                            helpers::format_links(&links)
-                        }
-                        "text" => {
-                            if let Some(sel) = selector {
-                                tab.query_all(sel).await.map_err(browser_err)?.join("\n")
-                            } else {
-                                page.markdown.clone()
-                            }
-                        }
-                        _ => {
-                            // "markdown" (default)
-                            if let Some(sel) = selector {
-                                tab.query_all(sel).await.map_err(browser_err)?.join("\n\n")
-                            } else {
-                                page.markdown.clone()
-                            }
-                        }
-                    };
-
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "url": page.url,
-                        "title": page.title,
-                        "content": content,
-                    }))))
-                }
-
-                "query_all" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let results = tab.query_all(sel).await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "results": results,
-                    }))))
-                }
-
-                "extract_links" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-
-                    let links = if let Some(sel) = selector {
-                        let js = helpers::js_links_within(sel);
-                        let value = tab.evaluate(&js).await.map_err(browser_err)?;
-                        helpers::parse_link_values(value)
-                    } else {
-                        helpers::extract_links(tab)
-                            .await
-                            .map_err(|e: ToolError| e)?
-                    };
-
-                    let json_links: Vec<Value> = links
-                        .iter()
-                        .map(|(text, href)| json!({ "text": text, "href": href }))
-                        .collect();
-
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "links": json_links,
-                    }))))
-                }
-
-                // ── Evaluate ────────────────────────────────────────────
-                "evaluate" => {
-                    self.check_idle_timeout().await?;
-                    let js = javascript
-                        .ok_or_else(|| "Missing required parameter: javascript".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let result_val = tab.evaluate(js).await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "result": result_val,
-                    }))))
-                }
-
-                "evaluate_await" => {
-                    self.check_idle_timeout().await?;
-                    let js = javascript
-                        .ok_or_else(|| "Missing required parameter: javascript".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let result_val = tab.evaluate_await(js).await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "result": result_val,
-                    }))))
-                }
-
-                // ── Screenshot ──────────────────────────────────────────
-                "screenshot" => {
-                    self.check_idle_timeout().await?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let png = tab.screenshot(width).await.map_err(browser_err)?;
-                    let size_bytes = png.len();
-                    let b64 =
-                        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
-                    let img =
-                        oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));
-
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "size_bytes": size_bytes,
-                    })))
-                    .with_content_blocks(vec![img]))
-                }
-
-                // ── Extended DOM actions ──────────────────────────────
-                "scroll_into_view" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.scroll_into_view(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "hover" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.hover(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "double_click" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.double_click(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "right_click" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.right_click(sel).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "drag" => {
-                    self.check_idle_timeout().await?;
-                    let from = from_selector
-                        .ok_or_else(|| "Missing required parameter: from_selector".to_string())?;
-                    let to = to_selector
-                        .ok_or_else(|| "Missing required parameter: to_selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.drag(from, to).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "upload_file" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let path = file_path
-                        .ok_or_else(|| "Missing required parameter: file_path".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    tab.upload_file(sel, path).await.map_err(browser_err)?;
-                    Ok(json_ok())
-                }
-
-                "get_value" => {
-                    self.check_idle_timeout().await?;
-                    let sel = selector
-                        .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                    let slot = self.tab.lock().await;
-                    let tab = require_tab(&slot)?;
-                    let result_val = tab.get_value(sel).await.map_err(browser_err)?;
-                    Ok(AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "value": result_val,
-                    }))))
-                }
-
-                _ => Err(format!(
-                    "Unknown action: '{}'. Valid actions: open, goto, back, forward, reload, \
+            _ => Err(format!(
+                "Unknown action: '{}'. Valid actions: open, goto, back, forward, reload, \
                      click, fill, type, clear, press, select, check, uncheck, scroll, \
                      scroll_into_view, hover, double_click, right_click, drag, upload_file, \
                      wait_for, content, query_all, extract_links, evaluate, evaluate_await, \
                      get_value, screenshot, close",
-                    action
-                )),
-            }
+                action
+            )),
+        }
     }
 }
 

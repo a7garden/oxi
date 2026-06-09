@@ -340,70 +340,70 @@ impl AgentTool for GitHubSearchTool {
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let query = params["query"]
-                .as_str()
-                .ok_or_else(|| "Missing required parameter: query".to_string())?;
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
-            let sort = params["sort"].as_str().unwrap_or("stars");
-            let sort = match sort {
-                "forks" | "updated" => sort,
-                _ => "stars",
-            };
+        let sort = params["sort"].as_str().unwrap_or("stars");
+        let sort = match sort {
+            "forks" | "updated" => sort,
+            _ => "stars",
+        };
 
-            let order = params["order"].as_str().unwrap_or("desc");
-            let order = match order {
-                "asc" => "asc",
-                _ => "desc",
-            };
+        let order = params["order"].as_str().unwrap_or("desc");
+        let order = match order {
+            "asc" => "asc",
+            _ => "desc",
+        };
 
-            let language = params["language"].as_str();
+        let language = params["language"].as_str();
 
-            let limit = params["limit"]
-                .as_u64()
-                .unwrap_or(DEFAULT_MAX_RESULTS as u64)
-                .min(MAX_RESULTS as u64) as usize;
+        let limit = params["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_MAX_RESULTS as u64)
+            .min(MAX_RESULTS as u64) as usize;
 
-            let (total, results) = search_github_repos(query, sort, order, limit, language).await?;
+        let (total, results) = search_github_repos(query, sort, order, limit, language).await?;
 
-            if results.is_empty() {
-                return Ok(AgentToolResult::success(format!(
-                    "No GitHub repositories found for: {}",
-                    query
-                )));
-            }
+        if results.is_empty() {
+            return Ok(AgentToolResult::success(format!(
+                "No GitHub repositories found for: {}",
+                query
+            )));
+        }
 
-            // Cache results
-            let search_id = self.cache.insert(
-                &format!("github:{}", query),
-                results.iter().map(|r| r.into()).collect(),
-            );
+        // Cache results
+        let search_id = self.cache.insert(
+            &format!("github:{}", query),
+            results.iter().map(|r| r.into()).collect(),
+        );
 
-            let output = format_github_results(total, &results);
+        let output = format_github_results(total, &results);
 
-            let results_json: Vec<Value> = results
-                .iter()
-                .map(|r| {
-                    json!({
-                        "full_name": r.full_name,
-                        "url": r.url,
-                        "description": r.description,
-                        "language": r.language,
-                        "stars": r.stars,
-                        "forks": r.forks,
-                        "open_issues": r.open_issues,
-                        "updated_at": r.updated_at,
-                        "topics": r.topics,
-                        "license": r.license
-                    })
+        let results_json: Vec<Value> = results
+            .iter()
+            .map(|r| {
+                json!({
+                    "full_name": r.full_name,
+                    "url": r.url,
+                    "description": r.description,
+                    "language": r.language,
+                    "stars": r.stars,
+                    "forks": r.forks,
+                    "open_issues": r.open_issues,
+                    "updated_at": r.updated_at,
+                    "topics": r.topics,
+                    "license": r.license
                 })
-                .collect();
+            })
+            .collect();
 
-            Ok(AgentToolResult::success(output).with_metadata(json!({
-                "results": results_json,
-                "query": query,
-                "searchId": search_id,
-                "totalCount": total,
-                "resultCount": results.len()
-            })))
+        Ok(AgentToolResult::success(output).with_metadata(json!({
+            "results": results_json,
+            "query": query,
+            "searchId": search_id,
+            "totalCount": total,
+            "resultCount": results.len()
+        })))
     }
 }
 

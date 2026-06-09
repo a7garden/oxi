@@ -811,37 +811,37 @@ impl AgentTool for GitHubTool {
     ) -> Result<AgentToolResult, ToolError> {
         let action = params["action"].as_str().unwrap_or("search");
 
-            match action {
-                "search" => {
-                    let result = gh_search(&params).await?;
-                    // Cache search results
-                    if let Some(query) = params["query"].as_str() {
-                        let kind = params["kind"].as_str().unwrap_or("repos");
-                        let search_id = self.cache.insert(
-                            &format!("github:{}:{}", kind, query),
-                            vec![SearchResult {
-                                title: format!("GitHub {} search: {}", kind, query),
-                                url: String::new(),
-                                snippet: result.output.chars().take(200).collect(),
-                                source: "GitHub".to_string(),
-                                extra: None,
-                            }],
-                        );
-                        return Ok(result.with_metadata(json!({
-                            "searchId": search_id,
-                        })));
-                    }
-                    Ok(result)
+        match action {
+            "search" => {
+                let result = gh_search(&params).await?;
+                // Cache search results
+                if let Some(query) = params["query"].as_str() {
+                    let kind = params["kind"].as_str().unwrap_or("repos");
+                    let search_id = self.cache.insert(
+                        &format!("github:{}:{}", kind, query),
+                        vec![SearchResult {
+                            title: format!("GitHub {} search: {}", kind, query),
+                            url: String::new(),
+                            snippet: result.output.chars().take(200).collect(),
+                            source: "GitHub".to_string(),
+                            extra: None,
+                        }],
+                    );
+                    return Ok(result.with_metadata(json!({
+                        "searchId": search_id,
+                    })));
                 }
-                "issue" => gh_issue(&params).await,
-                "pr" => gh_pr(&params).await,
-                "repo" => gh_repo(&params).await,
-                "run" => gh_run(&params).await,
-                other => Err(format!(
-                    "Unknown action '{}'. Use: search, issue, pr, repo, run",
-                    other
-                )),
+                Ok(result)
             }
+            "issue" => gh_issue(&params).await,
+            "pr" => gh_pr(&params).await,
+            "repo" => gh_repo(&params).await,
+            "run" => gh_run(&params).await,
+            other => Err(format!(
+                "Unknown action '{}'. Use: search, issue, pr, repo, run",
+                other
+            )),
+        }
     }
 }
 

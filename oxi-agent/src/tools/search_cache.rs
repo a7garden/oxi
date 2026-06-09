@@ -143,40 +143,40 @@ impl AgentTool for GetSearchResultsTool {
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let search_id = params["searchId"]
-                .as_str()
-                .ok_or_else(|| "Missing required parameter: searchId".to_string())?;
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: searchId".to_string())?;
 
-            let (query, results) = self
-                .cache
-                .get(search_id)
-                .ok_or_else(|| format!("Search not found for ID: {}", search_id))?;
+        let (query, results) = self
+            .cache
+            .get(search_id)
+            .ok_or_else(|| format!("Search not found for ID: {}", search_id))?;
 
-            let mut output = format!("Cached results for: \"{}\"\n\n", query);
-            for (i, result) in results.iter().enumerate() {
-                output.push_str(&format!(
-                    "{}. **{}**\n   {}\n   {}\n\n",
-                    i + 1,
-                    result.title,
-                    result.url,
-                    result.snippet
-                ));
-            }
+        let mut output = format!("Cached results for: \"{}\"\n\n", query);
+        for (i, result) in results.iter().enumerate() {
+            output.push_str(&format!(
+                "{}. **{}**\n   {}\n   {}\n\n",
+                i + 1,
+                result.title,
+                result.url,
+                result.snippet
+            ));
+        }
 
-            let results_json: Vec<Value> = results
-                .iter()
-                .map(|r| {
-                    json!({
-                        "title": r.title,
-                        "url": r.url,
-                        "snippet": r.snippet,
-                        "source": r.source,
-                    })
+        let results_json: Vec<Value> = results
+            .iter()
+            .map(|r| {
+                json!({
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet,
+                    "source": r.source,
                 })
-                .collect();
+            })
+            .collect();
 
-            Ok(AgentToolResult::success(output).with_metadata(
-                json!({ "results": results_json, "query": query, "searchId": search_id }),
-            ))
+        Ok(AgentToolResult::success(output).with_metadata(
+            json!({ "results": results_json, "query": query, "searchId": search_id }),
+        ))
     }
 }
 

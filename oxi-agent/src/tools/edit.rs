@@ -316,25 +316,25 @@ impl AgentTool for EditTool {
     ) -> Result<AgentToolResult, ToolError> {
         let input = Self::prepare_arguments(&params);
 
-            // Use root_dir if set, else ctx.root()
-            let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-            match Self::apply_edits(root, &input).await {
-                Ok(output) => {
-                    let mut result =
-                        AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
+        match Self::apply_edits(root, &input).await {
+            Ok(output) => {
+                let mut result =
+                    AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
 
-                    // Add metadata with first changed line for editor navigation
-                    if let Some(line) = output.first_changed_line {
-                        result = result.with_metadata(json!({
-                            "firstChangedLine": line,
-                        }));
-                    }
-
-                    Ok(result)
+                // Add metadata with first changed line for editor navigation
+                if let Some(line) = output.first_changed_line {
+                    result = result.with_metadata(json!({
+                        "firstChangedLine": line,
+                    }));
                 }
-                Err(e) => Ok(AgentToolResult::error(e)),
+
+                Ok(result)
             }
+            Err(e) => Ok(AgentToolResult::error(e)),
+        }
     }
 }
 

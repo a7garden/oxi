@@ -9,6 +9,7 @@
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use futures::Stream;
     use oxi_agent::{
         AgentEvent, AgentLoop, AgentLoopConfig, CompactionStrategy, SharedState, ToolExecutionMode,
@@ -25,7 +26,6 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use std::task::{Context as TaskContext, Poll};
-    use async_trait::async_trait;
 
     // ── Mock Providers ────────────────────────────────────────────────────
 

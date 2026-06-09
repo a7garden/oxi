@@ -349,6 +349,13 @@ impl Agent {
         Ok(())
     }
 
+    /// Refresh only the API key without changing model or provider.
+    /// Useful when the user stores a key after the session was already created.
+    pub fn refresh_api_key(&self, api_key: Option<String>) {
+        let mut inner = self.inner_mut();
+        inner.config.api_key = api_key;
+    }
+
     /// Get a handle to the tool registry.
     pub fn tools(&self) -> Arc<ToolRegistry> {
         Arc::clone(&self.tools)

@@ -134,48 +134,48 @@ impl AgentTool for WebSearchTool {
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let query = params["query"]
-                .as_str()
-                .ok_or_else(|| "Missing required parameter: query".to_string())?;
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
-            let engines = params["engines"].as_str().unwrap_or(DEFAULT_ENGINES);
+        let engines = params["engines"].as_str().unwrap_or(DEFAULT_ENGINES);
 
-            let limit = params["limit"]
-                .as_u64()
-                .unwrap_or(DEFAULT_MAX_RESULTS as u64)
-                .min(MAX_RESULTS as u64) as usize;
+        let limit = params["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_MAX_RESULTS as u64)
+            .min(MAX_RESULTS as u64) as usize;
 
-            let results = self.do_search(query, engines, limit).await?;
+        let results = self.do_search(query, engines, limit).await?;
 
-            if results.is_empty() {
-                return Ok(AgentToolResult::success(format!(
-                    "No results found for: {}",
-                    query
-                )));
-            }
+        if results.is_empty() {
+            return Ok(AgentToolResult::success(format!(
+                "No results found for: {}",
+                query
+            )));
+        }
 
-            // Cache results and generate a search ID
-            let search_id = self.cache.insert(query, results.clone());
+        // Cache results and generate a search ID
+        let search_id = self.cache.insert(query, results.clone());
 
-            let output = format_results(&results);
+        let output = format_results(&results);
 
-            let results_json: Vec<Value> = results
-                .iter()
-                .map(|r| {
-                    json!({
-                        "title": r.title,
-                        "url": r.url,
-                        "snippet": r.snippet,
-                        "source": r.source,
-                    })
+        let results_json: Vec<Value> = results
+            .iter()
+            .map(|r| {
+                json!({
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet,
+                    "source": r.source,
                 })
-                .collect();
+            })
+            .collect();
 
-            Ok(AgentToolResult::success(output).with_metadata(json!({
-                "results": results_json,
-                "query": query,
-                "searchId": search_id,
-                "resultCount": results.len()
-            })))
+        Ok(AgentToolResult::success(output).with_metadata(json!({
+            "results": results_json,
+            "query": query,
+            "searchId": search_id,
+            "resultCount": results.len()
+        })))
     }
 }
 

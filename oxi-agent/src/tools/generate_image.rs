@@ -223,71 +223,71 @@ impl AgentTool for GenerateImageTool {
     ) -> Result<AgentToolResult, ToolError> {
         // Parse parameters
         let prompt: String = params
-                .get("prompt")
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required parameter: prompt".to_string())?
+            .to_string();
+
+        if prompt.is_empty() {
+            return Err("Prompt cannot be empty".to_string());
+        }
+
+        if prompt.chars().count() > MAX_PROMPT_LEN {
+            tracing::warn!(
+                "Prompt length {} exceeds recommended max {}",
+                prompt.chars().count(),
+                MAX_PROMPT_LEN
+            );
+        }
+
+        let request = ImageGenerationRequest {
+            prompt: prompt.clone(),
+            model: params
+                .get("model")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| "Missing required parameter: prompt".to_string())?
-                .to_string();
+                .map(String::from),
+            size: params
+                .get("size")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            n: params.get("n").and_then(|v| v.as_u64()).map(|v| v as u32),
+            response_format: Some("b64_json".to_string()),
+        };
 
-            if prompt.is_empty() {
-                return Err("Prompt cannot be empty".to_string());
-            }
-
-            if prompt.chars().count() > MAX_PROMPT_LEN {
-                tracing::warn!(
-                    "Prompt length {} exceeds recommended max {}",
-                    prompt.chars().count(),
-                    MAX_PROMPT_LEN
-                );
-            }
-
-            let request = ImageGenerationRequest {
-                prompt: prompt.clone(),
-                model: params
-                    .get("model")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                size: params
-                    .get("size")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                n: params.get("n").and_then(|v| v.as_u64()).map(|v| v as u32),
-                response_format: Some("b64_json".to_string()),
-            };
-
-            let api_key = env::var("OPENROUTER_API_KEY")
-                .or_else(|_| env::var("OPENAI_API_KEY"))
-                .map_err(|_| {
-                    "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. \
+        let api_key = env::var("OPENROUTER_API_KEY")
+            .or_else(|_| env::var("OPENAI_API_KEY"))
+            .map_err(|_| {
+                "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. \
                      Please set your API key before using the image generation tool."
-                })?;
+            })?;
 
-            let response = self.call_openrouter(&api_key, &request).await?;
+        let response = self.call_openrouter(&api_key, &request).await?;
 
-            if response.images.is_empty() {
-                return Ok(AgentToolResult::success(
-                    "Image generation completed but returned no images.",
-                ));
-            }
+        if response.images.is_empty() {
+            return Ok(AgentToolResult::success(
+                "Image generation completed but returned no images.",
+            ));
+        }
 
-            // Format response for the agent
-            let n_images = response.images.len();
-            let mut output = format!("Generated {} image(s).\n\n", n_images);
+        // Format response for the agent
+        let n_images = response.images.len();
+        let mut output = format!("Generated {} image(s).\n\n", n_images);
 
-            if let Some(ref revised) = response.revised_prompt {
-                output.push_str(&format!("Revised prompt: {}\n\n", revised));
-            }
+        if let Some(ref revised) = response.revised_prompt {
+            output.push_str(&format!("Revised prompt: {}\n\n", revised));
+        }
 
-            for (i, img_data) in response.images.iter().enumerate() {
-                let b64 = general_purpose::STANDARD.encode(img_data);
-                output.push_str(&format!(
-                    "Image {} ({} bytes, base64):\n{}\n\n",
-                    i + 1,
-                    img_data.len(),
-                    b64
-                ));
-            }
+        for (i, img_data) in response.images.iter().enumerate() {
+            let b64 = general_purpose::STANDARD.encode(img_data);
+            output.push_str(&format!(
+                "Image {} ({} bytes, base64):\n{}\n\n",
+                i + 1,
+                img_data.len(),
+                b64
+            ));
+        }
 
-            Ok(AgentToolResult::success(output.trim_end()))
+        Ok(AgentToolResult::success(output.trim_end()))
     }
 }
 
