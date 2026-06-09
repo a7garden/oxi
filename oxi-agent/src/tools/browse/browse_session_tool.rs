@@ -9,10 +9,9 @@ use super::engine::{BrowserEngine, BrowserError};
 use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
 use serde_json::{Value, json};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, oneshot};
@@ -100,6 +99,7 @@ impl BrowseSessionTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for BrowseSessionTool {
     fn name(&self) -> &str {
         "browse_session"
@@ -247,15 +247,14 @@ impl AgentTool for BrowseSessionTool {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let action = params["action"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let action = params["action"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: action".to_string())?;
 
@@ -707,7 +706,6 @@ impl AgentTool for BrowseSessionTool {
                     action
                 )),
             }
-        })
     }
 }
 
@@ -750,6 +748,8 @@ fn browser_err(e: BrowserError) -> ToolError {
 mod tests {
     use super::*;
     use crate::tools::browse::engine::{BrowserError, PageContent};
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     // ── Mock tab for unit tests ─────────────────────────────────

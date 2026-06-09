@@ -4,9 +4,8 @@
 use crate::types::ToolDefinition;
 use serde_json::Value;
 use std::fmt;
-use std::future::Future;
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -163,6 +162,7 @@ pub struct RenderOutput {
 }
 
 /// Core trait for all agent tools
+#[async_trait]
 pub trait AgentTool: Send + Sync {
     /// Tool name (used in function calls)
     fn name(&self) -> &str;
@@ -196,6 +196,7 @@ pub trait AgentTool: Send + Sync {
     /// use serde_json::json;
     /// struct MyTool;
     ///
+    /// #[async_trait]
     /// impl AgentTool for MyTool {
     ///     fn name(&self) -> &str { "my_tool" }
     ///     fn label(&self) -> &str { "My Tool" }
@@ -211,13 +212,13 @@ pub trait AgentTool: Send + Sync {
     ///     }
     /// }
     /// ```
-    fn execute<'a>(
-        &'a self,
-        tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>>;
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError>;
 
     /// Called with progress updates during execution.
     /// Tools can override this to emit streaming updates.

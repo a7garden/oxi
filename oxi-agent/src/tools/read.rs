@@ -6,12 +6,11 @@
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
+use async_trait::async_trait;
 use base64::Engine;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
 use serde_json::{Value, json};
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -262,6 +261,7 @@ impl Default for ReadTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for ReadTool {
     fn name(&self) -> &str {
         "read"
@@ -299,15 +299,14 @@ impl AgentTool for ReadTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let path_str = params
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let path_str = params
                 .get("path")
                 .and_then(|v: &Value| v.as_str())
                 .ok_or_else(|| "Missing required parameter: path".to_string())?;
@@ -357,7 +356,6 @@ impl AgentTool for ReadTool {
 
             // Otherwise, read as text
             Self::read_text(path, offset, limit, &progress_cb).await
-        })
     }
 
     fn on_progress(&self, callback: ProgressCallback) {

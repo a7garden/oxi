@@ -9,10 +9,9 @@
 /// - Process tree kill on abort/cancel via signal
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
+use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
@@ -487,6 +486,7 @@ impl Default for BashTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for BashTool {
     fn name(&self) -> &str {
         "bash"
@@ -534,15 +534,14 @@ impl AgentTool for BashTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let command = params
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let command = params
                 .get("command")
                 .and_then(|v: &Value| v.as_str())
                 .ok_or_else(|| "Missing required parameter: command".to_string())?;
@@ -561,7 +560,6 @@ impl AgentTool for BashTool {
             let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
             Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
-        })
     }
 
     fn on_progress(&self, callback: ProgressCallback) {

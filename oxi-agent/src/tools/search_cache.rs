@@ -6,11 +6,10 @@
 /// Uses `oxibrowser::SearchResult` as the canonical result type, shared across
 /// web_search, github, and get_search_results tools.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -109,6 +108,7 @@ impl GetSearchResultsTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for GetSearchResultsTool {
     fn name(&self) -> &str {
         "get_search_results"
@@ -135,15 +135,14 @@ impl AgentTool for GetSearchResultsTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let search_id = params["searchId"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let search_id = params["searchId"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: searchId".to_string())?;
 
@@ -178,7 +177,6 @@ impl AgentTool for GetSearchResultsTool {
             Ok(AgentToolResult::success(output).with_metadata(
                 json!({ "results": results_json, "query": query, "searchId": search_id }),
             ))
-        })
     }
 }
 

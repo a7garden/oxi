@@ -1,11 +1,10 @@
 use super::path_security::PathGuard;
 /// Grep tool - search files for patterns
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use regex::RegexBuilder;
 use serde_json::{Value, json};
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -320,6 +319,7 @@ impl Default for GrepTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for GrepTool {
     fn name(&self) -> &str {
         "grep"
@@ -378,15 +378,14 @@ impl AgentTool for GrepTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let pattern = params
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let pattern = params
                 .get("pattern")
                 .and_then(|v: &Value| v.as_str())
                 .ok_or_else(|| "Missing required parameter: pattern".to_string())?;
@@ -446,6 +445,5 @@ impl AgentTool for GrepTool {
                 }
                 Err(e) => Ok(AgentToolResult::error(e)),
             }
-        })
     }
 }

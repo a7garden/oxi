@@ -1,5 +1,6 @@
 //! ClosureTool — ergonomic custom tool from a closure
 
+use async_trait::async_trait;
 use oxi_agent::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use serde_json::Value;
 use std::future::Future;
@@ -84,6 +85,7 @@ impl ClosureTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for ClosureTool {
     fn name(&self) -> &str {
         &self.name
@@ -101,13 +103,13 @@ impl AgentTool for ClosureTool {
         self.schema.clone()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
         params: Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        (self.handler)(params, ctx)
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        (self.handler)(params, ctx).await
     }
 }

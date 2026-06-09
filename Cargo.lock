@@ -3622,6 +3622,7 @@ version = "0.31.0"
 dependencies = [
  "anyhow",
  "async-stream",
+ "async-trait",
  "base64",
  "dirs",
  "futures",
@@ -3733,6 +3734,7 @@ name = "oxi-sdk"
 version = "0.31.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "blake3",
  "chrono",
  "dirs",

@@ -10,12 +10,11 @@ use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::future::Future;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -451,6 +450,7 @@ impl BrowseScriptTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for BrowseScriptTool {
     fn name(&self) -> &str {
         "browse_script"
@@ -500,15 +500,14 @@ impl AgentTool for BrowseScriptTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let script_input = params["script"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let script_input = params["script"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: script".to_string())?;
 
@@ -589,7 +588,6 @@ impl AgentTool for BrowseScriptTool {
             guard.close().await;
             *self.tab_id_slot.lock().lock() = None;
             Ok(result)
-        })
     }
 }
 

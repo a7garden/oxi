@@ -1,11 +1,10 @@
 use super::path_security::PathGuard;
 /// Ls tool - list directory contents
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use crate::tools::truncate::{TruncationOptions, format_bytes, truncate_head};
 use serde_json::{Value, json};
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -204,6 +203,7 @@ impl Default for LsTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for LsTool {
     fn name(&self) -> &str {
         "ls"
@@ -249,15 +249,14 @@ impl AgentTool for LsTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let path = params
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let path = params
                 .get("path")
                 .and_then(|v: &Value| v.as_str())
                 .unwrap_or(".");
@@ -284,7 +283,6 @@ impl AgentTool for LsTool {
                 Ok(output) => Ok(AgentToolResult::success(output)),
                 Err(e) => Ok(AgentToolResult::error(e)),
             }
-        })
     }
 }
 

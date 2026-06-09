@@ -15,10 +15,9 @@
 
 use crate::tools::http_client::shared_http_client;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext};
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
 
@@ -127,6 +126,7 @@ impl Context7ResolveLibraryIdTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for Context7ResolveLibraryIdTool {
     fn name(&self) -> &str {
         "context7_resolve-library-id"
@@ -177,15 +177,14 @@ impl AgentTool for Context7ResolveLibraryIdTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
-        Box::pin(async move {
-            let query = params
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, String> {
+        let query = params
                 .get("query")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing required parameter: query")?;
@@ -230,7 +229,6 @@ impl AgentTool for Context7ResolveLibraryIdTool {
             Ok(AgentToolResult::success(format_search_results(
                 &search.results,
             )))
-        })
     }
 }
 
@@ -252,6 +250,7 @@ impl Context7QueryDocsTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for Context7QueryDocsTool {
     fn name(&self) -> &str {
         "context7_query-docs"
@@ -289,15 +288,14 @@ impl AgentTool for Context7QueryDocsTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
-        Box::pin(async move {
-            let library_id = params
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, String> {
+        let library_id = params
                 .get("libraryId")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing required parameter: libraryId")?;
@@ -346,7 +344,6 @@ impl AgentTool for Context7QueryDocsTool {
             }
 
             Ok(AgentToolResult::success(text))
-        })
     }
 }
 

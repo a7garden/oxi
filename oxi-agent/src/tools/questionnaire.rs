@@ -16,8 +16,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use std::future::Future;
-use std::pin::Pin;
+use async_trait::async_trait;
 
 /// Shared bridge between the questionnaire tool (agent thread) and the TUI
 /// overlay (main thread). Created in `oxi-cli`, injected into both the tool
@@ -160,6 +159,7 @@ impl Clone for QuestionnaireTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for QuestionnaireTool {
     fn name(&self) -> &str {
         "questionnaire"
@@ -240,16 +240,15 @@ impl AgentTool for QuestionnaireTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: serde_json::Value,
         signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            // 1. Parse and validate
-            let questions = parse_questions(&params)?;
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        // 1. Parse and validate
+        let questions = parse_questions(&params)?;
 
             // 2. Create oneshot channel
             let (tx, rx) = oneshot::channel();
@@ -269,7 +268,6 @@ impl AgentTool for QuestionnaireTool {
 
             // 5. Format result
             result
-        })
     }
 }
 

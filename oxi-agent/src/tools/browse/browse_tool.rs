@@ -8,10 +8,9 @@ use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMode};
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -51,6 +50,7 @@ impl BrowseTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for BrowseTool {
     fn name(&self) -> &str {
         "browse"
@@ -125,15 +125,14 @@ impl AgentTool for BrowseTool {
         *self.tab_id_slot.lock() = slot;
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let url = params["url"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let url = params["url"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: url".to_string())?;
 
@@ -256,7 +255,6 @@ impl AgentTool for BrowseTool {
             }
 
             Ok(result)
-        })
     }
 }
 
@@ -264,6 +262,8 @@ impl AgentTool for BrowseTool {
 mod tests {
     use super::*;
     use crate::tools::browse::engine::{BrowserError, BrowserTab};
+    use std::future::Future;
+    use std::pin::Pin;
 
     /// Minimal `BrowserEngine` stub. We never call `new_tab` in the test,
     /// so the trait methods are allowed to return `Err` — the goal is just

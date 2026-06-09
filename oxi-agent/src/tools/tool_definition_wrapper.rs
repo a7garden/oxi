@@ -2,9 +2,8 @@
 /// Provides adapters for converting between tool representations.
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::types::ToolDefinition;
+use async_trait::async_trait;
 use serde_json::Value;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -82,6 +81,7 @@ impl DynamicTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for DynamicTool {
     fn name(&self) -> &str {
         &self.name
@@ -99,14 +99,14 @@ impl AgentTool for DynamicTool {
         self.parameters.clone()
     }
 
-    fn execute<'a>(
-        &'a self,
-        tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move { (self.execute_fn)(tool_call_id, params, signal).await })
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        (self.execute_fn)(tool_call_id, params, signal).await
     }
 }
 
@@ -139,6 +139,7 @@ pub fn wrap_tool_definition<T: ToolDefinitionLike + 'static>(def: T) -> Arc<dyn 
 /// Internal wrapper that adapts `ToolDefinitionLike` to `AgentTool`.
 struct DefinitionWrapper<T>(T);
 
+#[async_trait]
 impl<T: ToolDefinitionLike + 'static> AgentTool for DefinitionWrapper<T> {
     fn name(&self) -> &str {
         self.0.tool_name()
@@ -156,14 +157,14 @@ impl<T: ToolDefinitionLike + 'static> AgentTool for DefinitionWrapper<T> {
         self.0.tool_parameters()
     }
 
-    fn execute<'a>(
-        &'a self,
-        tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move { self.0.tool_execute(tool_call_id, params, signal).await })
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        self.0.tool_execute(tool_call_id, params, signal).await
     }
 }
 
@@ -194,6 +195,7 @@ mod tests {
     fn test_create_tool_definition_from_agent_tool() {
         struct TestTool;
 
+        #[async_trait]
         impl AgentTool for TestTool {
             fn name(&self) -> &str {
                 "test_tool"
@@ -212,15 +214,14 @@ mod tests {
                     }
                 })
             }
-            fn execute<'a>(
-                &'a self,
+            async fn execute(
+                &self,
                 _tool_call_id: &str,
                 _params: Value,
                 _signal: Option<oneshot::Receiver<()>>,
-                _ctx: &'a ToolContext,
-            ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>>
-            {
-                Box::pin(async move { Ok(AgentToolResult::success("test")) })
+                _ctx: &ToolContext,
+            ) -> Result<AgentToolResult, ToolError> {
+                Ok(AgentToolResult::success("test"))
             }
         }
 

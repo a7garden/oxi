@@ -8,10 +8,9 @@ use super::engine::{BrowserEngine, BrowserError, BrowserTab};
 use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -50,6 +49,7 @@ impl BrowseExtractTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for BrowseExtractTool {
     fn name(&self) -> &str {
         "browse_extract"
@@ -114,15 +114,14 @@ impl AgentTool for BrowseExtractTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let url = params["url"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let url = params["url"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: url".to_string())?;
 
@@ -147,7 +146,6 @@ impl AgentTool for BrowseExtractTool {
             .map_err(|_| format!("Extract timed out after {}s", timeout_secs))??;
 
             Ok(output)
-        })
     }
 }
 

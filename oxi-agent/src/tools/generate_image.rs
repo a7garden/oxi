@@ -5,12 +5,11 @@
 
 use super::http_client::shared_http_client;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose};
 use oxi_ai::types::{ImageGenerationRequest, ImageGenerationResponse};
 use serde_json::{Value, json};
 use std::env;
-use std::future::Future;
-use std::pin::Pin;
 
 /// Default image generation model.
 const DEFAULT_MODEL: &str = "black-forest-labs/flux-1-dev";
@@ -172,6 +171,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, ToolError> {
     Ok(out)
 }
 
+#[async_trait]
 impl AgentTool for GenerateImageTool {
     fn name(&self) -> &str {
         "generate_image"
@@ -214,16 +214,15 @@ impl AgentTool for GenerateImageTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            // Parse parameters
-            let prompt: String = params
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        // Parse parameters
+        let prompt: String = params
                 .get("prompt")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "Missing required parameter: prompt".to_string())?
@@ -289,7 +288,6 @@ impl AgentTool for GenerateImageTool {
             }
 
             Ok(AgentToolResult::success(output.trim_end()))
-        })
     }
 }
 

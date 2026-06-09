@@ -15,6 +15,7 @@ exclude = ["target/"]
 [dependencies]
 oxi-ai = { version = "0.31.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.31.0", path = "../oxi-agent" }
+async-trait = "0.1"
 # Re-exported under the `native-browser` feature so downstream consumers
 # can match on `BrowserEvent` variants without depending on oxibrowser-core
 # directly.

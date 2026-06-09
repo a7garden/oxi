@@ -11,9 +11,8 @@ use super::search_cache::{SearchCache, SearchResult};
 /// - Configurable engine selection and result count
 /// - Zero-config: no API keys, no external binary needed
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -90,6 +89,7 @@ fn format_results(results: &[SearchResult]) -> String {
 
 // ── AgentTool impl ────────────────────────────────────────────────
 
+#[async_trait]
 impl AgentTool for WebSearchTool {
     fn name(&self) -> &str {
         "web_search"
@@ -126,15 +126,14 @@ impl AgentTool for WebSearchTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let query = params["query"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let query = params["query"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
@@ -177,7 +176,6 @@ impl AgentTool for WebSearchTool {
                 "searchId": search_id,
                 "resultCount": results.len()
             })))
-        })
     }
 }
 

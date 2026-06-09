@@ -122,15 +122,15 @@ pub trait KernelToolProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use oxi_agent::{AgentTool, AgentToolResult, ToolContext, ToolError};
     use serde_json::Value;
-    use std::future::Future;
-    use std::pin::Pin;
 
     struct MockKernelTool {
         name: String,
     }
 
+    #[async_trait]
     impl AgentTool for MockKernelTool {
         fn name(&self) -> &str {
             &self.name
@@ -145,14 +145,14 @@ mod tests {
             serde_json::json!({"type": "object", "properties": {}})
         }
 
-        fn execute<'a>(
-            &'a self,
-            _tool_call_id: &'a str,
+        async fn execute(
+            &self,
+            _tool_call_id: &str,
             _params: Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            _ctx: &'a ToolContext,
-        ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-            Box::pin(async move { Ok(AgentToolResult::success("mock result")) })
+            _ctx: &ToolContext,
+        ) -> Result<AgentToolResult, ToolError> {
+            Ok(AgentToolResult::success("mock result"))
         }
     }
 

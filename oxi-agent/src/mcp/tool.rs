@@ -5,14 +5,13 @@
 //! different parameters to search, describe, connect, and call MCP tools.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolContext};
+use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::McpManager;
 use super::content;
-use std::future::Future;
-use std::pin::Pin;
 
 /// The unified MCP gateway tool.
 ///
@@ -32,6 +31,7 @@ impl McpTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for McpTool {
     fn name(&self) -> &str {
         "mcp"
@@ -86,17 +86,16 @@ impl AgentTool for McpTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
-        Box::pin(async move {
-            let obj = params
-                .as_object()
-                .ok_or("Parameters must be a JSON object")?;
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, String> {
+        let obj = params
+            .as_object()
+            .ok_or("Parameters must be a JSON object")?;
 
             // Parse optional args
             let parsed_args = if let Some(args_val) = obj.get("args").and_then(|v| v.as_str()) {
@@ -136,7 +135,6 @@ impl AgentTool for McpTool {
 
             // Default: status
             self.handle_status().await
-        })
     }
 }
 

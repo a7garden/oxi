@@ -13,11 +13,10 @@ use super::edit_diff::{
 use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -240,6 +239,7 @@ struct EditOutput {
     message: String,
 }
 
+#[async_trait]
 impl AgentTool for EditTool {
     fn name(&self) -> &str {
         "edit"
@@ -307,15 +307,14 @@ impl AgentTool for EditTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let input = Self::prepare_arguments(&params);
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let input = Self::prepare_arguments(&params);
 
             // Use root_dir if set, else ctx.root()
             let root = self.root_dir.as_deref().unwrap_or(ctx.root());
@@ -336,7 +335,6 @@ impl AgentTool for EditTool {
                 }
                 Err(e) => Ok(AgentToolResult::error(e)),
             }
-        })
     }
 }
 

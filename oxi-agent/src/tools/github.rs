@@ -11,9 +11,8 @@ use super::search_cache::{SearchCache, SearchResult};
 /// Prerequisites: `gh` CLI installed and authenticated (`gh auth status`).
 /// Disable via `disabled_tools = ["github"]` or `OXI_DISABLED_TOOLS=github`.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -711,6 +710,7 @@ impl GitHubTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for GitHubTool {
     fn name(&self) -> &str {
         "github"
@@ -802,15 +802,14 @@ impl AgentTool for GitHubTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let action = params["action"].as_str().unwrap_or("search");
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let action = params["action"].as_str().unwrap_or("search");
 
             match action {
                 "search" => {
@@ -843,7 +842,6 @@ impl AgentTool for GitHubTool {
                     other
                 )),
             }
-        })
     }
 }
 

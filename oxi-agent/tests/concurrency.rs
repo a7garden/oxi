@@ -4,8 +4,8 @@
 use oxi_agent::AgentTool;
 use oxi_agent::state::SharedState;
 use oxi_agent::tools::ToolRegistry;
+use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::pin::Pin;
 use std::sync::Arc;
 use std::thread;
 use tokio::sync::oneshot;
@@ -24,6 +24,7 @@ impl TestTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for TestTool {
     fn name(&self) -> &str {
         &self.name
@@ -37,14 +38,14 @@ impl AgentTool for TestTool {
     fn parameters_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
-    fn execute<'a>(
-        &'a self,
-        _tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
         _params: Value,
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &oxi_agent::ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<oxi_agent::AgentToolResult, String>> + Send + 'a>> {
-        Box::pin(async move { Ok(oxi_agent::AgentToolResult::success("test result")) })
+    ) -> Result<oxi_agent::AgentToolResult, String> {
+        Ok(oxi_agent::AgentToolResult::success("test result"))
     }
 }
 

@@ -7,7 +7,6 @@ use oxi_ai::{
     ThinkingContent, transform_for_provider,
 };
 use std::collections::HashMap;
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskContext, Poll};
@@ -610,8 +609,11 @@ impl Provider for MultiTurnToolProvider {
     }
 }
 
+use async_trait::async_trait;
+
 struct EchoTool;
 
+#[async_trait]
 impl crate::tools::AgentTool for EchoTool {
     fn name(&self) -> &str {
         "echo"
@@ -635,21 +637,14 @@ impl crate::tools::AgentTool for EchoTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
-        _tool_call_id: &'a str,
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
         params: serde_json::Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        _ctx: &'a crate::tools::ToolContext,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = std::result::Result<crate::tools::AgentToolResult, String>>
-                + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async move {
-            let msg = params
+        _ctx: &crate::tools::ToolContext,
+    ) -> std::result::Result<crate::tools::AgentToolResult, String> {
+        let msg = params
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("<no message>");
@@ -657,7 +652,6 @@ impl crate::tools::AgentTool for EchoTool {
                 "Echo: {}",
                 msg
             )))
-        })
     }
 }
 

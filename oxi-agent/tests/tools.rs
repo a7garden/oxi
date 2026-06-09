@@ -1,8 +1,8 @@
 //! Comprehensive tests for all built-in tools
 
 use oxi_agent::prelude::*;
+use async_trait::async_trait;
 use serde_json::json;
-use std::pin::Pin;
 use tokio::fs;
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -1132,6 +1132,7 @@ fn test_registry_custom_tool() {
 
     struct CustomTool;
 
+    #[async_trait]
     impl AgentTool for CustomTool {
         fn name(&self) -> &str {
             "custom"
@@ -1145,15 +1146,14 @@ fn test_registry_custom_tool() {
         fn parameters_schema(&self) -> Value {
             json!({ "type": "object", "properties": {} })
         }
-        fn execute<'a>(
-            &'a self,
+        async fn execute(
+            &self,
             _id: &str,
             _params: Value,
             _signal: Option<oneshot::Receiver<()>>,
             _ctx: &oxi_agent::ToolContext,
-        ) -> Pin<Box<dyn Future<Output = Result<oxi_agent::AgentToolResult, String>> + Send + 'a>>
-        {
-            Box::pin(async move { Ok(oxi_agent::AgentToolResult::success("custom result")) })
+        ) -> Result<oxi_agent::AgentToolResult, String> {
+            Ok(oxi_agent::AgentToolResult::success("custom result"))
         }
     }
 

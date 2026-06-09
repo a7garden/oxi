@@ -9,10 +9,9 @@ use super::search_cache::{SearchCache, SearchResult};
 /// - Structured JSON results — no HTML scraping
 /// - Result caching with the shared SearchCache
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -285,6 +284,7 @@ impl GitHubSearchTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for GitHubSearchTool {
     fn name(&self) -> &str {
         "github_search"
@@ -332,15 +332,14 @@ impl AgentTool for GitHubSearchTool {
         })
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let query = params["query"]
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let query = params["query"]
                 .as_str()
                 .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
@@ -405,7 +404,6 @@ impl AgentTool for GitHubSearchTool {
                 "totalCount": total,
                 "resultCount": results.len()
             })))
-        })
     }
 }
 

@@ -25,6 +25,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use std::task::{Context as TaskContext, Poll};
+    use async_trait::async_trait;
 
     // ── Mock Providers ────────────────────────────────────────────────────
 
@@ -187,6 +188,7 @@ mod tests {
     /// Simple echo tool that returns the message argument
     struct EchoTool;
 
+    #[async_trait]
     impl AgentTool for EchoTool {
         fn name(&self) -> &str {
             "echo"
@@ -213,20 +215,18 @@ mod tests {
             })
         }
 
-        fn execute<'a>(
-            &'a self,
-            _tool_call_id: &'a str,
+        async fn execute(
+            &self,
+            _tool_call_id: &str,
             params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            _ctx: &'a oxi_agent::ToolContext,
-        ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
-            Box::pin(async move {
-                let msg = params
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("<no message>");
-                Ok(AgentToolResult::success(format!("Echo: {}", msg)))
-            })
+            _ctx: &oxi_agent::ToolContext,
+        ) -> Result<AgentToolResult, String> {
+            let msg = params
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<no message>");
+            Ok(AgentToolResult::success(format!("Echo: {}", msg)))
         }
     }
 
@@ -241,6 +241,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl AgentTool for CountingTool {
         fn name(&self) -> &str {
             "count"
@@ -262,17 +263,15 @@ mod tests {
             })
         }
 
-        fn execute<'a>(
-            &'a self,
-            _tool_call_id: &'a str,
+        async fn execute(
+            &self,
+            _tool_call_id: &str,
             _params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            _ctx: &'a oxi_agent::ToolContext,
-        ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, String>> + Send + 'a>> {
-            Box::pin(async move {
-                let count = self.call_count.fetch_add(1, Ordering::Relaxed);
-                Ok(AgentToolResult::success(format!("Call #{}", count + 1)))
-            })
+            _ctx: &oxi_agent::ToolContext,
+        ) -> Result<AgentToolResult, String> {
+            let count = self.call_count.fetch_add(1, Ordering::Relaxed);
+            Ok(AgentToolResult::success(format!("Call #{}", count + 1)))
         }
     }
 

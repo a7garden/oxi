@@ -8,12 +8,11 @@
 ///     Agent definitions are markdown files with YAML frontmatter,
 ///     discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
@@ -708,6 +707,7 @@ impl SubagentTool {
     }
 }
 
+#[async_trait]
 impl AgentTool for SubagentTool {
     fn name(&self) -> &str {
         "subagent"
@@ -779,16 +779,15 @@ impl AgentTool for SubagentTool {
         *self.progress_callback.lock() = Some(callback);
     }
 
-    fn execute<'a>(
-        &'a self,
+    async fn execute(
+        &self,
         _tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-        ctx: &'a ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            // Use explicit cwd if set, else ctx.root()
-            let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        // Use explicit cwd if set, else ctx.root()
+        let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
 
             let scope: AgentScope = params
                 .get("agentScope")
@@ -863,7 +862,6 @@ impl AgentTool for SubagentTool {
             }
 
             Ok(AgentToolResult::error("Invalid parameters".to_string()))
-        })
     }
 }
 
