@@ -363,6 +363,18 @@ impl OverlayComponent for ProviderSelectOverlay {
         OverlayAction::None
     }
 
+    fn handle_paste(&mut self, text: &str) -> OverlayAction {
+        // Only handle paste when entering API key
+        if let SubMode::EnteringKey {
+            key_text: ref mut kt,
+            ..
+        } = self.sub_mode
+        {
+            kt.push_str(text);
+        }
+        OverlayAction::None
+    }
+
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let styles = theme.to_styles();
         let popup = centered_layout(area, 0.85, 0.90);

@@ -235,7 +235,7 @@ impl KeybindingsManager {
             (Submit, vec!["Enter"]),
             (NewLine, vec!["Alt+Enter", "Ctrl+j"]),
             (Tab, vec!["Tab"]),
-            (CycleThinking, vec!["BackTab"]),
+            (CycleThinking, vec!["BackTab", "Shift+Tab"]),
             // ── View ──
             (ScrollUp, vec!["Up"]),
             (ScrollDown, vec!["Down"]),

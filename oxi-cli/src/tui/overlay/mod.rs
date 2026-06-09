@@ -4,7 +4,7 @@
 //! to encapsulate its own state, event handling, and rendering.
 //! This follows ratatui's StatefulWidget philosophy at the overlay level.
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 use oxi_tui::Theme;
 use ratatui::{Frame, layout::Rect};
 
@@ -85,6 +85,19 @@ pub enum OverlayAction {
 pub trait OverlayComponent: std::fmt::Debug {
     /// Handle a key press. Return an action if the app needs to do something.
     fn handle_key(&mut self, key: KeyEvent) -> OverlayAction;
+
+    /// Handle a clipboard paste event.
+    /// Default implementation returns `OverlayAction::None` (no-op).
+    fn handle_paste(&mut self, _text: &str) -> OverlayAction {
+        OverlayAction::None
+    }
+
+    /// Handle a mouse event.
+    /// Default implementation returns `OverlayAction::None` (no-op).
+    #[allow(dead_code)]
+    fn handle_mouse(&mut self, _event: MouseEvent) -> OverlayAction {
+        OverlayAction::None
+    }
 
     /// Render the overlay into the given area.
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme);

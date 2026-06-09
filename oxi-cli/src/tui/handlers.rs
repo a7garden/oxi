@@ -1,6 +1,7 @@
 //! Event handlers for the TUI.
 
 use super::app::{AppState, NotificationKind, UiEvent};
+use super::overlay::OverlayAction;
 use super::overlay::router_integration;
 use super::slash;
 use crate::app::agent_session::{AgentSession, SessionEvent};
@@ -901,7 +902,6 @@ async fn handle_overlay_key(
 
     // ── Component-based overlay (takes priority) ──
     if let Some(ref mut overlay) = state.overlay_state {
-        use super::overlay::OverlayAction;
         let action = overlay.handle_key(key);
         match action {
             OverlayAction::Close => {
@@ -1061,9 +1061,23 @@ async fn handle_overlay_key(
 
 // ── Overlay paste handler ────────────────────────────────────────────────
 
-fn handle_overlay_paste(_text: &str, _state: &mut AppState) -> Option<Action> {
-    // NOTE: All paste handling now lives in component-based overlays.
-    // The ProviderSelectOverlay handles paste in its SubMode::EnteringKey.
+fn handle_overlay_paste(text: &str, state: &mut AppState) -> Option<Action> {
+    if let Some(ref mut overlay) = state.overlay_state {
+        let action = overlay.handle_paste(text);
+        // Process the action (same dispatch as handle_overlay_key)
+        match action {
+            OverlayAction::None => {}
+            OverlayAction::Close => {
+                state.overlay_state = None;
+                state.overlay = None;
+            }
+            _ => {
+                // For other actions, the paste handler returns them.
+                // The paste path doesn't need full action dispatch since
+                // paste events in overlays are typically just text insertion.
+            }
+        }
+    }
     None
 }
 
