@@ -375,7 +375,12 @@ fn draw_wizard(
 
         // Title bar
         let title = Paragraph::new(Line::from(vec![
-            Span::styled(" 🦊 ", Style::default().fg(Color::Rgb(255, 165, 0))),
+            Span::styled(
+                " oxi ",
+                Style::default()
+                    .fg(Color::Rgb(255, 165, 0))
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 "oxi Setup Wizard",
                 Style::default().add_modifier(Modifier::BOLD),

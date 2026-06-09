@@ -161,7 +161,7 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
                 }
             }
             Event::Code(code) => {
-                // Inline code (e.g. `🔍`) — capture content for table cells.
+                // Inline code (e.g. `code`) — capture content for table cells.
                 // Without this, emojis or other content wrapped in backticks
                 // inside table cells are silently dropped.
                 if in_table {

@@ -1662,7 +1662,7 @@ fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::Agent
     state.chat.add_message(ChatMessage {
         role: MessageRole::System,
         content_blocks: vec![ContentBlock::Text {
-            content: "📋 Context compacted — earlier messages summarized".to_string(),
+            content: "Context compacted — earlier messages summarized".to_string(),
         }],
         timestamp: now_millis(),
     });

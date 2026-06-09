@@ -190,9 +190,9 @@ impl<'a> CompletionPopup<'a> {
             .map(|item| {
                 let kind_icon = match item.kind {
                     CompletionKind::Command => "/",
-                    CompletionKind::File => "📄",
-                    CompletionKind::Directory => "📁",
-                    CompletionKind::Model => "🤖",
+                    CompletionKind::File => "[f]",
+                    CompletionKind::Directory => "[d]",
+                    CompletionKind::Model => "[m]",
                 };
                 let label = Span::styled(format!("{} ", item.label), Style::default().bold());
                 let desc = item.description.as_ref().map(|d| {
