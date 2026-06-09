@@ -278,14 +278,25 @@ fn add_google_models(map: &mut HashMap<String, Model>) {
 }
 
 fn add_deepseek_models(map: &mut HashMap<String, Model>) {
-    let models = [
-        ("deepseek/deepseek-chat", "DeepSeek Chat", false, 0.27, 1.1),
+    // Legacy models (to be retired 2026-07-24)
+    let legacy_models = [
+        (
+            "deepseek/deepseek-chat",
+            "DeepSeek Chat",
+            false,
+            0.27,
+            1.1,
+            64_000,
+            8192,
+        ),
         (
             "deepseek/deepseek-chat-v3",
             "DeepSeek Chat V3",
             false,
             0.27,
             1.1,
+            64_000,
+            8192,
         ),
         (
             "deepseek/deepseek-reasoner",
@@ -293,6 +304,8 @@ fn add_deepseek_models(map: &mut HashMap<String, Model>) {
             true,
             0.55,
             2.19,
+            64_000,
+            8192,
         ),
         (
             "deepseek/deepseek-coder",
@@ -300,10 +313,12 @@ fn add_deepseek_models(map: &mut HashMap<String, Model>) {
             false,
             0.27,
             1.1,
+            64_000,
+            8192,
         ),
     ];
 
-    for (id, name, reasoning, input_cost, output_cost) in models {
+    for (id, name, reasoning, input_cost, output_cost, ctx, max_out) in legacy_models {
         map.insert(
             id.to_string(),
             Model {
@@ -320,8 +335,58 @@ fn add_deepseek_models(map: &mut HashMap<String, Model>) {
                     cache_read: 0.1,
                     cache_write: 1.0,
                 },
-                context_window: 64_000,
-                max_tokens: 8192,
+                context_window: ctx,
+                max_tokens: max_out,
+                headers: Default::default(),
+                compat: default_compat_for_provider("deepseek"),
+            },
+        );
+    }
+
+    // V4 models (released 2026-04-24)
+    let v4_models = [
+        // deepseek-v4-flash: 284B total / 13B active, $0.14/M input, $0.28/M output
+        (
+            "deepseek/deepseek-v4-flash",
+            "DeepSeek V4 Flash",
+            true,
+            0.14,
+            0.28,
+            1_000_000,
+            384_000,
+        ),
+        // deepseek-v4-pro: 1.6T total / 49B active, $0.435/M input, $0.87/M output
+        (
+            "deepseek/deepseek-v4-pro",
+            "DeepSeek V4 Pro",
+            true,
+            0.435,
+            0.87,
+            1_000_000,
+            384_000,
+        ),
+    ];
+
+    for (id, name, reasoning, input_cost, output_cost, ctx, max_out) in v4_models {
+        map.insert(
+            id.to_string(),
+            Model {
+                id: extract_model_name(id).to_string(),
+                name: name.to_string(),
+                api: Api::OpenAiCompletions,
+                provider: "deepseek".to_string(),
+                base_url: "https://api.deepseek.com".to_string(),
+                reasoning,
+                input: vec![InputModality::Text],
+                cost: Cost {
+                    input: input_cost,
+                    output: output_cost,
+                    // V4 cache pricing: flash $0.0028, pro $0.003625 per 1M tokens
+                    cache_read: if input_cost < 0.2 { 0.0028 } else { 0.003625 },
+                    cache_write: 0.0, // DeepSeek does not charge extra for cache writes
+                },
+                context_window: ctx,
+                max_tokens: max_out,
                 headers: Default::default(),
                 compat: default_compat_for_provider("deepseek"),
             },
@@ -934,6 +999,27 @@ mod tests {
         let model = model.unwrap();
         assert_eq!(model.provider, "deepseek");
         assert_eq!(model.base_url, "https://api.deepseek.com");
+    }
+
+    #[test]
+    fn test_deepseek_v4_models() {
+        let flash = get_model("deepseek", "deepseek-v4-flash");
+        assert!(flash.is_some(), "deepseek-v4-flash should be registered");
+        let flash = flash.unwrap();
+        assert_eq!(flash.provider, "deepseek");
+        assert_eq!(flash.context_window, 1_000_000);
+        assert_eq!(flash.max_tokens, 384_000);
+        assert!(flash.reasoning);
+
+        let pro = get_model("deepseek", "deepseek-v4-pro");
+        assert!(pro.is_some(), "deepseek-v4-pro should be registered");
+        let pro = pro.unwrap();
+        assert_eq!(pro.provider, "deepseek");
+        assert_eq!(pro.context_window, 1_000_000);
+        assert_eq!(pro.max_tokens, 384_000);
+        assert!(pro.reasoning);
+        // V4 Pro is more expensive than V4 Flash
+        assert!(pro.cost.input > flash.cost.input);
     }
 
     #[test]
