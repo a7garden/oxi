@@ -1,6 +1,6 @@
 [package]
 name = "oxi-cli"
-version = "0.31.2"
+version = "0.31.3"
 edition.workspace = true
 rust-version.workspace = true
 description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
@@ -21,10 +21,10 @@ name = "oxi"
 path = "src/lib.rs"
 
 [dependencies]
-oxi-ai = { version = "0.31.2", path = "../oxi-ai" }
-oxi-agent = { version = "0.31.2", path = "../oxi-agent" }
-oxi-sdk = { version = "0.31.2", path = "../oxi-sdk" }
-oxi-tui = { version = "0.31.2", path = "../oxi-tui" }
+oxi-ai = { version = "0.31.3", path = "../oxi-ai" }
+oxi-agent = { version = "0.31.3", path = "../oxi-agent" }
+oxi-sdk = { version = "0.31.3", path = "../oxi-sdk" }
+oxi-tui = { version = "0.31.3", path = "../oxi-tui" }
 
 # Async
 async-trait = "0.1"
