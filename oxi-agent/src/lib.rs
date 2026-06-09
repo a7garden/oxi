@@ -10,6 +10,8 @@
 
 /// Core agent implementation.
 pub mod agent;
+/// Agent definition file parsing and discovery.
+pub mod agent_definition;
 /// Agent loop – the main request/response cycle driver.
 pub mod agent_loop;
 /// Context compaction strategies and data types.
@@ -38,6 +40,10 @@ pub mod types;
 
 pub use agent::Agent;
 pub use agent::ProviderResolver;
+pub use agent_definition::{
+    AgentDefinition, AgentDiscovery, AgentScope, DefaultContext, current_subagent_depth,
+    max_subagent_depth, validate_agent_name,
+};
 pub use agent_loop::{AgentLoop, AgentLoopConfig};
 
 /// Agent configuration, hooks, and tool execution mode.

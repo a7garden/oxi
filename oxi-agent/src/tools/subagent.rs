@@ -1,17 +1,23 @@
 /// Subagent tool — delegate tasks to specialized agents
+///
 /// Spawns a separate `oxi --mode json` process for each invocation,
 /// giving it an isolated context window.
+///
 /// Supports three modes:
 ///   - Single: { agent: "name", task: "..." }
 ///   - Parallel: { tasks: [{ agent, task }, ...] }
 ///   - Chain: { chain: [{ agent, task: "... {previous} ..." }, ...] }
-///     Agent definitions are markdown files with YAML frontmatter,
-///     discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
+///
+/// Agent definitions are markdown files with YAML frontmatter,
+/// discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
+/// Discovery is delegated to [`crate::agent_definition::AgentDiscovery`].
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
+use crate::agent_definition::{
+    AgentDefinition, AgentDiscovery, AgentScope, current_subagent_depth, max_subagent_depth,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
@@ -33,243 +39,81 @@ fn create_system_prompt_temp_dir(prefix: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-// ── Agent Discovery ────────────────────────────────────────────────────
+// ── Agent Discovery (delegates to SDK) ─────────────────────────────────
 
-/// Agent scope for discovery.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum AgentScope {
-    /// Only user-level agents (~/.oxi/agents/)
-    #[default]
-    User,
-    /// Only project-level agents (.oxi/agents/)
-    Project,
-    /// Both user and project agents
-    Both,
-}
-
-/// A discovered agent definition.
-#[derive(Debug, Clone)]
-pub struct AgentConfig {
-    /// pub.
-    pub name: String,
-    /// pub.
-    pub description: String,
-    /// pub.
-    pub model: Option<String>,
-    /// pub.
-    pub tools: Option<Vec<String>>,
-    /// pub.
-    pub system_prompt: String,
-    /// pub.
-    pub source: String, // "user" or "project"
-}
-
-/// Discover agents from user and/or project directories.
-pub fn discover_agents(cwd: &Path, scope: AgentScope) -> Vec<AgentConfig> {
-    let mut agents = Vec::new();
-    let mut seen_names = std::collections::HashSet::new();
-
-    // User-level agents
-    if (scope == AgentScope::User || scope == AgentScope::Both)
-        && let Some(home) = dirs::home_dir()
-    {
-        let user_dir = home.join(".oxi").join("agents");
-        load_agents_from_dir(&user_dir, "user", &mut agents, &mut seen_names);
-    }
-
-    // Project-level agents (walk up to .git boundary)
-    if (scope == AgentScope::Project || scope == AgentScope::Both)
-        && let Some(project_dir) = find_project_agents_dir(cwd)
-    {
-        load_agents_from_dir(&project_dir, "project", &mut agents, &mut seen_names);
-    }
-
-    agents
-}
-
-/// Walk up from `cwd` to find `.oxi/agents/`.
-/// Stops at `.git` boundary (project root). Returns None if not found.
-fn find_project_agents_dir(cwd: &Path) -> Option<PathBuf> {
-    let mut current = cwd;
-    loop {
-        let candidate = current.join(".oxi").join("agents");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        // .git marks project root — don't go higher
-        if current.join(".git").exists() {
-            return None;
-        }
-        current = current.parent()?;
-    }
-}
-
-fn load_agents_from_dir(
-    dir: &Path,
-    source: &str,
-    agents: &mut Vec<AgentConfig>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
-
-        if name.is_empty() || seen.contains(&name) {
-            continue;
-        }
-
-        match parse_agent_file(&path) {
-            Ok(config) => {
-                seen.insert(name.clone());
-                let mut config = config;
-                config.source = source.to_string();
-                agents.push(config);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to parse agent {}: {}", path.display(), e);
-            }
-        }
-    }
-}
-
-/// Parse an agent markdown file with optional YAML frontmatter.
-fn parse_agent_file(path: &Path) -> Result<AgentConfig, String> {
-    let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read: {}", e))?;
-
-    let (frontmatter, body) = parse_frontmatter(&content);
-
-    let name = frontmatter.get("name").cloned().unwrap_or_else(|| {
-        path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string()
-    });
-
-    let description = frontmatter.get("description").cloned().unwrap_or_default();
-
-    let model = frontmatter.get("model").cloned();
-
-    let tools = frontmatter.get("tools").map(|s| {
-        s.split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect()
-    });
-
-    Ok(AgentConfig {
-        name,
-        description,
-        model,
-        tools,
-        system_prompt: body.trim().to_string(),
-        source: String::new(),
-    })
-}
-
-/// Parse YAML frontmatter from markdown content.
-fn parse_frontmatter(content: &str) -> (HashMap<String, String>, String) {
-    let mut map = HashMap::new();
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return (map, content.to_string());
-    }
-    let after_first = &trimmed[3..];
-    if let Some(end_idx) = after_first.find("\n---") {
-        let yaml = &after_first[..end_idx];
-        let body = after_first[end_idx + 4..].to_string();
-        for line in yaml.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once(':') {
-                map.insert(key.trim().to_string(), value.trim().to_string());
-            }
-        }
-        return (map, body);
-    }
-    (map, content.to_string())
+/// Discover agents by delegating to [`AgentDiscovery`].
+pub fn discover_agents(cwd: &Path, scope: AgentScope) -> Vec<AgentDefinition> {
+    AgentDiscovery::discover(cwd, scope)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(_, def)| def)
+        .collect()
 }
 
 // ── Result Types ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-/// UsageStats.
+/// Usage statistics from a subagent run.
 pub struct UsageStats {
-    /// pub.
+    /// Input tokens consumed.
     pub input_tokens: u64,
-    /// pub.
+    /// Output tokens consumed.
     pub output_tokens: u64,
-    /// pub.
+    /// Cache read tokens (reserved for future use).
     pub cache_read: u64,
-    /// pub.
+    /// Cache write tokens (reserved for future use).
     pub cache_write: u64,
-    /// pub.
+    /// Cost in USD (reserved for future use).
     pub cost: f64,
-    /// pub.
+    /// Number of agent turns.
     pub turns: u32,
 }
 
 #[derive(Debug, Clone)]
-/// SingleResult.
+/// Result from a single subagent execution.
 pub struct SingleResult {
-    /// pub.
+    /// Agent name.
     pub agent: String,
-    /// pub.
+    /// Discovery source ("user" or "project").
     pub agent_source: String,
-    /// pub.
+    /// Task that was executed.
     pub task: String,
-    /// pub.
+    /// Process exit code.
     pub exit_code: i32,
-    /// pub.
+    /// Captured stdout text.
     pub output: String,
-    /// pub.
+    /// Captured stderr text.
     pub stderr: String,
-    /// pub.
+    /// Token usage.
     pub usage: UsageStats,
-    /// pub.
+    /// Model used by the agent.
     pub model: Option<String>,
-    /// pub.
+    /// Stop reason.
     pub stop_reason: Option<String>,
-    /// pub.
+    /// Error message if the agent failed.
     pub error_message: Option<String>,
-    /// pub.
+    /// Step index in chain mode.
     pub step: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-/// SubagentMode.
+/// Execution mode used for a subagent invocation.
 pub enum SubagentMode {
-    /// single variant.
+    /// Single agent, single task.
     Single,
-    /// parallel variant.
+    /// Multiple agents/tasks running concurrently.
     Parallel,
-    /// chain variant.
+    /// Sequential agents, passing {previous} output forward.
     Chain,
 }
 
 #[derive(Debug, Clone)]
-/// SubagentDetails.
+/// Detailed results from a subagent invocation.
 pub struct SubagentDetails {
-    /// pub.
+    /// Which mode was used.
     pub mode: SubagentMode,
-    /// pub.
+    /// Per-agent results.
     pub results: Vec<SingleResult>,
 }
 
@@ -315,7 +159,7 @@ fn process_json_line(
 // ── Process Execution ──────────────────────────────────────────────────
 
 /// Build command-line arguments for launching a subagent process.
-fn build_agent_args(agent: &AgentConfig, tmp_dir: &Path, task: &str) -> Vec<String> {
+fn build_agent_args(agent: &AgentDefinition, tmp_dir: &Path, task: &str) -> Vec<String> {
     let mut args = vec!["--mode".to_string(), "json".to_string(), "-p".to_string()];
 
     if let Some(ref model) = agent.model {
@@ -323,15 +167,14 @@ fn build_agent_args(agent: &AgentConfig, tmp_dir: &Path, task: &str) -> Vec<Stri
         args.push(model.clone());
     }
 
-    if let Some(ref agent_tools) = agent.tools
-        && !agent_tools.is_empty()
-    {
+    if !agent.tools.is_empty() {
         args.push("--tools".to_string());
-        args.push(agent_tools.join(","));
+        args.push(agent.tools.join(","));
     }
 
-    if !agent.system_prompt.is_empty()
-        && std::fs::write(tmp_dir.join("system_prompt.md"), &agent.system_prompt).is_ok()
+    if let Some(ref prompt) = agent.system_prompt
+        && !prompt.is_empty()
+        && std::fs::write(tmp_dir.join("system_prompt.md"), prompt).is_ok()
     {
         args.push("--append-system-prompt".to_string());
         args.push(
@@ -389,7 +232,7 @@ async fn terminate_child(
 #[allow(clippy::too_many_arguments)]
 async fn run_single_agent(
     cwd: &Path,
-    agents: &[AgentConfig],
+    agents: &[AgentDefinition],
     agent_name: &str,
     task: &str,
     agent_cwd: Option<&str>,
@@ -474,7 +317,16 @@ async fn run_single_agent(
         .current_dir(&working_dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .stdin(std::process::Stdio::null());
+        .stdin(std::process::Stdio::null())
+        // Depth tracking for subagent nesting limits
+        .env(
+            "OXI_SUBAGENT_DEPTH",
+            (current_subagent_depth() + 1).to_string(),
+        )
+        .env(
+            "OXI_MAX_SUBAGENT_DEPTH",
+            agent.max_subagent_depth.to_string(),
+        );
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -572,7 +424,7 @@ async fn run_single_agent(
 /// Run multiple tasks with concurrency limit.
 async fn run_parallel(
     cwd: &Path,
-    agents: &[AgentConfig],
+    agents: &[AgentDefinition],
     tasks: Vec<ParallelTask>,
     binary_path: PathBuf,
     on_progress: Option<ProgressFn>,
@@ -666,7 +518,7 @@ struct ChainStep {
 
 // ── Tool Implementation ────────────────────────────────────────────────
 
-/// SubagentTool.
+/// Subagent tool for delegating tasks to specialized agents.
 pub struct SubagentTool {
     /// Explicit working directory override. If None, uses ToolContext.root() at runtime.
     cwd: Option<PathBuf>,
@@ -786,6 +638,17 @@ impl AgentTool for SubagentTool {
         signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        // ── Depth check ──
+        let depth = current_subagent_depth();
+        let max = max_subagent_depth();
+        if depth >= max {
+            return Ok(AgentToolResult::error(format!(
+                "Subagent depth limit reached ({}/{}). \
+                 Increase max_subagent_depth in your agent definition.",
+                depth, max
+            )));
+        }
+
         // Use explicit cwd if set, else ctx.root()
         let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
 
@@ -853,7 +716,7 @@ impl AgentTool for SubagentTool {
 /// Execute chain mode: sequential agents where each step can reference {previous} output.
 async fn execute_chain_mode(
     cwd: &Path,
-    agents: &[AgentConfig],
+    agents: &[AgentDefinition],
     params: Value,
     binary: &Path,
     progress: Option<ProgressFn>,
@@ -926,7 +789,7 @@ async fn execute_chain_mode(
 /// Execute parallel mode: multiple agents running concurrently.
 async fn execute_parallel_mode(
     cwd: &Path,
-    agents: &[AgentConfig],
+    agents: &[AgentDefinition],
     params: Value,
     binary: &Path,
     progress: Option<ProgressFn>,
@@ -979,7 +842,7 @@ async fn execute_parallel_mode(
 /// Execute single mode: one agent, one task.
 async fn execute_single_mode(
     cwd: &Path,
-    agents: &[AgentConfig],
+    agents: &[AgentDefinition],
     params: Value,
     binary: &Path,
     progress: Option<ProgressFn>,
@@ -1045,58 +908,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_frontmatter_with_yaml() {
-        let content = "---\nname: scout\ndescription: Fast recon\nmodel: haiku\ntools: read, grep\n---\nYou are a scout agent.";
-        let (fm, body) = parse_frontmatter(content);
-        assert_eq!(fm.get("name").unwrap(), "scout");
-        assert_eq!(fm.get("description").unwrap(), "Fast recon");
-        assert_eq!(fm.get("model").unwrap(), "haiku");
-        assert_eq!(fm.get("tools").unwrap(), "read, grep");
-        assert!(body.trim().starts_with("You are a scout agent."));
-    }
-
-    #[test]
-    fn test_parse_frontmatter_no_yaml() {
-        let content = "Just a plain system prompt.";
-        let (fm, body) = parse_frontmatter(content);
-        assert!(fm.is_empty());
-        assert_eq!(body.trim(), "Just a plain system prompt.");
-    }
-
-    #[test]
-    fn test_parse_agent_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let file_path = tmp.path().join("scout.md");
-        std::fs::write(
-            &file_path,
-            "---\nname: scout\ndescription: Fast recon\n---\nYou are a scout.",
-        )
-        .unwrap();
-        let config = parse_agent_file(&file_path).unwrap();
-        assert_eq!(config.name, "scout");
-        assert_eq!(config.description, "Fast recon");
-        assert_eq!(config.system_prompt, "You are a scout.");
-    }
-
-    #[test]
-    fn test_parse_agent_file_no_frontmatter() {
-        let tmp = tempfile::tempdir().unwrap();
-        let file_path = tmp.path().join("worker.md");
-        std::fs::write(&file_path, "You are a worker agent.").unwrap();
-        let config = parse_agent_file(&file_path).unwrap();
-        assert_eq!(config.name, "worker");
-        assert_eq!(config.system_prompt, "You are a worker agent.");
-    }
-
-    #[test]
     fn test_discover_agents_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents = discover_agents(tmp.path(), AgentScope::User);
+        let agents = discover_agents(tmp.path(), AgentScope::Project);
         assert!(agents.is_empty());
     }
 
     #[test]
-    fn test_discover_agents_with_files() {
+    fn test_discover_agents_with_flat_files() {
         let tmp = tempfile::tempdir().unwrap();
         let agents_dir = tmp.path().join(".oxi").join("agents");
         std::fs::create_dir_all(&agents_dir).unwrap();
@@ -1115,47 +934,6 @@ mod tests {
         assert_eq!(agents.len(), 2);
         assert!(agents.iter().any(|a| a.name == "scout"));
         assert!(agents.iter().any(|a| a.name == "worker"));
-    }
-
-    #[test]
-    fn test_find_project_agents_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".oxi").join("agents");
-        std::fs::create_dir_all(&agents_dir).unwrap();
-        let git_dir = tmp.path().join(".git");
-        std::fs::create_dir_all(&git_dir).unwrap();
-        let sub = tmp.path().join("subdir");
-        std::fs::create_dir_all(&sub).unwrap();
-        // From subdirectory, should walk up to find .oxi/agents
-        assert_eq!(find_project_agents_dir(&sub), Some(agents_dir));
-    }
-
-    #[test]
-    fn test_find_project_agents_dir_stops_at_git() {
-        let tmp = tempfile::tempdir().unwrap();
-        let git_dir = tmp.path().join(".git");
-        std::fs::create_dir_all(&git_dir).unwrap();
-        // No .oxi/agents, .git exists → None
-        assert_eq!(find_project_agents_dir(tmp.path()), None);
-    }
-
-    #[test]
-    fn test_agent_scope_default() {
-        assert_eq!(AgentScope::default(), AgentScope::User);
-    }
-
-    #[test]
-    fn test_tools_parsing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let file_path = tmp.path().join("agent.md");
-        std::fs::write(
-            &file_path,
-            "---\ntools: read, grep, find, ls\n---\nSystem prompt.",
-        )
-        .unwrap();
-        let config = parse_agent_file(&file_path).unwrap();
-        let tools = config.tools.unwrap();
-        assert_eq!(tools, vec!["read", "grep", "find", "ls"]);
     }
 
     #[test]
@@ -1225,5 +1003,15 @@ mod tests {
         assert_eq!(result.usage.input_tokens, 100);
         assert_eq!(result.usage.output_tokens, 50);
         assert_eq!(result.usage.turns, 1);
+    }
+
+    #[test]
+    fn test_depth_limit_default() {
+        unsafe {
+            std::env::remove_var("OXI_SUBAGENT_DEPTH");
+            std::env::remove_var("OXI_MAX_SUBAGENT_DEPTH");
+        }
+        assert_eq!(current_subagent_depth(), 0);
+        assert_eq!(max_subagent_depth(), 3);
     }
 }
