@@ -85,6 +85,45 @@ fn test_session_roundtrip_preserves_assistant_content() {
 }
 
 #[test]
+fn test_session_roundtrip_preserves_user_content() {
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.path().to_str().unwrap();
+
+    let mut manager = SessionManager::create("/tmp/test", Some(dir_path));
+    let uid = manager.append_message(make_user_message("my question"));
+    let _aid = manager.append_message(make_assistant_message("my answer"));
+
+    let session_file = manager.get_session_file().unwrap();
+
+    // Reload
+    let loaded = SessionManager::open(&session_file, Some(dir_path), None);
+    let entry = loaded.get_entry(&uid);
+    assert!(entry.is_some(), "user entry should survive roundtrip");
+    assert_eq!(entry.unwrap().content(), "my question");
+}
+
+#[test]
+fn test_session_list_finds_sessions_with_user_messages() {
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.path().to_str().unwrap();
+
+    let mut manager = SessionManager::create("/tmp/test", Some(dir_path));
+    manager.append_message(make_user_message("hello there"));
+    manager.append_message(make_assistant_message("response"));
+    drop(manager);
+
+    // List sessions
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let sessions = rt
+        .block_on(SessionManager::list("/tmp/test", Some(dir_path)))
+        .unwrap();
+
+    assert_eq!(sessions.len(), 1, "should find exactly 1 session");
+    assert_eq!(sessions[0].first_message, "hello there");
+    assert_eq!(sessions[0].message_count, 1);
+}
+
+#[test]
 fn test_no_temp_files_left_behind() {
     let dir = TempDir::new().unwrap();
     let dir_path = dir.path().to_str().unwrap();

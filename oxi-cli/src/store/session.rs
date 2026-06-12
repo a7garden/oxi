@@ -214,7 +214,6 @@ pub enum AgentMessage {
     #[serde(rename = "user")]
     User {
         /// The content.
-        #[serde(flatten)]
         content: ContentValue,
     },
     /// Assistant.
@@ -248,7 +247,6 @@ pub enum AgentMessage {
     #[serde(rename = "system")]
     System {
         /// The content.
-        #[serde(flatten)]
         content: ContentValue,
     },
     /// Bash Execution.
@@ -1309,6 +1307,8 @@ impl SessionManager {
             for e in self.file_entries.read().iter() {
                 if let Ok(line) = serde_json::to_string(e) {
                     let _ = writeln!(&mut handle, "{}", line);
+                } else {
+                    tracing::warn!("Failed to serialize session entry, skipping");
                 }
             }
             self.flushed = true;
@@ -1317,6 +1317,8 @@ impl SessionManager {
             let file_entry = convert_from_session_entry(entry);
             if let Ok(line) = serde_json::to_string(&file_entry) {
                 let _ = writeln!(&mut handle, "{}", line);
+            } else {
+                tracing::warn!("Failed to serialize incremental session entry, skipping");
             }
         }
     }

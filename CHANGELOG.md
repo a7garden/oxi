@@ -5,6 +5,21 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.6] - 2026-06-12
+
+### Fixed — Session persistence bug
+
+- **`AgentMessage::User` and `AgentMessage::System` failed to serialize** due to
+  `#[serde(flatten)]` on a `ContentValue` field. `ContentValue::String` serializes
+  as a bare JSON string, but `flatten` can only merge structs/maps — causing
+  `serde_json::to_string` to fail silently. User messages were never written to
+  disk, making sessions invisible to `/resume`. Removed `#[serde(flatten)]` from
+  both variants (`oxi-cli/src/store/session.rs`).
+- **Silent serialization failures in `_persist()`** now emit `tracing::warn!`
+  instead of being silently swallowed.
+- Added regression tests: `test_session_roundtrip_preserves_user_content`,
+  `test_session_list_finds_sessions_with_user_messages`.
+
 ## [0.31.0] - 2026-06-07
 
 ### Changed — Rust 2024 edition modernization
