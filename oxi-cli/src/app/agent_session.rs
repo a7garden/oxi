@@ -642,27 +642,41 @@ impl AgentSession {
 
     /// Persist the current agent state to the session manager.
     ///
-    /// Only appends messages that are new since the last persist call,
-    /// tracked via `persisted_count`.
+    /// Safety-net fallback called on `AgentEnd`. Catches ToolResult
+    /// messages that were never delivered via `MessageEnd` events.
+    ///
+    /// Uses `agent.state().messages` index tracking via `persisted_count`
+    /// to append only messages that haven't been written yet.  Because
+    /// `persist_event_message` increments `persisted_count` independently
+    /// of this method's index-based logic, we must **reconcile** the two
+    /// counters to avoid double-writes or gaps.
+    ///
+    /// The reconciliation strategy is simple: count how many entries the
+    /// session manager already has, compare to `agent.state().messages.len()`,
+    /// and append any deficit.  This is idempotent — calling it when
+    /// everything is already persisted is a no-op.
     fn persist_session(&self) {
         let state = self.agent.state();
         let messages = &state.messages;
         let total = messages.len();
 
-        // Nothing to persist (no messages at all, or already up to date)
+        // Nothing to persist
         if total == 0 {
             return;
         }
 
+        // Count how many "real" message entries (non-header) the session
+        // manager already has. This is the source of truth for how many
+        // agent messages have been persisted to disk.
         let mut sm = self.session_manager.write();
-        let persisted = sm.persisted_count();
+        let already_in_sm = sm.get_entries().len();
 
-        if persisted >= total {
-            return; // already fully persisted
+        if already_in_sm >= total {
+            return; // fully persisted
         }
 
-        // Append only the new messages
-        for msg in &messages[persisted..] {
+        // Append the missing messages (by index in agent state)
+        for msg in &messages[already_in_sm..] {
             match msg {
                 Message::User(u) => {
                     let content = match &u.content {
@@ -678,7 +692,6 @@ impl AgentSession {
                     });
                 }
                 Message::Assistant(a) => {
-                    // Convert oxi_ai ContentBlocks → session AssistantContentBlocks
                     let content_blocks: Vec<crate::store::session::AssistantContentBlock> = a
                         .content
                         .iter()
@@ -707,7 +720,6 @@ impl AgentSession {
                                 }
                             }
                             oxi_sdk::ContentBlock::Unknown(v) => {
-                                // Best-effort: try to extract text from unknown JSON
                                 crate::store::session::AssistantContentBlock::Text {
                                     text: v.to_string(),
                                 }
@@ -744,7 +756,7 @@ impl AgentSession {
             }
         }
 
-        // Update the persisted count so we don't re-add these messages
+        // Sync persisted_count to match reality
         sm.set_persisted_count(total);
     }
 
@@ -777,6 +789,26 @@ impl AgentSession {
     /// Use this when you need direct agent access (e.g., `run_with_channel`).
     pub fn agent_ref(&self) -> Arc<Agent> {
         Arc::clone(&self.agent)
+    }
+
+    /// Persist a user prompt to the session manager before the agent loop starts.
+    ///
+    /// This must be called before sending the prompt to the agent worker so that
+    /// the user message is in `file_entries` when the deferred-flush fires (which
+    /// requires at least one assistant message before writing to disk).  Without
+    /// this call the session file would contain only assistant / tool-result
+    /// entries, and `cleanup_if_empty()` would delete it on teardown.
+    ///
+    /// The method also increments `persisted_count` so that the safety-net
+    /// `persist_session()` (called on `AgentEnd`) does not double-write the
+    /// message.
+    pub fn persist_user_message(&self, content: String) {
+        let mut sm = self.session_manager.write();
+        sm.append_message(AgentMessage::User {
+            content: crate::store::session::ContentValue::String(content),
+        });
+        let count = sm.persisted_count();
+        sm.set_persisted_count(count + 1);
     }
 
     /// Persist a single message from an event directly to session manager.

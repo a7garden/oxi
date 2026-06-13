@@ -1,6 +1,6 @@
 [package]
 name = "oxi-agent"
-version = "0.32.0"
+version = "0.32.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Agent runtime with tool-calling loop for AI coding assistants"
@@ -13,7 +13,7 @@ categories = ["development-tools", "asynchronous"]
 exclude = ["target/", "benches/"]
 
 [dependencies]
-oxi-ai = { version = "0.32.0", path = "../oxi-ai" }
+oxi-ai = { version = "0.32.1", path = "../oxi-ai" }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }

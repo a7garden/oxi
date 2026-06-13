@@ -1373,6 +1373,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             state.history_index = 0;
                             state.start_streaming();
                             agent_session.reset_should_stop();
+                            // Persist the user message to the session manager before
+                            // the agent loop starts so that the deferred-flush pattern
+                            // (which writes to disk on the first assistant message)
+                            // includes the user message in the output file.
+                            agent_session.persist_user_message(value.clone());
                             tracing::info!("[TUI] About to send prompt to channel");
                             tracing::debug!("[TUI] SendPrompt: prompt_tx.send() called");
                             let _ = prompt_tx.send(value).await;
@@ -1460,6 +1465,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                         prompt: msg.clone(),
                     });
                     state.is_agent_busy = true;
+                    // Persist the queued message to the session manager before
+                    // sending it through the prompt channel, same as SendPrompt.
+                    agent_session.persist_user_message(msg.clone());
                     let _ = prompt_tx.send(msg).await;
                 }
             }
