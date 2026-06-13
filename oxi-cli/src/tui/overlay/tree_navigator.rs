@@ -252,9 +252,12 @@ impl TreeNavigatorOverlay {
             });
 
             if has_children && !is_folded {
+                // Pass current indent (0); flatten_children_impl decides
+                // whether to increase based on child count.
+                let next_indent = if roots.len() > 1 { 1 } else { 0 };
                 Self::flatten_children_impl(
                     &root.id,
-                    1,
+                    next_indent,
                     &children_map,
                     is_last,
                     &filtered_ids,
@@ -310,6 +313,9 @@ impl TreeNavigatorOverlay {
     }
 
     /// Static version that accepts explicit parameters to avoid borrow conflicts.
+    ///
+    /// Linear chains (single-child) are collapsed at the same indent level so
+    /// the tree only deepens at actual branch points (≥2 children).
     #[allow(clippy::too_many_arguments)]
     fn flatten_children_impl(
         parent_id: &str,
@@ -326,6 +332,14 @@ impl TreeNavigatorOverlay {
             None => return,
         };
 
+        // Linear chains (single child) stay at the same indent level.
+        // Only increase indent at actual branch points (≥2 children).
+        let child_indent = if children.len() > 1 {
+            indent + 1
+        } else {
+            indent
+        };
+
         for (i, child) in children.iter().enumerate() {
             let is_last = i == children.len() - 1;
             let has_children = children_map
@@ -336,7 +350,7 @@ impl TreeNavigatorOverlay {
             flat_nodes.push(FlatNode {
                 entry_id: child.id.clone(),
                 parent_id: child.parent_id.clone(),
-                indent,
+                indent: child_indent,
                 is_last_child: is_last,
                 is_folded: is_folded && has_children,
                 has_children,
@@ -347,7 +361,7 @@ impl TreeNavigatorOverlay {
             if has_children && !is_folded {
                 Self::flatten_children_impl(
                     &child.id,
-                    indent + 1,
+                    child_indent,
                     children_map,
                     is_last,
                     _filtered_ids,
