@@ -4,6 +4,8 @@ use super::app::{AppState, NotificationKind, UiEvent};
 use super::overlay::OverlayAction;
 use super::overlay::router_integration;
 use super::slash;
+use std::sync::atomic::Ordering;
+
 use crate::app::agent_session::{AgentSession, SessionEvent};
 use crate::context::auto_compaction::CompactionReason;
 use crate::media::clipboard_write;
@@ -216,6 +218,12 @@ async fn dispatch_action(
                 session.abort_compaction_sync();
                 state.footer_state.data.is_compacting = false;
                 state.add_notification("Compaction cancelled".to_string(), NotificationKind::Info);
+            } else if state.is_agent_busy {
+                // Stop the running agent loop without quitting the program.
+                session.agent_ref().cancel();
+                session.should_stop_flag().store(true, Ordering::SeqCst);
+                state.cancel_streaming();
+                state.add_notification("Agent stopped".to_string(), NotificationKind::Info);
             } else if state.slash_completion_active {
                 state.clear_slash_completions();
             }
