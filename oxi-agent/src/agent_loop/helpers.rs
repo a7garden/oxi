@@ -43,34 +43,12 @@ pub fn should_terminate_batch(finalized_calls: &[FinalizedToolCall]) -> bool {
     finalized_calls.iter().all(|f| f.result.terminate)
 }
 
-/// Check if loop should stop after a turn.
+/// Check if the loop should stop after a turn due to external cancellation.
 ///
-/// pi-mono: shouldStopAfterTurn is an optional hook. If no hook is defined,
-/// the loop never stops here — it continues until no more tool calls AND
-/// no more steering/follow-up messages.
-///
-/// oxi: We check external_stop (Ctrl+C) and max_iterations.
-/// Stop/Length reasons are handled by the inner loop's has_more_tool_calls
-/// condition, NOT here.
-pub fn should_stop_after_turn(
-    _messages: &[oxi_ai::Message],
-    _assistant_message: &oxi_ai::AssistantMessage,
-    max_iterations: usize,
-    external_stop: &Arc<AtomicBool>,
-    turn_number: usize,
-) -> bool {
-    // External stop (Ctrl+C)
-    if external_stop.load(Ordering::SeqCst) {
-        return true;
-    }
-
-    // Max iterations guard — uses caller-provided turn_number
-    // instead of re-counting messages each time (O(n) → O(1)).
-    if turn_number >= max_iterations {
-        return true;
-    }
-
-    false
+/// The loop exits naturally when the LLM stops making tool calls (text-only
+/// response). This function only checks for out-of-band cancellation (Ctrl+C).
+pub fn should_stop_after_turn(external_stop: &Arc<AtomicBool>) -> bool {
+    external_stop.load(Ordering::SeqCst)
 }
 
 use crate::AgentToolResult;
@@ -83,4 +61,21 @@ pub struct FinalizedToolCall {
     pub result: AgentToolResult,
     /// pub.
     pub is_error: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_stop_returns_false_when_no_external_stop() {
+        let external_stop = Arc::new(AtomicBool::new(false));
+        assert!(!should_stop_after_turn(&external_stop));
+    }
+
+    #[test]
+    fn test_should_stop_returns_true_on_external_stop() {
+        let external_stop = Arc::new(AtomicBool::new(true));
+        assert!(should_stop_after_turn(&external_stop));
+    }
 }

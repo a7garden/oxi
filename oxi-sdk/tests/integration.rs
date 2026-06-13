@@ -19,7 +19,6 @@ async fn full_pipeline_build_and_run() {
     let agent = oxi
         .agent(AgentConfig {
             model_id: "mock/model".into(),
-            max_iterations: 5,
             ..Default::default()
         })
         .workspace("/tmp")
@@ -37,7 +36,6 @@ async fn agent_with_system_prompt() {
     let agent = oxi
         .agent(AgentConfig {
             model_id: "mock/model".into(),
-            max_iterations: 3,
             ..Default::default()
         })
         .workspace("/tmp")
@@ -55,7 +53,6 @@ async fn agent_with_custom_tool() {
     let agent = oxi
         .agent(AgentConfig {
             model_id: "mock/model".into(),
-            max_iterations: 3,
             ..Default::default()
         })
         .workspace("/tmp")

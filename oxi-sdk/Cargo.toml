@@ -1,6 +1,6 @@
 [package]
 name = "oxi-sdk"
-version = "0.31.6"
+version = "0.32.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "oxi AI agent SDK — build isolated, multi-agent AI systems"
@@ -13,8 +13,8 @@ categories = ["api-bindings", "development-tools"]
 exclude = ["target/"]
 
 [dependencies]
-oxi-ai = { version = "0.31.6", path = "../oxi-ai" }
-oxi-agent = { version = "0.31.6", path = "../oxi-agent" }
+oxi-ai = { version = "0.32.0", path = "../oxi-ai" }
+oxi-agent = { version = "0.32.0", path = "../oxi-agent" }
 async-trait = "0.1"
 # Re-exported under the `native-browser` feature so downstream consumers
 # can match on `BrowserEvent` variants without depending on oxibrowser-core

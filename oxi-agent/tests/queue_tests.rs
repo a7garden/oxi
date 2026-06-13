@@ -9,20 +9,12 @@ mod tests {
     fn test_agent_loop_config_defaults() {
         let config = AgentLoopConfig::default();
         assert_eq!(config.model_id, "");
-        assert_eq!(config.max_iterations, 20);
         assert_eq!(config.temperature, 0.7);
         assert_eq!(config.max_tokens, 4096);
         assert!(matches!(
             config.compaction_strategy,
             CompactionStrategy::Threshold(_)
         ));
-    }
-
-    #[test]
-    fn test_agent_loop_config_max_iterations() {
-        let mut config = AgentLoopConfig::default();
-        config.max_iterations = 5;
-        assert_eq!(config.max_iterations, 5);
     }
 
     #[test]

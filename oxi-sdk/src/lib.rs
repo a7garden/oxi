@@ -7,7 +7,6 @@
 //! let oxi = OxiBuilder::new().with_builtins().build();
 //! let agent = oxi.agent(AgentConfig {
 //!     model_id: "anthropic/claude-sonnet-4-20250514".into(),
-//!     max_iterations: 20,
 //!     ..Default::default()
 //! }).build().unwrap();
 //! ```
@@ -287,7 +286,6 @@ mod tests {
         let oxi = OxiBuilder::new().with_builtins().build();
         let config = AgentConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".into(),
-            max_iterations: 10,
             timeout_seconds: 30,
             ..Default::default()
         };
@@ -301,7 +299,6 @@ mod tests {
         let oxi = OxiBuilder::new().with_builtins().build();
         let config = AgentConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".into(),
-            max_iterations: 10,
             timeout_seconds: 30,
             ..Default::default()
         };
@@ -320,7 +317,6 @@ mod tests {
         let oxi = OxiBuilder::new().with_builtins().build();
         let config = AgentConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".into(),
-            max_iterations: 10,
             timeout_seconds: 30,
             ..Default::default()
         };
@@ -413,7 +409,6 @@ mod tests {
         // This should fail because 'anthropic' provider isn't registered
         let config = AgentConfig {
             model_id: "test-provider/test-model".into(),
-            max_iterations: 1,
             timeout_seconds: 5,
             ..Default::default()
         };
@@ -485,7 +480,6 @@ mod tests {
         let oxi = OxiBuilder::new().with_builtins().build();
         let config = AgentConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".into(),
-            max_iterations: 10,
             timeout_seconds: 30,
             ..Default::default()
         };
@@ -539,7 +533,6 @@ mod tests {
         let oxi = OxiBuilder::new().with_builtins().build();
         let config = AgentConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".into(),
-            max_iterations: 1,
             timeout_seconds: 5,
             ..Default::default()
         };

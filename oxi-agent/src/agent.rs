@@ -462,7 +462,6 @@ impl Agent {
 
         let (
             provider,
-            max_iterations,
             system_prompt,
             temperature,
             max_tokens,
@@ -474,7 +473,6 @@ impl Agent {
             let inner = self.inner.read();
             (
                 Arc::clone(&inner.provider) as Arc<dyn Provider>,
-                inner.config.max_iterations,
                 inner.config.system_prompt.clone(),
                 inner.config.temperature,
                 inner.config.max_tokens,
@@ -489,7 +487,6 @@ impl Agent {
         let loop_config = crate::agent_loop::config::AgentLoopConfig {
             model_id: self.model_id(),
             system_prompt,
-            max_iterations,
             temperature: temperature.unwrap_or(1.0) as f32,
             max_tokens: max_tokens.unwrap_or(4096) as u32,
             tool_execution: crate::config::ToolExecutionMode::Sequential,
@@ -843,7 +840,6 @@ impl Agent {
         let loop_config = crate::agent_loop::config::AgentLoopConfig {
             model_id: inner.config.model_id.clone(),
             system_prompt: inner.config.system_prompt.clone(),
-            max_iterations: inner.config.max_iterations,
             temperature: inner.config.temperature.unwrap_or(1.0) as f32,
             max_tokens: inner.config.max_tokens.unwrap_or(4096) as u32,
             tool_execution: crate::config::ToolExecutionMode::Sequential,

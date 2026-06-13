@@ -817,7 +817,6 @@ mod tests {
         AgentConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".into(),
             name: uuid::Uuid::new_v4().to_string(),
-            max_iterations: 10,
             ..Default::default()
         }
     }

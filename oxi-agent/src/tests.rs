@@ -92,7 +92,6 @@ impl Stream for MockStream {
 fn test_agent_config_default() {
     let config = AgentConfig::default();
     assert_eq!(config.name, "oxi-agent");
-    assert_eq!(config.max_iterations, 10);
     assert_eq!(config.timeout_seconds, 300);
 }
 
@@ -100,12 +99,10 @@ fn test_agent_config_default() {
 fn test_agent_config_builder() {
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514")
         .with_name("my-agent")
-        .with_system_prompt("You are helpful")
-        .with_max_iterations(5);
+        .with_system_prompt("You are helpful");
     assert_eq!(config.model_id, "anthropic/claude-sonnet-4-20250514");
     assert_eq!(config.name, "my-agent");
     assert_eq!(config.system_prompt, Some("You are helpful".to_string()));
-    assert_eq!(config.max_iterations, 5);
 }
 
 #[test]
@@ -766,7 +763,6 @@ async fn test_multi_turn_tool_use_loop() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1160,7 +1156,6 @@ async fn test_steering_messages_injected_into_loop() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1233,7 +1228,6 @@ async fn test_multiple_steering_messages() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1297,7 +1291,6 @@ fn test_follow_up_queue_api() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1376,7 +1369,6 @@ async fn test_follow_up_processed_in_tool_use_loop() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1462,7 +1454,6 @@ async fn test_follow_up_via_continue_loop() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1536,7 +1527,6 @@ async fn test_follow_up_queue_cleared() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,
@@ -1612,7 +1602,6 @@ fn test_follow_up_and_steering_queue_independent() {
         system_prompt: None,
         temperature: 0.7,
         max_tokens: 4096,
-        max_iterations: 10,
         tool_execution: ToolExecutionMode::Sequential,
         compaction_strategy: CompactionStrategy::Disabled,
         context_window: 100_000,

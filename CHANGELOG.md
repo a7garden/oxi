@@ -5,6 +5,38 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-06-12
+
+### Changed — RFC-008: Remove `max_iterations` loop guard
+
+The agent loop no longer enforces a turn limit. This matches pi-agent's
+behavior where the loop runs until the LLM naturally stops making tool calls.
+
+- **`should_stop_after_turn()`** now only checks `external_stop` (Ctrl+C).
+  The `max_iterations`, `turn_number`, `messages`, and `assistant_message`
+  parameters were removed — the function signature is now
+  `fn should_stop_after_turn(external_stop: &Arc<AtomicBool>) -> bool`.
+- **`AgentConfig::max_iterations`** field removed. Existing code that sets
+  this field will get a compile error — remove the field from struct literals.
+- **`AgentLoopConfig::max_iterations`** field removed.
+- **`AgentConfig::with_max_iterations()`** builder method removed.
+- **`AgentEvent::ForcedSummary`** variant removed (was added during RFC-008
+  development but is no longer needed without the max-iterations guard).
+- **`LoopStopReason`** enum removed.
+
+### Removed
+
+- `max_iterations` field from `AgentConfig` and `AgentLoopConfig`.
+- `with_max_iterations()` builder from `AgentConfig`.
+- `LoopStopReason` enum from `agent_loop::helpers`.
+- `ForcedSummary` variant from `AgentEvent`.
+
+### Migration
+
+Remove all `max_iterations` fields from `AgentConfig` and `AgentLoopConfig`
+struct literals. The loop now runs indefinitely until the LLM produces a
+text-only response (no tool calls) or the user cancels (Ctrl+C).
+
 ## [0.31.6] - 2026-06-12
 
 ### Fixed — Session persistence bug

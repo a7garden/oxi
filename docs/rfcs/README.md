@@ -16,6 +16,8 @@
 | [RFC-004](RFC-004-EXTENSION-SKILLS.md) | Extension & Skills (UI 컨텍스트, Skills 강화, 패키지) | **P2** | 80% | 100% | 4주 |
 | [RFC-005](RFC-005-CI-CD-INFRA.md) | CI/CD (크로스 컴파일, 자동 업데이트, 배포) | **P2** | 50% | 95% | 3주 |
 | [RFC-006](RFC-006-SDK-MULTI-AGENT.md) | SDK (에이전트 정의, 워크플로우 DSL) | **P2** | 92% | 100% | 1.5주 |
+| [RFC-007](RFC-007-BROWSE-PROGRESS-ENRICHMENT.md) | Browse 진행 정보 (구조화된 컨텍스트, 스크린샷) | **P1** | 90% | 95% | 1주 |
+| [RFC-008](RFC-008-GRACEFUL-LOOP-TERMINATION.md) | 에이전트 루프 정상 종료 보장 (max_iterations 후 텍스트 응답) | **P1** | 60% | 95% | 1.5주 |
 
 ---
 

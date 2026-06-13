@@ -283,7 +283,6 @@ mod tests {
             system_prompt: None,
             temperature: 0.7,
             max_tokens: 4096,
-            max_iterations: 10,
             tool_execution: ToolExecutionMode::Sequential,
             compaction_strategy: CompactionStrategy::Disabled,
             context_window: 100_000,
@@ -814,8 +813,8 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════════
 
     #[tokio::test]
-    async fn test_max_iterations_stop() {
-        // Provider that always returns tool calls (will hit max iterations)
+    async fn test_multi_turn_loop_completes() {
+        // The loop runs until the LLM naturally stops making tool calls.
         let provider = Arc::new(MultiTurnToolProvider::new(vec![
             MultiTurnToolResponse {
                 text: None,
@@ -834,35 +833,12 @@ mod tests {
                 )],
             },
             MultiTurnToolResponse {
-                text: None,
-                tool_calls: vec![ToolCall::new(
-                    "call_3",
-                    "echo",
-                    serde_json::json!({"message": "iteration 3"}),
-                )],
-            },
-            MultiTurnToolResponse {
-                text: None,
-                tool_calls: vec![ToolCall::new(
-                    "call_4",
-                    "echo",
-                    serde_json::json!({"message": "iteration 4"}),
-                )],
-            },
-            MultiTurnToolResponse {
-                text: None,
-                tool_calls: vec![ToolCall::new(
-                    "call_5",
-                    "echo",
-                    serde_json::json!({"message": "iteration 5"}),
-                )],
+                text: Some("Final answer.".to_string()),
+                tool_calls: vec![],
             },
         ]));
 
-        // Config with max_iterations = 3
-        let mut config = make_config();
-        config.max_iterations = 3;
-
+        let config = make_config();
         let tools = make_tools();
         let state = SharedState::new();
         let agent_loop = AgentLoop::new(provider.clone(), config, tools, state);
@@ -879,24 +855,19 @@ mod tests {
         assert!(result.is_ok());
         let events = events.lock().unwrap();
 
-        // Should stop after 3 iterations (internal loop iterations)
+        // All 3 provider responses are consumed
         let turn_starts = events
             .iter()
             .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
             .count();
-
-        // The loop should stop at max_iterations
-        assert!(turn_starts <= 3);
-
-        // Should have reached the limit
-        assert!(provider.call_count() <= 3);
+        assert_eq!(turn_starts, 3);
+        assert_eq!(provider.call_count(), 3);
     }
 
     #[tokio::test]
-    async fn test_max_iterations_exact() {
-        // Provider with exactly max_iterations responses
-        let mut config = make_config();
-        config.max_iterations = 2;
+    async fn test_natural_loop_exit() {
+        // The loop exits naturally when the LLM returns a text-only response.
+        let config = make_config();
 
         let provider = Arc::new(MultiTurnToolProvider::new(vec![
             MultiTurnToolResponse {
@@ -929,7 +900,7 @@ mod tests {
         assert!(result.is_ok());
         let events = events.lock().unwrap();
 
-        // With 2 max_iterations and 2 responses, should complete
+        // The loop completes naturally when the last response is text-only.
         let turn_starts = events
             .iter()
             .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
@@ -1305,5 +1276,89 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. }))
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Loop termination tests
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_loop_runs_until_natural_exit() {
+        // The loop runs until the LLM returns a text-only response.
+        let provider = Arc::new(MultiTurnToolProvider::new(vec![
+            MultiTurnToolResponse {
+                text: None,
+                tool_calls: vec![ToolCall::new("c1", "echo", serde_json::json!({"msg": "1"}))],
+            },
+            MultiTurnToolResponse {
+                text: None,
+                tool_calls: vec![ToolCall::new("c2", "echo", serde_json::json!({"msg": "2"}))],
+            },
+            MultiTurnToolResponse {
+                text: Some("Here is the final answer.".to_string()),
+                tool_calls: vec![],
+            },
+        ]));
+
+        let config = make_config();
+        let tools = make_tools();
+        let state = SharedState::new();
+        let agent_loop = AgentLoop::new(provider.clone(), config, tools, state);
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+
+        let result = agent_loop
+            .run("Do work".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
+            .await;
+        assert!(result.is_ok());
+
+        let events = events.lock().unwrap();
+
+        let turn_starts = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
+            .count();
+        assert_eq!(turn_starts, 3);
+        assert_eq!(provider.call_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_external_stop_exits_immediately() {
+        // External stop (Ctrl+C) should exit immediately.
+        let provider = Arc::new(MultiTurnToolProvider::new(vec![MultiTurnToolResponse {
+            text: None,
+            tool_calls: vec![ToolCall::new("c1", "echo", serde_json::json!({"msg": "1"}))],
+        }]));
+
+        let config = make_config();
+        let tools = make_tools();
+        let state = SharedState::new();
+        let agent_loop = AgentLoop::new(provider.clone(), config, tools, state);
+
+        // Set external stop flag before running
+        agent_loop.external_stop().store(true, Ordering::SeqCst);
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+
+        let result = agent_loop
+            .run("Test".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
+            .await;
+        assert!(result.is_ok());
+
+        // The loop should have exited early due to external stop.
+        // One turn may complete (the streaming error handler creates a turn)
+        // but no tool execution should have happened.
+        let events = events.lock().unwrap();
+        let tool_exec = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+            .count();
+        assert_eq!(tool_exec, 0);
     }
 }

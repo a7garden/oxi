@@ -11,8 +11,6 @@ pub struct AgentLoopConfig {
     pub temperature: f32,
     /// Maximum tokens the model may generate per request.
     pub max_tokens: u32,
-    /// Maximum number of assistant turns before the loop stops.
-    pub max_iterations: usize,
     /// Whether tool calls run in parallel or sequentially.
     pub tool_execution: ToolExecutionMode,
     /// Compaction strategy for managing context window usage.
@@ -67,7 +65,6 @@ impl Default for AgentLoopConfig {
             system_prompt: None,
             temperature: 0.7,
             max_tokens: 4096,
-            max_iterations: 20,
             tool_execution: ToolExecutionMode::Parallel,
             compaction_strategy: oxi_ai::CompactionStrategy::default(),
             context_window: 128_000,

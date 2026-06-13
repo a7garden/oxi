@@ -227,7 +227,6 @@ impl App {
             description: Some("oxi CLI agent".to_string()),
             model_id: model_id.clone(),
             system_prompt: Some(system_prompt),
-            max_iterations: 10,
             timeout_seconds: settings.tool_timeout_seconds,
             temperature: settings.effective_temperature(),
             max_tokens: settings.effective_max_tokens(),

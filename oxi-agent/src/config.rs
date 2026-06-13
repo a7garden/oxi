@@ -132,8 +132,6 @@ pub struct AgentConfig {
     pub model_id: String,
     /// System prompt
     pub system_prompt: Option<String>,
-    /// Maximum number of agent iterations
-    pub max_iterations: usize,
     /// Timeout in seconds for the entire agent run
     pub timeout_seconds: u64,
     /// Temperature for generation (0.0 to 1.0)
@@ -182,7 +180,6 @@ impl Default for AgentConfig {
             description: None,
             model_id: "claude-sonnet-4-20250514".to_string(),
             system_prompt: None,
-            max_iterations: 10,
             timeout_seconds: 300,
             temperature: None,
             max_tokens: None,
@@ -215,12 +212,6 @@ impl AgentConfig {
     /// Set the system prompt.
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
-        self
-    }
-
-    /// Set the maximum number of agent loop iterations.
-    pub fn with_max_iterations(mut self, max: usize) -> Self {
-        self.max_iterations = max;
         self
     }
 

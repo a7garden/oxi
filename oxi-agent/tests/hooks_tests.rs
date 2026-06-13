@@ -47,7 +47,6 @@ mod tests {
     #[test]
     fn test_agent_loop_config_default() {
         let config = AgentLoopConfig::default();
-        assert_eq!(config.max_iterations, 20);
         assert_eq!(config.temperature, 0.7);
         assert_eq!(config.max_tokens, 4096);
     }
@@ -56,7 +55,6 @@ mod tests {
     fn test_agent_loop_config_custom() {
         let config = AgentLoopConfig {
             model_id: "anthropic/claude-sonnet-4".to_string(),
-            max_iterations: 50,
             temperature: 0.5,
             max_tokens: 8192,
             compaction_strategy: CompactionStrategy::Threshold(0.8),
@@ -64,7 +62,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(config.model_id, "anthropic/claude-sonnet-4");
-        assert_eq!(config.max_iterations, 50);
     }
 
     #[test]

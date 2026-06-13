@@ -19,7 +19,6 @@ async fn main() -> anyhow::Result<()> {
 
     let config = AgentConfig {
         model_id: "anthropic/claude-sonnet-4-20250514".into(),
-        max_iterations: 5,
         ..Default::default()
     };
 
