@@ -1055,6 +1055,81 @@ async fn handle_overlay_key(
                 }
                 return None;
             }
+            OverlayAction::McpAction(action) => {
+                use super::overlay::mcp_dashboard::McpAction as MA;
+                let manager = match session.agent_ref().tools().mcp_manager() {
+                    Some(m) => m,
+                    None => {
+                        state.add_notification(
+                            "MCP manager unavailable".into(),
+                            NotificationKind::Error,
+                        );
+                        return None;
+                    }
+                };
+                match action {
+                    MA::Reconnect(server) => {
+                        match manager.connect(&server).await {
+                            Ok(_) => {
+                                state.add_notification(
+                                    format!("MCP: reconnected {}", server),
+                                    NotificationKind::Success,
+                                );
+                            }
+                            Err(e) => {
+                                state.add_notification(
+                                    format!("MCP reconnect failed: {}", e),
+                                    NotificationKind::Error,
+                                );
+                            }
+                        }
+                        if let Some(ref mut o) = state.overlay_state {
+                            o.mark_refresh();
+                        }
+                    }
+                    MA::ReconnectAll => {
+                        let names: Vec<String> = {
+                            let config = manager.config();
+                            config.mcp_servers.keys().cloned().collect()
+                        };
+                        for srv in &names {
+                            let _ = manager.connect(srv).await;
+                        }
+                        if let Some(ref mut o) = state.overlay_state {
+                            o.mark_refresh();
+                        }
+                    }
+                    MA::Disconnect(_server) => {
+                        state.add_notification(
+                            "Disconnect not yet implemented".into(),
+                            NotificationKind::Info,
+                        );
+                    }
+                    MA::SetConsent {
+                        name,
+                        state: consent,
+                    } => {
+                        let state_name = format!("{:?}", consent);
+                        if let Err(e) = manager.consent().decide(&name, consent) {
+                            state.add_notification(
+                                format!("Consent error: {}", e),
+                                NotificationKind::Error,
+                            );
+                        } else {
+                            state.add_notification(
+                                format!("MCP consent: {} → {}", name, state_name),
+                                NotificationKind::Success,
+                            );
+                        }
+                    }
+                    MA::Refresh => {
+                        if let Some(ref mut o) = state.overlay_state {
+                            o.mark_refresh();
+                        }
+                    }
+                }
+                return None;
+            }
             _ => {}
         }
         return None;

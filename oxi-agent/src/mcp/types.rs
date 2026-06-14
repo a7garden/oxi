@@ -12,26 +12,41 @@ use std::collections::HashMap;
 /// MCP server configuration entry.
 ///
 /// Supports both stdio (command-based) and HTTP transports.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerEntry {
     /// Command to start the MCP server process (stdio transport).
+    #[serde(default)]
     pub command: Option<String>,
     /// Arguments passed to the command.
+    #[serde(default)]
     pub args: Option<Vec<String>>,
     /// Additional environment variables for the server process.
+    #[serde(default)]
     pub env: Option<HashMap<String, String>>,
     /// Working directory for the server process.
+    #[serde(default)]
     pub cwd: Option<String>,
     /// HTTP URL for HTTP/SSE transport.
+    #[serde(default)]
     pub url: Option<String>,
     /// HTTP headers to include when connecting.
+    #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
     /// Server lifecycle mode.
+    #[serde(default)]
     pub lifecycle: Option<LifecycleMode>,
     /// Idle timeout in minutes (overrides global setting).
+    #[serde(default)]
     pub idle_timeout: Option<u64>,
     /// Show server stderr output (default: false).
+    #[serde(default)]
     pub debug: Option<bool>,
+    /// Direct tools registration config (Phase 3).
+    #[serde(default)]
+    pub direct_tools: Option<DirectToolsConfig>,
+    /// Tools to exclude from direct/proxy registration (Phase 3).
+    #[serde(default)]
+    pub exclude_tools: Option<Vec<String>>,
 }
 
 /// Server lifecycle modes.
@@ -47,14 +62,24 @@ pub enum LifecycleMode {
 }
 
 /// Global MCP settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpSettings {
     /// Tool name prefix mode.
+    #[serde(default)]
     pub tool_prefix: Option<ToolPrefix>,
     /// Global idle timeout in minutes (default: 10).
+    #[serde(default)]
     pub idle_timeout: Option<u64>,
     /// Back-off period in seconds after a server connection failure (default: 30).
+    #[serde(default)]
     pub failure_backoff_secs: Option<u64>,
+    /// Global default for direct tools registration (Phase 3).
+    #[serde(default)]
+    pub direct_tools: Option<DirectToolsConfig>,
+    /// If true, the `mcp` proxy tool is hidden when direct tools cover
+    /// all configured servers (Phase 3).
+    #[serde(default)]
+    pub disable_proxy_tool: Option<bool>,
 }
 
 /// Tool name prefix strategy.
@@ -288,4 +313,115 @@ pub fn format_schema(schema: &serde_json::Value, indent: &str) -> String {
     }
 
     format!("{indent}({schema_type})")
+}
+
+// ── Phase 3: Direct tools / consent ───────────────────────────────
+
+/// Configuration for direct tool registration (Phase 3).
+///
+/// Can be a boolean (all tools) or a list of specific tool names.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DirectToolsConfig {
+    /// `true` = register all tools as direct, `false` = proxy only.
+    All(bool),
+    /// Register only these specific tools as direct (by original name).
+    Specific(Vec<String>),
+}
+
+impl Default for DirectToolsConfig {
+    fn default() -> Self {
+        DirectToolsConfig::All(false)
+    }
+}
+
+/// MCP tool execution consent state (Phase 3, extended in Phase 4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ConsentState {
+    /// Always allow execution.
+    #[default]
+    Allow,
+    /// Always deny execution.
+    Deny,
+}
+
+/// Definition for a tool to be registered as a direct `AgentTool` (Phase 3).
+#[derive(Debug, Clone)]
+pub struct DirectToolDef {
+    /// Prefixed tool name (already computed at registration time so that
+    /// `AgentTool::name() -> &str` can return a reference into `self`).
+    pub prefixed_name: String,
+    /// Original (unprefixed) MCP tool name.
+    pub original_name: String,
+    /// Server that provides this tool.
+    pub server_name: String,
+    /// Tool description.
+    pub description: String,
+    /// JSON Schema for parameters.
+    pub input_schema: Option<serde_json::Value>,
+}
+
+// ── Phase 2: TUI dashboard data ────────────────────────────────────
+
+/// Connection status of an MCP server (Phase 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpConnectionStatus {
+    /// Server is connected and ready.
+    Connected,
+    /// Server is configured but not connected (lazy).
+    Disconnected,
+    /// Connection attempt is in progress.
+    Connecting,
+    /// Connection failed with an error message.
+    Error(String),
+}
+
+/// One server's information for the TUI dashboard (Phase 2).
+#[derive(Debug, Clone)]
+pub struct McpServerInfo {
+    pub name: String,
+    pub status: McpConnectionStatus,
+    /// Human-readable lifecycle string ("lazy", "eager", "keep-alive", "none").
+    pub lifecycle: String,
+    /// Number of tools (cached or live).
+    pub tool_count: usize,
+    /// Per-tool information (empty if server is not connected and has no cache).
+    pub tools: Vec<McpToolInfo>,
+}
+
+/// One tool's information for the TUI dashboard (Phase 2).
+#[derive(Debug, Clone)]
+pub struct McpToolInfo {
+    /// Prefixed tool name.
+    pub name: String,
+    /// Original (unprefixed) tool name.
+    pub original_name: String,
+    pub description: String,
+    /// Whether this tool is registered as a direct `AgentTool` (Phase 3).
+    pub is_direct: bool,
+    /// Current consent state (Phase 3).
+    pub consent: ConsentState,
+}
+
+/// Settings summary for the dashboard header.
+#[derive(Debug, Clone)]
+pub struct McpSettingsView {
+    /// Current tool prefix mode as a string ("server", "short", "none").
+    pub tool_prefix: String,
+    /// Global idle timeout in minutes.
+    pub idle_timeout: Option<u64>,
+    /// Total number of configured servers.
+    pub total_servers: usize,
+    /// Number of currently connected servers.
+    pub connected_servers: usize,
+    /// Total number of known tools (across all servers).
+    pub total_tools: usize,
+}
+
+/// The full structured snapshot consumed by the TUI dashboard (Phase 2).
+#[derive(Debug, Clone)]
+pub struct McpDashboardData {
+    pub servers: Vec<McpServerInfo>,
+    pub settings: McpSettingsView,
 }

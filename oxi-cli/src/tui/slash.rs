@@ -152,6 +152,43 @@ pub(crate) fn handle_slash_command(
             ));
             true
         }
+        // ── MCP (Phase 2) ──────────────────────────────────────────────
+        "/mcp" | "/mcp dashboard" => {
+            let manager = session.agent_ref().tools().mcp_manager();
+            match manager {
+                Some(m) => {
+                    state.overlay_state = Some(Box::new(
+                        super::overlay::mcp_dashboard::McpDashboardOverlay::new(m),
+                    ));
+                }
+                None => {
+                    state.add_notification(
+                        "MCP is not configured. Add servers in ~/.config/oxi/mcp.json".into(),
+                        crate::tui::app::NotificationKind::Warning,
+                    );
+                }
+            }
+            true
+        }
+        "/mcp status" => {
+            let manager = session.agent_ref().tools().mcp_manager();
+            match manager {
+                Some(m) => {
+                    let status = m.status();
+                    let status_text = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(status)
+                    });
+                    state.add_notification(status_text, crate::tui::app::NotificationKind::Info);
+                }
+                None => {
+                    state.add_notification(
+                        "MCP is not configured.".into(),
+                        crate::tui::app::NotificationKind::Warning,
+                    );
+                }
+            }
+            true
+        }
         "/tools" => {
             let registry = session.agent_ref().tools();
             let names = registry.names();

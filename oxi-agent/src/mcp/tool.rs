@@ -3,6 +3,10 @@
 //! Implements [`AgentTool`] for the unified `mcp` tool that acts as a
 //! gateway to all MCP servers.  The LLM calls this single tool with
 //! different parameters to search, describe, connect, and call MCP tools.
+//!
+//! The proxy tool is the **fallback / search** path. Specific tools may
+//! also be registered directly via [`McpDirectTool`] (Phase 3); the two
+//! paths coexist.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolContext};
 use async_trait::async_trait;
@@ -24,10 +28,22 @@ pub struct McpTool {
     manager: Arc<McpManager>,
 }
 
+impl std::fmt::Debug for McpTool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpTool").finish()
+    }
+}
+
 impl McpTool {
     /// Create a new MCP tool with the given manager.
     pub fn new(manager: Arc<McpManager>) -> Self {
         Self { manager }
+    }
+
+    /// Get a clone of the underlying manager (used by other code paths
+    /// that need to read McpManager state, e.g. the TUI dashboard).
+    pub fn manager(&self) -> Arc<McpManager> {
+        Arc::clone(&self.manager)
     }
 }
 
@@ -84,6 +100,10 @@ impl AgentTool for McpTool {
             },
             "additionalProperties": false
         })
+    }
+
+    fn essential(&self) -> bool {
+        false
     }
 
     async fn execute(

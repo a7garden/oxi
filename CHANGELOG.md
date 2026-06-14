@@ -5,6 +5,61 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-06-13
+
+### Added — MCP 고도화 (Phase 1-3 + SDK + TUI)
+
+pi-mcp-adapter 아키텍처 기반으로 MCP 기능 대폭 확장.
+
+- **Disk-backed metadata cache** (`~/.oxi/mcp-cache.json`): 서버 연결 없이도
+  `search`/`list`/`describe` 동작. 원본 툴 이름만 저장하여 `tool_prefix`
+  설정 변경에도 무효화 불필요.
+- **Channel-based lifecycle manager**: `mpsc` 채널로 idle disconnect 타이머와
+  keep-alive health check를 `McpManagerInner` 뮤텍스 밖에서 실행 → 데드락 방지.
+- **`McpTransport` trait**: stdio 전송을 추상화. 향후 HTTP/SSE 추가 용이.
+- **`McpManager::spawn()`**: `Arc::new_cyclic`으로 lifecycle 태스크에
+  `Weak<McpManager>` 전달. `Eager`/`KeepAlive` 서버는 백그라운드 자동 연결.
+- **`McpDirectTool`**: 개별 MCP 툴을 `AgentTool`로 직접 등록.
+  `directTools`/`excludeTools` 설정으로 제어. Consent system과 연동.
+- **`ConsentManager`**: 툴 실행 전 Allow/Deny 사전 승인.
+  `~/.oxi/mcp-consent.json`에 저장.
+- **Generic `DashboardWidget`** (oxi-tui): MCP 독립적인 제네릭 대시보드.
+  섹션/아이템/필터/뱃지 지원.
+- **`McpDashboardOverlay`** (oxi-cli): `/mcp` 슬래시 명령으로 열리는
+  인터랙티브 MCP 관리 대시보드. 서버 연결/해제, consent 관리, 필터 지원.
+- **SDK 레이어**: `OxiBuilder::with_mcp_config()`, `Oxi::mcp()`,
+  `mcp_tools()` factory. oxi-sdk re-export로 SDK 컨슈머(oxios 등)가
+  MCP를 직접 사용 가능.
+- **MCP 디스크 경로 커스터마이징** (SDK 컨슈머용): `McpManager::spawn_with_paths(config, cache, consent)`와
+  `OxiBuilder::with_mcp_paths(cache, consent)` 추가. SDK 컨슈머(oxios 등)가
+  자체 디렉토리(`~/.oxios/`) 아래에 MCP 캐시/consent 상태를 self-host할 수 있도록
+  additive API. `oxi_sdk::MetadataCache` 재내보내기 포함. 기존 `spawn()`/
+  `spawn_with_config()`는 `spawn_with_paths`의 thin wrapper가 됨 (관측 동작 불변).
+  (참고: `docs/proposals/mcp-disk-path-customization.md`)
+
+### Changed
+
+- `McpManager::new()` → `Arc<Self>` 반환 (내부적으로 `spawn()` 호출).
+  `ToolRegistry::with_builtins_cwd()`에서 `Arc` 한 겹 제거.
+- `McpClient`가 `Box<dyn McpTransport>` 기반으로 리팩터링.
+- `ToolRegistry`에 `mcp_manager` 필드 및 `set_mcp_manager()`/`mcp_manager()` getter 추가.
+- `ServerEntry`, `McpSettings`에 `#[serde(default)]` 및 `Default` 추가.
+- `ServerEntry`에 `direct_tools`, `exclude_tools` 필드 추가.
+- `McpSettings`에 `direct_tools`, `disable_proxy_tool` 필드 추가.
+
+### Fixed
+
+- `McpManager::spawn()` / `spawn_with_paths()`가 Tokio runtime 밖에서
+  호출되면 panic하던 회귀 수정 — `OxiBuilder::build()`를 runtime 없이 부르는
+  단위 테스트(oxi-sdk 6개)가 `tokio::spawn` panic으로 실패했다. runtime
+  가드(`Handle::try_current()`)를 추가해 runtime이 없으면 lifecycle/eager
+  task를 생략 (`new_no_spawn()` 패턴 차용).
+- `OxiBuilder::build()`에서 MCP paths-only 분기가 빈 `McpConfig`를 사용하던
+  풋건 수정 — 이제 `with_mcp_config` 없이 `with_mcp_paths`만 호출해도
+  표준 경로에서 config를 자동 발견한다.
+- `McpClient`/`McpPrompt`/`McpLogLevel`/`McpSamplingRequest` 등 공개 API의
+  missing-doc 누락 보충 및 clippy(clapsed-if, derive, map) 경고 해소.
+
 ## [0.32.0] - 2026-06-12
 
 ### Changed — RFC-008: Remove `max_iterations` loop guard

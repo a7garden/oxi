@@ -1,15 +1,16 @@
-//! MCP JSON-RPC client over stdio transport.
+//! MCP JSON-RPC client.
 //!
-//! Implements the MCP protocol with Content-Length framed JSON-RPC messages
-//! over a spawned child process's stdin/stdout.
+//! Communicates with an MCP server through a [`McpTransport`]
+//! (currently only [`StdioTransport`]). Owns the request/response correlation
+//! and ID counter, but delegates raw I/O to the transport.
 
+use super::transport::{McpTransport, stdio::StdioTransport};
 use super::types::{
     JsonRpcNotification, JsonRpcRequest, McpCallResult, McpContent, McpToolDef, RawJsonRpcMessage,
     ServerInfo,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// MCP protocol version we advertise during initialization.
@@ -18,42 +19,31 @@ const MCP_PROTOCOL_VERSION: &str = "2025-03-26";
 /// Default timeout for individual MCP requests (seconds).
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
-/// Maximum number of header lines before giving up (prevents infinite loop).
-const MAX_HEADER_LINES: usize = 64;
-
-/// Maximum allowed body size from an MCP server (10 MB).
-const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
-
-/// Environment variables that servers must not override (security).
-const BLOCKED_ENV_VARS: &[&str] = &[
-    "LD_PRELOAD",
-    "LD_LIBRARY_PATH",
-    "DYLD_INSERT_LIBRARIES",
-    "DYLD_LIBRARY_PATH",
-];
+/// Maximum number of orphaned responses to drain on timeout.
+const MAX_DRAIN_RESPONSES: usize = 16;
 
 /// MCP prompt template.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct McpPrompt {
-    /// Prompt name.
+    /// Prompt identifier.
     pub name: String,
-    /// Human-readable description.
+    /// Optional human-readable description.
     #[serde(default)]
     pub description: Option<String>,
-    /// Accepted arguments.
+    /// Arguments accepted by the prompt template.
     #[serde(default)]
     pub arguments: Vec<McpPromptArgument>,
 }
 
-/// MCP prompt template argument.
+/// A single argument accepted by an [`McpPrompt`] template.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct McpPromptArgument {
     /// Argument name.
     pub name: String,
-    /// Human-readable description.
+    /// Optional human-readable description of the argument.
     #[serde(default)]
     pub description: Option<String>,
-    /// Whether this argument is required.
+    /// Whether the argument must be supplied.
     #[serde(default)]
     pub required: bool,
 }
@@ -61,17 +51,17 @@ pub struct McpPromptArgument {
 /// MCP log level for `logging/setLevel`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpLogLevel {
-    /// Debug-level messages.
+    /// Fine-grained diagnostic information.
     Debug,
-    /// Informational messages.
+    /// General informational messages.
     Info,
-    /// Normal-but-notable messages.
+    /// Normal-but-significant conditions.
     Notice,
-    /// Warning conditions.
+    /// Indication that something unexpected happened.
     Warning,
-    /// Error conditions.
+    /// Runtime errors that do not halt execution.
     Error,
-    /// Critical conditions.
+    /// Critical conditions requiring immediate attention.
     Critical,
     /// Action must be taken immediately.
     Alert,
@@ -80,7 +70,7 @@ pub enum McpLogLevel {
 }
 
 impl McpLogLevel {
-    /// Return the string representation used in the MCP protocol.
+    /// Return the wire string representation used by the MCP protocol.
     pub fn as_str(&self) -> &'static str {
         match self {
             McpLogLevel::Debug => "debug",
@@ -98,34 +88,40 @@ impl McpLogLevel {
 /// MCP sampling request — server asks oxi to make an LLM call.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct McpSamplingRequest {
-    /// Sampling messages to send to the LLM.
+    /// Conversation messages to sample from.
     pub messages: Vec<serde_json::Value>,
-    /// Optional system prompt.
+    /// Optional system prompt to prepend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-    /// Maximum tokens to generate.
+    /// Maximum number of tokens to generate.
     pub max_tokens: u32,
     /// Optional sampling temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
 }
 
-/// An MCP client connected to a single server via stdio.
+/// An MCP client connected to a single server through a transport.
 pub struct McpClient {
-    /// Child process handle (kept alive to prevent process death).
-    _child: tokio::process::Child,
-    /// Writer to the server's stdin.
-    stdin: tokio::process::ChildStdin,
-    /// Buffered reader from the server's stdout.
-    stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+    /// Underlying transport (stdio, HTTP/SSE, ...).
+    transport: Box<dyn McpTransport>,
     /// Next JSON-RPC request ID.
     next_id: u64,
     /// Server info from the initialize handshake.
     pub server_info: ServerInfo,
 }
 
+impl std::fmt::Debug for McpClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpClient")
+            .field("server_info", &self.server_info)
+            .field("next_id", &self.next_id)
+            .field("connected", &self.transport.is_connected())
+            .finish()
+    }
+}
+
 impl McpClient {
-    /// Connect to an MCP server by spawning a child process.
+    /// Connect to an MCP server via stdio transport.
     ///
     /// Performs the full initialization handshake:
     /// 1. Spawn the process
@@ -138,50 +134,11 @@ impl McpClient {
         cwd: Option<&str>,
         debug: bool,
     ) -> Result<Self> {
-        let mut cmd = tokio::process::Command::new(command);
-        cmd.args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .kill_on_drop(true);
-
-        if debug {
-            cmd.stderr(Stdio::inherit());
-        } else {
-            cmd.stderr(Stdio::null());
-        }
-
-        // Build environment: inherit parent + overlay server-specific.
-        // Block dangerous variables that could hijack the parent process.
-        for (key, value) in env {
-            let upper = key.to_uppercase();
-            if BLOCKED_ENV_VARS.iter().any(|blocked| upper == *blocked) {
-                tracing::warn!("MCP: blocked dangerous env override: {}", key);
-                continue;
-            }
-            cmd.env(key, value);
-        }
-
-        if let Some(dir) = cwd {
-            cmd.current_dir(dir);
-        }
-
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("Failed to spawn MCP server: {}", command))?;
-
-        let stdin = child
-            .stdin
-            .take()
-            .context("Failed to acquire stdin from MCP server")?;
-        let stdout = child
-            .stdout
-            .take()
-            .context("Failed to acquire stdout from MCP server")?;
+        let transport: Box<dyn McpTransport> =
+            Box::new(StdioTransport::spawn(command, args, env, cwd, debug)?);
 
         let mut client = Self {
-            _child: child,
-            stdin,
-            stdout: tokio::io::BufReader::new(stdout),
+            transport,
             next_id: 1,
             server_info: ServerInfo {
                 name: String::new(),
@@ -190,9 +147,23 @@ impl McpClient {
             },
         };
 
-        // Initialize handshake
         client.initialize().await?;
+        Ok(client)
+    }
 
+    /// Connect through a pre-built transport (used by tests and by future
+    /// HTTP/SSE transports).
+    pub async fn connect_with_transport(transport: Box<dyn McpTransport>) -> Result<Self> {
+        let mut client = Self {
+            transport,
+            next_id: 1,
+            server_info: ServerInfo {
+                name: String::new(),
+                version: None,
+                protocol_version: String::new(),
+            },
+        };
+        client.initialize().await?;
         Ok(client)
     }
 
@@ -212,7 +183,6 @@ impl McpClient {
             .await
             .context("MCP initialize failed")?;
 
-        // Parse server info
         if let Some(info) = result.get("serverInfo") {
             self.server_info.name = info
                 .get("name")
@@ -228,14 +198,16 @@ impl McpClient {
             self.server_info.protocol_version = version.to_string();
         }
 
-        // Send initialized notification
         let notification = JsonRpcNotification {
             jsonrpc: "2.0",
             method: "notifications/initialized".to_string(),
             params: None,
         };
-        self.write_message(&serde_json::to_string(&notification)?)
-            .await?;
+        let json = serde_json::to_string(&notification)?;
+        self.transport
+            .send(&json)
+            .await
+            .context("Failed to send notifications/initialized")?;
 
         Ok(())
     }
@@ -320,14 +292,13 @@ impl McpClient {
             .cloned()
             .unwrap_or_default();
 
-        // Convert resource contents to McpContent
         let mut content = Vec::new();
         for item in contents {
             if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
                 content.push(McpContent::Text {
                     text: text.to_string(),
                 });
-            } else if let Some(_blob) = item.get("blob").and_then(|b| b.as_str()) {
+            } else if item.get("blob").is_some() {
                 content.push(McpContent::Text {
                     text: format!(
                         "[Binary data: {}]",
@@ -342,7 +313,6 @@ impl McpClient {
     }
 
     /// List prompt templates available on the MCP server.
-    /// Corresponds to `prompts/list` capability.
     pub async fn list_prompts(&mut self) -> Result<Vec<McpPrompt>> {
         let result = self.send_request("prompts/list", None).await?;
         let prompts = result
@@ -354,7 +324,6 @@ impl McpClient {
     }
 
     /// Get a prompt template with arguments applied.
-    /// Corresponds to `prompts/get` capability.
     pub async fn get_prompt(
         &mut self,
         name: &str,
@@ -373,7 +342,6 @@ impl McpClient {
     }
 
     /// Set the minimum log level for MCP server notifications.
-    /// Corresponds to `logging/setLevel` capability.
     pub async fn set_log_level(&mut self, level: McpLogLevel) -> Result<()> {
         let params = serde_json::json!({ "level": level.as_str() });
         self.send_request("logging/setLevel", Some(params)).await?;
@@ -381,8 +349,6 @@ impl McpClient {
     }
 
     /// Request the host to create a message via LLM sampling.
-    /// Corresponds to `sampling/createMessage` capability.
-    /// The MCP server delegates an LLM call to oxi.
     pub async fn create_sample(
         &mut self,
         request: McpSamplingRequest,
@@ -393,47 +359,28 @@ impl McpClient {
             .await
     }
 
-    /// Shut down the client gracefully.
-    ///
-    /// Sends SIGTERM first and waits up to 5 seconds for the server
-    /// to exit cleanly, then falls back to SIGKILL.
-    pub async fn close(&mut self) -> Result<()> {
-        let _ = self.stdin.shutdown().await;
-
-        // Try graceful shutdown first
-        #[cfg(unix)]
-        {
-            if let Some(id) = self._child.id() {
-                // SAFETY: libc::kill sends a signal to a process. The PID comes from
-                // child.id() which is a valid running process. SIGTERM requests graceful
-                // termination. On race (process already exited), kill returns ESRCH harmlessly.
-                unsafe {
-                    libc::kill(id as libc::pid_t, libc::SIGTERM);
-                }
-            }
-            match tokio::time::timeout(std::time::Duration::from_secs(5), self._child.wait()).await
-            {
-                Ok(Ok(_)) => return Ok(()),
-                _ => {
-                    let _ = self._child.kill().await;
-                }
-            }
-        }
-
-        #[cfg(not(unix))]
-        {
-            let _ = self._child.kill().await;
-        }
-
+    /// Send a low-level ping to verify the server is alive.
+    pub async fn ping(&mut self) -> Result<()> {
+        self.send_request("ping", None).await?;
         Ok(())
     }
 
-    // ── JSON-RPC transport layer ─────────────────────────────────────
+    /// Whether the transport is currently connected.
+    pub fn is_connected(&self) -> bool {
+        self.transport.is_connected()
+    }
+
+    /// Shut down the client gracefully.
+    pub async fn close(&mut self) -> Result<()> {
+        self.transport.close().await
+    }
+
+    // ── JSON-RPC request/response correlation ─────────────────────
 
     /// Send a JSON-RPC request and wait for the matching response.
     ///
-    /// If a timeout occurs, drains orphaned responses from the stream to
-    /// prevent ID mismatch on subsequent requests.
+    /// On timeout, drains orphaned responses to prevent ID mismatch on
+    /// subsequent requests.
     async fn send_request(
         &mut self,
         method: &str,
@@ -450,14 +397,19 @@ impl McpClient {
         };
 
         let json = serde_json::to_string(&request)?;
-        self.write_message(&json).await?;
+        self.transport
+            .send(&json)
+            .await
+            .with_context(|| format!("MCP send '{}' failed", method))?;
 
-        // Read responses until we get one with matching ID
         let timeout = std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS);
         let result = tokio::time::timeout(timeout, async {
             loop {
-                let msg = self.read_message().await?;
-                // Check if this is our response
+                let msg = self
+                    .transport
+                    .recv()
+                    .await
+                    .context("Failed to read MCP response")?;
                 if let Some(response_id) = msg.id
                     && response_id == id
                 {
@@ -478,13 +430,12 @@ impl McpClient {
         match result {
             Ok(inner) => inner.with_context(|| format!("MCP request '{}' failed", method)),
             Err(_) => {
-                // Timeout: drain orphaned responses to prevent future ID mismatch
                 tracing::warn!(
                     "MCP request '{}' timed out after {}s, draining orphaned responses",
                     method,
                     REQUEST_TIMEOUT_SECS
                 );
-                self.drain_orphaned_responses(16).await;
+                self.drain_orphaned_responses(MAX_DRAIN_RESPONSES).await;
                 Err(anyhow::anyhow!(
                     "MCP request '{}' timed out after {}s",
                     method,
@@ -494,13 +445,10 @@ impl McpClient {
         }
     }
 
-    /// Drain up to `max` orphaned responses from the stream.
-    ///
-    /// Called after a timeout to prevent stale server responses from
-    /// being matched against future requests by ID.
+    /// Drain up to `max` orphaned responses from the transport.
     async fn drain_orphaned_responses(&mut self, max: usize) {
         for _ in 0..max {
-            match tokio::time::timeout(std::time::Duration::from_millis(100), self.read_message())
+            match tokio::time::timeout(std::time::Duration::from_millis(100), self.transport.recv())
                 .await
             {
                 Ok(Ok(_)) => continue,
@@ -508,78 +456,45 @@ impl McpClient {
             }
         }
     }
+}
 
-    /// Write a JSON-RPC message with Content-Length framing.
-    async fn write_message(&mut self, json: &str) -> Result<()> {
-        let bytes = json.as_bytes();
-        let header = format!("Content-Length: {}\r\n\r\n", bytes.len());
-        self.stdin.write_all(header.as_bytes()).await?;
-        self.stdin.write_all(bytes).await?;
-        self.stdin.flush().await?;
-        Ok(())
+/// Write a JSON-RPC message with Content-Length framing.
+#[allow(dead_code)]
+pub async fn write_framed<W: AsyncWriteExt + Unpin>(writer: &mut W, json: &str) -> Result<()> {
+    let bytes = json.as_bytes();
+    let header = format!("Content-Length: {}\r\n\r\n", bytes.len());
+    writer.write_all(header.as_bytes()).await?;
+    writer.write_all(bytes).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+/// Read a single Content-Length framed message from a buffered reader.
+#[allow(dead_code)]
+pub async fn read_framed<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<RawJsonRpcMessage> {
+    let mut content_length: Option<usize> = None;
+    loop {
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line).await?;
+        if bytes_read == 0 {
+            return Err(anyhow::anyhow!("MCP server closed connection"));
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+            content_length = Some(
+                rest.trim()
+                    .parse::<usize>()
+                    .context("Invalid Content-Length header")?,
+            );
+        }
     }
-
-    /// Read a single JSON-RPC message from the transport.
-    ///
-    /// Wraps the header + body read in a timeout to prevent blocking
-    /// indefinitely if the MCP server stalls or disconnects silently.
-    async fn read_message(&mut self) -> Result<RawJsonRpcMessage> {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
-            async {
-                // Parse Content-Length header
-                let mut content_length: Option<usize> = None;
-                let mut lines_read = 0;
-                loop {
-                    let mut line = String::new();
-                    let bytes_read = self.stdout.read_line(&mut line).await?;
-                    if bytes_read == 0 {
-                        return Err(anyhow::anyhow!("MCP server closed connection"));
-                    }
-                    lines_read += 1;
-                    if lines_read > MAX_HEADER_LINES {
-                        return Err(anyhow::anyhow!(
-                            "MCP server sent too many header lines (>{})",
-                            MAX_HEADER_LINES
-                        ));
-                    }
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        break;
-                    }
-                    if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
-                        content_length = Some(
-                            rest.trim()
-                                .parse::<usize>()
-                                .context("Invalid Content-Length header")?,
-                        );
-                    }
-                }
-
-                let len = content_length
-                    .ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
-
-                if len > MAX_BODY_SIZE {
-                    return Err(anyhow::anyhow!(
-                        "MCP server sent oversized body: {} bytes (max {})",
-                        len,
-                        MAX_BODY_SIZE
-                    ));
-                }
-
-                // Read body
-                let mut buf = vec![0u8; len];
-                self.stdout.read_exact(&mut buf).await?;
-
-                let msg: RawJsonRpcMessage =
-                    serde_json::from_slice(&buf).context("Failed to parse JSON-RPC message")?;
-
-                Ok(msg)
-            },
-        )
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!("MCP read_message timed out after {}s", REQUEST_TIMEOUT_SECS)
-        })?
-    }
+    let len = content_length.ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf).await?;
+    let msg: RawJsonRpcMessage =
+        serde_json::from_slice(&buf).context("Failed to parse JSON-RPC message")?;
+    Ok(msg)
 }

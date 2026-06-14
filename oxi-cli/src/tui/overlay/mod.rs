@@ -12,6 +12,7 @@ pub mod anchor;
 pub mod extensions;
 pub mod factories;
 pub mod fork_select;
+pub mod mcp_dashboard;
 pub mod model_select_inline;
 pub mod provider_select;
 pub mod questionnaire;
@@ -26,6 +27,8 @@ pub use extensions::extensions_overlay;
 pub use factories::{logout_select, model_select, resume_select, routing_status};
 #[allow(unused_imports)]
 pub use fork_select::ForkSelectOverlay;
+#[allow(unused_imports)]
+pub use mcp_dashboard::{McpAction, McpDashboardOverlay};
 pub use router_setup::{RouterSetupData, router_setup};
 #[allow(unused_imports)]
 pub use settings::settings_overlay;
@@ -39,7 +42,7 @@ pub use tree_navigator::{TreeNavigatorOverlay, tree_navigator};
 // ---------------------------------------------------------------------------
 
 /// Actions an overlay can request after handling a key event.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(dead_code)]
 pub enum OverlayAction {
     /// No action needed.
@@ -72,6 +75,8 @@ pub enum OverlayAction {
         provider_name: String,
         model_id: String,
     },
+    /// Action emitted by the MCP dashboard overlay.
+    McpAction(McpAction),
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +90,9 @@ pub enum OverlayAction {
 pub trait OverlayComponent: std::fmt::Debug {
     /// Handle a key press. Return an action if the app needs to do something.
     fn handle_key(&mut self, key: KeyEvent) -> OverlayAction;
+
+    /// Called after an async action completes. Default: no-op.
+    fn mark_refresh(&mut self) {}
 
     /// Handle a clipboard paste event.
     /// Default implementation returns `OverlayAction::None` (no-op).

@@ -343,6 +343,9 @@ pub use write::WriteTool;
 #[derive(Clone)]
 pub struct ToolRegistry {
     tools: Arc<parking_lot::RwLock<std::collections::HashMap<String, Arc<dyn AgentTool>>>>,
+    /// Optional MCP manager, set by `with_builtins_cwd()` so the TUI and
+    /// other consumers can reach the live MCP state (Phase 2+).
+    mcp_manager: Arc<parking_lot::RwLock<Option<Arc<crate::mcp::McpManager>>>>,
 }
 
 impl Default for ToolRegistry {
@@ -356,7 +359,18 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            mcp_manager: Arc::new(parking_lot::RwLock::new(None)),
         }
+    }
+
+    /// Attach an `McpManager` to this registry. Replaces any previous one.
+    pub fn set_mcp_manager(&self, mgr: Arc<crate::mcp::McpManager>) {
+        *self.mcp_manager.write() = Some(mgr);
+    }
+
+    /// Get the attached `McpManager`, if any.
+    pub fn mcp_manager(&self) -> Option<Arc<crate::mcp::McpManager>> {
+        self.mcp_manager.read().clone()
     }
 
     /// Register a tool
@@ -468,9 +482,7 @@ impl ToolRegistry {
 
         // MCP: use OnceCell to avoid re-creating McpManager on repeated calls
         let mcp_once: std::cell::OnceCell<Arc<crate::mcp::McpManager>> = std::cell::OnceCell::new();
-        let mcp_manager = mcp_once
-            .get_or_init(|| Arc::new(crate::mcp::McpManager::new()))
-            .clone();
+        let mcp_manager = mcp_once.get_or_init(crate::mcp::McpManager::spawn).clone();
 
         // Register all builtin tools — essential ones ignore disabled list
         let mut all_tools: Vec<Box<dyn AgentTool>> = vec![
@@ -499,7 +511,19 @@ impl ToolRegistry {
             Box::new(SubagentTool::with_cwd(cwd)),
         ];
 
-        all_tools.push(Box::new(crate::mcp::McpTool::new(mcp_manager)));
+        all_tools.push(Box::new(crate::mcp::McpTool::new(mcp_manager.clone())));
+
+        // Phase 3: register direct MCP tools from the metadata cache.
+        for def in mcp_manager.direct_tools_from_cache() {
+            all_tools.push(Box::new(crate::mcp::McpDirectTool::new(
+                mcp_manager.clone(),
+                def,
+            )));
+        }
+
+        // Remember the manager on the registry so the TUI can reach it.
+        registry.set_mcp_manager(mcp_manager);
+
         all_tools.push(Box::new(context7::Context7ResolveLibraryIdTool::new()));
         all_tools.push(Box::new(context7::Context7QueryDocsTool::new()));
         all_tools.push(Box::new(generate_image::GenerateImageTool::new()));

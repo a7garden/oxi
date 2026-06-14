@@ -1,20 +1,28 @@
 //! MCP (Model Context Protocol) integration.
 //!
-//! Provides a built-in `mcp` tool that acts as a gateway to MCP servers.
-//! Supports:
-//! - **stdio transport**: spawn MCP server processes, communicate via JSON-RPC
-//! - **Lazy connection**: connect on first tool call, cache tool metadata
-//! - **Tool discovery**: search, describe, and call MCP tools through a unified proxy
-//! - **Config loading**: discover config from `~/.config/oxi/mcp.json`, `.mcp.json`, etc.
+//! Provides a built-in `mcp` tool that acts as a gateway to MCP servers,
+//! plus a per-tool direct-registration path (Phase 3) and a disk-backed
+//! metadata cache (Phase 1) that lets `search` / `list` / `describe`
+//! work without a live connection.
 //!
 //! # Architecture
 //!
 //! ```text
-//! McpTool (AgentTool) ──→ McpManager ──→ McpClient (per server)
-//!                                         ├── JSON-RPC over stdio
-//!                                         ├── Tool discovery (tools/list)
-//!                                         └── Tool execution (tools/call)
+//! McpTool (AgentTool) ──┐
+//! McpDirectTool  (x N) ─┴─→ McpManager ─→ McpClient (per server, Transport-based)
+//!                         │       ├── JSON-RPC over transport (stdio / http_sse)
+//!                         │       ├── Metadata cache (disk-backed)
+//!                         │       ├── Consent manager (disk-backed)
+//!                         │       └── Lifecycle task (mpsc, owns idle/health timers)
 //! ```
+//!
+//! # Concurrency
+//!
+//! `McpManager` is internally `Arc<McpManager>` after `spawn()`. The
+//! lifecycle timer task receives a `Weak<McpManager>` so it never
+//! participates in a reference cycle. The inner state is guarded by
+//! `tokio::sync::Mutex` for write paths and `parking_lot::RwLock` for
+//! cheap read paths (cache, consent).
 //!
 //! # Config format
 //!
@@ -24,7 +32,9 @@
 //!     "my-server": {
 //!       "command": "npx",
 //!       "args": ["-y", "@my-org/mcp-server"],
-//!       "env": { "API_KEY": "..." }
+//!       "lifecycle": "lazy",
+//!       "idleTimeout": 10,
+//!       "directTools": true
 //!     }
 //!   },
 //!   "settings": {
@@ -33,69 +43,237 @@
 //! }
 //! ```
 
+pub mod cache;
 pub mod client;
 pub mod config;
+pub mod consent;
 pub mod content;
+pub mod direct_tool;
+pub mod lifecycle;
 pub mod tool;
+pub mod transport;
 pub mod types;
 
+pub use cache::MetadataCache;
 pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument, McpSamplingRequest};
+pub use consent::ConsentManager;
+pub use direct_tool::McpDirectTool;
 pub use tool::McpTool;
+pub use transport::{McpTransport, stdio::StdioTransport};
 pub use types::{
-    McpCallResult, McpConfig, McpContent, McpSettings, McpToolDef, ServerEntry, ServerInfo,
-    ServerStatus, ToolMetadata, ToolPrefix, effective_prefix_mode, format_schema, format_tool_name,
-    get_server_prefix,
+    ConsentState, DirectToolDef, DirectToolsConfig, LifecycleMode, McpCallResult, McpConfig,
+    McpConnectionStatus, McpContent, McpDashboardData, McpServerInfo, McpSettings, McpSettingsView,
+    McpToolDef, McpToolInfo, ServerEntry, ServerInfo, ServerStatus, ToolMetadata, ToolPrefix,
+    effective_prefix_mode, format_schema, format_tool_name, get_server_prefix,
 };
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::time::Instant;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use lifecycle::{LifecycleEvent, channel as lifecycle_channel, lifecycle_event_loop};
 
 /// Default back-off period after a server connection failure (seconds).
-const DEFAULT_FAILURE_BACKOFF_SECS: u64 = 30;
+pub const DEFAULT_FAILURE_BACKOFF_SECS: u64 = 30;
+/// Default global idle timeout (minutes).
+pub const DEFAULT_IDLE_TIMEOUT_MINS: u64 = 10;
 
 /// Inner mutable state for [`McpManager`].
-struct McpManagerInner {
+pub struct McpManagerInner {
     /// Connected MCP clients (server name → client).
     clients: HashMap<String, McpClient>,
-    /// Discovered tool metadata (server name → tool list).
-    tool_metadata: HashMap<String, Vec<ToolMetadata>>,
-    /// Connection failure timestamps.
+    /// Raw tool definitions (server name → list, in original naming).
+    /// Prefixed names are computed at lookup time.
+    raw_tool_metadata: HashMap<String, Vec<McpToolDef>>,
+    /// Server connection failure timestamps (for back-off).
     failure_tracker: HashMap<String, Instant>,
+    /// Servers whose connection is currently in progress.
+    /// Prevents two concurrent `ensure_connected` calls from racing.
+    connecting: HashSet<String>,
 }
 
 /// Central manager for all MCP server connections.
 ///
-/// Thread-safe via `tokio::sync::Mutex`. Holds config, connections,
-/// and cached tool metadata.
+/// Created via [`McpManager::spawn()`] which returns an `Arc<Self>`.
+/// Use [`McpManager::new_no_spawn()`] only in tests where the lifecycle
+/// task is not needed.
 pub struct McpManager {
     inner: tokio::sync::Mutex<McpManagerInner>,
+    /// Configuration (read-mostly; `parking_lot` for cheap clones).
     config: parking_lot::RwLock<McpConfig>,
+    /// On-disk + in-memory tool metadata cache.
+    cache: MetadataCache,
+    /// Consent decisions (per-tool Allow/Deny).
+    consent: ConsentManager,
+    /// Lifecycle event channel sender.
+    lifecycle_tx: lifecycle::LifecycleTx,
+    /// Handle to the background lifecycle task (kept alive via `Arc<Self>`).
+    /// `None` when constructed with `new_no_spawn()` outside a runtime.
+    _lifecycle_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for McpManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpManager")
+            .field("cache_path", &self.cache.path())
+            .field("consent_path", &self.consent.path())
+            .finish()
+    }
 }
 
 impl McpManager {
-    /// Create a new manager, loading config from standard locations.
-    pub fn new() -> Self {
-        let config = config::load_mcp_config();
-        Self {
-            inner: tokio::sync::Mutex::new(McpManagerInner {
-                clients: HashMap::new(),
-                tool_metadata: HashMap::new(),
-                failure_tracker: HashMap::new(),
-            }),
-            config: parking_lot::RwLock::new(config),
-        }
+    /// Spawns the background lifecycle task using the oxi-default config
+    /// and disk paths (`~/.config/oxi/`), and eagerly connects to any
+    /// `Eager` / `KeepAlive` servers.
+    ///
+    /// Returns `Arc<Self>` so it can be shared freely across the agent
+    /// loop, the TUI dashboard, and the lifecycle task (via `Weak`).
+    pub fn spawn() -> Arc<Self> {
+        Self::spawn_with_config(config::load_mcp_config())
     }
 
-    /// Create with a specific config (useful for testing).
-    pub fn with_config(config: McpConfig) -> Self {
+    /// Spawn with a programmatically-supplied config (used by the SDK
+    /// `OxiBuilder::with_mcp_config`). Disk paths default to the oxi
+    /// standard locations (`~/.config/oxi/`).
+    pub fn spawn_with_config(mcp_config: McpConfig) -> Arc<Self> {
+        Self::spawn_with_paths(mcp_config, None, None)
+    }
+
+    /// **Primary constructor.** Spawn with a programmatically-supplied
+    /// config **and** optional custom disk paths for the metadata cache
+    /// and consent store.
+    ///
+    /// Pass `None` for either path to use the oxi default
+    /// (`~/.config/oxi/mcp-cache.json` / `mcp-consent.json`).
+    ///
+    /// This is the constructor SDK consumers (e.g. oxios) should use when
+    /// they self-host MCP state under their own config directory. It
+    /// spawns the background lifecycle task and eagerly connects to any
+    /// `Eager` / `KeepAlive` servers.
+    ///
+    /// Returns `Arc<Self>` so it can be shared freely across the agent
+    /// loop, the TUI dashboard, and the lifecycle task (via `Weak`).
+    pub fn spawn_with_paths(
+        mcp_config: McpConfig,
+        cache_path: Option<PathBuf>,
+        consent_path: Option<PathBuf>,
+    ) -> Arc<Self> {
+        let cache = match cache_path {
+            Some(p) => MetadataCache::with_path(p),
+            None => MetadataCache::new(),
+        };
+        // Loading is best-effort: a missing or malformed cache must not
+        // prevent startup.
+        let _ = cache.load();
+
+        let consent = match consent_path {
+            Some(p) => ConsentManager::with_path(p),
+            None => ConsentManager::new(),
+        };
+        let _ = consent.load();
+
+        // Pre-populate the in-memory cache snapshot for any servers that
+        // have cached tools.
+        let cached_servers = cache.cached_servers();
+
+        // Detect whether a Tokio runtime is available. When absent (e.g.
+        // unit tests calling `OxiBuilder::build()` outside a runtime), we
+        // skip spawning the lifecycle task and eager connectors — those
+        // require a runtime, and a manager constructed this way is only
+        // useful for non-MCP work anyway. Real consumers always run inside
+        // a Tokio runtime, so this guard is transparent to them.
+        let has_runtime = tokio::runtime::Handle::try_current().is_ok();
+
+        let (lifecycle_tx, lifecycle_rx) = lifecycle_channel();
+
+        // `Arc::new_cyclic` lets us pass a `Weak<Self>` into the
+        // lifecycle task during construction, avoiding any use-before-
+        // initialization pattern.
+        let manager = Arc::new_cyclic(|weak| {
+            let _lifecycle_handle = if has_runtime {
+                Some(tokio::spawn(lifecycle_event_loop(
+                    lifecycle_rx,
+                    weak.clone(),
+                )))
+            } else {
+                None
+            };
+            Self {
+                inner: tokio::sync::Mutex::new(McpManagerInner {
+                    clients: HashMap::new(),
+                    raw_tool_metadata: HashMap::new(),
+                    failure_tracker: HashMap::new(),
+                    connecting: HashSet::new(),
+                }),
+                config: parking_lot::RwLock::new(mcp_config),
+                cache,
+                consent,
+                lifecycle_tx,
+                _lifecycle_handle,
+            }
+        });
+
+        // Seed the in-memory metadata from cache, so `search` / `list` /
+        // `describe` work before the first live connection.
+        {
+            let prefix_mode = effective_prefix_mode(manager.config.read().settings.as_ref());
+            let mut inner = manager.inner.try_lock().expect("freshly constructed");
+            for server in &cached_servers {
+                let tools = manager.cache.get_tools(server, &prefix_mode);
+                if !tools.is_empty() {
+                    // Convert ToolMetadata back to raw McpToolDef for
+                    // raw_tool_metadata. (The cache stores names, but we
+                    // need the defs here.)
+                    let raw: Vec<McpToolDef> = tools
+                        .iter()
+                        .map(|t| McpToolDef {
+                            name: t.original_name.clone(),
+                            description: Some(t.description.clone()),
+                            input_schema: t.input_schema.clone(),
+                        })
+                        .collect();
+                    inner.raw_tool_metadata.insert(server.clone(), raw);
+                }
+            }
+        }
+
+        // Fire-and-forget: start eager/keep-alive servers in the background.
+        // Only when a runtime is available (see `has_runtime` above).
+        if has_runtime {
+            let mgr = manager.clone();
+            tokio::spawn(async move {
+                mgr.start_eager_servers().await;
+            });
+        }
+
+        manager
+    }
+
+    /// Construct a manager without spawning the lifecycle task.
+    /// Intended for tests that don't need timer/disconnect behaviour.
+    pub fn new_no_spawn() -> Self {
+        let cache = MetadataCache::new();
+        let _ = cache.load();
+        let consent = ConsentManager::new();
+        let _ = consent.load();
+        let (lifecycle_tx, _lifecycle_rx) = lifecycle_channel();
+        let handle = tokio::runtime::Handle::try_current()
+            .ok()
+            .map(|h| h.spawn(async {}));
         Self {
             inner: tokio::sync::Mutex::new(McpManagerInner {
                 clients: HashMap::new(),
-                tool_metadata: HashMap::new(),
+                raw_tool_metadata: HashMap::new(),
                 failure_tracker: HashMap::new(),
+                connecting: HashSet::new(),
             }),
-            config: parking_lot::RwLock::new(config),
+            config: parking_lot::RwLock::new(config::load_mcp_config()),
+            cache,
+            consent,
+            lifecycle_tx,
+            _lifecycle_handle: handle,
         }
     }
 
@@ -104,7 +282,16 @@ impl McpManager {
         self.config.read()
     }
 
-    /// Get the configured failure backoff duration in seconds.
+    /// Get the consent manager.
+    pub fn consent(&self) -> &ConsentManager {
+        &self.consent
+    }
+
+    /// Get the metadata cache.
+    pub fn cache(&self) -> &MetadataCache {
+        &self.cache
+    }
+
     fn failure_backoff_secs(&self) -> u64 {
         self.config
             .read()
@@ -114,10 +301,66 @@ impl McpManager {
             .unwrap_or(DEFAULT_FAILURE_BACKOFF_SECS)
     }
 
-    // ── Status ────────────────────────────────────────────────────
+    fn global_idle_timeout(&self) -> Duration {
+        let mins = self
+            .config
+            .read()
+            .settings
+            .as_ref()
+            .and_then(|s| s.idle_timeout)
+            .unwrap_or(DEFAULT_IDLE_TIMEOUT_MINS);
+        Duration::from_secs(mins.saturating_mul(60))
+    }
 
-    /// Get a formatted status summary of all configured servers.
-    pub async fn status(&self) -> String {
+    // ── Eager / Keep-Alive startup ─────────────────────────────────
+
+    /// Connect to all servers whose lifecycle is `Eager` or `KeepAlive`.
+    async fn start_eager_servers(self: &Arc<Self>) {
+        let eager_servers: Vec<(String, LifecycleMode, Option<u64>)> = {
+            let config = self.config.read();
+            config
+                .mcp_servers
+                .iter()
+                .filter_map(|(name, entry)| {
+                    let mode = entry.lifecycle.clone().unwrap_or(LifecycleMode::Lazy);
+                    match mode {
+                        LifecycleMode::Eager | LifecycleMode::KeepAlive => {
+                            Some((name.clone(), mode, entry.idle_timeout))
+                        }
+                        LifecycleMode::Lazy => None,
+                    }
+                })
+                .collect()
+        };
+
+        for (name, mode, idle_override) in eager_servers {
+            if let Err(e) = self.connect(&name).await {
+                tracing::warn!("MCP: eager connect to '{}' failed: {}", name, e);
+                continue;
+            }
+            match mode {
+                LifecycleMode::KeepAlive => {
+                    let _ = self.lifecycle_tx.send(LifecycleEvent::StartHealthCheck {
+                        server: name.clone(),
+                    });
+                }
+                LifecycleMode::Eager => {
+                    if let Some(mins) = idle_override {
+                        let _ = self.lifecycle_tx.send(LifecycleEvent::StartIdleTimer {
+                            server: name.clone(),
+                            timeout: Duration::from_secs(mins.saturating_mul(60)),
+                        });
+                    }
+                }
+                LifecycleMode::Lazy => unreachable!(),
+            }
+        }
+    }
+
+    // ── Status ─────────────────────────────────────────────────────
+
+    /// Get a formatted status summary (legacy `mcp({})` interface).
+    pub async fn status(self: &Arc<Self>) -> String {
         let inner = self.inner.lock().await;
         let config = self.config.read();
         let servers = &config.mcp_servers;
@@ -134,7 +377,11 @@ impl McpManager {
         for name in servers.keys() {
             let (status_marker, tool_count) = if inner.clients.contains_key(name) {
                 connected_count += 1;
-                let count = inner.tool_metadata.get(name).map(|m| m.len()).unwrap_or(0);
+                let count = inner
+                    .raw_tool_metadata
+                    .get(name)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
                 total_tools += count;
                 ("✓", count)
             } else if let Some(failed_at) = inner.failure_tracker.get(name) {
@@ -145,7 +392,11 @@ impl McpManager {
                     ("○", 0)
                 }
             } else {
-                let count = inner.tool_metadata.get(name).map(|m| m.len()).unwrap_or(0);
+                let count = inner
+                    .raw_tool_metadata
+                    .get(name)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
                 total_tools += count;
                 ("○", count)
             };
@@ -165,17 +416,109 @@ impl McpManager {
         )
     }
 
-    // ── Connect ───────────────────────────────────────────────────
+    // ── Dashboard (Phase 2) ────────────────────────────────────────
 
-    /// Connect to a specific MCP server by name.
-    pub async fn connect(&self, server_name: &str) -> Result<String> {
+    /// Snapshot of dashboard data (Phase 2). Synchronous — only reads
+    /// `parking_lot`-guarded state and in-memory copies of cached tool
+    /// lists, so it is safe to call from `render()`.
+    pub fn dashboard_data(self: &Arc<Self>) -> McpDashboardData {
+        use McpConnectionStatus as CS;
+        let config = self.config.read();
+        let prefix_mode = effective_prefix_mode(config.settings.as_ref());
+
+        let inner = self.inner.try_lock();
+        let (clients_connected, raw_metadata) = match &inner {
+            Ok(g) => (
+                g.clients.keys().cloned().collect::<HashSet<_>>(),
+                g.raw_tool_metadata.clone(),
+            ),
+            Err(_) => (HashSet::new(), HashMap::new()),
+        };
+
+        let mut servers = Vec::new();
+        let mut total_tools = 0usize;
+        let mut connected_servers = 0usize;
+
+        for (name, entry) in &config.mcp_servers {
+            let lifecycle = entry
+                .lifecycle
+                .as_ref()
+                .map(|l| match l {
+                    LifecycleMode::Lazy => "lazy".to_string(),
+                    LifecycleMode::Eager => "eager".to_string(),
+                    LifecycleMode::KeepAlive => "keep-alive".to_string(),
+                })
+                .unwrap_or_else(|| "lazy".to_string());
+
+            let raw_tools = raw_metadata.get(name);
+            let tool_count = raw_tools.map(|t| t.len()).unwrap_or(0);
+            total_tools += tool_count;
+
+            let status = if clients_connected.contains(name) {
+                connected_servers += 1;
+                CS::Connected
+            } else {
+                CS::Disconnected
+            };
+
+            let direct_set = collect_direct_tool_names(entry, config.settings.as_ref());
+            let exclude: HashSet<String> = entry
+                .exclude_tools
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+
+            let tools: Vec<McpToolInfo> = raw_tools
+                .map(|defs| {
+                    defs.iter()
+                        .filter(|d| !exclude.contains(&d.name))
+                        .map(|d| McpToolInfo {
+                            name: format_tool_name(&d.name, name, &prefix_mode),
+                            original_name: d.name.clone(),
+                            description: d.description.clone().unwrap_or_default(),
+                            is_direct: direct_set.contains(&d.name),
+                            consent: self.consent.check(&d.name),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            servers.push(McpServerInfo {
+                name: name.clone(),
+                status,
+                lifecycle,
+                tool_count,
+                tools,
+            });
+        }
+
+        let settings = McpSettingsView {
+            tool_prefix: match prefix_mode {
+                ToolPrefix::Server => "server".to_string(),
+                ToolPrefix::Short => "short".to_string(),
+                ToolPrefix::None => "none".to_string(),
+            },
+            idle_timeout: config.settings.as_ref().and_then(|s| s.idle_timeout),
+            total_servers: config.mcp_servers.len(),
+            connected_servers,
+            total_tools,
+        };
+
+        McpDashboardData { servers, settings }
+    }
+
+    // ── Connect / disconnect ──────────────────────────────────────
+
+    /// Connect to a specific MCP server by name. Stores the connected
+    /// client, lists tools, and updates the metadata cache.
+    pub async fn connect(self: &Arc<Self>, server_name: &str) -> Result<String> {
         let (command, args, env, cwd, debug) = {
             let config = self.config.read();
             let entry = config
                 .mcp_servers
                 .get(server_name)
                 .ok_or_else(|| anyhow::anyhow!("Server '{}' not found", server_name))?;
-
             let command = entry.command.clone().ok_or_else(|| {
                 anyhow::anyhow!("Server '{}' has no command configured", server_name)
             })?;
@@ -190,29 +533,22 @@ impl McpManager {
             .await
             .with_context(|| format!("Failed to connect to MCP server '{}'", server_name))?;
 
-        // Discover tools
         let tools = client.list_tools().await.unwrap_or_default();
-        let prefix_mode = effective_prefix_mode(self.config.read().settings.as_ref());
 
-        let metadata: Vec<ToolMetadata> = tools
-            .iter()
-            .map(|t| ToolMetadata {
-                name: format_tool_name(&t.name, server_name, &prefix_mode),
-                original_name: t.name.clone(),
-                server_name: server_name.to_string(),
-                description: t.description.clone().unwrap_or_default(),
-                input_schema: t.input_schema.clone(),
-            })
-            .collect();
+        // Persist to cache (original names only).
+        if let Err(e) = self.cache.update(server_name, &tools) {
+            tracing::warn!("MCP: failed to update cache for '{}': {}", server_name, e);
+        }
 
-        let tool_names: Vec<String> = metadata.iter().map(|m| m.name.clone()).collect();
+        let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
 
         let mut inner = self.inner.lock().await;
         inner.clients.insert(server_name.to_string(), client);
         inner
-            .tool_metadata
-            .insert(server_name.to_string(), metadata);
+            .raw_tool_metadata
+            .insert(server_name.to_string(), tools);
         inner.failure_tracker.remove(server_name);
+        inner.connecting.remove(server_name);
 
         if tool_names.is_empty() {
             Ok(format!(
@@ -233,29 +569,44 @@ impl McpManager {
         }
     }
 
-    /// Lazily connect to a server if not already connected.
-    /// Returns `true` if connected (or was already connected).
-    async fn lazy_connect(&self, server_name: &str) -> bool {
-        // Check existing connection
-        {
-            let inner = self.inner.lock().await;
+    /// Lazily connect (or return true if already connected).
+    pub async fn ensure_connected(self: &Arc<Self>, server_name: &str) -> bool {
+        let should_connect = {
+            let mut inner = self.inner.lock().await;
             if inner.clients.contains_key(server_name) {
                 return true;
             }
-            // Check backoff
+            if inner.connecting.contains(server_name) {
+                return false;
+            }
             if let Some(failed_at) = inner.failure_tracker.get(server_name)
                 && failed_at.elapsed().as_secs() < self.failure_backoff_secs()
             {
                 return false;
             }
+            inner.connecting.insert(server_name.to_string());
+            true
+        };
+
+        if !should_connect {
+            return false;
         }
 
-        // Try to connect
-        match self.connect(server_name).await {
-            Ok(_) => true,
+        let result = self.connect(server_name).await;
+        self.inner.lock().await.connecting.remove(server_name);
+        match result {
+            Ok(_) => {
+                // Reset/clear any pending idle timer — the server is
+                // now connected and we want to start a fresh timer
+                // when the next call happens.
+                let _ = self.lifecycle_tx.send(LifecycleEvent::CancelIdleTimer {
+                    server: server_name.to_string(),
+                });
+                true
+            }
             Err(e) => {
                 tracing::warn!("MCP: lazy connect failed for {}: {}", server_name, e);
-                let inner = &mut *self.inner.lock().await;
+                let mut inner = self.inner.lock().await;
                 inner
                     .failure_tracker
                     .insert(server_name.to_string(), Instant::now());
@@ -264,22 +615,58 @@ impl McpManager {
         }
     }
 
+    /// Disconnect a single server (used by the lifecycle idle timer).
+    async fn disconnect_server(self: &Arc<Self>, server_name: &str) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        if let Some(mut client) = inner.clients.remove(server_name) {
+            let _ = client.close().await;
+        }
+        inner.raw_tool_metadata.remove(server_name);
+        inner.connecting.remove(server_name);
+        drop(inner);
+
+        let _ = self.lifecycle_tx.send(LifecycleEvent::ServerStopped {
+            server: server_name.to_string(),
+        });
+        tracing::info!("MCP: disconnected '{}' (idle timeout)", server_name);
+        Ok(())
+    }
+
+    /// Health check + reconnect for a keep-alive server.
+    async fn health_check_and_reconnect(self: &Arc<Self>, server_name: &str) -> Result<()> {
+        {
+            let mut inner = self.inner.lock().await;
+            if let Some(client) = inner.clients.get_mut(server_name)
+                && client.ping().await.is_ok()
+            {
+                return Ok(());
+            }
+        }
+        // Connection is down: try to reconnect.
+        self.connect(server_name).await.map(|_| ())
+    }
+
     // ── Tool operations ───────────────────────────────────────────
 
     /// Call an MCP tool by name, optionally targeting a specific server.
     pub async fn call_tool(
-        &self,
+        self: &Arc<Self>,
         tool_name: &str,
         args: serde_json::Value,
         server_override: Option<&str>,
     ) -> Result<McpCallResult> {
-        // Find tool across servers
-        let (server_name, tool_meta) = self.find_tool(tool_name, server_override).await?;
+        let (server_name, original_name) = self.find_tool(tool_name, server_override).await?;
 
-        // Ensure connected
-        self.lazy_connect(&server_name).await;
+        // Consent gate (Phase 3) — proxy path also honors consent.
+        if self.consent.check(&original_name) == ConsentState::Deny {
+            return Err(anyhow::anyhow!(
+                "Tool '{}' is denied by consent policy",
+                original_name
+            ));
+        }
 
-        // Call the tool
+        self.ensure_connected(&server_name).await;
+
         let mut inner = self.inner.lock().await;
         let client = inner
             .clients
@@ -287,27 +674,62 @@ impl McpManager {
             .ok_or_else(|| anyhow::anyhow!("Server '{}' not connected", server_name))?;
 
         let result = client
-            .call_tool(&tool_meta.original_name, args)
+            .call_tool(&original_name, args)
             .await
             .with_context(|| format!("Tool '{}' call failed", tool_name))?;
+        drop(inner);
+
+        // Reset idle timer after a successful call.
+        self.reset_idle_timer(&server_name);
 
         let text = content::transform_mcp_content(&result.content);
-
         Ok(McpCallResult {
             content: vec![McpContent::Text { text }],
             is_error: result.is_error,
         })
     }
 
+    /// Reset (or start) the idle-disconnect timer for a server.
+    /// Called after every successful tool use.
+    pub fn reset_idle_timer(self: &Arc<Self>, server_name: &str) {
+        let timeout = {
+            let config = self.config.read();
+            let per_server = config
+                .mcp_servers
+                .get(server_name)
+                .and_then(|e| e.idle_timeout)
+                .map(|m| Duration::from_secs(m.saturating_mul(60)));
+            per_server.unwrap_or_else(|| self.global_idle_timeout())
+        };
+        let _ = self.lifecycle_tx.send(LifecycleEvent::StartIdleTimer {
+            server: server_name.to_string(),
+            timeout,
+        });
+    }
+
     /// Describe a tool by name.
-    pub async fn describe(&self, tool_name: &str) -> Result<String> {
-        let (_server_name, tool_meta) = self.find_tool(tool_name, None).await?;
+    pub async fn describe(self: &Arc<Self>, tool_name: &str) -> Result<String> {
+        let (server_name, original_name) = self.find_tool(tool_name, None).await?;
 
-        let mut text = format!("{}\n", tool_meta.name);
-        text.push_str(&format!("Server: {}\n", tool_meta.server_name));
-        text.push_str(&format!("\n{}\n", tool_meta.description));
+        // Look up the cached/live def to get description + schema.
+        let prefix_mode = effective_prefix_mode(self.config.read().settings.as_ref());
+        let prefixed = format_tool_name(&original_name, &server_name, &prefix_mode);
 
-        if let Some(ref schema) = tool_meta.input_schema {
+        let (description, input_schema) = {
+            let inner = self.inner.lock().await;
+            inner
+                .raw_tool_metadata
+                .get(&server_name)
+                .and_then(|defs| defs.iter().find(|d| d.name == original_name).cloned())
+                .map(|d| (d.description.unwrap_or_default(), d.input_schema))
+                .unwrap_or_default()
+        };
+
+        let mut text = format!("{}\n", prefixed);
+        text.push_str(&format!("Server: {}\n", server_name));
+        text.push_str(&format!("\n{}\n", description));
+
+        if let Some(ref schema) = input_schema {
             text.push_str(&format!("\nParameters:\n{}", format_schema(schema, "  ")));
         } else {
             text.push_str("\nNo parameters defined.");
@@ -318,7 +740,7 @@ impl McpManager {
 
     /// Search tools by name or description.
     pub async fn search(
-        &self,
+        self: &Arc<Self>,
         query: &str,
         regex: bool,
         server_filter: Option<&str>,
@@ -338,15 +760,26 @@ impl McpManager {
         let inner = self.inner.lock().await;
         let mut matches = Vec::new();
 
-        for (server_name, metadata) in &inner.tool_metadata {
+        for (server_name, raw_tools) in &inner.raw_tool_metadata {
             if let Some(filter) = server_filter
                 && server_name != filter
             {
                 continue;
             }
-            for tool in metadata {
-                if pattern.is_match(&tool.name) || pattern.is_match(&tool.description) {
-                    matches.push((server_name.clone(), tool.clone()));
+            for tool in raw_tools {
+                let prefixed = format_tool_name(
+                    &tool.name,
+                    server_name,
+                    &effective_prefix_mode(self.config.read().settings.as_ref()),
+                );
+                let description = tool.description.clone().unwrap_or_default();
+                if pattern.is_match(&prefixed) || pattern.is_match(&description) {
+                    matches.push((
+                        server_name.clone(),
+                        tool.name.clone(),
+                        description,
+                        tool.input_schema.clone(),
+                    ));
                 }
             }
         }
@@ -367,16 +800,18 @@ impl McpManager {
             query
         );
 
-        for (_server, tool) in &matches {
-            text.push_str(&format!("{}\n", tool.name));
-            if !tool.description.is_empty() {
-                text.push_str(&format!("  {}\n", tool.description));
+        for (server, original, description, schema) in &matches {
+            let prefixed = format_tool_name(
+                original,
+                server,
+                &effective_prefix_mode(self.config.read().settings.as_ref()),
+            );
+            text.push_str(&format!("{}\n", prefixed));
+            if !description.is_empty() {
+                text.push_str(&format!("  {}\n", description));
             }
-            if let Some(ref schema) = tool.input_schema {
-                text.push_str(&format!(
-                    "  Parameters:\n{}\n",
-                    format_schema(schema, "    ")
-                ));
+            if let Some(s) = schema {
+                text.push_str(&format!("  Parameters:\n{}\n", format_schema(s, "    ")));
             }
             text.push('\n');
         }
@@ -385,8 +820,7 @@ impl McpManager {
     }
 
     /// List tools for a specific server.
-    pub async fn list_tools(&self, server_name: &str) -> Result<String> {
-        // Check if server exists in config
+    pub async fn list_tools(self: &Arc<Self>, server_name: &str) -> Result<String> {
         {
             let config = self.config.read();
             if !config.mcp_servers.contains_key(server_name) {
@@ -397,20 +831,21 @@ impl McpManager {
             }
         }
 
-        // Try to connect if not already
-        self.lazy_connect(server_name).await;
+        self.ensure_connected(server_name).await;
 
         let inner = self.inner.lock().await;
-        let metadata = inner.tool_metadata.get(server_name);
+        let metadata = inner.raw_tool_metadata.get(server_name);
+        let prefix_mode = effective_prefix_mode(self.config.read().settings.as_ref());
 
         match metadata {
             Some(tools) if !tools.is_empty() => {
                 let mut text = format!("{} ({} tools):\n\n", server_name, tools.len());
                 for tool in tools {
-                    text.push_str(&format!("- {}", tool.name));
-                    if !tool.description.is_empty() {
-                        let desc: String = tool.description.chars().take(60).collect();
-                        text.push_str(&format!(" - {}", desc));
+                    let prefixed = format_tool_name(&tool.name, server_name, &prefix_mode);
+                    text.push_str(&format!("- {}", prefixed));
+                    if let Some(desc) = &tool.description {
+                        let short: String = desc.chars().take(60).collect();
+                        text.push_str(&format!(" - {}", short));
                     }
                     text.push('\n');
                 }
@@ -424,18 +859,84 @@ impl McpManager {
         }
     }
 
+    /// Direct tool definitions for `ToolRegistry` registration (Phase 3).
+    /// Reads from the metadata cache, applies `direct_tools` /
+    /// `exclude_tools` filters, and returns the precomputed prefixed names.
+    pub fn direct_tools_from_cache(self: &Arc<Self>) -> Vec<DirectToolDef> {
+        let config = self.config.read();
+        let prefix_mode = effective_prefix_mode(config.settings.as_ref());
+        let global_direct = config
+            .settings
+            .as_ref()
+            .and_then(|s| s.direct_tools.clone());
+
+        let mut out = Vec::new();
+
+        for (server_name, entry) in &config.mcp_servers {
+            // Determine whether to honor this server at all
+            let effective = entry.direct_tools.clone().or_else(|| global_direct.clone());
+            let is_direct_enabled = match &effective {
+                None => false,
+                Some(DirectToolsConfig::All(b)) => *b,
+                Some(DirectToolsConfig::Specific(_)) => true,
+            };
+            if !is_direct_enabled {
+                continue;
+            }
+            let exclude: HashSet<String> = entry
+                .exclude_tools
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+
+            // Iterate over cached tools for this server.
+            let tools = self.cache.get_tools(server_name, &prefix_mode);
+            for t in tools {
+                if exclude.contains(&t.original_name) {
+                    continue;
+                }
+                let in_set = match &effective {
+                    Some(DirectToolsConfig::All(_)) => true,
+                    Some(DirectToolsConfig::Specific(list)) => list.contains(&t.original_name),
+                    None => false,
+                };
+                if !in_set {
+                    continue;
+                }
+                out.push(DirectToolDef {
+                    prefixed_name: format_tool_name(&t.original_name, server_name, &prefix_mode),
+                    original_name: t.original_name.clone(),
+                    server_name: server_name.clone(),
+                    description: t.description.clone(),
+                    input_schema: t.input_schema.clone(),
+                });
+            }
+        }
+
+        out
+    }
+
+    /// Whether the `mcp` proxy tool should be hidden in the tool registry
+    /// (Phase 3 — `settings.disable_proxy_tool: true`).
+    pub fn should_disable_proxy(self: &Arc<Self>) -> bool {
+        self.config
+            .read()
+            .settings
+            .as_ref()
+            .and_then(|s| s.disable_proxy_tool)
+            .unwrap_or(false)
+    }
+
     // ── Internal helpers ──────────────────────────────────────────
 
-    /// Find a tool by name across all servers.
-    ///
-    /// Tries exact match first, then falls back to prefix-based matching
-    /// (e.g., `my_server_tool` → server `my-server`, tool `tool`).
+    /// Find a tool by name across all known (cached + live) servers.
     async fn find_tool(
-        &self,
+        self: &Arc<Self>,
         tool_name: &str,
         server_override: Option<&str>,
-    ) -> Result<(String, ToolMetadata)> {
-        // If server specified, search only that server
+    ) -> Result<(String, String)> {
+        // If a specific server was requested, verify it exists.
         if let Some(server) = server_override {
             let config = self.config.read();
             if !config.mcp_servers.contains_key(server) {
@@ -443,45 +944,35 @@ impl McpManager {
             }
         }
 
-        // Search tool metadata
+        // 1. Try exact match against the in-memory metadata.
         {
             let inner = self.inner.lock().await;
-
-            // Determine which servers to search
-            let owned_server_key;
-            let server_keys: Vec<&str> = if let Some(server) = server_override {
-                owned_server_key = server.to_string();
-                vec![owned_server_key.as_str()]
+            let server_keys: Vec<String> = if let Some(s) = server_override {
+                vec![s.to_string()]
             } else {
-                inner.tool_metadata.keys().map(|s| s.as_str()).collect()
+                inner.raw_tool_metadata.keys().cloned().collect()
             };
-
-            for server_name in server_keys {
-                if let Some(metadata) = inner.tool_metadata.get(server_name) {
-                    // Exact name match
-                    if let Some(tool) = metadata.iter().find(|t| t.name == tool_name) {
-                        return Ok((server_name.to_string(), tool.clone()));
-                    }
-                    // Original (un-prefixed) name match
-                    if let Some(tool) = metadata.iter().find(|t| t.original_name == tool_name) {
-                        return Ok((server_name.to_string(), tool.clone()));
-                    }
+            for server_name in &server_keys {
+                if let Some(raw) = inner.raw_tool_metadata.get(server_name)
+                    && let Some(d) = raw.iter().find(|t| t.name == tool_name)
+                {
+                    return Ok((server_name.clone(), d.name.clone()));
                 }
             }
         }
 
-        // Try prefix-based matching (lazy connect candidates)
+        // 2. Try prefix-based matching on configured server names
+        //    (e.g. `chrome_take_screenshot` → server `chrome`,
+        //    tool `take_screenshot`).
         let prefix_mode = effective_prefix_mode(self.config.read().settings.as_ref());
-
-        // Collect candidates while holding the config lock
         let candidates: Vec<String> = {
             let config = self.config.read();
             config
                 .mcp_servers
                 .keys()
-                .filter(|server_name: &&String| {
-                    if let Some(server) = server_override {
-                        server_name.as_str() == server
+                .filter(|server_name| {
+                    if let Some(s) = server_override {
+                        server_name.as_str() == s
                     } else {
                         true
                     }
@@ -492,30 +983,34 @@ impl McpManager {
                 })
                 .cloned()
                 .collect()
-        }; // config lock released here
+        };
 
-        // Try connecting to candidates
         for server_name in &candidates {
-            self.lazy_connect(server_name).await;
-
+            self.ensure_connected(server_name).await;
             let inner = self.inner.lock().await;
-            if let Some(metadata) = inner.tool_metadata.get(server_name)
-                && let Some(tool) = metadata.iter().find(|t| t.name == tool_name)
-            {
-                return Ok((server_name.clone(), tool.clone()));
+            if let Some(raw) = inner.raw_tool_metadata.get(server_name) {
+                // Look for prefixed match
+                for d in raw {
+                    if format_tool_name(&d.name, server_name, &prefix_mode) == tool_name {
+                        return Ok((server_name.clone(), d.name.clone()));
+                    }
+                }
             }
         }
 
-        // Not found — provide helpful error
+        // 3. Not found — helpful error.
         let inner = self.inner.lock().await;
         let mut hint_servers = Vec::new();
-        for (server_name, metadata) in &inner.tool_metadata {
-            let names: Vec<&str> = metadata.iter().map(|t| t.name.as_str()).collect();
+        let prefix_mode = effective_prefix_mode(self.config.read().settings.as_ref());
+        for (server_name, raw) in &inner.raw_tool_metadata {
+            let names: Vec<String> = raw
+                .iter()
+                .map(|d| format_tool_name(&d.name, server_name, &prefix_mode))
+                .collect();
             if !names.is_empty() {
                 hint_servers.push(format!("{}: {}", server_name, names.join(", ")));
             }
         }
-
         let mut msg = format!("Tool '{}' not found.", tool_name);
         if !hint_servers.is_empty() {
             msg.push_str(&format!(
@@ -529,13 +1024,127 @@ impl McpManager {
         } else {
             msg.push_str(" Use mcp({ search: \"...\" }) to search.");
         }
-
         Err(anyhow::anyhow!(msg))
+    }
+}
+
+/// Compute the set of tool original-names that should be exposed as direct
+/// for the given server, taking the per-server `direct_tools` override
+/// first, then the global default.
+fn collect_direct_tool_names(
+    entry: &ServerEntry,
+    settings: Option<&McpSettings>,
+) -> HashSet<String> {
+    let cfg = entry
+        .direct_tools
+        .clone()
+        .or_else(|| settings.and_then(|s| s.direct_tools.clone()));
+    match cfg {
+        Some(DirectToolsConfig::All(true)) => HashSet::new(), // "all" sentinel: handled elsewhere
+        Some(DirectToolsConfig::All(false)) => HashSet::new(),
+        Some(DirectToolsConfig::Specific(list)) => list.into_iter().collect(),
+        None => HashSet::new(),
     }
 }
 
 impl Default for McpManager {
     fn default() -> Self {
-        Self::new()
+        Self::new_no_spawn()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn new_no_spawn_succeeds() {
+        let m = McpManager::new_no_spawn();
+        assert_eq!(m.config().mcp_servers.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn spawn_with_paths_uses_supplied_paths() {
+        let dir = TempDir::new().unwrap();
+        let cache_p = dir.path().join("c.json");
+        let consent_p = dir.path().join("consent.json");
+        let mgr = McpManager::spawn_with_paths(
+            McpConfig::default(),
+            Some(cache_p.clone()),
+            Some(consent_p.clone()),
+        );
+        assert_eq!(mgr.cache().path(), cache_p);
+        assert_eq!(mgr.consent().path(), consent_p);
+    }
+
+    #[tokio::test]
+    async fn spawn_with_paths_none_uses_default_paths() {
+        // None, None → 기본 경로 사용 (에러 없이 spawn).
+        let mgr = McpManager::spawn_with_paths(McpConfig::default(), None, None);
+        assert!(!mgr.cache().path().as_os_str().is_empty());
+        assert!(!mgr.consent().path().as_os_str().is_empty());
+    }
+
+    #[test]
+    fn dashboard_data_empty_config() {
+        let mgr = Arc::new(McpManager::new_no_spawn());
+        let data = mgr.dashboard_data();
+        assert!(data.servers.is_empty());
+        assert_eq!(data.settings.total_servers, 0);
+    }
+
+    #[tokio::test]
+    async fn direct_tools_from_cache_respects_specific_list() {
+        let dir = TempDir::new().unwrap();
+        let cache = MetadataCache::with_path(dir.path().join("mcp-cache.json"));
+        let consent = ConsentManager::with_path(dir.path().join("consent.json"));
+
+        // Manually populate the cache with a single server + 2 tools.
+        let defs = vec![
+            McpToolDef {
+                name: "take_screenshot".into(),
+                description: Some("screenshot".into()),
+                input_schema: None,
+            },
+            McpToolDef {
+                name: "navigate".into(),
+                description: Some("go to url".into()),
+                input_schema: None,
+            },
+        ];
+        cache.update("chrome", &defs).unwrap();
+
+        // Build a config that asks for only `take_screenshot` as direct.
+        let mut cfg = McpConfig::default();
+        cfg.mcp_servers.insert(
+            "chrome".into(),
+            ServerEntry {
+                command: Some("echo".into()),
+                direct_tools: Some(DirectToolsConfig::Specific(vec!["take_screenshot".into()])),
+                ..Default::default()
+            },
+        );
+
+        // Manually construct a manager so we can install our cache/consent.
+        let (lifecycle_tx, _rx) = lifecycle_channel();
+        let mgr = Arc::new(McpManager {
+            inner: tokio::sync::Mutex::new(McpManagerInner {
+                clients: HashMap::new(),
+                raw_tool_metadata: HashMap::new(),
+                failure_tracker: HashMap::new(),
+                connecting: HashSet::new(),
+            }),
+            config: parking_lot::RwLock::new(cfg),
+            cache,
+            consent,
+            lifecycle_tx,
+            _lifecycle_handle: Some(tokio::spawn(async {})),
+        });
+
+        let direct = mgr.direct_tools_from_cache();
+        assert_eq!(direct.len(), 1);
+        assert_eq!(direct[0].original_name, "take_screenshot");
+        assert_eq!(direct[0].prefixed_name, "chrome_take_screenshot");
     }
 }

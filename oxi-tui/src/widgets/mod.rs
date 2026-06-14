@@ -11,6 +11,8 @@ pub mod chat;
 #[allow(missing_docs)]
 pub mod completion;
 #[allow(missing_docs)]
+pub mod dashboard;
+#[allow(missing_docs)]
 pub mod footer;
 #[allow(missing_docs)]
 pub mod input;

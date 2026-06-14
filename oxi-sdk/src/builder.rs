@@ -34,6 +34,9 @@ pub struct Oxi {
     base_urls: Arc<HashMap<String, String>>,
     /// Port registry (state, config, auth, event bus, etc.). Default: noop.
     ports: Arc<PortRegistry>,
+    /// MCP manager (Phase 1+). `None` if MCP is disabled or has not been
+    /// spawned yet.
+    mcp_manager: Option<Arc<oxi_agent::mcp::McpManager>>,
 }
 
 impl Oxi {
@@ -60,6 +63,17 @@ impl Oxi {
     /// Get the port registry (state, config, auth, event bus, ...).
     pub fn ports(&self) -> &PortRegistry {
         &self.ports
+    }
+
+    /// Get the MCP manager, if MCP is enabled.
+    ///
+    /// This is the entry point for SDK consumers who want to use MCP from
+    /// outside the agent loop — e.g. the TUI dashboard, RPC handlers, or
+    /// custom agent integrations.
+    ///
+    /// Returns `None` if MCP was disabled via [`OxiBuilder::with_mcp(false)`].
+    pub fn mcp(&self) -> Option<Arc<oxi_agent::mcp::McpManager>> {
+        self.mcp_manager.clone()
     }
 
     /// Resolve a model ID to a Model.
@@ -140,6 +154,17 @@ pub struct OxiBuilder {
     base_urls: HashMap<String, String>,
     /// Port registry (None = use noop default).
     ports: Option<PortRegistry>,
+    /// Programmatic MCP config (overrides the on-disk config if set).
+    mcp_config: Option<oxi_agent::mcp::McpConfig>,
+    /// Whether MCP is enabled. Defaults to true (when `with_builtins()` is
+    /// also called) or as set by `with_mcp(false)`.
+    mcp_enabled: bool,
+    /// Custom disk path for the MCP metadata cache. When unset, oxi uses
+    /// its default (`~/.config/oxi/mcp-cache.json`).
+    mcp_cache_path: Option<std::path::PathBuf>,
+    /// Custom disk path for the MCP consent store. When unset, oxi uses
+    /// its default (`~/.config/oxi/mcp-consent.json`).
+    mcp_consent_path: Option<std::path::PathBuf>,
 }
 
 impl OxiBuilder {
@@ -153,6 +178,10 @@ impl OxiBuilder {
             api_keys: HashMap::new(),
             base_urls: HashMap::new(),
             ports: None,
+            mcp_config: None,
+            mcp_enabled: true,
+            mcp_cache_path: None,
+            mcp_consent_path: None,
         }
     }
 
@@ -479,6 +508,31 @@ impl OxiBuilder {
 
     /// Build the Oxi engine instance.
     pub fn build(self) -> Oxi {
+        // Spawn the MCP manager unless explicitly disabled.
+        let mcp_manager = if self.mcp_enabled {
+            if self.mcp_cache_path.is_some() || self.mcp_consent_path.is_some() {
+                // Custom disk paths supplied — go through `spawn_with_paths`.
+                // If no config was injected, auto-discover from the standard
+                // oxi config file locations (same as `spawn()`).
+                let cfg = match self.mcp_config {
+                    Some(cfg) => cfg,
+                    None => oxi_agent::mcp::config::load_mcp_config(),
+                };
+                Some(oxi_agent::mcp::McpManager::spawn_with_paths(
+                    cfg,
+                    self.mcp_cache_path,
+                    self.mcp_consent_path,
+                ))
+            } else {
+                Some(match self.mcp_config {
+                    Some(cfg) => oxi_agent::mcp::McpManager::spawn_with_config(cfg),
+                    None => oxi_agent::mcp::McpManager::spawn(),
+                })
+            }
+        } else {
+            None
+        };
+
         Oxi {
             providers: Arc::new(self.providers),
             models: Arc::new(self.models),
@@ -487,7 +541,70 @@ impl OxiBuilder {
             api_keys: Arc::new(self.api_keys),
             base_urls: Arc::new(self.base_urls),
             ports: Arc::new(self.ports.unwrap_or_default()),
+            mcp_manager,
         }
+    }
+
+    // ── MCP configuration (Phase SDK) ───────────────────────────────
+
+    /// Inject a programmatic MCP configuration. This overrides the
+    /// on-disk `~/.config/oxi/mcp.json` and `.mcp.json` discovery.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use oxi_sdk::{OxiBuilder, McpConfig, ServerEntry, LifecycleMode};
+    ///
+    /// let mut mcp = McpConfig::default();
+    /// mcp.mcp_servers.insert(
+    ///     "my-server".into(),
+    ///     ServerEntry {
+    ///         command: Some("npx".into()),
+    ///         args: Some(vec!["-y".into(), "@my-org/mcp-server".into()]),
+    ///         lifecycle: Some(LifecycleMode::Lazy),
+    ///         ..Default::default()
+    ///     },
+    /// );
+    ///
+    /// let oxi = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .with_mcp_config(mcp)
+    ///     .build();
+    /// ```
+    pub fn with_mcp_config(mut self, config: oxi_agent::mcp::McpConfig) -> Self {
+        self.mcp_config = Some(config);
+        self.mcp_enabled = true;
+        self
+    }
+
+    /// Set custom disk paths for the MCP metadata cache and consent store.
+    ///
+    /// Only takes effect when MCP is enabled (see [`with_mcp`](Self::with_mcp)).
+    /// When unset, oxi uses its default paths (`~/.config/oxi/`). Intended
+    /// for SDK consumers that self-host MCP state under their own config
+    /// directory (e.g. oxios under `~/.oxios/`).
+    ///
+    /// Combine with [`with_mcp_config`](Self::with_mcp_config) to also inject
+    /// a programmatic config. If only paths are supplied (no config), oxi
+    /// auto-discovers its config from the standard file locations and writes
+    /// cache/consent to the supplied paths.
+    pub fn with_mcp_paths(
+        mut self,
+        cache_path: std::path::PathBuf,
+        consent_path: std::path::PathBuf,
+    ) -> Self {
+        self.mcp_cache_path = Some(cache_path);
+        self.mcp_consent_path = Some(consent_path);
+        self
+    }
+
+    /// Enable or disable MCP. When disabled, no `McpManager` is spawned
+    /// and the `mcp` proxy tool / direct tools are not registered.
+    ///
+    /// Defaults to `true`.
+    pub fn with_mcp(mut self, enabled: bool) -> Self {
+        self.mcp_enabled = enabled;
+        self
     }
 }
 
