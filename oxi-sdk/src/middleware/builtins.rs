@@ -274,12 +274,8 @@ impl Middleware for ContentFilterMiddleware {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ContentFilterMiddleware, LoggingMiddleware, RateLimitMiddleware, TokenBudgetMiddleware,
-    };
-    use crate::middleware::{
-        Middleware, MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewareResult,
-    };
+    use super::{ContentFilterMiddleware, RateLimitMiddleware};
+    use crate::middleware::{Middleware, MiddlewareContext, MiddlewareData, MiddlewarePhase};
 
     #[tokio::test]
     async fn test_rate_limit() {

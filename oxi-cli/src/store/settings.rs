@@ -944,6 +944,7 @@ mod tests {
     use std::sync::Mutex;
 
     /// Global lock to serialize all tests that manipulate process-wide env vars.
+    #[allow(dead_code)] // held implicitly via guard pattern; not all tests acquire it
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// RAII guard that removes listed env vars on creation and restores them on drop.

@@ -229,11 +229,13 @@ impl Extension for NoopExtension {
 
 // Test helpers
 #[cfg(test)]
+#[allow(missing_docs)] // test-only helpers
 pub struct RecordingExtension {
     pub name: String,
     pub calls: std::sync::Mutex<Vec<String>>,
 }
 #[cfg(test)]
+#[allow(missing_docs)] // test-only helpers
 impl RecordingExtension {
     pub fn new(name: impl Into<String>) -> Self {
         Self {

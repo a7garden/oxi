@@ -76,7 +76,7 @@ pub fn resolve_cspace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::capability::types::{CSpace, ResourceRef, Rights};
+    use crate::security::capability::types::{ResourceRef, Rights};
 
     #[test]
     fn test_resolve_standard() {

@@ -83,7 +83,7 @@ impl PluginLoader {
 mod tests {
     use super::*;
     use crate::Middleware;
-    use crate::middleware::{MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewareResult};
+    use crate::middleware::{MiddlewareContext, MiddlewarePhase, MiddlewareResult};
     use std::future::Future;
     use std::pin::Pin;
 

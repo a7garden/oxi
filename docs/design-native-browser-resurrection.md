@@ -224,8 +224,10 @@ impl BrowserTabTrait for OxiTab {
 ```
 
 > **버전 정책:** 트레이트 시그니처가 `Pin<Box<...>>` → `async fn`으로
-> 바뀌지만 `#[async_trait]`가 동일한 디슈가를 생성하므로 ABI 호환.
-> downstream의 `use` 구문은 불변. 따라서 **MINOR** 업으로 충분
+> 바뀌는 것은 API breaking change이지만, `BrowserTab`/`BrowserEngine`의
+> 외부 impl은 존재하지 않으므로 (모두 oxi-agent 내부) downstream에는
+> 실질적 영향이 없다. `#[async_trait]`가 내부적으로 동일한 `Pin<Box<...>>`
+> 디슈가를 생성하므로 런타임 동작도 동일. 따라서 **MINOR** 업으로 충분
 > (0.35.0). 단, 확신이 없으면 MAJOR(1.0.0)도 고려 — 하지만 과잉.
 
 ---
@@ -324,13 +326,23 @@ impl BrowserTabTrait for OxiTab {
 
 ---
 
-## 7. 열린 질문
+## 7. 열린 질문 — 해결 내역
 
-1. **oxibrowser-core re-export 정책** — oxi-sdk이 `oxibrowser-core`를
-   re-export하는데(0.14.1), 버전 올리면서 API 노출이 바뀌는가?
-   (`BrowserEvent` 매칭에 영향)
-2. **0.35.0 vs 1.0.0** — 트레이트 시그니처 변형이 ABI 호환이라 주장하지만,
-   보수적으로 MAJOR를 고를지? (권장: MINOR)
-3. **oxios의 `native-browser` feature 활성화** — oxios가 자체적으로
-   `oxios-kernel/native-browser`를 선언하는데, 이걸 CI에서 테스트할지,
-   아니면 feature 자체를 제거할지? (별도 논의)
+1. **oxibrowser-core re-export 정책** ✅ **해결**
+   oxi-sdk은 `pub use oxibrowser_core::BrowserEvent`만 re-export한다.
+   0.14.1 → 0.15 전환 후 `BrowserEvent` variant 구조는 동일
+   (`NavigationStarted`, `WaitingForSelector`, `DocumentReady`,
+   `ScreenshotCaptured` — `tab_id` 필드 포함). oxibrowser_backend.rs의
+   `extract_event_tab_id` / `browse_progress_from_event` 매칭 로직은
+   변경 없이 통과 (네이티브 브라우저 테스트 5개 green 확인).
+
+2. **0.35.0 vs 1.0.0** ✅ **MINOR (0.35.0) 선택 — 정당화됨**
+   트레이트 시그니처 변형은 기술적 breaking change이지만, 외부 impl이
+   없으므로 downstream 영향이 없다. 5개 크레이트 전부 crates.io에
+   0.35.0으로 게시 완료. downstream(oxios)에서 컴파일 + 테스트 통과 확인.
+
+3. **oxios의 `native-browser` feature 활성화** ⚠️ **미해결 (후속 작업)**
+   oxi CI에 `clippy-native-browser` job이 추가되어 oxi 측은 영구 차단됨.
+   하지만 oxios의 자체 `oxios-kernel/native-browser` feature는
+   oxios CI에서 별도로 검증되지 않는다. 후속으로 oxios CI에
+   `cargo build -p oxios-kernel --features native-browser` 검증 스텝 추가 권장.

@@ -219,6 +219,7 @@ mod tests {
     use super::*;
 
     /// No-op sink for tests.
+    #[allow(dead_code)] // test helper, not all test binaries use it
     pub struct NoOpAuditSink;
 
     #[cfg(test)]

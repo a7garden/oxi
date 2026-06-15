@@ -2,8 +2,8 @@
 
 use futures::Stream;
 use oxi_ai::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderError, ProviderEvent,
-    StopReason, StreamOptions, StreamResult, TextContent, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
+    StreamOptions, StreamResult, TextContent, Usage,
 };
 use oxi_sdk::OxiBuilder;
 use std::future::Future;

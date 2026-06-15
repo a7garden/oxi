@@ -5,7 +5,16 @@
 //! `#[cfg(feature = "native-browser")]`.
 
 use super::config::BrowseConfig;
+use super::engine::{
+    BrowseProgress, BrowserEngine, BrowserError, BrowserTab as BrowserTabTrait, PageContent,
+    TabCallbackRegistry,
+};
 use async_trait::async_trait;
+use serde_json::Value;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::task::JoinHandle;
 
 /// Extract the `tab_id` from any `BrowserEvent` variant.
 fn extract_event_tab_id(event: &oxibrowser_core::BrowserEvent) -> uuid::Uuid {
@@ -67,15 +76,6 @@ fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<B
         _ => None,
     }
 }
-use super::engine::{
-    BrowseProgress, BrowserEngine, BrowserError, BrowserTab as BrowserTabTrait, PageContent,
-    TabCallbackRegistry,
-};
-use serde_json::Value;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::sync::broadcast::error::RecvError;
-use tokio::task::JoinHandle;
 
 // ── OxiBrowserEngine ──────────────────────────────────────────────────────────
 

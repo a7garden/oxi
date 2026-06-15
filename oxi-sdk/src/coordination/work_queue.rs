@@ -353,7 +353,7 @@ mod tests {
     fn complete_item() {
         let q = WorkQueue::new(WorkQueueConfig::default());
         let id = q.enqueue("task", serde_json::json!({}), 0);
-        let item = q.claim("a1", None).unwrap();
+        let _item = q.claim("a1", None).unwrap();
         q.start(&id).unwrap();
         q.complete(
             &id,

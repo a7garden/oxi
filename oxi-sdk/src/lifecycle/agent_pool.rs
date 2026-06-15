@@ -101,18 +101,10 @@ impl std::fmt::Debug for AgentPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_agent::ToolRegistry;
 
-    fn make_agent(id: &str) -> Arc<Agent> {
-        let config = oxi_agent::AgentConfig {
-            model_id: format!("test/{id}"),
-            ..Default::default()
-        };
-        // Create a minimal Agent — this won't actually run, just for pool testing
-        Arc::new(unsafe { std::mem::zeroed::<Agent>() })
-    }
-
-    // Note: The above test helper uses zeroed which is unsafe.
+    // `make_agent` was removed — it used `std::mem::zeroed::<Agent>()` which
+    // is UB (Agent contains non-zero fields) and was never called by any test.
+    // Re-add a proper Agent constructor here if pool tests are needed.
     // For a safe version, we test the pool with just the data structure operations.
 
     #[test]

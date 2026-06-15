@@ -1,5 +1,3 @@
-// Test helpers may go unused as tests evolve; don't block CI on dead code.
-#![allow(dead_code)]
 /// Integration tests for oxi-agent
 use crate::types::{ToolCall, ToolDefinition, ToolResult};
 use crate::{Agent, AgentConfig, AgentEvent, AgentState, ToolRegistry};
@@ -655,6 +653,7 @@ impl crate::tools::AgentTool for EchoTool {
 }
 
 /// Provider that fails the first N calls then succeeds.
+#[allow(dead_code)] // test helper, used by selected test binaries
 struct RetryableProvider {
     fail_count: usize,
     success_response: String,
@@ -662,6 +661,7 @@ struct RetryableProvider {
 }
 
 impl RetryableProvider {
+    #[allow(dead_code)] // test helper
     fn new(fail_count: usize, success_response: String) -> Self {
         Self {
             fail_count,
@@ -713,6 +713,7 @@ impl Provider for RetryableProvider {
 }
 
 /// Provider that always returns a provider-level error (non-retryable).
+#[allow(dead_code)] // test helper, used by selected test binaries
 struct AlwaysErrorProvider;
 
 impl Provider for AlwaysErrorProvider {

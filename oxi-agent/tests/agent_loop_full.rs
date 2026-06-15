@@ -237,6 +237,7 @@ mod tests {
     }
 
     impl CountingTool {
+        #[allow(dead_code)] // test helper
         fn new(call_count: Arc<AtomicUsize>) -> Self {
             Self { call_count }
         }

@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn test_permissive_gate() {
         let gate = AccessGate::permissive();
-        let ctx = AgentContext::from_template("dev", "worker");
+        let _ctx = AgentContext::from_template("dev", "worker");
         // Permissive gate has no permissions registered, so tool check passes RBAC
         // but may fail permissions — that's fine, it's for development
         drop(gate);
