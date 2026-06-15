@@ -12,6 +12,7 @@ pub mod anchor;
 pub mod extensions;
 pub mod factories;
 pub mod fork_select;
+pub mod mcp_config;
 pub mod mcp_dashboard;
 pub mod model_select_inline;
 pub mod provider_select;
@@ -27,6 +28,8 @@ pub use extensions::extensions_overlay;
 pub use factories::{logout_select, model_select, resume_select, routing_status};
 #[allow(unused_imports)]
 pub use fork_select::ForkSelectOverlay;
+#[allow(unused_imports)]
+pub use mcp_config::McpConfigOverlay;
 #[allow(unused_imports)]
 pub use mcp_dashboard::{McpAction, McpDashboardOverlay};
 pub use router_setup::{RouterSetupData, router_setup};
@@ -77,6 +80,14 @@ pub enum OverlayAction {
     },
     /// Action emitted by the MCP dashboard overlay.
     McpAction(McpAction),
+    /// A new MCP config was written to disk by the management overlay
+    /// and should be hot-loaded into the running `McpManager`.
+    /// `config` is the freshly-merged disk view; `message` is shown as
+    /// a success notification.
+    McpConfigApplied {
+        config: oxi_agent::mcp::McpConfig,
+        message: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

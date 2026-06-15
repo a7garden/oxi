@@ -153,10 +153,32 @@ pub(crate) fn handle_slash_command(
             true
         }
         // ── MCP (Phase 2) ──────────────────────────────────────────────
-        "/mcp" | "/mcp dashboard" => {
+        "/mcp" => {
+            // Open the interactive management overlay (add / edit / remove).
             let manager = session.agent_ref().tools().mcp_manager();
             match manager {
                 Some(m) => {
+                    let cwd =
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    state.overlay = None;
+                    state.overlay_state = Some(Box::new(
+                        super::overlay::mcp_config::McpConfigOverlay::new(m, cwd),
+                    ));
+                }
+                None => {
+                    state.add_notification(
+                        "MCP is not configured. Add servers in ~/.config/oxi/mcp.json".into(),
+                        crate::tui::app::NotificationKind::Warning,
+                    );
+                }
+            }
+            true
+        }
+        "/mcp dashboard" => {
+            let manager = session.agent_ref().tools().mcp_manager();
+            match manager {
+                Some(m) => {
+                    state.overlay = None;
                     state.overlay_state = Some(Box::new(
                         super::overlay::mcp_dashboard::McpDashboardOverlay::new(m),
                     ));

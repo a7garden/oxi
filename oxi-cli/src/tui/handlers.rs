@@ -1130,6 +1130,24 @@ async fn handle_overlay_key(
                 }
                 return None;
             }
+            OverlayAction::McpConfigApplied { config, message } => {
+                // Hot-reload the manager so newly added servers are
+                // reachable through the proxy tool without a restart.
+                let manager = session.agent_ref().tools().mcp_manager();
+                if let Some(m) = manager {
+                    m.replace_config(config);
+                    state.add_notification(message, NotificationKind::Success);
+                } else {
+                    state.add_notification(
+                        "MCP config saved, but manager unavailable — restart to apply.".into(),
+                        NotificationKind::Warning,
+                    );
+                }
+                if let Some(ref mut o) = state.overlay_state {
+                    o.mark_refresh();
+                }
+                return None;
+            }
             _ => {}
         }
         return None;

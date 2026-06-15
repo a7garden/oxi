@@ -82,6 +82,10 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
         description: "List active tools or toggle tool on/off",
     },
     BuiltinSlashCommand {
+        name: "mcp",
+        description: "Manage MCP servers (add/edit/remove/view) or open status dashboard",
+    },
+    BuiltinSlashCommand {
         name: "extensions",
         description: "List extensions & WASM tools (alias: /ext)",
     },

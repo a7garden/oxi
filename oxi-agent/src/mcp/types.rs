@@ -36,16 +36,16 @@ pub struct ServerEntry {
     #[serde(default)]
     pub lifecycle: Option<LifecycleMode>,
     /// Idle timeout in minutes (overrides global setting).
-    #[serde(default)]
+    #[serde(default, rename = "idleTimeout", alias = "idle_timeout")]
     pub idle_timeout: Option<u64>,
     /// Show server stderr output (default: false).
     #[serde(default)]
     pub debug: Option<bool>,
     /// Direct tools registration config (Phase 3).
-    #[serde(default)]
+    #[serde(default, rename = "directTools", alias = "direct_tools")]
     pub direct_tools: Option<DirectToolsConfig>,
     /// Tools to exclude from direct/proxy registration (Phase 3).
-    #[serde(default)]
+    #[serde(default, rename = "excludeTools", alias = "exclude_tools")]
     pub exclude_tools: Option<Vec<String>>,
 }
 
@@ -65,20 +65,20 @@ pub enum LifecycleMode {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpSettings {
     /// Tool name prefix mode.
-    #[serde(default)]
+    #[serde(default, rename = "toolPrefix", alias = "tool_prefix")]
     pub tool_prefix: Option<ToolPrefix>,
     /// Global idle timeout in minutes (default: 10).
-    #[serde(default)]
+    #[serde(default, rename = "idleTimeout", alias = "idle_timeout")]
     pub idle_timeout: Option<u64>,
     /// Back-off period in seconds after a server connection failure (default: 30).
-    #[serde(default)]
+    #[serde(default, rename = "failureBackoffSecs", alias = "failure_backoff_secs")]
     pub failure_backoff_secs: Option<u64>,
     /// Global default for direct tools registration (Phase 3).
-    #[serde(default)]
+    #[serde(default, rename = "directTools", alias = "direct_tools")]
     pub direct_tools: Option<DirectToolsConfig>,
     /// If true, the `mcp` proxy tool is hidden when direct tools cover
     /// all configured servers (Phase 3).
-    #[serde(default)]
+    #[serde(default, rename = "disableProxyTool", alias = "disable_proxy_tool")]
     pub disable_proxy_tool: Option<bool>,
 }
 
@@ -98,6 +98,7 @@ pub enum ToolPrefix {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
     /// Map of server name → server definition.
+    #[serde(rename = "mcpServers", alias = "mcp_servers")]
     pub mcp_servers: HashMap<String, ServerEntry>,
     /// Global settings override.
     pub settings: Option<McpSettings>,

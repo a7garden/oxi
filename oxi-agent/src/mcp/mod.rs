@@ -282,6 +282,23 @@ impl McpManager {
         self.config.read()
     }
 
+    /// Hot-replace the in-memory MCP configuration.
+    ///
+    /// Used by the `/mcp` management overlay after it writes a new
+    /// config to disk: the updated server map becomes visible to
+    /// `connect()`, `status()`, and the proxy tool **without** a full
+    /// process restart. Existing live connections are left untouched;
+    /// newly added servers connect lazily on first use (or eagerly if
+    /// their [`LifecycleMode`] is `eager`/`keep-alive`).
+    ///
+    /// Direct-tool registration happens once at boot from the cache, so
+    /// newly-added `directTools` servers still require a restart to
+    /// surface as first-class agent tools — but the `mcp` proxy tool
+    /// can reach them immediately.
+    pub fn replace_config(&self, new_config: McpConfig) {
+        *self.config.write() = new_config;
+    }
+
     /// Get the consent manager.
     pub fn consent(&self) -> &ConsentManager {
         &self.consent
