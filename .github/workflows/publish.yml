@@ -131,9 +131,11 @@ jobs:
           echo "Waiting for $WAIT $TARGET on crates.io..."
           for i in $(seq 1 60); do
             # Query crates.io API for the max version (excludes yanked/prerelease).
-            SEEN=$(curl -fsSL "https://crates.io/api/v1/crates/$WAIT" \
-              | grep -oE '"max_stable_version":"[^"]+"' \
-              | head -1 | sed -E 's/.*:"([^"]+)".*/\1/')
+            # crates.io requires a User-Agent header — bare curl gets 403.
+            SEEN=$(curl -fsSL -H "User-Agent: oxi-publish-ci/1.0 (github.com/a7garden/oxi)" \
+              "https://crates.io/api/v1/crates/$WAIT" \
+              | grep -oE '"max_stable_version":[[:space:]]*"[^"]+"' \
+              | head -1 | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/')
             if [ "$SEEN" = "$TARGET" ]; then
               echo "$WAIT $TARGET visible on crates.io"
               exit 0
