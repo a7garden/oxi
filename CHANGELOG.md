@@ -5,6 +5,53 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-06-15
+
+### Added — MCP 서버 관리 TUI + 표준 config 호환성
+
+`/mcp` 명령이 읽기전용 대시보드에서 **인터랙티브 관리 오버레이**로
+승격. 서버 추가/편집/삭제를 TUI에서 직접 하고 디스크에 저장하면 런타임
+`McpManager`에 핫 리로드. pi-mcp-adapter의 `/mcp` 패널 UX를 참고.
+
+- **`McpConfigOverlay`** (oxi-cli): `/mcp`로 열리는 관리 오버레이.
+  - **List 모드**: 라이브 연결 상태 표시(●/○/✗), scope 표시,
+    unsaved 배지.
+  - **Edit 모드**: 폼 편집기 — name, transport(stdio/http 토글),
+    command+args 또는 url, lifecycle, idle timeout, direct-tools,
+    env/headers.
+  - **Confirm-remove 모드**: 삭제 가드.
+  - **Discard-guard 패턴**: dirty 상태에서 첫 Esc/Tab은 경고만,
+    두 번째가 실제 닫기/전환 — 조용한 데이터 손실 방지.
+  - **명시적 Transport 토글**: 자동감지 대신 선택 필드로 URL 필드에
+    접근 가능. 토글 시 관련 첫 입력 필드로 포커스 이동.
+- **`/mcp` 자동완성**: `BUILTIN_SLASH_COMMANDS`에 추가되어 슬래시
+  자동완성 목록에 표시.
+- **Config 저장 헬퍼** (oxi-agent): `save_mcp_config()`(temp+rename
+  atomic write), `load_or_default()`, `default_write_path_global/project()`.
+
+### Changed
+
+- **`/mcp` 라우팅 분리**: `/mcp` → 관리 오버레이, `/mcp dashboard` →
+  기존 읽기전용 상태 대시보드, `/mcp status` → 상태 알림(변경 없음).
+- **표준 MCP config 포맷 호환** (oxi-agent): serde가 canonical camelCase
+  (`mcpServers`, `idleTimeout`, `directTools`, `toolPrefix`, …)로 직렬화.
+  역직렬화는 camelCase와 legacy snake_case 모두 허용(`serde alias`)하여
+  기존 파일이 그대로 동작.
+- **`McpManager::replace_config()`** (oxi-agent): 런타임 config 핫 교체.
+  새로 추가된 서버가 재시작 없이 proxy tool에 도달 가능.
+  (direct-tool 등록은 여전히 부팅 시 1회만 수행하므로 재시작 필요.)
+- **`OverlayAction::McpConfigApplied`** (oxi-cli): 오버레이가 디스크에
+  쓴 merged config를 라이브 매니저에 반영하고 성공 알림.
+
+### Fixed
+
+- **"Save & Apply" 버튼 미작동**: Edit 모드 Save가 메모리만 고치고
+  디스크 저장/live 적용을 안 하던 버그 수정 — `commit_and_save()`로
+  stage + write + apply를 한 번에 수행.
+- **scope 전환(Tab) 시 unsaved 변경사항 조용히 손실**: discard-guard로
+  두 번 누르기 패턴 적용.
+- **Esc로 닫을 때 unsaved 손실**: 동일한 discard-guard 패턴 적용.
+
 ## [0.33.0] - 2026-06-13
 
 ### Added — MCP 고도화 (Phase 1-3 + SDK + TUI)
@@ -360,7 +407,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
 [0.29.0]: https://github.com/a7garden/oxi/compare/v0.28.0...v0.29.0
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.34.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 
