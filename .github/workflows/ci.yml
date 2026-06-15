@@ -110,7 +110,11 @@ jobs:
   # ── MSRV verification (no -D warnings so transient toolchain
   #    warnings don't block; we only check that it BUILDS at MSRV).
   msrv:
-    name: MSRV (${{ env.RUST_VERSION_MSRV }})
+    # NOTE: GitHub Actions does not allow the `env` context in the
+    # `name` field (only github/inputs/matrix/needs/strategy/vars).
+    # Hardcode the MSRV here; keep in sync with `RUST_VERSION_MSRV` above
+    # and `rust-toolchain.toml`.
+    name: MSRV (1.96)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
