@@ -83,7 +83,7 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
     },
     BuiltinSlashCommand {
         name: "mcp",
-        description: "Manage MCP servers (add/edit/remove/view) or open status dashboard",
+        description: "Manage MCP servers (Quick Add presets / add / edit / remove) or open status dashboard",
     },
     BuiltinSlashCommand {
         name: "extensions",

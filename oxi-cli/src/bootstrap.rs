@@ -251,6 +251,12 @@ fn fetch_and_register_models(
 }
 
 /// Register builtin tools with the agent, respecting --tools filter and disabled_tools.
+///
+/// Also transfers the [`McpManager`](oxi_agent::mcp::McpManager) reference from
+/// the built-in registry to the live agent registry. This matters because
+/// `register_arc` only copies the `Arc<dyn AgentTool>` — the manager field is
+/// stored separately and would otherwise be `None`, making `/mcp` show a
+/// "MCP is not configured" warning even though the `McpTool` is registered.
 fn register_builtin_tools(
     tools: &oxi_agent::ToolRegistry,
     cwd: &std::path::Path,
@@ -267,6 +273,11 @@ fn register_builtin_tools(
         if let Some(tool) = builtin_registry.get(&name) {
             tools.register_arc(tool);
         }
+    }
+    // Propagate the MCP manager so the TUI's `/mcp` overlay can hot-reload
+    // configs, render live connection status, and so on.
+    if let Some(mgr) = builtin_registry.mcp_manager() {
+        tools.set_mcp_manager(mgr);
     }
 }
 

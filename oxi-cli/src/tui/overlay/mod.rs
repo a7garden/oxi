@@ -14,6 +14,7 @@ pub mod factories;
 pub mod fork_select;
 pub mod mcp_config;
 pub mod mcp_dashboard;
+pub mod mcp_presets;
 pub mod model_select_inline;
 pub mod provider_select;
 pub mod questionnaire;

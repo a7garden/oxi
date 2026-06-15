@@ -154,29 +154,25 @@ pub(crate) fn handle_slash_command(
         }
         // ── MCP (Phase 2) ──────────────────────────────────────────────
         "/mcp" => {
-            // Open the interactive management overlay (add / edit / remove).
+            // Always open the interactive management overlay, even when
+            // no servers are configured. The overlay itself opens on the
+            // Quick Add gallery when the list is empty, so the path of
+            // least resistance is one Enter press away. The manager
+            // being `None` is rare (the bootstrap normally wires it) but
+            // is handled defensively: the overlay still reads / writes
+            // the config file, just without live status or hot-reload.
             let manager = session.agent_ref().tools().mcp_manager();
-            match manager {
-                Some(m) => {
-                    let cwd =
-                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-                    state.overlay = None;
-                    state.overlay_state = Some(Box::new(
-                        super::overlay::mcp_config::McpConfigOverlay::new(m, cwd),
-                    ));
-                }
-                None => {
-                    state.add_notification(
-                        "MCP is not configured. Add servers in ~/.config/oxi/mcp.json".into(),
-                        crate::tui::app::NotificationKind::Warning,
-                    );
-                }
-            }
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            state.overlay = None;
+            state.overlay_state = Some(Box::new(
+                super::overlay::mcp_config::McpConfigOverlay::new(manager, cwd),
+            ));
             true
         }
         "/mcp dashboard" => {
-            let manager = session.agent_ref().tools().mcp_manager();
-            match manager {
+            // Dashboard is a read-only runtime view; it requires the
+            // live manager. Fall back to a helpful notice when missing.
+            match session.agent_ref().tools().mcp_manager() {
                 Some(m) => {
                     state.overlay = None;
                     state.overlay_state = Some(Box::new(
@@ -185,7 +181,7 @@ pub(crate) fn handle_slash_command(
                 }
                 None => {
                     state.add_notification(
-                        "MCP is not configured. Add servers in ~/.config/oxi/mcp.json".into(),
+                        "MCP runtime manager unavailable — use /mcp to configure servers.".into(),
                         crate::tui::app::NotificationKind::Warning,
                     );
                 }
@@ -193,8 +189,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/mcp status" => {
-            let manager = session.agent_ref().tools().mcp_manager();
-            match manager {
+            match session.agent_ref().tools().mcp_manager() {
                 Some(m) => {
                     let status = m.status();
                     let status_text = tokio::task::block_in_place(|| {
@@ -204,7 +199,7 @@ pub(crate) fn handle_slash_command(
                 }
                 None => {
                     state.add_notification(
-                        "MCP is not configured.".into(),
+                        "MCP runtime manager unavailable — use /mcp to configure servers.".into(),
                         crate::tui::app::NotificationKind::Warning,
                     );
                 }

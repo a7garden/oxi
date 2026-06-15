@@ -13,6 +13,9 @@
 //! - [`Mode::Edit`] — form editor for a single server (command, args,
 //!   url, lifecycle, idle timeout, direct-tools).
 //! - [`Mode::ConfirmRemove`] — confirm-before-delete prompt.
+//! - [`Mode::QuickAdd`] — curated preset gallery. When the server list
+//!   is empty, the overlay opens here by default so the user lands one
+//!   keystroke away from a working config.
 //!
 //! # Config scope
 //!
@@ -266,6 +269,46 @@ impl EditableServer {
         }
     }
 
+    /// Build an EditableServer from a Quick Add preset. Behaves like
+    /// `from_stored` for the entry fields, but uses the preset's name as
+    /// the form default and clears `original_name` (it's a new server).
+    ///
+    /// `env_placeholder` is dropped into the env field as a hint so the
+    /// user can see what variables they need to provide. It's not a
+    /// valid value — `build()` will then either ignore it (no `=`) or
+    /// require the user to replace it with a real value.
+    fn from_preset(preset: &super::mcp_presets::McpPreset) -> Self {
+        let entry = &preset.entry;
+        let command = entry.command.clone().unwrap_or_default();
+        let args = entry.args.clone().unwrap_or_default().join(" ");
+        let url = entry.url.clone().unwrap_or_default();
+        // If the preset advertises a placeholder (e.g. "API_KEY=…"),
+        // seed the env field with that text so the user can see what
+        // they need to fill in. Real values would be supplied by the
+        // user before they hit Save.
+        let env = preset.env_placeholder.unwrap_or_default().to_string();
+        let transport = if entry.url.is_some() {
+            Transport::Http
+        } else {
+            Transport::Stdio
+        };
+        Self {
+            original_name: None,
+            name: preset.name.to_string(),
+            transport,
+            command,
+            args,
+            url,
+            env,
+            lifecycle: LifecycleField::from_entry(entry),
+            idle_timeout: entry
+                .idle_timeout
+                .map(|m| m.to_string())
+                .unwrap_or_default(),
+            direct_tools: DirectField::from_entry(entry),
+        }
+    }
+
     fn transport(&self) -> Transport {
         self.transport
     }
@@ -380,6 +423,13 @@ enum Mode {
     },
     /// Confirming a destructive removal.
     ConfirmRemove { name: String },
+    /// Browsing the curated Quick Add gallery. Pressing `Enter` on a
+    /// preset transitions to `Edit` with the preset's fields pre-filled,
+    /// so the user can confirm / tweak before saving.
+    QuickAdd {
+        selected: usize,
+        list_state: ListState,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -388,7 +438,12 @@ enum Mode {
 
 /// The interactive MCP management overlay.
 pub struct McpConfigOverlay {
-    manager: Arc<McpManager>,
+    /// The live manager — used for live connection status and hot-reload.
+    /// `None` is allowed for defensive operation: the overlay can still
+    /// read/write the on-disk config, just without live status or
+    /// hot-reload. This is rare in practice (the bootstrap normally wires
+    /// it) but it keeps `/mcp` functional even if the manager is missing.
+    manager: Option<Arc<McpManager>>,
     cwd: PathBuf,
     scope: Scope,
     /// The editable document for the target file (loaded fresh on
@@ -428,11 +483,18 @@ impl std::fmt::Debug for McpConfigOverlay {
 
 impl McpConfigOverlay {
     /// Build the overlay, loading the current global config document.
-    pub fn new(manager: Arc<McpManager>, cwd: PathBuf) -> Self {
+    ///
+    /// `manager` is the live runtime manager used for hot-reload and
+    /// status display. It is `Option` so the overlay remains usable even
+    /// in the rare case the bootstrap didn't wire it (e.g. a tool
+    /// registry was assembled manually). When `None`, the overlay can
+    /// still read / write the config file but skips live status and
+    /// hot-reload.
+    pub fn new(manager: Option<Arc<McpManager>>, cwd: PathBuf) -> Self {
         let scope = Scope::Global;
         let path = target_path(scope, &cwd);
         let doc = config::load_or_default(&path);
-        Self {
+        let mut overlay = Self {
             manager,
             cwd,
             scope,
@@ -443,7 +505,15 @@ impl McpConfigOverlay {
             dirty: false,
             discard_guard: false,
             notice: None,
+        };
+        // When there are no servers configured yet, the user is most
+        // likely here to add their first one. Drop them straight into
+        // the Quick Add gallery so the path of least resistance is
+        // one keystroke away (no need to read the empty-state hint).
+        if overlay.server_names().is_empty() {
+            overlay.enter_quick_add();
         }
+        overlay
     }
 
     fn target_path(&self) -> PathBuf {
@@ -525,6 +595,36 @@ impl McpConfigOverlay {
         if let Some(name) = names.get(self.selected).cloned() {
             self.mode = Mode::ConfirmRemove { name };
         }
+    }
+
+    /// Open the Quick Add gallery. Called from List mode (via `q` /
+    /// `a`-when-empty) and from `new()` when the server list is empty.
+    fn enter_quick_add(&mut self) {
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+        self.mode = Mode::QuickAdd {
+            selected: 0,
+            list_state,
+        };
+    }
+
+    /// Apply the currently-selected preset to the Edit form.
+    /// Returns `true` if a preset was applied.
+    fn apply_preset(&mut self) -> bool {
+        let idx = match &self.mode {
+            Mode::QuickAdd { selected, .. } => *selected,
+            _ => return false,
+        };
+        let Some(preset) = super::mcp_presets::presets().get(idx) else {
+            return false;
+        };
+        let server = EditableServer::from_preset(preset);
+        self.mode = Mode::Edit {
+            server,
+            field: Field::Name,
+            error: None,
+        };
+        true
     }
 
     fn commit_remove(&mut self, name: &str) {
@@ -727,6 +827,7 @@ impl OverlayComponent for McpConfigOverlay {
             Mode::List => self.handle_list_key(key),
             Mode::Edit { .. } => self.handle_edit_key(key),
             Mode::ConfirmRemove { .. } => self.handle_confirm_key(key),
+            Mode::QuickAdd { .. } => self.handle_quick_add_key(key),
         }
     }
 
@@ -739,11 +840,13 @@ impl OverlayComponent for McpConfigOverlay {
             List,
             Edit,
             ConfirmRemove(String),
+            QuickAdd,
         }
         let kind = match &self.mode {
             Mode::List => RenderKind::List,
             Mode::Edit { .. } => RenderKind::Edit,
             Mode::ConfirmRemove { name } => RenderKind::ConfirmRemove(name.clone()),
+            Mode::QuickAdd { .. } => RenderKind::QuickAdd,
         };
         match kind {
             RenderKind::List => self.render_list(frame, area, theme, &styles),
@@ -752,18 +855,29 @@ impl OverlayComponent for McpConfigOverlay {
                 self.render_list(frame, area, theme, &styles);
                 self.render_confirm(frame, area, theme, &name);
             }
+            RenderKind::QuickAdd => self.render_quick_add(frame, area, theme, &styles),
         }
     }
 
     fn hint(&self) -> &str {
         match self.mode {
             Mode::List => {
-                "↑↓ Navigate │ a:Add │ e/Enter:Edit │ d:Remove │ r:Reconnect │ Tab:Scope │ s:Save │ Esc:Close"
+                if self.server_names().is_empty() {
+                    // Empty state — the user is most likely here to add
+                    // their first server. The Quick Add key is the
+                    // path of least resistance.
+                    "a:Quick Add │ c:Custom server │ Tab:Scope │ Esc:Close"
+                } else {
+                    "↑↓ Navigate │ a:Add │ e/Enter:Edit │ d:Remove │ r:Reconnect │ Tab:Scope │ s:Save │ Esc:Close"
+                }
             }
             Mode::Edit { .. } => {
                 "↑↓/Tab Next │ ←→ Transport/Choice │ Enter Save/Cancel │ Esc Cancel"
             }
             Mode::ConfirmRemove { .. } => "Enter:Confirm remove │ Esc/other:Cancel",
+            Mode::QuickAdd { .. } => {
+                "↑↓ Navigate │ Enter/a:Apply preset │ c:Custom server │ Esc:Back"
+            }
         }
     }
 }
@@ -784,13 +898,32 @@ impl McpConfigOverlay {
                 }
                 OverlayAction::None
             }
-            KeyCode::Char('a') | KeyCode::Char('n') => {
+            KeyCode::Char('a') => {
+                // 'a' now opens the Quick Add gallery, regardless of
+                // whether the list is empty. The gallery includes a
+                // 'c' shortcut to the blank custom form for power users.
+                self.enter_quick_add();
+                OverlayAction::None
+            }
+            KeyCode::Char('n') => {
+                // 'n' keeps its old behaviour: jump straight to the
+                // blank custom add form (no preset).
+                self.begin_add();
+                OverlayAction::None
+            }
+            KeyCode::Char('c') => {
+                // 'c' = custom server: same as 'n'.
                 self.begin_add();
                 OverlayAction::None
             }
             KeyCode::Char('e') | KeyCode::Enter => {
                 if count > 0 {
                     self.begin_edit();
+                } else {
+                    // No servers — Enter on an empty list opens Quick
+                    // Add (so the user can confirm their first server
+                    // with a single key press).
+                    self.enter_quick_add();
                 }
                 OverlayAction::None
             }
@@ -811,12 +944,19 @@ impl McpConfigOverlay {
             KeyCode::Char('R') => {
                 OverlayAction::McpAction(super::mcp_dashboard::McpAction::ReconnectAll)
             }
+            KeyCode::Char('q') => {
+                // 'q' is the Quick Add shortcut (was previously a
+                // redundant alias for Esc — we don't need two close
+                // keys when one does the job).
+                self.enter_quick_add();
+                OverlayAction::None
+            }
             KeyCode::Tab => {
                 self.switch_scope();
                 OverlayAction::None
             }
             KeyCode::Char('s') => self.save_and_apply(),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 if self.dirty && !self.discard_guard {
                     // First Esc: warn and arm the guard. Second Esc closes.
                     self.discard_guard = true;
@@ -939,6 +1079,57 @@ impl McpConfigOverlay {
             }
         }
     }
+
+    /// Key handler for the Quick Add gallery.
+    ///
+    /// `Enter` / `a` applies the highlighted preset (jumps to the Edit
+    /// form with fields pre-filled). `Esc` returns to List mode (which
+    /// is a no-op when the server list is empty — the overlay will
+    /// reopen on Quick Add next time). `c` switches to the blank
+    /// add-server form (no preset).
+    fn handle_quick_add_key(&mut self, key: KeyEvent) -> OverlayAction {
+        let preset_count = super::mcp_presets::presets().len();
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Mode::QuickAdd {
+                    selected,
+                    list_state,
+                } = &mut self.mode
+                {
+                    *selected = selected.saturating_sub(1);
+                    list_state.select(Some(*selected));
+                }
+                OverlayAction::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Mode::QuickAdd {
+                    selected,
+                    list_state,
+                } = &mut self.mode
+                    && preset_count > 0
+                {
+                    *selected = (*selected + 1).min(preset_count - 1);
+                    list_state.select(Some(*selected));
+                }
+                OverlayAction::None
+            }
+            KeyCode::Enter | KeyCode::Char('a') => {
+                self.apply_preset();
+                OverlayAction::None
+            }
+            KeyCode::Char('c') => {
+                // 'c' = "custom" — go straight to the blank add form
+                // so power users can skip the gallery.
+                self.begin_add();
+                OverlayAction::None
+            }
+            KeyCode::Esc => {
+                self.mode = Mode::List;
+                OverlayAction::None
+            }
+            _ => OverlayAction::None,
+        }
+    }
 }
 
 // ── rendering ─────────────────────────────────────────────────────────
@@ -967,19 +1158,29 @@ impl McpConfigOverlay {
         let inner = border.inner(popup);
         frame.render_widget(border, popup);
 
-        // Build live status map from the manager.
-        let dash = self.manager.dashboard_data();
+        // Build live status map from the manager. When the manager is
+        // missing (defensive — bootstrap normally wires it), we skip
+        // the live status and just show server entries in the muted
+        // (disconnected) state. The list is still usable for add/edit.
         let mut status_by_name: std::collections::HashMap<String, (&str, Color)> =
             std::collections::HashMap::new();
-        for s in &dash.servers {
-            let (label, color) = match &s.status {
-                McpConnectionStatus::Connected => ("●", theme.colors.success),
-                McpConnectionStatus::Connecting => ("◌", theme.colors.warning),
-                McpConnectionStatus::Error(_) => ("✗", theme.colors.error),
-                McpConnectionStatus::Disconnected => ("○", theme.colors.muted),
-            };
-            status_by_name.insert(s.name.clone(), (label, color));
-        }
+        let (connected_count, total_count) = if let Some(mgr) = &self.manager {
+            let dash = mgr.dashboard_data();
+            let total = dash.settings.total_servers;
+            let connected = dash.settings.connected_servers;
+            for s in &dash.servers {
+                let (label, color) = match &s.status {
+                    McpConnectionStatus::Connected => ("●", theme.colors.success),
+                    McpConnectionStatus::Connecting => ("◌", theme.colors.warning),
+                    McpConnectionStatus::Error(_) => ("✗", theme.colors.error),
+                    McpConnectionStatus::Disconnected => ("○", theme.colors.muted),
+                };
+                status_by_name.insert(s.name.clone(), (label, color));
+            }
+            (connected, total)
+        } else {
+            (0, 0)
+        };
 
         let names = self.server_names();
 
@@ -995,10 +1196,7 @@ impl McpConfigOverlay {
             ),
             Span::raw("   "),
             Span::styled(
-                format!(
-                    "live: {}/{} connected",
-                    dash.settings.connected_servers, dash.settings.total_servers
-                ),
+                format!("live: {connected_count}/{total_count} connected"),
                 styles.muted,
             ),
             if self.dirty {
@@ -1030,13 +1228,16 @@ impl McpConfigOverlay {
         };
 
         let items: Vec<ListItem> = if names.is_empty() {
+            // The overlay normally opens in Quick Add mode when the
+            // list is empty, so this branch is only reached if the user
+            // Esc'd back from Quick Add without applying a preset.
+            // Still, keep the hint useful and consistent.
             vec![ListItem::new(Line::from(vec![
                 Span::styled(" No servers yet. Press ", styles.muted),
                 Span::styled("a", styles.accent),
-                Span::styled(
-                    " to add one (e.g. npx -y @modelcontextprotocol/server-filesystem).",
-                    styles.muted,
-                ),
+                Span::styled(" for a curated Quick Add gallery, or ", styles.muted),
+                Span::styled("c", styles.accent),
+                Span::styled(" to enter a custom server.", styles.muted),
             ]))]
         } else {
             names
@@ -1456,6 +1657,212 @@ impl McpConfigOverlay {
             },
         );
     }
+
+    /// Render the Quick Add gallery. Two-column layout: list of presets
+    /// on the left, live preview / detail of the highlighted preset on
+    /// the right.
+    fn render_quick_add(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        styles: &ThemeStyles,
+    ) {
+        let popup = centered_layout(area, 0.86, 0.82);
+        frame.render_widget(Clear, popup);
+
+        let title = Line::from(vec![
+            Span::styled(" \u{2728} Quick Add MCP Server ", styles.accent),
+            Span::styled("— pick a preset to pre-fill the form, or ", styles.muted),
+            Span::styled("c", styles.accent),
+            Span::styled(" for custom.", styles.muted),
+        ]);
+        let border = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.colors.border));
+        let inner = border.inner(popup);
+        frame.render_widget(border, popup);
+
+        // Pull selection out of self.mode without holding the borrow
+        // through the rest of the function.
+        let (selected_idx, list_state_ref) = match &mut self.mode {
+            Mode::QuickAdd {
+                selected,
+                list_state,
+            } => (*selected, list_state),
+            _ => return,
+        };
+
+        let presets = super::mcp_presets::presets();
+        // Update the cursor in the list state.
+        list_state_ref.select(Some(selected_idx));
+
+        // Split: list on the left, detail on the right.
+        let list_width = inner.width.saturating_sub(2).saturating_mul(55) / 100;
+        let list_area = Rect {
+            x: inner.x + 1,
+            y: inner.y + 1,
+            width: list_width,
+            height: inner.height.saturating_sub(2),
+        };
+        let detail_x = inner.x + 1 + list_width + 2;
+        let detail_area = Rect {
+            x: detail_x,
+            y: inner.y + 1,
+            width: inner.width.saturating_sub(2 + (detail_x - inner.x)),
+            height: inner.height.saturating_sub(2),
+        };
+
+        // ── Left: preset list ────────────────────────────────────────
+        let items: Vec<ListItem> = presets
+            .iter()
+            .map(|p| {
+                let spans = vec![
+                    Span::styled(
+                        format!("{:<12}", p.name),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(format!("[{}]", p.tag), styles.muted),
+                    if p.requires_oauth {
+                        Span::styled("  \u{1f511} oauth", styles.warning)
+                    } else {
+                        Span::raw("")
+                    },
+                ];
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(theme.colors.primary)
+                    .fg(theme.colors.background),
+            )
+            .highlight_symbol("▶ ");
+        frame.render_stateful_widget(list, list_area, list_state_ref);
+
+        // ── Right: detail panel ──────────────────────────────────────
+        if let Some(preset) = presets.get(selected_idx) {
+            self.render_preset_detail(frame, detail_area, theme, styles, preset);
+        } else {
+            // Empty preset list shouldn't happen (PRESETS is a const
+            // non-empty slice), but render a friendly placeholder
+            // rather than panic.
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    " (no presets available)",
+                    styles.muted,
+                ))),
+                detail_area,
+            );
+        }
+    }
+
+    /// Render the right-hand detail panel for a highlighted preset:
+    /// name + summary + transport + command/url + env hint + lifecycle.
+    fn render_preset_detail(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        styles: &ThemeStyles,
+        preset: &super::mcp_presets::McpPreset,
+    ) {
+        let mut lines: Vec<Line> = Vec::new();
+        // Header: name + tag
+        lines.push(Line::from(vec![
+            Span::styled(
+                preset.name,
+                Style::default()
+                    .fg(theme.colors.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("({})", preset.tag),
+                Style::default().fg(theme.colors.muted),
+            ),
+        ]));
+        // Summary (wrap by hand: split on whitespace at width-2).
+        let wrap_width = area.width.saturating_sub(2) as usize;
+        let mut summary = preset.summary.to_string();
+        if wrap_width > 0 {
+            let mut chunks: Vec<String> = Vec::new();
+            // Simple word-wrap: greedy line break.
+            for word in summary.split_whitespace() {
+                if let Some(last) = chunks.last_mut()
+                    && last.len() + 1 + word.len() <= wrap_width
+                {
+                    last.push(' ');
+                    last.push_str(word);
+                    continue;
+                }
+                chunks.push(word.to_string());
+            }
+            summary = chunks.join("\n");
+        }
+        for line in summary.lines() {
+            lines.push(Line::from(Span::styled(line, styles.normal)));
+        }
+        lines.push(Line::from(""));
+
+        // Transport detail
+        if let Some(cmd) = &preset.entry.command {
+            lines.push(Line::from(vec![
+                Span::styled("command:  ", styles.muted),
+                Span::styled(cmd.clone(), styles.normal),
+            ]));
+            if let Some(args) = &preset.entry.args
+                && !args.is_empty()
+            {
+                lines.push(Line::from(vec![
+                    Span::styled("args:     ", styles.muted),
+                    Span::styled(args.join(" "), styles.normal),
+                ]));
+            }
+        }
+        if let Some(url) = &preset.entry.url {
+            lines.push(Line::from(vec![
+                Span::styled("url:      ", styles.muted),
+                Span::styled(url.clone(), styles.normal),
+            ]));
+        }
+        if let Some(env) = preset.env_placeholder {
+            lines.push(Line::from(vec![
+                Span::styled("env:      ", styles.muted),
+                Span::styled(env.to_string(), Style::default().fg(theme.colors.warning)),
+            ]));
+        }
+        lines.push(Line::from(""));
+
+        // Footer hint about post-install auth
+        if preset.requires_oauth {
+            lines.push(Line::from(Span::styled(
+                "After saving, this server will prompt for OAuth.",
+                Style::default().fg(theme.colors.warning),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "Press Enter to add this server.",
+                styles.muted,
+            )));
+        }
+
+        let block = Block::default()
+            .borders(Borders::LEFT)
+            .border_style(Style::default().fg(theme.colors.border));
+        frame.render_widget(
+            Paragraph::new(lines).block(block),
+            Rect {
+                x: area.x,
+                y: area.y,
+                width: area.width,
+                height: area.height,
+            },
+        );
+    }
 }
 
 /// One-line summary of a server entry for the list view.
@@ -1476,3 +1883,90 @@ const _: Option<ToolPrefix> = None;
 // ConsentState is referenced by the dashboard action path; keep the
 // import live even if this overlay doesn't set consent directly.
 const _: Option<ConsentState> = None;
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `EditableServer::from_preset` should produce a form that
+    /// round-trips back to a `ServerEntry` matching the preset's
+    /// transport-specific fields (command + args, or url).
+    #[test]
+    fn preset_roundtrips_through_editable_server() {
+        for preset in crate::tui::overlay::mcp_presets::presets() {
+            let editable = EditableServer::from_preset(preset);
+            let (name, entry) = editable
+                .build()
+                .unwrap_or_else(|e| panic!("preset '{}' failed to build: {e}", preset.name));
+            assert_eq!(name, preset.name, "name mismatch for {}", preset.name);
+            // Transport sanity: the editable's transport (inferred from
+            // which non-empty field is set) must match the preset's
+            // transport.
+            let editable_is_stdio = editable.url.trim().is_empty();
+            let preset_is_stdio = preset.entry.url.is_none();
+            assert_eq!(
+                editable_is_stdio, preset_is_stdio,
+                "transport mismatch for {} (editable: stdio={}, preset: stdio={})",
+                preset.name, editable_is_stdio, preset_is_stdio
+            );
+            // Round-trip the transport-specific fields.
+            if preset.entry.command.is_some() {
+                assert_eq!(
+                    entry.command, preset.entry.command,
+                    "command mismatch for {}",
+                    preset.name
+                );
+                assert_eq!(
+                    entry.args, preset.entry.args,
+                    "args mismatch for {}",
+                    preset.name
+                );
+            }
+            if preset.entry.url.is_some() {
+                assert_eq!(
+                    entry.url, preset.entry.url,
+                    "url mismatch for {}",
+                    preset.name
+                );
+            }
+        }
+    }
+
+    /// Editing a preset (changing the name) should rename the entry.
+    #[test]
+    fn preset_can_be_renamed() {
+        let preset = &crate::tui::overlay::mcp_presets::presets()[0];
+        let mut editable = EditableServer::from_preset(preset);
+        editable.name = "renamed-preset".to_string();
+        let (name, _entry) = editable.build().expect("build ok");
+        assert_eq!(name, "renamed-preset");
+    }
+
+    /// The lifecycle / direct-tools fields on the form should reflect
+    /// the preset's choices after `from_preset`.
+    #[test]
+    fn preset_lifecycle_and_direct_tools_are_copied() {
+        for preset in crate::tui::overlay::mcp_presets::presets() {
+            let editable = EditableServer::from_preset(preset);
+            // Both presets default to Lazy lifecycle + no direct_tools.
+            // When a preset flips these in the future, the form will
+            // reflect it.
+            assert_eq!(
+                editable.lifecycle,
+                LifecycleField::from_entry(&preset.entry),
+                "lifecycle mismatch for {}",
+                preset.name
+            );
+            assert_eq!(
+                editable.direct_tools,
+                DirectField::from_entry(&preset.entry),
+                "direct_tools mismatch for {}",
+                preset.name
+            );
+        }
+    }
+}
