@@ -34,7 +34,7 @@ futures = "0.3"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "0.9"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -50,21 +50,21 @@ thiserror = { workspace = true }
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "5"
+dirs = "6"
 parking_lot = "0.12"
 crossterm = "0.29"
 ratatui = { version = "0.30", features = ["crossterm"] }
 unicode-width = "0.2"
 base64 = "0.22"
-rand = "0.8"
-sha2 = "0.10"
+rand = "0.9"
+sha2 = "0.11"
 url = "2"
 
 # Image processing
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 
 # Dynamic loading for extensions
-libloading = "0.8"
+libloading = "0.9"
 # Pinned to extism 1.21.0 (wasmtime 41.x).
 #
 # extism 1.30.0 (published 2026-06-04) is uncompilable: it assumes
@@ -89,19 +89,19 @@ semver = { version = "1", features = ["serde"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # Self-update (optional)
-self_update = { version = "0.41", features = ["archive-tar", "compression-flate2"], optional = true }
+self_update = { version = "0.44", features = ["archive-tar", "compression-flate2"], optional = true }
 serde_yaml = "0.9"
 
 # OAuth support
 urlencoding = "2.1"
 
 # Filesystem watching
-notify = "6"
+notify = "8"
 
 # Archive extraction for tools-manager
 flate2 = "1"
 tar = "0.4"
-zip = "2"
+zip = "8"
 
 # Unix primitives for SIGTSTP
 [target.'cfg(unix)'.dependencies]
