@@ -9,8 +9,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # Default MSRV — overwritable per job via `dtolnay/rust-toolchain`.
-  RUST_VERSION_STABLE: stable
+  # The workspace `rust-toolchain.toml` pins `channel = "1.96"`, which
+  # overrides whatever `dtolnay/rust-toolchain` installs.  Every job
+  # therefore MUST install 1.96 explicitly (with the components it
+  # needs) — installing stable + clippy does nothing because cargo
+  # picks 1.96 from the override and finds no components there.
   RUST_VERSION_MSRV: "1.96"
 
 concurrency:
@@ -26,8 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
           components: rustfmt
       - run: cargo fmt --all -- --check
 
@@ -36,8 +40,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -53,8 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -77,7 +83,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "smoke-test"
@@ -94,7 +102,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
       - uses: taiki-e/install-action@cargo-audit
       - run: cargo audit
 
@@ -103,7 +113,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
       - uses: taiki-e/install-action@cargo-deny
       - run: cargo deny check
 
@@ -145,7 +157,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "doc"
