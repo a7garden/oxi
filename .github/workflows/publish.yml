@@ -89,6 +89,11 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      # max-parallel: 1 enforces topological order: oxi-ai → oxi-tui →
+      # oxi-agent → oxi-sdk → oxi-cli. Each job also polls for its
+      # heaviest dependency's new version to clear the crates.io index
+      # propagation lag (can take ~30-60s after publish).
+      max-parallel: 1
       matrix:
         crate:
           - oxi-ai
@@ -99,22 +104,42 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Wait for crates.io index to see the previous crate
-        # After publishing oxi-ai, the crates.io index takes a few
-        # seconds to update before oxi-agent can resolve it. Polling
-        # the registry index is more reliable than a fixed sleep.
+      - name: Wait for crates.io index to see the dependency's new version
+        # Poll the crates.io API (not `cargo search`, which only does
+        # name matching) for the exact new version of the heaviest
+        # internal dependency. Skips crates with no internal deps.
         run: |
-          if [ "${{ matrix.crate }}" = "oxi-ai" ]; then exit 0; fi
-          PREV=$(echo "${{ matrix.crate }}" | awk -F- '{print $2}')
-          for i in $(seq 1 30); do
-            if cargo search "oxi-$PREV" --limit 1 > /dev/null 2>&1; then
-              echo "oxi-$PREV visible on crates.io"
+          CRATE="${{ matrix.crate }}"
+          # Map each crate to the internal dependency it must wait for
+          # (the one published immediately before it in topo order).
+          case "$CRATE" in
+            oxi-ai|oxi-tui) WAIT=""; exit 0 ;;
+            oxi-agent) WAIT="oxi-ai" ;;
+            oxi-sdk) WAIT="oxi-agent" ;;
+            oxi-cli) WAIT="oxi-sdk" ;;
+            *) WAIT=""; exit 0 ;;
+          esac
+          # Read the required version from this crate's Cargo.toml.
+          TARGET=$(grep -E "^${WAIT} = \{ version = " "$CRATE/Cargo.toml" \
+            | head -1 | sed -E 's/.*version = "([^"]+)".*/\1/')
+          if [ -z "$TARGET" ]; then
+            echo "::error::Could not determine required version of $WAIT"
+            exit 1
+          fi
+          echo "Waiting for $WAIT $TARGET on crates.io..."
+          for i in $(seq 1 60); do
+            # Query crates.io API for the max version (excludes yanked/prerelease).
+            SEEN=$(curl -fsSL "https://crates.io/api/v1/crates/$WAIT" \
+              | grep -oE '"max_stable_version":"[^"]+"' \
+              | head -1 | sed -E 's/.*:"([^"]+)".*/\1/')
+            if [ "$SEEN" = "$TARGET" ]; then
+              echo "$WAIT $TARGET visible on crates.io"
               exit 0
             fi
-            echo "Waiting for oxi-$PREV to be indexed... ($i/30)"
-            sleep 5
+            echo "  waiting for $WAIT $TARGET (saw $SEEN)... ($i/60)"
+            sleep 10
           done
-          echo "::error::Timeout waiting for oxi-$PREV to be indexed on crates.io"
+          echo "::error::Timeout waiting for $WAIT $TARGET on crates.io"
           exit 1
       - name: Publish ${{ matrix.crate }}
         working-directory: ${{ matrix.crate }}
