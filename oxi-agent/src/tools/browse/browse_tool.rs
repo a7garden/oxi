@@ -258,32 +258,24 @@ impl AgentTool for BrowseTool {
 mod tests {
     use super::*;
     use crate::tools::browse::engine::{BrowserError, BrowserTab};
-    use std::future::Future;
-    use std::pin::Pin;
 
     /// Minimal `BrowserEngine` stub. We never call `new_tab` in the test,
     /// so the trait methods are allowed to return `Err` — the goal is just
     /// to be able to construct a `BrowseTool` and read `execution_mode()`.
     struct MockEngine;
 
+    #[async_trait]
     impl BrowserEngine for MockEngine {
-        fn new_tab<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Result<Box<dyn BrowserTab>, BrowserError>> + Send + 'a>>
-        {
-            Box::pin(
-                async move { Err(BrowserError::Backend("MockEngine: no real browser".into())) },
-            )
+        async fn new_tab(&self) -> Result<Box<dyn BrowserTab>, BrowserError> {
+            Err(BrowserError::Backend("MockEngine: no real browser".into()))
         }
 
-        fn close<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
-            Box::pin(async move { Ok(()) })
+        async fn close(&self) -> Result<(), BrowserError> {
+            Ok(())
         }
 
-        fn is_alive<'a>(&'a self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-            Box::pin(async move { false })
+        async fn is_alive(&self) -> bool {
+            false
         }
     }
 

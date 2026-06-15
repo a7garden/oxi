@@ -3649,7 +3649,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3661,7 +3661,7 @@ dependencies = [
  "libc",
  "oxi-ai",
  "oxibrowser",
- "oxibrowser-core 0.15.0",
+ "oxibrowser-core",
  "parking_lot",
  "regex",
  "reqwest",
@@ -3678,7 +3678,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-ai"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3714,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3763,7 +3763,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3775,7 +3775,7 @@ dependencies = [
  "glob",
  "oxi-agent",
  "oxi-ai",
- "oxibrowser-core 0.14.1",
+ "oxibrowser-core",
  "parking_lot",
  "serde",
  "serde_json",
@@ -3791,7 +3791,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-tui"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3823,7 +3823,7 @@ dependencies = [
  "clap",
  "futures",
  "oxibrowser-cdp",
- "oxibrowser-core 0.15.0",
+ "oxibrowser-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -3845,50 +3845,14 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "oxibrowser-core 0.15.0",
- "oxibrowser-webapi 0.15.0",
+ "oxibrowser-core",
+ "oxibrowser-webapi",
  "serde",
  "serde_json",
  "sha1",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "oxibrowser-core"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d458ce46c0e5cb2c0dfb3a5f4aa294401443452a9b6e15a7cbd9496eba4fa660"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "boa_engine",
- "boa_gc",
- "bytes",
- "chrono",
- "encoding_rs",
- "futures",
- "getrandom 0.3.4",
- "html5ever",
- "image",
- "markup5ever",
- "oxibrowser-webapi 0.14.1",
- "parking_lot",
- "percent-encoding",
- "pollster",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "string_cache",
- "thiserror 2.0.18",
- "tokio",
  "tracing",
  "url",
  "uuid",
@@ -3913,7 +3877,7 @@ dependencies = [
  "html5ever",
  "image",
  "markup5ever",
- "oxibrowser-webapi 0.15.0",
+ "oxibrowser-webapi",
  "parking_lot",
  "percent-encoding",
  "pollster",
@@ -3928,21 +3892,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "oxibrowser-webapi"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1516aabcc859510c886f08cbc9839f61989fbd2e151b80eebd31fed382b0387e"
-dependencies = [
- "html5ever",
- "markup5ever",
- "serde",
- "serde_json",
- "string_cache",
- "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]

@@ -11,7 +11,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Version | 0.30.0 (latest release: 0.30.0) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
-| Workflows | `ci.yml` (7 jobs: fmt/clippy/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `release.yml` (aarch64-apple-darwin + SHA256SUMS + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |
+| Workflows | `ci.yml` (8 jobs: fmt/clippy/clippy-native-browser/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `release.yml` (aarch64-apple-darwin + SHA256SUMS + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |
 
 > The legacy `oxi-store` crate (settings, sessions, auth) was absorbed
 > into `oxi-cli/src/store/` as a self-contained sub-module. The legacy
@@ -210,6 +210,17 @@ Extension system (`src/extensions/types.rs`):
   `clippy --all-targets` is **not** enforced yet (test/bench code has
   pre-existing `unwrap()` and pedantic lints) — see "Pre-existing TODO"
   below.
+- **`native-browser` feature must always compile.** The `ci.yml`
+  `clippy-native-browser` job runs `cargo clippy -p oxi-sdk --features
+  native-browser -- -D warnings` on every PR. This feature compiles
+  `oxibrowser_backend.rs` — if you change `BrowserTab`/`BrowserEngine`
+  traits or their impls, this job catches edition-2024 lifetime bugs
+  that `cargo clippy --workspace` (default features) cannot see. To
+  verify locally:
+  ```bash
+  cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+  cargo build -p oxi-agent --features native-browser
+  ```
 - **Pre-commit hooks** — `.pre-commit-config.yaml` mirrors the ci.yml
   gate. Install once: `pre-commit install`. On every `git commit`,
   trailing whitespace, EOF, YAML/TOML lint, merge-conflict, large
@@ -310,7 +321,7 @@ oxi ships a multi-stage pipeline. The full source is under
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `smoke-test`, `audit`, `deny`, `msrv`, `doc`. ~2-3 min for the fast jobs. |
+| `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `clippy-native-browser`, `smoke-test`, `audit`, `deny`, `msrv`, `doc`. ~2-3 min for the fast jobs. |
 | `test.yml` | PR + push to main + release | Full nextest matrix on **macos-latest** (Apple Silicon), plus doc tests. Replaces the older "smoke on PR, full on main" split. |
 | `pr-gate.yml` | PR opened/synchronized/reopened | Conventional-Commit title, PR size ≤ 4000 lines, no merge commits, issue linkage. |
 | `release.yml` | `v*` tag push | Build `aarch64-apple-darwin`, `tag-check` (rejects stale tags), `SHA256SUMS` + CycloneDX SBOM, GitHub Release. |

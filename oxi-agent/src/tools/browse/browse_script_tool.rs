@@ -96,11 +96,11 @@ fn parse_steps(yaml: &str) -> Result<Vec<Step>, ToolError> {
             // Index<&str> on Mapping, so iterate).
             let mut found: Option<&serde_yaml::Value> = None;
             for (k, v) in map.iter() {
-                if let serde_yaml::Value::String(s) = k {
-                    if s == "steps" {
-                        found = Some(v);
-                        break;
-                    }
+                if let serde_yaml::Value::String(s) = k
+                    && s == "steps"
+                {
+                    found = Some(v);
+                    break;
                 }
             }
             match found {

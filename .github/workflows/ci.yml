@@ -48,6 +48,27 @@ jobs:
       # is tracked as a follow-up — see AGENTS.md "Pre-existing TODO".
       - run: cargo clippy --workspace -- -D warnings
 
+  clippy-native-browser:
+    name: Clippy (native-browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "clippy-native-browser"
+      # The `native-browser` feature compiles oxibrowser_backend.rs —
+      # the pure-Rust headless browser backend.  This code path was
+      # previously never CI-verified, which let edition-2024 lifetime
+      # bugs ship to crates.io (0.32.0–0.34.0).  This job ensures the
+      # feature always compiles cleanly.  Runtime tests (actual browser
+      # execution) run locally only — they need a display/Chromium and
+      # are not reproducible in a headless CI runner.
+      - run: cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+      - run: cargo build -p oxi-agent --features native-browser
+
   smoke-test:
     name: Smoke Test (PR only)
     # Lightweight subset of tests for PR feedback. Full matrix runs in

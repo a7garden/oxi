@@ -9,12 +9,11 @@
 //! Actual backend implementations (e.g. oxibrowser-core) are behind
 //! `#[cfg(feature = "native-browser")]` in `oxibrowser_backend.rs`.
 
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 /// Errors that can occur during browser operations.
@@ -100,223 +99,147 @@ pub struct ElementInfo {
 ///
 /// Implementors handle their own async runtime; this trait only
 /// defines the interface contract.
+///
+/// Uses `#[async_trait]` so that `dyn BrowserTab` remains object-safe
+/// while method bodies can be written as plain `async fn`. This matches
+/// the sibling `AgentTool` impls in this module and avoids the manual
+/// `Pin<Box<dyn Future + 'a>>` boilerplate that broke under edition 2024's
+/// precise lifetime capture rules.
+#[async_trait]
 pub trait BrowserTab: Send + Sync {
     /// Navigate to `url` and return page content.
-    fn goto<'a>(
-        &'a self,
-        url: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>>;
+    async fn goto(&self, url: &str) -> Result<PageContent, BrowserError>;
 
     /// Click an element matching `selector`.
-    fn click<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn click(&self, selector: &str) -> Result<(), BrowserError>;
 
     /// Type text into an element matching `selector`.
-    fn type_<'a>(
-        &'a self,
-        selector: &str,
-        text: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn type_(&self, selector: &str, text: &str) -> Result<(), BrowserError>;
 
     /// Fill (set value of) an element matching `selector`.
-    fn fill<'a>(
-        &'a self,
-        selector: &str,
-        value: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn fill(&self, selector: &str, value: &str) -> Result<(), BrowserError>;
 
     /// Press a keyboard combo (e.g. `"Enter"`, `"Control+c"`).
-    fn press<'a>(
-        &'a self,
-        combo: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn press(&self, combo: &str) -> Result<(), BrowserError>;
 
     /// Wait for an element matching `selector` to appear.
-    fn wait_for<'a>(
-        &'a self,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn wait_for(&self, selector: &str, timeout_ms: u64) -> Result<(), BrowserError>;
 
     /// Get the current page content (markdown + html).
-    fn content<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>>;
+    async fn content(&self) -> Result<PageContent, BrowserError>;
 
     /// Get text content of all elements matching `selector`.
-    fn query_all<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, BrowserError>> + Send + 'a>>;
+    async fn query_all(&self, selector: &str) -> Result<Vec<String>, BrowserError>;
 
     /// Evaluate a JavaScript expression and return the JSON result.
-    fn evaluate<'a>(
-        &'a self,
-        js: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, BrowserError>> + Send + 'a>>;
+    async fn evaluate(&self, js: &str) -> Result<Value, BrowserError>;
 
     /// Capture a screenshot and return PNG bytes.
-    fn screenshot<'a>(
-        &'a self,
-        width: u32,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, BrowserError>> + Send + 'a>>;
+    async fn screenshot(&self, width: u32) -> Result<Vec<u8>, BrowserError>;
 
     /// Close this tab.
-    fn close<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn close(&self) -> Result<(), BrowserError>;
 
     /// Navigate back in history. Returns the rendered page content.
-    fn back<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>>;
+    async fn back(&self) -> Result<PageContent, BrowserError>;
 
     /// Navigate forward in history. Returns the rendered page content.
-    fn forward<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>>;
+    async fn forward(&self) -> Result<PageContent, BrowserError>;
 
     /// Reload the current page. Returns the rendered page content.
-    fn reload<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>>;
+    async fn reload(&self) -> Result<PageContent, BrowserError>;
 
     /// Select an option in a `<select>` element.
-    fn select_option<'a>(
-        &'a self,
-        selector: &str,
-        value: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError>;
 
     /// Check a checkbox or radio input.
-    fn check<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn check(&self, selector: &str) -> Result<(), BrowserError>;
 
     /// Uncheck a checkbox or radio input.
-    fn uncheck<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn uncheck(&self, selector: &str) -> Result<(), BrowserError>;
 
-    // ── Advanced interaction ───────────────────────────────────
+    // ── Advanced interaction (default impls via JS) ───────────
 
     /// Clear the value of an input element.
-    fn clear<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
-        self.fill(selector, "")
+    async fn clear(&self, selector: &str) -> Result<(), BrowserError> {
+        self.fill(selector, "").await
     }
 
     /// Hover over an element.
-    fn hover<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn hover(&self, selector: &str) -> Result<(), BrowserError> {
         let sel = serde_json::to_string(selector).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.dispatchEvent(new MouseEvent('mouseover', {{bubbles:true}})); return el.tagName; }})()"#
         );
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Double-click an element.
-    fn double_click<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn double_click(&self, selector: &str) -> Result<(), BrowserError> {
         let sel = serde_json::to_string(selector).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}})); return el.tagName; }})()"#
         );
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Right-click (context menu) an element.
-    fn right_click<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn right_click(&self, selector: &str) -> Result<(), BrowserError> {
         let sel = serde_json::to_string(selector).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.dispatchEvent(new MouseEvent('contextmenu', {{bubbles:true, button:2}})); return el.tagName; }})()"#
         );
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Scroll the page by delta pixels.
-    fn scroll<'a>(
-        &'a self,
-        delta_x: f64,
-        delta_y: f64,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn scroll(&self, delta_x: f64, delta_y: f64) -> Result<(), BrowserError> {
         let js = format!("window.scrollBy({}, {})", delta_x, delta_y);
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Scroll an element into view.
-    fn scroll_into_view<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn scroll_into_view(&self, selector: &str) -> Result<(), BrowserError> {
         let sel = serde_json::to_string(selector).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.scrollIntoView(); return el.tagName; }})()"#
         );
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Drag from one element to another.
-    fn drag<'a>(
-        &'a self,
-        from_selector: &str,
-        to_selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn drag(&self, from_selector: &str, to_selector: &str) -> Result<(), BrowserError> {
         let from_sel = serde_json::to_string(from_selector).unwrap_or_default();
         let to_sel = serde_json::to_string(to_selector).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var src = document.querySelector({from_sel}); var dst = document.querySelector({to_sel}); if (!src || !dst) return null; src.dispatchEvent(new DragEvent('dragstart', {{bubbles:true}})); dst.dispatchEvent(new DragEvent('drop', {{bubbles:true}})); src.dispatchEvent(new DragEvent('dragend', {{bubbles:true}})); return 'ok'; }})()"#
         );
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Upload a file to a file input element.
-    fn upload_file<'a>(
-        &'a self,
-        selector: &str,
-        path: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>> {
+    async fn upload_file(&self, selector: &str, path: &str) -> Result<(), BrowserError> {
         let sel = serde_json::to_string(selector).unwrap_or_default();
         let p = serde_json::to_string(path).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var el = document.querySelector({sel}); if (!el || el.type !== 'file') return null; if (typeof DataTransfer === 'undefined') return null; var dt = new DataTransfer(); var f = new File([], {p}.split('/').pop()); dt.items.add(f); el.files = dt.files; el.dispatchEvent(new Event('change', {{bubbles:true}})); return el.tagName; }})()"#
         );
-        Box::pin(async move { self.evaluate(&js).await.map(|_| ()) })
+        self.evaluate(&js).await.map(|_| ())
     }
 
     /// Get the value or text content of an element.
-    fn get_value<'a>(
-        &'a self,
-        selector: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<String, BrowserError>> + Send + 'a>> {
+    async fn get_value(&self, selector: &str) -> Result<String, BrowserError> {
         let sel = serde_json::to_string(selector).unwrap_or_default();
         let js = format!(
             r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; return (el.value !== undefined ? el.value : el.textContent) || ''; }})()"#
         );
-        Box::pin(async move {
-            let val = self.evaluate(&js).await?;
-            Ok(val.as_str().unwrap_or("").to_string())
-        })
+        let val = self.evaluate(&js).await?;
+        Ok(val.as_str().unwrap_or("").to_string())
     }
 
     /// Evaluate JS that may return a promise; awaits by default.
-    fn evaluate_await<'a>(
-        &'a self,
-        js: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, BrowserError>> + Send + 'a>> {
-        self.evaluate(js)
+    async fn evaluate_await(&self, js: &str) -> Result<Value, BrowserError> {
+        self.evaluate(js).await
     }
 
     /// Returns `true` if this tab has been closed.
@@ -351,31 +274,24 @@ pub trait BrowserTab: Send + Sync {
 ///
 /// This trait is implemented by backends (e.g. oxibrowser-core) and
 /// consumed by the tool layer via `Arc<dyn BrowserEngine>`.
-#[allow(clippy::type_complexity)]
+#[async_trait]
 pub trait BrowserEngine: Send + Sync {
     /// Fetch a URL and return page content (no tab management).
-    fn fetch<'a>(
-        &'a self,
-        url: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>> {
-        Box::pin(async move {
-            let tab = self.new_tab().await?;
-            let content = tab.goto(url).await;
-            let _ = tab.close().await;
-            content
-        })
+    async fn fetch(&self, url: &str) -> Result<PageContent, BrowserError> {
+        let tab = self.new_tab().await?;
+        let content = tab.goto(url).await;
+        let _ = tab.close().await;
+        content
     }
 
     /// Open a new browser tab and return it.
-    fn new_tab<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn BrowserTab>, BrowserError>> + Send + 'a>>;
+    async fn new_tab(&self) -> Result<Box<dyn BrowserTab>, BrowserError>;
 
     /// Close all open tabs and shut down the browser instance.
-    fn close<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<(), BrowserError>> + Send + 'a>>;
+    async fn close(&self) -> Result<(), BrowserError>;
 
     /// Returns `true` if the browser is still alive.
-    fn is_alive<'a>(&'a self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+    async fn is_alive(&self) -> bool;
 
     /// Access the engine's per-tab callback registry.
     ///

@@ -5,6 +5,45 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-06-15
+
+### Fixed — native-browser 부활: edition 2024 lifetime 버그 전면 수정
+
+`--features native-browser`로 컴파일하면 27~28개의 컴파일 에러가
+발생하던 치명적 버그 수정. 근본 원인은 `BrowserTab`/
+`BrowserEngine` trait가 수동 `Pin<Box<dyn Future + 'a>>` 패턴을
+사용했는데, edition 2024의 정밀한 lifetime 캡처 규칙에 위배되었기
+때문. 이 버그는 oxi CI가 `native-browser` feature를 단 한 번도
+컴파일하지 않아 0.32.0~0.34.0까지 배포된 채 방치되었음.
+
+- **`BrowserTab`/`BrowserEngine` trait를 `#[async_trait]`로 전환**
+  (oxi-agent): 30개 메서드 시그니처를 `async fn`으로 단순화.
+  `async-trait = "0.1"`은 이미 의존성이었고 sibling `AgentTool`
+  trait 4개가 같은 패턴을 사용 중이었으므로 일관성 확보.
+  `Pin<Box<...>>` 보일러플레이트 약 480줄 제거.
+  `dyn BrowserTab`/`dyn BrowserEngine` object-safety 유지.
+- **oxibrowser_backend.rs impl을 async_trait 기반으로 재작성**
+  (oxi-agent): 27개 메서드 전부 `async fn`으로 변환.
+  `tab_id(&'a self)`, `evaluate_await`의 선언되지 않은 lifetime
+  버그(E0261), `new_tab`의 Box coercion 실패(E0271) 동시 해결.
+- **Mock 구현체 3종 동기화** (oxi-agent): `tab_guard.rs::MockTab`,
+  `browse_tool.rs::MockEngine`, `browse_session_tool.rs::MockTab`/
+  `MockEngine` 전부 async_trait 기반으로 변환.
+
+### Changed
+
+- **`oxibrowser-core` 0.14.1 → 0.15 정렬** (oxi-sdk): oxi-agent은
+  이미 0.15를 사용 중이었으나 oxi-sdk의 re-export만 0.14.1에
+  고정되어 있던 버전 불일치 해결.
+
+### CI — 재부팅 영구 차단
+
+- **`clippy-native-browser` job 추가** (ci.yml): 매 PR마다
+  `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`
+  + `cargo build -p oxi-agent --features native-browser` 실행.
+  native-browser 코드 경로가 다시 부서지는 것을 영구 차단.
+- AGENTS.md에 native-browser 컴파일 의무화 명시.
+
 ## [0.34.0] - 2026-06-15
 
 ### Added — MCP 서버 관리 TUI + 표준 config 호환성
