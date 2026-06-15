@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_tool_registry() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register(EchoTool);
         assert!(registry.get("echo").is_some());
         assert!(registry.get("nonexistent").is_none());

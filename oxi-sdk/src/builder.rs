@@ -71,7 +71,8 @@ impl Oxi {
     /// outside the agent loop — e.g. the TUI dashboard, RPC handlers, or
     /// custom agent integrations.
     ///
-    /// Returns `None` if MCP was disabled via [`OxiBuilder::with_mcp(false)`].
+    /// Returns `None` if MCP was disabled via [`OxiBuilder::with_mcp`] with
+    /// `false`.
     pub fn mcp(&self) -> Option<Arc<oxi_agent::mcp::McpManager>> {
         self.mcp_manager.clone()
     }

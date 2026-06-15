@@ -1,3 +1,5 @@
+// Test helpers may go unused as tests evolve; don't block CI on dead code.
+#![allow(dead_code)]
 /// Integration tests for oxi-agent
 use crate::types::{ToolCall, ToolDefinition, ToolResult};
 use crate::{Agent, AgentConfig, AgentEvent, AgentState, ToolRegistry};

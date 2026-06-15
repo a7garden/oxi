@@ -93,6 +93,13 @@ jobs:
       - name: Run smoke tests
         # Exclude long-running / network-dependent tests; those run in test.yml
         # against the full nextest CI profile (20-min timeout).
+        #
+        # Override RUSTFLAGS so test/bench code (which has pre-existing
+        # `unwrap()` and pedantic lints — see AGENTS.md) doesn't fail
+        # compilation under `-D warnings`. This matches the clippy job's
+        # intentional `--workspace` (no `--all-targets`) scope.
+        env:
+          RUSTFLAGS: ""
         run: |
           cargo nextest run --workspace \
             -E 'not (test(slow) | test(/^net_/) | test(requires_network) | test(/^bench_/))'

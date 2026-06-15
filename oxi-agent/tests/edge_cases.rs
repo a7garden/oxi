@@ -532,7 +532,7 @@ async fn test_bash_blocked_env_ld_preload() {
     let tool = BashTool::new();
     // Bash tool silently strips blocked env vars and still runs the command.
     // Verify the command succeeds but LD_PRELOAD was NOT actually set.
-    let result = execute_tool(
+    let _result = execute_tool(
         &tool,
         json!({
             "command": "echo $LD_PRELOAD"

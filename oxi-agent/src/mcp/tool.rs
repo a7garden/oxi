@@ -5,7 +5,7 @@
 //! different parameters to search, describe, connect, and call MCP tools.
 //!
 //! The proxy tool is the **fallback / search** path. Specific tools may
-//! also be registered directly via [`McpDirectTool`] (Phase 3); the two
+//! also be registered directly via [`crate::mcp::McpDirectTool`] (Phase 3); the two
 //! paths coexist.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolContext};

@@ -231,6 +231,7 @@ mod tests {
     }
 
     /// Tool that records when it was called (for parallel test)
+    #[allow(dead_code)]
     struct CountingTool {
         call_count: Arc<AtomicUsize>,
     }
