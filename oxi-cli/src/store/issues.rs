@@ -531,7 +531,7 @@ impl std::fmt::Debug for Inner {
 ///
 /// One instance is shared (via `Arc`) between the TUI indicator, the agent
 /// `issue` tool, and the `oxi issue` CLI subcommand. All mutations go through
-/// [`FileIssueStore::write`] which serializes per-file (in-process) and uses
+/// [`FileIssueStore::create`] / [`FileIssueStore::update`] which serialize per-file
 /// content-hash CAS (cross-process / external edits).
 #[derive(Clone, Debug)]
 pub struct FileIssueStore {
@@ -753,7 +753,7 @@ impl FileIssueStore {
 
     /// Update an issue with optimistic concurrency.
     ///
-    /// `expected_hash` should be the hash returned by [`read`]. If the
+    /// `expected_hash` should be the hash returned by [`FileIssueStore::read`]. If the
     /// on-disk content changed since, returns [`IssueError::Conflict`].
     /// `mutator` receives the loaded issue and returns the new state.
     ///
