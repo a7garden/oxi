@@ -1,4 +1,4 @@
-//! User override layer (Layer 2 of the 3-tier catalog).
+//! User override layer of the dynamic catalog.
 //!
 //! Allows users to:
 //! - Override prices for built-in models (e.g., negotiated enterprise rates)

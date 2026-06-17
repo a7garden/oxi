@@ -1,4 +1,4 @@
-//! Runtime model discovery (Layer 3 of the 3-tier catalog).
+//! Runtime model discovery layer of the dynamic catalog.
 //!
 //! Some providers (ollama, lmstudio, vllm, sglang, openrouter) expose
 //! `GET /v1/models` for runtime discovery. This module fetches those endpoints

@@ -27,14 +27,15 @@ use crate::catalog::BuiltinModelEntry;
 use crate::{Api, InputModality};
 
 // ---------------------------------------------------------------------------
-// TOML → ModelEntry bridge
+// ModelEntry bridge
 // ---------------------------------------------------------------------------
 //
-// The canonical model data lives in `data/catalog/models/*.toml` (Layer 1 of
-// the 3-tier catalog). The legacy `ModelEntry` struct here is `&'static str`
-// based, so we need to convert each `BuiltinModelEntry` (String-based, from
-// the TOML loader) to a `ModelEntry` once and cache the result in a
-// `OnceLock`. String-to-`&'static str` is achieved via `Box::leak`, same
+// The canonical model data is materialized from the embedded models.dev
+// snapshot (`_snapshot.json.gz`, Layer 1 of the dynamic catalog). The legacy
+// `ModelEntry` struct here is `&'static str` based, so we need to convert
+// each `BuiltinModelEntry` (String-based, from the materialize pipeline)
+// to a `ModelEntry` once and cache the result in a `OnceLock`.
+// String-to-`&'static str` is achieved via `Box::leak`, same
 // pattern used by `register_builtins.rs`.
 
 fn parse_api(s: &str) -> Api {

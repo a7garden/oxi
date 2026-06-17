@@ -124,15 +124,15 @@ pub use oxi_ai::model_db::{
     search_models,
 };
 
-// 3-tier hybrid catalog (Layer 1 built-in TOML, Layer 2 user override,
-// Layer 3 runtime discovery). The catalog module exposes the full surface;
-// `model_db` (above) is the legacy compatibility shim that lazily
-// integrates all three layers and converts BuiltinModelEntry → ModelEntry.
+// Catalog — models.dev-backed dynamic catalog (SNAP/LIVE/override/LOCAL).
+// The catalog module exposes the full surface; `model_db` (above) is the
+// legacy compatibility shim that integrates all layers and converts
+// BuiltinModelEntry → ModelEntry.
 pub use oxi_ai::catalog::{
     AuthMethod, BuiltinModelEntry, BuiltinProviderEntry, OverrideFile, apply_model_overrides,
     apply_provider_overrides, builtin_model_count, builtin_providers_count, discover_all,
     discover_all_authenticated, discover_all_local, discover_models, find_override_files,
-    load_builtin_models, load_builtin_providers, load_overrides,
+    load_builtin_providers, load_overrides,
 };
 pub use oxi_ai::oauth::{
     AuthStore, OAuthError, TokenBundle, default_auth_path, load_auth_store, load_token,
