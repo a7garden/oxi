@@ -1,9 +1,9 @@
-//! End-to-end integration test for the models.dev enrichment pipeline.
+//! End-to-end integration test for the models.dev materialize pipeline.
 //!
 //! Verifies that a cache fixture flows through `init_models_dev` →
-//! `model_db::get_model_entry` and that Layer 1 entries are enriched with
-//! models.dev data (pricing, context window, reasoning). Runs fully
-//! offline by pointing the cache at a temp fixture and disabling live fetch.
+//! `model_db::get_model_entry` and that the catalog reflects models.dev
+//! data (pricing, context window, reasoning). Runs fully offline by
+//! pointing the cache at a temp fixture and disabling live fetch.
 //!
 //! This is a single test in its own binary because the global `MODELS_DEV`
 //! `OnceLock` is process-scoped — sharing a binary with other tests would

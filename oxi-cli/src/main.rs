@@ -94,6 +94,9 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Models { provider } => {
             handle_models_command(provider)?;
         }
+        Commands::Refresh {} => {
+            handle_refresh_command().await?;
+        }
         Commands::Setup { reset } => {
             handle_setup_command(*reset)?;
         }
@@ -1061,6 +1064,21 @@ fn handle_config_reset(all: bool) -> Result<()> {
         println!("Credentials reset. Run 'oxi setup' to reconfigure API keys.");
     }
 
+    Ok(())
+}
+
+/// Handle `oxi refresh` — force-refresh the model catalog from models.dev.
+///
+/// Performs a conditional GET (ETag). The refreshed cache takes effect
+/// on the next process start (the in-memory catalog is immutable).
+async fn handle_refresh_command() -> Result<()> {
+    println!("Refreshing model catalog from models.dev...");
+    let updated = oxi_ai::catalog::models_dev::refresh().await;
+    if updated {
+        println!("✓ Catalog updated. Restart oxi to use the new data.");
+    } else {
+        println!("✓ Catalog already up to date.");
+    }
     Ok(())
 }
 

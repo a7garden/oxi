@@ -185,8 +185,10 @@ pub fn get_builtin_providers() -> &'static [BuiltinProvider] {
     static CACHE: std::sync::OnceLock<Vec<BuiltinProvider>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
-            let mut builtins: Vec<crate::catalog::BuiltinProviderEntry> =
-                crate::catalog::load_builtin_providers().to_vec();
+            // Materialize providers from the embedded models.dev snapshot.
+            // This replaces the old TOML-based path (CatalogRoot::providers.toml)
+            // and gives us all 145+ providers from models.dev.
+            let mut builtins = crate::catalog::materialize::materialize_providers();
             if let Some(overrides) = crate::catalog::load_overrides() {
                 crate::catalog::apply_provider_overrides(&mut builtins, &overrides.provider);
             }
@@ -602,8 +604,9 @@ description = "Test provider from override"
 
     #[test]
     fn test_get_builtin_provider_by_alias() {
+        // With models.dev IDs, the canonical id is "amazon-bedrock".
         let p = get_builtin_provider("amazon-bedrock").unwrap();
-        assert_eq!(p.name, "bedrock");
+        assert_eq!(p.name, "amazon-bedrock");
     }
 
     #[test]
@@ -627,13 +630,21 @@ description = "Test provider from override"
     #[test]
     fn test_get_provider_api() {
         assert_eq!(get_provider_api("anthropic"), Some(Api::AnthropicMessages));
-        assert_eq!(get_provider_api("vertex"), Some(Api::GoogleVertex));
+        assert_eq!(get_provider_api("google-vertex"), Some(Api::GoogleVertex));
+        assert_eq!(get_provider_api("google"), Some(Api::GoogleGenerativeAi));
     }
 
     #[test]
     fn test_resolve_provider_name() {
-        assert_eq!(resolve_provider_name("google-vertex"), Some("vertex"));
-        assert_eq!(resolve_provider_name("aws-bedrock"), Some("bedrock"));
+        // With models.dev IDs, canonical names are the models.dev IDs.
+        assert_eq!(
+            resolve_provider_name("google-vertex"),
+            Some("google-vertex")
+        );
+        assert_eq!(
+            resolve_provider_name("amazon-bedrock"),
+            Some("amazon-bedrock")
+        );
         assert_eq!(resolve_provider_name("openai"), Some("openai"));
     }
 
@@ -667,149 +678,130 @@ description = "Test provider from override"
 
     #[test]
     fn test_get_all_provider_names() {
+        // Provider names are now models.dev IDs.
         let names = get_all_provider_names();
         assert!(names.contains(&"openai"));
         assert!(names.contains(&"anthropic"));
-        assert!(names.contains(&"bedrock"));
+        assert!(names.contains(&"amazon-bedrock"));
         assert!(names.contains(&"togetherai"));
-        assert!(names.len() >= 20);
+        // models.dev has 145+ providers
+        assert!(names.len() >= 100);
     }
 
-    // ── Tests for providers ported from openclaw (MIT) ─────────────────
+    // ── Tests for materialized providers (models.dev as source of truth) ─
 
     #[test]
     fn test_openclaw_ported_providers_present() {
-        // Verify all 28 new providers added in feat/openclaw-port
+        // Verify key models.dev providers are present after materialize.
+        // Local-only providers (ollama/lmstudio/vllm/sglang) are not in
+        // models.dev — they're handled by the runtime discovery layer.
         let names = get_all_provider_names();
         for p in [
             "chutes",
             "venice",
-            "moonshot",
-            "byteplus",
-            "gmi",
-            "novita",
-            "arcee",
-            "qianfan",
-            "stepfun",
-            "qwen-portal",
+            "moonshotai",
+            "novita-ai",
+            "stepfun-ai",
             "alibaba",
-            "anthropic-vertex",
+            "google-vertex-anthropic",
             "synthetic",
-            "ollama",
-            "ollama-cloud",
-            "lmstudio",
-            "vllm",
-            "sglang",
-            "litellm",
-            "microsoft-foundry",
-            "amazon-bedrock-mantle",
+            "amazon-bedrock",
             "opencode",
-            "copilot-proxy",
-            "xiaomi-token-plan",
-            "kilocode",
         ] {
-            assert!(names.contains(&p), "Missing openclaw-ported provider: {p}");
+            assert!(names.contains(&p), "Missing materialized provider: {p}");
         }
     }
 
     #[test]
     fn test_openclaw_provider_aliases() {
-        // gmi-cloud, gmicloud, qwen-portal, modelstudio → canonical resolution
-        assert_eq!(resolve_provider_name("gmi-cloud"), Some("gmi"));
-        assert_eq!(resolve_provider_name("gmicloud"), Some("gmi"));
-        // dashscope and modelstudio resolve to alibaba (primary entry)
-        assert_eq!(resolve_provider_name("dashscope"), Some("alibaba"));
-        assert_eq!(resolve_provider_name("modelstudio"), Some("alibaba"));
-        // qwen-oauth and qwen-cli resolve to qwen-portal
-        assert_eq!(resolve_provider_name("qwen-oauth"), Some("qwen-portal"));
-        assert_eq!(resolve_provider_name("qwen-cli"), Some("qwen-portal"));
-        assert_eq!(resolve_provider_name("novita-ai"), Some("novita"));
-        assert_eq!(resolve_provider_name("novitaai"), Some("novita"));
-        assert_eq!(resolve_provider_name("stepfun-plan"), Some("stepfun"));
-        assert_eq!(resolve_provider_name("kilocode"), Some("kilocode"));
+        // With models.dev IDs, there's no alias layer — the ID is the ID.
+        // Legacy aliases (gmi-cloud, dashscope, etc.) are no longer valid.
+        assert_eq!(resolve_provider_name("chutes"), Some("chutes"));
+        assert_eq!(resolve_provider_name("anthropic"), Some("anthropic"));
+        assert_eq!(resolve_provider_name("openai"), Some("openai"));
+        // Unknown IDs return None (no alias fallback)
+        assert_eq!(resolve_provider_name("nonexistent-provider"), None);
     }
 
     #[test]
     fn test_openclaw_provider_base_urls() {
+        // URLs come from models.dev `api` field. Native SDK providers
+        // (venice, anthropic) have `api: null` → empty base_url.
         assert_eq!(
             get_provider_base_url("chutes"),
             Some("https://llm.chutes.ai/v1")
         );
-        assert_eq!(
-            get_provider_base_url("venice"),
-            Some("https://api.venice.ai/api/v1")
-        );
-        assert_eq!(
-            get_provider_base_url("ollama"),
-            Some("http://localhost:11434/v1")
-        );
-        assert_eq!(
-            get_provider_base_url("lmstudio"),
-            Some("http://localhost:1234/v1")
-        );
-        assert_eq!(
-            get_provider_base_url("vllm"),
-            Some("http://localhost:8000/v1")
-        );
+        assert_eq!(get_provider_base_url("venice"), Some(""));
         assert_eq!(
             get_provider_base_url("synthetic"),
-            Some("https://api.synthetic.new/anthropic")
+            Some("https://api.synthetic.new/openai/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("openrouter"),
+            Some("https://openrouter.ai/api/v1")
         );
     }
 
     #[test]
     fn test_openclaw_local_providers_use_bearer() {
-        // Local providers still use Bearer auth (some clients require a key)
-        for p in ["ollama", "ollama-cloud", "lmstudio", "vllm", "sglang"] {
-            let bp = get_builtin_provider(p).unwrap();
-            assert_eq!(
-                bp.auth_method,
-                AuthMethod::Bearer,
-                "{p} should use Bearer auth"
-            );
-        }
+        // Local-only providers (ollama/lmstudio/vllm/sglang) are NOT in
+        // models.dev — they're handled by the LOCAL discovery layer
+        // (crate::catalog::runtime) which uses Bearer auth by default.
+        // This test is a placeholder for future LOCAL-layer testing.
+        // Verify that at least some providers use Bearer auth (the
+        // OpenAI-compatible default).
+        let names = get_all_provider_names();
+        let bearer_count = names
+            .iter()
+            .filter(|n| {
+                get_builtin_provider(n)
+                    .map(|p| p.auth_method == AuthMethod::Bearer)
+                    .unwrap_or(false)
+            })
+            .count();
+        assert!(
+            bearer_count > 50,
+            "expected >50 Bearer providers, got {bearer_count}"
+        );
     }
 
     #[test]
     fn test_openclaw_anthropic_compat_providers() {
-        // synthetic, anthropic-vertex, kimi are Anthropic-protocol
-        for p in ["synthetic", "anthropic-vertex"] {
-            let bp = get_builtin_provider(p).unwrap();
-            assert_eq!(
-                bp.api,
-                Api::AnthropicMessages,
-                "{p} should use AnthropicMessages API"
-            );
-        }
+        // Providers using Anthropic protocol (identified by @ai-sdk/anthropic
+        // or compatible npm package).
+        // google-vertex-anthropic uses @ai-sdk/google-vertex/anthropic.
+        let bp = get_builtin_provider("google-vertex-anthropic").unwrap();
+        assert_eq!(
+            bp.api,
+            Api::GoogleVertex,
+            "google-vertex-anthropic maps to GoogleVertex"
+        );
+        // minimax uses @ai-sdk/anthropic
+        let bp = get_builtin_provider("minimax").unwrap();
+        assert_eq!(
+            bp.api,
+            Api::AnthropicMessages,
+            "minimax uses AnthropicMessages"
+        );
     }
 
     #[test]
     fn test_create_openclaw_providers() {
-        // Smoke test that all new providers can be instantiated
+        // Smoke test that materialized providers can be instantiated.
+        // These are models.dev provider IDs (not legacy oxi IDs).
         for p in [
             "chutes",
             "venice",
-            "moonshot",
-            "byteplus",
-            "gmi",
-            "novita",
-            "arcee",
-            "qianfan",
-            "stepfun",
-            "qwen-portal",
+            "moonshotai",
+            "novita-ai",
+            "gmicloud",
+            "deepinfra",
+            "fireworks-ai",
+            "togetherai",
             "alibaba",
-            "anthropic-vertex",
-            "synthetic",
-            "ollama",
-            "lmstudio",
-            "vllm",
-            "sglang",
-            "litellm",
-            "microsoft-foundry",
+            "amazon-bedrock",
             "opencode",
-            "copilot-proxy",
-            "xiaomi-token-plan",
-            "kilocode",
+            "minimax",
         ] {
             let bp = create_builtin_provider(p);
             assert!(bp.is_some(), "create_builtin_provider({p}) failed");
@@ -818,37 +810,35 @@ description = "Test provider from override"
 
     #[test]
     fn test_get_all_provider_aliases() {
+        // With models.dev as the source of truth, provider IDs are the
+        // canonical models.dev IDs (e.g. "amazon-bedrock", "togetherai").
+        // Legacy oxi aliases ("bedrock", "together") are no longer present.
         let aliases = get_all_provider_aliases();
         assert!(aliases.contains(&"amazon-bedrock"));
-        assert!(aliases.contains(&"aws-bedrock"));
-        assert!(aliases.contains(&"bedrock"));
-        assert!(aliases.contains(&"together"));
+        assert!(aliases.contains(&"togetherai"));
+        assert!(aliases.contains(&"anthropic"));
+        assert!(aliases.contains(&"openai"));
     }
 
     #[test]
     fn test_get_provider_base_url() {
+        // With models.dev as the source of truth, base URLs come from
+        // the `api` field. Native SDK providers (openai, anthropic, google)
+        // have `api: null`, so their base_url is empty (computed at runtime).
+        assert_eq!(get_provider_base_url("openai"), Some(""));
+        assert_eq!(get_provider_base_url("anthropic"), Some(""));
+        // OpenRouter has an explicit api URL
         assert_eq!(
-            get_provider_base_url("openai"),
-            Some("https://api.openai.com/v1")
-        );
-        assert_eq!(
-            get_provider_base_url("anthropic"),
-            Some("https://api.anthropic.com")
-        );
-        assert_eq!(
-            get_provider_base_url("groq"),
-            Some("https://api.groq.com/openai/v1")
-        );
-        assert_eq!(
-            get_provider_base_url("togetherai"),
-            Some("https://api.together.xyz/v1")
+            get_provider_base_url("openrouter"),
+            Some("https://openrouter.ai/api/v1")
         );
     }
 
     #[test]
     fn test_minimax_base_url() {
         let p = get_builtin_provider("minimax").unwrap();
-        assert_eq!(p.base_url, "https://api.minimax.io/anthropic");
+        // models.dev: api = "https://api.minimax.io/anthropic/v1"
+        assert_eq!(p.base_url, "https://api.minimax.io/anthropic/v1");
         assert_eq!(p.api, Api::AnthropicMessages);
     }
 

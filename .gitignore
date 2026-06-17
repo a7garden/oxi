@@ -33,3 +33,6 @@ Desktop.ini
 flamegraph.svg
 perf.data
 perf.data.old
+
+# Runtime cache generated during tests
+.oxi/

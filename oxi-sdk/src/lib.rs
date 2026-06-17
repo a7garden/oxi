@@ -215,21 +215,37 @@ mod tests {
 
     #[test]
     fn catalog_reachable_via_sdk() {
-        // Verify the 3-tier catalog surface is exposed to SDK consumers.
+        // Verify the catalog surface is exposed to SDK consumers.
+        // Models now come from the materialized snapshot (models.dev),
+        // not from load_builtin_models() (which is an empty legacy map).
         let providers = load_builtin_providers();
-        let models = load_builtin_models();
         assert!(
             providers.len() >= 70,
             "expected >= 70 providers, got {}",
             providers.len()
         );
-        assert!(!models.is_empty(), "models should be loaded");
+        // Materialized catalog should have models.
+        let all = get_all_models().collect::<Vec<_>>();
+        assert!(
+            !all.is_empty(),
+            "models should be loaded via get_all_models()"
+        );
+        assert!(
+            all.len() > 5000,
+            "expected >5000 materialized models, got {}",
+            all.len()
+        );
     }
 
     #[test]
     fn sentinel_count_via_sdk() {
         let n = builtin_model_count_sentinel();
-        assert!(n >= 30, "expected >= 30 sentinel entries, got {n}");
+        // With materialize from models.dev, no sentinel pricing is applied
+        // (models.dev is the verified source of truth).
+        assert_eq!(
+            n, 0,
+            "expected 0 sentinel entries with materialize, got {n}"
+        );
     }
 
     /// Helper to build a minimal Model for tests.

@@ -1002,18 +1002,11 @@ impl MultiProvider {
             return self.model_from_entry(entry);
         }
 
-        // Not in model_db: determine API type from provider name
-        let api = match provider {
-            "openai" | "openai-codex" | "opencode" | "opencode-go" => {
-                crate::types::Api::OpenAiResponses
-            }
-            "anthropic" | "cloudflare-ai-gateway" => crate::types::Api::AnthropicMessages,
-            "google" => crate::types::Api::GoogleGenerativeAi,
-            "google-vertex" => crate::types::Api::GoogleVertex,
-            "azure-openai" | "azure-openai-responses" => crate::types::Api::AzureOpenAiResponses,
-            "amazon-bedrock" | "bedrock" => crate::types::Api::BedrockConverseStream,
-            _ => crate::types::Api::OpenAiResponses,
-        };
+        // Not in model_db: determine API type from the provider registry
+        // (which is now materialized from models.dev). Falls back to
+        // OpenAI Responses for unknown providers.
+        let api = crate::providers::register_builtins::get_provider_api(provider)
+            .unwrap_or(crate::types::Api::OpenAiResponses);
 
         Model {
             id: model_id.to_string(),

@@ -149,6 +149,10 @@ pub enum Commands {
         #[arg(long)]
         provider: Option<String>,
     },
+    /// Refresh the model catalog from models.dev
+    ///
+    /// Performs a conditional GET (ETag). Updates take effect on next start.
+    Refresh {},
     /// Run the interactive setup wizard
     Setup {
         /// Reset all settings to defaults

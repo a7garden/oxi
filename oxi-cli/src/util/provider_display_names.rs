@@ -20,16 +20,18 @@ mod tests {
     #[test]
     fn known_provider() {
         assert_eq!(provider_display_name("anthropic"), "Anthropic");
-        assert_eq!(provider_display_name("google"), "Google AI");
+        assert_eq!(provider_display_name("google"), "Google");
         assert_eq!(provider_display_name("openai"), "OpenAI");
-        assert_eq!(provider_display_name("bedrock"), "Amazon Bedrock");
+        // models.dev provider ID
+        assert_eq!(provider_display_name("amazon-bedrock"), "Amazon Bedrock");
     }
 
     #[test]
     fn known_provider_by_alias() {
-        // aliases are also supported
+        // models.dev IDs are the canonical names — no alias layer.
+        // "google-vertex" is its own provider (not aliased to "google").
         assert_eq!(provider_display_name("amazon-bedrock"), "Amazon Bedrock");
-        assert_eq!(provider_display_name("google-vertex"), "Google Vertex AI");
+        assert_eq!(provider_display_name("google-vertex"), "Vertex");
     }
 
     #[test]
