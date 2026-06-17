@@ -63,13 +63,23 @@ opencode-go는 OpenAI 호환 provider 안에서 특정 모델만 Anthropic 프�
 → **프로토콜 결정은 provider 수준이 아니라 model 수준에서 일어난다.** 이게 opencode
 `plugin/models-dev.ts`가 provider.api와 model.api를 **둘 다** 설정하는 이유입니다.
 
-**v1 정정**: 프로토콜이 model 수준 속성이라면 **auth도 model 수준 속성**이다.
-`opencode-go/minimax-m2.5`는 `model.npm=@ai-sdk/anthropic` + `model.api=null`
-(native Anthropic endpoint)이므로 **x-api-key 인증**이 필요합니다. provider 수준
-auth(bearer)로 호출하면 401. 따라서:
+**v3 정정 (결함 A+D, 데이터 검증)**: 프로토콜·auth·**base_url** 모두 model 수준 속성이다.
+데이터 확인 (2026-06-17): 55개 모델이 부모 provider와 **다른 `model.provider.api`(base_url)**를 가진다.
+예: `zenmux/anthropic/claude-sonnet-4.5` — provider=`https://zenmux.ai/api/v1`,
+model=`https://zenmux.ai/api/anthropic/v1` (같은 provider 안에서 모델별로 다른 경로).
+즉 model은 프로토콜(npm)뿐 아니라 endpoint(base_url)까지 별도로 가질 수 있다.
 
-- `BuiltinModelEntry`에 **`auth_method` 필드를 추가**한다 (현재는 provider에만 있음).
-- materialize는 `(model_api, model_auth)` **둘 다** model.provider.npm으로부터 override.
+`opencode-go/minimax-m2.5` 예: `model.npm=@ai-sdk/anthropic` + `model.api=null` →
+부모 base_url 상속 + Anthropic 프로토콜 + **x-api-key**. provider 수준 bearer로 호출 시 401.
+
+따라서 materialize는 model.provider에 **세 가지**를 모두 반영한다:
+
+- `(model_api, model_auth)` ← `model.provider.npm` 있으면 override, 없으면 부모 것
+- `model_base_url` ← `model.provider.api` 있으면 override, 없으면 부모 것 (None=상속)
+- `BuiltinModelEntry`에 **`auth_method: AuthMethod`** 및 **`base_url: Option<String>`** 필드 추가.
+- oxi provider 구현체는 이미 base_url override 지원(검증: `AnthropicProvider::with_base_url`,
+  `OpenAiProvider::with_base_url`). `model_from_entry`가 model entry의 base_url/auth를
+  provider 것보다 우선 사용하도록 수정 (§7.3).
 
 ### 2.3 auth_method도 protocol_for가 함께 반환한다 (그러나 한계 명시)
 
@@ -115,7 +125,7 @@ anthropic-vertex [["anthropic-version", "vertex-2023-10-16"]]
      [빌드 시점] SNAP              [런타임] LIVE
      build.rs가 snapshot 주입         init_models_dev() (1차 재사용 + 확장)
      → 임베드 (opencode define 패턴)   → ~/.oxi/cache/models-dev.json
-     → 첫실행/오프라인 안전망          → 진실 소스 우선 (5분 TTL, 수동 refresh)
+     → 첫실행/오프라인 안전망          → 진실 소스 우선 (mtime 창 + ETag 조건부 GET, §4.2)
               │                           │
               └─────────────┬─────────────┘
                             ▼ (LIVE가 신선하면 LIVE, 아니면 SNAP)
@@ -186,30 +196,69 @@ fn main() {
 
 > opencode `OPENCODE_MODELS_DEV` define과 동일한 역할. **빌드 자체는 네트워크 없이도 가능** (OXI_CATALOG_SNAPSHOT 또는 fallback).
 
-### 4.2 LIVE — 런타임 캐시 (1차 `models_dev.rs` 재사용 + 확장)
+### 4.2 LIVE — 런타임 캐시 + 조건부 GET (1차 `models_dev.rs` 재사용 + 확장)
 
-현재 1차 구현(`fetch_with_fallback` + 5분 TTL + Flock + atomic write)을 거의 그대로.
-**진실 소스 우선순위** 정립:
+**동기화 주기는 '시간'이 아니라 '데이터 변화'로 정의한다.** v1/v2 초안이
+"60분 갱신", "24시간 TTL" 같은 임의 주기를 제안했으나, 데이터 분석(2026-06-17)에
+의하면 models.dev 신규 모델은 일평균 ~10개지만 **주요 foundation 모델 출시는 주 1회
+이하**이고, 일평균의 대부분은 aggregator(nano-gpt/openrouter)의 사소한 변종이다.
+따라서 시간 기반 주기는 과잉 또는 부족이 된다.
+
+대신 **mtime 로컬 판정 + HTTP 조건부 GET(ETag) 혼합**을 쓴다:
 
 ```rust
-/// 진실 소스 해결 (models_dev.rs::source)
-/// opencode populate 순서와 동일: 캐시 → snapshot → fetch
+/// 동기화 결정 (models_dev.rs::source)
+/// 2단계: 로컬 mtime으로 HTTP 비용을 0으로 만들고, 실제 변화는 ETag로 판정.
 pub fn source() -> Source {
-    if let Some(c) = read_cache_if_fresh() { return Source::Live(c); }  // 1
-    if let Some(s) = decompress_snapshot(MODELS_DEV_SNAPSHOT) {          // 2
-        return Source::Snap(s);
+    // 1단계: mtime이 1시간 이내면 HTTP 자체를 안 함 (로컬만, 0비용)
+    if let Some(c) = read_cache_if_fresh() {  // age < MTIME_WINDOW (1h)
+        return Source::Live(c);
     }
-    // 3. 둘 다 없으면 (이론적 — 정상 빌드면 항상 SNAP 있음)
-    Source::Empty
+    // 2단계: 1시간 넘었으면 조건부 GET. 캐시의 ETag를 보내서 실제 변화만 갱신.
+    match conditional_fetch() {
+        Some(FetchResult::NotModified) => {
+            touch_cache_mtime();   // 304: 데이터 동일 → mtime만 갱신해 1h 창 리셋
+            Source::Live(read_cache_any())  // 기존 캐시 사용
+        }
+        Some(FetchResult::Updated(c)) => Source::Live(c),  // 200: 새 데이터 → 캐시 갱신
+        None => Source::Snap(decompress_snapshot(MODELS_DEV_SNAPSHOT)?),  // 폴백
+    }
 }
 ```
 
+**측정 기준의 명확화** (이 섹션의 핵심):
+
+- **mtime** = 로컬 캐시 파일(`~/.oxi/cache/models-dev.json`)의 수정 시각. oxi가
+  마지막으로 *성공적으로 검증한* 시점(304든 200이든). `SystemTime::now() - mtime`.
+- **MTIME_WINDOW** (기본 1시간) = 로컬만으로 fresh로 간주하는 창. 이 창 내에는
+  HTTP를 아예 안 보내 0비용. oxi를 아무리 자주 켜도 1시간에 1회 HTTP가 상한.
+- **ETag** = models.dev 응답의 강한 ETag(Cloudflare CDN, 검증됨).
+  `If-None-Match`로 보냄. `304 Not Modified`면 데이터 동일 → 갱신 비용 0(수 ms 왕복).
+- **ETag 저장 (v3 정정 결함 A)**: 사이드카 파일 `~/.oxi/cache/models-dev.json.etag`
+  (1줄 짜리 ETag 문자열). 캐시 JSON 본문과 분리해 models.dev 원본 포맷 유지.
+  - 쓰기: 200 수신 시 JSON(atomic write) + ETag 사이드카 동시 작성.
+  - 읽기: 조건부 GET 직전에 사이드카 읽어 `If-None-Match` 헤더 구성.
+  - 304 수신 시: 캐시 JSON은 그대로, 사이드카도 그대로 (mtime만 갱신해 1h 창 리셋).
+  - 사이드카 손상/없음: 일반 GET(If-None-Match 없음)으로 폴백, 이후 사이드카 재생성.
+- **TTL 환경변수는 폐지** (§8). mtime + ETag가 TTL의 역할을 대체한다.
+
+**이 방식이 해결하는 것**:
+
+| 문제 | 해결 |
+|---|---|
+| "너무 자주 동기화" (사용자 지적) | 데이터 안 변하면 304로 갱신 안 함. foundation 모델 주 1회면 주 1회 갱신 |
+| "시간은 어떻게 재나" (사용자 질문) | mtime(로컬) + ETag(HTTP) — 임의 시간 주기 아님 |
+| opencode 60분의 비합리성 | opencode는 60분 고정 대기. oxi는 '변화가 있을 때만' 갱신. 데이터 기반 |
+| 자주 켜는 사용자 비효율 | MTIME_WINDOW 1h로 HTTP 자체를 억제. 1h 내엔 완전 로컬 |
+
 **확장점** (1차 대비):
-- **조건부 GET** (`If-None-Match` ETag) — 만료 후에도 `304`면 0비용 갱신.
+- 조건부 GET(ETag) — 위 설명의 핵심. opencode보다 oxi 우위.
 - **스키마 보강** (1차가 놓친 필드): `reasoning_options`, `structured_output`,
   `cost.tiers`, `cost.context_over_200k`, `interleaved`, `knowledge`, `open_weights`.
   serde 스키마를 opencode `models-dev.ts`와 1:1로.
-- **백그라운드 갱신은 도입 안 함** (§11.1 결정: OnceLock 유지 → 런타임 갱신 무의미).
+- 백그라운드 갱신은 도입 안 함 (§11.1: OnceLock 유지 + 1h MTIME_WINDOW로 충분).
+- `OXI_MODELS_DEV_FORCE_REFRESH=1` 또는 `oxi models refresh`가 mtime 창을 무시하고
+  강제 조건부 GET 수행 (사용자가 즉시 최신을 원할 때).
 
 ### 4.3 PROTOCOL RESOLVER — npm → (Api, AuthMethod), 7줄 (본 설계 핵심)
 
@@ -261,7 +310,7 @@ pub fn materialize(
             id: pid.clone(),
             display_name: mdprov.name.clone(),        // ⬅ 보존 (v1 정정: 사용자 동의 범위)
             description: String::new(),               // models.dev엔 원라인 설명 없음
-            aliases: vec![pid.clone()],               // 기본 = id
+            aliases: vec![],                          // 제거: models.dev id를 그대로 사용 (v3 결정: 기존 호환성 버림)
             api: api.to_str().to_string(),
             env_key: mdprov.env.first().cloned().unwrap_or_default(),
             extra_env_keys: mdprov.env[1..].to_vec(),
@@ -273,18 +322,21 @@ pub fn materialize(
         });
 
         for (mid, mdmodel) in &mdprov.models {
-            // 모델 수준 프로토콜 + auth override (§2.2)
-            let model_npm = mdmodel.provider.as_ref()
-                .and_then(|p| p.npm.as_deref())
+            // 모델 수준 override (v3): protocol+auth+base_url 세 가지
+            let model_provider = mdmodel.provider.as_ref();
+            let model_npm = model_provider.and_then(|p| p.npm.as_deref())
                 .unwrap_or_else(|| mdprov.npm.as_deref().unwrap_or(""));
             let (model_api, model_auth) = protocol_for(model_npm);
+            // base_url: model.provider.api 있으면 override, 없으면 None(부모 상속)
+            let model_base_url = model_provider.and_then(|p| p.api.clone());
 
             models.push(BuiltinModelEntry {
                 id: mid.clone(),
                 name: mdmodel.name.clone(),
                 api: model_api.to_str().to_string(),
                 provider: pid.clone(),
-                auth_method: model_auth,             // ⬅ 신규 필드 (v1 정정)
+                auth_method: model_auth,             // v1 정정
+                base_url: model_base_url,            // v3 정정 (결함 D): None=부모 상속
                 reasoning: mdmodel.reasoning,
                 input: normalize_modalities(&mdmodel.modalities),
                 cost_input:  mdmodel.cost.as_ref().map(|c| c.input).unwrap_or(0.0),
@@ -431,7 +483,8 @@ v1은 schema에 넣고 materialize에선 무시 → dead field. 정정: **CostTi
 |---|---|---|
 | `catalog/materialize.rs` | ~180줄 | models.dev → oxi 엔트리 변환 + merge (§4.4) |
 | `protocol_for()` | 7줄 | 본 설계 핵심 (§4.3) |
-| `BuiltinModelEntry.auth_method` | 필드 1 | 모델 수준 auth override (§2.2 정정) |
+| `BuiltinModelEntry.auth_method` | 필드 1 | 모델 수준 auth override (§2.2) |
+| `BuiltinModelEntry.base_url` | 필드 1 | 모델 수준 base_url override, 55개 모델 (§2.2 v3 정정 결함 D) |
 | `build.rs` snapshot 주입 | ~50줄 | opencode define 패턴 번역 (§4.1) |
 | `data/catalog/product-meta.toml` | ~30줄 | extra_headers만 (§4.6) |
 | `data/catalog/_snapshot.json.gz` | 커밋 | fallback + CI 결정론성 기준점 |
@@ -483,24 +536,31 @@ models.dev 검증값 → **대부분 불필요**. 단, §7.1과 마찬가지로 
 | `OXI_MODELS_DEV` | `auto` | `auto`/`on`/`off` (1차 유지) |
 | `OXI_MODELS_DEV_URL` | `https://models.dev` | 엔터프라이즈 미러 |
 | `OXI_MODELS_DEV_DISABLE_FETCH` | (unset) | `1`이면 라이브 페치 금지 (에어갭) |
-| `OXI_MODELS_DEV_TTL` | `300` | 캐시 신선도(초) |
-| `OXI_MODELS_DEV_CACHE_PATH` | `~/.oxi/cache/models-dev.json` | 캐시 위치 |
+| `OXI_MODELS_DEV_CACHE_PATH` | `~/.oxi/cache/models-dev.json` | 캐시 + ETag 저장 위치 |
+| **`OXI_MODELS_DEV_MTIME_WINDOW`** | `3600` (1시간) | **신규/변경** — mtime이 이 창 이내면 HTTP를 아예 안 보냄(0비용). 1시간 내 여러 번 실행해도 HTTP 1회가 상한 |
+| **`OXI_MODELS_DEV_FORCE_REFRESH`** | (unset) | **신규** — `1`이면 mtime 창 무시하고 강제 조건부 GET (`oxi models refresh`가 사용) |
 | **`OXI_CATALOG_SNAPSHOT`** | (unset) | **신규** — 빌드 시 snapshot 파일 주입 (결정론적, opencode `MODELS_DEV_API_JSON` 패리티) |
 
-> v1의 `OXI_CATALOG_OFFLINE`는 제거 — `OXI_CATALOG_SNAPSHOT`이 항상 있으면
+> **v2 정정 (TTL 폐지)**: 1차/초안의 `OXI_MODELS_DEV_TTL=300`(5분)은 제거한다.
+> 임의 시간 주기 대신 mtime 창(로컬) + ETag(HTTP)로 '데이터 변화'를 측정한다 (§4.2).
+> foundation 모델 출시가 주 단위인 현실(데이터 검증)에 가장 적합하다.
+>
+> v1의 `OXI_CATALOG_OFFLINE`도 제거 — `OXI_CATALOG_SNAPSHOT`이 항상 있으면
 > 빌드는 네트워크 없으므로 offline 게이트 불필요. 로컬 fetch 원치 않으면
 > `OXI_CATALOG_SNAPSHOT` 미리 설정.
 
 ## 9. 사용자 인터페이스 — 수동 갱신
 
 ```
-oxi models refresh          # LIVE 캐시 강제 갱신. 효과: 다음 실행에 반영 (OnceLock, §11.1)
+oxi models refresh          # mtime 창 무시, 조건부 GET (ETag) 강제 수행.
+                            # 304=이미 최신 / 200=갱신. 효과는 다음 실행에 반영 (§11.1)
 oxi models list             # materialize된 카탈로그 (LIVE 또는 SNAP)
 oxi models show <id>        # 단일 모델 상세 (출처: live/snap)
 ```
 
-> v1 정정 (결함 4): `refresh`는 **런타임 즉시 효과가 아님** (OnceLock 유지).
-> "갱신됨 — 다음 실행에 반영됩니다" 메시지로 정확 안내.
+> 동기화 주기 정의 (§4.2): 임의 시간 주기가 아니다. 매 실행 시
+> (1) mtime 1h 이내면 로컬만 사용, (2) 그 이상이면 조건부 GET으로 실제 변화만 갱신.
+> foundation 모델 출시가 주 단위이므로, 실제 갱신도 주 단위로 자연 수렴한다.
 
 ## 10. 구현 단계 (Phase 분할) — v1 정정: SNAP 선행
 
@@ -525,8 +585,9 @@ v1은 Phase 2(TOML 삭제)가 Phase 3(SNAP)보다 먼저 → "TOML 없고 SNAP �
 - 이 Phase 종료 = **완전 동적 달성** (SNAP로 첫실행 안전 + LIVE로 갱신).
 
 ### Phase 3: LIVE 고도화 (위험 低)
-- 조건부 GET (ETag).
-- `oxi models refresh` 명령 (다음 실행 반영 명시).
+- **조건부 GET (ETag)** — mtime 창 + `If-None-Match`. TTL 폐지 (§4.2).
+- `oxi models refresh` 명령 (mtime 창 무시 강제 GET, 다음 실행 반영).
+- `OXI_MODELS_DEV_MTIME_WINDOW` / `OXI_MODELS_DEV_FORCE_REFRESH` 게이트.
 - 스키마 보강 검증 (Phase 1 스키마가 실제 데이터와 일치).
 
 ### Phase 4: 부가 (위험 低, 선택)
@@ -535,7 +596,7 @@ v1은 Phase 2(TOML 삭제)가 Phase 3(SNAP)보다 먼저 → "TOML 없고 SNAP �
 - structured_output → tool 스키마 강제.
 - LOCAL과 OnceLock 병합 (별도 설계).
 
-> v1의 Phase 4(60분 백그라운드 갱신)는 **삭제** — OnceLock 유지(§11.1)와 모순.
+> v1의 Phase 4(60분 백그라운드 갱신)는 **삭제** — 동기화는 §4.2의 조건부 GET이 담당하므로 별도 백그라운드 갱신 불필요.
 
 ## 11. 리스크 & 완화
 
@@ -550,18 +611,26 @@ v1은 Phase 2(TOML 삭제)가 Phase 3(SNAP)보다 먼저 → "TOML 없고 SNAP �
 | models.dev 데이터 오류 (커뮤니티) | 중 | README 면책. `overrides.toml` 사용자 최종 상단 (Layer 2 유지) |
 | 신프로바이더 특수 인증 미작동 | 중 | OAuth/SigV4 provider는 protocol_for 정확 매핑. 그 외 bearer 폴밸 정상 |
 
-### 11.1 OnceLock 유지 (v1 정정 결함 4) — 결정 회피 없이 명시적 택일
+### 11.1 OnceLock 유지 + 조건부 GET (v1 정정 결함 4 + 동기화 주기 재정의)
 
 v1은 OnceLock(A)/RwLock(B)를 열어두고 "60분 갱신"/"refresh 즉시 효과"와 동시에 약속 → 모순.
-**정정: (A) OnceLock 유지로 단순화. 그 대가로:**
+v2 초안은 (A)를 택하면서 임의 주기(24시간)를 붙였으나, 사용자 리뷰로 "주 단위 출시인데
+왜 시간 주기인가"가 제기되어 **mtime 창 + ETag 조건부 GET**으로 재정의했다 (§4.2).
 
-- ❌ 60분 백그라운드 런타임 갱신 — **포기** (다음 실행에만 반영).
-- ❌ `oxi models refresh` 즉시 효과 — **포기** (§9에 "다음 실행 반영" 명시).
+**OnceLock 유지 — 결정 회피 없이 명시적 택일:**
+
+- ❌ 런타임 메모리 갱신 (RwLock) — **포기**. 캐시 파일 갱신은 다음 실행에 반영.
+- ❌ 임의 시간 주기 (60분/24시간) — **포기**. 데이터 변화(ETag)로 대체.
 - ✅ 기존 `&'static` 계약 유지 → downstream 시그니처 무변경 (§6.3 진실화).
-- ✅ 구현 단순 (RwLock 전환 복잡성 회피).
+- ✅ 조건부 GET으로 실제 변화만 갱신 — foundation 모델 주 1회면 주 1회 갱신.
 
-**근거**: 사용자는 보통 세션마다 oxi를 새로 시작. "다음 실행 반영"이 UX에 큰 지장 없음.
-런타임 갱신이 꼭 필요해지면 별도 Phase에서 RwLock 전환 검토.
+**`oxi models refresh` 동작** (§9 정정): mtime 창을 무시하고 즉시 조건부 GET을 수행한다.
+304면 "이미 최신", 200이면 갱신. **다음 실행에 OnceLock에 반영** (런타임 메모리는 고정).
+이것이 가장 합리적인 타협 — 사용자가 명시적으로 최신을 원할 때 ETag 1회 왕복으로
+확인하고, 결과는 다음 실행에 깔끔하게 적용된다.
+
+**근거**: 사용자는 보통 세션마다 oxi를 새로 시작. 캐시 파일 갱신 → 다음 실행 반영이
+UX에 큰 지장 없다. 런타임 메모리 갱신이 꼭 필요해지면 별도 Phase에서 RwLock 전환 검토.
 
 ## 12. 본 설계가 MODELS_DEV_SYNC.md §12와 다른 점
 
@@ -577,7 +646,7 @@ v1은 OnceLock(A)/RwLock(B)를 열어두고 "60분 갱신"/"refresh 즉시 효�
 | extra_headers | PRODUCT-META 필요 | **product-meta.toml로 축소 보존** (~9개) |
 | category | 유지 | **제거** |
 | 빌드 재현성 | 게이트(OFFLINE) | **OXI_CATALOG_SNAPSHOT 파일 주입** (게이트 없이 결정론적) |
-| 런타임 갱신 | 60분 백그라운드 | **포기** (OnceLock 유지, 다음 실행 반영) |
+| 동기화 주기 | (N/A) | **mtime 1h 창 + ETag 조건부 GET** — 시간 주기 아닌 데이터 변화 기반 (§4.2) |
 
 ## 13. 테스트 계획 (v1 정정 결함 14: 구체화)
 
@@ -618,7 +687,7 @@ v1은 OnceLock(A)/RwLock(B)를 열어두고 "60분 갱신"/"refresh 즉시 효�
 | 🔴 Phase 2/3 순서 모순 (TOML 삭제 후 SNAP 없는 깨진 구간) | §10: Phase 2에서 SNAP + REGISTRY 동시 적용 |
 | 🔴 모델 수준 auth 무시 (핵심 통찰과 모순) | §2.2/§4.4: `BuiltinModelEntry.auth_method` 추가, `(model_api, model_auth)` 둘 다 override |
 | 🔴 extra_headers 제거 → 9개 provider 회귀 | §2.4/§4.6: product-meta.toml로 extra_headers만 보존 (~9개) |
-| 🔴 OnceLock(A)/"60분 갱신"/"refresh 즉시" 삼중 모순 | §11.1: OnceLock(A) 명시적 택일, 60분 갱신·즉시 refresh 포기 |
+| 🔴 OnceLock(A)/"60분 갱신"/"refresh 즉시" 삼중 모순 | §11.1: OnceLock 유지 + 동기화 주기를 mtime 창+ETag로 재정의 (시간 주기 폐지) |
 | 🟡 build.rs 네트워크 fetch 과소평가 | §4.1: `OXI_CATALOG_SNAPSHOT` 파일 주입 (opencode 패턴 정확 차용) |
 | 🟡 Layer 2 통합 지점 누락 | §4.4: materialize 내부에서 apply_*_overrides 호출 명시 |
 | 🟡 LOCAL 병합 메커니즘 누락 | §4.5: LOCAL은 OnceLock과 별개 레지스트리 유지 |
@@ -627,6 +696,9 @@ v1은 OnceLock(A)/RwLock(B)를 열어두고 "60분 갱신"/"refresh 즉시 효�
 | 🟡 CostTier dead field | §5.2: schema와 materialize 모두 Phase 4로 이동 |
 | 🟢 "우아하다" 자찬 | §1: 삭제. 원칙만 명시 |
 | 🟢 테스트 계획 부족 | §13: 구체적 테스트 매트릭스 추가 |
+| 🔴 **v3 결함 E**: 기존 oxi id 32개 ↔ models.dev id 불일치 (호환성) | **사용자 결정: 호환성 버림** — models.dev id로 전면 교체, alias 맵 도입 안 함 |
+| 🔴 **v3 결함 D**: model 수준 base_url override 누락 (55개 모델) | §2.2: `BuiltinModelEntry.base_url: Option<String>` 추가, materialize 반영 |
+| 🔴 **v3 결함 A**: ETag 저장 메커니즘 미정의 | §4.2: 사이드카 파일 `models-dev.json.etag` 명시 |
 
 ## 부록 B: 라이선스 / 재배포 (v1 보완)
 
