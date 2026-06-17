@@ -225,25 +225,25 @@ pub async fn install_extension(source: &str, include_prerelease: bool) -> Result
         installed_at: chrono::Utc::now().to_rfc3339(),
         wasm_file: wasm_asset.name.clone(),
     };
-    registry.extensions.insert(ext_name.clone(), entry);
+    registry.extensions.insert(repo.to_string(), entry);
     registry.save()?;
 
     Ok(InstallResult {
-        name: ext_name,
+        name: repo.to_string(),
         version: release.tag_name,
         source: repo.to_string(),
         wasm_file: wasm_asset.name.clone(),
     })
 }
 
-/// Remove an installed extension.
-pub fn remove_extension(name: &str) -> Result<()> {
+/// Remove an installed extension by source (owner/repo).
+pub fn remove_extension(source: &str) -> Result<()> {
     let mut registry = ExtensionRegistry::load()?;
 
     let entry = registry
         .extensions
-        .remove(name)
-        .context(format!("Extension '{}' not found in registry", name))?;
+        .remove(source)
+        .context(format!("Extension '{}' not found in registry", source))?;
 
     // Delete the .wasm file
     let extensions_dir = ExtensionRegistry::extensions_dir()?;
@@ -265,30 +265,31 @@ pub fn list_extensions() -> Result<Vec<(String, ExtensionEntry)>> {
     Ok(entries)
 }
 
-/// Update an extension (or all if name is None).
-pub async fn update_extension(name: Option<&str>) -> Result<Vec<InstallResult>> {
+/// Update an extension by source (owner/repo), or all if None.
+pub async fn update_extension(source: Option<&str>) -> Result<Vec<InstallResult>> {
     let registry = ExtensionRegistry::load()?;
     let mut results = Vec::new();
 
-    let targets: Vec<(String, ExtensionEntry)> = if let Some(name) = name {
+    let targets: Vec<(String, ExtensionEntry)> = if let Some(src) = source {
         let entry = registry
             .extensions
-            .get(name)
+            .get(src)
             .cloned()
-            .context(format!("Extension '{}' not found", name))?;
-        vec![(name.to_string(), entry)]
+            .context(format!("Extension '{}' not found", src))?;
+        vec![(src.to_string(), entry)]
     } else {
         registry.extensions.into_iter().collect()
     };
 
-    for (ext_name, entry) in targets {
+    for (_ext_source, entry) in targets {
+        let label = entry.wasm_file.strip_suffix(".wasm").unwrap_or(&entry.wasm_file);
         match install_extension(&entry.source, false).await {
             Ok(result) => {
-                println!("Updated {} to {}", ext_name, result.version);
+                println!("Updated {} to {}", label, result.version);
                 results.push(result);
             }
             Err(e) => {
-                eprintln!("Failed to update {}: {}", ext_name, e);
+                eprintln!("{}", crate::print_mode::format_error(&format!("Failed to update {}: {}", label, e)));
             }
         }
     }

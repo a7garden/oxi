@@ -8,7 +8,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 |------|-------|
 | Language | Rust 2024 edition |
 | Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli` (5 crates) |
-| Version | 0.30.0 (latest release: 0.30.0) |
+| Version | see `Cargo.toml` / `git tag` — single source of truth (do NOT hardcode the number here; it drifts) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
 | Workflows | `ci.yml` (8 jobs: fmt/clippy/clippy-native-browser/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `release.yml` (aarch64-apple-darwin + SHA256SUMS + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |

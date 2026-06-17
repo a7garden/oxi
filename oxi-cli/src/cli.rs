@@ -99,24 +99,24 @@ pub struct CliArgs {
 /// CLI subcommands
 #[derive(Debug, Clone, Subcommand)]
 pub enum Commands {
-    /// List all sessions.
+    /// List all sessions for this project
     Sessions,
-    /// Show session tree structure.
+    /// Show session entry tree structure
     Tree {
-        /// Session ID to show tree for (default: current/last session)
+        /// Session ID or prefix (default: current/last session for this project)
         #[arg(default_value = "")]
         session_id: String,
     },
     /// Fork a new session from a specific entry
     Fork {
-        /// Parent session ID
+        /// Parent session ID or prefix
         parent_id: String,
         /// Entry ID to branch from
         entry_id: String,
     },
-    /// Delete a session
+    /// Delete a session by ID (prefix match supported)
     Delete {
-        /// Session ID to delete
+        /// Session ID or prefix (from `oxi sessions`)
         session_id: String,
     },
     /// Package management
@@ -163,7 +163,7 @@ pub enum Commands {
     },
     /// Export a session to HTML
     Export {
-        /// Session ID to export (default: most recent for this project)
+        /// Session ID or prefix (default: most recent for this project)
         session_id: Option<String>,
         /// Output file path (default: oxi-export-{id}.html in CWD)
         #[arg(short, long)]
@@ -176,7 +176,7 @@ pub enum Commands {
     },
     /// Share a session as a GitHub Gist (requires gh CLI)
     Share {
-        /// Session ID to share (default: most recent for this project)
+        /// Session ID or prefix (default: most recent for this project)
         session_id: Option<String>,
     },
 }
@@ -222,13 +222,13 @@ pub enum ExtCommands {
     List,
     /// Remove an installed extension
     Remove {
-        /// Extension name to remove
-        name: String,
+        /// Extension source: owner/repo
+        source: String,
     },
     /// Update extension(s) to latest version
     Update {
-        /// Extension name to update (updates all if omitted)
-        name: Option<String>,
+        /// Extension source: owner/repo (updates all if omitted)
+        source: Option<String>,
     },
     /// Show info about a remote extension (without installing)
     Info {

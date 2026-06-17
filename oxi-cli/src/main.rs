@@ -188,7 +188,7 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
                                 println!("Updated {} to v{}", manifest.name, manifest.version);
                             }
                             Err(e) => {
-                                eprintln!("Failed to update {}: {}", pkg_name, e);
+                                eprintln!("{}", oxi::print_mode::format_error(&format!("Failed to update {}: {}", pkg_name, e)));
                             }
                         }
                     }
@@ -242,29 +242,30 @@ async fn handle_ext_command(action: &oxi::cli::ExtCommands) -> Result<()> {
                 println!("Install with: oxi ext install owner/repo");
             } else {
                 println!("Installed extensions:\n");
-                for (name, entry) in &entries {
+                for (source, entry) in &entries {
+                    let name = entry.wasm_file.strip_suffix(".wasm").unwrap_or(&entry.wasm_file);
                     println!(
                         "  {} v{} — {} ({})",
-                        name,
+                        source,
                         entry.version,
-                        entry.source,
+                        name,
                         entry.installed_at.split('T').next().unwrap_or("?")
                     );
                 }
                 println!("\n{} extension(s)", entries.len());
             }
         }
-        ExtCommands::Remove { name } => {
-            ext_cli::remove_extension(name)?;
-            println!("Removed extension: {}", name);
+        ExtCommands::Remove { source } => {
+            ext_cli::remove_extension(source)?;
+            println!("Removed extension: {}", source);
         }
-        ExtCommands::Update { name } => {
-            let results = ext_cli::update_extension(name.as_deref()).await?;
+        ExtCommands::Update { source } => {
+            let results = ext_cli::update_extension(source.as_deref()).await?;
             if results.is_empty() {
                 println!("Nothing to update.");
             } else {
                 for r in &results {
-                    println!("Updated {} to {}", r.name, r.version);
+                    println!("Updated {} to {}", r.source, r.version);
                 }
             }
         }

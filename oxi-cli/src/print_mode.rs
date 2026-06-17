@@ -14,6 +14,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+/// Format an error message consistently for stderr output.
+///
+/// All error output in the CLI should flow through this function so that
+/// the format stays consistent across all commands and run modes.
+pub fn format_error(msg: &str) -> String {
+    format!("Error: {}", msg)
+}
+
 /// Output format for print mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrintMode {
@@ -90,7 +98,7 @@ pub async fn run_print_mode(app: &App, options: PrintModeOptions) -> Result<i32>
                 Ok(()) => {}
                 Err(PromptError::AgentError(msg)) => {
                     if mode == PrintMode::Text && !quiet {
-                        eprintln!("Error: {}", msg);
+                        eprintln!("{}", format_error(&msg));
                     }
                     exit_code = 1;
                 }
@@ -113,7 +121,7 @@ pub async fn run_print_mode(app: &App, options: PrintModeOptions) -> Result<i32>
                 Ok(()) => {}
                 Err(PromptError::AgentError(msg)) => {
                     if mode == PrintMode::Text && !quiet {
-                        eprintln!("Error: {}", msg);
+                        eprintln!("{}", format_error(&msg));
                     }
                     exit_code = 1;
                 }

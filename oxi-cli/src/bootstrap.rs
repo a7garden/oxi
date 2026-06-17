@@ -7,6 +7,7 @@
 //! retain their original signatures.
 
 use crate::cli::CliArgs;
+use crate::print_mode;
 use crate::store::settings::Settings;
 use anyhow::Result;
 use std::path::PathBuf;
@@ -37,7 +38,7 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         .unwrap_or_default()
         .is_empty()
     {
-        eprintln!("No model configured. Run `oxi setup` to configure.");
+        eprintln!("{}", print_mode::format_error("No model configured. Run `oxi setup` to configure."));
         std::process::exit(1);
     }
 
