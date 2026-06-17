@@ -1,8 +1,9 @@
 # 설계: oxi 완전 동적 카탈로그 (models.dev 진실 소스)
 
-> 상태: 설계 v2 (구현 전). v1 리뷰에서 발견된 5개 결함 정정.
+> 상태: 설계 **v4** (구현 전). v1 리뷰에서 발견된 5개 결함 정정, v2 까지 추가 정정, **v4** 는 catalog-port v2 와 동기화 (CatalogProtocol 도입, auth_method 필드 삭제, Phase 5 신설).
 > 작성: 2026-06-17
 > 선행: `docs/MODELS_DEV_SYNC.md` (1차 enrich 구현), 본 설계는 그 후속·통합
+> 후속: `docs/designs/2026-06-17-catalog-port-design.md` (v2) — 본 설계의 §6.3/§11.1 을 Phase 5 에서 무효화
 
 ## 0. 핵심 (TL;DR)
 
@@ -25,7 +26,7 @@ npm 필드 → `Api` enum 7줄 매핑으로 145개 provider·5,277개 모델을 
 |---|---|---|
 | 1 | **단일 진실 소스** | models.dev `api.json` 하나. 두 번째 카피 없음 |
 | 2 | **단일 진입점** | 기존 `model_db::all_provider_models()` OnceLock — downstream 무변경 |
-| 3 | **단일 매핑 함수** | `protocol_for(npm) → (Api, AuthMethod)`, 7줄 match. provider id 매칭 아님 |
+| 3 | **단일 매핑 함수** | `protocol_for(npm) → CatalogProtocol` (v4 정정), 8줄 match. provider id 매칭 아님. auth 는 `protocol.default_auth()` 로 파생 |
 | 4 | **자동 추론 최대화** | api·auth·base_url·env·modalities·cost·limit·reasoning 전부 models.dev에서 |
 | 5 | **점진적 향상** | SNAP(임베드) + LIVE(캐시) + LOCAL(ollama). 어느 게 없어도 작동 |
 | 6 | **제거 > 추가** | TOML 71파일 + providers.toml + category 제거. 추가보다 제거가 많음 |
@@ -72,13 +73,15 @@ model=`https://zenmux.ai/api/anthropic/v1` (같은 provider 안에서 모델별�
 `opencode-go/minimax-m2.5` 예: `model.npm=@ai-sdk/anthropic` + `model.api=null` →
 부모 base_url 상속 + Anthropic 프로토콜 + **x-api-key**. provider 수준 bearer로 호출 시 401.
 
-따라서 materialize는 model.provider에 **세 가지**를 모두 반영한다:
+따라서 materialize는 model.provider에 **두 가지**를 반영한다:
 
-- `(model_api, model_auth)` ← `model.provider.npm` 있으면 override, 없으면 부모 것
+- `model_protocol: CatalogProtocol` ← `model.provider.npm` 있으면 override, 없으면 부모 것 (**v4 정정**: `Api`/`AuthMethod` tuple → `CatalogProtocol` enum)
 - `model_base_url` ← `model.provider.api` 있으면 override, 없으면 부모 것 (None=상속)
-- `BuiltinModelEntry`에 **`auth_method: AuthMethod`** 및 **`base_url: Option<String>`** 필드 추가.
+- `BuiltinModelEntry`에 **`base_url: Option<String>`** 필드 추가 (v3 결함 D 정정).
+- **v4 정정**: `BuiltinModelEntry.auth_method` 필드 **삭제됨**. auth 는
+  `entry.protocol.default_auth()` 로 파생. 필드 중복 제거.
 - oxi provider 구현체는 이미 base_url override 지원(검증: `AnthropicProvider::with_base_url`,
-  `OpenAiProvider::with_base_url`). `model_from_entry`가 model entry의 base_url/auth를
+  `OpenAiProvider::with_base_url`). `model_from_entry`가 model entry의 base_url 을
   provider 것보다 우선 사용하도록 수정 (§7.3).
 
 ### 2.3 auth_method도 protocol_for가 함께 반환한다 (그러나 한계 명시)
@@ -130,7 +133,8 @@ anthropic-vertex [["anthropic-version", "vertex-2023-10-16"]]
               └─────────────┬─────────────┘
                             ▼ (LIVE가 신선하면 LIVE, 아니면 SNAP)
                     Protocol Resolver
-                    protocol_for(npm) → (Api, AuthMethod)   ← 7줄 match
+                    protocol_for(npm) → CatalogProtocol   ← 8줄 match (v4)
+                    (auth 는 protocol.default_auth() 로 파생)
                             │
                             ▼
                     Materialize + Merge
@@ -260,38 +264,61 @@ pub fn source() -> Source {
 - `OXI_MODELS_DEV_FORCE_REFRESH=1` 또는 `oxi models refresh`가 mtime 창을 무시하고
   강제 조건부 GET 수행 (사용자가 즉시 최신을 원할 때).
 
-### 4.3 PROTOCOL RESOLVER — npm → (Api, AuthMethod), 7줄 (본 설계 핵심)
+### 4.3 PROTOCOL RESOLVER — npm → CatalogProtocol, 8줄 (v4 정정)
 
 oxi가 models.dev 데이터를 소비하기 위해 가지는 **유일한 자체 지식**.
 
+> **v4 정정 (catalog-port-design v2 동기화)**: `protocol_for` 의 출력 타입이
+> `(oxi_ai::Api, AuthMethod)` 에서 **`oxi_sdk::CatalogProtocol`** 로 변경됨.
+> SDK 가 자기 타입을 소유하고, oxi-ai 는 consumer. auth_method 는
+> `CatalogProtocol::default_auth()` 로 파생되므로 별도 반환 불필요.
+> 위치: `oxi-sdk/src/ports/fs/catalog.rs::protocol_for` (private).
+> 자세한 동기: `docs/designs/2026-06-17-catalog-port-design.md` §4.1.
+
 ```rust
-/// models.dev의 npm 필드 → oxi의 프로토콜 + 인증 방식.
-/// 새 프로토콜이 models.dev에 추가되지 않는 한, 이 7줄은 영구 불변.
-fn protocol_for(npm: &str) -> (Api, AuthMethod) {
+// oxi-sdk/src/ports/fs/catalog.rs (private)
+fn protocol_for(npm: &str) -> CatalogProtocol {
     match npm {
-        "@ai-sdk/anthropic"      => (Api::AnthropicMessages,    AuthMethod::XApiKey),
-        "@ai-sdk/google"         => (Api::GoogleGenerativeAi,   AuthMethod::None),
+        "@ai-sdk/anthropic"      => CatalogProtocol::AnthropicMessages,
+        "@ai-sdk/google"         => CatalogProtocol::GoogleGenerativeAi,
         "@ai-sdk/google-vertex"
         | "@ai-sdk/google-vertex/anthropic"
-                                  => (Api::GoogleVertex,         AuthMethod::None),
-        "@ai-sdk/mistral"        => (Api::MistralConversations, AuthMethod::Bearer),
-        "@ai-sdk/azure"          => (Api::AzureOpenAiResponses, AuthMethod::ApiKey),
-        "@ai-sdk/amazon-bedrock" => (Api::BedrockConverseStream,AuthMethod::None),
-        // @ai-sdk/openai, @ai-sdk/openai-compatible, groq, xai, togetherai, vercel,
-        // 그리고 알 수 없는 모든 npm → OpenAI 호환
-        _                         => (Api::OpenAiCompletions,    AuthMethod::Bearer),
+                                  => CatalogProtocol::GoogleVertex,
+        "@ai-sdk/mistral"        => CatalogProtocol::MistralConversations,
+        "@ai-sdk/azure"          => CatalogProtocol::AzureOpenAiResponses,
+        "@ai-sdk/amazon-bedrock" => CatalogProtocol::BedrockConverseStream,
+        // @ai-sdk/openai, @ai-sdk/openai-compatible, groq, xai, togetherai, vercel
+        _                         => CatalogProtocol::OpenAiCompletions,  // OpenAI 호환
+    }
+}
+
+// auth 는 별도 함수로 파생:
+impl CatalogProtocol {
+    pub fn default_auth(&self) -> AuthMethod {
+        match self {
+            CatalogProtocol::AnthropicMessages => AuthMethod::XApiKey,
+            CatalogProtocol::AzureOpenAiResponses => AuthMethod::ApiKey,
+            CatalogProtocol::GoogleGenerativeAi
+            | CatalogProtocol::GoogleVertex
+            | CatalogProtocol::BedrockConverseStream => AuthMethod::None,
+            _ => AuthMethod::Bearer,
+        }
     }
 }
 ```
 
 - **id 매칭 아닌 npm 매칭인 이유** (§2.1): 새 provider가 models.dev에 추가돼도 oxi 수정 없이 정확 분류. id 매칭은 매핑 테이블 수작업 부활.
-- **모델 수준 오버라이드** (§2.2, v1 정정): `materialize_model`은 model.provider.npm(있으면)으로
-  `(model_api, model_auth)` **둘 다** 부모 provider 값을 override. `BuiltinModelEntry`에
-  `auth_method` 필드 추가 필요.
+- **모델 수준 오버라이드** (§2.2, v1 정정): `materialize_model`은 `model.provider.npm`(있으면)으로
+  `model_protocol` 만 override. `model.protocol.default_auth()` 으로 auth 도 따라 결정됨.
+  **`BuiltinModelEntry.auth_method` 필드 불필요** (v4 정정: 파생 가능).
 
 ### 4.4 REGISTRY — materialize + merge (신규, `catalog/materialize.rs`)
 
 models.dev → oxi 엔트리 변환. **신모델·신프로바이더 자동 등장**이 달성되는 곳.
+
+> **v4 정정**: `BuiltinProviderEntry.api` 가 `oxi_ai::Api::to_str().to_string()`
+> 대신 `CatalogProtocol` (SDK 타입) 을 그대로 보관. `auth_method` 필드 삭제 —
+> `protocol.default_auth()` 로 파생. `BuiltinModelEntry` 도 동일.
 
 ```rust
 pub fn materialize(
@@ -303,40 +330,40 @@ pub fn materialize(
     let mut models = Vec::new();
 
     for (pid, mdprov) in &catalog.0 {
-        let (api, auth) = protocol_for(mdprov.npm.as_deref().unwrap_or(""));
+        let provider_protocol = protocol_for(mdprov.npm.as_deref().unwrap_or(""));
         let pm = headers_overlay.get(pid);   // extra_headers (있으면)
 
         providers.push(BuiltinProviderEntry {
             id: pid.clone(),
-            display_name: mdprov.name.clone(),        // ⬅ 보존 (v1 정정: 사용자 동의 범위)
+            display_name: mdprov.name.clone(),        // ⬅ 보존 (v1 정정)
             description: String::new(),               // models.dev엔 원라인 설명 없음
-            aliases: vec![],                          // 제거: models.dev id를 그대로 사용 (v3 결정: 기존 호환성 버림)
-            api: api.to_str().to_string(),
+            aliases: vec![],                          // 제거: models.dev id 그대로 사용
+            protocol: provider_protocol,             // v4 정정: String → CatalogProtocol
             env_key: mdprov.env.first().cloned().unwrap_or_default(),
             extra_env_keys: mdprov.env[1..].to_vec(),
             base_url: mdprov.api.clone().unwrap_or_default(),
-            auth_method: auth,
+            // auth_method: 제거 (v4 정정). protocol.default_auth() 로 파생
             extra_headers: pm.map(|m| m.extra_headers.clone()).unwrap_or_default(),
             // category 필드: 제거됨 (§6.1)
             default_enabled: true,
         });
 
         for (mid, mdmodel) in &mdprov.models {
-            // 모델 수준 override (v3): protocol+auth+base_url 세 가지
+            // 모델 수준 override (v3 → v4): protocol + base_url
             let model_provider = mdmodel.provider.as_ref();
             let model_npm = model_provider.and_then(|p| p.npm.as_deref())
                 .unwrap_or_else(|| mdprov.npm.as_deref().unwrap_or(""));
-            let (model_api, model_auth) = protocol_for(model_npm);
+            let model_protocol = protocol_for(model_npm);
             // base_url: model.provider.api 있으면 override, 없으면 None(부모 상속)
             let model_base_url = model_provider.and_then(|p| p.api.clone());
 
             models.push(BuiltinModelEntry {
                 id: mid.clone(),
                 name: mdmodel.name.clone(),
-                api: model_api.to_str().to_string(),
+                protocol: model_protocol,              // v4 정정: String → CatalogProtocol
                 provider: pid.clone(),
-                auth_method: model_auth,             // v1 정정
-                base_url: model_base_url,            // v3 정정 (결함 D): None=부모 상속
+                // auth_method: 제거 (v4 정정). protocol.default_auth() 로 파생
+                base_url: model_base_url,              // v3 정정: None=부모 상속
                 reasoning: mdmodel.reasoning,
                 input: normalize_modalities(&mdmodel.modalities),
                 cost_input:  mdmodel.cost.as_ref().map(|c| c.input).unwrap_or(0.0),
@@ -482,18 +509,24 @@ v1은 schema에 넣고 materialize에선 무시 → dead field. 정정: **CostTi
 | 대상 | 규모 | 이유 |
 |---|---|---|
 | `catalog/materialize.rs` | ~180줄 | models.dev → oxi 엔트리 변환 + merge (§4.4) |
-| `protocol_for()` | 7줄 | 본 설계 핵심 (§4.3) |
-| `BuiltinModelEntry.auth_method` | 필드 1 | 모델 수준 auth override (§2.2) |
+| `protocol_for(npm) → CatalogProtocol` | 8줄 | §4.3. v4 정정: `(Api, AuthMethod)` → `CatalogProtocol` (SDK 자기 타입) |
 | `BuiltinModelEntry.base_url` | 필드 1 | 모델 수준 base_url override, 55개 모델 (§2.2 v3 정정 결함 D) |
 | `build.rs` snapshot 주입 | ~50줄 | opencode define 패턴 번역 (§4.1) |
 | `data/catalog/product-meta.toml` | ~30줄 | extra_headers만 (§4.6) |
 | `data/catalog/_snapshot.json.gz` | 커밋 | fallback + CI 결정론성 기준점 |
 | CI 스냅샷 갱신 워크플로 | ~40줄 YAML | 주간 `_snapshot.json.gz` 갱신 + `OXI_CATALOG_SNAPSHOT` 주입 |
 
-### 6.3 무변경 (단일 진입점 덕분)
+> **v4 정정 (catalog-port v2 동기화)**: `BuiltinModelEntry.auth_method` 필드
+> **제거됨**. auth 는 `entry.protocol.default_auth()` 로 파생 가능. 별도 필드
+> 불필요. `BuiltinModelEntry.api: String` → `protocol: CatalogProtocol` (SDK 타입).
+
+### 6.3 무변경 (단일 진입점 덕분) — **v4 정정**
 
 `model_db::get_model_entry`, `get_all_models`, `multi_provider::model_from_entry`,
 `fallback_chain`, `setup_wizard`, TUI overlay, RPC/print, `oxi-sdk` re-export.
+
+> **v4 정정**: 위 free fn 들은 §7.3 (catalog-port §7.1) 에 따라 **모두 제거됨**.
+> catalog-port v2 가 port 로 통합. 본 섹션 무효.
 단, `multi_provider`가 model entry의 `auth_method`를 **사용**하도록 수정 필요
 (현재는 provider에서만 읽음) — §7.3.
 
@@ -517,11 +550,25 @@ v1은 schema에 넣고 materialize에선 무시 → dead field. 정정: **CostTi
 models.dev 검증값 → **대부분 불필요**. 단, §7.1과 마찬가지로 models.dev 오류 가능성을
 수용하므로, 정말 oxi가 의도한 차이만 0~5줄로 축소 보존.
 
-### 7.3 multi_provider auth 반영 (v1 정정)
+### 7.3 multi_provider protocol/auth 반영 (v1 → v4 정정)
 
-`model_from_entry`가 model entry의 `auth_method`(신규 필드)를 provider 것보다 우선
-사용하도록 수정. 이래야 §2.2의 `opencode-go/minimax-m2.5` (Anthropic 프로토콜)가
-올바른 x-api-key로 호출됨.
+**v1 정정**: `model_from_entry`가 model entry의 `auth_method`(신규 필드)를
+provider 것보다 우선 사용하도록 수정. §2.2의 `opencode-go/minimax-m2.5`
+(Anthropic 프로토콜)가 올바른 x-api-key로 호출됨.
+
+**v4 정정**: `auth_method` 필드 자체가 **삭제됨** (catalog-port v2 동기화).
+대신 `model.protocol.default_auth()` 가 dispatch 의 단일 소스. 즉:
+
+```rust
+fn model_from_entry(entry: &BuiltinModelEntry, api_key: Option<&str>) -> Provider {
+    let auth = entry.protocol.default_auth();  // entry.protocol 의 단일 dispatch
+    // ... auth 와 api_key 로 provider 인스턴스 생성
+}
+```
+
+`opencode-go/minimax-m2.5` 의 `model.npm = @ai-sdk/anthropic` →
+`protocol = AnthropicMessages` → `default_auth() = XApiKey`. v4 이전 v1 의
+`model.auth_method` 필드와 결과 동일. **더 적은 코드, 더 명확한 데이터 흐름.**
 
 ### 7.4 빌드 재현성 (v1 정정)
 
@@ -570,7 +617,7 @@ v1은 Phase 2(TOML 삭제)가 Phase 3(SNAP)보다 먼저 → "TOML 없고 SNAP �
 ### Phase 1: 스키마 + protocol_for + product-meta (위험 最저, 기반)
 - `MdCatalog` 스키마를 opencode와 1:1로 확장 (§5.1). CostTier 제외 (§5.2).
 - `protocol_for(npm)` 구현 + 단위테스트 (네트워크 X, 결정론적).
-- `BuiltinModelEntry.auth_method` 필드 추가 (§2.2 정정).
+- (Phase 1 에서는 `auth_method` 필드 추가하지 않음 — v4 정정 후 `protocol.default_auth()` 로 파생)
 - `data/catalog/product-meta.toml` 생성 (extra_headers만, §4.6).
 - materialize() 골격 — **기존 provider_map 경로와 병행, 게이트로 전환**.
 - 기존 catalog 테스트 전부 통과 유지.
@@ -597,6 +644,19 @@ v1은 Phase 2(TOML 삭제)가 Phase 3(SNAP)보다 먼저 → "TOML 없고 SNAP �
 - LOCAL과 OnceLock 병합 (별도 설계).
 
 > v1의 Phase 4(60분 백그라운드 갱신)는 **삭제** — 동기화는 §4.2의 조건부 GET이 담당하므로 별도 백그라운드 갱신 불필요.
+
+### Phase 5: Catalog Port 승격 (위험 中, **별도 설계**)
+
+- **별도 설계**: `docs/designs/2026-06-17-catalog-port-design.md` (v2).
+- 본 Phase 의 핵심: `protocol_for` 출력 타입을 `(oxi_ai::Api, AuthMethod)` →
+  `oxi_sdk::CatalogProtocol` (SDK 자기 타입) 으로 변경. `auth_method` 필드 삭제.
+- SDK ↔ oxi-ai 의존 방향을 단방향(oxi-ai → SDK) 으로 정리.
+- 카탈로그 접근을 port 로 통합, `&'static` 글로벌 API 제거.
+- 5 PR 분할 (catalog-port §12 참조):
+  PR1 port 추가 / PR2 oxi-cli 이관 / PR3 oxi-ai 내부 이관 / PR4 정리 / PR5 외부 consumer.
+- Phase 5 완료 = 본 설계 (dynamic-catalog) 의 **완전 종결**.
+  Phase 5 이전에는 §11.1 의 "`OnceLock` 유지 + 조건부 GET" 이 유효.
+  Phase 5 완료 시점에 §11.1 의 결정은 **모두 무효** (port 가 대체).
 
 ## 11. 리스크 & 완화
 
@@ -632,6 +692,22 @@ v2 초안은 (A)를 택하면서 임의 주기(24시간)를 붙였으나, 사용
 **근거**: 사용자는 보통 세션마다 oxi를 새로 시작. 캐시 파일 갱신 → 다음 실행 반영이
 UX에 큰 지장 없다. 런타임 메모리 갱신이 꼭 필요해지면 별도 Phase에서 RwLock 전환 검토.
 
+> **v4 단서 (catalog-port v2 동기화)**: 본 섹션의 "`&'static` 계약 유지" 와
+> "OnceLock 유지" 결정은 **Phase 5 (Catalog Port 승격)** 완료 시점에 **모두
+> 무효**. port 가 catalog 의 단일 진입점이 되고, `&'static`/`OnceLock` 가 모두
+> 사라짐 (catalog-port §7). 본 섹션은 Phase 5 이전의 구현 단계에서 유효.
+> See: `docs/designs/2026-06-17-catalog-port-design.md`
+>
+> **v4 구현 완료 (2026-06-17)**: catalog-port 마이그레이션 PR 1→2.5→3(축소)→4(부분)
+> 완료. **그러나** sync read API 도입(catalog-port §7.9) 으로 인해 OnceLock/`&'static`
+> API 는 **제거되지 않고 유지**됨. FileModelCatalog 가 `include_bytes!` 로 oxi-ai 의
+> SNAP 를 가져오고, legacy free fn (`get_all_models` 등) 은 fallback path 로 남아
+> 있음. OnceLock → port 전환은 custom provider 동적 등록과 agent_session_runtime 의
+> `get_provider` plumbing 이 남아있어 **완전한 제거는 다음 메이저 버전으로 연기**.
+> 현재 상태: catalog port 가 **primary**, legacy API 가 **fallback** (catalog 가 없을
+> 때만). 사용자 관점 동작은 이미 port 기반 (`oxi models`, `oxi refresh`, TUI picker).
+> See: `docs/designs/2026-06-17-catalog-port-design.md` §7.9, §12.
+
 ## 12. 본 설계가 MODELS_DEV_SYNC.md §12와 다른 점
 
 | | 문서 §12 | 본 설계 (v2) |
@@ -652,7 +728,7 @@ UX에 큰 지장 없다. 런타임 메모리 갱신이 꼭 필요해지면 별�
 
 | 테스트 | 방식 |
 |---|---|
-| `protocol_for` 분류 | 모든 npm 값(21종) → 예상 (Api, AuthMethod) 단언. 결정론적, 네트워크 X |
+| `protocol_for` 분류 | 모든 npm 값(21종) → 예상 `CatalogProtocol` 단언. 결정론적, 네트워크 X |
 | 모델 수준 auth override | fixture: opencode-go/minimax-m2.5 → (Anthropic, XApiKey). vivgrid/gpt-5.4 → (OpenAi, Bearer) |
 | extra_headers 병합 | product-meta.toml의 9개 provider가 헤더 보존. 미지정 provider는 빈 헤더 |
 | materialize 전체 | `api.json` 스냅샷 fixture → 145 provider / 5,277 model 카운트 단언 |
@@ -685,7 +761,7 @@ UX에 큰 지장 없다. 런타임 메모리 갱신이 꼭 필요해지면 별�
 | 결함 (v1 리뷰) | 정정 (v2) |
 |---|---|
 | 🔴 Phase 2/3 순서 모순 (TOML 삭제 후 SNAP 없는 깨진 구간) | §10: Phase 2에서 SNAP + REGISTRY 동시 적용 |
-| 🔴 모델 수준 auth 무시 (핵심 통찰과 모순) | §2.2/§4.4: `BuiltinModelEntry.auth_method` 추가, `(model_api, model_auth)` 둘 다 override |
+| 🔴 모델 수준 auth 무시 (핵심 통찰과 모순) | §2.2/§4.4: `(model_api, model_auth)` 둘 다 override (v2 정정) → **v4 정정으로 `BuiltinModelEntry.auth_method` 필드 삭제** (`protocol.default_auth()` 로 파생) |
 | 🔴 extra_headers 제거 → 9개 provider 회귀 | §2.4/§4.6: product-meta.toml로 extra_headers만 보존 (~9개) |
 | 🔴 OnceLock(A)/"60분 갱신"/"refresh 즉시" 삼중 모순 | §11.1: OnceLock 유지 + 동기화 주기를 mtime 창+ETag로 재정의 (시간 주기 폐지) |
 | 🟡 build.rs 네트워크 fetch 과소평가 | §4.1: `OXI_CATALOG_SNAPSHOT` 파일 주입 (opencode 패턴 정확 차용) |
@@ -699,6 +775,8 @@ UX에 큰 지장 없다. 런타임 메모리 갱신이 꼭 필요해지면 별�
 | 🔴 **v3 결함 E**: 기존 oxi id 32개 ↔ models.dev id 불일치 (호환성) | **사용자 결정: 호환성 버림** — models.dev id로 전면 교체, alias 맵 도입 안 함 |
 | 🔴 **v3 결함 D**: model 수준 base_url override 누락 (55개 모델) | §2.2: `BuiltinModelEntry.base_url: Option<String>` 추가, materialize 반영 |
 | 🔴 **v3 결함 A**: ETag 저장 메커니즘 미정의 | §4.2: 사이드카 파일 `models-dev.json.etag` 명시 |
+| 🟡 **v4 결함 F**: `protocol_for` 출력 타입 `(Api, AuthMethod)` — SDK 가 자기 타입 갖지 못하고 oxi-ai 에 결합 | §4.3: 출력 → `oxi_sdk::CatalogProtocol`. `auth_method` 필드 삭제. `default_auth()` 메서드로 파생. §6.2, §7.3. catalog-port-design §4.1 |
+| 🟡 **v4 결함 G**: `&'static` API 와 `OnceLock` 가 SDK consumer 갱신 경로 차단 | Phase 5 신설. catalog-port-design v2 가 port 로 승격. 본 섹션의 `&'static` 계약 유지 결정 무효화 |
 
 ## 부록 B: 라이선스 / 재배포 (v1 보완)
 
