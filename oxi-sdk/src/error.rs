@@ -88,6 +88,20 @@ pub enum SdkError {
     #[error("port not configured: {port} (use OxiBuilder::with_port_*(...))")]
     PortNotConfigured { port: &'static str },
 
+    // ── Catalog ─────────────────────────────────────────────────────────────
+    /// The catalog port is not wired or returned no data for the request.
+    #[error("catalog unavailable: {reason}")]
+    CatalogUnavailable { reason: String },
+
+    /// A user-supplied catalog override file failed to parse.
+    #[error("catalog override parse error at {path}: {reason}")]
+    CatalogOverrideParse { path: String, reason: String },
+
+    /// A catalog refresh attempt failed (network, HTTP, or parse error).
+    /// The stale snapshot is still served; this error is informational.
+    #[error("catalog refresh failed: {reason}")]
+    CatalogRefresh { reason: String },
+
     // ── General ─────────────────────────────────────────────────────────────
     #[error("{0}")]
     Internal(#[from] anyhow::Error),

@@ -38,11 +38,15 @@ glob = "0.3"
 # File-based port impls (fs/ sub-module). Always available in default build.
 toml = "0.8"
 walkdir = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+flate2 = "1"
+filetime = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
 futures = "0.3"
 fastrand = "2"
+wiremock = "0.6"
 
 
 [features]

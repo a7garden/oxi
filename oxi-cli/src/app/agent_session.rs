@@ -591,13 +591,28 @@ impl AgentSession {
     /// does not touch the live agent), the next call to this method
     /// picks the new policy up. The `/reload` slash command calls
     /// this alongside `set_thinking_level`/`set_model`.
+    ///
+    /// **v6 — disk fresh load:** this method now reloads `Settings`
+    /// from disk before rebuilding the prompt. This synchronizes
+    /// the in-memory `Arc<RwLock<Settings>>` cache with whatever
+    /// `persist_changes()` (or external `settings.toml` edits) just
+    /// wrote, so overlay edits and direct file edits converge to
+    /// the same state without the overlay having to reach into
+    /// `AgentSession`'s mutable API.
     pub fn rebuild_system_prompt(&self) {
-        let settings = self.settings.read();
-        let thinking = settings.thinking_level;
-        let languages = settings.output_languages.clone();
-        drop(settings);
+        // v6: fresh-load from disk so in-memory cache matches whatever
+        // was just persisted (or hand-edited in settings.toml).
+        let fresh = crate::store::settings::Settings::load().unwrap_or_default();
+        let thinking = fresh.thinking_level;
+        let languages = fresh.output_languages.clone();
+        let language_policy_enabled = fresh.language_policy_enabled;
+        *self.settings.write() = fresh;
 
-        let prompt = crate::app::agent_session_runtime::build_system_prompt(thinking, &languages);
+        let prompt = crate::app::agent_session_runtime::build_system_prompt(
+            thinking,
+            language_policy_enabled,
+            &languages,
+        );
         self.agent.set_system_prompt(prompt);
     }
 

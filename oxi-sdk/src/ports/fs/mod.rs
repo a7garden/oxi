@@ -16,6 +16,7 @@ pub fn home_dir() -> std::io::Result<PathBuf> {
 pub mod access;
 pub mod auth;
 pub mod capability;
+pub mod catalog;
 pub mod config;
 pub mod path;
 pub mod persona;
@@ -25,6 +26,7 @@ pub mod skill;
 pub use access::SimpleAccessGate;
 pub use auth::FileAuthProvider;
 pub use capability::TomlCapabilityResolver;
+pub use catalog::{CatalogConfig, FileModelCatalog};
 pub use config::FileConfigStore;
 pub use persona::FilePersonaProvider;
 pub use session::FileStateStore;

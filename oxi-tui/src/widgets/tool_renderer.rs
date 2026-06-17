@@ -218,6 +218,295 @@ pub fn format_search_call(name: &str, args: &Value, styles: &ThemeStyles) -> Vec
     ])]
 }
 
+// ── Issue tool formatter ────────────────────────────────────────────────────
+
+/// Format the `issue` tool call. The tool has a single `action` discriminator
+/// (list/read/create/update/start/release/close/link_session) and renders
+/// compactly so the chat shows what's about to happen without dumping the
+/// full parameter set.
+pub fn format_issue_call(
+    args: &Value,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
+    let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+    let id = args.get("id").and_then(|v| v.as_i64());
+
+    let header = Line::from(vec![
+        Span::styled(
+            "issue ".to_string(),
+            styles.accent.add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("{action} "), styles.normal),
+    ]);
+
+    let mut lines = vec![header];
+    match action {
+        "create" => {
+            // Title (highlighted) + priority/labels as tags on a second line.
+            if let Some(title) = args.get("title").and_then(|v| v.as_str()) {
+                let title_disp = truncate_to_width(title, max_width.saturating_sub(2));
+                lines.push(Line::from(vec![
+                    Span::styled("  ", styles.muted),
+                    Span::styled(format!("“{title_disp}”"), styles.normal),
+                ]));
+            }
+            let mut tags: Vec<String> = Vec::new();
+            if let Some(p) = args.get("priority").and_then(|v| v.as_str()) {
+                tags.push(format!("[{p}]"));
+            }
+            if let Some(arr) = args.get("labels").and_then(|v| v.as_array()) {
+                let labels: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                if !labels.is_empty() {
+                    tags.push(format!("[{}]", labels.join(",")));
+                }
+            }
+            if !tags.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", tags.join(" ")),
+                    styles.muted,
+                )));
+            }
+        }
+        "list" => {
+            // Show active filters as muted tag line.
+            let mut filters: Vec<String> = Vec::new();
+            if let Some(s) = args.get("status").and_then(|v| v.as_str()) {
+                filters.push(format!("status={s}"));
+            }
+            if let Some(p) = args.get("priority").and_then(|v| v.as_str()) {
+                filters.push(format!("priority={p}"));
+            }
+            if let Some(l) = args.get("label").and_then(|v| v.as_str()) {
+                filters.push(format!("label={l}"));
+            }
+            if let Some(t) = args.get("text").and_then(|v| v.as_str()) {
+                filters.push(format!("text=“{}”", truncate_to_width(t, 24)));
+            }
+            if filters.is_empty() {
+                lines.push(Line::from(Span::styled("  (all open)", styles.muted)));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", filters.join("  ")),
+                    styles.muted,
+                )));
+            }
+        }
+        "update" | "start" | "release" | "close" | "link_session" | "read" => {
+            if let Some(i) = id {
+                lines.push(Line::from(Span::styled(format!("  #{i}"), styles.muted)));
+            }
+            // For update, surface what fields are being changed.
+            if action == "update" {
+                let mut changed: Vec<&str> = Vec::new();
+                if args.get("title").is_some() {
+                    changed.push("title");
+                }
+                if args.get("body").is_some() {
+                    changed.push("body");
+                }
+                if args.get("priority").is_some() {
+                    changed.push("priority");
+                }
+                if args.get("status").is_some() {
+                    changed.push("status");
+                }
+                if args.get("labels").is_some() {
+                    changed.push("labels");
+                }
+                if !changed.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  → {}", changed.join(", ")),
+                        styles.muted,
+                    )));
+                }
+            }
+        }
+        other => {
+            lines.push(Line::from(Span::styled(
+                format!("  (unknown action: {other})"),
+                styles.warning,
+            )));
+        }
+    }
+    lines
+}
+
+/// Format the `issue` tool result. We pattern-match the success/error strings
+/// produced by `IssueTool` (and the underlying `FileIssueStore`) so the chat
+/// surfaces semantic distinctions (created vs. closed vs. conflict).
+pub fn format_issue_result(
+    result: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let text = result.trim();
+    let first_line = text.lines().next().unwrap_or("");
+
+    // ── Errors first — detect by leading prefix pattern ──────────────────
+    if let Some(rest) = first_line.strip_prefix("issue ") {
+        // Conflict / Assigned / NotAssigned are surfaced as `issue #N ...`.
+        let lower = rest.to_lowercase();
+        let (kind, detail) = if lower.contains("was modified since last read") {
+            ("conflict", "re-read and retry")
+        } else if lower.contains("is currently being worked on by") {
+            ("assigned", "another session owns it")
+        } else if lower.contains("is not assigned to session") {
+            ("not owner", "run start first")
+        } else if lower.contains("not found") {
+            ("missing", "id does not exist")
+        } else if lower.starts_with("#") && lower.contains("failed") {
+            ("failed", "")
+        } else {
+            ("", "")
+        };
+        if !kind.is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  ✗ {}",
+                    truncate_to_width(first_line, max_width.saturating_sub(4))
+                ),
+                styles.error,
+            )));
+            if !detail.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("    → {detail}"),
+                    styles.muted,
+                )));
+            }
+            // Show remaining lines muted (truncated).
+            for extra in text.lines().skip(1).take(3) {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "    {}",
+                        truncate_to_width(extra, max_width.saturating_sub(6))
+                    ),
+                    styles.muted,
+                )));
+            }
+            return lines;
+        }
+    }
+
+    // ── Success patterns ────────────────────────────────────────────────
+    let success_style = styles.success;
+    let neutral_style = styles.normal;
+    let muted_style = styles.muted;
+
+    if first_line.starts_with("created issue ") {
+        // "created issue #12: Fix login bug"
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  ✓ {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            success_style,
+        )));
+        // Subsequent lines may be a follow-up notification (e.g., the
+        // store emits nothing extra, but callers sometimes append).
+        for extra in text.lines().skip(1).take(3) {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "    {}",
+                    truncate_to_width(extra, max_width.saturating_sub(6))
+                ),
+                muted_style,
+            )));
+        }
+    } else if first_line.starts_with("closed issue ") {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  ✓ {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            success_style,
+        )));
+    } else if first_line.starts_with("updated issue ") {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  • {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            neutral_style,
+        )));
+    } else if first_line.starts_with("released issue ") {
+        // Released is a soft-yellow action — assignment ended.
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  ◯ {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            styles.warning,
+        )));
+    } else if first_line.starts_with("linked session to issue ") {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  + {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            muted_style,
+        )));
+    } else if first_line.starts_with("assigned issue ") {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  ✓ {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            success_style,
+        )));
+    } else if first_line == "no issues match the filter" {
+        lines.push(Line::from(Span::styled(
+            "  (no issues match the filter)".to_string(),
+            muted_style,
+        )));
+    } else if first_line.starts_with("issue #") && first_line.contains(" failed: ") {
+        // Slash command fallback: "issue #N start failed: <reason>"
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  ✗ {}",
+                truncate_to_width(first_line, max_width.saturating_sub(4))
+            ),
+            styles.error,
+        )));
+    } else {
+        // Multi-line list result — color-code each entry.
+        let total = text.lines().count();
+        for (i, line) in text.lines().take(8).enumerate() {
+            let display = truncate_to_width(line, max_width.saturating_sub(2));
+            // Color by the status token in `[open]` / `[closed]`.
+            let span = if display.contains("[closed]") {
+                Span::styled(format!("  {display}"), muted_style)
+            } else if display.contains("[open]") {
+                Span::styled(format!("  {display}"), styles.normal)
+            } else if display.contains("🔒") {
+                Span::styled(format!("  {display}"), styles.warning)
+            } else {
+                Span::styled(format!("  {display}"), muted_style)
+            };
+            lines.push(Line::from(span));
+            // Hint at truncation on the last rendered line.
+            if i == 7 && total > 8 {
+                lines.push(Line::from(Span::styled(
+                    format!("    … ({} more)", total - 8),
+                    muted_style,
+                )));
+            }
+        }
+        if total == 0 {
+            lines.push(Line::from(Span::styled(
+                "  (empty result)".to_string(),
+                muted_style,
+            )));
+        }
+    }
+    lines
+}
+
+/// Parse a priority string into a normalized display label.
 /// Format a generic tool call (fallback for unknown tools).
 pub fn format_generic_call(
     name: &str,
@@ -267,6 +556,7 @@ pub fn format_tool_call(
         "read" => format_read_call(&args, styles),
         "write" => format_write_call(&args, styles),
         "grep" | "find" | "ls" => format_search_call(name, &args, styles),
+        "issue" => format_issue_call(&args, max_width, styles),
         _ => format_generic_call(name, &args, max_width, styles),
     }
 }
@@ -501,6 +791,7 @@ pub fn format_tool_result(
         "edit" => format_diff_result(result, max_width, styles),
         "bash" => format_bash_result(result, max_width, styles),
         "read" => format_read_result(result, max_width, styles),
+        "issue" => format_issue_result(result, max_width, styles),
         _ => format_generic_result(result, max_width, styles),
     }
 }
@@ -517,6 +808,48 @@ pub fn measure_call_height(name: &str, arguments: &str, max_width: usize) -> u16
         "read" => 1, // Always 1 line for read
         "write" => 1,
         "grep" | "find" | "ls" => 1,
+        "issue" => {
+            // Header + (title + optional tags) for create, or
+            // header + #id + (optional changed-fields) for update,
+            // or just header + #id for the rest.
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            let base = 1u16;
+            match action {
+                "create" => {
+                    base + 1
+                        + if args.get("priority").is_some() || args.get("labels").is_some() {
+                            1
+                        } else {
+                            0
+                        }
+                }
+                "list" => base + 1,
+                "update" => {
+                    let mut extra = 1; // #id line
+                    let mut changed = 0u16;
+                    if args.get("title").is_some() {
+                        changed += 1;
+                    }
+                    if args.get("body").is_some() {
+                        changed += 1;
+                    }
+                    if args.get("priority").is_some() {
+                        changed += 1;
+                    }
+                    if args.get("status").is_some() {
+                        changed += 1;
+                    }
+                    if args.get("labels").is_some() {
+                        changed += 1;
+                    }
+                    if changed > 0 {
+                        extra += 1;
+                    }
+                    base + extra
+                }
+                _ => base + 1,
+            }
+        }
         _ => {
             // Generic: 1 header + up to 3 args
             let args_count = args.as_object().map(|o| o.len().min(3)).unwrap_or(0);
@@ -568,6 +901,37 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
             let shown = total.min(READ_PREVIEW_LINES);
             let extra: u16 = 1; // Always show count
             shown as u16 + extra
+        }
+        "issue" => {
+            // We render at most 9 lines (header + up to 8 list entries, or
+            // 1 success line + 0–3 follow-ups, or 1 error line + 0–3 details).
+            let first = result.lines().next().unwrap_or("");
+            let lower = first.to_lowercase();
+            let is_error = first.starts_with("issue ")
+                && (lower.contains("was modified since last read")
+                    || lower.contains("is currently being worked on by")
+                    || lower.contains("is not assigned to session")
+                    || lower.contains("not found"));
+            if is_error {
+                1 + result.lines().skip(1).take(3).count() as u16
+            } else if first.starts_with("created issue ")
+                || first.starts_with("closed issue ")
+                || first.starts_with("updated issue ")
+                || first.starts_with("released issue ")
+                || first.starts_with("linked session to issue ")
+                || first.starts_with("assigned issue ")
+                || first == "no issues match the filter"
+                || (first.starts_with("issue #") && first.contains(" failed: "))
+            {
+                // Header + up to 3 follow-up lines.
+                (1 + result.lines().skip(1).take(3).count() as u16).min(4)
+            } else {
+                // Multi-line list — cap at 8 + 1 trailing hint.
+                let total = result.lines().count();
+                let shown = total.min(8);
+                let extra = if total > 8 { 1 } else { 0 };
+                shown as u16 + extra
+            }
         }
         _ => {
             let total = result.lines().count();
@@ -701,5 +1065,166 @@ mod tests {
         assert!(has_exit_status("Command exited with code 1"));
         assert!(has_exit_status("Command timed out after 120 seconds"));
         assert!(!has_exit_status("Everything is fine"));
+    }
+
+    #[test]
+    fn test_format_issue_call_create() {
+        let args = serde_json::json!({
+            "action": "create",
+            "title": "Fix login bug",
+            "priority": "high",
+            "labels": ["bug", "auth"],
+        });
+        let lines = format_issue_call(&args, 80, &ThemeStyles::default());
+        assert!(lines[0].to_string().contains("issue"));
+        assert!(lines[0].to_string().contains("create"));
+        // Title appears quoted on line 2
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.to_string().contains("Fix login bug"))
+        );
+        // Priority chip present
+        assert!(lines.iter().any(|l| l.to_string().contains("[high]")));
+        // Labels chip present
+        assert!(lines.iter().any(|l| l.to_string().contains("bug,auth")));
+    }
+
+    #[test]
+    fn test_format_issue_call_start() {
+        let args = serde_json::json!({"action": "start", "id": 12});
+        let lines = format_issue_call(&args, 80, &ThemeStyles::default());
+        assert!(lines[0].to_string().contains("start"));
+        assert!(lines[1].to_string().contains("#12"));
+    }
+
+    #[test]
+    fn test_format_issue_call_list_with_filters() {
+        let args = serde_json::json!({
+            "action": "list",
+            "status": "open",
+            "priority": "high",
+            "label": "auth",
+            "text": "login",
+        });
+        let lines = format_issue_call(&args, 80, &ThemeStyles::default());
+        assert!(lines[0].to_string().contains("list"));
+        let combined: String = lines.iter().map(|l| l.to_string()).collect();
+        assert!(combined.contains("status=open"));
+        assert!(combined.contains("priority=high"));
+        assert!(combined.contains("label=auth"));
+        assert!(combined.contains("text="));
+    }
+
+    #[test]
+    fn test_format_issue_result_success() {
+        let result = "created issue #12: Fix login bug";
+        let lines = format_issue_result(result, 80, &ThemeStyles::default());
+        assert!(lines[0].to_string().contains("✓"));
+        assert!(lines[0].to_string().contains("created issue #12"));
+    }
+
+    #[test]
+    fn test_format_issue_result_closed() {
+        let lines = format_issue_result(
+            "closed issue #7: Outdated task",
+            80,
+            &ThemeStyles::default(),
+        );
+        assert!(lines[0].to_string().contains("✓"));
+        assert!(lines[0].to_string().contains("closed"));
+    }
+
+    #[test]
+    fn test_format_issue_result_released_warning_color() {
+        let lines = format_issue_result("released issue #3", 80, &ThemeStyles::default());
+        // Released uses warning style; we only assert semantic content here.
+        assert!(lines[0].to_string().contains("released"));
+    }
+
+    #[test]
+    fn test_format_issue_result_empty_list() {
+        let lines = format_issue_result("no issues match the filter", 80, &ThemeStyles::default());
+        assert!(lines[0].to_string().contains("no issues"));
+    }
+
+    #[test]
+    fn test_format_issue_result_conflict() {
+        let lines = format_issue_result(
+            "issue #12 was modified since last read; re-read and retry",
+            80,
+            &ThemeStyles::default(),
+        );
+        // Conflict marker must appear.
+        assert!(lines[0].to_string().contains("✗"));
+        assert!(
+            lines.iter().any(|l| l.to_string().contains("Conflict"))
+                || lines.iter().any(|l| l.to_string().contains("re-read"))
+        );
+    }
+
+    #[test]
+    fn test_format_issue_result_assigned_error() {
+        let lines = format_issue_result(
+            "issue #12 is currently being worked on by session tui",
+            80,
+            &ThemeStyles::default(),
+        );
+        assert!(lines[0].to_string().contains("✗"));
+    }
+
+    #[test]
+    fn test_format_issue_result_list_multiline_color() {
+        let result = "\
+#1    [open]    medium     Fix login bug
+#2    [open]    high   🔒  Refactor auth
+#3    [closed]  low       Old task";
+        let lines = format_issue_result(result, 80, &ThemeStyles::default());
+        // 3 entries + no truncation hint.
+        assert!(lines.len() >= 3);
+        assert!(lines.iter().any(|l| l.to_string().contains("#1")));
+        assert!(lines.iter().any(|l| l.to_string().contains("#3")));
+    }
+
+    #[test]
+    fn test_format_issue_call_unknown_action() {
+        let args = serde_json::json!({"action": "frobnicate"});
+        let lines = format_issue_call(&args, 80, &ThemeStyles::default());
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.to_string().contains("unknown action"))
+        );
+    }
+
+    #[test]
+    fn test_measure_issue_call_create() {
+        // 1 header + 1 title + 1 tags = 3
+        let args = r#"{"action":"create","title":"X","priority":"high"}"#;
+        assert!(measure_call_height("issue", args, 80) >= 3);
+    }
+
+    #[test]
+    fn test_measure_issue_call_id_only() {
+        let args = r#"{"action":"start","id":1}"#;
+        // 1 header + 1 id = 2
+        assert!(measure_call_height("issue", args, 80) >= 2);
+    }
+
+    #[test]
+    fn test_measure_issue_result_success_short() {
+        let result = "created issue #12: Title";
+        assert!(measure_result_height("issue", result, false) >= 1);
+    }
+
+    #[test]
+    fn test_measure_issue_result_long_list() {
+        let result = (1..=20)
+            .map(|i| format!("#{i:<4} [open]    medium     Issue {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Capped at 8 + 1 hint = 9 lines max.
+        let h = measure_result_height("issue", &result, false);
+        assert!(h <= 10, "expected height ≤10, got {h}");
     }
 }

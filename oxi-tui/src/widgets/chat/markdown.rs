@@ -332,7 +332,12 @@ pub(crate) fn spans_width(spans: &[Span<'static>]) -> usize {
 
 /// Render regular markdown (non-table content).
 /// Detects fenced code blocks and applies syntax highlighting.
-fn render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>> {
+///
+/// **Public** so callers outside the chat widget (e.g. the issues panel's
+/// detail body) can reuse the same styling. Pass `Theme::to_styles()` to
+/// match the active theme. Output is suitable for a `Paragraph::new(lines)`
+/// with `Wrap { trim: false }`.
+pub fn render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
 
     // Split into segments: code blocks vs inline markdown

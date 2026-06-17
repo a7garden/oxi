@@ -14,6 +14,7 @@
 pub mod agent_builder;
 pub mod agent_definition;
 pub mod agent_group;
+pub mod bridge;
 pub mod builder;
 pub mod closure_tool;
 pub mod coordination;
@@ -55,13 +56,21 @@ pub use ports::AccessGate as AccessGatePort;
 pub use ports::EventBus as EventBusPort;
 pub use ports::MemoryEntry as MemoryEntryPort;
 pub use ports::{
-    AccessDecision, AuthProvider, CapabilityResolver, ConfigStore, CronJob, CronScheduler,
-    EventPayload, EventTopic, InMemoryEventBus, MemoryStore, NoopAuthProvider, NoopConfigStore,
-    NoopCronScheduler, NoopEventBus, NoopMemoryStore, NoopPersonaProvider, NoopResourceMonitor,
-    NoopSkillLoader, NoopStateStore, OAuthToken, Persona, PersonaProvider, PortId, PortRegistry,
-    PortValue, ResourceMonitor, ResourceUsage, Skill, SkillLoader, SkillMeta, StateStore,
-    SubscriptionHandle, ToolCallRequest,
+    AccessDecision, AuthMethod, AuthProvider, CapabilityResolver, ConfigStore, CronJob,
+    CronScheduler, EventPayload, EventTopic, InMemoryEventBus, MemoryStore, NoopAuthProvider,
+    NoopConfigStore, NoopCronScheduler, NoopEventBus, NoopMemoryStore, NoopPersonaProvider,
+    NoopResourceMonitor, NoopSkillLoader, NoopStateStore, OAuthToken, Persona, PersonaProvider,
+    PortId, PortRegistry, PortValue, ResourceMonitor, ResourceUsage, Skill, SkillLoader, SkillMeta,
+    StateStore, SubscriptionHandle, ToolCallRequest,
 };
+
+// Catalog port (Port 12).
+pub use ports::catalog::{
+    CatalogEvent, CatalogModelEntry, CatalogProtocol, CatalogProviderEntry, CatalogSource,
+    ModelCatalog, NoopModelCatalog, RefreshOutcome,
+};
+// File-backed reference impl for the catalog port.
+pub use ports::fs::catalog::{CatalogConfig, FileModelCatalog};
 
 // Composition Layer — EventBus
 pub use event_bus::EventBus;
@@ -129,7 +138,7 @@ pub use oxi_ai::model_db::{
 // legacy compatibility shim that integrates all layers and converts
 // BuiltinModelEntry → ModelEntry.
 pub use oxi_ai::catalog::{
-    AuthMethod, BuiltinModelEntry, BuiltinProviderEntry, OverrideFile, apply_model_overrides,
+    BuiltinModelEntry, BuiltinProviderEntry, OverrideFile, apply_model_overrides,
     apply_provider_overrides, builtin_model_count, builtin_providers_count, discover_all,
     discover_all_authenticated, discover_all_local, discover_models, find_override_files,
     load_builtin_providers, load_overrides,

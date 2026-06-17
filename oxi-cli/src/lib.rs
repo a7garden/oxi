@@ -50,9 +50,9 @@ pub(crate) mod util;
 /// println!("providers: {}", oxi.providers().names().len());
 /// # Ok(()) }
 /// ```
-pub fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
+pub async fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
     let paths = services::OxiPaths::default_paths()?;
-    services::build_oxi(&paths)
+    services::build_oxi(&paths).await
 }
 
 /// Self-check the wired port implementations. Prints a one-line summary
@@ -62,7 +62,7 @@ pub fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
 /// `oxi-cli/src/main.rs`. Useful for verifying the new composition root
 /// without disturbing the legacy `App::new` path.
 pub async fn run_port_check() -> anyhow::Result<()> {
-    let oxi = build_oxi_engine()?;
+    let oxi = build_oxi_engine().await?;
     let ports = oxi.ports();
 
     // State
@@ -162,6 +162,17 @@ pub struct App {
     /// Used by the agent `issue` tool, the TUI indicator, and the `oxi issue`
     /// CLI subcommand.
     issue_store: Option<crate::store::issues::FileIssueStore>,
+    /// Process-wide liveness identity used by every issue-ownership surface
+    /// in this process (agent tool's `ToolContext.session_id`, TUI panel,
+    /// slash-command `/issue` handlers). See
+    /// [`crate::store::issues::liveness::TUI_OWNERSHIP_ID`] for the TUI value.
+    ownership_session_id: String,
+    /// Alive-lock held for the lifetime of `App`. Dropped with `App`, releasing
+    /// the OS-held flock so any other process sees this session as dead once
+    /// we exit (including `kill -9` / crash / normal exit). Only held when
+    /// `issue_store` is available.
+    #[allow(dead_code)]
+    liveness_guard: Option<crate::store::issues::liveness::AliveGuard>,
 }
 
 /// Context for compaction operations, passed to extension hooks
@@ -200,7 +211,20 @@ impl App {
     /// `services::build_oxi`) so that all 11 ports are wired. The
     /// settings hold the user's runtime configuration (model, thinking
     /// level, etc.).
-    pub async fn from_oxi(oxi: oxi_sdk::Oxi, settings: Settings) -> Result<Self> {
+    ///
+    /// `ownership_session_id` is the per-process liveness identity used by
+    /// the agent's `issue` tool (`ToolContext.session_id`), the TUI panel,
+    /// and the `/issue` slash command. In TUI mode this MUST equal
+    /// [`crate::store::issues::liveness::TUI_OWNERSHIP_ID`] so the panel and
+    /// agent see the same flock holder. In print / RPC mode, a stable
+    /// process-scoped id (e.g. `proc-<pid>-<uuid>`) is appropriate.
+    /// When `issue_store` is available, an `flock` is acquired under this
+    /// id for the lifetime of the returned `App`.
+    pub async fn from_oxi(
+        oxi: oxi_sdk::Oxi,
+        settings: Settings,
+        ownership_session_id: String,
+    ) -> Result<Self> {
         let model_id = settings.effective_model(None).unwrap_or_default();
         let provider_name = settings
             .effective_provider(None)
@@ -244,6 +268,7 @@ impl App {
             ),
             output_mode: None,
             provider_options: None,
+            session_id: Some(ownership_session_id.clone()),
         };
 
         // Build the agent via the SDK's AgentBuilder — no manual wiring.
@@ -290,7 +315,36 @@ impl App {
             wasm_ext: None,
             questionnaire_bridge: Some(bridge),
             issue_store,
+            ownership_session_id,
+            liveness_guard: None, // set below once issue_store is known
         })
+        .map(|mut app| {
+            // Acquire the process-wide liveness flock now that issue_store exists.
+            // Best-effort: another live process already holds the lock is non-fatal;
+            // we still expose ownership_session_id so callers can detect the conflict.
+            if let Some(store) = app.issue_store.as_ref() {
+                app.liveness_guard = crate::store::issues::liveness::acquire(
+                    &store.issues_dir(),
+                    &app.ownership_session_id,
+                )
+                .ok();
+            }
+            app
+        })
+    }
+
+    /// Per-process liveness identity. Used by the agent's `issue` tool and any
+    /// other surface that gates on `is_session_alive`.
+    pub fn ownership_session_id(&self) -> &str {
+        &self.ownership_session_id
+    }
+
+    /// True iff `App` holds a live liveness flock under `ownership_session_id`.
+    /// False when there is no `issue_store` (e.g. headless test) or when another
+    /// live process already holds the lock (the assignment feature will surface
+    /// `Assigned` errors in that case — by design).
+    pub fn has_liveness_lock(&self) -> bool {
+        self.liveness_guard.is_some()
     }
 
     /// Get the current settings
@@ -314,6 +368,12 @@ impl App {
     /// Get a clone of the local issue store, if one was opened successfully.
     pub fn issue_store(&self) -> Option<crate::store::issues::FileIssueStore> {
         self.issue_store.clone()
+    }
+
+    /// Get a reference to the underlying `Oxi` engine. The catalog port and
+    /// other ports are accessible through it.
+    pub fn oxi(&self) -> &oxi_sdk::Oxi {
+        &self.oxi
     }
 
     /// Get a reference to the underlying agent.

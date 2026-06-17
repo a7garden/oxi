@@ -39,6 +39,9 @@ pub struct ProviderEntry {
     pub has_key: bool,
     pub category: String,
     pub description: String,
+    /// Environment variable holding the API key (e.g. `ANTHROPIC_API_KEY`).
+    /// Populated from the catalog port; `None` for legacy/unknown providers.
+    pub env_key: Option<String>,
 }
 
 /// Which sub-mode the overlay is in.
@@ -648,8 +651,16 @@ impl ProviderSelectOverlay {
 
             let styles = theme.to_styles();
 
-            // Storage hint + env var alternative
-            if let Some(env_key) = oxi_sdk::get_provider_env_key(provider_name) {
+            // Storage hint + env var alternative. Prefer the env_key
+            // captured on the ProviderEntry (catalog port); fall back to
+            // legacy global lookup.
+            let env_key = self
+                .providers
+                .iter()
+                .find(|p| &p.name == provider_name)
+                .and_then(|p| p.env_key.clone())
+                .or_else(|| oxi_sdk::get_provider_env_key(provider_name).map(|s| s.to_string()));
+            if let Some(env_key) = env_key {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
                         " Saved to ~/.oxi/auth.json",
@@ -792,22 +803,59 @@ fn truncate_str(text: &str, max_width: usize) -> String {
 // ── Builder helper ────────────────────────────────────────────────────────
 
 /// Build the provider list from builtins, sorted by category order.
+///
+/// This is the legacy entry point that reads from global state. Prefer
+/// [`build_provider_entries_with_catalog`] when a catalog port is available.
+#[allow(dead_code)]
 pub fn build_provider_entries() -> Vec<ProviderEntry> {
+    build_provider_entries_inner(None)
+}
+
+/// Build the provider list from the catalog port (sync read API), falling
+/// back to legacy global state if the catalog is `None`.
+pub fn build_provider_entries_with_catalog(
+    catalog: Option<&std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+) -> Vec<ProviderEntry> {
+    build_provider_entries_inner(catalog)
+}
+
+fn build_provider_entries_inner(
+    catalog: Option<&std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+) -> Vec<ProviderEntry> {
     let auth = crate::store::auth_storage::shared_auth_storage();
 
-    let mut providers: Vec<ProviderEntry> = oxi_sdk::get_builtin_providers()
-        .iter()
-        .map(|builtin| {
-            let has_key = auth.get_api_key(builtin.name).is_some();
-            ProviderEntry {
-                name: builtin.name.to_string(),
-                display_name: builtin.display_name.to_string(),
-                has_key,
-                category: builtin.category.to_string(),
-                description: builtin.description.to_string(),
-            }
-        })
-        .collect();
+    let mut providers: Vec<ProviderEntry> = if let Some(cat) = catalog {
+        cat.list_providers_sync()
+            .into_iter()
+            .filter_map(|pid| {
+                let entry = cat.get_provider_sync(&pid)?;
+                let has_key = auth.get_api_key(&pid).is_some();
+                Some(ProviderEntry {
+                    name: pid,
+                    display_name: entry.display_name,
+                    has_key,
+                    category: entry.category,
+                    description: entry.description,
+                    env_key: entry.env_key,
+                })
+            })
+            .collect()
+    } else {
+        oxi_sdk::get_builtin_providers()
+            .iter()
+            .map(|builtin| {
+                let has_key = auth.get_api_key(builtin.name).is_some();
+                ProviderEntry {
+                    name: builtin.name.to_string(),
+                    display_name: builtin.display_name.to_string(),
+                    has_key,
+                    category: builtin.category.to_string(),
+                    description: builtin.description.to_string(),
+                    env_key: oxi_sdk::get_provider_env_key(builtin.name).map(|s| s.to_string()),
+                }
+            })
+            .collect()
+    };
 
     // Sort by category order then by name.
     let category_rank = |cat: &str| -> usize {

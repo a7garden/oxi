@@ -390,6 +390,16 @@ fn slugify(s: &str) -> String {
 pub mod liveness {
     use super::*;
 
+    /// Single source of truth for the liveness identity used by the TUI
+    /// (and any in-TUI operations: agent tool, `/issue` slash command, panel).
+    ///
+    /// Invariant: in TUI mode, [`crate::App::ownership_session_id`] MUST equal
+    /// this constant. The TUI panel's [`crate::tui::overlay::IssuesPanelOverlay::session_id`]
+    /// references it, and the agent's `ToolContext.session_id` is set from it,
+    /// so the flock acquired by `App` is the same one the panel and agent use
+    /// to check `is_session_alive`. Keep the two in sync.
+    pub const TUI_OWNERSHIP_ID: &str = "tui";
+
     /// Path of the alive-lock file for `session_id` under `issues_dir`.
     pub fn alive_path(issues_dir: &Path, session_id: &str) -> PathBuf {
         issues_dir.join(".alive").join(session_id)
@@ -510,13 +520,47 @@ struct Cache {
     open_count: usize,
     /// Title of the most recently updated open issue (for the indicator).
     latest_open_title: Option<String>,
+    /// Number of currently-assigned (locked) open issues. Computed at the
+    /// same time as `open_count` so the indicator can show "3 open · 1 🔒".
+    locked_open_count: usize,
+    /// Highest priority among open issues (None if no open issues).
+    /// Used for the priority dot in the footer indicator.
+    top_priority: Option<Priority>,
     dir_mtime: Option<std::time::SystemTime>,
+}
+
+/// Summary view exposed for UI consumers (footer indicator, panel header).
+/// Cheap to construct — values come straight from the in-memory cache.
+#[derive(Debug, Clone)]
+pub struct IssueSummary {
+    pub open_count: usize,
+    pub locked_open_count: usize,
+    pub top_priority: Option<Priority>,
+    pub latest_open_title: Option<String>,
+}
+
+impl IssueSummary {
+    pub fn is_empty(&self) -> bool {
+        self.open_count == 0
+    }
 }
 
 /// In-memory state for [`FileIssueStore`].
 struct Inner {
     issues_dir: PathBuf,
     cache: Cache,
+}
+
+impl Cache {
+    fn empty() -> Self {
+        Self {
+            open_count: 0,
+            latest_open_title: None,
+            locked_open_count: 0,
+            top_priority: None,
+            dir_mtime: None,
+        }
+    }
 }
 
 impl std::fmt::Debug for Inner {
@@ -574,6 +618,19 @@ impl FileIssueStore {
         self.inner.read().cache.latest_open_title.clone()
     }
 
+    /// Aggregate summary for the footer indicator / panels. Pulled from the
+    /// in-memory cache, so it's cheap (O(1) on a warm cache).
+    pub fn summary(&self) -> IssueSummary {
+        self.refresh_if_stale();
+        let g = self.inner.read();
+        IssueSummary {
+            open_count: g.cache.open_count,
+            locked_open_count: g.cache.locked_open_count,
+            top_priority: g.cache.top_priority,
+            latest_open_title: g.cache.latest_open_title.clone(),
+        }
+    }
+
     /// True iff the issues directory has any issues at all (suppresses the
     /// indicator when the project has never used the feature).
     pub fn has_any(&self) -> bool {
@@ -604,6 +661,8 @@ impl FileIssueStore {
         }
         // Re-scan.
         let mut open_count = 0;
+        let mut locked_open_count = 0;
+        let mut top_priority: Option<Priority> = None;
         let mut latest_open_title: Option<String> = None;
         let mut latest_open_updated: Option<chrono::DateTime<chrono::Utc>> = None;
         if let Ok(rd) = fs::read_dir(&dir) {
@@ -619,6 +678,14 @@ impl FileIssueStore {
                     && issue.meta.status == Status::Open
                 {
                     open_count += 1;
+                    if issue.meta.assigned_to.is_some() {
+                        locked_open_count += 1;
+                    }
+                    // Track highest priority (Critical > High > Medium > Low).
+                    top_priority = Some(match top_priority {
+                        Some(existing) => existing.max(issue.meta.priority),
+                        None => issue.meta.priority,
+                    });
                     if issue.meta.updated_at
                         > latest_open_updated.unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC)
                     {
@@ -632,6 +699,8 @@ impl FileIssueStore {
         g.cache = Cache {
             open_count,
             latest_open_title,
+            locked_open_count,
+            top_priority,
             dir_mtime: cur_dir_mtime,
         };
     }
@@ -806,6 +875,30 @@ impl FileIssueStore {
             issue.meta.status = Status::Closed;
             issue.meta.closed_at = Some(now);
             issue.meta.assigned_to = None; // closing releases the assignment
+            Ok(issue)
+        })
+        .await
+    }
+
+    /// Reopen a closed issue. No ownership required (reopening doesn't
+    /// assign the issue to anyone; it goes back to the unassigned pool).
+    ///
+    /// Errors with `NotFound` if the id doesn't exist, or with no special
+    /// error if the issue is already open — that case is a no-op.
+    pub async fn reopen(
+        &self,
+        id: u32,
+        expected_hash: Option<String>,
+    ) -> std::result::Result<Issue, IssueError> {
+        self.update(id, expected_hash, move |mut issue| {
+            if issue.meta.status == Status::Open {
+                // Already open — idempotent no-op so callers can retry
+                // without special-casing.
+                return Ok(issue);
+            }
+            issue.meta.status = Status::Open;
+            issue.meta.closed_at = None;
+            issue.meta.assigned_to = None;
             Ok(issue)
         })
         .await
@@ -1152,6 +1245,40 @@ mod tests {
         assert!(closed.meta.assigned_to.is_none());
     }
 
+    #[tokio::test]
+    async fn reopen_flips_closed_to_open() {
+        let (_tmp, store) = tmp_store();
+        let issues_dir = store.issues_dir();
+        let _guard = crate::store::issues::liveness::acquire(&issues_dir, "tui").unwrap();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        // Close it.
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "tui", Some(h)).await.unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.close(1, "tui", Some(h)).await.unwrap();
+        // Reopen.
+        let (_, h) = store.read(1).unwrap();
+        let reopened = store.reopen(1, Some(h)).await.unwrap();
+        assert_eq!(reopened.meta.status, Status::Open);
+        assert!(reopened.meta.closed_at.is_none());
+        assert!(reopened.meta.assigned_to.is_none());
+    }
+
+    #[tokio::test]
+    async fn reopen_is_idempotent_on_already_open() {
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let (_, h) = store.read(1).unwrap();
+        // Already open — reopen returns the issue unchanged.
+        let reopened = store.reopen(1, Some(h)).await.unwrap();
+        assert_eq!(reopened.meta.status, Status::Open);
+        assert!(reopened.meta.closed_at.is_none());
+    }
+
     #[test]
     fn slugify_basic() {
         assert_eq!(slugify("Fix Login Bug!"), "fix-login-bug");
@@ -1187,6 +1314,50 @@ mod tests {
         store.close(1, "sessionA", Some(h)).await.unwrap();
         store.invalidate();
         assert_eq!(store.open_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn summary_reflects_lock_and_priority() {
+        let (_tmp, store) = tmp_store();
+        let issues_dir = store.issues_dir();
+        let _guard = liveness::acquire(&issues_dir, "sessionA").unwrap();
+        // Two opens: one Low (assigned to A), one Critical (free).
+        store
+            .create("Lowly".into(), "".into(), Priority::Low, vec![], None)
+            .unwrap();
+        store
+            .create("Crit".into(), "".into(), Priority::Critical, vec![], None)
+            .unwrap();
+        // Plus one closed Medium (should be ignored).
+        store
+            .create("Closed".into(), "".into(), Priority::Medium, vec![], None)
+            .unwrap();
+        let (_, h) = store.read(3).unwrap();
+        store.start(3, "sessionA", Some(h)).await.unwrap();
+        let (_, h) = store.read(3).unwrap();
+        store.close(3, "sessionA", Some(h)).await.unwrap();
+        // Assign #1 to A.
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "sessionA", Some(h)).await.unwrap();
+        store.invalidate();
+
+        let s = store.summary();
+        assert_eq!(s.open_count, 2);
+        assert_eq!(s.locked_open_count, 1);
+        assert_eq!(s.top_priority, Some(Priority::Critical));
+        assert!(s.latest_open_title.is_some());
+        assert!(!s.is_empty());
+    }
+
+    #[tokio::test]
+    async fn summary_empty_when_no_issues() {
+        let (_tmp, store) = tmp_store();
+        let s = store.summary();
+        assert_eq!(s.open_count, 0);
+        assert_eq!(s.locked_open_count, 0);
+        assert!(s.top_priority.is_none());
+        assert!(s.latest_open_title.is_none());
+        assert!(s.is_empty());
     }
 
     #[tokio::test]

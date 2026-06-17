@@ -65,6 +65,25 @@ impl Oxi {
         &self.ports
     }
 
+    /// Catalog port accessor. Use this for all catalog queries.
+    ///
+    /// Returns a reference to the `Arc<dyn ModelCatalog>`. The default
+    /// (when `OxiBuilder::with_catalog()` is not called) is a
+    /// [`NoopModelCatalog`](crate::ports::catalog::NoopModelCatalog) —
+    /// all lookups return empty/None.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn doc(oxi: oxi_sdk::Oxi) -> Result<(), oxi_sdk::SdkError> {
+    /// let providers = oxi.catalog().list_providers().await?;
+    /// let model = oxi.catalog().get_model("anthropic", "claude-sonnet-4-20250514").await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn catalog(&self) -> &Arc<dyn crate::ports::catalog::ModelCatalog> {
+        &self.ports.catalog
+    }
+
     /// Get the MCP manager, if MCP is enabled.
     ///
     /// This is the entry point for SDK consumers who want to use MCP from
@@ -80,6 +99,10 @@ impl Oxi {
     /// Resolve a model ID to a Model.
     ///
     /// Accepts `"provider/model"` or bare `"model"` (defaults to "anthropic").
+    ///
+    /// Resolution order:
+    /// 1. The catalog port (if wired) — reads the in-memory snapshot.
+    /// 2. The static model registry (`with_builtins`).
     pub fn resolve_model(&self, model_id: &str) -> Result<Model> {
         let parts: Vec<&str> = model_id.splitn(2, '/').collect();
         let (provider, model) = if parts.len() == 2 {
@@ -87,6 +110,13 @@ impl Oxi {
         } else {
             ("anthropic", parts[0])
         };
+
+        // 1. Catalog port (sync read of the snapshot).
+        if let Some(ref entry) = self.ports.catalog.get_model_sync(provider, model) {
+            return Ok(crate::bridge::catalog_entry_to_model(provider, entry));
+        }
+
+        // 2. Static model registry fallback.
         self.models
             .lookup(provider, model)
             .ok_or_else(|| anyhow::anyhow!("Model '{}' not found", model_id))
@@ -331,6 +361,30 @@ impl OxiBuilder {
     /// directory of file-based adapters). For piecemeal registration, use
     /// the `with_port_*` methods below.
     pub fn with_ports(mut self, ports: PortRegistry) -> Self {
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the model catalog port.
+    ///
+    /// The catalog is the source of truth for provider/model metadata.
+    /// If not called, the SDK uses [`NoopModelCatalog`](crate::ports::catalog::NoopModelCatalog)
+    /// (empty results — all lookups return `None`/`vec![]`).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use oxi_sdk::{OxiBuilder, ModelCatalog};
+    /// use std::sync::Arc;
+    ///
+    /// let catalog: Arc<dyn ModelCatalog> = /* ... */;
+    /// let oxi = OxiBuilder::new()
+    ///     .with_catalog(catalog)
+    ///     .build();
+    /// ```
+    pub fn with_catalog(mut self, catalog: Arc<dyn crate::ports::catalog::ModelCatalog>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.catalog = catalog;
         self.ports = Some(ports);
         self
     }

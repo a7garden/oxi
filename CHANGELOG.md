@@ -5,6 +5,52 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Catalog Port (12번째 port, models.dev 동적 카탈로그)
+
+SDK 에 **catalog port** (`ModelCatalog` trait) 를 추가하여, 모델/프로바이더
+메타데이터를 동적으로 수신할 수 있게 했다. 이는 정적 TOML 카탈로그에서
+동적 models.dev 기반 시스템으로의 전환을 완성하며, SDK consumer 가 모델
+갱신을 런타임에 수신할 수 있도록 한다.
+
+> **설계 문서**: `docs/designs/2026-06-17-catalog-port-design.md` (v4, §7.9
+> sync API 회피 정정 포함). 데이터 흐름은
+> `docs/designs/2026-06-17-dynamic-catalog-design.md`.
+
+- **신규 port** `oxi-sdk/src/ports/catalog.rs`: `ModelCatalog` trait (async
+  read + refresh + subscribe) + **sync read API** (`*_sync`, §7.9). noop 기본값.
+  `CatalogProtocol` enum (SDK 소유, oxi-ai `Api` 와 역방향 의존 없음).
+  `CatalogModelEntry`, `CatalogProviderEntry`, `CatalogEvent`, `RefreshOutcome`.
+- **신규 bridge layer** `oxi-sdk/src/bridge.rs`: `catalog_entry_to_model()`,
+  `provider_base_url()`, modality 변환. SDK 소유 (oxi-ai 역방향 의존 방지).
+- **참조 구현** `oxi-sdk/src/ports/fs/catalog.rs`: `FileModelCatalog` —
+  embedded SNAP + runtime cache + ETag 조건부 GET + user overrides +
+  LOCAL `/v1/models` discovery. lazy on-call refresh (백그라운드 작업 없음).
+- **`OxiBuilder::with_catalog()`** / **`Oxi::catalog()`** 접근자.
+- **`Oxi::resolve_model()`** catalog fallback 통합 (sync 유지, §7.9).
+- **`SdkError` catalog 변종** 3개: `CatalogUnavailable`, `CatalogOverrideParse`,
+  `CatalogRefresh`.
+
+**sync read API (§7.9, 구현 중 단순화)**: catalog 데이터가 이미 메모리에
+존재하므로, read-only 조회는 I/O 가 아닌 단순 락 획득 + clone 이다. 이로 인해
+v3 설계가 명시했던 `ProviderResolver` trait async화 ripple (agent_loop /
+multi_provider / fallback_chain 전체) 을 **전면 회피**했다. PR 3 이 "대공사"에서
+bridge layer + resolve_model 통합으로 축소되었다.
+
+**oxi-cli 이관**: composition root (`services::build_oxi`) 가
+`FileModelCatalog::init()` + `with_catalog()` 로 catalog 를 등록한다. TUI
+(`AppState.catalog` 필드 주입), setup wizard, `oxi models` / `oxi refresh`
+명령이 모두 catalog port 기반으로 동작한다. legacy `init_models_dev()` 제거.
+
+**하위 호환성**: legacy free fn (`get_all_models`, `get_provider`, 등) 은
+**fallback path 로 유지** (catalog 가 `None` 일 때만). custom provider 동적 등록
+(`fetch_models_blocking`/`register_model`) 과 `oxi-ai/src/catalog/` 모듈은
+SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으로 연기.
+
+**테스트**: catalog port 19개 (sync API 2개, bridge 7개, resolve_model 통합 2개
+포함) + 전체 회귀 **2297/2297 통과**.
+
 ## [0.36.0]
 
 ### Added — models.dev 라이브 보강 (catalog Layer 2.5)
@@ -305,6 +351,46 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - `tokio-test` — from oxi-ai, oxi-agent (unused)
 
 ## [Unreleased]
+
+### Changed — TUI 언어 정책 default OFF + 자동 적용
+
+기존 TUI 언어 정책(`Settings::output_languages`)은 **사용자 설정이 있어도
+기본적으로 활성화되지 않도록** 변경되었으며, 오버레이 변경이 라이브
+세션에 즉시 반영되도록 개선되었다. `oxi --print` 및 RPC 모드의 비대칭은
+**의도된 설계**이므로 변경되지 않았다 (AGENTS.md pitfalls 참조).
+
+- **Master toggle 신설** (`Settings::language_policy_enabled: bool`,
+  `oxi-cli/src/store/settings.rs`): default `false`. `output_languages`
+  맵에 값이 있어도 이 플래그가 `false`이면 정책이 주입되지 않는다.
+  신규/기존(v5) 사용자 모두 OFF로 시작한다. `/settings` 오버레이에서
+  명시적으로 ON 해야 동작.
+- **자동 적용** (`oxi-cli/src/tui/overlay/settings.rs`,
+  `oxi-cli/src/app/agent_session.rs`): `/settings` 오버레이 Esc 시
+  `changed=true`이면 `persist_changes()` + `AgentSession::rebuild_system_prompt()`
+  를 자동 호출한다. 디스크 저장이 `set_system_prompt()`까지 단일 흐름으로
+  연결된다. `/reload` 슬래시 명령은 백업 경로로 유지.
+- **in-memory 캐시 동기화** (`rebuild_system_prompt`): 호출 직전에
+  디스크에서 fresh load하여 `AgentSession::settings` `Arc<RwLock<Settings>>`
+  를 교체한다. overlay가 `AgentSession` mutable API를 알 필요 없이
+  결정적으로 동기화됨.
+- **OFF 시 채널 설정 보존**: `language_policy_enabled`를 false로 두어도
+  `output_languages` 맵은 디스크에 보존된다. 다시 ON 하면 이전 채널
+  매핑이 그대로 적용됨.
+- **Disabled UI** (`SettingsItem::Choice::disabled: bool`): OFF일 때
+  채널 항목 4개는 회색으로 표시되고 `Enter`/`Space`로 순환되지 않는다.
+  시도 시 "Enable language_policy first." notification 표시.
+- **시그니처 변경** (`oxi-cli/src/prompt/system_prompt.rs`,
+  `oxi-cli/src/app/agent_session_runtime.rs`):
+  `language_directive(enabled: bool, channels: &HashMap<...>)` —
+  마스터 게이트 신규. `build_system_prompt(thinking, enabled, languages)`,
+  `build_compaction_instruction(enabled, languages)` — `enabled` 인자 추가.
+  기존 8개 테스트 시그니처 반영 + 신규 8개 테스트 추가.
+- **마이그레이션** (`Settings::SETTINGS_VERSION: 5 → 6`): 누락 시
+  `#[serde(default = "default_false")]`로 안전하게 false로 떨어진다.
+  별도 데이터 변환 없음 (필드 추가 only).
+- **문서**: `AGENTS.md` pitfalls에 "TUI-only — by design, not oversight"
+  및 채널이 분류기가 아님을 명시. `/settings` 슬래시 description 정정.
+  `docs/designs/2026-06-17-tui-language-policy.md` 신규.
 
 ### Changed — Edition upgrade (2024 edition)
 

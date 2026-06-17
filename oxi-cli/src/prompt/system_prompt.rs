@@ -224,9 +224,21 @@ fn lookup_channel_label(key: &str) -> &str {
 /// `lib.rs` App build path (used by `oxi --print` and RPC mode)
 /// does not call it. See the `BuildSystemPromptOptions::language_directive`
 /// field docs for the rationale.
-pub fn language_directive(channels: &std::collections::HashMap<String, String>) -> Option<String> {
+///
+/// **Master gate:** when `enabled` is `false`, returns `None`
+/// immediately regardless of channel contents. This corresponds to
+/// `Settings::language_policy_enabled` (default `false` since v6).
+/// Users must toggle the policy ON in `/settings` for the directive
+/// to be injected.
+pub fn language_directive(
+    enabled: bool,
+    channels: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     use std::collections::HashSet;
 
+    if !enabled {
+        return None;
+    }
     if channels.is_empty() {
         return None;
     }
@@ -524,9 +536,21 @@ mod tests {
     // ── language_directive tests (TUI language policy) ─────────────
 
     #[test]
+    fn language_directive_returns_none_when_disabled() {
+        // v6: master gate. When enabled=false, returns None regardless of channels.
+        let mut map = std::collections::HashMap::new();
+        map.insert("response".to_string(), "ko".to_string());
+        map.insert("commit_message".to_string(), "en".to_string());
+        assert!(
+            language_directive(false, &map).is_none(),
+            "language_directive(false, _) must return None"
+        );
+    }
+
+    #[test]
     fn language_directive_returns_none_for_empty_map() {
         let map = std::collections::HashMap::new();
-        assert!(language_directive(&map).is_none());
+        assert!(language_directive(true, &map).is_none());
     }
 
     #[test]
@@ -534,7 +558,7 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         map.insert("response".to_string(), "auto".to_string());
         map.insert("commit_message".to_string(), "auto".to_string());
-        assert!(language_directive(&map).is_none());
+        assert!(language_directive(true, &map).is_none());
     }
 
     #[test]
@@ -542,7 +566,7 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         map.insert("response".to_string(), "ko".to_string());
         map.insert("commit_message".to_string(), "auto".to_string()); // skipped
-        let d = language_directive(&map).expect("at least one non-auto channel");
+        let d = language_directive(true, &map).expect("at least one non-auto channel");
         assert!(d.contains("Korean (한국어)"), "got: {d}");
         assert!(d.contains("Your conversational responses"));
         assert!(
@@ -555,7 +579,7 @@ mod tests {
     fn language_directive_renders_unknown_code_as_is() {
         let mut map = std::collections::HashMap::new();
         map.insert("response".to_string(), "klingon".to_string());
-        let d = language_directive(&map).expect("non-auto channel");
+        let d = language_directive(true, &map).expect("non-auto channel");
         // Unknown codes are passed through verbatim.
         assert!(d.contains("klingon"), "got: {d}");
     }
@@ -568,7 +592,7 @@ mod tests {
         map.insert("code_comment".to_string(), "en".to_string());
         map.insert("documentation".to_string(), "en".to_string());
         map.insert("commit_message".to_string(), "en".to_string());
-        let d = language_directive(&map).expect("non-empty policy");
+        let d = language_directive(true, &map).expect("non-empty policy");
         // Order should match KNOWN_CHANNELS (response, code_comment, documentation, commit_message).
         let pos_response = d.find("Your conversational responses").unwrap();
         let pos_code = d.find("Code comments").unwrap();
@@ -589,7 +613,7 @@ mod tests {
         map.insert("response".to_string(), "ko".to_string()); // known
         map.insert("zeta_channel".to_string(), "en".to_string()); // user, sorts after alpha
         map.insert("alpha_channel".to_string(), "en".to_string()); // user, sorts first
-        let d = language_directive(&map).expect("non-empty policy");
+        let d = language_directive(true, &map).expect("non-empty policy");
         // Known channel first.
         let pos_response = d.find("Your conversational responses").unwrap();
         // User channels in sorted order.

@@ -92,6 +92,8 @@ struct WizardState {
     auth_path: PathBuf,
     /// Settings path
     settings_path: PathBuf,
+    /// Catalog port handle (None = use legacy global state).
+    catalog: Option<std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
 }
 
 /// A model entry for display.
@@ -116,35 +118,50 @@ fn mask_key(key: &str) -> String {
 // ── Load provider state ─────────────────────────────────────────────────────
 
 /// Build the initial provider list from builtins + stored keys + custom providers.
-fn load_providers(auth_store: &crate::store::auth_storage::AuthStorage) -> Vec<ProviderEntry> {
+fn load_providers(
+    auth_store: &crate::store::auth_storage::AuthStorage,
+    catalog: Option<&std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+) -> Vec<ProviderEntry> {
     let mut entries = Vec::new();
 
-    for builtin in oxi_sdk::get_builtin_providers() {
-        let key = auth_store.get_api_key(builtin.name);
+    let builtin_names: Vec<String> = if let Some(cat) = catalog {
+        cat.list_providers_sync()
+    } else {
+        oxi_sdk::get_builtin_providers()
+            .iter()
+            .map(|p| p.name.to_string())
+            .collect()
+    };
+
+    for name in &builtin_names {
+        let key = auth_store.get_api_key(name);
 
         let (has_key, key_masked) = match &key {
             Some(k) => (true, mask_key(k)),
             None => (false, String::new()),
         };
 
-        let base_url = builtin.base_url;
+        let base_url = if let Some(cat) = catalog {
+            cat.get_provider_sync(name).and_then(|p| p.base_url)
+        } else {
+            oxi_sdk::get_provider_base_url(name)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        };
+
         entries.push(ProviderEntry {
-            name: builtin.name.to_string(),
+            name: name.clone(),
             has_key,
             key_masked,
             is_custom: false,
-            base_url: if base_url.is_empty() {
-                None
-            } else {
-                Some(base_url.to_string())
-            },
+            base_url,
         });
     }
 
     // Add custom providers from settings that aren't already in builtins
     if let Ok(settings) = crate::store::settings::Settings::load() {
         for cp in &settings.custom_providers {
-            if oxi_sdk::is_builtin_provider(&cp.name) {
+            if builtin_names.iter().any(|n| n == &cp.name) {
                 continue;
             }
             let actual_key = auth_store.get_api_key(&cp.name);
@@ -169,8 +186,10 @@ fn load_providers(auth_store: &crate::store::auth_storage::AuthStorage) -> Vec<P
 
 // ── Load model list ────────────────────────────────────────────────────────
 
-/// Build the model list from the static model database + dynamic cache.
-fn load_models() -> Vec<ModelEntry> {
+/// Build the model list from the catalog port + dynamic cache.
+fn load_models(
+    catalog: Option<&std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+) -> Vec<ModelEntry> {
     let mut models = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -180,10 +199,16 @@ fn load_models() -> Vec<ModelEntry> {
             for id in model_ids {
                 let key = format!("{}/{}", provider, id);
                 if seen.insert(key.clone()) {
-                    // Try to get context_window from model_db, default 128_000
-                    let ctx = oxi_sdk::get_model_entry(provider, id)
-                        .map(|e| e.context_window)
-                        .unwrap_or(128_000);
+                    // Try to get context_window from catalog/model_db, default 128_000
+                    let ctx = if let Some(cat) = catalog {
+                        cat.get_model_sync(provider, id)
+                            .map(|e| e.context_window)
+                            .unwrap_or(128_000)
+                    } else {
+                        oxi_sdk::get_model_entry(provider, id)
+                            .map(|e| e.context_window)
+                            .unwrap_or(128_000)
+                    };
                     models.push(ModelEntry {
                         id: id.clone(),
                         provider: provider.clone(),
@@ -194,15 +219,28 @@ fn load_models() -> Vec<ModelEntry> {
         }
     }
 
-    // 2. Static models from model_db
-    for entry in oxi_sdk::get_all_models() {
-        let key = format!("{}/{}", entry.provider, entry.id);
-        if seen.insert(key) {
-            models.push(ModelEntry {
-                id: entry.id.to_string(),
-                provider: entry.provider.to_string(),
-                context_window: entry.context_window,
-            });
+    // 2. Catalog models (sync read) or static model_db fallback
+    if let Some(cat) = catalog {
+        for entry in cat.search_sync("") {
+            let key = format!("{}/{}", entry.provider, entry.model_id);
+            if seen.insert(key) {
+                models.push(ModelEntry {
+                    id: entry.model_id,
+                    provider: entry.provider,
+                    context_window: entry.context_window,
+                });
+            }
+        }
+    } else {
+        for entry in oxi_sdk::get_all_models() {
+            let key = format!("{}/{}", entry.provider, entry.id);
+            if seen.insert(key) {
+                models.push(ModelEntry {
+                    id: entry.id.to_string(),
+                    provider: entry.provider.to_string(),
+                    context_window: entry.context_window,
+                });
+            }
         }
     }
 
@@ -837,7 +875,7 @@ fn handle_provider_event(
                             fetch_and_cache_models(provider_name, &state.providers);
 
                             // Refresh the model list to include newly fetched models
-                            state.models = load_models();
+                            state.models = load_models(state.catalog.as_ref());
                         }
                         state.input_mode = InputMode::Normal;
                     }
@@ -895,7 +933,7 @@ fn handle_provider_event(
                             // Try to fetch models from this custom provider
                             if !api_key.is_empty() {
                                 fetch_and_cache_models(&name, &state.providers);
-                                state.models = load_models();
+                                state.models = load_models(state.catalog.as_ref());
                             }
 
                             // Move back to normal
@@ -1050,7 +1088,7 @@ fn finish_setup(state: &mut WizardState) -> Result<()> {
 // ── Main entry point ────────────────────────────────────────────────────────
 
 /// Run the interactive setup wizard.
-pub fn run() -> Result<()> {
+pub async fn run() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -1066,10 +1104,31 @@ pub fn run() -> Result<()> {
         panic_hook(info);
     }));
 
+    // Initialize the catalog port for model/provider lookups.
+    let catalog: Option<std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>> = {
+        let paths = crate::services::OxiPaths::default_paths().ok();
+        if let Some(paths) = paths {
+            let config = oxi_sdk::CatalogConfig {
+                cache_path: paths.home.join("cache").join("models-dev.json"),
+                etag_path: paths.home.join("cache").join("models-dev.json.etag"),
+                override_path: paths.home.join("catalog").join("overrides.toml"),
+                // Don't trigger a network refresh during setup.
+                fetch_enabled: false,
+                ..Default::default()
+            };
+            oxi_sdk::FileModelCatalog::init(config)
+                .await
+                .ok()
+                .map(|c| c as _)
+        } else {
+            None
+        }
+    };
+
     // Load data
     let auth_store = crate::store::auth_storage::shared_auth_storage();
-    let providers = load_providers(&auth_store);
-    let models = load_models();
+    let providers = load_providers(&auth_store, catalog.as_ref());
+    let models = load_models(catalog.as_ref());
     let themes = load_themes();
 
     let auth_path = crate::store::auth_storage::AuthStorage::default_path().unwrap_or_else(|| {
@@ -1122,6 +1181,7 @@ pub fn run() -> Result<()> {
         theme_list_state: ListState::default(),
         auth_path,
         settings_path,
+        catalog,
     };
 
     // Main loop

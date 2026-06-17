@@ -262,6 +262,7 @@ pub fn create_agent_session_from_services(
             model_id: String::new(),
             system_prompt: Some(build_system_prompt(
                 thinking_level,
+                settings.language_policy_enabled,
                 &settings.output_languages,
             )),
             timeout_seconds: settings.tool_timeout_seconds,
@@ -272,11 +273,15 @@ pub fn create_agent_session_from_services(
             } else {
                 oxi_sdk::CompactionStrategy::Disabled
             },
-            compaction_instruction: build_compaction_instruction(&settings.output_languages),
+            compaction_instruction: build_compaction_instruction(
+                settings.language_policy_enabled,
+                &settings.output_languages,
+            ),
             context_window: 128_000,
             api_key: None,
             workspace_dir: Some(services.cwd.clone()),
             output_mode: None,
+            session_id: None,
             provider_options: None,
         };
         // Use anthropic as a placeholder provider so the session can be created
@@ -300,7 +305,11 @@ pub fn create_agent_session_from_services(
         .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
 
     // Build agent config
-    let system_prompt = build_system_prompt(thinking_level, &settings.output_languages);
+    let system_prompt = build_system_prompt(
+        thinking_level,
+        settings.language_policy_enabled,
+        &settings.output_languages,
+    );
     let compaction_strategy = if settings.auto_compaction {
         oxi_sdk::CompactionStrategy::Threshold(0.8)
     } else {
@@ -319,11 +328,15 @@ pub fn create_agent_session_from_services(
         temperature: settings.effective_temperature(),
         max_tokens: settings.effective_max_tokens(),
         compaction_strategy,
-        compaction_instruction: build_compaction_instruction(&settings.output_languages),
+        compaction_instruction: build_compaction_instruction(
+            settings.language_policy_enabled,
+            &settings.output_languages,
+        ),
         context_window: 128_000,
         api_key,
         workspace_dir: Some(services.cwd.clone()),
         output_mode: None,
+        session_id: None,
         provider_options: None,
     };
 
@@ -744,9 +757,11 @@ fn parse_model_id(model_id: &str) -> (String, String) {
 /// Delegates to [`crate::prompt::system_prompt::build_system_prompt`].
 pub(crate) fn build_system_prompt(
     thinking_level: ThinkingLevel,
+    language_policy_enabled: bool,
     languages: &std::collections::HashMap<String, String>,
 ) -> String {
-    let directive = crate::prompt::system_prompt::language_directive(languages);
+    let directive =
+        crate::prompt::system_prompt::language_directive(language_policy_enabled, languages);
     let options = crate::prompt::system_prompt::BuildSystemPromptOptions {
         custom_prompt: crate::prompt::system_prompt::thinking_level_prompt(thinking_level),
         cwd: std::env::current_dir()
@@ -779,9 +794,11 @@ pub(crate) fn build_system_prompt(
 /// system-prompt section in the summarizer (cross-crate change
 /// to `oxi-ai`, out of scope here).
 fn build_compaction_instruction(
+    language_policy_enabled: bool,
     languages: &std::collections::HashMap<String, String>,
 ) -> Option<String> {
-    let directive = crate::prompt::system_prompt::language_directive(languages)?;
+    let directive =
+        crate::prompt::system_prompt::language_directive(language_policy_enabled, languages)?;
     // Trim the leading "\n\n" so we can compose cleanly.
     let body = directive.trim_start();
     Some(format!(
@@ -871,13 +888,14 @@ mod tests {
     #[test]
     fn test_build_system_prompt() {
         let empty = std::collections::HashMap::new();
-        let prompt = build_system_prompt(ThinkingLevel::Off, &empty);
+        // language_policy_enabled=true (boolean gate doesn't affect non-policy paths)
+        let prompt = build_system_prompt(ThinkingLevel::Off, true, &empty);
         assert!(prompt.contains("concise"));
 
-        let prompt = build_system_prompt(ThinkingLevel::Medium, &empty);
+        let prompt = build_system_prompt(ThinkingLevel::Medium, true, &empty);
         assert!(prompt.contains("coding"));
 
-        let prompt = build_system_prompt(ThinkingLevel::High, &empty);
+        let prompt = build_system_prompt(ThinkingLevel::High, true, &empty);
         assert!(prompt.contains("comprehensive"));
     }
 
@@ -887,7 +905,7 @@ mod tests {
         langs.insert("response".to_string(), "ko".to_string());
         langs.insert("commit_message".to_string(), "en".to_string());
 
-        let prompt = build_system_prompt(ThinkingLevel::Medium, &langs);
+        let prompt = build_system_prompt(ThinkingLevel::Medium, true, &langs);
         assert!(
             prompt.contains("Output Language Policy (enforced)"),
             "language directive must be present, got prompt tail: {}",
@@ -901,7 +919,7 @@ mod tests {
     fn test_build_system_prompt_omits_policy_when_all_auto() {
         let mut langs = std::collections::HashMap::new();
         langs.insert("response".to_string(), "auto".to_string());
-        let prompt = build_system_prompt(ThinkingLevel::Medium, &langs);
+        let prompt = build_system_prompt(ThinkingLevel::Medium, true, &langs);
         assert!(
             !prompt.contains("Output Language Policy"),
             "no policy should be injected when all channels are auto"
@@ -909,20 +927,41 @@ mod tests {
     }
 
     #[test]
+    fn test_build_system_prompt_omits_policy_when_disabled() {
+        // v6: master gate. enabled=false must suppress the policy regardless of channels.
+        let mut langs = std::collections::HashMap::new();
+        langs.insert("response".to_string(), "ko".to_string());
+        langs.insert("commit_message".to_string(), "en".to_string());
+        let prompt = build_system_prompt(ThinkingLevel::Medium, false, &langs);
+        assert!(
+            !prompt.contains("Output Language Policy"),
+            "no policy should be injected when language_policy_enabled is false"
+        );
+    }
+
+    #[test]
     fn test_build_compaction_instruction_none_for_all_auto() {
         let langs = std::collections::HashMap::new();
-        assert!(build_compaction_instruction(&langs).is_none());
+        assert!(build_compaction_instruction(true, &langs).is_none());
 
         let mut langs = std::collections::HashMap::new();
         langs.insert("response".to_string(), "auto".to_string());
-        assert!(build_compaction_instruction(&langs).is_none());
+        assert!(build_compaction_instruction(true, &langs).is_none());
+    }
+
+    #[test]
+    fn test_build_compaction_instruction_none_when_disabled() {
+        // v6: master gate. enabled=false must return None regardless of channels.
+        let mut langs = std::collections::HashMap::new();
+        langs.insert("response".to_string(), "ko".to_string());
+        assert!(build_compaction_instruction(false, &langs).is_none());
     }
 
     #[test]
     fn test_build_compaction_instruction_propagates_policy() {
         let mut langs = std::collections::HashMap::new();
         langs.insert("response".to_string(), "ko".to_string());
-        let instr = build_compaction_instruction(&langs).expect("non-auto");
+        let instr = build_compaction_instruction(true, &langs).expect("non-auto");
         assert!(instr.contains("Output Language Policy (enforced)"));
         assert!(instr.contains("Korean (한국어)"));
         assert!(

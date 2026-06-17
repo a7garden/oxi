@@ -72,7 +72,7 @@ pub async fn handle_input(
                 handle_overlay_paste(&text, state)
             } else {
                 state.input.insert_str(&text);
-                state.update_slash_completions();
+                state.update_slash_completions(session);
                 update_file_completions(state);
                 None
             }
@@ -117,7 +117,7 @@ async fn handle_key(
         && let oxi_tui::keybindings::keys::BaseKey::Char(c) = key_id.base
     {
         state.input.insert_char(c);
-        state.update_slash_completions();
+        state.update_slash_completions(session);
         update_file_completions(state);
     }
     None
@@ -267,25 +267,25 @@ async fn dispatch_action(
         // ── Editor editing ────────────────────────────────────
         KAction::DeleteCharBackward => {
             state.input.backspace();
-            state.update_slash_completions();
+            state.update_slash_completions(session);
             update_file_completions(state);
             None
         }
         KAction::DeleteCharForward => {
             state.input.delete();
-            state.update_slash_completions();
+            state.update_slash_completions(session);
             update_file_completions(state);
             None
         }
         KAction::DeleteToLineStart => {
             state.input.delete_to_line_start();
-            state.update_slash_completions();
+            state.update_slash_completions(session);
             update_file_completions(state);
             None
         }
         KAction::DeleteToLineEnd => {
             state.input.delete_to_line_end();
-            state.update_slash_completions();
+            state.update_slash_completions(session);
             update_file_completions(state);
             None
         }
@@ -297,11 +297,20 @@ async fn dispatch_action(
         // ── Tab / Completion ──────────────────────────────────
         KAction::Tab => {
             if state.slash_completion_active {
-                let cmd = state.selected_slash_command().map(|c| c.name.clone());
+                let sel = state
+                    .selected_slash_command()
+                    .map(|c| (c.name.clone(), c.is_arg));
                 state.clear_slash_completions();
-                state.input_clear();
-                if let Some(cmd) = cmd {
-                    return Some(Action::ExecuteSlashCommand(cmd));
+                if let Some((text, is_arg)) = sel {
+                    if is_arg {
+                        // Argument completion: fill the input, keep editing.
+                        state.input_clear();
+                        state.input_set_text(text);
+                    } else {
+                        // Command-name completion: execute immediately.
+                        state.input_clear();
+                        return Some(Action::ExecuteSlashCommand(text));
+                    }
                 }
             }
             None
@@ -411,13 +420,13 @@ async fn dispatch_action(
         // ── Actions not bound in main input mode ──────────────
         KAction::DeleteWordBackward => {
             state.input.delete_word_backward();
-            state.update_slash_completions();
+            state.update_slash_completions(session);
             update_file_completions(state);
             None
         }
         KAction::DeleteWordForward => {
             state.input.delete_word_forward();
-            state.update_slash_completions();
+            state.update_slash_completions(session);
             update_file_completions(state);
             None
         }
@@ -453,11 +462,14 @@ async fn handle_submit(
 
     // Slash command popup
     if state.slash_completion_active {
-        let cmd = state.selected_slash_command().map(|c| c.name.clone());
+        let sel = state
+            .selected_slash_command()
+            .map(|c| (c.name.clone(), c.is_arg));
         state.clear_slash_completions();
         state.input_clear();
-        if let Some(cmd) = cmd {
-            return Some(Action::ExecuteSlashCommand(cmd));
+        if let Some((text, _)) = sel {
+            // Command-name or argument completion on Enter: execute.
+            return Some(Action::ExecuteSlashCommand(text));
         }
         return None;
     }
@@ -980,21 +992,11 @@ async fn handle_overlay_key(
 
                 // Resolve models that match the selected provider, expanding
                 // to all providers sharing the same env_key (e.g. zai-coding-global
-                // and zai share the same env_key).
-                let model_providers = oxi_sdk::get_builtin_provider(&provider_name)
-                    .map(|bp| {
-                        oxi_sdk::get_builtin_providers()
-                            .iter()
-                            .filter(|p| p.env_key == bp.env_key)
-                            .map(|p| p.name)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| vec![provider_name.as_str()]);
+                // and zai share the same env_key). Uses the catalog port's
+                // sync read API when available.
+                let model_providers = resolve_sibling_providers(state, &provider_name);
 
-                let models: Vec<String> = oxi_sdk::get_all_models()
-                    .filter(|e| model_providers.contains(&e.provider))
-                    .map(|e| e.id.to_string())
-                    .collect();
+                let models: Vec<String> = list_models_for_providers(state, &model_providers);
 
                 if models.is_empty() {
                     // No models registered — fall back to "default" passthrough.
@@ -1403,4 +1405,68 @@ fn parse_issue_ids(raw: &str) -> Vec<u32> {
         }
     }
     out
+}
+
+// ── Catalog port helpers (sync read API) ───────────────────────────────────
+//
+// These helpers query the catalog port via its synchronous read API (which
+// only touches the in-memory snapshot, no I/O). When the catalog is not
+// wired (unit tests, non-TUI modes), they fall back to legacy global state.
+
+/// Resolve the set of provider names sharing the same `env_key` as
+/// `provider_name` (including itself). Falls back to `[provider_name]` if
+/// the provider is unknown or the catalog is not wired.
+pub(crate) fn resolve_sibling_providers(
+    state: &super::app::AppState,
+    provider_name: &str,
+) -> Vec<String> {
+    if let Some(ref cat) = state.catalog {
+        if let Some(entry) = cat.get_provider_sync(provider_name) {
+            let env_key = entry.env_key;
+            if let Some(ek) = env_key {
+                // Find all providers sharing this env_key.
+                return cat
+                    .list_providers_sync()
+                    .into_iter()
+                    .filter(|pid| {
+                        cat.get_provider_sync(pid)
+                            .and_then(|p| p.env_key)
+                            .as_deref()
+                            == Some(ek.as_str())
+                    })
+                    .collect();
+            }
+        }
+        return vec![provider_name.to_string()];
+    }
+    // Legacy fallback.
+    oxi_sdk::get_builtin_provider(provider_name)
+        .map(|bp| {
+            oxi_sdk::get_builtin_providers()
+                .iter()
+                .filter(|p| p.env_key == bp.env_key)
+                .map(|p| p.name.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec![provider_name.to_string()])
+}
+
+/// List model IDs whose provider is in `providers`. Uses the catalog port's
+/// sync read API when available.
+pub(crate) fn list_models_for_providers(
+    state: &super::app::AppState,
+    providers: &[String],
+) -> Vec<String> {
+    if let Some(ref cat) = state.catalog {
+        let mut out = Vec::new();
+        for pid in providers {
+            out.extend(cat.list_models_sync(pid).into_iter().map(|m| m.model_id));
+        }
+        return out;
+    }
+    // Legacy fallback.
+    oxi_sdk::get_all_models()
+        .filter(|e| providers.iter().any(|p| p == e.provider))
+        .map(|e| e.id.to_string())
+        .collect()
 }

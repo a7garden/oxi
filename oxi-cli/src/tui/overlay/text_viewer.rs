@@ -150,8 +150,8 @@ impl OverlayComponent for TextViewerOverlay {
 
 // ── Convenience constructors for common text viewers ─────────────────────
 
-pub fn help_overlay() -> Box<dyn OverlayComponent> {
-    Box::new(TextViewerOverlay::new(" Help ", HELP_CONTENT.to_string()))
+pub fn help_overlay(content: String) -> Box<dyn OverlayComponent> {
+    Box::new(TextViewerOverlay::new(" Help ", content))
 }
 
 pub fn hotkeys_overlay() -> Box<dyn OverlayComponent> {
@@ -181,63 +181,6 @@ fn format_changelog_entries(entries: Vec<(String, String)>) -> String {
 }
 
 // ── Static content ────────────────────────────────────────────────────────
-
-pub const HELP_CONTENT: &str = r#" Session
-  /new              Start a new session
-  /clone            Duplicate current session
-  /resume           Resume a previous session
-  /import <path>    Import session from JSONL
-  /tree             Show session tree
-  /fork             List messages to fork from
-  /fork <number>    Fork from a message by list number
-  /fork <id>        Fork from a specific message ID
-  /session          Show session info
-  /name <name>      Set session name
-
- Model
-  /model [id]       Switch or show model
-  /scoped-models    Models for Ctrl+P cycling
-  /router           Configure model router
-  /router pin <t>   Pin router tier (low/medium/high/off)
-  /router disable   Switch away from router
-  /router enable    Switch to router/auto
-
- Skills
-  /skill            List skills with active status
-  /skill <name>     Activate a skill
-  /skill off <name> Deactivate a skill
-
- Context
-  /compact [instr]  Compact context
-
- Tools
-  /tools            List active tools
-  /tools <name>     Toggle tool on/off
-  /extensions       List extensions & WASM tools
-  /ext              Alias for /extensions
-
- Export
-  /export [path]    Export to HTML
-  /copy             Copy code block / last reply
-  /share            Share session as GitHub Gist
-
- Auth
-  /provider [name]  Configure API key
-  /logout [name]    Remove key
-
- Info
-  /help             This help
-  /hotkeys          Key shortcuts
-  /changelog        Changelog
-  /settings         Current settings
-  /reload           Reload settings & extensions
-  /quit             Quit
-
- Keys
-  Enter             Send
-  Ctrl+C            Interrupt / Quit
-  PageUp/Down       Scroll
-  /                 Slash commands"#;
 
 pub const HOTKEYS_CONTENT: &str = r#" Navigation
   Enter              Submit input

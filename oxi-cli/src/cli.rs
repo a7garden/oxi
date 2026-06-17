@@ -259,6 +259,14 @@ pub enum IssueCommands {
         #[arg(long)]
         hash: Option<String>,
     },
+    /// Reopen a closed issue (no ownership required)
+    Reopen {
+        /// Issue id
+        id: u32,
+        /// Content hash from `show` (skip to bypass CAS check)
+        #[arg(long)]
+        hash: Option<String>,
+    },
 }
 
 // ── Extension subcommands ──────────────────────────────────────────────

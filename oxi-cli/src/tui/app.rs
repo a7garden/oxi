@@ -1,18 +1,16 @@
 //! Main TUI event loop and application state.
 
 use super::handlers;
-use super::overlay::IssuesPanelOverlay;
 use super::render;
 use super::slash;
 use super::welcome;
-use crate::app::agent_session::SessionEvent;
+use crate::app::agent_session::{AgentSession, SessionEvent};
 use crate::app::agent_session_runtime::{
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
     create_agent_session_from_services, create_agent_session_services,
 };
 use crate::context::auto_compaction::CompactionReason;
 use crate::store::session::SessionManager;
-use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
 use oxi_tui::theme::Theme;
@@ -280,6 +278,10 @@ pub(crate) struct AppState {
     pub slash_completions: Vec<slash::SlashCompletion>,
     pub slash_completion_index: usize,
     pub slash_completion_active: bool,
+    /// Central slash command registry (new layer; replaces the legacy match as
+    /// commands migrate). Dispatch/completion read from here.
+    #[allow(dead_code)]
+    pub slash_registry: slash::registry::SlashRegistry,
     pub message_count: usize,
     /// Active overlay (None = normal chat mode)
     pub overlay: Option<AppOverlay>,
@@ -342,6 +344,11 @@ pub(crate) struct AppState {
     /// Local issue store, if one was opened. Used by the `/issue` slash
     /// command to open the issues panel overlay.
     pub issue_store: Option<crate::store::issues::FileIssueStore>,
+    /// Catalog port handle for model/provider lookups without touching
+    /// legacy global state. Populated from `App::oxi().catalog()` during
+    /// TUI startup. `None` when the TUI is not driven by an `Oxi` engine
+    /// (e.g. unit tests using `AppState::new()`).
+    pub catalog: Option<std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
 }
 
 /// A toast notification to display temporarily.
@@ -424,6 +431,7 @@ impl AppState {
             slash_completions: Vec::new(),
             slash_completion_index: 0,
             slash_completion_active: false,
+            slash_registry: slash::registry::SlashRegistry::builtins(),
             message_count: 0,
             overlay: None,
             overlay_state: None,
@@ -453,6 +461,7 @@ impl AppState {
             tool_start_times: std::collections::HashMap::new(),
             notifications: Vec::new(),
             issue_store: None,
+            catalog: None,
         };
 
         // Load user keybindings from settings
@@ -486,25 +495,54 @@ impl AppState {
         self.slash_completion_active = false;
     }
 
-    pub fn update_slash_completions(&mut self) {
+    pub fn update_slash_completions(&mut self, session: &AgentSession) {
         let input_str = self.input_value();
         let text = input_str.trim();
-        if !text.starts_with('/') || text.contains(' ') {
+        if !text.starts_with('/') {
             self.clear_slash_completions();
             return;
         }
+
+        // ── Argument completion: `/cmd <prefix>` routes to the matched
+        // command's `complete_arg` (aliases + extension commands included).
+        if let Some(space) = text.find(' ') {
+            let cmd_token = &text[..space];
+            let arg_prefix = text[space + 1..].trim_start();
+            // Read-only access: borrow the registry and state immutably.
+            let registry = &self.slash_registry;
+            let state: &AppState = self;
+            let cmd_token_no_slash = cmd_token.strip_prefix('/').unwrap_or(cmd_token);
+            let items = registry.complete_arg(cmd_token, arg_prefix, session, state);
+            let mut matches: Vec<slash::SlashCompletion> = items
+                .into_iter()
+                .map(|item| slash::SlashCompletion {
+                    // Argument completion: insert the full `/cmd <arg>` text.
+                    name: format!("/{} {}{}", cmd_token_no_slash, item.text, " "),
+                    description: item.description.unwrap_or_default(),
+                    is_arg: true,
+                })
+                .collect();
+            matches.sort_by(|a, b| a.name.cmp(&b.name));
+            self.slash_completions = matches;
+            self.slash_completion_index = 0;
+            self.slash_completion_active = !self.slash_completions.is_empty();
+            return;
+        }
+
         let cmd_part = text.split_whitespace().next().unwrap_or("");
         let query = if cmd_part.len() > 1 {
             &cmd_part[1..]
         } else {
             ""
         };
-        let mut matches: Vec<slash::SlashCompletion> = BUILTIN_SLASH_COMMANDS
-            .iter()
-            .filter(|cmd| query.is_empty() || cmd.name.starts_with(query))
-            .map(|cmd| slash::SlashCompletion {
-                name: format!("/{}", cmd.name),
-                description: cmd.description.to_string(),
+        let mut matches: Vec<slash::SlashCompletion> = self
+            .slash_registry
+            .complete_command(query)
+            .into_iter()
+            .map(|e| slash::SlashCompletion {
+                name: e.display,
+                description: e.description,
+                is_arg: false,
             })
             .collect();
         matches.sort_by(|a, b| a.name.cmp(&b.name));
@@ -800,18 +838,17 @@ pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: boo
 }
 
 async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
-    // ── Hold the TUI session's liveness lock for the entire run ─────────
-    // This makes `is_session_alive("tui")` return `true` while the TUI is
-    // running, so any `issue` ownership checks (start/release/close) treat
-    // the TUI as a live owner. The guard's Drop closes the file descriptor,
-    // releasing the OS-held flock on process exit (including `kill -9`).
-    let _liveness_guard = app.issue_store().as_ref().and_then(|store| {
-        crate::store::issues::liveness::acquire(
-            &store.issues_dir(),
-            IssuesPanelOverlay::session_id(),
-        )
-        .ok()
-    });
+    // ── Liveness lock is held by `App` itself (see App::from_oxi) ──────
+    // `App::ownership_session_id` equals [`liveness::TUI_OWNERSHIP_ID`] in
+    // TUI mode, so `is_session_alive` checks made from the agent tool,
+    // the issues panel, and `/issue` slash commands all see this TUI
+    // process as a single coherent owner. The lock is released when `App`
+    // is dropped at the end of this function (kernel closes the fd →
+    // flock released → process exit, including `kill -9`).
+    debug_assert_eq!(
+        app.ownership_session_id(),
+        crate::store::issues::liveness::TUI_OWNERSHIP_ID
+    );
 
     // ── Extract resources from App (needed for session switching loop) ──
     let settings = app.settings().clone();
@@ -1186,6 +1223,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // overlay. The store is opened read-write by `App::from_oxi`; cloning
         // is cheap (inner Arc).
         state.issue_store = app.issue_store();
+        // Inject the catalog port so TUI overlays/slash commands can query
+        // models without going through legacy global state.
+        state.catalog = Some(std::sync::Arc::clone(app.oxi().catalog()));
 
         // Restore previous messages if resuming
         if is_resuming && let Some(ref path) = session_target {
@@ -1294,7 +1334,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             // (not a full-screen wizard). The user picks a provider, enters an
             // API key inline, and is then transitioned to the model selector
             // — all without leaving the TUI.
-            let provider_entries = super::overlay::provider_select::build_provider_entries();
+            let provider_entries =
+                super::overlay::provider_select::build_provider_entries_with_catalog(
+                    state.catalog.as_ref(),
+                );
             state.overlay_state = Some(Box::new(
                 super::overlay::provider_select::ProviderSelectOverlay::new(
                     provider_entries,

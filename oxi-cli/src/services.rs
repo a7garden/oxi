@@ -22,12 +22,14 @@ use anyhow::{Context, Result};
 
 use oxi_sdk::Oxi;
 use oxi_sdk::fs::{
-    FileAuthProvider, FileConfigStore, FilePersonaProvider, FileSkillLoader, FileStateStore,
-    SimpleAccessGate, TomlCapabilityResolver,
+    FileAuthProvider, FileConfigStore, FileModelCatalog, FilePersonaProvider, FileSkillLoader,
+    FileStateStore, SimpleAccessGate, TomlCapabilityResolver,
 };
 use oxi_sdk::inmem::{
     CountingResourceMonitor, InMemoryCronScheduler, InMemoryMemoryStore, InProcessEventBus,
 };
+use oxi_sdk::ports::catalog::CatalogEvent;
+use oxi_sdk::ports::fs::CatalogConfig;
 
 /// Resolved paths under the oxi home directory.
 #[derive(Debug, Clone)]
@@ -67,13 +69,38 @@ impl OxiPaths {
 
 /// Build an `Oxi` engine wired with file-based port implementations.
 ///
-/// This is the **composition root** for oxi-cli. It is intentionally
-/// side-effect-light: it does not touch the network or start any task.
-/// Run modes (TUI, print, RPC) take the returned `Oxi` and run.
-pub fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
+/// This is the **composition root** for oxi-cli. The catalog port
+/// (`FileModelCatalog`) performs network I/O during `init()` (cache check
+/// + optional one refresh attempt).
+///
+/// Callers that want a fully sync composition should use the catalog's
+/// noop default or pre-construct a `CatalogConfig` with
+/// `fetch_enabled: false`.
+pub async fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
+    build_oxi_with_catalog(paths, build_catalog_config(paths)).await
+}
+
+/// Build an `Oxi` engine with a custom catalog config. Useful for tests
+/// (e.g. pointing the catalog at a tempdir).
+pub async fn build_oxi_with_catalog(
+    paths: &OxiPaths,
+    catalog_config: CatalogConfig,
+) -> Result<Oxi> {
     ensure_parent(&paths.auth)?;
     ensure_parent(&paths.config)?;
     ensure_parent(&paths.sessions)?;
+
+    // Initialize the catalog (loads embedded SNAP + cache + overrides).
+    // Errors here are non-fatal — we fall back to noop and let the user
+    // re-run `oxi refresh` to recover.
+    let catalog: Arc<dyn oxi_sdk::ports::catalog::ModelCatalog> =
+        match FileModelCatalog::init(catalog_config).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "catalog init failed; continuing with noop");
+                oxi_sdk::NoopModelCatalog::new()
+            }
+        };
 
     let oxi = oxi_sdk::OxiBuilder::new()
         .with_builtins()
@@ -94,9 +121,92 @@ pub fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
         .with_memory(Arc::new(InMemoryMemoryStore::new()))
         .with_cron(Arc::new(InMemoryCronScheduler::new()))
         .with_resources(Arc::new(CountingResourceMonitor::new()))
+        .with_catalog(catalog)
         .build();
 
     Ok(oxi)
+}
+
+/// Build a `CatalogConfig` rooted at `paths.home` (default cache, ETag,
+/// and override file locations).
+fn build_catalog_config(paths: &OxiPaths) -> CatalogConfig {
+    CatalogConfig {
+        cache_path: paths.home.join("cache").join("models-dev.json"),
+        etag_path: paths.home.join("cache").join("models-dev.json.etag"),
+        override_path: paths.home.join("catalog").join("overrides.toml"),
+        mtime_window: std::time::Duration::from_secs(60 * 60),
+        fetch_enabled: std::env::var("OXI_MODELS_DEV_DISABLE_FETCH")
+            .ok()
+            .map(|v| !matches!(v.as_str(), "1" | "true" | "TRUE"))
+            .unwrap_or(true),
+        models_dev_url: std::env::var("OXI_MODELS_DEV_URL")
+            .unwrap_or_else(|_| "https://models.dev".to_string()),
+        user_agent: format!("oxi-cli/{}", env!("CARGO_PKG_VERSION")),
+        local_discovery_urls: local_discovery_from_env(),
+        snapshot_path: paths.home.join("cache").join("models-dev.json"),
+    }
+}
+
+/// Resolve local-discovery URLs from environment.
+///
+/// `OXI_LOCAL_DISCOVERY` is a comma-separated list of base URLs (e.g.
+/// `http://localhost:11434/v1,http://localhost:1234/v1`). Empty default.
+fn local_discovery_from_env() -> Vec<String> {
+    std::env::var("OXI_LOCAL_DISCOVERY")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|u| u.trim().to_string())
+                .filter(|u| !u.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Spawn a background task that drains the catalog event channel and logs
+/// at info level. The returned `JoinHandle` can be dropped (the task runs
+/// for the lifetime of the program — it owns its Receiver clone).
+///
+/// This is a thin convenience — production consumers should subscribe to
+/// `oxi.catalog().subscribe()` directly and react to events (UI refresh,
+/// cache invalidation, etc.).
+pub fn spawn_catalog_event_logger(
+    catalog: Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>,
+) -> tokio::task::JoinHandle<()> {
+    let mut rx = catalog.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            match event {
+                CatalogEvent::Updated {
+                    provider_count,
+                    model_count,
+                } => {
+                    tracing::info!(provider_count, model_count, "catalog refreshed");
+                }
+                CatalogEvent::RefreshFailed { reason, .. } => {
+                    tracing::warn!(reason, "catalog refresh failed");
+                }
+                CatalogEvent::OverrideApplied {
+                    path,
+                    provider_overrides,
+                    model_overrides,
+                } => {
+                    tracing::info!(
+                        path = %path.display(),
+                        provider_overrides,
+                        model_overrides,
+                        "catalog overrides applied"
+                    );
+                }
+                CatalogEvent::LocalDiscovered {
+                    base_url,
+                    model_count,
+                } => {
+                    tracing::info!(base_url, model_count, "local models discovered");
+                }
+            }
+        }
+    })
 }
 
 fn ensure_parent(path: &Path) -> Result<()> {
@@ -120,11 +230,11 @@ mod tests {
         assert!(p.skills.starts_with("/tmp/oxi-test"));
     }
 
-    #[test]
-    fn build_oxi_succeeds() {
+    #[tokio::test]
+    async fn build_oxi_succeeds() {
         let tmp = tempfile::TempDir::new().unwrap();
         let paths = OxiPaths::from_home(tmp.path());
-        let oxi = build_oxi(&paths).unwrap();
+        let oxi = build_oxi(&paths).await.unwrap();
         // State is wired (even if we don't call it).
         let _ = oxi.ports().state;
     }

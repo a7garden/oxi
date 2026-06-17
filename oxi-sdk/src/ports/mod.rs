@@ -12,9 +12,9 @@
 //!      │ implements
 //!      ▼
 //!   Product layer
-//!   ├── oxi-cli    → FileStateStore, FileAuthProvider, FileSkillLoader
+//!   ├── oxi-cli    → FileStateStore, FileAuthProvider, FileSkillLoader, FileModelCatalog
 //!   ├── oxios-kernel → OxiosStateStore, OxiosEventBus, OxiosMemoryStore
-//!   └── custom     → MyDbStateStore, MyAuthProvider, etc.
+//!   └── custom     → MyDbStateStore, MyAuthProvider, MyModelCatalog, etc.
 //! ```
 //!
 //! # Design Principles
@@ -32,6 +32,8 @@
 //!
 //! Port traits are **additive**. New methods get default noop implementations,
 //! so adding a port or extending an existing one never breaks existing products.
+
+pub mod catalog;
 
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -57,6 +59,28 @@ pub type PortId = String;
 /// Each product uses its own concrete types; the port contract only requires
 /// the value be JSON-serializable so products stay decoupled.
 pub type PortValue = serde_json::Value;
+
+/// How a provider passes its API key in HTTP headers.
+///
+/// Port-level enum (lives in oxi-sdk so the catalog port's `default_auth()`
+/// can return it). Mirrors the existing `oxi_ai::catalog::AuthMethod` and
+/// `oxi_ai::providers::AuthMethod` — those will be reconciled in PR 4 when
+/// `BuiltinProviderEntry` is removed.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuthMethod {
+    /// `Authorization: Bearer <key>` — most OpenAI-compatible providers.
+    #[default]
+    Bearer,
+    /// `x-api-key: <key>` — Anthropic and Anthropic-compatible providers.
+    #[serde(rename = "x-api-key")]
+    XApiKey,
+    /// `api-key: <key>` — Azure OpenAI.
+    #[serde(rename = "api-key")]
+    ApiKey,
+    /// No API key header (uses other auth like OAuth, SigV4).
+    None,
+}
 
 /// An OAuth token bundle (subset of `oxi_ai::oauth::TokenBundle`).
 ///
@@ -822,6 +846,9 @@ pub struct PortRegistry {
     pub cron: Arc<dyn CronScheduler>,
     /// Resource monitor.
     pub resources: Arc<dyn ResourceMonitor>,
+    /// Model catalog — provider/model metadata source of truth.
+    /// Default: [`NoopModelCatalog`] (empty results).
+    pub catalog: Arc<dyn catalog::ModelCatalog>,
 }
 
 impl std::fmt::Debug for PortRegistry {
@@ -838,6 +865,7 @@ impl std::fmt::Debug for PortRegistry {
             .field("memory", &"<dyn MemoryStore>")
             .field("cron", &"<dyn CronScheduler>")
             .field("resources", &"<dyn ResourceMonitor>")
+            .field("catalog", &"<dyn ModelCatalog>")
             .finish()
     }
 }
@@ -864,6 +892,7 @@ impl PortRegistry {
             memory: Arc::new(NoopMemoryStore),
             cron: Arc::new(NoopCronScheduler),
             resources: Arc::new(NoopResourceMonitor),
+            catalog: catalog::NoopModelCatalog::new(),
         }
     }
 

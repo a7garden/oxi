@@ -86,17 +86,32 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     // Status bar
     state.footer_state.data.is_busy = state.is_agent_busy;
-    // Issue indicator: shows open issue count and the most recent open issue
-    // title. Cheap (uses the in-memory cache in `FileIssueStore`).
+    // Issue indicator: shows open count, lock count, top-priority dot, and
+    // the most recent open issue title. Cheap (uses the in-memory cache in
+    // `FileIssueStore::summary`).
     state.footer_state.data.extra_right = match &state.issue_store {
         Some(store) => {
-            let count = store.open_count();
-            if count == 0 {
+            let s = store.summary();
+            if s.is_empty() {
                 String::new()
-            } else if let Some(title) = store.latest_open_title() {
-                format!("\u{1F4CB} {} · {}", count, truncate_for_footer(&title))
             } else {
-                format!("\u{1F4CB} {} issues", count)
+                let prio = match s.top_priority {
+                    Some(crate::store::issues::Priority::Critical) => "🔴",
+                    Some(crate::store::issues::Priority::High) => "🟠",
+                    Some(crate::store::issues::Priority::Medium) => "🟡",
+                    Some(crate::store::issues::Priority::Low) => "🟢",
+                    None => "",
+                };
+                let lock = if s.locked_open_count > 0 {
+                    format!(" \u{1F512}{}", s.locked_open_count)
+                } else {
+                    String::new()
+                };
+                let title_part = match &s.latest_open_title {
+                    Some(t) => format!(" · {}", truncate_for_footer(t)),
+                    None => String::new(),
+                };
+                format!("{prio}\u{1F4CB} {}{lock}{title_part}", s.open_count)
             }
         }
         None => String::new(),

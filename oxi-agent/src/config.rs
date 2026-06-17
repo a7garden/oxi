@@ -164,6 +164,14 @@ pub struct AgentConfig {
     /// [`OutputMode`]: crate::structured_output::OutputMode
     #[serde(default)]
     pub output_mode: Option<String>,
+    /// Session identity used by tools that gate behavior on liveness (e.g. the
+    /// `issue` tool's `start`/`close` ownership checks). When `Some`, this value
+    /// is threaded through to [`crate::tools::ToolContext::session_id`].
+    /// `None` means the tool receives `session_id == None` and ownership-gated
+    /// operations will reject the call (defensive default).
+    #[serde(default)]
+    pub session_id: Option<String>,
+
     /// Per-provider options for fine-grained control.
     ///
     /// When set, these are passed through to [`oxi_ai::StreamOptions::provider_options`]
@@ -190,6 +198,7 @@ impl Default for AgentConfig {
             workspace_dir: None,
             output_mode: None,
             provider_options: None,
+            session_id: None,
         }
     }
 }

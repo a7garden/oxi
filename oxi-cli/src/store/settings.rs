@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 /// Version history:
 /// - 4: dynamic_models field + last_used_model/provider split
 /// - 5: output_languages field (TUI-only language policy)
-const SETTINGS_VERSION: u32 = 5;
+/// - 6: language_policy_enabled field (master toggle, default OFF)
+const SETTINGS_VERSION: u32 = 6;
 
 /// Known output channels for the TUI language policy.
 ///
@@ -305,6 +306,27 @@ pub struct Settings {
     /// map" above.
     #[serde(default)]
     pub output_languages: HashMap<String, String>,
+
+    // ── TUI language policy master toggle (v6) ────────────────────────
+    /// Master switch for the TUI output language policy.
+    ///
+    /// **Default: `false` (opt-in).** Even with a non-empty
+    /// `output_languages` map, the policy is **not** injected into
+    /// the system prompt or compaction instruction unless this is
+    /// `true`. Users must toggle it ON in the `/settings` overlay
+    /// for the policy to take effect.
+    ///
+    /// **Why opt-in (not opt-out):** keeps the pre-feature behavior
+    /// intact for users who never touch language settings, while
+    /// making the feature discoverable through the overlay toggle.
+    /// Users who configured `output_languages` in v5 will see their
+    /// channel mappings preserved on disk, but disabled until they
+    /// flip this switch.
+    ///
+    /// **Scope:** TUI-only. `oxi --print` and RPC mode ignore the
+    /// policy regardless of this flag (see AGENTS.md pitfalls).
+    #[serde(default = "default_false")]
+    pub language_policy_enabled: bool,
 }
 
 fn default_theme() -> String {
@@ -377,6 +399,7 @@ impl Default for Settings {
             circuit_breaker_open_duration_secs: 30,
             keybindings: HashMap::new(),
             output_languages: HashMap::new(),
+            language_policy_enabled: false,
         }
     }
 }
@@ -903,11 +926,14 @@ impl Settings {
     /// Migrate settings from an older format version to the current one.
     ///
     /// Currently handles:
-    /// - Version 0 → Version 2 (adds JSON support, version bump)
-    /// - Version 1 → Version 2 (adds JSON support)
+    /// - Version 0 → Version 6 (multi-step)
+    /// - Version 1 → Version 6 (multi-step)
+    /// - Version 2 → Version 6 (multi-step)
     /// - Version 3 → Version 4 (default_model → last_used_model)
     /// - Version 4 → Version 5 (output_languages field added — no
     ///   value migration, serde default fills with empty map)
+    /// - Version 5 → Version 6 (language_policy_enabled field added —
+    ///   defaults to false via `#[serde(default = "default_false")]`)
     fn migrate(settings: Settings) -> Result<Settings> {
         let mut settings = settings;
 
@@ -926,17 +952,19 @@ impl Settings {
                 tracing::info!("Migrated settings from version 0 to {}", SETTINGS_VERSION);
             }
             1 | 2 => {
-                // Version 1/2 → 5: dynamic_models field added + model/provider split
-                // (back-compat path that also covers the 4 → 5 no-op for output_languages).
+                // Version 1/2 → 6: dynamic_models field added + model/provider split.
+                // The v3 → v4 default_model → last_used_model split doesn't apply
+                // here (no default_model in v1/v2). `#[serde(default)]` fills
+                // output_languages (empty) and language_policy_enabled (false).
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
-                    "Migrated settings from version {} to {}",
+                    "Migrated settings from version {} to {} (dynamic_models + output_languages + language_policy_enabled defaults applied)",
                     settings.version,
                     SETTINGS_VERSION
                 );
             }
             3 => {
-                // Version 3 → 4: migrate default_model → last_used_model.
+                // Version 3 → 4 step happens inline: migrate default_model → last_used_model.
                 if let Some(model) = settings.default_model.take() {
                     if let Some((provider, model_name)) = model.split_once('/') {
                         settings.last_used_provider = Some(provider.to_string());
@@ -945,20 +973,32 @@ impl Settings {
                         settings.last_used_model = Some(model);
                     }
                 }
+                // Then collapse to v6: output_languages + language_policy_enabled default.
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
-                    "Migrated settings from version 3 to {} (default_model → last_used_model)",
+                    "Migrated settings from version 3 to {} (default_model → last_used_model; output_languages + language_policy_enabled defaults)",
                     SETTINGS_VERSION
                 );
             }
             4 => {
-                // Version 4 → 5: output_languages field added.
-                // No value migration needed — `#[serde(default)]` fills
-                // the missing field with an empty map (all channels = "auto"),
-                // which is the pre-feature behavior.
+                // Version 4 → 5 (output_languages field added) collapses to v6.
+                // No value migration needed — `#[serde(default)]` fills the
+                // missing fields with empty map + language_policy_enabled = false.
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
-                    "Migrated settings from version 4 to {} (added output_languages, defaulting all channels to auto)",
+                    "Migrated settings from version 4 to {} (added output_languages + language_policy_enabled, both defaulted to off)",
+                    SETTINGS_VERSION
+                );
+            }
+            5 => {
+                // Version 5 → 6: language_policy_enabled field added.
+                // `#[serde(default = "default_false")]` fills with false (opt-in).
+                // Existing v5 users with output_languages configured will see
+                // their channel mappings preserved but disabled until they
+                // toggle the master switch ON in /settings.
+                settings.version = SETTINGS_VERSION;
+                tracing::info!(
+                    "Migrated settings from version 5 to {} (added language_policy_enabled, defaulting to OFF — toggle ON in /settings to activate existing channels)",
                     SETTINGS_VERSION
                 );
             }
@@ -1627,6 +1667,71 @@ theme = "dracula"
         let codes: Vec<&str> = KNOWN_LANGS.iter().map(|(k, _)| *k).collect();
         assert!(codes.contains(&"auto"));
         assert!(codes.contains(&"en"));
+    }
+
+    #[test]
+    fn test_default_language_policy_enabled_is_false() {
+        // v6: master toggle defaults to OFF (opt-in).
+        let settings = Settings::default();
+        assert!(
+            !settings.language_policy_enabled,
+            "language_policy_enabled must default to false (opt-in)"
+        );
+    }
+
+    #[test]
+    fn test_migration_v5_to_v6_defaults_master_toggle_to_off() {
+        // v5 settings (with output_languages configured) should migrate to v6
+        // with language_policy_enabled = false. Channel mappings are preserved
+        // but disabled until the user flips the master switch.
+        let mut settings = Settings::default();
+        settings.version = 5;
+        settings
+            .output_languages
+            .insert("response".to_string(), "ko".to_string());
+        settings
+            .output_languages
+            .insert("commit_message".to_string(), "en".to_string());
+
+        let migrated = Settings::migrate(settings).unwrap();
+        assert_eq!(migrated.version, SETTINGS_VERSION);
+        assert!(
+            !migrated.language_policy_enabled,
+            "v5 → v6 migration must default language_policy_enabled to false"
+        );
+        // Channel mappings are preserved verbatim.
+        assert_eq!(
+            migrated.output_languages.get("response"),
+            Some(&"ko".to_string())
+        );
+        assert_eq!(
+            migrated.output_languages.get("commit_message"),
+            Some(&"en".to_string())
+        );
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip_preserves_language_policy_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.toml");
+
+        let mut original = Settings::default();
+        original.language_policy_enabled = true;
+        original
+            .output_languages
+            .insert("response".to_string(), "ko".to_string());
+
+        let content = toml::to_string_pretty(&original).unwrap();
+        fs::write(&settings_path, &content).unwrap();
+
+        let loaded_content = fs::read_to_string(&settings_path).unwrap();
+        let loaded: Settings = toml::from_str(&loaded_content).unwrap();
+
+        assert!(loaded.language_policy_enabled);
+        assert_eq!(
+            loaded.output_languages.get("response"),
+            Some(&"ko".to_string())
+        );
     }
 
     #[test]

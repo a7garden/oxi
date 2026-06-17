@@ -16,14 +16,12 @@ use tracing;
 /// Build a wired `App` from CLI args. All the wiring that used to be
 /// inline in `main()` lives here.
 pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
-    // Layer 2.5: prime the models.dev live catalog so that the first model
-    // lookup (and every subsequent one) sees enriched pricing / limits /
-    // reasoning flags. Near-instant on a cache hit; bounded to ~10s on a
-    // cache miss. Falls back to Layer 1 silently if offline.
-    //
-    // Runs before settings load so any catalog-driven default selection
-    // also benefits. Safe to skip in tests via `OXI_MODELS_DEV=off`.
-    oxi_ai::catalog::models_dev::init_models_dev().await;
+    // Layer 2.5 / Catalog Port (v3): the `FileModelCatalog` wired in
+    // `services::build_oxi` performs its own init at `OxiBuilder::build`
+    // time — it loads the embedded SNAP, applies overrides, and attempts
+    // one refresh if the cache is stale. So we no longer call the legacy
+    // `init_models_dev()` here. To skip network access during boot, set
+    // `OXI_MODELS_DEV_DISABLE_FETCH=1`.
 
     // Load settings (global + project + env layers).
     let mut settings = Settings::load().unwrap_or_default();
@@ -73,8 +71,31 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     }
 
     // Build the wired Oxi engine + Agent via the SDK composition root.
-    let oxi = crate::build_oxi_engine()?;
-    let mut app = crate::App::from_oxi(oxi, settings).await?;
+    let oxi = crate::build_oxi_engine().await?;
+
+    // Per-process liveness identity for issue-system ownership. In TUI mode
+    // we use the canonical "tui" id so the agent tool, the TUI panel, and
+    // the `/issue` slash command all share the same flock holder. In any
+    // non-TUI mode (print, RPC, single-prompt) we generate a stable
+    // process-scoped id; that way concurrent ownership checks see this
+    // process as a single coherent owner rather than an empty caller.
+    let ownership_session_id = if is_tui_mode(args) {
+        crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string()
+    } else {
+        format!(
+            "proc-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        )
+    };
+
+    // Spawn the catalog event logger so refresh / override / local-discovery
+    // events show up in the log file. UI hooks can subscribe to
+    // `oxi.catalog().subscribe()` separately for picker invalidation.
+    let _catalog_logger =
+        crate::services::spawn_catalog_event_logger(std::sync::Arc::clone(oxi.catalog()));
+
+    let mut app = crate::App::from_oxi(oxi, settings, ownership_session_id).await?;
 
     // Register built-in tools on the agent's tool registry.
     let tools = app.agent_tools();
@@ -420,4 +441,19 @@ fn register_router_provider(settings: &Settings) {
     if let Some(profile) = settings.router_profile() {
         tracing::info!("Router active with profile: {profile}");
     }
+}
+
+/// Decide whether this run is the TUI (interactive) mode. Mirrors the
+/// dispatch in [`dispatch_run_mode`]: print / RPC / single-prompt are
+/// non-TUI. Used by [`build_app`] to pick the canonical liveness identity.
+fn is_tui_mode(args: &CliArgs) -> bool {
+    if args.mode.as_deref() == Some("json") || args.print {
+        return false;
+    }
+    // prompt-only (no `--interactive` and non-empty prompt) is non-TUI too;
+    // dispatch_run_mode sends it through main_dispatch::run_single_prompt.
+    if !args.interactive && !args.prompt.is_empty() {
+        return false;
+    }
+    true
 }

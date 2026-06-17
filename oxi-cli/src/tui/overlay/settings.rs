@@ -28,10 +28,27 @@ fn share_state(state: &mut crate::tui::app::AppState) -> SharedAppState {
 // ─────────────────────────────────────────────────────────────────────────
 
 enum SettingsItem {
-    Toggle { label: String, value: bool },
-    Choice { label: String, value: String },
-    ReadOnly { label: String, value: String },
-    Action { label: String, id: &'static str },
+    Toggle {
+        label: String,
+        value: bool,
+    },
+    Choice {
+        label: String,
+        value: String,
+        /// When `true`, the item is rendered greyed-out and Enter/Space
+        /// are blocked (no cycling, optional warning notification).
+        /// Used to gate the per-channel language Choice items behind
+        /// the `language_policy` master toggle.
+        disabled: bool,
+    },
+    ReadOnly {
+        label: String,
+        value: String,
+    },
+    Action {
+        label: String,
+        id: &'static str,
+    },
 }
 
 impl SettingsItem {
@@ -59,6 +76,9 @@ impl SettingsItem {
     }
     fn is_editable(&self) -> bool {
         !matches!(self, SettingsItem::ReadOnly { .. })
+    }
+    fn is_disabled(&self) -> bool {
+        matches!(self, SettingsItem::Choice { disabled: true, .. })
     }
 }
 
@@ -135,36 +155,51 @@ impl SettingsOverlay {
                         "extensions" => settings.extensions_enabled = *value,
                         "auto_compact" => settings.auto_compaction = *value,
                         "routing" => settings.enable_routing = *value,
+                        "language_policy" => settings.language_policy_enabled = *value,
                         _ => {}
                     },
-                    SettingsItem::Choice { label, value } => match label.as_str() {
-                        "thinking" => {
-                            settings.thinking_level = match value.as_str() {
-                                "Off" => crate::store::settings::ThinkingLevel::Off,
-                                "Minimal" => crate::store::settings::ThinkingLevel::Minimal,
-                                "Low" => crate::store::settings::ThinkingLevel::Low,
-                                "Medium" => crate::store::settings::ThinkingLevel::Medium,
-                                "High" => crate::store::settings::ThinkingLevel::High,
-                                "XHigh" => crate::store::settings::ThinkingLevel::XHigh,
-                                _ => settings.thinking_level,
-                            };
+                    SettingsItem::Choice {
+                        label,
+                        value,
+                        disabled,
+                    } => {
+                        // Disabled Choices (gated by language_policy=OFF) are
+                        // accepted but ignored on persist — their in-overlay
+                        // value may have been cycled by the user before they
+                        // realized the gate, so we trust the master toggle
+                        // for whether the channel is honored.
+                        if *disabled {
+                            continue;
                         }
-                        "theme" => settings.theme = value.clone(),
-                        // TUI language policy channels. `label` is
-                        // "language.<channel_key>"; the cycle value
-                        // is the language code (e.g. "ko", "en", "auto").
-                        // "auto" or empty value removes the channel
-                        // from the map (restoring default behavior).
-                        lbl if lbl.starts_with("language.") => {
-                            let channel = lbl.trim_start_matches("language.").to_string();
-                            if value == "auto" {
-                                settings.output_languages.remove(&channel);
-                            } else {
-                                settings.output_languages.insert(channel, value.clone());
+                        match label.as_str() {
+                            "thinking" => {
+                                settings.thinking_level = match value.as_str() {
+                                    "Off" => crate::store::settings::ThinkingLevel::Off,
+                                    "Minimal" => crate::store::settings::ThinkingLevel::Minimal,
+                                    "Low" => crate::store::settings::ThinkingLevel::Low,
+                                    "Medium" => crate::store::settings::ThinkingLevel::Medium,
+                                    "High" => crate::store::settings::ThinkingLevel::High,
+                                    "XHigh" => crate::store::settings::ThinkingLevel::XHigh,
+                                    _ => settings.thinking_level,
+                                };
                             }
+                            "theme" => settings.theme = value.clone(),
+                            // TUI language policy channels. `label` is
+                            // "language.<channel_key>"; the cycle value
+                            // is the language code (e.g. "ko", "en", "auto").
+                            // "auto" or empty value removes the channel
+                            // from the map (restoring default behavior).
+                            lbl if lbl.starts_with("language.") => {
+                                let channel = lbl.trim_start_matches("language.").to_string();
+                                if value == "auto" {
+                                    settings.output_languages.remove(&channel);
+                                } else {
+                                    settings.output_languages.insert(channel, value.clone());
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -216,7 +251,27 @@ impl OverlayComponent for SettingsOverlay {
                         *value = !*value;
                         self.changed = true;
                     }
-                    SettingsItem::Choice { label, value, .. } => {
+                    SettingsItem::Choice {
+                        label,
+                        value,
+                        disabled,
+                    } => {
+                        // Disabled Choices (gated by language_policy=OFF)
+                        // surface a guidance notification and block the cycle.
+                        if *disabled {
+                            if let Ok(ptr) = self.app_state.lock() {
+                                // SAFETY: Mutex lock guarantees exclusive access.
+                                unsafe {
+                                    if let Some(ref mut app) = (*ptr).as_mut() {
+                                        app.add_notification(
+                                            "Enable language_policy first.".to_string(),
+                                            crate::tui::app::NotificationKind::Warning,
+                                        );
+                                    }
+                                }
+                            }
+                            return OverlayAction::None;
+                        }
                         let options = get_choice_options(label);
                         if let Some(pos) = options.iter().position(|o| o == value) {
                             let next = (pos + 1) % options.len();
@@ -243,9 +298,35 @@ impl OverlayComponent for SettingsOverlay {
                             }
                         } else if *id == "router_setup" {
                             let auth = crate::store::auth_storage::shared_auth_storage();
-                            let models: Vec<String> = oxi_sdk::get_all_models()
-                                .filter(|entry| auth.get_api_key(entry.provider).is_some())
-                                .map(|entry| format!("{}/{}", entry.provider, entry.id))
+                            // Read models via the catalog port (sync API)
+                            // when the AppState is available, else fall back
+                            // to legacy global state.
+                            let all_pairs: Vec<(String, String)> =
+                                if let Ok(ptr) = self.app_state.lock() {
+                                    // SAFETY: `ptr` points at the AppState
+                                    // borrowed immutably for the duration of
+                                    // this block. We only read `catalog`
+                                    // and do not mutate AppState.
+                                    let state = unsafe { &**ptr };
+                                    if let Some(ref cat) = state.catalog {
+                                        cat.search_sync("")
+                                            .into_iter()
+                                            .map(|e| (e.provider, e.model_id))
+                                            .collect()
+                                    } else {
+                                        oxi_sdk::get_all_models()
+                                            .map(|e| (e.provider.to_string(), e.id.to_string()))
+                                            .collect()
+                                    }
+                                } else {
+                                    oxi_sdk::get_all_models()
+                                        .map(|e| (e.provider.to_string(), e.id.to_string()))
+                                        .collect()
+                                };
+                            let models: Vec<String> = all_pairs
+                                .into_iter()
+                                .filter(|(provider, _)| auth.get_api_key(provider).is_some())
+                                .map(|(provider, model_id)| format!("{}/{}", provider, model_id))
                                 .collect();
                             return OverlayAction::OpenRouterSetup {
                                 initial: crate::tui::overlay::RouterSetupData {
@@ -262,13 +343,21 @@ impl OverlayComponent for SettingsOverlay {
             KeyCode::Esc => {
                 if self.changed {
                     self.persist_changes();
+                    // v6: auto-apply changes to the live agent so the next
+                    // turn picks them up. `rebuild_system_prompt()` fresh-loads
+                    // `Settings` from disk (covering both this overlay's
+                    // persist and any external `settings.toml` edits) and
+                    // calls `Agent::set_system_prompt`. No live LLM call is
+                    // interrupted — `set_system_prompt` only affects future
+                    // turns.
+                    self.session.rebuild_system_prompt();
                     if let Ok(ptr) = self.app_state.lock() {
                         // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                         // The raw pointer is valid for the lock's lifetime.
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
                                 app.add_notification(
-                                    "Settings saved.".to_string(),
+                                    "Settings saved and applied.".to_string(),
                                     crate::tui::app::NotificationKind::Success,
                                 );
                             }
@@ -332,7 +421,14 @@ impl OverlayComponent for SettingsOverlay {
                 let item = &self.all_items[idx];
                 let label = format!("{:<22}", item.label());
                 let value = format!("{:<20}", item.value_str());
-                let style = if item.is_editable() {
+                // Disabled Choices (gated by language_policy=OFF) render
+                // dimmer than the muted ReadOnly color to signal that
+                // the value is gated, not just informational.
+                let style = if item.is_disabled() {
+                    Style::default()
+                        .fg(theme.colors.muted)
+                        .add_modifier(Modifier::DIM)
+                } else if item.is_editable() {
                     styles.normal
                 } else {
                     Style::default().fg(theme.colors.muted)
@@ -414,11 +510,13 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     let mut items = vec![SettingsItem::Choice {
         label: "thinking".to_string(),
         value: thinking_str.to_string(),
+        disabled: false,
     }];
 
     items.push(SettingsItem::Choice {
         label: "theme".to_string(),
         value: settings.theme.clone(),
+        disabled: false,
     });
 
     items.push(SettingsItem::Toggle {
@@ -440,12 +538,16 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     // Each channel is a Choice that cycles through `KNOWN_LANGS` codes.
     // "auto" (the default, when the channel is absent from the map) means
     // "match the most recent user message language". These settings are
-    // consumed only by the TUI session build path; `oxi --print` and RPC
-    // mode ignore them. Run `/reload` after changing them to apply to the
-    // live session.
+    // consumed only by the TUI session build path; `oxi --print` and
+    // RPC mode ignore them. Closing the overlay auto-applies changes
+    // (see Esc handler).
     items.push(SettingsItem::ReadOnly {
         label: "── Language (TUI) ─".to_string(),
         value: "─────────────────────".to_string(),
+    });
+    items.push(SettingsItem::Toggle {
+        label: "language_policy".to_string(),
+        value: settings.language_policy_enabled,
     });
     for (key, _label) in crate::store::settings::KNOWN_CHANNELS {
         let value = settings
@@ -456,6 +558,10 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
         items.push(SettingsItem::Choice {
             label: format!("language.{key}"),
             value,
+            // Channels are gated by the master `language_policy` toggle.
+            // When OFF, the item is rendered greyed-out and Enter/Space
+            // are blocked. When ON, channels become editable.
+            disabled: !settings.language_policy_enabled,
         });
     }
 

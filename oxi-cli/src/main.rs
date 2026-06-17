@@ -92,13 +92,13 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
             handle_ext_command(action).await?;
         }
         Commands::Models { provider } => {
-            handle_models_command(provider)?;
+            handle_models_command(provider).await?;
         }
         Commands::Refresh {} => {
             handle_refresh_command().await?;
         }
         Commands::Setup { reset } => {
-            handle_setup_command(*reset)?;
+            handle_setup_command(*reset).await?;
         }
         Commands::Reset {
             yes,
@@ -213,6 +213,23 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             println!("closed issue #{}: {}", closed.meta.id, closed.meta.title);
+        }
+        IssueCommands::Reopen { id, hash } => {
+            // Reopen doesn't need ownership — it just flips status back to
+            // Open and clears closed_at / assignment. Use the supplied hash
+            // if any, otherwise read fresh.
+            let effective_hash = match hash.clone() {
+                Some(h) => h,
+                None => store.read(*id)?.1,
+            };
+            let reopened = store
+                .reopen(*id, Some(effective_hash))
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            println!(
+                "reopened issue #{}: {}",
+                reopened.meta.id, reopened.meta.title
+            );
         }
     }
     Ok(())
@@ -749,11 +766,11 @@ fn config_remove_provider(name: &str) -> Result<()> {
 }
 
 /// Handle `oxi setup [--reset]`
-fn handle_setup_command(reset: bool) -> Result<()> {
+async fn handle_setup_command(reset: bool) -> Result<()> {
     if reset {
         handle_config_reset(true)?;
     }
-    oxi::setup_wizard::run()
+    oxi::setup_wizard::run().await
 }
 
 /// Target descriptor for the reset command.
@@ -1071,20 +1088,54 @@ fn handle_config_reset(all: bool) -> Result<()> {
 ///
 /// Performs a conditional GET (ETag). The refreshed cache takes effect
 /// on the next process start (the in-memory catalog is immutable).
+///
+/// Uses the catalog port (`FileModelCatalog`) directly. The `App`'s
+/// catalog would be equivalent but this command runs standalone (no App).
 async fn handle_refresh_command() -> Result<()> {
+    use oxi_sdk::ModelCatalog;
+    use oxi_sdk::ports::catalog::RefreshOutcome;
+    use oxi_sdk::ports::fs::{CatalogConfig, FileModelCatalog};
+
+    let paths = oxi::services::OxiPaths::default_paths()?;
+    let config = CatalogConfig {
+        cache_path: paths.home.join("cache").join("models-dev.json"),
+        etag_path: paths.home.join("cache").join("models-dev.json.etag"),
+        override_path: paths.home.join("catalog").join("overrides.toml"),
+        // Bypass the mtime window so we always issue a conditional GET.
+        mtime_window: std::time::Duration::ZERO,
+        ..Default::default()
+    };
+    // We don't run `init`'s optional pre-refresh — load SNAP+cache, then
+    // explicitly call refresh to issue a conditional GET.
+    let cat = FileModelCatalog::init(config).await?;
+
     println!("Refreshing model catalog from models.dev...");
-    let updated = oxi_ai::catalog::models_dev::refresh().await;
-    if updated {
-        println!("✓ Catalog updated. Restart oxi to use the new data.");
-    } else {
-        println!("✓ Catalog already up to date.");
+    match cat.refresh().await? {
+        RefreshOutcome::Updated {
+            provider_count,
+            model_count,
+        } => {
+            println!(
+                "✓ Catalog updated: {} providers, {} models.",
+                provider_count, model_count
+            );
+        }
+        RefreshOutcome::Unchanged => {
+            println!("✓ Catalog already up to date.");
+        }
+        RefreshOutcome::Offline { reason } => {
+            println!("⚠ Catalog refresh skipped (offline: {reason}).");
+        }
+        RefreshOutcome::Failed { reason } => {
+            println!("✗ Catalog refresh failed: {reason}.");
+        }
     }
     Ok(())
 }
 
 /// Handle `oxi models [--provider <name>]`
-fn handle_models_command(provider: &Option<String>) -> Result<()> {
-    use oxi_sdk::{get_all_models, get_provider_models, model_count};
+async fn handle_models_command(provider: &Option<String>) -> Result<()> {
+    use oxi_sdk::ModelCatalog;
 
     // If a custom provider is specified, also try to fetch models dynamically
     if let Some(ref provider_name) = *provider {
@@ -1149,8 +1200,9 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
             }
         }
 
-        // Fallback: show static models for this provider
-        let models = get_provider_models(provider_name);
+        // Fallback: show catalog models for this provider via the port.
+        let cat = build_catalog_for_cli().await?;
+        let models = cat.list_models(provider_name).await?;
         if models.is_empty() {
             println!(
                 "No models found for provider '{}' (static or dynamic).",
@@ -1163,24 +1215,41 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
                 models.len()
             );
             for m in models {
-                println!("  {} ({})", m.id, m.name);
+                println!("  {} ({})", m.model_id, m.name);
             }
         }
         return Ok(());
     }
 
-    // No provider filter: show everything
-    let all: Vec<_> = get_all_models().collect();
-    let static_count = model_count();
-    println!(
-        "Available models ({} static, {} total):",
-        static_count,
-        all.len()
-    );
+    // No provider filter: show everything via the catalog port.
+    let cat = build_catalog_for_cli().await?;
+    let all = cat.search("").await?;
+    let count = cat.model_count().await?;
+    println!("Available models ({} total):", count);
     for entry in &all {
-        println!("  {}/{} — {}", entry.provider, entry.id, entry.name);
+        println!("  {}/{} — {}", entry.provider, entry.model_id, entry.name);
     }
     Ok(())
+}
+
+/// Build a catalog port for `oxi models` / `oxi refresh` standalone commands.
+///
+/// These commands run without an `App`; we construct a fresh `FileModelCatalog`
+/// rooted at the conventional oxi home directory. The result is a short-lived
+/// catalog used only for this one command.
+async fn build_catalog_for_cli() -> Result<std::sync::Arc<oxi_sdk::FileModelCatalog>> {
+    use oxi_sdk::ports::fs::CatalogConfig;
+    let paths = oxi::services::OxiPaths::default_paths()?;
+    let config = CatalogConfig {
+        cache_path: paths.home.join("cache").join("models-dev.json"),
+        etag_path: paths.home.join("cache").join("models-dev.json.etag"),
+        override_path: paths.home.join("catalog").join("overrides.toml"),
+        // Don't trigger a refresh during `oxi models`; users who want fresh
+        // data should run `oxi refresh` first.
+        fetch_enabled: false,
+        ..Default::default()
+    };
+    Ok(oxi_sdk::FileModelCatalog::init(config).await?)
 }
 
 #[allow(dead_code)]
