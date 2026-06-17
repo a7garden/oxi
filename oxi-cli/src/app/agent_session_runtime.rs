@@ -281,7 +281,6 @@ pub fn create_agent_session_from_services(
             api_key: None,
             workspace_dir: Some(services.cwd.clone()),
             output_mode: None,
-            session_id: None,
             provider_options: None,
             session_id: None,
         };
@@ -337,7 +336,6 @@ pub fn create_agent_session_from_services(
         api_key,
         workspace_dir: Some(services.cwd.clone()),
         output_mode: None,
-        session_id: None,
         provider_options: None,
         session_id: None,
     };
