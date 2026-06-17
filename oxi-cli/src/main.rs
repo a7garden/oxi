@@ -215,13 +215,19 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
             }
             // 2. Claim (or re-claim if previous owner is dead), then close.
             //    Use the user-supplied hash if any; otherwise the current one.
+            //    `start` writes the assignment (mutating the file + hash), so we
+            //    re-read a FRESH hash before `close` — reusing `effective_hash`
+            //    would hit a CAS conflict (regression: `oxi issue close` failing
+            //    with "was modified since last read" whenever start actually
+            //    changed the file, e.g. a previously-unassigned issue).
             let effective_hash = hash.clone().unwrap_or(current_hash);
             store
-                .start(*id, &session, Some(effective_hash.clone()))
+                .start(*id, &session, Some(effective_hash))
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let (_, fresh_hash) = store.read(*id)?;
             let closed = store
-                .close(*id, &session, Some(effective_hash))
+                .close(*id, &session, Some(fresh_hash))
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             println!("closed issue #{}: {}", closed.meta.id, closed.meta.title);

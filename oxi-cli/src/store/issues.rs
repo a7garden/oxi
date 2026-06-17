@@ -1249,9 +1249,6 @@ impl FileIssueStore {
         .await
     }
 
-    /// Reopen a closed issue: `status = Open`, `closed_at = None`.
-    ///
-    /// Anyone may reopen — after [`FileIssueStore::close`] there is no owner.
     // ── Path helpers ────────────────────────────────────────────────────
 
     fn path_for_id(&self, id: u32) -> Result<PathBuf> {

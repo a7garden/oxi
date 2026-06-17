@@ -144,6 +144,14 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
   store 를 열지 않고 디렉토리를 직접 reap 해 **정확한 카운트**를 보고한다.
   (없으면 double-reap 으로 0이 된다.)
 
+### Fixed — `oxi issue close` CAS 경쟁 (기존 버그)
+
+`close` 핸들러가 `start`→`close` 호출에 **같은 content_hash** 를 재사용했다.
+`start` 가 assignment 를 쓰면서 파일(와 해시)을 바꾸기 때문에, 이어지는
+`close` 가 거의 항상 `Conflict`("was modified since last read")로 실패했다
+(미할당 이슈를 close 할 때 특히). `start` 직후 파일을 다시 읽어 fresh 해시를
+`close` 에 넘기도록 수정.
+
 ## [0.36.0]
 
 ### Added — models.dev 라이브 보강 (catalog Layer 2.5)
