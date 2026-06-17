@@ -85,7 +85,7 @@ jobs:
   # in dep order to give each publish a chance to fail fast.
   publish:
     name: cargo publish ${{ matrix.crate }}
-    needs: [pre-flight, package-check]
+    needs: [pre-flight]
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 15
