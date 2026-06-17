@@ -56,7 +56,13 @@ impl AgentTool for IssueTool {
          Before editing, call `start` to claim the issue — this prevents other \
          agents/sessions from concurrently working on the same issue. Always \
          call `list` first to see existing issues and avoid duplicates. \
-         Use `release` to give up a claim, or `close` to finish the work."
+         Use `release` to give up a claim, or `close` to finish the work. \
+         For `update`: every field is optional — omit to keep, provide to replace; \
+         `labels: []` clears all labels (omit to keep). Prefer the dedicated \
+         `close`/`reopen`/`start`/`release` actions over `update { status }`. \
+         To resume a closed issue, call `reopen`, then `start`. Concurrent edits \
+         are auto-reconciled (up to 4 retries), so a stale `content_hash` from \
+         an earlier `read` still succeeds."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -66,17 +72,18 @@ impl AgentTool for IssueTool {
                 "action": {
                     "type": "string",
                     "enum": ["list", "read", "create", "update", "reopen", "start", "release", "close", "link_session"],
-                    "description": "Which issue operation to perform."
+                    "description": "Issue operation. For `update`, every field is optional — omit to keep, provide to replace. Concurrent edits are auto-reconciled (up to 4 retries)."
                 },
-                "id": {"type": "integer", "description": "Issue id (for read/update/start/release/close)."},
-                "title": {"type": "string", "description": "Issue title (for create)."},
-                "body": {"type": "string", "description": "Markdown body (for create/update)."},
-                "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Priority."},
-                "labels": {"type": "array", "items": {"type": "string"}, "description": "String labels."},
-                "status": {"type": "string", "enum": ["open", "closed"], "description": "Status filter (for list) or new status (for update)."},
-                "label": {"type": "string", "description": "Filter list to issues with this label."},
-                "text": {"type": "string", "description": "Substring filter on title (list)."},
-                "content_hash": {"type": "string", "description": "Optional hash from the last read; if the file has changed, the write is rejected."}
+                "id": {"type": "integer", "description": "Issue id (for read/update/reopen/start/release/close/link_session)."},
+                "title": {"type": "string", "description": "create: required. update: replaces the title. Max 512 chars."},
+                "body": {"type": "string", "description": "create: optional (defaults empty). update: replaces the body. Max 256 KiB."},
+                "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"], "description": "create/update: new priority. list: filter to this priority."},
+                "labels": {"type": "array", "items": {"type": "string"}, "description": "create/update: REPLACES labels entirely. Omit to keep; pass [] to clear all. Max 32 labels, 64 chars each."},
+                "status": {"type": "string", "enum": ["open", "closed"], "description": "list: filter by status. update: new status (prefer the `close`/`reopen` actions for clarity)."},
+                "label": {"type": "string", "description": "list: filter to issues with this label."},
+                "text": {"type": "string", "description": "list: case-insensitive substring filter on the title."},
+                "content_hash": {"type": "string", "description": "Hash from the last `read`. ADVISORY: the tool auto re-reads and retries on conflict, so a stale hash still succeeds."},
+                "github": {"type": "object", "readOnly": true, "description": "READ-ONLY. Populated by GitHub sync (Phase 6); cannot be set via this tool."}
             },
             "required": ["action"]
         })
@@ -97,6 +104,11 @@ impl AgentTool for IssueTool {
             Some(a) => a.to_string(),
             None => return Ok(AgentToolResult::error("missing required field: action")),
         };
+
+        // Guard the disk before dispatch: reject oversize payloads early (#5).
+        if let Err(e) = validate_size(&params, &action) {
+            return Ok(AgentToolResult::error(e));
+        }
 
         let session = ctx.session_id.clone().unwrap_or_default();
         let result: Result<String, String> = match action.as_str() {
@@ -419,6 +431,50 @@ fn hash_param(v: Option<&Value>) -> Option<String> {
         .map(String::from)
 }
 
+// ── Size limits (#5) — early rejection to prevent disk fill / oversized docs ──
+
+/// Maximum title length, in characters.
+const MAX_TITLE_LEN: usize = 512;
+/// Maximum body length, in bytes (256 KiB).
+const MAX_BODY_LEN: usize = 256 * 1024;
+/// Maximum number of labels per issue.
+const MAX_LABELS: usize = 32;
+/// Maximum length of a single label, in characters.
+const MAX_LABEL_LEN: usize = 64;
+
+/// Reject oversized `create`/`update` payloads before they touch the store.
+///
+/// Size is enforced only for the actions that accept free-form text
+/// (`create`, `update`); read-only actions (`list`/`read`) are unaffected.
+/// `title`/`label` length is measured in `char`s (grapheme-safe enough for a
+/// bound); `body` in bytes (the on-disk cost).
+fn validate_size(params: &Value, action: &str) -> Result<(), String> {
+    if !matches!(action, "create" | "update") {
+        return Ok(());
+    }
+    if let Some(t) = params.get("title").and_then(|v| v.as_str())
+        && t.chars().count() > MAX_TITLE_LEN
+    {
+        return Err(format!("title too long (max {MAX_TITLE_LEN} chars)"));
+    }
+    if let Some(b) = params.get("body").and_then(|v| v.as_str())
+        && b.len() > MAX_BODY_LEN
+    {
+        return Err(format!("body too large (max {MAX_BODY_LEN} bytes)"));
+    }
+    if let Some(l) = params.get("labels").and_then(|v| v.as_array()) {
+        if l.len() > MAX_LABELS {
+            return Err(format!("too many labels (max {MAX_LABELS})"));
+        }
+        for item in l {
+            if item.as_str().map(|s| s.chars().count()).unwrap_or(0) > MAX_LABEL_LEN {
+                return Err(format!("label too long (max {MAX_LABEL_LEN} chars)"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn require_string(v: Option<&Value>, name: &str) -> Result<String, String> {
     v.and_then(|x| x.as_str())
         .map(String::from)
@@ -540,5 +596,51 @@ mod tests {
             matches!(result, Err(IssueError::Conflict { id: 1 })),
             "must give up with Conflict after the bound, got: {result:?}"
         );
+    }
+
+    // ── Phase 3 coverage: size limits (#5) ──
+
+    #[test]
+    fn validate_size_passes_small_payload() {
+        let p = json!({"title": "ok", "body": "short", "labels": ["a", "b"]});
+        assert!(validate_size(&p, "create").is_ok());
+        assert!(validate_size(&p, "update").is_ok());
+    }
+
+    #[test]
+    fn validate_size_skips_non_text_actions() {
+        // list/read/start/etc. never hit the size gate even with huge values.
+        let p = json!({"body": "x".repeat(300_000)});
+        assert!(validate_size(&p, "list").is_ok());
+        assert!(validate_size(&p, "start").is_ok());
+    }
+
+    #[test]
+    fn validate_size_rejects_oversize_body() {
+        let p = json!({"body": "x".repeat(MAX_BODY_LEN + 1)});
+        let err = validate_size(&p, "create").unwrap_err();
+        assert!(err.contains("body too large"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_size_rejects_oversize_title() {
+        let p = json!({"title": "x".repeat(MAX_TITLE_LEN + 1)});
+        let err = validate_size(&p, "update").unwrap_err();
+        assert!(err.contains("title too long"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_size_rejects_too_many_labels() {
+        let labels: Vec<&str> = (0..(MAX_LABELS + 1)).map(|_| "l").collect();
+        let p = json!({"labels": labels});
+        let err = validate_size(&p, "create").unwrap_err();
+        assert!(err.contains("too many labels"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_size_rejects_long_label() {
+        let p = json!({"labels": ["x".repeat(MAX_LABEL_LEN + 1)]});
+        let err = validate_size(&p, "create").unwrap_err();
+        assert!(err.contains("label too long"), "got: {err}");
     }
 }
