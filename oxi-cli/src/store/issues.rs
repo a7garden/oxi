@@ -1388,4 +1388,79 @@ mod tests {
         let (read_back, _hash) = store.read(created.meta.id).unwrap();
         assert!(read_back.body.contains("한글"));
     }
+
+    // ── Phase 0 (defect #13) regression coverage ───────────────────────────
+    //
+    // Before #13 was fixed, `ToolContext.session_id` was always `None`, so the
+    // `issue` tool called `start(id, "", hash)`. An assignment under the empty
+    // string is never "alive" (no `.alive/` file named `""`), so any other
+    // caller immediately reclaimed it — the headline ownership feature was
+    // silently inert for the agent path. These tests pin the post-fix invariants
+    // at the store layer so the regression cannot return silently.
+
+    #[tokio::test]
+    async fn start_with_distinct_live_owners_collides() {
+        // Two DIFFERENT live sessions both try to start the same issue. With
+        // real session identities (the post-#13 world), the second MUST see
+        // `Assigned` — proving the liveness check is now meaningful for the
+        // agent path, not just for the TUI panel.
+        let (_tmp, store) = tmp_store();
+        let issues_dir = store.issues_dir();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+
+        // Session A is live and claims the issue.
+        let _guard_a = liveness::acquire(&issues_dir, "proc-A").unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "proc-A", Some(h)).await.unwrap();
+
+        // Session B is ALSO live (different flock file) and tries to start.
+        let _guard_b = liveness::acquire(&issues_dir, "proc-B").unwrap();
+        let (_, h2) = store.read(1).unwrap();
+        let err = store.start(1, "proc-B", Some(h2)).await.unwrap_err();
+        assert!(
+            matches!(err, IssueError::Assigned { ref owner, .. } if owner == "proc-A"),
+            "a second distinct live owner must be rejected, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_session_assignment_is_immediately_reclaimable_documentation() {
+        // Documents the EXACT pre-#13 bug shape at the store layer so that if
+        // `start(id, "", hash)` ever reappears in a caller, this test loudly
+        // explains why it's wrong: an assignment under "" has no flock holder,
+        // so `is_session_alive("")` is false and ANY caller reclaims it.
+        //
+        // (This is intentionally a documentation test, not a behavior change —
+        // the store is policy-free. The fix lives in the agent/tool wiring,
+        // covered by oxi-agent's `session_id_wiring_tests`.)
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let issues_dir = store.issues_dir();
+
+        // Caller "" (the pre-#13 agent default) claims the issue.
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "", Some(h)).await.unwrap();
+
+        // Nobody holds a flock named "", so the assignment is NOT alive...
+        assert!(
+            !liveness::is_session_alive(&issues_dir, ""),
+            "no flock can be held under the empty string"
+        );
+
+        // ...and any real caller reclaims it without contention. This is the
+        // silent-ownership-bypass bug that #13 fixes by ensuring agents never
+        // use "" as their caller id.
+        let _guard_c = liveness::acquire(&issues_dir, "proc-C").unwrap();
+        let (_, h2) = store.read(1).unwrap();
+        let reclaimed = store.start(1, "proc-C", Some(h2)).await.unwrap();
+        assert_eq!(
+            reclaimed.meta.assigned_to.as_ref().unwrap().session,
+            "proc-C",
+            "empty-string assignment is reclaimable — this is the #13 bug shape"
+        );
+    }
 }

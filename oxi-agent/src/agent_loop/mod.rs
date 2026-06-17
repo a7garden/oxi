@@ -204,7 +204,8 @@ impl AgentLoop {
 
     /// Build a ToolContext from the agent loop config.
     /// Uses workspace_dir from config if set, otherwise falls back to current directory.
-    fn build_tool_context(&self) -> ToolContext {
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn build_tool_context(&self) -> ToolContext {
         let workspace = self
             .config
             .workspace_dir
@@ -918,5 +919,110 @@ impl AgentLoop {
         self.resolver
             .resolve_model(&self.config.model_id)
             .ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
+    }
+}
+
+#[cfg(test)]
+mod session_id_wiring_tests {
+    //! Regression coverage for the #13 fix.
+    //! `build_tool_context` is private; testing it here keeps the test in the
+    //! same module so it can reach private surface. We never stream — the
+    //! nop provider only exists to satisfy `AgentLoop::new_with_resolver`.
+    use super::*;
+    use crate::ProviderResolver;
+    use crate::agent_loop::config::AgentLoopConfig;
+    use crate::config::ToolExecutionMode;
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::{
+        CompactionStrategy, Context, Model, Provider, ProviderError, StreamOptions, StreamResult,
+    };
+    use std::future::Future;
+    use std::pin::Pin;
+
+    struct NopProvider;
+    impl Provider for NopProvider {
+        fn stream<'a>(
+            &'a self,
+            _model: &'a Model,
+            _context: &'a Context,
+            _options: Option<StreamOptions>,
+        ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+            Box::pin(async {
+                Err(ProviderError::NotImplemented(
+                    "session-id wiring tests never stream".to_string(),
+                ))
+            })
+        }
+        fn name(&self) -> &str {
+            "nop"
+        }
+    }
+
+    struct NullResolver;
+    impl ProviderResolver for NullResolver {
+        fn resolve_provider(&self, _name: &str) -> Option<Arc<dyn Provider>> {
+            None
+        }
+        fn resolve_model(&self, _model_id: &str) -> Option<Model> {
+            None
+        }
+    }
+
+    fn loop_with(session_id: Option<String>) -> AgentLoop {
+        let config = AgentLoopConfig {
+            model_id: "test/model".to_string(),
+            system_prompt: None,
+            temperature: 1.0,
+            max_tokens: 4096,
+            tool_execution: ToolExecutionMode::Sequential,
+            compaction_strategy: CompactionStrategy::Disabled,
+            compaction_instruction: None,
+            context_window: 128_000,
+            session_id,
+            transport: None,
+            compact_on_start: false,
+            max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: 3,
+            auto_retry_base_delay_ms: 1000,
+            api_key: None,
+            workspace_dir: None,
+            provider_options: None,
+            on_compaction: None,
+        };
+        AgentLoop::new_with_resolver(
+            Arc::new(NopProvider),
+            config,
+            Arc::new(ToolRegistry::new()),
+            SharedState::new(),
+            Arc::new(NullResolver),
+        )
+    }
+
+    /// Regression for defect #13: `AgentLoopConfig.session_id` MUST flow into
+    /// `ToolContext.session_id`. Before the fix, the field was hardcoded to
+    /// `None`, so the `issue` tool received an empty caller id and bypassed
+    /// all ownership/liveness checks (two agents could both `start` the same
+    /// issue and the last writer silently won).
+    #[test]
+    fn tool_context_inherits_session_id_when_set() {
+        let loop_ = loop_with(Some("proc-test-session-id".to_string()));
+        let ctx = loop_.build_tool_context();
+        assert_eq!(
+            ctx.session_id.as_deref(),
+            Some("proc-test-session-id"),
+            "ToolContext.session_id must inherit AgentConfig.session_id"
+        );
+    }
+
+    #[test]
+    fn tool_context_session_id_defaults_to_none() {
+        let loop_ = loop_with(None);
+        let ctx = loop_.build_tool_context();
+        assert!(
+            ctx.session_id.is_none(),
+            "default ToolContext.session_id should be None"
+        );
     }
 }

@@ -283,6 +283,7 @@ pub fn create_agent_session_from_services(
             output_mode: None,
             session_id: None,
             provider_options: None,
+            session_id: None,
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_sdk::get_provider("anthropic")
@@ -338,6 +339,7 @@ pub fn create_agent_session_from_services(
         output_mode: None,
         session_id: None,
         provider_options: None,
+        session_id: None,
     };
 
     let agent = Arc::new(oxi_agent::Agent::new(

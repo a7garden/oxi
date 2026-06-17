@@ -241,4 +241,57 @@ impl AgentConfig {
         self.compaction_instruction = Some(instruction.into());
         self
     }
+
+    /// Set the session identity threaded into [`crate::tools::ToolContext::session_id`].
+    ///
+    /// Tools that gate behavior on liveness (e.g. an `issue` tool's
+    /// `start`/`close` ownership checks) use this to identify the caller.
+    /// Leaving it `None` causes those tools to see an empty caller id and
+    /// reject ownership-gated operations (defensive default).
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_id_defaults_to_none() {
+        let c = AgentConfig::default();
+        assert!(c.session_id.is_none(), "default session_id must be None");
+    }
+
+    #[test]
+    fn with_session_id_sets_the_field() {
+        let c = AgentConfig::new("m").with_session_id("proc-42");
+        assert_eq!(c.session_id.as_deref(), Some("proc-42"));
+    }
+
+    #[test]
+    fn session_id_round_trips_through_serde() {
+        // Forward-compat: a serialized config with the new field deserializes back.
+        let with = AgentConfig::new("m").with_session_id("proc-7");
+        let json = serde_json::to_string(&with).unwrap();
+        assert!(json.contains("\"session_id\":"));
+        let back: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.session_id.as_deref(), Some("proc-7"));
+
+        // Backward-compat: a payload WITHOUT the session_id key must still
+        // deserialize and default the field to None. We build that payload by
+        // serializing a config, then stripping the key with serde_json::Value.
+        let mut v: serde_json::Value =
+            serde_json::from_str(&json).expect("config serializes to valid JSON");
+        if let Some(obj) = v.as_object_mut() {
+            obj.remove("session_id");
+        }
+        let stripped = serde_json::to_string(&v).unwrap();
+        let legacy: AgentConfig = serde_json::from_str(&stripped).unwrap();
+        assert!(
+            legacy.session_id.is_none(),
+            "payload missing session_id must default to None"
+        );
+    }
 }

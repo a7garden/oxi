@@ -51,6 +51,34 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 **테스트**: catalog port 19개 (sync API 2개, bridge 7개, resolve_model 통합 2개
 포함) + 전체 회귀 **2297/2297 통과**.
 
+### Fixed — issue 시스템 소유권 복원 (Phase 0 / 결함 #13)
+
+에이전트가 `issue` 도구의 `start`/`close`를 호출할 때 소유권/liveness
+검사가 **조용히 우회**되던 결함을 수정했다. 근본 원인: `agent.rs`가
+`AgentLoopConfig.session_id`를 항상 `None`으로 하드코딩하여,
+`ToolContext.session_id`가 `None` → 도구 caller id가 빈 문자열(`""`)이
+되었고, 빈 문자열은 어떤 `flock` 홀더와도 매칭되지 않아 모든 할당이
+즉시 reclaim 가능했다 (두 에이전트가 같은 이슈를 `start` 하면 마지막이
+조용히 승리).
+
+- **`oxi-agent`**: `AgentConfig.session_id: Option<String>` 신규 필드
+  (additive, `#[serde(default)]`, `with_session_id` 빌더). `agent.rs`의
+  두 `AgentLoopConfig` 생성지점이 이제 config에서 `session_id`를 주입.
+- **`oxi-cli`**: `bootstrap.rs::build_app`가 run-mode별 ownership identity
+  생성 — TUI 모드는 `liveness::TUI_OWNERSHIP_ID`("tui"), 그 외는
+  `proc-<pid>-<uuid>`. `App::from_oxi(..., ownership_session_id)`가 프로세스
+  수명 동안 `flock`을 잡고 `AgentConfig.session_id`에 동일 id 주입.
+  `liveness::TUI_OWNERSHIP_ID` 상수가 단일 진실 소스 — 에이전트 도구·
+  TUI 패널·`/issue` 슬래시 명령이 모두 같은 flock 홀더를 본다.
+- **`tui/app.rs`**: `run_tui_interactive_impl`의 중복 flock 획득 제거
+  (`App`가 이제 보유). `debug_assert!`로 identity 일치 검증.
+- **회귀 테스트**: `session_id_wiring_tests`(oxi-agent,
+  `build_tool_context` 레벨), `start_with_distinct_live_owners_collides` +
+  `empty_session_assignment_is_immediately_reclaimable_documentation`(oxi-cli).
+
+> 설계 문서: `docs/designs/2026-06-17-issue-system-hardening.md` (P0).
+> 후속 Phase P1–P4 (atomic write, CAS retry, schema, robustness)는 별도 PR.
+
 ## [0.36.0]
 
 ### Added — models.dev 라이브 보강 (catalog Layer 2.5)

@@ -383,6 +383,26 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + release build
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
 - Provider message formats differ significantly (Anthropic vs OpenAI). Use `transform.rs` for conversion.
 - The tool-calling loop in `agent_loop/` has retry logic — tool implementations must be idempotent.
+- **Issue-system ownership identity (Phase 0 / defect #13).** The local `issue`
+  tool's `start`/`close` ownership checks use `ToolContext.session_id` as the
+  caller identity, and `is_session_alive` checks a per-session `flock` under
+  `.oxi/issues/.alive/<session_id>`. For this to actually protect anything,
+  the identity must (a) be **non-empty** and (b) **match a flock the process
+  holds**. `oxi-cli` enforces both by construction:
+  - `bootstrap.rs::build_app` picks the identity — `liveness::TUI_OWNERSHIP_ID`
+    ("tui") in TUI mode, `proc-<pid>-<uuid>` otherwise.
+  - `App::from_oxi(..., ownership_session_id)` acquires the flock for `App`'s
+    lifetime AND sets `AgentConfig.session_id = Some(ownership_session_id)`,
+    which `agent.rs` threads into `AgentLoopConfig.session_id` →
+    `ToolContext.session_id`.
+  - `liveness::TUI_OWNERSHIP_ID` is the single source of truth; the TUI panel's
+    `IssuesPanelOverlay::session_id()` references it so the agent tool, the
+    panel, and the `/issue` slash command all see one consistent flock holder.
+  - **Do NOT** re-introduce a hardcoded `session_id: None` in `agent.rs`'s
+    `AgentLoopConfig` construction (that was the #13 bug — it made every agent
+    `start` write an empty-string owner that was instantly reclaimable).
+    Regression coverage: `session_id_wiring_tests` (oxi-agent) +
+    `start_with_distinct_live_owners_collides` (oxi-cli).
 - The catalog lives in `data/catalog/*.toml`, not hand-written Rust. Adding a
   TOML file requires no Rust code (build script auto-enumerates). Many oxi-
   original entries ship `cost_input`/`cost_output` = `0.0`; these are
