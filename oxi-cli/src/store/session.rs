@@ -17,14 +17,7 @@ use uuid::Uuid;
 // Atomic Write Helper
 // ============================================================================
 
-/// Atomically write content to a file by first writing to a temp file,
-/// then renaming it. This avoids corruption if the process crashes mid-write.
-fn atomic_write(path: &Path, content: &str) -> Result<(), std::io::Error> {
-    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
-    std::fs::write(&tmp_path, content)?;
-    std::fs::rename(&tmp_path, path)?;
-    Ok(())
-}
+use super::fs_util::atomic_write;
 
 /// Type alias for entry IDs (for backward compatibility)
 pub type EntryId = Uuid;

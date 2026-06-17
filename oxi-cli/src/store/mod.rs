@@ -20,6 +20,7 @@
 pub mod auth_storage;
 #[allow(missing_docs, dead_code)] // surface is large; do a doc pass before stabilizing
 pub mod issues;
+pub mod fs_util;
 pub mod router_config;
 pub mod session;
 pub mod session_cwd;

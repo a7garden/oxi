@@ -220,14 +220,7 @@ impl Issue {
 // Serialization — markdown + YAML frontmatter
 // ============================================================================
 
-/// Atomically write content to a file by first writing to a temp file,
-/// then renaming it. Same pattern as `store::session::atomic_write`.
-fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
-    std::fs::write(&tmp_path, content)?;
-    std::fs::rename(&tmp_path, path)?;
-    Ok(())
-}
+use super::fs_util::atomic_write;
 
 const FRONTMATTER_DELIM: &str = "---";
 
