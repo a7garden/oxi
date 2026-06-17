@@ -1238,7 +1238,9 @@ use crate::store::issues::FileIssueStore;
 /// Pure string transformation: no side effects. If `store` is None, the
 /// input is returned unchanged.
 fn expand_issue_refs(input: &str, store: &Option<FileIssueStore>) -> String {
-    let Some(store) = store else { return input.to_string() };
+    let Some(store) = store else {
+        return input.to_string();
+    };
     let mut out = String::with_capacity(input.len());
     let mut i = 0;
     while i < input.len() {
@@ -1250,9 +1252,7 @@ fn expand_issue_refs(input: &str, store: &Option<FileIssueStore>) -> String {
         };
         // Word boundary: previous char is whitespace or start.
         let at_byte = i + off;
-        if at_byte > 0
-            && !prev_char_is_whitespace(input, at_byte)
-        {
+        if at_byte > 0 && !prev_char_is_whitespace(input, at_byte) {
             // Not a word boundary; keep the `@` and continue past it.
             out.push_str(&rest[..off + 1]);
             i = at_byte + 1;
@@ -1261,9 +1261,7 @@ fn expand_issue_refs(input: &str, store: &Option<FileIssueStore>) -> String {
         // Parse the number.
         let num_start = at_byte + "@issue-".len();
         let mut num_end = num_start;
-        while num_end < input.len()
-            && input.as_bytes()[num_end].is_ascii_digit()
-        {
+        while num_end < input.len() && input.as_bytes()[num_end].is_ascii_digit() {
             num_end += 1;
         }
         if num_end == num_start {
@@ -1288,7 +1286,11 @@ fn expand_issue_refs(input: &str, store: &Option<FileIssueStore>) -> String {
                 let preview = first_line_preview(&issue);
                 out.push_str(&format!(
                     "[#{} {} ({} / {}): {}]",
-                    issue.meta.id, issue.meta.title, issue.meta.status, issue.meta.priority, preview
+                    issue.meta.id,
+                    issue.meta.title,
+                    issue.meta.status,
+                    issue.meta.priority,
+                    preview
                 ));
             }
             Err(_) => {
@@ -1349,11 +1351,7 @@ fn truncate_for_preview(s: &str) -> String {
 /// referenced in `raw`. Idempotent: existing links are not duplicated.
 /// Best-effort: errors are silently dropped (the agent tool provides the
 /// proper error path; this is purely observational).
-fn link_sessions_async(
-    raw: String,
-    store: Option<FileIssueStore>,
-    session: &AgentSession,
-) {
+fn link_sessions_async(raw: String, store: Option<FileIssueStore>, session: &AgentSession) {
     let Some(store) = store else { return };
     // Collect ids synchronously.
     let ids: Vec<u32> = parse_issue_ids(&raw);
@@ -1364,7 +1362,11 @@ fn link_sessions_async(
     // session manager may not surface this directly; fall back to a stable
     // synthetic id derived from the session file path if needed.
     let session_id = session.session_id();
-    let session_id = if session_id.is_empty() { "tui".to_string() } else { session_id };
+    let session_id = if session_id.is_empty() {
+        "tui".to_string()
+    } else {
+        session_id
+    };
     for id in ids {
         let store = store.clone();
         let session_id = session_id.clone();
@@ -1384,9 +1386,7 @@ fn parse_issue_ids(raw: &str) -> Vec<u32> {
     let needle = b"@issue-";
     let mut i = 0;
     while i + needle.len() <= bytes.len() {
-        if &bytes[i..i + needle.len()] == needle
-            && (i == 0 || bytes[i - 1].is_ascii_whitespace())
-        {
+        if &bytes[i..i + needle.len()] == needle && (i == 0 || bytes[i - 1].is_ascii_whitespace()) {
             let num_start = i + needle.len();
             let mut num_end = num_start;
             while num_end < bytes.len() && bytes[num_end].is_ascii_digit() {

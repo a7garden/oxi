@@ -805,16 +805,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     // running, so any `issue` ownership checks (start/release/close) treat
     // the TUI as a live owner. The guard's Drop closes the file descriptor,
     // releasing the OS-held flock on process exit (including `kill -9`).
-    let _liveness_guard = app
-        .issue_store()
-        .as_ref()
-        .and_then(|store| {
-            crate::store::issues::liveness::acquire(
-                &store.issues_dir(),
-                IssuesPanelOverlay::session_id(),
-            )
-            .ok()
-        });
+    let _liveness_guard = app.issue_store().as_ref().and_then(|store| {
+        crate::store::issues::liveness::acquire(
+            &store.issues_dir(),
+            IssuesPanelOverlay::session_id(),
+        )
+        .ok()
+    });
 
     // ── Extract resources from App (needed for session switching loop) ──
     let settings = app.settings().clone();

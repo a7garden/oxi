@@ -12,6 +12,7 @@ pub mod anchor;
 pub mod extensions;
 pub mod factories;
 pub mod fork_select;
+pub mod issues_panel;
 pub mod mcp_config;
 pub mod mcp_dashboard;
 pub mod mcp_presets;
@@ -22,7 +23,6 @@ pub mod router_integration;
 pub mod router_setup;
 pub mod settings;
 pub mod text_viewer;
-pub mod issues_panel;
 pub mod tree_navigator;
 #[allow(unused_imports)]
 pub use extensions::extensions_overlay;
@@ -30,6 +30,8 @@ pub use extensions::extensions_overlay;
 pub use factories::{logout_select, model_select, resume_select, routing_status};
 #[allow(unused_imports)]
 pub use fork_select::ForkSelectOverlay;
+#[allow(unused_imports)]
+pub use issues_panel::IssuesPanelOverlay;
 #[allow(unused_imports)]
 pub use mcp_config::McpConfigOverlay;
 #[allow(unused_imports)]
@@ -39,8 +41,6 @@ pub use router_setup::{RouterSetupData, router_setup};
 pub use settings::settings_overlay;
 #[allow(unused_imports)]
 pub use text_viewer::{changelog_overlay, help_overlay, hotkeys_overlay, tools_overlay};
-#[allow(unused_imports)]
-pub use issues_panel::IssuesPanelOverlay;
 #[allow(unused_imports)] // re-exported for downstream consumers; not used in this crate
 pub use tree_navigator::{TreeNavigatorOverlay, tree_navigator};
 

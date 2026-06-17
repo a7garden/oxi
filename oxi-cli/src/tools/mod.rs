@@ -7,4 +7,4 @@
 //! directly from `App::from_oxi`.
 
 pub mod issue_tool;
-pub use issue_tool::{format_issue_full, format_issue_line, IssueTool};
+pub use issue_tool::{IssueTool, format_issue_full, format_issue_line};

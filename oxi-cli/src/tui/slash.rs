@@ -41,9 +41,8 @@ pub(crate) fn handle_slash_command(
             match state.issue_store.clone() {
                 Some(store) => {
                     state.overlay = None;
-                    state.overlay_state = Some(Box::new(
-                        super::overlay::IssuesPanelOverlay::new(store),
-                    ));
+                    state.overlay_state =
+                        Some(Box::new(super::overlay::IssuesPanelOverlay::new(store)));
                 }
                 None => {
                     state.add_notification(

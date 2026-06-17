@@ -172,7 +172,10 @@ impl IssueTool {
             .store
             .create(title, body, priority, labels, session_opt)
             .map_err(|e| e.to_string())?;
-        Ok(format!("created issue #{}: {}", issue.meta.id, issue.meta.title))
+        Ok(format!(
+            "created issue #{}: {}",
+            issue.meta.id, issue.meta.title
+        ))
     }
 
     async fn update(&self, params: Value, session: &str) -> Result<String, String> {

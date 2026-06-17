@@ -594,8 +594,8 @@ impl FileIssueStore {
         let needs = {
             let g = self.inner.read();
             match (g.cache.dir_mtime, cur_dir_mtime) {
-                (None, _) => true,               // never loaded
-                (Some(_), None) => false,        // can't stat dir; keep cache
+                (None, _) => true,        // never loaded
+                (Some(_), None) => false, // can't stat dir; keep cache
                 (Some(cached), Some(cur)) => cached != cur,
             }
         };
@@ -781,8 +781,7 @@ impl FileIssueStore {
                 {
                     return Err(IssueError::Conflict { id });
                 }
-                let issue =
-                    parse_issue(&raw, Some(path.clone())).map_err(IssueError::Other)?;
+                let issue = parse_issue(&raw, Some(path.clone())).map_err(IssueError::Other)?;
                 let mut new = mutator(issue)?;
                 new.meta.updated_at = Utc::now();
                 let content = serialize_issue(&new).map_err(IssueError::Other)?;
@@ -1200,8 +1199,11 @@ mod tests {
         // round-trip through the cache and read() without panic on multi-byte
         // boundaries. (Regression test for the byte-slice panic in
         // `first_line_preview` / `truncate_for_footer`.)
-        let cjk_title = "버그 수정: 한글 제목도 정상이어야 합니다 — 멀티바이트 인코딩 안전성".to_string();
-        let cjk_body = "요약\n\n이 이슈는 한글 본문을 포함합니다. 본문에는 영문과 한글이 섞여 있습니다. ".repeat(4);
+        let cjk_title =
+            "버그 수정: 한글 제목도 정상이어야 합니다 — 멀티바이트 인코딩 안전성".to_string();
+        let cjk_body =
+            "요약\n\n이 이슈는 한글 본문을 포함합니다. 본문에는 영문과 한글이 섞여 있습니다. "
+                .repeat(4);
         let created = store
             .create(cjk_title.clone(), cjk_body, Priority::High, vec![], None)
             .unwrap();

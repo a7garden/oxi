@@ -81,7 +81,10 @@ impl IssuesPanelOverlay {
         };
         self.items = self.store.list(&filter).unwrap_or_default();
         if !self.items.is_empty()
-            && self.list_state.selected().is_none_or(|s| s >= self.items.len())
+            && self
+                .list_state
+                .selected()
+                .is_none_or(|s| s >= self.items.len())
         {
             self.list_state.select(Some(0));
         } else if self.items.is_empty() {
@@ -181,16 +184,14 @@ impl OverlayComponent for IssuesPanelOverlay {
 
 impl IssuesPanelOverlay {
     fn render_list(&mut self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!(
-                "Issues ({}) — filter: {}",
-                self.items.len(),
-                match self.status_filter {
-                    StatusFilter::Open => "open",
-                    StatusFilter::All => "all",
-                }
-            ));
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            "Issues ({}) — filter: {}",
+            self.items.len(),
+            match self.status_filter {
+                StatusFilter::Open => "open",
+                StatusFilter::All => "all",
+            }
+        ));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -204,7 +205,11 @@ impl IssuesPanelOverlay {
             .items
             .iter()
             .map(|i| {
-                let lock = if i.meta.assigned_to.is_some() { "🔒" } else { "  " };
+                let lock = if i.meta.assigned_to.is_some() {
+                    "🔒"
+                } else {
+                    "  "
+                };
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("#{:<4} ", i.meta.id)),
                     Span::styled(

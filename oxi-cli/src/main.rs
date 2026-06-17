@@ -183,28 +183,20 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
             // Hold the liveness lock for the duration of this command so
             // that any other process trying to read the issue sees us as a
             // live owner while we operate.
-            let _guard = oxi::store::issues::liveness::acquire(
-                &store.issues_dir(),
-                &session,
-            )
-            .ok();
+            let _guard = oxi::store::issues::liveness::acquire(&store.issues_dir(), &session).ok();
 
             // 1. Read current state to inspect the current assignment.
             let (issue, current_hash) = store.read(*id)?;
-            if let Some(ref a) = issue.meta.assigned_to {
-                if a.session != session
-                    && oxi::store::issues::liveness::is_session_alive(
-                        &store.issues_dir(),
-                        &a.session,
-                    )
-                {
-                    anyhow::bail!(
-                        "issue #{id} is currently being worked on by session {} \
-                         (since {}); cannot close from CLI",
-                        a.session,
-                        a.acquired_at,
-                    );
-                }
+            if let Some(ref a) = issue.meta.assigned_to
+                && a.session != session
+                && oxi::store::issues::liveness::is_session_alive(&store.issues_dir(), &a.session)
+            {
+                anyhow::bail!(
+                    "issue #{id} is currently being worked on by session {} \
+                     (since {}); cannot close from CLI",
+                    a.session,
+                    a.acquired_at,
+                );
             }
             // 2. Claim (or re-claim if previous owner is dead), then close.
             //    Use the user-supplied hash if any; otherwise the current one.

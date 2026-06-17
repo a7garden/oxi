@@ -29,10 +29,10 @@ pub mod storage; // public for main.rs (packages)
 // Re-exports from storage for main.rs
 pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
+pub mod tools;
 pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
-pub mod tools;
 
 ///
 /// This is the **new entry point** for oxi-cli run modes. It uses
@@ -271,7 +271,8 @@ impl App {
             .ok()
             .map(|cwd| crate::store::issues::FileIssueStore::open_from_cwd(&cwd))
             .and_then(|r| {
-                r.map_err(|e| tracing::warn!("issue store unavailable: {e}")).ok()
+                r.map_err(|e| tracing::warn!("issue store unavailable: {e}"))
+                    .ok()
             });
 
         // Register the `issue` agent tool when the store is available.
