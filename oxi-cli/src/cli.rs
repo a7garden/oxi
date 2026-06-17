@@ -259,7 +259,7 @@ pub enum IssueCommands {
         #[arg(long)]
         hash: Option<String>,
     },
-    /// Reopen a closed issue (no ownership required)
+    /// Reopen a closed issue (anyone may reopen after close)
     Reopen {
         /// Issue id
         id: u32,
@@ -267,6 +267,10 @@ pub enum IssueCommands {
         #[arg(long)]
         hash: Option<String>,
     },
+    /// Reap dead alive-lock files under `.oxi/issues/.alive/` (best-effort cleanup
+    /// of zombie locks left by crashed/killed processes). Age-gated: only files
+    /// older than 1 hour and not currently held are removed. Prints the count.
+    Reap,
 }
 
 // ── Extension subcommands ──────────────────────────────────────────────

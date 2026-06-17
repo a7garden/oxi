@@ -322,13 +322,8 @@ impl App {
             // Acquire the process-wide liveness flock now that issue_store exists.
             // Best-effort: another live process already holds the lock is non-fatal;
             // we still expose ownership_session_id so callers can detect the conflict.
-            if let Some(store) = app.issue_store.as_ref() {
-                app.liveness_guard = crate::store::issues::liveness::acquire(
-                    &store.issues_dir(),
-                    &app.ownership_session_id,
-                )
-                .ok();
-            }
+            app.liveness_guard =
+                acquire_ownership_guard(app.issue_store.as_ref(), &app.ownership_session_id);
             app
         })
     }
@@ -490,5 +485,96 @@ impl App {
     /// Get the current model ID
     pub fn model_id(&self) -> String {
         self.agent.model_id()
+    }
+}
+
+/// Acquire the process-wide liveness flock for `ownership_id` under the issue
+/// store's `.alive/` directory.
+///
+/// Returns `None` (no lock) when there is no issue store or when another live
+/// process already holds the lock — both non-fatal; the caller can still read
+/// `ownership_session_id` and the assignment feature will surface `Assigned`
+/// errors if contention actually occurs.
+///
+/// Extracted from `App::from_oxi` so the single-lock invariant (defect #13 fix)
+/// can be unit-tested without standing up a full `Oxi` engine.
+pub(crate) fn acquire_ownership_guard(
+    issue_store: Option<&crate::store::issues::FileIssueStore>,
+    ownership_id: &str,
+) -> Option<crate::store::issues::liveness::AliveGuard> {
+    let store = issue_store?;
+    if ownership_id.is_empty() {
+        // Defensive: never hold a lock under the empty string — that was the
+        // #13 bug shape (empty owner is never alive, so ownership was bypassed).
+        return None;
+    }
+    crate::store::issues::liveness::acquire(&store.issues_dir(), ownership_id).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    //! P0 regression: `App` must hold exactly one liveness flock under its
+    //! ownership identity. We test the extracted `acquire_ownership_guard`
+    //! helper (the single chokepoint `from_oxi` delegates to) rather than
+    //! standing up a full `Oxi` engine.
+    use super::*;
+    use crate::store::issues::FileIssueStore;
+    use crate::store::issues::liveness;
+
+    fn tmp_store() -> (tempfile::TempDir, FileIssueStore) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".oxi").join("issues");
+        std::fs::create_dir_all(&dir).unwrap();
+        (tmp, FileIssueStore::open(dir).unwrap())
+    }
+
+    #[test]
+    fn app_holds_single_liveness_lock() {
+        // The #13 invariant: acquiring the ownership guard makes the session
+        // live under that identity, and a second acquire under the SAME id
+        // fails (one flock per identity — single lock).
+        let (_tmp, store) = tmp_store();
+        let dir = store.issues_dir();
+        let id = "proc-test-app";
+
+        let guard = acquire_ownership_guard(Some(&store), id);
+        assert!(
+            guard.is_some(),
+            "App must acquire the liveness lock for its ownership id"
+        );
+        assert!(
+            liveness::is_session_alive(&dir, id),
+            "after acquire, the session must be live"
+        );
+
+        // While held, the same identity cannot be acquired again — single lock.
+        let second = liveness::acquire(&dir, id);
+        assert!(second.is_err(), "second acquire under same id must fail");
+
+        drop(guard);
+        assert!(
+            !liveness::is_session_alive(&dir, id),
+            "dropping App's guard releases the lock"
+        );
+    }
+
+    #[test]
+    fn acquire_returns_none_without_store() {
+        // No issue store (headless/test) → no lock. Not an error.
+        let dir = tempfile::tempdir().unwrap();
+        let id = "proc-x";
+        assert!(acquire_ownership_guard(None, id).is_none());
+        let _ = dir; // no store created
+    }
+
+    #[test]
+    fn acquire_rejects_empty_ownership_id() {
+        // Defensive guard against the #13 bug shape: never hold a lock under
+        // the empty string (it's never alive, so ownership would be bypassed).
+        let (_tmp, store) = tmp_store();
+        assert!(
+            acquire_ownership_guard(Some(&store), "").is_none(),
+            "empty ownership id must never acquire a lock (#13 guard)"
+        );
     }
 }

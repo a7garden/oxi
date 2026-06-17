@@ -127,6 +127,18 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
     use oxi::tools::format_issue_full;
 
     let cwd = std::env::current_dir()?;
+
+    // `reap` is special: it resolves the issues dir WITHOUT opening a store,
+    // because the store constructor runs its own lazy reap — opening one here
+    // would double-reap and underreport the count we actually removed.
+    if let IssueCommands::Reap = action {
+        let dir = oxi::store::issues::issues_dir(&cwd);
+        let removed = oxi::store::issues::liveness::reap_orphans(&dir)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        println!("reaped {removed} dead alive-lock file(s)");
+        return Ok(());
+    }
+
     let store = oxi::store::issues::FileIssueStore::open_from_cwd(&cwd)?;
 
     match action {
@@ -230,6 +242,11 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
                 "reopened issue #{}: {}",
                 reopened.meta.id, reopened.meta.title
             );
+        }
+        IssueCommands::Reap => {
+            // Handled above before the store was opened; unreachable here, but
+            // kept exhaustive so adding a new variant is a compile error.
+            unreachable!("reap handled before store open")
         }
     }
     Ok(())

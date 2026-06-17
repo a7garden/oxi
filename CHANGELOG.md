@@ -132,6 +132,18 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 - 테스트: reap 멱등/최근 dead 보존(age gate)/오래된 dead 제거+live 보존;
   top_free_priority 가 할당·닫힌 이슈 무시.
 
+### Added — `oxi issue` CLI `reopen`·`reap` 서브커맨드
+
+설계 §11 권장 항목. store와 에이전트 도구에 이미 노출된 `reopen`/
+`reap_orphans`의 CLI 래퍼.
+
+- `oxi issue reopen <id> [--hash]`: 닫힌 이슈 재개(status=Open, closed_at 클리어).
+  close 와 달리 소유권 락 불필요(닫힌 후엔 owner 없음).
+- `oxi issue reap`: `.oxi/issues/.alive/` dead 파일 수거(age-gated, 멱등) 후
+  제거 개수 출력. 주의: store 생성자가 자체 lazy reap 을 돌리므로, 이 명령은
+  store 를 열지 않고 디렉토리를 직접 reap 해 **정확한 카운트**를 보고한다.
+  (없으면 double-reap 으로 0이 된다.)
+
 ## [0.36.0]
 
 ### Added — models.dev 라이브 보강 (catalog Layer 2.5)
