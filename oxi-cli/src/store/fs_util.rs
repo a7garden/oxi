@@ -104,17 +104,18 @@ mod tests {
             })
             .collect();
         let _ = fs::remove_file(&tmp);
-        assert!(leaking.is_empty(), "orphan temp files left behind: {leaking:?}");
+        assert!(
+            leaking.is_empty(),
+            "orphan temp files left behind: {leaking:?}"
+        );
     }
 
     #[test]
     fn rename_failure_does_not_leak_orphan() {
         // A read-only directory makes rename fail. The temp file must be
         // removed by the helper (best-effort) and the error propagated.
-        let root = std::env::temp_dir().join(format!(
-            "oxi-fs-util-ro-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("oxi-fs-util-ro-{}", uuid::Uuid::new_v4().simple()));
         fs::create_dir(&root).unwrap();
         let target = root.join("out.md");
 

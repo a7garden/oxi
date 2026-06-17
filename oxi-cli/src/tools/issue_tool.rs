@@ -22,7 +22,9 @@ use async_trait::async_trait;
 use oxi_agent::{AgentTool, AgentToolResult, ToolContext};
 use serde_json::{Value, json};
 
-use crate::store::issues::{FileIssueStore, Issue, IssueError, IssueFilter, Priority, Status};
+use crate::store::issues::{
+    FileIssueStore, Issue, IssueError, IssueFilter, IssuePatch, Priority, Status,
+};
 
 /// The `issue` tool. One registration, multiple actions.
 #[derive(Debug, Clone)]
@@ -63,7 +65,7 @@ impl AgentTool for IssueTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "read", "create", "update", "start", "release", "close", "link_session"],
+                    "enum": ["list", "read", "create", "update", "reopen", "start", "release", "close", "link_session"],
                     "description": "Which issue operation to perform."
                 },
                 "id": {"type": "integer", "description": "Issue id (for read/update/start/release/close)."},
@@ -105,6 +107,7 @@ impl AgentTool for IssueTool {
             "start" => self.start(params, &session).await,
             "release" => self.release(params, &session).await,
             "close" => self.close(params, &session).await,
+            "reopen" => self.reopen(params).await,
             "link_session" => self.link_session(params, &session).await,
             other => Err(format!("unknown action: {other}")),
         };
@@ -180,125 +183,125 @@ impl IssueTool {
 
     async fn update(&self, params: Value, session: &str) -> Result<String, String> {
         let id = require_u32(params.get("id"), "id")?;
-        let hash = params
-            .get("content_hash")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let new_title = params
-            .get("title")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let new_body = params
-            .get("body")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let new_priority = parse_priority_opt(params.get("priority"))?;
-        let new_status = parse_status_opt(params.get("status"))?;
-        let new_labels = parse_labels(params.get("labels"))?;
-        let labels_changed = params.get("labels").is_some();
-        let session_owned = session.to_string();
-
+        let agent_hash = hash_param(params.get("content_hash"));
+        // IssuePatch makes absent vs [] unambiguous: labels absent → None (keep),
+        // labels: [] → Some(vec![]) (clear). Resolves #3.
+        let patch = IssuePatch {
+            title: params
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            body: params
+                .get("body")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            status: parse_status_opt(params.get("status"))?,
+            priority: parse_priority_opt(params.get("priority"))?,
+            labels: params
+                .get("labels")
+                .map(|v| parse_labels(Some(v)))
+                .transpose()?,
+        };
+        let caller = if session.is_empty() {
+            None
+        } else {
+            Some(session.to_string())
+        };
         let store = self.store.clone();
-        let result = store
-            .update(id, hash, move |mut issue| {
-                if let Some(ref a) = issue.meta.assigned_to
-                    && !a.session.is_empty()
-                    && a.session != session_owned
-                {
-                    return Err(IssueError::NotAssigned {
-                        id,
-                        caller: session_owned,
-                    });
-                }
-                if let Some(t) = new_title {
-                    issue.meta.title = t;
-                }
-                if let Some(b) = new_body {
-                    issue.body = b;
-                }
-                if let Some(p) = new_priority {
-                    issue.meta.priority = p;
-                }
-                if let Some(s) = new_status {
-                    issue.meta.status = s;
-                    if s == Status::Closed {
-                        issue.meta.closed_at = Some(chrono::Utc::now());
-                    }
-                }
-                if labels_changed {
-                    issue.meta.labels = new_labels;
-                }
-                Ok(issue)
-            })
-            .await;
-        match result {
-            Ok(issue) => Ok(format!("updated issue #{}", issue.meta.id)),
-            Err(e) => Err(e.to_string()),
-        }
+        cas_retry(&store, id, agent_hash, |hash| {
+            let store = store.clone();
+            let patch = patch.clone();
+            let caller = caller.clone();
+            async move { store.apply_patch(id, patch, caller, hash).await }
+        })
+        .await
+        .map(|issue| format!("updated issue #{}", issue.meta.id))
+        .map_err(|e| e.to_string())
     }
 
     async fn start(&self, params: Value, session: &str) -> Result<String, String> {
         let id = require_u32(params.get("id"), "id")?;
-        let hash = params
-            .get("content_hash")
-            .and_then(|v| v.as_str())
-            .map(String::from);
         if session.is_empty() {
             return Err("cannot start: no active session id in context".to_string());
         }
-        self.store
-            .start(id, session, hash)
-            .await
-            .map(|issue| format!("assigned issue #{} to session {}", issue.meta.id, session))
-            .map_err(|e| e.to_string())
+        let agent_hash = hash_param(params.get("content_hash"));
+        let store = self.store.clone();
+        let session = session.to_string();
+        cas_retry(&store, id, agent_hash, |hash| {
+            let store = store.clone();
+            let session = session.clone();
+            async move { store.start(id, &session, hash).await }
+        })
+        .await
+        .map(|issue| format!("assigned issue #{} to session {}", issue.meta.id, session))
+        .map_err(|e| e.to_string())
     }
 
     async fn release(&self, params: Value, session: &str) -> Result<String, String> {
         let id = require_u32(params.get("id"), "id")?;
-        let hash = params
-            .get("content_hash")
-            .and_then(|v| v.as_str())
-            .map(String::from);
         if session.is_empty() {
             return Err("cannot release: no active session id in context".to_string());
         }
-        self.store
-            .release(id, session, hash)
-            .await
-            .map(|_| format!("released issue #{id}"))
-            .map_err(|e| e.to_string())
+        let agent_hash = hash_param(params.get("content_hash"));
+        let store = self.store.clone();
+        let session = session.to_string();
+        cas_retry(&store, id, agent_hash, |hash| {
+            let store = store.clone();
+            let session = session.clone();
+            async move { store.release(id, &session, hash).await }
+        })
+        .await
+        .map(|_| format!("released issue #{id}"))
+        .map_err(|e| e.to_string())
     }
 
     async fn close(&self, params: Value, session: &str) -> Result<String, String> {
         let id = require_u32(params.get("id"), "id")?;
-        let hash = params
-            .get("content_hash")
-            .and_then(|v| v.as_str())
-            .map(String::from);
         if session.is_empty() {
             return Err("cannot close: no active session id in context".to_string());
         }
-        self.store
-            .close(id, session, hash)
-            .await
-            .map(|issue| format!("closed issue #{}: {}", issue.meta.id, issue.meta.title))
-            .map_err(|e| e.to_string())
+        let agent_hash = hash_param(params.get("content_hash"));
+        let store = self.store.clone();
+        let session = session.to_string();
+        cas_retry(&store, id, agent_hash, |hash| {
+            let store = store.clone();
+            let session = session.clone();
+            async move { store.close(id, &session, hash).await }
+        })
+        .await
+        .map(|issue| format!("closed issue #{}: {}", issue.meta.id, issue.meta.title))
+        .map_err(|e| e.to_string())
+    }
+
+    async fn reopen(&self, params: Value) -> Result<String, String> {
+        let id = require_u32(params.get("id"), "id")?;
+        let agent_hash = hash_param(params.get("content_hash"));
+        let store = self.store.clone();
+        cas_retry(&store, id, agent_hash, |hash| {
+            let store = store.clone();
+            async move { store.reopen(id, hash).await }
+        })
+        .await
+        .map(|issue| format!("reopened issue #{}: {}", issue.meta.id, issue.meta.title))
+        .map_err(|e| e.to_string())
     }
 
     async fn link_session(&self, params: Value, session: &str) -> Result<String, String> {
         let id = require_u32(params.get("id"), "id")?;
-        let hash = params
-            .get("content_hash")
-            .and_then(|v| v.as_str())
-            .map(String::from);
         if session.is_empty() {
             return Err("cannot link_session: no active session id in context".to_string());
         }
-        self.store
-            .link_session(id, session, hash)
-            .await
-            .map(|_| format!("linked session to issue #{id}"))
-            .map_err(|e| e.to_string())
+        let agent_hash = hash_param(params.get("content_hash"));
+        let store = self.store.clone();
+        let session = session.to_string();
+        cas_retry(&store, id, agent_hash, |hash| {
+            let store = store.clone();
+            let session = session.clone();
+            async move { store.link_session(id, &session, hash).await }
+        })
+        .await
+        .map(|_| format!("linked session to issue #{id}"))
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -365,6 +368,57 @@ fn short_session(s: &str) -> String {
 
 // ── Param parsers (centralized so each action doesn't repeat) ────────────
 
+/// Maximum CAS attempts before giving up (#2). The first attempt uses the
+/// agent's `content_hash` (fast path); on each [`IssueError::Conflict`] we
+/// re-read a fresh hash and retry. So a stale hash from the agent still
+/// succeeds as long as contention resolves within the bound. See
+/// `docs/designs/2026-06-17-issue-system-hardening.md` §1.4 for why the hash
+/// gate is *required* for safe automatic recovery.
+const MAX_CAS_ATTEMPTS: u32 = 4;
+
+/// Run an issue store mutation under bounded compare-and-set retry.
+///
+/// The store is deliberately strict: it returns raw [`IssueError::Conflict`]
+/// and never retries on its own (principle: strictness in the store, recovery
+/// in the tool). This helper owns the recovery — re-reading a fresh hash after
+/// each conflict and retrying up to [`MAX_CAS_ATTEMPTS`] times.
+async fn cas_retry<T, F, Fut>(
+    store: &FileIssueStore,
+    id: u32,
+    agent_hash: Option<String>,
+    mut op: F,
+) -> Result<T, IssueError>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<T, IssueError>> + Send,
+    T: Send,
+{
+    let mut hash = agent_hash;
+    for attempt in 0..MAX_CAS_ATTEMPTS {
+        match op(hash.clone()).await {
+            Ok(v) => return Ok(v),
+            Err(IssueError::Conflict { .. }) if attempt + 1 < MAX_CAS_ATTEMPTS => {
+                tracing::debug!(
+                    id,
+                    attempt = attempt + 1,
+                    "issue CAS conflict, re-reading fresh hash"
+                );
+                hash = store.read(id).ok().map(|(_, h)| h);
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(IssueError::Conflict { id })
+}
+
+/// Extract a non-empty `content_hash` from params (absent/empty → `None`).
+fn hash_param(v: Option<&Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
 fn require_string(v: Option<&Value>, name: &str) -> Result<String, String> {
     v.and_then(|x| x.as_str())
         .map(String::from)
@@ -416,4 +470,75 @@ fn parse_labels(v: Option<&Value>) -> Result<Vec<String>, String> {
         out.push(s.to_string());
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Phase 2 coverage for the tool-layer CAS retry helper (#2). The store
+    //! is strict (raw Conflict, no retry); `cas_retry` owns recovery.
+    use super::*;
+
+    fn tmp_store() -> (tempfile::TempDir, FileIssueStore) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".oxi").join("issues");
+        std::fs::create_dir_all(&dir).unwrap();
+        (tmp, FileIssueStore::open(dir).unwrap())
+    }
+
+    #[tokio::test]
+    async fn cas_retry_recovers_from_stale_hash() {
+        // The agent passes a stale/wrong content_hash. First attempt conflicts;
+        // cas_retry re-reads a fresh hash and retries → succeeds. This is the
+        // whole point of #2: a stale hash is advisory, not fatal.
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let id = 1;
+
+        let result: Result<Issue, _> = cas_retry(
+            &store,
+            id,
+            Some("deadbeefdeadbeef".to_string()), // deliberately wrong
+            |hash| {
+                let store = store.clone();
+                async move {
+                    store
+                        .apply_patch(
+                            id,
+                            IssuePatch {
+                                title: Some("Patched".into()),
+                                ..Default::default()
+                            },
+                            None,
+                            hash,
+                        )
+                        .await
+                }
+            },
+        )
+        .await;
+        let issue = result.expect("cas_retry should recover from a stale hash");
+        assert_eq!(issue.meta.title, "Patched");
+    }
+
+    #[tokio::test]
+    async fn cas_retry_gives_up_after_bound() {
+        // If contention never resolves, cas_retry surfaces Conflict after
+        // MAX_CAS_ATTEMPTS — it never loops forever.
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let id = 1;
+
+        let result: Result<Issue, _> = cas_retry(&store, id, None, |_hash| async move {
+            Err(IssueError::Conflict { id })
+        })
+        .await;
+        assert!(
+            matches!(result, Err(IssueError::Conflict { id: 1 })),
+            "must give up with Conflict after the bound, got: {result:?}"
+        );
+    }
 }

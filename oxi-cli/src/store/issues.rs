@@ -216,6 +216,33 @@ impl Issue {
     }
 }
 
+/// A precise update payload for [`FileIssueStore::apply_patch`].
+///
+/// Every field is `Option`: `None` = keep the existing value, `Some` = replace
+/// it. `labels` is the only field with a meaningful empty state —
+/// `Some(vec![])` clears all labels while `None` keeps them. This resolves
+/// defect #3: through the tool schema, "field absent" vs `[]` were previously
+/// indistinguishable, so labels could never be cleared without resending the
+/// full set.
+///
+/// Used by the `issue` tool's `update` action (via [`FileIssueStore::apply_patch`])
+/// and is the recommended mutation surface for callers that want precise
+/// keep-vs-replace semantics.
+#[derive(Debug, Clone, Default)]
+pub struct IssuePatch {
+    /// Replace the title.
+    pub title: Option<String>,
+    /// Replace the markdown body.
+    pub body: Option<String>,
+    /// Replace the status. Setting [`Status::Open`] also clears `closed_at`
+    /// (see [`FileIssueStore::apply_patch`], which fixes the latent reopen bug #4).
+    pub status: Option<Status>,
+    /// Replace the priority.
+    pub priority: Option<Priority>,
+    /// Replace the labels wholesale. `Some(vec![])` clears all labels.
+    pub labels: Option<Vec<String>>,
+}
+
 // ============================================================================
 // Serialization — markdown + YAML frontmatter
 // ============================================================================
@@ -843,13 +870,30 @@ impl FileIssueStore {
                 {
                     return Err(IssueError::Conflict { id });
                 }
-                let issue = parse_issue(&raw, Some(path.clone())).map_err(IssueError::Other)?;
-                let mut new = mutator(issue)?;
-                new.meta.updated_at = Utc::now();
-                let content = serialize_issue(&new).map_err(IssueError::Other)?;
+                let before = parse_issue(&raw, Some(path.clone())).map_err(IssueError::Other)?;
+                let before_updated_at = before.meta.updated_at;
+                let before_bytes = serialize_issue(&before).map_err(IssueError::Other)?;
+                let after = mutator(before)?;
+
+                // No-op detection (#12): if the mutator produced no meaningful
+                // change — ignoring `updated_at`, which a real write always
+                // refreshes — skip the write, the timestamp bump, and the cache
+                // invalidate. We compare the *normalized serialized* forms so
+                // key-order/whitespace drift in the on-disk `raw` can't create
+                // false negatives.
+                let mut probe = after.clone();
+                probe.meta.updated_at = before_updated_at;
+                let probe_bytes = serialize_issue(&probe).map_err(IssueError::Other)?;
+                if probe_bytes == before_bytes {
+                    return Ok(after.with_path(path));
+                }
+
+                let mut final_issue = after;
+                final_issue.meta.updated_at = Utc::now();
+                let content = serialize_issue(&final_issue).map_err(IssueError::Other)?;
                 atomic_write(&path, &content)?;
                 store.invalidate();
-                Ok(new.with_path(path))
+                Ok(final_issue.with_path(path))
             })
             .await
     }
@@ -966,6 +1010,78 @@ impl FileIssueStore {
             if !issue.meta.sessions.contains(&session) {
                 issue.meta.sessions.push(session);
             }
+            Ok(issue)
+        })
+        .await
+    }
+
+    /// Apply a precise [`IssuePatch`] under strict CAS, preserving the existing
+    /// ownership policy.
+    ///
+    /// If `caller` is `Some`, a different *non-empty* assignee blocks the
+    /// update with [`IssueError::NotAssigned`] — identical to the legacy
+    /// `update` tool action. Setting `status = Open` also clears `closed_at`,
+    /// fixing the latent reopen bug (#4: previously `update { status: open }`
+    /// left a stale `closed_at` on a reopened issue). Prefer the dedicated
+    /// [`FileIssueStore::reopen`] for clarity.
+    ///
+    /// No-op patches (nothing meaningful changed) are detected inside
+    /// [`FileIssueStore::update`] and skip the write entirely.
+    pub async fn apply_patch(
+        &self,
+        id: u32,
+        patch: IssuePatch,
+        caller: Option<String>,
+        expected_hash: Option<String>,
+    ) -> std::result::Result<Issue, IssueError> {
+        self.update(id, expected_hash, move |mut issue| {
+            if let Some(caller) = caller.as_deref()
+                && let Some(ref a) = issue.meta.assigned_to
+                && !a.session.is_empty()
+                && a.session != caller
+            {
+                return Err(IssueError::NotAssigned {
+                    id,
+                    caller: caller.to_string(),
+                });
+            }
+            if let Some(t) = patch.title {
+                issue.meta.title = t;
+            }
+            if let Some(b) = patch.body {
+                issue.body = b;
+            }
+            if let Some(s) = patch.status {
+                issue.meta.status = s;
+                issue.meta.closed_at = match s {
+                    Status::Closed => Some(Utc::now()),
+                    Status::Open => None, // reopen clears closed_at (#4)
+                };
+            }
+            if let Some(p) = patch.priority {
+                issue.meta.priority = p;
+            }
+            if let Some(l) = patch.labels {
+                issue.meta.labels = l;
+            }
+            Ok(issue)
+        })
+        .await
+    }
+
+    /// Reopen a closed issue: `status = Open`, `closed_at = None`.
+    ///
+    /// Anyone may reopen — after [`FileIssueStore::close`] there is no owner.
+    /// Maps to the `issue { action: "reopen" }` tool action. Distinct from
+    /// `apply_patch { status: Open }` so callers express intent explicitly.
+    pub async fn reopen(
+        &self,
+        id: u32,
+        expected_hash: Option<String>,
+    ) -> std::result::Result<Issue, IssueError> {
+        self.update(id, expected_hash, |mut issue| {
+            issue.meta.status = Status::Open;
+            issue.meta.closed_at = None;
             Ok(issue)
         })
         .await
@@ -1455,5 +1571,228 @@ mod tests {
             "proc-C",
             "empty-string assignment is reclaimable — this is the #13 bug shape"
         );
+    }
+
+    // ── Phase 2 regression coverage (#2 #3 #4 #9 #12) ────────────────────
+
+    #[tokio::test]
+    async fn reopen_clears_closed_at() {
+        // #4: reopening must clear `closed_at`. The legacy `update { status:
+        // open }` left a stale `closed_at` on a reopened issue.
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "proc-X", Some(h)).await.unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.close(1, "proc-X", Some(h)).await.unwrap();
+        let (closed, _) = store.read(1).unwrap();
+        assert_eq!(closed.meta.status, Status::Closed);
+        assert!(closed.meta.closed_at.is_some());
+
+        let (_, h) = store.read(1).unwrap();
+        store.reopen(1, Some(h)).await.unwrap();
+        let (reopened, _) = store.read(1).unwrap();
+        assert_eq!(reopened.meta.status, Status::Open);
+        assert!(
+            reopened.meta.closed_at.is_none(),
+            "reopen must clear closed_at (#4)"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_patch_status_open_clears_closed_at() {
+        // #4 via the apply_patch path too: status -> Open clears closed_at.
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "proc-X", Some(h)).await.unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.close(1, "proc-X", Some(h)).await.unwrap();
+
+        let (_, h) = store.read(1).unwrap();
+        store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    status: Some(Status::Open),
+                    ..Default::default()
+                },
+                None,
+                Some(h),
+            )
+            .await
+            .unwrap();
+        let (after, _) = store.read(1).unwrap();
+        assert_eq!(after.meta.status, Status::Open);
+        assert!(
+            after.meta.closed_at.is_none(),
+            "apply_patch status=Open must clear closed_at (#4)"
+        );
+    }
+
+    #[tokio::test]
+    async fn noop_update_does_not_bump_timestamp() {
+        // #12: a patch that changes nothing meaningful must not write, must
+        // not bump updated_at, must not invalidate the cache.
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let (before, _) = store.read(1).unwrap();
+        let ts_before = before.meta.updated_at;
+
+        // Empty patch → no-op.
+        let (_, h) = store.read(1).unwrap();
+        store
+            .apply_patch(1, IssuePatch::default(), None, Some(h))
+            .await
+            .unwrap();
+        let (after, _) = store.read(1).unwrap();
+        assert_eq!(
+            after.meta.updated_at, ts_before,
+            "no-op update must not bump updated_at (#12)"
+        );
+
+        // A real change DOES bump it (and updates the field).
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let (_, h2) = store.read(1).unwrap();
+        store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    title: Some("New".into()),
+                    ..Default::default()
+                },
+                None,
+                Some(h2),
+            )
+            .await
+            .unwrap();
+        let (after2, _) = store.read(1).unwrap();
+        assert_ne!(
+            after2.meta.updated_at, ts_before,
+            "real update must bump updated_at"
+        );
+        assert_eq!(after2.meta.title, "New");
+    }
+
+    #[tokio::test]
+    async fn apply_patch_labels_clear_vs_keep() {
+        // #3: absent vs [] must be distinguishable. None=keep, Some([])=clear,
+        // Some([x])=replace.
+        let (_tmp, store) = tmp_store();
+        store
+            .create(
+                "T".into(),
+                "b".into(),
+                Priority::Low,
+                vec!["a".into(), "b".into()],
+                None,
+            )
+            .unwrap();
+
+        // Omit labels (None) → keep, while another field changes.
+        let (_, h) = store.read(1).unwrap();
+        store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    priority: Some(Priority::High),
+                    ..Default::default()
+                },
+                None,
+                Some(h),
+            )
+            .await
+            .unwrap();
+        let (kept, _) = store.read(1).unwrap();
+        assert_eq!(kept.meta.labels, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(kept.meta.priority, Priority::High);
+
+        // labels: Some([]) → clear.
+        let (_, h) = store.read(1).unwrap();
+        store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    labels: Some(vec![]),
+                    ..Default::default()
+                },
+                None,
+                Some(h),
+            )
+            .await
+            .unwrap();
+        let (cleared, _) = store.read(1).unwrap();
+        assert!(cleared.meta.labels.is_empty(), "Some([]) must clear labels");
+
+        // labels: Some([x]) → replace.
+        let (_, h) = store.read(1).unwrap();
+        store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    labels: Some(vec!["z".into()]),
+                    ..Default::default()
+                },
+                None,
+                Some(h),
+            )
+            .await
+            .unwrap();
+        let (replaced, _) = store.read(1).unwrap();
+        assert_eq!(replaced.meta.labels, vec!["z".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn apply_patch_enforces_ownership() {
+        // Hardening keeps the legacy ownership policy: a different non-empty
+        // assignee blocks the update. apply_patch must reject a non-owner.
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        let (_, h) = store.read(1).unwrap();
+        store.start(1, "proc-A", Some(h)).await.unwrap();
+
+        // proc-B cannot patch.
+        let (_, h) = store.read(1).unwrap();
+        let err = store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    title: Some("X".into()),
+                    ..Default::default()
+                },
+                Some("proc-B".into()),
+                Some(h),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, IssueError::NotAssigned { ref caller, .. } if caller == "proc-B"),
+            "non-owner must be rejected, got: {err:?}"
+        );
+
+        // proc-A (the owner) succeeds.
+        let (_, h) = store.read(1).unwrap();
+        store
+            .apply_patch(
+                1,
+                IssuePatch {
+                    title: Some("X".into()),
+                    ..Default::default()
+                },
+                Some("proc-A".into()),
+                Some(h),
+            )
+            .await
+            .unwrap();
+        let (patched, _) = store.read(1).unwrap();
+        assert_eq!(patched.meta.title, "X");
     }
 }
