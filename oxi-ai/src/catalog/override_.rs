@@ -257,6 +257,8 @@ mod tests {
             cost_cache_write: 0.0,
             context_window: 200000,
             max_tokens: 8192,
+            auth_method: crate::catalog::provider::AuthMethod::Bearer,
+            base_url: None,
         }];
         apply_model_overrides(&mut models, &overrides);
         assert_eq!(models.get("anthropic").unwrap().len(), 1);

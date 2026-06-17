@@ -51,6 +51,8 @@ dirs = "5"
 # File locking (fs2 for cross-platform flock, raii_flock for RAII guards)
 fs2 = "0.4"
 raii_flock = "0.2"
+flate2 = "1"
+filetime = "0.2"
 base64 = "0.22"
 digest = "0.10"
 sha2 = "0.10"
@@ -61,6 +63,7 @@ rsa = { version = "0.9", features = ["pem"] }
 [dev-dependencies]
 mockito = "1"
 tempfile = "3"
+flate2 = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

@@ -1,14 +1,16 @@
 //! Provider metadata structures — TOML ↔ Rust.
 
+use crate::catalog::BuiltinModelEntry;
 use serde::{Deserialize, Serialize};
 
 /// How a provider passes its API key in HTTP headers.
 ///
 /// Maps to `register_builtins::AuthMethod` 1:1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AuthMethod {
     /// `Authorization: Bearer <key>` — most OpenAI-compatible providers.
+    #[default]
     Bearer,
     /// `x-api-key: <key>` — Anthropic and Anthropic-compatible providers.
     #[serde(rename = "x-api-key")]
@@ -73,17 +75,43 @@ impl BuiltinProviderEntry {
     }
 }
 
-/// Load all built-in providers from the bundled TOML.
+/// Load all built-in providers from the materialized models.dev snapshot.
 ///
-/// This is the public entry point for the catalog loader. It returns a
-/// `'static` reference to the parsed providers, cached after first call.
+/// This is cached after first call. The result is leaked to `'static`.
 pub fn load_builtin_providers() -> &'static [BuiltinProviderEntry] {
-    crate::catalog::CatalogRoot::get().provider.as_slice()
+    static CACHE: std::sync::OnceLock<&'static [BuiltinProviderEntry]> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        let providers = crate::catalog::materialize::materialize_providers();
+        // Box::leak the Vec to obtain `&'static [BuiltinProviderEntry]`.
+        // This happens once at startup; bounded by provider count (~145).
+        Box::leak(providers.into_boxed_slice())
+    })
 }
 
 /// Number of built-in providers.
 pub fn builtin_providers_count() -> usize {
     load_builtin_providers().len()
+}
+
+// ---------------------------------------------------------------------------
+// Legacy TOML-based model API — now empty (models come from materialize).
+// Retained for SDK backwards compatibility. Returns an empty map.
+// ---------------------------------------------------------------------------
+
+/// Empty BTreeMap stub — models are now loaded from the materialize
+/// pipeline. This function is retained for SDK backwards compatibility
+/// and will return an empty map.
+pub fn load_builtin_models() -> &'static std::collections::BTreeMap<String, Vec<BuiltinModelEntry>>
+{
+    static EMPTY: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<BuiltinModelEntry>>> =
+        std::sync::OnceLock::new();
+    EMPTY.get_or_init(std::collections::BTreeMap::new)
+}
+
+/// Always returns 0 — models are loaded from the materialize pipeline.
+/// Retained for SDK backwards compatibility.
+pub fn builtin_model_count() -> usize {
+    0
 }
 
 #[cfg(test)]

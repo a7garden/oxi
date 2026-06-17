@@ -47,14 +47,16 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::BuiltinModelEntry;
+use crate::Api;
+use crate::catalog::provider::AuthMethod;
 
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
 
-/// Disk cache freshness window.
-const DEFAULT_TTL: Duration = Duration::from_secs(5 * 60);
+/// Local-only freshness window: if the cache file's mtime is within this
+/// window, no HTTP request is made at all (zero-cost). Default 1 hour.
+const DEFAULT_MTIME_WINDOW: Duration = Duration::from_secs(60 * 60);
 
 /// Per-request timeout for the live fetch.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -72,7 +74,7 @@ const DEFAULT_URL: &str = "https://models.dev";
 const USER_AGENT: &str = concat!("oxi/", env!("CARGO_PKG_VERSION"));
 
 // ---------------------------------------------------------------------------
-// Schema (mirrors models.dev `api.json`, see `packages/core/src/schema.ts`)
+// Schema (mirrors models.dev `api.json`, see opencode `packages/core/src/models-dev.ts`)
 // ---------------------------------------------------------------------------
 
 /// Top-level catalog: provider id → provider.
@@ -88,7 +90,7 @@ pub struct MdProvider {
     /// Environment variables that hold the API key.
     #[allow(dead_code)]
     pub env: Vec<String>,
-    /// AI SDK npm package (informational).
+    /// AI SDK npm package identifying the API protocol.
     #[serde(default)]
     #[allow(dead_code)]
     pub npm: Option<String>,
@@ -96,37 +98,109 @@ pub struct MdProvider {
     #[serde(default)]
     #[allow(dead_code)]
     pub api: Option<String>,
+    /// Link to provider documentation.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub doc: Option<String>,
     /// Models served by this provider.
     pub models: BTreeMap<String, MdModel>,
 }
 
-/// A single model entry.
+/// A single model entry — serialised from models.dev `api.json`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MdModel {
     /// Display name.
     #[allow(dead_code)]
     pub name: String,
+    /// Model family (e.g. "claude-sonnet", "gpt-4").
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub family: Option<String>,
     /// Whether the model supports reasoning / chain-of-thought.
     pub reasoning: bool,
+    /// Whether the model supports tool calling.
+    #[serde(default)]
+    pub tool_call: bool,
+    /// Whether the model supports file attachments (images, PDFs).
+    #[serde(default)]
+    pub attachment: bool,
+    /// Whether the model supports temperature control.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub temperature: Option<bool>,
+    /// Whether the model supports structured output / JSON mode.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub structured_output: Option<bool>,
+    /// Knowledge cutoff date.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub knowledge: Option<String>,
+    /// Release date of the model.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub release_date: Option<String>,
+    /// Last update time of this entry.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub last_updated: Option<String>,
+    /// Whether the model uses open weights.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub open_weights: Option<bool>,
+    /// Whether the model supports interleaved thinking + tool calls.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub interleaved: Option<serde_json::Value>,
+    /// Reasoning options (effort levels, budget tokens).
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub reasoning_options: Option<Vec<MdReasoningOption>>,
     /// Token limits.
     pub limit: MdLimit,
-    /// Pricing (USD per million tokens). Optional — some models are free.
+    /// Pricing (USD per million tokens). Optional — some are free.
     #[serde(default)]
     pub cost: Option<MdCost>,
+    /// Supported input/output modalities.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub modalities: Option<MdModalities>,
+    /// Model status (alpha, beta, deprecated).
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub status: Option<String>,
+    /// Per-model provider override (npm + api).
+    #[serde(default)]
+    pub provider: Option<MdModelProvider>,
+}
+
+/// Per-model provider override — lets a specific model use a different
+/// API protocol or endpoint than its parent provider.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MdModelProvider {
+    /// Override npm package (API protocol).
+    #[serde(default)]
+    pub npm: Option<String>,
+    /// Override API base URL (empty = inherit from parent).
+    #[serde(default)]
+    pub api: Option<String>,
 }
 
 /// Token limits.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MdLimit {
-    /// Maximum context window.
+    /// Maximum context window (total tokens).
     pub context: f64,
+    /// Max input tokens (optional, for reasoning models with input budget).
+    #[serde(default)]
+    pub input: Option<f64>,
     /// Maximum output tokens (maps to oxi `max_tokens`).
     pub output: f64,
 }
 
-/// Pricing. All values are USD per million tokens; `None` means "not billed
-/// separately" / unknown.
+/// Pricing. All values are USD per million tokens.
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
 pub struct MdCost {
     /// Cost per million input tokens.
     pub input: f64,
@@ -138,178 +212,114 @@ pub struct MdCost {
     /// Cost per million cached write tokens, if billed separately.
     #[serde(default)]
     pub cache_write: Option<f64>,
-    // Note: models.dev also exposes `tiers` and `context_over_200k` for
-    // tiered pricing. oxi models a single cost tier (the base), so those
-    // are intentionally ignored here.
+    /// Tiered pricing (e.g. context-length-based tiers).
+    #[serde(default)]
+    pub tiers: Option<Vec<MdCostTier>>,
+    /// Context >200K pricing (Anthropic-specific extended pricing tier).
+    #[serde(default)]
+    pub context_over_200k: Option<MdCostTierData>,
+    /// Separate pricing for reasoning/thinking tokens.
+    #[serde(default)]
+    pub reasoning: Option<f64>,
+    /// Audio modality input pricing.
+    #[serde(default)]
+    pub input_audio: Option<f64>,
+    /// Audio modality output pricing.
+    #[serde(default)]
+    pub output_audio: Option<f64>,
+}
+
+/// A single pricing tier (used within `tiers` array).
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct MdCostTier {
+    pub input: f64,
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: Option<f64>,
+    #[serde(default)]
+    pub cache_write: Option<f64>,
+    pub tier: MdTierSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct MdTierSpec {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub size: f64,
+}
+
+/// Context-over-200K pricing tier data (Anthropic-specific).
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct MdCostTierData {
+    pub input: f64,
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: Option<f64>,
+    #[serde(default)]
+    pub cache_write: Option<f64>,
+}
+
+/// Supported input/output modalities.
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct MdModalities {
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub input: Option<Vec<String>>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub output: Option<Vec<String>>,
+}
+
+/// Reasoning options (effort levels, budget tokens).
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(missing_docs)]
+pub struct MdReasoningOption {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub values: Option<Vec<Option<String>>>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub min: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
-// Provider ID mapping (oxi → models.dev)
+// Protocol resolver — npm → (Api + AuthMethod), 7줄 (본 설계 핵심)
 // ---------------------------------------------------------------------------
 
-/// Map an oxi provider id to the corresponding models.dev provider id.
+/// Map a models.dev `npm` string to oxi's API type and authentication method.
 ///
-/// oxi carries regional and plan-specific variants (e.g. `minimax-cn`,
-/// `zai-coding-global`) that collapse to a single models.dev provider.
-/// Returns `None` for providers that have no models.dev counterpart
-/// (local servers, unmapped gateways) — those are left on Layer 1.
-pub fn provider_map(oxi_pid: &str) -> Option<&'static str> {
-    Some(match oxi_pid {
-        "anthropic" | "anthropic-vertex" => "anthropic",
-        "google" => "google",
-        "google-vertex" => "google-vertex",
-        "google-vertex-anthropic" => "google-vertex-anthropic",
-        "openai" | "openai-responses" | "openai-completions" | "openai-codex" => "openai",
-        "openrouter" => "openrouter",
-        "deepseek" => "deepseek",
-        "groq" => "groq",
-        "xai" => "xai",
-        "mistral" => "mistral",
-        "azure" | "azure-cognitive-services" => "azure-cognitive-services",
-        "bedrock" | "amazon-bedrock" | "amazon-bedrock-mantle" => "amazon-bedrock",
-        "fireworks" => "fireworks-ai",
-        "togetherai" | "together" => "togetherai",
-        "cerebras" => "cerebras",
-        "deepinfra" => "deepinfra",
-        "cloudflare" | "cloudflare-workers-ai" => "cloudflare-workers-ai",
-        "cloudflare-ai-gateway" => "cloudflare-ai-gateway",
-        "huggingface" => "huggingface",
-        "moonshotai" | "moonshot" => "moonshotai",
-        "moonshotai-cn" => "moonshotai-cn",
-        "kimi-coding" => "kimi-for-coding",
-        "xiaomi" => "xiaomi",
-        "xiaomi-token-plan" => "xiaomi-token-plan",
-        "minimax" => "minimax",
-        "minimax-cn" => "minimax-cn",
-        "zai" | "zai-global" => "zai",
-        "zai-cn" => "zai-cn",
-        "zai-coding-global" | "zai-coding-cn" => "zai-coding-plan",
-        "vercel-ai-gateway" => "vercel",
-        "copilot" | "codex" | "github-copilot" => "github-copilot",
-        "opencode" => "opencode",
-        "opencode-go" => "opencode-go",
-        "nvidia" => "nvidia",
-        "novita" => "novita-ai",
-        "venice" => "venice",
-        "chutes" => "chutes",
-        "gmi" => "gmicloud",
-        "stepfun" => "stepfun-ai",
-        "qwen-portal" | "alibaba" => "alibaba",
-        "ollama-cloud" => "ollama-cloud",
-        "synthetic" => "synthetic",
-        // Unmapped (skipped): ollama, lmstudio, vllm, sglang, byteplus,
-        // qianfan, arcee, litellm, microsoft-foundry, copilot-proxy,
-        // kilocode, etc. — these are local servers, gateways, or providers
-        // without a models.dev entry. Runtime `/v1/models` discovery
-        // (Layer 3) handles the server ones.
-        _ => return None,
-    })
+/// This is the **only** protocol knowledge oxi has. For OpenAI-compatible
+/// providers, the base URL from `MdProvider.api` is used at materialize time.
+/// Fresh npm values not listed here default to OpenAI-compatible (`OpenAiCompletions`).
+pub fn protocol_for(npm: &str) -> (Api, AuthMethod) {
+    match npm {
+        "@ai-sdk/anthropic" => (Api::AnthropicMessages, AuthMethod::XApiKey),
+        "@ai-sdk/google" => (Api::GoogleGenerativeAi, AuthMethod::None),
+        "@ai-sdk/google-vertex" | "@ai-sdk/google-vertex/anthropic" => {
+            (Api::GoogleVertex, AuthMethod::None)
+        }
+        "@ai-sdk/mistral" => (Api::MistralConversations, AuthMethod::Bearer),
+        "@ai-sdk/azure" => (Api::AzureOpenAiResponses, AuthMethod::ApiKey),
+        "@ai-sdk/amazon-bedrock" => (Api::BedrockConverseStream, AuthMethod::None),
+        // @ai-sdk/openai, @ai-sdk/openai-compatible, groq, xai, togetherai,
+        // vercel, perplexity, cerebras, deepinfra, cohere, gateway, etc.
+        // And any unknown npm → OpenAI-compatible with Bearer auth.
+        _ => (Api::OpenAiCompletions, AuthMethod::Bearer),
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Reasoning preservation allowlist
+// NOTE: provider_map, reasoning_preserve, and enrich() were removed.
+// These were used by the legacy TOML enrichment path. With the materialize
+// approach (materialize.rs), models.dev data flows directly into
+// BuiltinProviderEntry/BuiltinModelEntry without per-entry enrichment.
 // ---------------------------------------------------------------------------
-
-/// Returns true if oxi's `reasoning` flag for this model must NOT be
-/// overwritten by models.dev.
-///
-/// Some variants intentionally disable reasoning even though the base model
-/// supports it (TEE/throughput/quantized variants, tool-augmented composites).
-/// models.dev reflects the base model's capability, so blindly copying it
-/// would be wrong here.
-pub fn reasoning_preserve(oxi_pid: &str, id: &str) -> bool {
-    // TEE (Trusted Execution Environment) variants — reasoning-disabled.
-    if id.ends_with("-TEE") {
-        return matches!(oxi_pid, "chutes" | "together");
-    }
-    // Throughput-tuned variants (`-tput` suffix).
-    if id.ends_with("-tput") && oxi_pid == "together" {
-        return true;
-    }
-    // Explicit list of variants where oxi's flag is deliberate.
-    matches!(
-        (oxi_pid, id),
-        ("groq", "groq/compound")
-            | ("groq", "groq/compound-mini")
-            | ("together", "Qwen/Qwen3-Coder-Next-FP8")
-            | ("mistral", "mistral-medium-latest")
-            | ("together", "Qwen/Qwen3.7-Max")
-            | ("together", "deepseek-ai/DeepSeek-V3")
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Enrichment
-// ---------------------------------------------------------------------------
-
-/// Enrich a Layer 1 entry in place with models.dev data.
-///
-/// # Precedence rules
-///
-/// - **Price**: only a positive models.dev value overwrites Layer 1. A `0.0`
-///   or absent models.dev price leaves Layer 1 untouched (preserves
-///   verified-free and unknown). This also clears the openclaw `-1.0`
-///   sentinel: once a real price is filled in, the entry is no longer
-///   "unverified".
-/// - **Limits**: `limit.context` → `context_window`, `limit.output` →
-///   `max_tokens`. Only positive values overwrite.
-/// - **Reasoning**: overwritten unless [`reasoning_preserve`] vetoes it.
-///
-/// No-op when the provider isn't mapped, the model id isn't found, or the
-/// field would be set to an empty/zero value.
-pub fn enrich(entry: &mut BuiltinModelEntry, catalog: &MdCatalog) {
-    let md_pid = match provider_map(&entry.provider) {
-        Some(p) => p,
-        None => {
-            tracing::trace!(
-                provider = %entry.provider,
-                "models.dev: provider unmapped, skipping enrichment"
-            );
-            return;
-        }
-    };
-    let Some(mdprov) = catalog.0.get(md_pid) else {
-        return;
-    };
-    let Some(mdm) = mdprov.models.get(&entry.id) else {
-        // Common case: model id mismatch between oxi and models.dev.
-        // Silent skip to avoid log noise on every catalog lookup.
-        return;
-    };
-
-    // Pricing.
-    if let Some(c) = &mdm.cost {
-        if c.input > 0.0 {
-            entry.cost_input = c.input;
-        }
-        if c.output > 0.0 {
-            entry.cost_output = c.output;
-        }
-        if let Some(cr) = c.cache_read
-            && cr > 0.0
-        {
-            entry.cost_cache_read = cr;
-        }
-        if let Some(cw) = c.cache_write
-            && cw > 0.0
-        {
-            entry.cost_cache_write = cw;
-        }
-    }
-
-    // Limits.
-    if mdm.limit.context > 0.0 {
-        entry.context_window = mdm.limit.context as u32;
-    }
-    if mdm.limit.output > 0.0 {
-        entry.max_tokens = mdm.limit.output as u32;
-    }
-
-    // Reasoning flag (respect allowlist).
-    if !reasoning_preserve(&entry.provider, &entry.id) {
-        entry.reasoning = mdm.reasoning;
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Global state
@@ -344,6 +354,41 @@ pub async fn init_models_dev() {
 /// all these cases.
 pub fn get() -> Option<&'static MdCatalog> {
     MODELS_DEV.get().and_then(|o| o.as_deref())
+}
+
+/// Force-refresh the models.dev cache.
+///
+/// Performs a conditional GET (ETag) regardless of the mtime window.
+/// The result is written to the cache file. The in-memory catalog is
+/// **not** updated (OnceLock is immutable) — the refreshed data takes
+/// effect on the next process start.
+///
+/// Returns `true` if the cache was updated (200), `false` if unchanged
+/// (304) or on error.
+pub async fn refresh() -> bool {
+    if !enabled() || fetch_disabled() {
+        return false;
+    }
+    let etag = read_etag();
+    match live_fetch_conditional(etag.as_deref()).await {
+        Some(ConditionalResult::NotModified) => {
+            tracing::info!("models.dev: already up to date (304)");
+            touch_cache_mtime();
+            false
+        }
+        Some(ConditionalResult::Updated(c, new_etag)) => {
+            write_cache_atomic(&c);
+            if let Some(e) = new_etag {
+                write_etag(&e);
+            }
+            tracing::info!("models.dev: cache refreshed");
+            true
+        }
+        None => {
+            tracing::warn!("models.dev: refresh failed");
+            false
+        }
+    }
 }
 
 /// Force-clear the cached catalog. Test-only.
@@ -399,33 +444,84 @@ fn models_url() -> String {
     std::env::var("OXI_MODELS_DEV_URL").unwrap_or_else(|_| DEFAULT_URL.to_string())
 }
 
-/// Configured cache TTL.
-fn ttl() -> Duration {
-    std::env::var("OXI_MODELS_DEV_TTL")
+/// Configured mtime window (local-only freshness check).
+///
+/// `OXI_MODELS_DEV_MTIME_WINDOW` (seconds) overrides the default (1 hour).
+/// Within this window, no HTTP request is made — zero-cost cache hit.
+fn mtime_window() -> Duration {
+    std::env::var("OXI_MODELS_DEV_MTIME_WINDOW")
         .ok()
         .and_then(|s| s.parse().ok())
         .map(Duration::from_secs)
-        .unwrap_or(DEFAULT_TTL)
+        .unwrap_or(DEFAULT_MTIME_WINDOW)
 }
 
-/// Cache-or-live fallback chain.
+/// Whether to force a conditional GET regardless of mtime window.
+/// Set by `oxi models refresh` or `OXI_MODELS_DEV_FORCE_REFRESH=1`.
+fn force_refresh() -> bool {
+    matches!(
+        std::env::var("OXI_MODELS_DEV_FORCE_REFRESH").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// Cache-or-live fallback chain with conditional GET (ETag).
+///
+/// Sync resolution order:
+/// 1. If cache mtime is within `mtime_window()` (default 1h) and not forced →
+///    use cache, no HTTP (zero-cost).
+/// 2. Otherwise, conditional GET with `If-None-Match` (stored ETag).
+///    - `304 Not Modified` → cache is still valid, touch mtime, use cache.
+///    - `200 OK` → write new cache + ETag, use new data.
+/// 3. On fetch failure, use stale cache (any age) if available.
 async fn fetch_with_fallback() -> Option<MdCatalog> {
     if !enabled() {
         return None;
     }
 
-    // 1) Fresh disk cache — near-instant.
-    if let Some(c) = read_cache_if_fresh() {
-        tracing::debug!("models.dev: using fresh cache");
+    // 1) Fresh disk cache within mtime window (unless force_refresh).
+    if !force_refresh()
+        && let Some(c) = read_cache_if_fresh()
+    {
+        tracing::debug!("models.dev: using cache within mtime window");
         return Some(c);
     }
 
-    // 2) Live fetch (unless air-gapped).
-    if !fetch_disabled()
-        && let Some(c) = live_fetch().await
-    {
-        write_cache_atomic(&c);
-        return Some(c);
+    // 2) Conditional GET (unless air-gapped).
+    if !fetch_disabled() {
+        let etag = read_etag();
+        match live_fetch_conditional(etag.as_deref()).await {
+            Some(ConditionalResult::NotModified) => {
+                // 304 means our cached data is still valid. But if the cache
+                // file is missing/corrupt, we have the ETag but no data —
+                // fall through to a non-conditional fetch to recover.
+                if let Some(c) = read_cache_any() {
+                    tracing::debug!("models.dev: 304 Not Modified, touching cache mtime");
+                    touch_cache_mtime();
+                    return Some(c);
+                }
+                tracing::warn!("models.dev: 304 received but cache missing — refetching");
+                // Remove stale ETag and retry without conditional.
+                clear_etag();
+                if let Some(ConditionalResult::Updated(c, new_etag)) =
+                    live_fetch_conditional(None).await
+                {
+                    write_cache_atomic(&c);
+                    if let Some(e) = new_etag {
+                        write_etag(&e);
+                    }
+                    return Some(c);
+                }
+            }
+            Some(ConditionalResult::Updated(c, new_etag)) => {
+                write_cache_atomic(&c);
+                if let Some(e) = new_etag {
+                    write_etag(&e);
+                }
+                return Some(c);
+            }
+            None => { /* fetch failed, fall through to stale */ }
+        }
     }
 
     // 3) Stale cache is better than nothing.
@@ -437,13 +533,21 @@ async fn fetch_with_fallback() -> Option<MdCatalog> {
     None
 }
 
-/// Read the cache only if it is within the TTL.
+/// Result of a conditional GET.
+enum ConditionalResult {
+    /// Server returned 304 — data unchanged.
+    NotModified,
+    /// Server returned 200 — new data + optional new ETag.
+    Updated(MdCatalog, Option<String>),
+}
+
+/// Read the cache only if its mtime is within the mtime window.
 fn read_cache_if_fresh() -> Option<MdCatalog> {
     let path = cache_path()?;
     let meta = std::fs::metadata(&path).ok()?;
     let modified = meta.modified().ok()?;
     let age = SystemTime::now().duration_since(modified).ok()?;
-    if age > ttl() {
+    if age > mtime_window() {
         return None;
     }
     read_cache(&path)
@@ -466,6 +570,47 @@ fn read_cache(path: &std::path::Path) -> Option<MdCatalog> {
             None
         }
     }
+}
+
+/// Touch the cache file's mtime to reset the mtime window (after 304).
+fn touch_cache_mtime() {
+    let Some(path) = cache_path() else { return };
+    // Set mtime to now. `set_modified` is stable in Rust 1.75+.
+    let now = std::time::SystemTime::now();
+    let _ = filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(now));
+}
+
+/// Path to the ETag sidecar file.
+fn etag_path() -> Option<PathBuf> {
+    let base = cache_path()?;
+    Some(base.with_extension("json.etag"))
+}
+
+/// Read the stored ETag (if any) for conditional GET.
+fn read_etag() -> Option<String> {
+    let path = etag_path()?;
+    let body = std::fs::read_to_string(&path).ok()?;
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Write the ETag sidecar atomically.
+fn write_etag(etag: &str) {
+    let Some(path) = etag_path() else { return };
+    let tmp = path.with_extension("json.etag.tmp");
+    if std::fs::write(&tmp, etag).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Remove the ETag sidecar (used when recovering from a stale-ETag state).
+fn clear_etag() {
+    let Some(path) = etag_path() else { return };
+    let _ = std::fs::remove_file(&path);
 }
 
 /// Write the catalog atomically (temp + rename), per AGENTS.md I/O rules.
@@ -493,8 +638,11 @@ fn write_cache_atomic(catalog: &MdCatalog) {
     }
 }
 
-/// Live fetch with bounded retries.
-async fn live_fetch() -> Option<MdCatalog> {
+/// Live fetch with bounded retries and conditional GET (ETag) support.
+///
+/// - If `etag` is `Some`, sends `If-None-Match` header.
+/// - Returns `NotModified` on 304, `Updated` on 200, `None` on failure.
+async fn live_fetch_conditional(etag: Option<&str>) -> Option<ConditionalResult> {
     let client = reqwest::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .build()
@@ -502,32 +650,45 @@ async fn live_fetch() -> Option<MdCatalog> {
     let url = format!("{}/api.json", models_url().trim_end_matches('/'));
 
     for attempt in 0..FETCH_RETRIES {
-        match client
-            .get(&url)
-            .header("User-Agent", USER_AGENT)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => match resp.text().await {
-                Ok(body) => match serde_json::from_str::<MdCatalog>(&body) {
-                    Ok(c) => {
-                        tracing::debug!(
-                            models = c.0.values().map(|p| p.models.len()).sum::<usize>(),
-                            "models.dev: fetched"
-                        );
-                        return Some(c);
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "models.dev: parse failed");
-                        return None;
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(error = %e, "models.dev: body read failed");
-                }
-            },
+        let mut req = client.get(&url).header("User-Agent", USER_AGENT);
+        if let Some(e) = etag {
+            req = req.header("If-None-Match", e);
+        }
+        match req.send().await {
             Ok(resp) => {
-                tracing::warn!(status = %resp.status(), "models.dev: non-success status");
+                let status = resp.status();
+                if status.as_u16() == 304 {
+                    tracing::debug!("models.dev: 304 Not Modified");
+                    return Some(ConditionalResult::NotModified);
+                }
+                if status.is_success() {
+                    // Capture the new ETag (if any) before consuming the body.
+                    let new_etag = resp
+                        .headers()
+                        .get(reqwest::header::ETAG)
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    match resp.text().await {
+                        Ok(body) => match serde_json::from_str::<MdCatalog>(&body) {
+                            Ok(c) => {
+                                tracing::debug!(
+                                    models = c.0.values().map(|p| p.models.len()).sum::<usize>(),
+                                    "models.dev: fetched"
+                                );
+                                return Some(ConditionalResult::Updated(c, new_etag));
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "models.dev: parse failed");
+                                return None;
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!(error = %e, "models.dev: body read failed");
+                        }
+                    }
+                } else {
+                    tracing::warn!(status = %status, "models.dev: non-success status");
+                }
             }
             Err(e) => {
                 tracing::warn!(error = %e, attempt, "models.dev: fetch failed");
@@ -559,9 +720,21 @@ mod tests {
         let mut cat = MdCatalog::default();
         let m = MdModel {
             name: model_id.to_string(),
+            family: None,
             reasoning,
+            tool_call: false,
+            attachment: false,
+            temperature: None,
+            structured_output: None,
+            knowledge: None,
+            release_date: None,
+            last_updated: None,
+            open_weights: None,
+            interleaved: None,
+            reasoning_options: None,
             limit: MdLimit {
                 context: ctx,
+                input: None,
                 output,
             },
             cost: cost.map(|(i, o)| MdCost {
@@ -569,7 +742,15 @@ mod tests {
                 output: o,
                 cache_read: None,
                 cache_write: None,
+                tiers: None,
+                context_over_200k: None,
+                reasoning: None,
+                input_audio: None,
+                output_audio: None,
             }),
+            modalities: None,
+            status: None,
+            provider: None,
         };
         let mut models = BTreeMap::new();
         models.insert(model_id.to_string(), m);
@@ -580,27 +761,11 @@ mod tests {
                 env: vec![],
                 npm: None,
                 api: None,
+                doc: None,
                 models,
             },
         );
         cat
-    }
-
-    fn entry(provider: &str, id: &str) -> BuiltinModelEntry {
-        BuiltinModelEntry {
-            id: id.to_string(),
-            name: id.to_string(),
-            api: "openai-completions".to_string(),
-            provider: provider.to_string(),
-            reasoning: false,
-            input: vec!["text".to_string()],
-            cost_input: 0.0,
-            cost_output: 0.0,
-            cost_cache_read: 0.0,
-            cost_cache_write: 0.0,
-            context_window: 0,
-            max_tokens: 0,
-        }
     }
 
     #[test]
@@ -633,113 +798,6 @@ mod tests {
         assert!((m.cost.as_ref().unwrap().input - 0.14).abs() < 1e-9);
         assert_eq!(m.limit.context, 1000000.0);
         assert_eq!(m.limit.output, 384000.0);
-    }
-
-    #[test]
-    fn enrich_fills_missing_price() {
-        let cat = md(
-            "deepseek",
-            "deepseek-chat",
-            Some((0.14, 0.28)),
-            1000000.0,
-            384000.0,
-            false,
-        );
-        let mut e = entry("deepseek", "deepseek-chat");
-        enrich(&mut e, &cat);
-        assert!((e.cost_input - 0.14).abs() < 1e-9);
-        assert!((e.cost_output - 0.28).abs() < 1e-9);
-        assert_eq!(e.context_window, 1000000);
-        assert_eq!(e.max_tokens, 384000);
-    }
-
-    #[test]
-    fn enrich_preserves_zero_price_when_md_zero() {
-        // models.dev reports 0.0 (verified free) — Layer 1 must NOT be
-        // touched (we can't tell verified-free from unknown here).
-        let cat = md(
-            "deepseek",
-            "free-model",
-            Some((0.0, 0.0)),
-            128000.0,
-            8192.0,
-            false,
-        );
-        let mut e = entry("deepseek", "free-model");
-        e.cost_input = 0.5; // existing Layer 1 value
-        e.context_window = 64000;
-        enrich(&mut e, &cat);
-        assert_eq!(e.cost_input, 0.5, "non-zero Layer 1 price must survive");
-        // But limits are still updated (positive in md).
-        assert_eq!(e.context_window, 128000);
-    }
-
-    #[test]
-    fn enrich_noop_for_unmapped_provider() {
-        let cat = md("deepseek", "x", None, 1000000.0, 384000.0, true);
-        let mut e = entry("ollama", "llama3");
-        enrich(&mut e, &cat);
-        assert_eq!(e.context_window, 0, "unmapped provider must be untouched");
-    }
-
-    #[test]
-    fn enrich_noop_for_missing_model() {
-        let cat = md("deepseek", "deepseek-chat", None, 1000000.0, 384000.0, true);
-        let mut e = entry("deepseek", "deepseek-other");
-        enrich(&mut e, &cat);
-        assert_eq!(e.context_window, 0);
-    }
-
-    #[test]
-    fn enrich_updates_reasoning() {
-        let cat = md(
-            "openai",
-            "gpt-5-chat-latest",
-            None,
-            400000.0,
-            128000.0,
-            true,
-        );
-        let mut e = entry("openai", "gpt-5-chat-latest");
-        assert!(!e.reasoning);
-        enrich(&mut e, &cat);
-        assert!(e.reasoning, "reasoning should be copied from models.dev");
-    }
-
-    #[test]
-    fn enrich_preserves_reasoning_for_tee_variant() {
-        let cat = md(
-            "chutes",
-            "Qwen/Qwen3-Coder-Next-TEE",
-            None,
-            131072.0,
-            32768.0,
-            false,
-        );
-        let mut e = entry("chutes", "Qwen/Qwen3-Coder-Next-TEE");
-        e.reasoning = true; // oxi's deliberate setting
-        enrich(&mut e, &cat);
-        assert!(e.reasoning, "TEE variant reasoning must be preserved");
-    }
-
-    #[test]
-    fn enrich_preserves_reasoning_for_compound() {
-        let cat = md("groq", "groq/compound", None, 131072.0, 32768.0, false);
-        let mut e = entry("groq", "groq/compound");
-        e.reasoning = true;
-        enrich(&mut e, &cat);
-        assert!(e.reasoning);
-    }
-
-    #[test]
-    fn provider_map_collapse_rules() {
-        assert_eq!(provider_map("minimax-cn"), Some("minimax-cn"));
-        assert_eq!(provider_map("zai-coding-global"), Some("zai-coding-plan"));
-        assert_eq!(provider_map("moonshot"), Some("moonshotai"));
-        assert_eq!(provider_map("copilot"), Some("github-copilot"));
-        assert_eq!(provider_map("ollama"), None);
-        assert_eq!(provider_map("lmstudio"), None);
-        assert_eq!(provider_map("unknown-provider"), None);
     }
 
     #[test]

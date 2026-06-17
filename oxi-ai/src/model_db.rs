@@ -62,7 +62,7 @@ fn parse_input_modality(s: &str) -> InputModality {
 impl From<&BuiltinModelEntry> for ModelEntry {
     fn from(e: &BuiltinModelEntry) -> Self {
         // Leak the strings to obtain `&'static str`. Bounded by total model
-        // count (currently 1099) and amortized once at startup.
+        // count and amortized once at startup.
         let id: &'static str = Box::leak(e.id.clone().into_boxed_str());
         let name: &'static str = Box::leak(e.name.clone().into_boxed_str());
         let provider: &'static str = Box::leak(e.provider.clone().into_boxed_str());
@@ -73,26 +73,11 @@ impl From<&BuiltinModelEntry> for ModelEntry {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         );
-        // Sentinel transform: openclaw-sourced models with cost = 0 are
-        // NOT verified as free — they're unverified. We translate upstream
-        // `0.0` to the sentinel `-1.0` only for openclaw-imported providers.
-        // Oxi-original verified data is left at 0.0 (truly free).
-        let (ci, co) = if is_openclaw_sourced(&e.provider) {
-            (
-                if e.cost_input == 0.0 {
-                    UNVERIFIED_PRICE
-                } else {
-                    e.cost_input
-                },
-                if e.cost_output == 0.0 {
-                    UNVERIFIED_PRICE
-                } else {
-                    e.cost_output
-                },
-            )
-        } else {
-            (e.cost_input, e.cost_output)
-        };
+        // models.dev is the verified source of truth — all prices are
+        // treated as-is. A 0.0 cost means "verified free" (e.g. local
+        // models, free tiers). The legacy openclaw sentinel transform
+        // (`is_openclaw_sourced`) has been removed since models.dev data
+        // is community-verified, not placeholder zeros.
         ModelEntry {
             id,
             name,
@@ -100,8 +85,8 @@ impl From<&BuiltinModelEntry> for ModelEntry {
             provider,
             reasoning: e.reasoning,
             input,
-            cost_input: ci,
-            cost_output: co,
+            cost_input: e.cost_input,
+            cost_output: e.cost_output,
             cost_cache_read: e.cost_cache_read,
             cost_cache_write: e.cost_cache_write,
             context_window: e.context_window,
@@ -112,12 +97,9 @@ impl From<&BuiltinModelEntry> for ModelEntry {
 
 /// Sentinel value used when a model entry has no verified price.
 ///
-/// Negative values are reserved for sentinel meanings. The two real
-/// interpretations of `cost_input` are now:
-///
-/// - `cost_input < 0.0` — price is unverified, see [`ModelEntry::pricing_unverified`].
-/// - `cost_input == 0.0` — verified as zero (truly free local model, etc.).
-/// - `cost_input > 0.0` — verified price in USD per million tokens.
+/// With the models.dev materialize path, all prices are treated as
+/// verified. This constant is retained for backward compatibility but
+/// is no longer produced by the materialize pipeline.
 pub const UNVERIFIED_PRICE: f64 = -1.0;
 
 /// Returns true if a provider id came from the openclaw port AND has
@@ -131,28 +113,6 @@ pub const UNVERIFIED_PRICE: f64 = -1.0;
 /// set — their values are backfilled and treated as known.
 ///
 /// See `data/catalog/README.md` for the data-quality breakdown.
-fn is_openclaw_sourced(provider: &str) -> bool {
-    matches!(
-        provider,
-        "gmi"
-            | "kilocode"
-            | "moonshot"
-            | "nvidia"
-            | "ollama-cloud"
-            | "qianfan"
-            | "qwen-oauth"
-            | "stepfun"
-            | "byteplus"
-            | "chutes"
-            | "deepinfra"
-            // Variants that share a TOML file with a verified provider.
-            // stepfun.toml has both "stepfun" and "stepfun-plan" models;
-            // the latter is a paid tier whose price is also unknown.
-            | "stepfun-plan"
-            | "byteplus-plan"
-    )
-}
-
 /// A static model entry in the database.
 ///
 /// Uses `&'static str` references for zero-allocation lookups.
@@ -251,66 +211,54 @@ static ALL_PROVIDER_MODELS: OnceLock<Vec<(&'static str, &'static [ModelEntry])>>
 fn all_provider_models() -> &'static [(&'static str, &'static [ModelEntry])] {
     ALL_PROVIDER_MODELS
         .get_or_init(|| {
-            let catalog = crate::catalog::CatalogRoot::get();
-            // Group by the per-model `provider` field, not the file-level
-            // top-level provider. The openclaw-anthropic file contains models
-            // for both `anthropic` and `claude-cli` provider namespaces; they
-            // must be indexed separately. We first flatten all entries, then
-            // regroup by the per-entry provider field.
-            use std::collections::BTreeMap;
-            // Snapshot into owned BuiltinModelEntry vec so we can mutate.
-            let mut all_builtins: Vec<crate::catalog::BuiltinModelEntry> = Vec::new();
-            for (_file_pid, builtin_models) in catalog.models.iter() {
-                for bm in builtin_models.iter() {
-                    all_builtins.push(bm.clone());
-                }
-            }
-            // Apply Layer 2 (user overrides): same (provider, id) replaces,
-            // new entries append.
-            if let Some(overrides) = crate::catalog::load_overrides() {
-                // Build mutable BTreeMap so apply_model_overrides can mutate.
-                let mut all_map: BTreeMap<String, Vec<crate::catalog::BuiltinModelEntry>> =
-                    BTreeMap::new();
-                for bm in all_builtins.into_iter() {
-                    all_map.entry(bm.provider.clone()).or_default().push(bm);
-                }
-                crate::catalog::apply_model_overrides(&mut all_map, &overrides.model);
-                all_builtins = all_map.into_values().flatten().collect();
-            }
-            // Layer 2.5: models.dev live enrichment. Fills gaps in pricing,
-            // context windows, max output tokens, and reasoning flags from
-            // the community catalog (https://models.dev, MIT). Only positive
-            // prices / known limits overwrite Layer 1; verified-free and
-            // unknown values are preserved. No-op when init hasn't run or
-            // returned no data (offline) — Layer 1 stands on its own.
-            //
-            // Runs after Layer 2 so user overrides still win: enrich only
-            // touches fields the override left at their Layer 1 value.
-            if let Some(md) = crate::catalog::models_dev::get() {
-                for bm in all_builtins.iter_mut() {
-                    crate::catalog::models_dev::enrich(bm, md);
-                }
-            }
-            let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
-            for bm in all_builtins.iter() {
-                let entry = ModelEntry::from(bm);
-                by_pid
-                    .entry(entry.provider.to_string())
-                    .or_default()
-                    .push(entry);
-            }
-            let mut out: Vec<(&'static str, &'static [ModelEntry])> =
-                Vec::with_capacity(by_pid.len());
-            for (pid, mut entries) in by_pid {
-                let pid_static: &'static str = Box::leak(pid.into_boxed_str());
-                entries.sort_by(|a, b| a.id.cmp(b.id));
-                let slice: &'static [ModelEntry] = Box::leak(entries.into_boxed_slice());
-                out.push((pid_static, slice));
-            }
-            out
+            try_materialize_from_snapshot().expect(
+                "Failed to materialize from embedded snapshot. \
+             The catalog snapshot is required for oxi to function.",
+            )
         })
         .as_slice()
 }
+
+/// Try to load and materialize from the embedded SNAP snapshot.
+fn try_materialize_from_snapshot() -> Option<Vec<(&'static str, &'static [ModelEntry])>> {
+    let catalog = crate::catalog::materialize::load_snapshot_catalog()?;
+    let product_meta = crate::catalog::ProductMeta::builtin();
+    let overrides = crate::catalog::load_overrides().unwrap_or_default();
+    let (_providers, models_by_pid) =
+        crate::catalog::materialize(&catalog, &product_meta, &overrides);
+    let mut out: Vec<(&'static str, &'static [ModelEntry])> =
+        Vec::with_capacity(models_by_pid.len());
+    for (pid, entries) in models_by_pid {
+        let pid_static: &'static str = Box::leak(pid.into_boxed_str());
+        let model_entries: Vec<ModelEntry> = entries.iter().map(ModelEntry::from).collect();
+        let slice: &'static [ModelEntry] = Box::leak(model_entries.into_boxed_slice());
+        out.push((pid_static, slice));
+    }
+    out.sort_by(|a, b| a.0.cmp(b.0));
+    Some(out)
+}
+
+// ── Materialize path (public, for tests / CLI) ─────────────────────────
+
+/// Initialize and materialize the catalog from models.dev data.
+pub fn try_materialize_all() -> Option<Vec<(&'static str, &'static [ModelEntry])>> {
+    let catalog = crate::catalog::models_dev::get()?;
+    let product_meta = crate::catalog::ProductMeta::builtin();
+    let overrides = crate::catalog::load_overrides().unwrap_or_default();
+    let (_providers, models_by_pid) =
+        crate::catalog::materialize(catalog, &product_meta, &overrides);
+    let mut out: Vec<(&'static str, &'static [ModelEntry])> =
+        Vec::with_capacity(models_by_pid.len());
+    for (pid, entries) in models_by_pid {
+        let pid_static: &'static str = Box::leak(pid.into_boxed_str());
+        let model_entries: Vec<ModelEntry> = entries.iter().map(ModelEntry::from).collect();
+        let slice: &'static [ModelEntry] = Box::leak(model_entries.into_boxed_slice());
+        out.push((pid_static, slice));
+    }
+    out.sort_by(|a, b| a.0.cmp(b.0));
+    Some(out)
+}
+
 // ── Lazy-initialized indexes for O(1) lookups ──────────────────────────
 
 /// Maps `"provider/id"` → `&'static ModelEntry` for O(1) model lookups.
@@ -322,9 +270,6 @@ fn model_index() -> &'static HashMap<&'static str, &'static ModelEntry> {
         for (provider, models) in all_provider_models().iter() {
             for model in models.iter() {
                 let key = format!("{}/{}", provider, model.id);
-                // Leak the formatted key to obtain `&'static str`.
-                // This happens once at first access; the total leaked memory
-                // is bounded by the model database size (~60 KiB).
                 let key_static: &'static str = Box::leak(key.into_boxed_str());
                 map.insert(key_static, model);
             }
@@ -522,5 +467,53 @@ mod tests {
         for i in 1..cheapest.len() {
             assert!(cheapest[i].cost_input >= cheapest[i - 1].cost_input);
         }
+    }
+
+    #[test]
+    fn try_materialize_from_snapshot() {
+        use std::io::Read;
+        // Verify the materialize path can decode the embedded snapshot and
+        // produce valid ModelEntry records. This tests the full pipeline:
+        //   gzip → MdCatalog → materialize() → ModelEntry
+        let compressed = include_bytes!("../data/catalog/_snapshot.json.gz");
+        let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
+        let mut json = String::new();
+        decoder.read_to_string(&mut json).unwrap();
+        let catalog: crate::catalog::MdCatalog = serde_json::from_str(&json).unwrap();
+        let meta = crate::catalog::ProductMeta::builtin();
+        let (providers, models) = crate::catalog::materialize(&catalog, &meta, &Default::default());
+        // Convert to ModelEntry format
+        let mut entries: Vec<super::ModelEntry> = Vec::new();
+        for (_pid, model_list) in &models {
+            for bm in model_list {
+                entries.push(super::ModelEntry::from(bm));
+            }
+        }
+        assert_eq!(entries.len(), 5277, "expected 5277 models");
+        assert_eq!(providers.len(), 145, "expected 145 providers");
+        // Every ModelEntry must have a valid API type
+        for e in &entries {
+            assert!(
+                matches!(
+                    e.api,
+                    Api::AnthropicMessages
+                        | Api::OpenAiCompletions
+                        | Api::OpenAiResponses
+                        | Api::GoogleGenerativeAi
+                        | Api::GoogleVertex
+                        | Api::MistralConversations
+                        | Api::AzureOpenAiResponses
+                        | Api::BedrockConverseStream
+                ),
+                "unexpected api for model {}/{}",
+                e.provider,
+                e.id
+            );
+        }
+        // Verify at least one model has cost_input == 0.0 (free model exists)
+        assert!(
+            entries.iter().any(|e| e.cost_input == 0.0),
+            "expected at least one free model"
+        );
     }
 }

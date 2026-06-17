@@ -132,6 +132,8 @@ pub async fn discover_models(
             cost_cache_write: 0.0,
             context_window: 0, // unknown
             max_tokens: 0,
+            auth_method: crate::catalog::provider::AuthMethod::Bearer,
+            base_url: None,
         })
         .collect()
 }
@@ -254,7 +256,7 @@ pub async fn discover_all_authenticated() -> BTreeMap<String, Vec<BuiltinModelEn
         ("venice", "VENICE_API_KEY", "https://api.venice.ai/api/v1"),
     ];
 
-    let providers = crate::catalog::load_builtin_providers();
+    let providers = crate::catalog::materialize::materialize_providers();
     let provider_map: BTreeMap<&str, &crate::catalog::BuiltinProviderEntry> =
         providers.iter().map(|p| (p.id.as_str(), p)).collect();
 
