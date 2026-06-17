@@ -14,7 +14,7 @@
 //! Layer 3   /v1/models runtime discovery          local servers
 //! ```
 //!
-//! Enrichment runs inside [`crate::model_db::all_provider_models`] after
+//! Enrichment runs inside [`crate::model_db::get_all_models`] after
 //! Layer 2 overrides are applied. Only fields that are missing or
 //! unverifiable in Layer 1 are overwritten — see [`enrich`] for the exact
 //! precedence rules.
