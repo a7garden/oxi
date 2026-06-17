@@ -109,13 +109,6 @@ fn color_to_bytes(color: &Color) -> [u8; 4] {
     }
 }
 
-/// Convert ratatui Color to crossterm Color using ratatui 0.30's IntoCrossterm trait.
-/// Color is Copy, so &Color auto-derefs for `into_crossterm(self)`.
-#[inline]
-fn ratatui_color_to_crossterm(color: &Color) -> CColor {
-    color.into_crossterm()
-}
-
 // ---------------------------------------------------------------------------
 // DiffBackend
 // ---------------------------------------------------------------------------
@@ -212,7 +205,7 @@ impl<W: io::Write> Backend for DiffBackend<W> {
         self.inner.flush()?;
 
         // Reset any residual attributes
-        let _ = crossterm::execute!(self.inner, SetAttribute(CAttribute::Reset));
+        crossterm::execute!(self.inner, SetAttribute(CAttribute::Reset))?;
 
         // Find changed rows
         let max_rows = new_rows.len().max(self.prev_rows.len());
@@ -224,15 +217,15 @@ impl<W: io::Write> Backend for DiffBackend<W> {
                 (Some(nr), Some(pr)) if nr == pr => continue, // Unchanged — skip
                 (None, Some(_)) => {
                     // Row was removed — clear it
-                    let _ = crossterm::execute!(
+                    crossterm::execute!(
                         self.inner,
                         MoveTo(0, row_idx as u16),
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
-                    );
+                    )?;
                 }
                 (Some(_), _) => {
                     // Row is new or changed — write it
-                    let _ = crossterm::execute!(self.inner, MoveTo(0, row_idx as u16));
+                    crossterm::execute!(self.inner, MoveTo(0, row_idx as u16))?;
 
                     // Write cells for this row
                     if let Some(cells) = row_cells.get(row_idx) {
@@ -244,19 +237,19 @@ impl<W: io::Write> Backend for DiffBackend<W> {
                         for &(x, _y, cell) in cells {
                             // Move cursor if there's a gap
                             if x > last_x {
-                                let _ = crossterm::execute!(self.inner, MoveTo(x, row_idx as u16));
+                                crossterm::execute!(self.inner, MoveTo(x, row_idx as u16))?;
                             }
 
                             // Set style only if changed
-                            let fg = ratatui_color_to_crossterm(&cell.fg);
+                            let fg = cell.fg.into_crossterm();
                             if last_fg.as_ref() != Some(&fg) {
-                                let _ = crossterm::execute!(self.inner, SetForegroundColor(fg));
+                                crossterm::execute!(self.inner, SetForegroundColor(fg))?;
                                 last_fg = Some(fg);
                             }
 
-                            let bg = ratatui_color_to_crossterm(&cell.bg);
+                            let bg = cell.bg.into_crossterm();
                             if last_bg.as_ref() != Some(&bg) {
-                                let _ = crossterm::execute!(self.inner, SetBackgroundColor(bg));
+                                crossterm::execute!(self.inner, SetBackgroundColor(bg))?;
                                 last_bg = Some(bg);
                             }
 
@@ -268,52 +261,49 @@ impl<W: io::Write> Backend for DiffBackend<W> {
                                     SetAttribute(CAttribute::Reset)
                                 );
                                 if modifier.contains(Modifier::BOLD) {
-                                    let _ = crossterm::execute!(
+                                    crossterm::execute!(
                                         self.inner,
                                         SetAttribute(CAttribute::Bold)
-                                    );
+                                    )?;
                                 }
                                 if modifier.contains(Modifier::ITALIC) {
-                                    let _ = crossterm::execute!(
+                                    crossterm::execute!(
                                         self.inner,
                                         SetAttribute(CAttribute::Italic)
-                                    );
+                                    )?;
                                 }
                                 if modifier.contains(Modifier::UNDERLINED) {
-                                    let _ = crossterm::execute!(
+                                    crossterm::execute!(
                                         self.inner,
                                         SetAttribute(CAttribute::Underlined)
-                                    );
+                                    )?;
                                 }
                                 if modifier.contains(Modifier::REVERSED) {
-                                    let _ = crossterm::execute!(
+                                    crossterm::execute!(
                                         self.inner,
                                         SetAttribute(CAttribute::Reverse)
-                                    );
+                                    )?;
                                 }
                                 if modifier.contains(Modifier::DIM) {
-                                    let _ = crossterm::execute!(
-                                        self.inner,
-                                        SetAttribute(CAttribute::Dim)
-                                    );
+                                    crossterm::execute!(self.inner, SetAttribute(CAttribute::Dim))?;
                                 }
                                 if modifier.contains(Modifier::CROSSED_OUT) {
-                                    let _ = crossterm::execute!(
+                                    crossterm::execute!(
                                         self.inner,
                                         SetAttribute(CAttribute::CrossedOut)
-                                    );
+                                    )?;
                                 }
                                 last_mod = Some(modifier);
                                 // Re-apply fg/bg after reset
                                 if let Some(ref f) = last_fg {
-                                    let _ = crossterm::execute!(self.inner, SetForegroundColor(*f));
+                                    crossterm::execute!(self.inner, SetForegroundColor(*f))?;
                                 }
                                 if let Some(ref b) = last_bg {
-                                    let _ = crossterm::execute!(self.inner, SetBackgroundColor(*b));
+                                    crossterm::execute!(self.inner, SetBackgroundColor(*b))?;
                                 }
                             }
 
-                            let _ = crossterm::execute!(self.inner, Print(cell.symbol()));
+                            crossterm::execute!(self.inner, Print(cell.symbol()))?;
                             last_x = x + 1;
                         }
                     }

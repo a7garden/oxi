@@ -119,6 +119,12 @@ pub enum Commands {
         /// Session ID or prefix (from `oxi sessions`)
         session_id: String,
     },
+    /// Local issue management
+    Issue {
+        /// Action
+        #[command(subcommand)]
+        action: IssueCommands,
+    },
     /// Package management
     Pkg {
         /// action.
@@ -202,6 +208,52 @@ pub enum PkgCommands {
     Update {
         /// Package name to update (updates all if omitted)
         name: Option<String>,
+    },
+}
+
+// ── Issue subcommands ───────────────────────────────────────────────
+
+/// Local issue management subcommands.
+#[derive(Debug, Clone, Subcommand)]
+pub enum IssueCommands {
+    /// List local issues (default: open only)
+    List {
+        /// Show closed issues too
+        #[arg(long)]
+        all: bool,
+        /// Filter by label
+        #[arg(long)]
+        label: Option<String>,
+        /// Filter by substring of title
+        #[arg(long)]
+        text: Option<String>,
+    },
+    /// Show a single issue (prints content + content_hash for `update`)
+    Show {
+        /// Issue id
+        id: u32,
+    },
+    /// Create a new issue
+    New {
+        /// Issue title
+        title: String,
+        /// Issue body (markdown); pass via stdin or $EDITOR
+        #[arg(long, short)]
+        body: Option<String>,
+        /// Priority: low|medium|high|critical (default: medium)
+        #[arg(long)]
+        priority: Option<String>,
+        /// Comma-separated labels
+        #[arg(long)]
+        labels: Option<String>,
+    },
+    /// Close an issue (releases any assignment; must be owner)
+    Close {
+        /// Issue id
+        id: u32,
+        /// Content hash from `show` (skip to bypass CAS check)
+        #[arg(long)]
+        hash: Option<String>,
     },
 }
 

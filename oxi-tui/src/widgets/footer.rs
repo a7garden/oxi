@@ -31,6 +31,8 @@ pub struct FooterData {
     pub session_duration_secs: u64,
     pub is_busy: bool,
     pub is_compacting: bool,
+    /// Optional right-aligned status string (e.g., issue counts from oxi-cli).
+    pub extra_right: String,
     /// Sparkline data: recent token output rate history (tokens/sec, max 60 samples).
     /// Updated by the app layer during streaming.
     pub token_rate_history: Vec<u64>,
@@ -57,6 +59,7 @@ impl Default for FooterData {
             session_duration_secs: 0,
             is_busy: false,
             is_compacting: false,
+            extra_right: String::new(),
             token_rate_history: Vec::new(),
             version: String::new(),
         }
@@ -209,6 +212,14 @@ impl StatefulWidget for Footer<'_> {
             }
 
             // Show sparkline if we have enough samples during streaming
+            // Optional right-aligned extra (e.g., issue counts injected by oxi-cli).
+            if !d.extra_right.is_empty() {
+                left_spans.push(Span::styled(
+                    format!("  \u{2502} {}", d.extra_right),
+                    Style::default().fg(self.theme.colors.accent),
+                ));
+            }
+
             let show_sparkline = has_tokens && d.token_rate_history.len() >= 3;
 
             if show_sparkline {

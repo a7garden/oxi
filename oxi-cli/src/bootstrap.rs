@@ -16,6 +16,15 @@ use tracing;
 /// Build a wired `App` from CLI args. All the wiring that used to be
 /// inline in `main()` lives here.
 pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
+    // Layer 2.5: prime the models.dev live catalog so that the first model
+    // lookup (and every subsequent one) sees enriched pricing / limits /
+    // reasoning flags. Near-instant on a cache hit; bounded to ~10s on a
+    // cache miss. Falls back to Layer 1 silently if offline.
+    //
+    // Runs before settings load so any catalog-driven default selection
+    // also benefits. Safe to skip in tests via `OXI_MODELS_DEV=off`.
+    oxi_ai::catalog::models_dev::init_models_dev().await;
+
     // Load settings (global + project + env layers).
     let mut settings = Settings::load().unwrap_or_default();
 
@@ -38,7 +47,10 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         .unwrap_or_default()
         .is_empty()
     {
-        eprintln!("{}", print_mode::format_error("No model configured. Run `oxi setup` to configure."));
+        eprintln!(
+            "{}",
+            print_mode::format_error("No model configured. Run `oxi setup` to configure.")
+        );
         std::process::exit(1);
     }
 

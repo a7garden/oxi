@@ -565,6 +565,43 @@ impl AgentSession {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // System prompt rebuild (TUI language policy hot-apply)
+    // ══════════════════════════════════════════════════════════════════
+
+    /// Rebuild the system prompt from the current `Settings`, picking
+    /// up the latest `output_languages` (TUI language policy) and
+    /// `thinking_level`. Pushes the rebuilt prompt to the underlying
+    /// agent so the **next** user turn sees the updated policy.
+    ///
+    /// This is a no-op-safe: it always rewrites the system prompt
+    /// (no change-detection), so it can be called unconditionally
+    /// from `/reload` or other hot-apply paths.
+    ///
+    /// **Strong default, NOT a hard guarantee.** The rebuilt
+    /// prompt carries a prompt-level "MUST" directive. The model
+    /// can still occasionally violate the policy (long contexts,
+    /// tool-output echo, subagent summarization under a different
+    /// framing). This method only refreshes the prompt — it does
+    /// not enforce anything at the I/O layer.
+    ///
+    /// **Why this exists:** `Settings::output_languages` is consumed
+    /// exclusively by the TUI session build path
+    /// (`agent_session_runtime::build_system_prompt`). When the user
+    /// edits the policy via `/settings` (which persists to disk but
+    /// does not touch the live agent), the next call to this method
+    /// picks the new policy up. The `/reload` slash command calls
+    /// this alongside `set_thinking_level`/`set_model`.
+    pub fn rebuild_system_prompt(&self) {
+        let settings = self.settings.read();
+        let thinking = settings.thinking_level;
+        let languages = settings.output_languages.clone();
+        drop(settings);
+
+        let prompt = crate::app::agent_session_runtime::build_system_prompt(thinking, &languages);
+        self.agent.set_system_prompt(prompt);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // Auto-compaction
     // ══════════════════════════════════════════════════════════════════
 

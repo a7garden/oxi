@@ -1,6 +1,7 @@
 //! Main TUI event loop and application state.
 
 use super::handlers;
+use super::overlay::IssuesPanelOverlay;
 use super::render;
 use super::slash;
 use super::welcome;
@@ -338,6 +339,9 @@ pub(crate) struct AppState {
     pub(crate) tool_start_times: std::collections::HashMap<String, std::time::Instant>,
     /// Active notifications (toast messages).
     pub notifications: Vec<Notification>,
+    /// Local issue store, if one was opened. Used by the `/issue` slash
+    /// command to open the issues panel overlay.
+    pub issue_store: Option<crate::store::issues::FileIssueStore>,
 }
 
 /// A toast notification to display temporarily.
@@ -448,6 +452,7 @@ impl AppState {
             questionnaire_bridge: None,
             tool_start_times: std::collections::HashMap::new(),
             notifications: Vec::new(),
+            issue_store: None,
         };
 
         // Load user keybindings from settings
@@ -795,6 +800,22 @@ pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: boo
 }
 
 async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
+    // ── Hold the TUI session's liveness lock for the entire run ─────────
+    // This makes `is_session_alive("tui")` return `true` while the TUI is
+    // running, so any `issue` ownership checks (start/release/close) treat
+    // the TUI as a live owner. The guard's Drop closes the file descriptor,
+    // releasing the OS-held flock on process exit (including `kill -9`).
+    let _liveness_guard = app
+        .issue_store()
+        .as_ref()
+        .and_then(|store| {
+            crate::store::issues::liveness::acquire(
+                &store.issues_dir(),
+                IssuesPanelOverlay::session_id(),
+            )
+            .ok()
+        });
+
     // ── Extract resources from App (needed for session switching loop) ──
     let settings = app.settings().clone();
     let mut model_id = app.model_id();
@@ -1164,6 +1185,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // ── Create state ──
         let mut state = AppState::new();
         state.session_file_path = session_target.clone();
+        // Share the local issue store with the TUI so `/issue` can open the
+        // overlay. The store is opened read-write by `App::from_oxi`; cloning
+        // is cheap (inner Arc).
+        state.issue_store = app.issue_store();
 
         // Restore previous messages if resuming
         if is_resuming && let Some(ref path) = session_target {

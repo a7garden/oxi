@@ -13,6 +13,18 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+/// Char-safe truncation for the footer indicator. Byte-based slicing would
+/// panic on multi-byte UTF-8 (e.g., 28th CJK char starting mid-codepoint).
+fn truncate_for_footer(s: &str) -> String {
+    const MAX: usize = 40;
+    if s.chars().count() <= MAX {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(MAX).collect();
+        format!("{truncated}…")
+    }
+}
+
 // ── Main draw function ──────────────────────────────────────────────────
 
 /// Main draw function — renders the full TUI frame.
@@ -74,6 +86,21 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     // Status bar
     state.footer_state.data.is_busy = state.is_agent_busy;
+    // Issue indicator: shows open issue count and the most recent open issue
+    // title. Cheap (uses the in-memory cache in `FileIssueStore`).
+    state.footer_state.data.extra_right = match &state.issue_store {
+        Some(store) => {
+            let count = store.open_count();
+            if count == 0 {
+                String::new()
+            } else if let Some(title) = store.latest_open_title() {
+                format!("\u{1F4CB} {} · {}", count, truncate_for_footer(&title))
+            } else {
+                format!("\u{1F4CB} {} issues", count)
+            }
+        }
+        None => String::new(),
+    };
     f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
 
     // Notifications (toasts) — rendered on top of everything
@@ -98,31 +125,23 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         0
     };
 
-    // Row 0: status line (Working/Idle + queue count)
-    let status_row = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: 1,
-    };
+    let [status_row, queue_area, input_row] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(queue_lines),
+        Constraint::Fill(1),
+    ])
+    .areas(area);
+
     render_status_line(f, status_row, state, theme);
 
-    // Queue preview / active panel rows
-    if is_active {
-        render_queue_active(f, area, state, theme);
-    } else {
-        render_queue_compact(f, area, state, theme);
+    if queue_lines > 0 {
+        if is_active {
+            render_queue_active(f, queue_area, state, theme);
+        } else {
+            render_queue_compact(f, queue_area, state, theme);
+        }
     }
 
-    // Input: height is whatever remains after status + queue
-    let input_y = area.y + 1 + queue_lines;
-    let input_height = area.height.saturating_sub(1 + queue_lines);
-    let input_row = Rect {
-        x: area.x,
-        y: input_y,
-        width: area.width,
-        height: input_height,
-    };
     state.input.set_placeholder(None);
     f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
 }
@@ -141,7 +160,7 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
     {
         let row = Rect {
             x: area.x,
-            y: area.y + 1 + i as u16,
+            y: area.y + i as u16,
             width: area.width,
             height: 1,
         };
@@ -215,7 +234,7 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
     {
         let row = Rect {
             x: area.x,
-            y: area.y + 1 + i as u16,
+            y: area.y + i as u16,
             width: area.width,
             height: 1,
         };
@@ -291,7 +310,7 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
     }
 
     // Hint line at the bottom of allocated space
-    let hint_y = area.y + 1 + max_items as u16;
+    let hint_y = area.y + max_items as u16;
     if hint_y < area.y + area.height {
         let row = Rect {
             x: area.x,

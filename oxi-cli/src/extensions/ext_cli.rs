@@ -282,14 +282,20 @@ pub async fn update_extension(source: Option<&str>) -> Result<Vec<InstallResult>
     };
 
     for (_ext_source, entry) in targets {
-        let label = entry.wasm_file.strip_suffix(".wasm").unwrap_or(&entry.wasm_file);
+        let label = entry
+            .wasm_file
+            .strip_suffix(".wasm")
+            .unwrap_or(&entry.wasm_file);
         match install_extension(&entry.source, false).await {
             Ok(result) => {
                 println!("Updated {} to {}", label, result.version);
                 results.push(result);
             }
             Err(e) => {
-                eprintln!("{}", crate::print_mode::format_error(&format!("Failed to update {}: {}", label, e)));
+                eprintln!(
+                    "{}",
+                    crate::print_mode::format_error(&format!("Failed to update {}: {}", label, e))
+                );
             }
         }
     }

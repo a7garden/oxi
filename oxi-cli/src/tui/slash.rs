@@ -37,6 +37,23 @@ pub(crate) fn handle_slash_command(
             state.overlay_state = Some(super::overlay::help_overlay());
             true
         }
+        "/issue" | "/issues" => {
+            match state.issue_store.clone() {
+                Some(store) => {
+                    state.overlay = None;
+                    state.overlay_state = Some(Box::new(
+                        super::overlay::IssuesPanelOverlay::new(store),
+                    ));
+                }
+                None => {
+                    state.add_notification(
+                        "Issue store is not available in this directory".to_string(),
+                        super::app::NotificationKind::Error,
+                    );
+                }
+            }
+            true
+        }
         "/quit" | "/exit" | "/q" => {
             *running = false;
             true
@@ -1010,6 +1027,12 @@ pub(crate) fn handle_slash_command(
             let reloaded = crate::store::settings::Settings::load().unwrap_or_default();
             let _theme_name = reloaded.theme.clone();
             session.set_thinking_level(reloaded.thinking_level);
+            // Rebuild the system prompt to pick up the latest TUI language
+            // policy (`output_languages`). The App-side `set_thinking_level`
+            // above handles the thinking-level half; the language policy is
+            // a separate concern (see `Settings::output_languages` docs and
+            // `AgentSession::rebuild_system_prompt`).
+            session.rebuild_system_prompt();
             // Apply model change to the active agent session
             if let Some(m) = reloaded.effective_model(None)
                 && !m.is_empty()

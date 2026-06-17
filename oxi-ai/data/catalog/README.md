@@ -245,20 +245,39 @@ for (provider_id, models) in &live {
 
 ## Upstream sync
 
-oxi's catalog is informed by two upstream projects, both reviewed for
+oxi's catalog is informed by three upstream sources, all reviewed for
 license compatibility and data quality:
 
 | Upstream | License | Status | What we took |
 |----------|---------|--------|--------------|
 | **openclaw** (openclaw/openclaw) | MIT | ✅ 13 files in `data/catalog/openclaw/` | Static `modelCatalog` from 13 extension manifests |
-| **opencode** (sst/opencode) | MIT | ℹ️ Reviewed, no data to port | They have NO static model metadata — model ids are just branded strings. Their value is in protocol routing, not catalog data. |
+| **models.dev** (sst/models.dev) | MIT | ✅ **Live enrichment layer** (`catalog/models_dev.rs`) | Runtime fetch of `api.json` to refresh pricing / context / max output / reasoning. See [models.dev enrichment](#models-dev-enrichment) below. |
+| **opencode** (sst/opencode) | MIT | ℹ️ Reviewed for reference | opencode itself ships NO static metadata — it fetches **models.dev** live at runtime (same source oxi now enriches from). |
+
+### models.dev enrichment
+
+`catalog/models_dev.rs` is a **Layer 2.5** enrichment layer. At bootstrap
+the CLI fetches `https://models.dev/api.json` (5-min disk cache at
+`~/.oxi/cache/models-dev.json`, atomic writes, bounded retries) and fills
+in pricing, `context_window`, `max_tokens`, and `reasoning` for every
+built-in entry that has a models.dev counterpart. Precedence is
+`Layer 2 override > models.dev > Layer 1 TOML`; only positive prices and
+known limits overwrite, so verified-free and unknown values are
+preserved. Offline → silent fallback to Layer 1.
+
+Gates: `OXI_MODELS_DEV=on|auto|off`, `OXI_MODELS_DEV_URL`,
+`OXI_MODELS_DEV_DISABLE_FETCH`, `OXI_MODELS_DEV_TTL`,
+`OXI_MODELS_DEV_CACHE_PATH`. See `docs/MODELS_DEV_SYNC.md` for the full
+design.
 
 ### Why opencode contributes no files
 
 opencode's `packages/llm/src/schema/ids.ts` defines `ModelID` as a plain
 branded string. There is no `models.ts`, no `MODELS` array, no
 `inputCost`/`outputCost`/`contextWindow` fields anywhere in the LLM
-package. Pricing is handled at request time by the protocol layer.
+package. Instead opencode fetches the community **models.dev** catalog
+live (`packages/core/src/models-dev.ts`). oxi now enriches from that same
+source at runtime.
 
 What opencode DOES have is the *protocol variants* concept
 (`openai-compatible-profile.ts` lists 9 OpenAI-compatible profiles like
@@ -274,10 +293,18 @@ verified** — see the breakdown:
 
 | Source | Models | Prices verified | Method |
 |--------|--------|-----------------|--------|
-| oxi-original (`models/*.toml`) | 957 | ✅ All (hand-curated by oxi team) | Manual research |
+| oxi-original (`models/*.toml`) | 957 | ⚠️ Partial — many `0.0` gaps (see below) | Manual research; backfill ongoing |
+| **models.dev enrichment** (runtime) | all mapped providers | ✅ Fills `0.0` gaps live | `https://models.dev/api.json`, 5-min cache. Clears the openclaw `-1.0` sentinel when a real price arrives. |
 | openclaw port (`openclaw/*.toml`) — venice | 38 | ✅ 30/38 (live API `https://api.venice.ai/api/v1/models`) | Verified 2026-Q2 |
 | openclaw port (`openclaw/*.toml`) — novita | 6 | ✅ 6/6 (live API `https://api.novita.ai/v3/openai/models`) | Verified 2026-Q2 |
-| openclaw port (`openclaw/*.toml`) — other 11 | 121 | ⚠️ 0 verified, all `0.0` from openclaw source | **Needs user-supplied pricing** |
+| openclaw port (`openclaw/*.toml`) — other 11 | 121 | ⚠️ 0 verified, all `0.0` from openclaw source | Enriched at runtime via models.dev; override locally if needed |
+
+> **Note on `0.0` gaps**: the oxi-original TOMLs ship `cost_input`/`cost_output`
+> = `0.0` for many paid models (e.g. all anthropic/openai/azure entries). The
+> earlier claim of "✅ All verified" was inaccurate. These zeros are
+> transparently filled at runtime by the models.dev enrichment layer
+> (`catalog/models_dev.rs`); when that layer is offline or disabled, the
+> `0.0` value is reported as-is.
 
 For the 11 unverified providers (`gmi`, `kilocode`, `moonshot`,
 `nvidia`, `ollama-cloud`, `qianfan`, `qwen`, `stepfun`, `byteplus`,

@@ -5,6 +5,96 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — models.dev 라이브 보강 (catalog Layer 2.5)
+
+opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
+`https://models.dev/api.json` 을 런타임에 페치하여 카탈로그를 보강한다.
+이는 oxi-original TOML의 광범위한 `0.0` 가격 결손을 해소한다
+(anthropic/openai/azure 등 유료 모델의 cost_input/cost_output이
+대부분 `0.0`으로, 비용 리포트가 부정확했다).
+
+- **신규 모듈** `oxi-ai/src/catalog/models_dev.rs`: models.dev 스키마
+  파서, provider ID 매핑(oxi 지역 변형 collapse), reasoning 보존
+  allowlist(TEE/tput/compound/FP8 변형), enrich 로직, fetch/캐시
+  (5분 TTL, atomic temp→rename, 교차프로세스 Flock, 2회 재시도).
+- **단일 진입점**: `model_db::all_provider_models()`의 OnceLock 클로저에
+  enrich 3줄 삽입 — 모든 소비자(`get_model_entry`/
+  `model_from_entry`/`fallback_chain`/TUI 슬래시)가 자동 보강.
+  부트스트랩(`bootstrap.rs::build_app`)에서 `init_models_dev().await` 호출.
+- **우선순위**: Layer 2 override > models.dev > Layer 1. 양수 가격/
+  양수 limit만 덮어쓰며, verified-free/unknown은 보존. openclaw
+  `-1.0` 센티넬은 models.dev 양수 도착 시 자동 정상화.
+- **오프라인 안전**: init 미실행/페치 실패 시 `get()`=None →
+  Layer 1로 graceful fallback. 기능은 항상 동작, 비용 정확도만 저하.
+- **게이트**: `OXI_MODELS_DEV`(`on`/`auto`/`off`, 기본 `auto`),
+  `OXI_MODELS_DEV_URL`, `OXI_MODELS_DEV_DISABLE_FETCH`(에어갑),
+  `OXI_MODELS_DEV_TTL`, `OXI_MODELS_DEV_CACHE_PATH`.
+- **테스트**: 단위 10개(스키마/enrich/매핑/allowlist) + end-to-end
+  통합 1개(캐시 fixture → init → model_db 조회 검증).
+- **문서**: `docs/MODELS_DEV_SYNC.md`(설계 청사진),
+  `data/catalog/README.md`(Upstream sync / Price data quality 표 정정),
+  `AGENTS.md`(catalog 4-tier 설명, 환경변수, Pitfalls 갱신).
+
+### Added — TUI 출력 언어 정책 (TUI-only, per-channel)
+
+`Settings::output_languages`를 신설하여 **TUI 세션**에서 출력
+채널별 언어 정책을 구성할 수 있게 했다. `oxi --print` 및 RPC
+모드는 정책이 있어도 **조용히 무시**된다 (의도적 격리 — TUI
+하네스 전용).
+
+- **데이터 모델** (`oxi-cli/src/store/settings.rs`):
+  `output_languages: HashMap<String, String>` — 채널 키
+  (`response`, `code_comment`, `documentation`,
+  `commit_message`)에 ISO 639-1 코드(`en`, `ko`, `ja`, …) 또는
+  `"auto"`를 매핑. 기본값 = 전 채널 `auto` (현재 동작 100% 보존).
+  `settings.toml` v4→5 마이그레이션은 값 변환 없이 버전만 올림.
+- **확장형 맵**: 핵심 4채널 외에 사용자가 임의 키를 추가할 수
+  있다 (예: `pr_description = "en"`). `KNOWN_CHANNELS`는 이제
+  prompt label 매핑 테이블로만 사용되며, 알 수 없는 채널은 raw
+  키를 label fallback으로 directive에 포함된다.
+- **3레이어 전파** (`oxi-cli/src/app/agent_session_runtime.rs`,
+  `oxi-cli/src/prompt/system_prompt.rs`):
+  1. 시스템 프롬프트의 **마지막 섹션**에 "Output Language
+     Policy (enforced)"로 부착 — 모델이 가장 강하게 attend하는
+     위치.
+  2. `compaction_instruction`에도 같은 directive를 흘려 요약
+     누출 차단. 단, summarizer는 이를 `"Focus areas: …"`로
+     wrap하므로 강도가 약해짐 (문서화됨, 별도 cross-crate 변경
+     필요).
+  3. 서브에이전트는 부모 `system_prompt`를 `--append-system-prompt`
+     플래그로 자식에게 전달하고 자식은 `set_system_prompt()`로
+     통째 replace하므로, **부모 directive가 자식에게 자연
+     전파**된다 (추가 코드 불필요).
+- **TUI UX** (`oxi-cli/src/tui/overlay/settings.rs`):
+  `/settings` 오버레이에 "Language (TUI)" 섹션 추가. 채널당
+  Choice로 `auto → en → ko → ja → zh → es → fr → de → auto` 사이클.
+  Esc로 디스크 persist + `OXI`-mode 알림.
+- **Hot-apply** (`oxi-cli/src/app/agent_session.rs`,
+  `oxi-cli/src/tui/slash.rs`): `AgentSession::rebuild_system_prompt()`
+  신규, `/reload` 슬래시 명령에서 `set_thinking_level`과 함께
+  호출. 변경 후 `/reload` 한 번이면 다음 턴부터 적용.
+- **검증**: 알 수 없는 언어 코드는 `tracing::warn!` 후 유지
+  (사용자가 새 언어 추가 가능). 알 수 없는 채널 키는 그대로
+  통과 (확장형). 화이트리스트 검증 없음.
+- **테스트 8개 신규** (settings 4, system_prompt 4,
+  agent_session_runtime 4) — 핵심 invariant를 단위 테스트로
+  잠금.
+- **Strong default, NOT a hard guarantee.** 코드 docstring 4곳
+  + AGENTS.md Pitfall에 한계 명시. 100% 보장이 필요하면 도구
+  출력 wrapping 또는 응답 후처리가 필요 (현재 MVP 범위 외).
+
+### 사용 예시 (`~/.oxi/settings.toml`)
+
+```toml
+[output_languages]
+response = "ko"
+code_comment = "en"
+documentation = "en"
+commit_message = "en"
+```
+
 ## [0.35.0] - 2026-06-15
 
 ### Fixed — native-browser 부활: edition 2024 lifetime 버그 전면 수정

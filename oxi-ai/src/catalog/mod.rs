@@ -21,11 +21,14 @@
 //! See `register_builtins.rs` for the consumer side.
 
 pub mod model;
+pub mod models_dev;
 pub mod override_;
 pub mod provider;
 pub mod runtime;
 
 pub use model::{BuiltinModelEntry, builtin_model_count, load_builtin_models};
+pub use models_dev::enrich as enrich_from_models_dev;
+pub use models_dev::{MdCatalog, enrich, get as models_dev_get, init_models_dev, provider_map};
 pub use override_::{
     OverrideFile, apply_model_overrides, apply_provider_overrides, find_override_files,
     load_overrides,

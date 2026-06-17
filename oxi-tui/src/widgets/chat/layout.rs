@@ -78,6 +78,8 @@ pub(crate) enum LayoutKind {
     Dashboard {
         info: DashboardInfo,
     },
+    /// Divider line between thinking and the actual response
+    ResponseDivider,
 }
 
 /// Check if a content block renders as a bordered box (tool calls, errors).
@@ -139,6 +141,7 @@ pub(crate) fn compute_layout(
             y += 1;
         }
         let mut prev_was_box = false;
+        let mut prev_was_thinking = false;
         for (blk_idx, block) in msg.content_blocks.iter().enumerate() {
             // Skip whitespace-only blocks (defensive; finish_streaming also removes them).
             let is_empty = match block {
@@ -148,6 +151,18 @@ pub(crate) fn compute_layout(
             };
             if is_empty {
                 continue;
+            }
+
+            // Insert response divider between thinking and non-thinking blocks
+            if prev_was_thinking && !matches!(block, ContentBlock::Thinking { .. }) {
+                if y <= u16::MAX as u32 {
+                    entries.push(LayoutEntry {
+                        y: y as u16,
+                        height: 1,
+                        kind: LayoutKind::ResponseDivider,
+                    });
+                }
+                y += 1;
             }
 
             // Insert spacer between consecutive box-type blocks (tool calls, errors)
@@ -163,6 +178,7 @@ pub(crate) fn compute_layout(
                 y += 1;
             }
             prev_was_box = is_box;
+            prev_was_thinking = matches!(block, ContentBlock::Thinking { .. });
 
             let key = format!("{}:{}", msg_idx, blk_idx);
             let mut kind = block_to_layout_kind(block, msg.role, width, &key, styles);
@@ -211,6 +227,7 @@ pub(crate) fn compute_layout(
             y += 1;
         }
         let mut prev_was_box = false;
+        let mut prev_was_thinking = false;
         for (blk_idx, block) in streaming.message.content_blocks.iter().enumerate() {
             // Skip whitespace-only blocks (prevents large blank gaps during tool-only turns).
             let is_empty = match block {
@@ -220,6 +237,18 @@ pub(crate) fn compute_layout(
             };
             if is_empty {
                 continue;
+            }
+
+            // Insert response divider between thinking and non-thinking blocks
+            if prev_was_thinking && !matches!(block, ContentBlock::Thinking { .. }) {
+                if y <= u16::MAX as u32 {
+                    entries.push(LayoutEntry {
+                        y: y as u16,
+                        height: 1,
+                        kind: LayoutKind::ResponseDivider,
+                    });
+                }
+                y += 1;
             }
 
             // Insert spacer between consecutive box-type blocks (tool calls, errors)
@@ -235,6 +264,7 @@ pub(crate) fn compute_layout(
                 y += 1;
             }
             prev_was_box = is_box;
+            prev_was_thinking = matches!(block, ContentBlock::Thinking { .. });
 
             let key = format!("s:{}", blk_idx);
             let mut kind = block_to_layout_kind(block, MessageRole::Assistant, width, &key, styles);
@@ -367,7 +397,8 @@ pub(crate) fn measure_kind(
         LayoutKind::Spacer
         | LayoutKind::Rule
         | LayoutKind::Label { .. }
-        | LayoutKind::Spinner { .. } => 1,
+        | LayoutKind::Spinner { .. }
+        | LayoutKind::ResponseDivider => 1,
         LayoutKind::Text { lines, is_user } => {
             // User text: Block::borders(LEFT) takes 1 col, so inner = width-1
             // Assistant text: no block, renders at full width

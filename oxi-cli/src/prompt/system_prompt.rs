@@ -2,7 +2,7 @@
 //!
 //! Originally inspired by pi-mono's system prompt construction.
 
-use crate::store::settings::ThinkingLevel;
+use crate::store::settings::{KNOWN_CHANNELS, KNOWN_LANGS, ThinkingLevel};
 use chrono::Local;
 
 /// A skill that can be included in the system prompt.
@@ -48,6 +48,24 @@ pub struct BuildSystemPromptOptions {
     pub docs_path: Option<String>,
     /// Path to examples.
     pub examples_path: Option<String>,
+    /// TUI language policy directive, rendered as the final section of
+    /// the system prompt (strongest position). `None` or empty string =
+    /// no policy injected.
+    ///
+    /// **Strong default, NOT a hard guarantee.** This is a
+    /// prompt-level "MUST" instruction. Long contexts, tool-output
+    /// echo, and subagent summarization can cause occasional
+    /// violations. See `Settings::output_languages` for the full
+    /// caveat list.
+    ///
+    /// **TUI-only.** This is populated exclusively by
+    /// `crate::app::agent_session_runtime::build_system_prompt` (the
+    /// TUI session build path). The `lib.rs` App build path used by
+    /// `oxi --print` and RPC mode must NOT set this field. See
+    /// `crate::store::settings::Settings::output_languages` for the
+    /// source map and `language_directive` for the helper that
+    /// generates this string.
+    pub language_directive: Option<String>,
 }
 
 /// Convert a [`ThinkingLevel`] to its default custom prompt string.
@@ -132,6 +150,7 @@ impl Default for BuildSystemPromptOptions {
             readme_path: None,
             docs_path: None,
             examples_path: None,
+            language_directive: None,
         }
     }
 }
@@ -146,6 +165,121 @@ fn format_skills_for_prompt(skills: &[Skill]) -> String {
         out.push_str(&format!("## {}\n\n{}\n\n", skill.name, skill.content));
     }
     out
+}
+
+/// Look up a human-readable display label for an ISO 639-1 language
+/// code. Falls back to the raw code when the code is not in
+/// [`KNOWN_LANGS`], so user-defined languages render in the
+/// directive verbatim (the model usually still understands).
+fn lookup_language_display(code: &str) -> &str {
+    KNOWN_LANGS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, d)| *d)
+        .unwrap_or(code)
+}
+
+/// Look up a human-readable channel label (the phrase used in the
+/// rendered directive, e.g. `"Your conversational responses"`).
+/// Falls back to the raw channel key when the key is not in
+/// [`KNOWN_CHANNELS`], so user-defined channels still render
+/// meaningfully (the key is self-describing in practice).
+fn lookup_channel_label(key: &str) -> &str {
+    KNOWN_CHANNELS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, l)| *l)
+        .unwrap_or(key)
+}
+
+/// Build a strong-default language policy directive from the
+/// per-channel `output_languages` map.
+///
+/// **Channel ordering** (deterministic):
+/// 1. Channels present in [`KNOWN_CHANNELS`], in declaration order.
+/// 2. User-defined channels (not in `KNOWN_CHANNELS`), sorted by key.
+///
+/// This makes the directive stable across runs and predictable for
+/// tests, while still allowing users to add their own channels in
+/// `settings.toml` without code changes (e.g. `pr_description = "en"`).
+///
+/// **Language codes:** `KNOWN_LANGS` provides display labels for the
+/// core set (`"auto"`, `"en"`, `"ko"`, ...). Unknown codes are
+/// rendered verbatim — the model typically still understands.
+///
+/// **Channels whose value is missing, empty, or `"auto"` are
+/// skipped** (the default, and the way to opt out per channel).
+///
+/// **Strong default, not a hard guarantee.** The directive uses
+/// "MUST" framing so the model attends to it, but this is a
+/// prompt-level instruction: long contexts, tool-output echo, and
+/// subagent summarization can still cause occasional violations.
+/// See `Settings::output_languages` for the full caveat list.
+///
+/// Returns `None` when the map is empty or every channel is
+/// `"auto"`/empty (i.e. no policy should be injected).
+///
+/// **TUI-only.** This helper is called exclusively by
+/// `crate::app::agent_session_runtime::build_system_prompt`. The
+/// `lib.rs` App build path (used by `oxi --print` and RPC mode)
+/// does not call it. See the `BuildSystemPromptOptions::language_directive`
+/// field docs for the rationale.
+pub fn language_directive(channels: &std::collections::HashMap<String, String>) -> Option<String> {
+    use std::collections::HashSet;
+
+    if channels.is_empty() {
+        return None;
+    }
+
+    // Phase 1: known channels in canonical order.
+    let mut bullets: Vec<String> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for (key, label) in KNOWN_CHANNELS {
+        let lang = match channels.get(*key) {
+            Some(l) if !l.is_empty() && l != "auto" => l.as_str(),
+            _ => continue,
+        };
+        bullets.push(format!(
+            "- {}: always in {}.",
+            label,
+            lookup_language_display(lang)
+        ));
+        seen.insert(*key);
+    }
+
+    // Phase 2: user-defined channels in sorted key order (deterministic).
+    let mut extras: Vec<(&String, &String)> = channels
+        .iter()
+        .filter(|(k, _)| !seen.contains(k.as_str()))
+        .collect();
+    extras.sort_by(|a, b| a.0.cmp(b.0));
+    for (key, lang) in extras {
+        if lang.is_empty() || lang == "auto" {
+            continue;
+        }
+        bullets.push(format!(
+            "- {}: always in {}.",
+            lookup_channel_label(key),
+            lookup_language_display(lang)
+        ));
+    }
+
+    if bullets.is_empty() {
+        return None;
+    }
+
+    let bullets_text = bullets.join("\n");
+
+    Some(format!(
+        "\n\n# Output Language Policy (enforced)\n\n\
+         You MUST follow these language rules for every output. These are \
+         hard constraints, not preferences:\n\n\
+         {bullets_text}\n\n\
+         If a tool's natural output language conflicts (e.g. a generated \
+         commit message in another language), rewrite it to comply before \
+         returning it to the user. Do not echo verbatim multi-language tool \
+         output without translating it into the channel's required language."
+    ))
 }
 
 /// Build the system prompt with tools, guidelines, and context.
@@ -184,6 +318,15 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         // Add date and working directory last
         prompt.push_str(&format!("\nCurrent date: {}", date));
         prompt.push_str(&format!("\nCurrent working directory: {}", prompt_cwd));
+
+        // Language policy directive (TUI-only) — appended LAST so it
+        // sits at the end of the prompt where models attend most
+        // strongly. Skipped when the option is None or empty.
+        if let Some(ref directive) = options.language_directive
+            && !directive.is_empty()
+        {
+            prompt.push_str(directive);
+        }
 
         return prompt;
     }
@@ -307,6 +450,15 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     prompt.push_str(&format!("\nCurrent date: {}", date));
     prompt.push_str(&format!("\nCurrent working directory: {}", prompt_cwd));
 
+    // Language policy directive (TUI-only) — appended LAST so it
+    // sits at the end of the prompt where models attend most
+    // strongly. Skipped when the option is None or empty.
+    if let Some(ref directive) = options.language_directive
+        && !directive.is_empty()
+    {
+        prompt.push_str(directive);
+    }
+
     prompt
 }
 
@@ -367,5 +519,139 @@ mod tests {
         };
         let prompt = build_system_prompt(&opts);
         assert!(prompt.contains("Extra rules"));
+    }
+
+    // ── language_directive tests (TUI language policy) ─────────────
+
+    #[test]
+    fn language_directive_returns_none_for_empty_map() {
+        let map = std::collections::HashMap::new();
+        assert!(language_directive(&map).is_none());
+    }
+
+    #[test]
+    fn language_directive_returns_none_when_all_auto() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("response".to_string(), "auto".to_string());
+        map.insert("commit_message".to_string(), "auto".to_string());
+        assert!(language_directive(&map).is_none());
+    }
+
+    #[test]
+    fn language_directive_includes_only_non_auto_channels() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("response".to_string(), "ko".to_string());
+        map.insert("commit_message".to_string(), "auto".to_string()); // skipped
+        let d = language_directive(&map).expect("at least one non-auto channel");
+        assert!(d.contains("Korean (한국어)"), "got: {d}");
+        assert!(d.contains("Your conversational responses"));
+        assert!(
+            !d.contains("commit_message") || !d.contains("Git commit messages"),
+            "auto channel must be excluded, got: {d}"
+        );
+    }
+
+    #[test]
+    fn language_directive_renders_unknown_code_as_is() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("response".to_string(), "klingon".to_string());
+        let d = language_directive(&map).expect("non-auto channel");
+        // Unknown codes are passed through verbatim.
+        assert!(d.contains("klingon"), "got: {d}");
+    }
+
+    #[test]
+    fn language_directive_walks_known_channels_in_order() {
+        let mut map = std::collections::HashMap::new();
+        // All four core channels fixed.
+        map.insert("response".to_string(), "ko".to_string());
+        map.insert("code_comment".to_string(), "en".to_string());
+        map.insert("documentation".to_string(), "en".to_string());
+        map.insert("commit_message".to_string(), "en".to_string());
+        let d = language_directive(&map).expect("non-empty policy");
+        // Order should match KNOWN_CHANNELS (response, code_comment, documentation, commit_message).
+        let pos_response = d.find("Your conversational responses").unwrap();
+        let pos_code = d.find("Code comments").unwrap();
+        let pos_doc = d.find("Documentation").unwrap();
+        let pos_commit = d.find("Git commit messages").unwrap();
+        assert!(pos_response < pos_code);
+        assert!(pos_code < pos_doc);
+        assert!(pos_doc < pos_commit);
+    }
+
+    #[test]
+    fn language_directive_includes_user_defined_channels_sorted() {
+        // Extension-map contract: user can add channels not in
+        // KNOWN_CHANNELS. They must appear in the directive, sorted
+        // alphabetically by key for determinism, AFTER the known
+        // channels. The raw key is used as the label fallback.
+        let mut map = std::collections::HashMap::new();
+        map.insert("response".to_string(), "ko".to_string()); // known
+        map.insert("zeta_channel".to_string(), "en".to_string()); // user, sorts after alpha
+        map.insert("alpha_channel".to_string(), "en".to_string()); // user, sorts first
+        let d = language_directive(&map).expect("non-empty policy");
+        // Known channel first.
+        let pos_response = d.find("Your conversational responses").unwrap();
+        // User channels in sorted order.
+        let pos_alpha = d.find("alpha_channel").unwrap();
+        let pos_zeta = d.find("zeta_channel").unwrap();
+        assert!(pos_response < pos_alpha);
+        assert!(pos_alpha < pos_zeta);
+        // User-defined label uses the raw key (lookup_channel_label fallback).
+        assert!(d.contains("alpha_channel: always in English."));
+        assert!(d.contains("zeta_channel: always in English."));
+    }
+
+    #[test]
+    fn build_system_prompt_includes_language_directive_at_end() {
+        let opts = BuildSystemPromptOptions {
+            cwd: "/tmp".into(),
+            language_directive: Some(
+                "\n\n# Output Language Policy (enforced)\n\n- foo: bar.".to_string(),
+            ),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.contains("Output Language Policy (enforced)"));
+        // Must be the very last content.
+        assert!(prompt.ends_with("- foo: bar."));
+    }
+
+    #[test]
+    fn build_system_prompt_skips_empty_language_directive() {
+        let opts = BuildSystemPromptOptions {
+            cwd: "/tmp".into(),
+            language_directive: Some(String::new()),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(!prompt.contains("Output Language Policy"));
+    }
+
+    #[test]
+    fn build_system_prompt_skips_none_language_directive() {
+        let opts = BuildSystemPromptOptions {
+            cwd: "/tmp".into(),
+            language_directive: None,
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(!prompt.contains("Output Language Policy"));
+    }
+
+    #[test]
+    fn build_system_prompt_language_directive_in_custom_prompt_branch() {
+        // The custom-prompt early-return branch must also append the
+        // language directive (it sits at the END of both branches).
+        let opts = BuildSystemPromptOptions {
+            custom_prompt: Some("CUSTOM_BASE".into()),
+            cwd: "/tmp".into(),
+            language_directive: Some("\n\n# Output Language Policy (enforced)".into()),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.starts_with("CUSTOM_BASE"));
+        assert!(prompt.contains("Output Language Policy (enforced)"));
+        assert!(prompt.ends_with("Output Language Policy (enforced)"));
     }
 }

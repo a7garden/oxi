@@ -440,10 +440,16 @@ async fn handle_submit(
     running: &mut bool,
     ui_tx: &mpsc::UnboundedSender<UiEvent>,
 ) -> Option<Action> {
-    let value = state.input_value().to_string();
-    if value.is_empty() {
+    let raw = state.input_value().to_string();
+    if raw.is_empty() {
         return None;
     }
+    // Expand `@issue-N` references in the input into a small inline preview,
+    // and asynchronously link the active session to each referenced issue
+    // (so the issue's `sessions:` list accumulates every conversation that
+    // touched it). Runs only when the issue store is open.
+    let value = expand_issue_refs(&raw, &state.issue_store);
+    link_sessions_async(raw.clone(), state.issue_store.clone(), session);
 
     // Slash command popup
     if state.slash_completion_active {
@@ -1222,4 +1228,179 @@ fn update_file_completions(state: &mut AppState) {
         state.file_completions.clear();
         state.file_completion_active = false;
     }
+}
+
+// ── @issue-N inline reference expansion ────────────────────────────────
+
+use crate::store::issues::FileIssueStore;
+
+/// Expand `@issue-N` patterns in `input` to inline previews of the issue.
+/// Pure string transformation: no side effects. If `store` is None, the
+/// input is returned unchanged.
+fn expand_issue_refs(input: &str, store: &Option<FileIssueStore>) -> String {
+    let Some(store) = store else { return input.to_string() };
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        // Look for `@issue-` prefix at a word boundary.
+        let rest = &input[i..];
+        let Some(off) = rest.find("@issue-") else {
+            out.push_str(rest);
+            break;
+        };
+        // Word boundary: previous char is whitespace or start.
+        let at_byte = i + off;
+        if at_byte > 0
+            && !prev_char_is_whitespace(input, at_byte)
+        {
+            // Not a word boundary; keep the `@` and continue past it.
+            out.push_str(&rest[..off + 1]);
+            i = at_byte + 1;
+            continue;
+        }
+        // Parse the number.
+        let num_start = at_byte + "@issue-".len();
+        let mut num_end = num_start;
+        while num_end < input.len()
+            && input.as_bytes()[num_end].is_ascii_digit()
+        {
+            num_end += 1;
+        }
+        if num_end == num_start {
+            // No digits — treat as literal text.
+            out.push_str(&rest[..off + "@issue-".len()]);
+            i = at_byte + "@issue-".len();
+            continue;
+        }
+        let id: u32 = match input[num_start..num_end].parse() {
+            Ok(n) => n,
+            Err(_) => {
+                out.push_str(&rest[..off + "@issue-".len() + (num_end - num_start)]);
+                i = num_end;
+                continue;
+            }
+        };
+        // Copy the prefix up to the `@`.
+        out.push_str(&rest[..off]);
+        // Resolve the issue and emit a preview.
+        match store.read(id) {
+            Ok((issue, _hash)) => {
+                let preview = first_line_preview(&issue);
+                out.push_str(&format!(
+                    "[#{} {} ({} / {}): {}]",
+                    issue.meta.id, issue.meta.title, issue.meta.status, issue.meta.priority, preview
+                ));
+            }
+            Err(_) => {
+                // Issue not found — leave the literal reference in place.
+                out.push_str(&rest[..off + (num_end - at_byte)]);
+            }
+        }
+        i = num_end;
+    }
+    out
+}
+
+/// Char-based boundary check (NOT byte-based): the previous char in
+/// `input` before `byte_pos` is whitespace or `byte_pos == 0`.
+fn prev_char_is_whitespace(input: &str, byte_pos: usize) -> bool {
+    if byte_pos == 0 {
+        return true;
+    }
+    // Walk back over the (multi-byte) char ending at `byte_pos`.
+    let bytes = input.as_bytes();
+    let mut start = byte_pos - 1;
+    while start > 0 && !is_char_boundary(bytes[start]) {
+        start -= 1;
+    }
+    let prev = &input[start..byte_pos];
+    prev.chars().next().is_some_and(char::is_whitespace)
+}
+
+fn is_char_boundary(b: u8) -> bool {
+    // UTF-8 continuation bytes have their top two bits as `10`; any other
+    // top-bit pattern starts a new codepoint.
+    (b & 0b1100_0000) != 0b1000_0000
+}
+
+fn first_line_preview(issue: &crate::store::issues::Issue) -> String {
+    issue
+        .body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(truncate_for_preview)
+        .unwrap_or_default()
+}
+
+/// Char-based truncation (NOT byte-based): panics on non-ASCII boundaries
+/// if you slice `&str[..n]` where `n` falls inside a multi-byte codepoint.
+fn truncate_for_preview(s: &str) -> String {
+    const MAX: usize = 80;
+    if s.chars().count() <= MAX {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(MAX).collect();
+        format!("{truncated}…")
+    }
+}
+
+/// Spawn a background task to link the active session to each issue
+/// referenced in `raw`. Idempotent: existing links are not duplicated.
+/// Best-effort: errors are silently dropped (the agent tool provides the
+/// proper error path; this is purely observational).
+fn link_sessions_async(
+    raw: String,
+    store: Option<FileIssueStore>,
+    session: &AgentSession,
+) {
+    let Some(store) = store else { return };
+    // Collect ids synchronously.
+    let ids: Vec<u32> = parse_issue_ids(&raw);
+    if ids.is_empty() {
+        return;
+    }
+    // The active session id (from the agent's tool context). The TUI's
+    // session manager may not surface this directly; fall back to a stable
+    // synthetic id derived from the session file path if needed.
+    let session_id = session.session_id();
+    let session_id = if session_id.is_empty() { "tui".to_string() } else { session_id };
+    for id in ids {
+        let store = store.clone();
+        let session_id = session_id.clone();
+        // Fire-and-forget; we don't block the UI on these updates.
+        tokio::spawn(async move {
+            // best-effort: read-then-link. The store serializes same-file writes.
+            if let Ok((_issue, hash)) = store.read(id) {
+                let _ = store.link_session(id, &session_id, Some(hash)).await;
+            }
+        });
+    }
+}
+
+fn parse_issue_ids(raw: &str) -> Vec<u32> {
+    let mut out = Vec::new();
+    let bytes = raw.as_bytes();
+    let needle = b"@issue-";
+    let mut i = 0;
+    while i + needle.len() <= bytes.len() {
+        if &bytes[i..i + needle.len()] == needle
+            && (i == 0 || bytes[i - 1].is_ascii_whitespace())
+        {
+            let num_start = i + needle.len();
+            let mut num_end = num_start;
+            while num_end < bytes.len() && bytes[num_end].is_ascii_digit() {
+                num_end += 1;
+            }
+            if num_end > num_start
+                && let Ok(n) = raw[num_start..num_end].parse::<u32>()
+            {
+                out.push(n);
+            }
+            i = num_end.max(num_start);
+        } else {
+            i += 1;
+        }
+    }
+    out
 }

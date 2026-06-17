@@ -86,7 +86,16 @@ pub trait Provider: Send + Sync + 'static {
 ```
 
 **8 built-in providers** in `src/providers/`: openai, openai-responses, anthropic, google, vertex, mistral, azure, bedrock.
-`model_db.rs` contains pricing/context/feature data for 934 models across 29 providers.
+`model_db.rs` indexes pricing/context/feature data for 1099 models across 30+
+providers, sourced from a 3-tier catalog (`data/catalog/*.toml`):
+- **Layer 1** — built-in TOML (`include_str!`-ed at build time)
+- **Layer 2** — user overrides (`~/.oxi/catalog/overrides.toml`)
+- **Layer 2.5** — **models.dev live enrichment** (`catalog/models_dev.rs`):
+  fetches `https://models.dev/api.json` (5-min cache) to fill `0.0` price gaps
+  and refresh context/max_tokens/reasoning. MIT upstream (also used by opencode).
+  Gates: `OXI_MODELS_DEV`, `OXI_MODELS_DEV_URL`, `OXI_MODELS_DEV_DISABLE_FETCH`,
+  `OXI_MODELS_DEV_TTL`, `OXI_MODELS_DEV_CACHE_PATH`.
+- **Layer 3** — runtime `/v1/models` discovery for local servers (ollama/lmstudio/vllm/sglang)
 `compaction.rs` summarizes old messages when context grows too large.
 `ProviderRegistry` in `mod.rs` supports both custom providers (via `register()`) and built-in fallback (via `register_builtins.rs`).
 
@@ -254,7 +263,10 @@ Extension system (`src/extensions/types.rs`):
 1. Create `oxi-ai/src/providers/<name>.rs`.
 2. Implement the `Provider` trait.
 3. Add `BuiltinProvider` entry in `oxi-ai/src/providers/register_builtins.rs`.
-4. Add model data to `oxi-ai/src/model_db.rs` if needed.
+4. Add model data to `oxi-ai/data/catalog/models/<provider>.toml` (no Rust
+   changes needed — `build.rs` picks it up). If the provider exists on
+   models.dev, the Layer 2.5 enrichment will fill pricing/limits
+   automatically at runtime.
 
 ### Adding a New Tool
 
@@ -307,6 +319,7 @@ cargo test --workspace --doc         # Doc tests
 | Sessions | `~/.oxi/sessions/` |
 | Extensions | `~/.oxi/extensions/` |
 | Skills | `~/.oxi/skills/<name>/SKILL.md` |
+| **models.dev cache** | `~/.oxi/cache/models-dev.json` (5-min TTL, atomic writes) |
 | MCP config | `~/.config/oxi/mcp.json` or `.oxi/mcp.json` |
 | Logs | `~/.oxi/logs/` |
 | Nextest config | `.config/nextest.toml` |
@@ -370,9 +383,15 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + release build
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
 - Provider message formats differ significantly (Anthropic vs OpenAI). Use `transform.rs` for conversion.
 - The tool-calling loop in `agent_loop/` has retry logic — tool implementations must be idempotent.
-- `model_db.rs` is large (934 models). Manual edits may be overwritten by regeneration scripts.
+- The catalog lives in `data/catalog/*.toml`, not hand-written Rust. Adding a
+  TOML file requires no Rust code (build script auto-enumerates). Many oxi-
+  original entries ship `cost_input`/`cost_output` = `0.0`; these are
+  transparently enriched at runtime by the models.dev Layer 2.5
+  (`catalog/models_dev.rs`). Set `OXI_MODELS_DEV=off` to test Layer 1 alone.
 - SSE parsing handles partial UTF-8 lines. Do not assume line boundaries are clean.
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.
 - Port trait methods are **async**. `MutexGuard`s held across `.await` will not compile (`!Send`). Use `tokio::sync::Mutex` or scope the lock.
 - The legacy `oxi-store` crate no longer exists. If a new file needs session/settings/auth, put it in `oxi-cli/src/store/` (or in a sibling product's store).
 - The `oxi-cli` crate is a **monorepo monolith** by design (~17K lines). Do not split it into more crates — the 4 separation conditions (independent reuse, independent versioning, build isolation, team boundary) do not hold.
+- **TUI language policy is TUI-only.** `Settings::output_languages` (see `oxi-cli/src/store/settings.rs`) is consumed **exclusively** by `app::agent_session_runtime::build_system_prompt` (the TUI session build path). The `lib.rs` App build path used by `oxi --print` and RPC mode does **not** inject the policy — it has its own simpler `build_system_prompt` that omits it. So a policy written to `settings.toml` is **silently ignored** in non-TUI modes. If the policy ever needs to apply to print/RPC too, the single injection point to add is `oxi-cli/src/lib.rs::build_system_prompt`. See the module-level docs on `agent_session_runtime::build_system_prompt` for the invariant.
+- **TUI language policy is a strong default, NOT a hard guarantee.** The system prompt carries a "MUST" directive and the compaction summarizer sees a "Focus areas:" instruction, but both are prompt-level signals. The model can still occasionally violate the policy when context grows long, when tool output is echoed verbatim, or when the summarizer reframes it as "focus areas" (weaker than the main prompt's MUST). See the docstrings on `Settings::output_languages`, `BuildSystemPromptOptions::language_directive`, `AgentSession::rebuild_system_prompt`, and `build_compaction_instruction` for the full caveat list. To get 100% enforcement you need additional layers (tool output wrapping, response post-processing) — out of scope for the current MVP.

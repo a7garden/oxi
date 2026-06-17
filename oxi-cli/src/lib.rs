@@ -32,6 +32,7 @@ pub use storage::packages::ResourceKind;
 pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
+pub mod tools;
 
 ///
 /// This is the **new entry point** for oxi-cli run modes. It uses
@@ -157,6 +158,10 @@ pub struct App {
     wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
     questionnaire_bridge:
         Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
+    /// Shared local issue store (`.oxi/issues/`). Cloned cheaply (inner `Arc`).
+    /// Used by the agent `issue` tool, the TUI indicator, and the `oxi issue`
+    /// CLI subcommand.
+    issue_store: Option<crate::store::issues::FileIssueStore>,
 }
 
 /// Context for compaction operations, passed to extension hooks
@@ -258,6 +263,23 @@ impl App {
             .tools()
             .register_arc(std::sync::Arc::new(questionnaire_tool));
 
+        // Open the local issue store rooted at the project (`.oxi/issues/`).
+        // Best-effort: if the directory cannot be resolved, issues are simply
+        // unavailable — the app still works without them. The `/issue` slash
+        // command surfaces a clear error in that case.
+        let issue_store = std::env::current_dir()
+            .ok()
+            .map(|cwd| crate::store::issues::FileIssueStore::open_from_cwd(&cwd))
+            .and_then(|r| {
+                r.map_err(|e| tracing::warn!("issue store unavailable: {e}")).ok()
+            });
+
+        // Register the `issue` agent tool when the store is available.
+        if let Some(store) = issue_store.clone() {
+            let tool = std::sync::Arc::new(crate::tools::IssueTool::new(store));
+            agent.tools().register_arc(tool);
+        }
+
         Ok(Self {
             oxi,
             agent,
@@ -266,6 +288,7 @@ impl App {
             active_skills: RwLock::new(Vec::new()),
             wasm_ext: None,
             questionnaire_bridge: Some(bridge),
+            issue_store,
         })
     }
 
@@ -285,6 +308,11 @@ impl App {
     /// Get the WASM extension manager
     pub fn wasm_ext(&self) -> Option<&std::sync::Arc<crate::extensions::WasmExtensionManager>> {
         self.wasm_ext.as_ref()
+    }
+
+    /// Get a clone of the local issue store, if one was opened successfully.
+    pub fn issue_store(&self) -> Option<crate::store::issues::FileIssueStore> {
+        self.issue_store.clone()
     }
 
     /// Get a reference to the underlying agent.

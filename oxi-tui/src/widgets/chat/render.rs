@@ -343,8 +343,8 @@ impl Widget for EntryWidget<'_> {
 
                 if *collapsed {
                     lines.push(Line::from(vec![
-                        Span::styled("\u{25B8} ", header_style),
-                        Span::styled("thinking".to_string(), header_style),
+                        Span::styled("\u{2699} ", header_style),
+                        Span::styled("Thinking".to_string(), header_style),
                         Span::styled(count_str, self.styles.muted),
                         Span::styled(" \u{00B7} click to expand".to_string(), self.styles.muted),
                     ]));
@@ -357,8 +357,8 @@ impl Widget for EntryWidget<'_> {
                     }
                 } else {
                     lines.push(Line::from(vec![
-                        Span::styled("\u{25BE} ", header_style),
-                        Span::styled("thinking".to_string(), header_style),
+                        Span::styled("\u{2699} ", header_style),
+                        Span::styled("Thinking".to_string(), header_style),
                         Span::styled(count_str, self.styles.muted),
                     ]));
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
@@ -377,6 +377,17 @@ impl Widget for EntryWidget<'_> {
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 Paragraph::new(text).render(rect, buf);
+            }
+            LayoutKind::ResponseDivider => {
+                let style = self.styles.muted;
+                let label = " Response ";
+                let total_w = rect.width as usize;
+                let label_w = label.len();
+                let dash_count = total_w.saturating_sub(label_w) / 2;
+                let left_dashes = "\u{2500}".repeat(dash_count);
+                let right_dashes = "\u{2500}".repeat(total_w.saturating_sub(dash_count + label_w));
+                let line_str = format!("{}{}{}", left_dashes, label, right_dashes);
+                Line::from(Span::styled(line_str, style)).render(rect, buf);
             }
             LayoutKind::Image {
                 mime_type,

@@ -276,11 +276,26 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
             return;
         }
 
+        // Paint the input region with the theme background *every* frame.
+        //
+        // The input area is the only region in the app that ratatui-textarea
+        // renders into; the textarea only writes cells that hold text or the
+        // cursor. When Backspace vacates the cursor cell, that cell would
+        // otherwise transition `cursor_bg -> Reset` (the `49m` default-bg
+        // escape), which many terminals leave as a stale cursor-colored
+        // afterimage (a "stuck white block"). Filling the whole area —
+        // including the 1-char horizontal padding — with a concrete color each
+        // frame guarantees vacated cells repaint cleanly and keeps the input
+        // visually consistent with the chat/footer regions (which also fill
+        // their backgrounds).
+        let bg = self.theme.colors.background;
+        buf.set_style(area, Style::default().bg(bg));
+
         let y = area.y;
 
         // Configure the textarea with oxi styling
         let textarea = state.textarea_mut();
-        textarea.set_style(Style::default().fg(self.theme.colors.foreground));
+        textarea.set_style(Style::default().fg(self.theme.colors.foreground).bg(bg));
         textarea.set_cursor_style(
             Style::default()
                 .fg(self.theme.colors.cursor_fg)

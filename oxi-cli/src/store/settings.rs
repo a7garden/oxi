@@ -17,7 +17,55 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Current settings format version.
-const SETTINGS_VERSION: u32 = 4;
+///
+/// Version history:
+/// - 4: dynamic_models field + last_used_model/provider split
+/// - 5: output_languages field (TUI-only language policy)
+const SETTINGS_VERSION: u32 = 5;
+
+/// Known output channels for the TUI language policy.
+///
+/// `(key, prompt_label)` — `prompt_label` is the human-readable
+/// phrase used when building the system prompt directive.
+///
+/// New channels can be added by the user in `settings.toml`; the
+/// `KNOWN_CHANNELS` list is only the validation whitelist and the
+/// prompt-rendering label table. The runtime policy generator
+/// (`crate::prompt::system_prompt::language_directive`) walks this
+/// list to render each non-auto channel.
+pub const KNOWN_CHANNELS: &[(&str, &str)] = &[
+    ("response", "Your conversational responses to the user"),
+    (
+        "code_comment",
+        "Code comments you write (//, /* */, #, etc.)",
+    ),
+    (
+        "documentation",
+        "Documentation (markdown files, README, AGENTS.md, doc comments)",
+    ),
+    ("commit_message", "Git commit messages (subject + body)"),
+];
+
+/// Known language codes for the TUI language policy.
+///
+/// `(code, display_label)` — `code` is the ISO 639-1 value stored
+/// in `settings.toml`; `display_label` is shown in the UI and used
+/// in the rendered prompt directive.
+///
+/// `"auto"` is the special "match user's input language" sentinel
+/// (see `crate::prompt::system_prompt::language_directive`).
+/// Unknown codes are accepted at load time (with a warning) so that
+/// users can add languages without code changes.
+pub const KNOWN_LANGS: &[(&str, &str)] = &[
+    ("auto", "Auto (match user)"),
+    ("en", "English"),
+    ("ko", "Korean (한국어)"),
+    ("ja", "Japanese (日本語)"),
+    ("zh", "Chinese (中文)"),
+    ("es", "Spanish"),
+    ("fr", "French"),
+    ("de", "German"),
+];
 
 /// Environment variable prefix for oxi settings.
 /// Keep: reserved for future env-based config loading (e.g. OXI_API_KEY).
@@ -209,6 +257,54 @@ pub struct Settings {
     /// Actions are matched case-insensitively to the Action enum in oxi-tui.
     #[serde(default)]
     pub keybindings: HashMap<String, Vec<String>>,
+
+    // ── TUI output language policy (TUI-only) ─────────────────────────
+    /// Per-channel output language for the TUI agent loop.
+    ///
+    /// Maps a channel key (e.g. `"response"`, `"code_comment"`,
+    /// `"documentation"`, `"commit_message"`) to a language code
+    /// (e.g. `"en"`, `"ko"`, or `"auto"`).
+    ///
+    /// **Scope:** This setting is consumed exclusively by
+    /// `crate::app::agent_session_runtime::build_system_prompt` (the
+    /// TUI session build path). The `lib.rs` App build path used by
+    /// `oxi --print` and RPC mode **does not** inject the policy,
+    /// so this setting is silently ignored in non-TUI modes.
+    ///
+    /// **Default:** Empty map. Every channel defaults to `"auto"`
+    /// (match the most recent user message language), preserving
+    /// the previous behavior. Set a channel to a non-`"auto"`
+    /// value to fix its output language.
+    ///
+    /// **Extension map:** User-defined channels beyond the four in
+    /// `KNOWN_CHANNELS` are accepted (e.g. `pr_description = "en"`).
+    /// Unknown channels fall back to using the raw key as the label
+    /// in the rendered directive, and the model typically still
+    /// understands from context.
+    ///
+    /// **Strong default, NOT a hard guarantee.** This setting drives
+    /// a prompt-level "MUST" directive at the end of the system
+    /// prompt and a `"Focus areas:"` instruction passed to the
+    /// compaction summarizer. Both are prompt-level signals — the
+    /// model can still occasionally violate the policy when:
+    ///
+    ///   - the context grows long and the directive is "lost in the
+    ///     middle";
+    ///   - tool output is echoed verbatim without translation;
+    ///   - subagent summarization under a different framing weakens
+    ///     the instruction (see `build_compaction_instruction` for
+    ///     the exact framing caveat).
+    ///
+    /// If a 100% guarantee is required, additional layers (tool
+    /// output wrapping, response post-processing) are needed — out
+    /// of scope for this MVP.
+    ///
+    /// **Validation:** Unknown language codes are logged at warn
+    /// level and kept (so users can add languages without code
+    /// changes). Channel keys are not validated — see "Extension
+    /// map" above.
+    #[serde(default)]
+    pub output_languages: HashMap<String, String>,
 }
 
 fn default_theme() -> String {
@@ -280,6 +376,7 @@ impl Default for Settings {
             circuit_breaker_failure_threshold: 5,
             circuit_breaker_open_duration_secs: 30,
             keybindings: HashMap::new(),
+            output_languages: HashMap::new(),
         }
     }
 }
@@ -444,7 +541,35 @@ impl Settings {
         // 5. Run migration if needed
         settings = Self::migrate(settings)?;
 
+        // 6. Validate TUI-specific language policy
+        settings.validate_output_languages();
+
         Ok(settings)
+    }
+
+    /// Warn on unknown `output_languages` language codes. Channel
+    /// keys are **not** validated: any channel (known or user-defined)
+    /// is accepted so users can add new channels in `settings.toml`
+    /// without code changes. `KNOWN_CHANNELS` provides a label table
+    /// for the prompt directive; unknown channels fall back to using
+    /// the raw key as the label.
+    fn validate_output_languages(&mut self) {
+        if self.output_languages.is_empty() {
+            return;
+        }
+        let known_langs: std::collections::HashSet<&str> =
+            KNOWN_LANGS.iter().map(|(k, _)| *k).collect();
+
+        for (channel, lang) in &self.output_languages {
+            if !known_langs.contains(lang.as_str()) {
+                tracing::warn!(
+                    "Unknown output_languages language code '{}' for channel '{}'. \
+                     Keeping as-is (the model will likely understand).",
+                    lang,
+                    channel
+                );
+            }
+        }
     }
 
     /// Convenience: load from current working directory.
@@ -780,6 +905,9 @@ impl Settings {
     /// Currently handles:
     /// - Version 0 → Version 2 (adds JSON support, version bump)
     /// - Version 1 → Version 2 (adds JSON support)
+    /// - Version 3 → Version 4 (default_model → last_used_model)
+    /// - Version 4 → Version 5 (output_languages field added — no
+    ///   value migration, serde default fills with empty map)
     fn migrate(settings: Settings) -> Result<Settings> {
         let mut settings = settings;
 
@@ -798,7 +926,8 @@ impl Settings {
                 tracing::info!("Migrated settings from version 0 to {}", SETTINGS_VERSION);
             }
             1 | 2 => {
-                // Version 1/2 → 4: dynamic_models field added + model/provider split.
+                // Version 1/2 → 5: dynamic_models field added + model/provider split
+                // (back-compat path that also covers the 4 → 5 no-op for output_languages).
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
                     "Migrated settings from version {} to {}",
@@ -819,6 +948,17 @@ impl Settings {
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
                     "Migrated settings from version 3 to {} (default_model → last_used_model)",
+                    SETTINGS_VERSION
+                );
+            }
+            4 => {
+                // Version 4 → 5: output_languages field added.
+                // No value migration needed — `#[serde(default)]` fills
+                // the missing field with an empty map (all channels = "auto"),
+                // which is the pre-feature behavior.
+                settings.version = SETTINGS_VERSION;
+                tracing::info!(
+                    "Migrated settings from version 4 to {} (added output_languages, defaulting all channels to auto)",
                     SETTINGS_VERSION
                 );
             }
@@ -1371,6 +1511,151 @@ theme = "dracula"
         let mut settings = Settings::default();
         settings.version = 9999;
         assert!(Settings::migrate(settings).is_err());
+    }
+
+    // ── output_languages tests (TUI language policy, v5) ────────────
+
+    #[test]
+    fn test_default_output_languages_is_empty() {
+        let settings = Settings::default();
+        assert!(
+            settings.output_languages.is_empty(),
+            "all channels should default to auto (empty map)"
+        );
+    }
+
+    #[test]
+    fn test_migration_v4_to_v5_preserves_existing_output_languages() {
+        let mut settings = Settings::default();
+        settings.version = 4;
+        settings
+            .output_languages
+            .insert("response".to_string(), "ko".to_string());
+        settings
+            .output_languages
+            .insert("commit_message".to_string(), "en".to_string());
+
+        let migrated = Settings::migrate(settings).unwrap();
+        assert_eq!(migrated.version, SETTINGS_VERSION);
+        assert_eq!(
+            migrated.output_languages.get("response"),
+            Some(&"ko".to_string())
+        );
+        assert_eq!(
+            migrated.output_languages.get("commit_message"),
+            Some(&"en".to_string())
+        );
+    }
+
+    #[test]
+    fn test_migration_v4_to_v5_creates_empty_if_missing() {
+        // A v4 file loaded fresh will not have `output_languages` at all —
+        // serde fills it with an empty HashMap via `#[serde(default)]`.
+        // After migration, version is bumped to 5 with the empty map intact.
+        let mut settings = Settings::default();
+        settings.version = 4;
+        assert!(settings.output_languages.is_empty());
+
+        let migrated = Settings::migrate(settings).unwrap();
+        assert_eq!(migrated.version, SETTINGS_VERSION);
+        assert!(migrated.output_languages.is_empty());
+    }
+
+    #[test]
+    fn test_validate_keeps_user_defined_channel() {
+        // Per the extension-map contract, ANY channel key must be
+        // accepted (known or user-defined). The validator must NOT
+        // drop unknown channels — `language_directive` will use the
+        // raw key as a label fallback.
+        let mut settings = Settings::default();
+        settings
+            .output_languages
+            .insert("pr_description".to_string(), "en".to_string()); // user-defined
+        settings
+            .output_languages
+            .insert("response".to_string(), "ko".to_string()); // known
+
+        settings.validate_output_languages();
+
+        assert!(settings.output_languages.contains_key("pr_description"));
+        assert!(settings.output_languages.contains_key("response"));
+        assert_eq!(
+            settings.output_languages.get("pr_description"),
+            Some(&"en".to_string())
+        );
+        assert_eq!(
+            settings.output_languages.get("response"),
+            Some(&"ko".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_keeps_unknown_lang_with_warning() {
+        let mut settings = Settings::default();
+        settings
+            .output_languages
+            .insert("response".to_string(), "klingon".to_string()); // unknown code
+        settings
+            .output_languages
+            .insert("commit_message".to_string(), "en".to_string()); // known
+
+        settings.validate_output_languages();
+
+        // Unknown code is KEPT (with a warn log) so users can add languages
+        // without code changes.
+        assert_eq!(
+            settings.output_languages.get("response"),
+            Some(&"klingon".to_string())
+        );
+        assert_eq!(
+            settings.output_languages.get("commit_message"),
+            Some(&"en".to_string())
+        );
+    }
+
+    #[test]
+    fn test_known_channels_table_includes_core_four() {
+        let keys: Vec<&str> = KNOWN_CHANNELS.iter().map(|(k, _)| *k).collect();
+        assert!(keys.contains(&"response"));
+        assert!(keys.contains(&"code_comment"));
+        assert!(keys.contains(&"documentation"));
+        assert!(keys.contains(&"commit_message"));
+    }
+
+    #[test]
+    fn test_known_langs_table_includes_auto_and_english() {
+        let codes: Vec<&str> = KNOWN_LANGS.iter().map(|(k, _)| *k).collect();
+        assert!(codes.contains(&"auto"));
+        assert!(codes.contains(&"en"));
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip_preserves_output_languages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.toml");
+
+        let mut original = Settings::default();
+        original
+            .output_languages
+            .insert("response".to_string(), "ko".to_string());
+        original
+            .output_languages
+            .insert("commit_message".to_string(), "en".to_string());
+
+        let content = toml::to_string_pretty(&original).unwrap();
+        fs::write(&settings_path, &content).unwrap();
+
+        let loaded_content = fs::read_to_string(&settings_path).unwrap();
+        let loaded: Settings = toml::from_str(&loaded_content).unwrap();
+
+        assert_eq!(
+            loaded.output_languages.get("response"),
+            Some(&"ko".to_string())
+        );
+        assert_eq!(
+            loaded.output_languages.get("commit_message"),
+            Some(&"en".to_string())
+        );
     }
 
     // ── Persistence ──────────────────────────────────────────────────

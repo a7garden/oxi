@@ -277,6 +277,20 @@ fn all_provider_models() -> &'static [(&'static str, &'static [ModelEntry])] {
                 crate::catalog::apply_model_overrides(&mut all_map, &overrides.model);
                 all_builtins = all_map.into_values().flatten().collect();
             }
+            // Layer 2.5: models.dev live enrichment. Fills gaps in pricing,
+            // context windows, max output tokens, and reasoning flags from
+            // the community catalog (https://models.dev, MIT). Only positive
+            // prices / known limits overwrite Layer 1; verified-free and
+            // unknown values are preserved. No-op when init hasn't run or
+            // returned no data (offline) — Layer 1 stands on its own.
+            //
+            // Runs after Layer 2 so user overrides still win: enrich only
+            // touches fields the override left at their Layer 1 value.
+            if let Some(md) = crate::catalog::models_dev::get() {
+                for bm in all_builtins.iter_mut() {
+                    crate::catalog::models_dev::enrich(bm, md);
+                }
+            }
             let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
             for bm in all_builtins.iter() {
                 let entry = ModelEntry::from(bm);

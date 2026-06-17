@@ -150,6 +150,19 @@ impl SettingsOverlay {
                             };
                         }
                         "theme" => settings.theme = value.clone(),
+                        // TUI language policy channels. `label` is
+                        // "language.<channel_key>"; the cycle value
+                        // is the language code (e.g. "ko", "en", "auto").
+                        // "auto" or empty value removes the channel
+                        // from the map (restoring default behavior).
+                        lbl if lbl.starts_with("language.") => {
+                            let channel = lbl.trim_start_matches("language.").to_string();
+                            if value == "auto" {
+                                settings.output_languages.remove(&channel);
+                            } else {
+                                settings.output_languages.insert(channel, value.clone());
+                            }
+                        }
                         _ => {}
                     },
                     _ => {}
@@ -423,6 +436,29 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
         value: settings.auto_compaction,
     });
 
+    // ── TUI output language policy (TUI-only) ─────────────────────────────
+    // Each channel is a Choice that cycles through `KNOWN_LANGS` codes.
+    // "auto" (the default, when the channel is absent from the map) means
+    // "match the most recent user message language". These settings are
+    // consumed only by the TUI session build path; `oxi --print` and RPC
+    // mode ignore them. Run `/reload` after changing them to apply to the
+    // live session.
+    items.push(SettingsItem::ReadOnly {
+        label: "── Language (TUI) ─".to_string(),
+        value: "─────────────────────".to_string(),
+    });
+    for (key, _label) in crate::store::settings::KNOWN_CHANNELS {
+        let value = settings
+            .output_languages
+            .get(*key)
+            .cloned()
+            .unwrap_or_else(|| "auto".to_string());
+        items.push(SettingsItem::Choice {
+            label: format!("language.{key}"),
+            value,
+        });
+    }
+
     // ── Routing ─────────────────────────────────────────────────────────
     let gd = dirs::config_dir().unwrap_or_default().join("oxi");
     let pd = std::env::current_dir().unwrap_or_default();
@@ -532,6 +568,13 @@ fn get_choice_options(label: &str) -> Vec<String> {
             "High".to_string(),
             "XHigh".to_string(),
         ],
+        // TUI language policy channel cycles. The cycle order matches
+        // `KNOWN_LANGS` (see `store::settings`). "auto" is the default
+        // and means "no policy for this channel".
+        lbl if lbl.starts_with("language.") => crate::store::settings::KNOWN_LANGS
+            .iter()
+            .map(|(code, _)| code.to_string())
+            .collect(),
         _ => vec![],
     }
 }

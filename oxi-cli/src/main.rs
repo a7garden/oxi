@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use oxi::cli::{CliArgs, Commands, ConfigCommands, PkgCommands};
+use oxi::cli::{CliArgs, Commands, ConfigCommands, IssueCommands, PkgCommands};
 use oxi::storage::packages::{PackageManager, ResourceKind};
 use oxi::store::session::{AgentMessage, SessionManager};
 use oxi::store::settings::Settings;
@@ -82,6 +82,9 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Pkg { action } => {
             handle_pkg_command(action)?;
         }
+        Commands::Issue { action } => {
+            handle_issue_command(action).await?;
+        }
         Commands::Config { action } => {
             handle_config_command(action)?;
         }
@@ -111,6 +114,112 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Handle `oxi issue …` subcommands. Opens the local issue store rooted at
+/// the project and dispatches to the requested action.
+async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
+    use oxi::store::issues::{IssueFilter, Priority, Status};
+    use oxi::tools::format_issue_full;
+
+    let cwd = std::env::current_dir()?;
+    let store = oxi::store::issues::FileIssueStore::open_from_cwd(&cwd)?;
+
+    match action {
+        IssueCommands::List { all, label, text } => {
+            let filter = IssueFilter {
+                status: if *all { None } else { Some(Status::Open) },
+                priority: None,
+                label: label.clone(),
+                assigned_to_session: None,
+                text: text.clone(),
+            };
+            let issues = store.list(&filter)?;
+            if issues.is_empty() {
+                println!("(no issues)");
+            } else {
+                for i in &issues {
+                    println!("{}", oxi::tools::format_issue_line(i));
+                }
+            }
+        }
+        IssueCommands::Show { id } => {
+            let (issue, hash) = store.read(*id)?;
+            println!("{}", format_issue_full(&issue, &hash));
+        }
+        IssueCommands::New {
+            title,
+            body,
+            priority,
+            labels,
+        } => {
+            let body = body.clone().unwrap_or_default();
+            let prio = match priority.as_deref() {
+                Some("low") => Priority::Low,
+                Some("medium") | None => Priority::Medium,
+                Some("high") => Priority::High,
+                Some("critical") => Priority::Critical,
+                Some(other) => anyhow::bail!("invalid priority: {other}"),
+            };
+            let labels: Vec<String> = labels
+                .as_deref()
+                .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
+                .unwrap_or_default();
+            let issue = store.create(title.clone(), body, prio, labels, None)?;
+            println!("created issue #{}: {}", issue.meta.id, issue.meta.title);
+        }
+        IssueCommands::Close { id, hash } => {
+            // Unique session id per CLI invocation (pid + nanos) so two
+            // concurrent `oxi issue close` calls don't collide.
+            let session = format!(
+                "cli-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            // Hold the liveness lock for the duration of this command so
+            // that any other process trying to read the issue sees us as a
+            // live owner while we operate.
+            let _guard = oxi::store::issues::liveness::acquire(
+                &store.issues_dir(),
+                &session,
+            )
+            .ok();
+
+            // 1. Read current state to inspect the current assignment.
+            let (issue, current_hash) = store.read(*id)?;
+            if let Some(ref a) = issue.meta.assigned_to {
+                if a.session != session
+                    && oxi::store::issues::liveness::is_session_alive(
+                        &store.issues_dir(),
+                        &a.session,
+                    )
+                {
+                    anyhow::bail!(
+                        "issue #{id} is currently being worked on by session {} \
+                         (since {}); cannot close from CLI",
+                        a.session,
+                        a.acquired_at,
+                    );
+                }
+            }
+            // 2. Claim (or re-claim if previous owner is dead), then close.
+            //    Use the user-supplied hash if any; otherwise the current one.
+            let effective_hash = hash.clone().unwrap_or(current_hash);
+            store
+                .start(*id, &session, Some(effective_hash.clone()))
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let closed = store
+                .close(*id, &session, Some(effective_hash))
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            println!("closed issue #{}: {}", closed.meta.id, closed.meta.title);
+        }
+    }
     Ok(())
 }
 
@@ -188,7 +297,13 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
                                 println!("Updated {} to v{}", manifest.name, manifest.version);
                             }
                             Err(e) => {
-                                eprintln!("{}", oxi::print_mode::format_error(&format!("Failed to update {}: {}", pkg_name, e)));
+                                eprintln!(
+                                    "{}",
+                                    oxi::print_mode::format_error(&format!(
+                                        "Failed to update {}: {}",
+                                        pkg_name, e
+                                    ))
+                                );
                             }
                         }
                     }
@@ -243,7 +358,10 @@ async fn handle_ext_command(action: &oxi::cli::ExtCommands) -> Result<()> {
             } else {
                 println!("Installed extensions:\n");
                 for (source, entry) in &entries {
-                    let name = entry.wasm_file.strip_suffix(".wasm").unwrap_or(&entry.wasm_file);
+                    let name = entry
+                        .wasm_file
+                        .strip_suffix(".wasm")
+                        .unwrap_or(&entry.wasm_file);
                     println!(
                         "  {} v{} — {} ({})",
                         source,

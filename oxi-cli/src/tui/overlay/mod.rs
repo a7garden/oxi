@@ -22,6 +22,7 @@ pub mod router_integration;
 pub mod router_setup;
 pub mod settings;
 pub mod text_viewer;
+pub mod issues_panel;
 pub mod tree_navigator;
 #[allow(unused_imports)]
 pub use extensions::extensions_overlay;
@@ -39,6 +40,8 @@ pub use settings::settings_overlay;
 #[allow(unused_imports)]
 pub use text_viewer::{changelog_overlay, help_overlay, hotkeys_overlay, tools_overlay};
 #[allow(unused_imports)]
+pub use issues_panel::IssuesPanelOverlay;
+#[allow(unused_imports)] // re-exported for downstream consumers; not used in this crate
 pub use tree_navigator::{TreeNavigatorOverlay, tree_navigator};
 
 // ---------------------------------------------------------------------------
