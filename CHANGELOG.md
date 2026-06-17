@@ -76,8 +76,61 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
   `build_tool_context` 레벨), `start_with_distinct_live_owners_collides` +
   `empty_session_assignment_is_immediately_reclaimable_documentation`(oxi-cli).
 
-> 설계 문서: `docs/designs/2026-06-17-issue-system-hardening.md` (P0).
-> 후속 Phase P1–P4 (atomic write, CAS retry, schema, robustness)는 별도 PR.
+> 설계 문서: `docs/designs/2026-06-17-issue-system-hardening.md` (P0–P4 전부).
+
+### Fixed — `atomic_write` temp 이름 UUID 접미 (Phase 1 / 결함 #1)
+
+`store::issues`·`store::session`의 `atomic_write`가 temp 파일을
+`tmp.<pid>`로 명명했다. PID-namespace 재활용(컨테이너)이나 fork+exec에서
+두 프로세스가 같은 PID로 같은 temp 를 덮어 한 쪽 write 가 손실될 수 있었다.
+
+- **신규** `oxi-cli/src/store/fs_util.rs`: `atomic_write`/`atomic_write_bytes`.
+  temp 이름을 `<base>.tmp.<pid>.<uuid-simple>`로 변경 (PID는 디버깅용,
+  UUID 가 유일성 보장). rename 실패 시 best-effort orphan 제거.
+- issues/session 양쪽 로컬 복사본 제거 → 공유 헬퍼로 마이그레이션.
+- 테스트: 16스레드 동시 동일경로 쓰기, temp 이름 형식, rename 실패 시 orphan 미누출.
+
+### Changed — CAS 재시도 + `IssuePatch` + `reopen` + no-op 감지 (Phase 2 / #2 #3 #4 #9 #12)
+
+저장소는 **엄격**을 유지(원시 `Conflict` 반환, 재시도 없음)하고, **도구만**
+회복을 담당한다. 소유권 정책(assignee 한정)은 **유지**.
+
+- **`store::update`**: no-op 감지(#12) — 직렬화된 before/after 를 `updated_at` 를
+  정규화해 비교; 의미 변화가 없으면 쓰기/타임스탬프/cache invalidate 스킵.
+- **`IssuePatch`**(#3): 모든 필드 `Option` (None=유지, Some=교체). `labels`만
+  의미적 공란 — `Some([])`=전체 삭제, `None`=유지. 도구 스키마로 표현 못 하던
+  absent vs `[]` 구분 해소.
+- **`apply_patch`**: 정밀 patch 를 엄격 CAS 로 적용, 소유권 **강제**(다른
+  assignee → `NotAssigned`). `status=Open` 시 `closed_at` 도 클리어(#4 잠재 버그 수정).
+- **`reopen`** 액션(#4): `status=Open` + `closed_at=None`.
+- **도구 `cas_retry`**(#2): bounded CAS 회복(4회). 첫 시도는 에이전트 hash(빠른
+  경로), conflict 시 fresh hash 재독 후 재시도 — stale hash 가 advisory 로 작동.
+  모든 변형 액션이 이를 경유. `update` 는 `apply_patch`+`cas_retry` 조합.
+- 테스트: stale hash 회복·바운드 후 포기; reopen/apply_patch 의 closed_at 클리어;
+  no-op 미갱신; labels keep/clear/replace; 소유권 강제.
+
+### Changed — 스키마 정밀화 + 크기 상한 + github readOnly (Phase 3 / #5 #6 #7)
+
+- **`validate_size`**(#5): `create`/`update` 의 과대 페이로드 조기 거부 —
+  title≤512자, body≤256KiB, labels≤32, 라벨당≤64자. 디스크 채우기 방지.
+- **스키마 description**(#6, #7): `status` 이중의미 정리(list 필터 vs update 값,
+  close/reopen 권장), `labels` REPLACES 시맨틱, `content_hash` ADVISORY 표기,
+  `github` `readOnly` 속성 추가(Phase 6 동기화 전용). 도구 최상위 설명에
+  update 필드 관례·reopen 워크플로우·자동재조정 정책 명시.
+- 테스트: 소형 통과·비텍스트 액션 스킵·body/title/라벨수/긴라벨 거부.
+
+### Changed — orphan 수거 + `top_free_priority` + flock 헬퍼 (Phase 4 / #8 #10 #11)
+
+- **`liveness::reap_orphans`**(#8): `.alive/` dead 파일 수거(best-effort,
+  멱등, TOCTOU 안전). (1) 홀더 체크(is_session_alive)로 live 락 미건드림,
+  (2) `ORPHAN_AGE_SECS`(1h) age gate 로 최근 파일 보존. `FileIssueStore::open` 에서
+  lazy 호출(실패는 warn 만, 시작 차단 없음).
+- **flock 헬퍼**(#11): 산재하던 2곳의 `unsafe libc::flock` 호출을
+  `try_flock_exclusive`/`probe_flock_shared` 명명 함수로 중앙화(SAFETY 주석).
+- **`top_free_priority`**(#10): open + 미할당 이슈 중 최대 우선순위 —
+  "지금 당장 손댈 것" 신호. Cache 필드로 계산, 접근자 노출.
+- 테스트: reap 멱등/최근 dead 보존(age gate)/오래된 dead 제거+live 보존;
+  top_free_priority 가 할당·닫힌 이슈 무시.
 
 ## [0.36.0]
 

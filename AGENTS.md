@@ -403,6 +403,22 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + release build
     `start` write an empty-string owner that was instantly reclaimable).
     Regression coverage: `session_id_wiring_tests` (oxi-agent) +
     `start_with_distinct_live_owners_collides` (oxi-cli).
+- **Issue-system CAS: strict store, recovery in the tool (Phase 2 / #2).** The
+  store's `update` is deliberately strict — it returns raw `IssueError::Conflict`
+  and **never retries on its own**. Only the `issue` agent tool wraps mutations in
+  `cas_retry` (4 attempts: first try uses the agent's `content_hash` as a fast
+  path; on conflict it re-reads a fresh hash and retries). Consequence: **a
+  stale `content_hash` from an earlier `read` is advisory, not fatal** — the tool
+  auto-reconciles. If you add a new mutating store op the agent can call, route
+  it through `cas_retry` (see `issue_tool.rs`). Direct `oxi issue` CLI calls do
+  **not** retry (CLI is a single-shot caller; re-read manually on conflict).
+  `IssuePatch` (absent=keep, `Some([])`=clear labels, `Some`=replace) is the
+  precise mutation surface — prefer `apply_patch`/`reopen`/`close` over
+  hand-rolled `update` closures, and note `apply_patch` **enforces ownership**
+  (different non-empty assignee → `NotAssigned`), matching the legacy policy.
+  `update` also does **no-op detection** (skips write/timestamp/invalidate when
+  nothing meaningful changed), so don't rely on a no-op `update` bumping
+  `updated_at` or the dir mtime.
 - The catalog lives in `data/catalog/*.toml`, not hand-written Rust. Adding a
   TOML file requires no Rust code (build script auto-enumerates). Many oxi-
   original entries ship `cost_input`/`cost_output` = `0.0`; these are
