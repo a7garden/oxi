@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-06-18
+
 ### Added — Catalog Port (12번째 port, models.dev 동적 카탈로그)
 
 SDK 에 **catalog port** (`ModelCatalog` trait) 를 추가하여, 모델/프로바이더
@@ -151,6 +153,33 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 `close` 가 거의 항상 `Conflict`("was modified since last read")로 실패했다
 (미할당 이슈를 close 할 때 특히). `start` 직후 파일을 다시 읽어 fresh 해시를
 `close` 에 넘기도록 수정.
+
+### Fixed — Production readiness (crates.io publish)
+
+main 의 두 CI 잡이 실패 상태였고, 그대로는 crates.io publish 가 막히는
+상황이었다.
+
+* **doc** (ci.yml, `RUSTDOCFLAGS=-D warnings`): oxi-ai 와 oxi-sdk 의
+  깨진 intra-doc 링크 6곳, oxi-cli 의 모호한 링크 1곳 수정.
+* **test-doc** (test.yml, `cargo test --doc`): 컴파일조차 안 되는 doctest
+  2건 수정 — `build_oxi_engine` 이 `async` 가 된 뒤 `.await` 가 누락된 것,
+  `OxiBuilder::with_catalog` 예시의 빈 `/* ... */;` RHS.
+
+### Changed — clippy `--all-targets` 게이트 강화
+
+`cargo clippy --workspace --all-targets -- -D warnings` 가 **완전히 clean**
+하도록 정리했다 (기존 ~1448 warning, 전부 test/bench/example 코드).
+shipped 라이브러리는 엄격함을 유지하고, test 코드는 정확히 두 가지
+test-idiom lint (`clippy::unwrap_used`, `clippy::field_reassign_with_default`)
+만 `#![cfg_attr(test, allow(...))]` 로 완화했다. 나머지 모든 lint
+(correctness/suspicious/style/complexity) 는 test 코드에서도 그 자리에서
+수정했다.
+
+* ci.yml 의 `clippy` 잡과 `.pre-commit-config.yaml` 의 hook 을 `--workspace`
+  에서 `--workspace --all-targets` 로 강화 (AGENTS.md 의 "Pre-existing TODO"
+  후속 작업 완료).
+* oxi-ai 의 `benches/` exclude 를 제거해 패키지된 크레이트가 벤치마크 소스를
+  포함하도록 수정 (`cargo package` 경고 제거).
 
 ## [0.36.0]
 
