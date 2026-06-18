@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — CI 워크플로우 (v0.37.0 릴리스 직후 발견)
+
+v0.37.0 릴리스 시도에서 세 가지 CI 인프라 문제가 드러났다.
+
+* **SBOM** (`sbom.yml`): `cargo cyclonedx` 가 각 워크스페이스 멤버마다
+  `oxi.json` 을 생성하는데 (not `target/`), 워크플로우는 단일
+  `target/oxi.cdx.json` 을 기대해 `find: 'target': No such file` 로
+  실패하던 것을 수정. `oxi-cli` (전체 의존성 트리 포함) 을 단일 SBOM 으로
+  취합.
+* **Sync Labels** (`labels.yml`): 존재하지 않는 `github/issue-labeler@v2`
+  태그 + 잘못된 도구 (이슈 분류용) → `.github/labels.yml` 포맷과 정확히
+  호환되는 `EndBug/label-sync@v2` 로 교체.
+* **crates.io publish 자동화** (`release.yml` + `publish.yml`):
+  GITHUB_TOKEN 으로 만든 GitHub Release 는 `release: published` 이벤트를
+  다른 워크플로우로 전파하지 않아 `publish.yml` 이 자동 실행되지 않던
+  것을, `release.yml` 에 `trigger-publish` 잡을 추가해 Release 생성 직후
+  `gh workflow run` 으로 명시적 dispatch 하도록 수정.
+
 ## [0.37.0] - 2026-06-18
 
 ### Added — Catalog Port (12번째 port, models.dev 동적 카탈로그)

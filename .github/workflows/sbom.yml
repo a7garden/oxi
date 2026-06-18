@@ -43,8 +43,13 @@ jobs:
       - name: Generate SBOM
         run: |
           cargo cyclonedx --format json --override-filename oxi --spec-version 1.5
-          # cargo-cyclonedx writes to target/ by default; move to a stable path.
-          find target -maxdepth 4 -name 'oxi.cdx.json' -exec cp {} ./oxi.cdx.json \;
+          # cargo-cyclonedx writes one `oxi.json` per workspace member into
+          # each crate's directory (NOT into target/). `oxi-cli` is the
+          # top-level binary and pulls in the entire dependency tree, so it
+          # stands in for the whole workspace. Relocate it to the stable
+          # path the downstream steps expect.
+          cp oxi-cli/oxi.json ./oxi.cdx.json
+          rm -f oxi-*/oxi.json
           ls -la oxi.cdx.json
 
       - name: Upload to Dependency Graph

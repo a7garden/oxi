@@ -340,11 +340,11 @@ oxi ships a multi-stage pipeline. The full source is under
 | `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `clippy-native-browser`, `smoke-test`, `audit`, `deny`, `msrv`, `doc`. ~2-3 min for the fast jobs. |
 | `test.yml` | PR + push to main + release | Full nextest matrix on **macos-latest** (Apple Silicon), plus doc tests. Replaces the older "smoke on PR, full on main" split. |
 | `pr-gate.yml` | PR opened/synchronized/reopened | Conventional-Commit title, PR size ≤ 4000 lines, no merge commits, issue linkage. |
-| `release.yml` | `v*` tag push | Build `aarch64-apple-darwin`, `tag-check` (rejects stale tags), `SHA256SUMS` + CycloneDX SBOM, GitHub Release. |
+| `release.yml` | `v*` tag push | Build `aarch64-apple-darwin`, `tag-check` (rejects stale tags), `SHA256SUMS` + CycloneDX SBOM, GitHub Release, then dispatches `publish.yml`. |
 | `build-binaries.yml` | weekly cron + manual | Continuous binary build (no release artifact) for sanity. |
-| `publish.yml` | `release: published` + manual | `cargo publish` to crates.io in topological order with a dry-run pre-flight. Requires `CARGO_TOKEN`. |
+| `publish.yml` | dispatched by `release.yml` + manual | `cargo publish` to crates.io in topological order with a dry-run pre-flight. Requires `CARGO_TOKEN`. |
 | `sbom.yml` | push to main + release | Generates CycloneDX 1.5 SBOM and submits it to GitHub's dependency-graph API. |
-| `labels.yml` | weekly + labels.yml change | Syncs `.github/labels.yml` to the repo's label set via `github/issue-labeler`. |
+| `labels.yml` | weekly + labels.yml change | Syncs `.github/labels.yml` to the repo's label set via `EndBug/label-sync`. |
 
 ### Required GitHub Secrets
 

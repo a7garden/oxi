@@ -22,11 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Apply labels
-        uses: github/issue-labeler@v2
+        # EndBug/label-sync syncs the repo's label set to a declarative
+        # config file. Its `name`/`color`/`description`/`aliases` schema
+        # matches .github/labels.yml exactly (the previous step used
+        # `github/issue-labeler`, a different action with a deleted v2 tag
+        # that classifies issues rather than managing the label set).
+        uses: EndBug/label-sync@v2
         with:
-          mode: update
-          # When `mode: update` and a `repo-name` is provided, the action
-          # creates/updates the labels in this repo directly.
-          repo-name: ${{ github.repository }}
-          # Path is relative to the repo root.
-          labels-path: .github/labels.yml
+          config-file: .github/labels.yml
+          # Preserve any extra labels that exist in the repo but aren't in
+          # the config — avoids wiping hand-created labels.
+          delete-other-labels: false
+          token: ${{ secrets.GITHUB_TOKEN }}

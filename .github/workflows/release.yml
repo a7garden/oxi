@@ -10,6 +10,9 @@ env:
 
 permissions:
   contents: write
+  # `actions: write` lets the `trigger-publish` job dispatch publish.yml
+  # via `gh workflow run` (same-repo dispatch works with GITHUB_TOKEN).
+  actions: write
 
 jobs:
   # ── Build matrix ───────────────────────────────────────────────
@@ -114,14 +117,14 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         # SPDX/CycloneDX SBOM for compliance with supply-chain transparency
         # frameworks (US EO 14028, EU CRA, etc.).
-        # Run from repo root (where Cargo.toml lives), then copy output to artifacts/.
+        # cargo-cyclonedx writes one `oxi.json` per workspace member into
+        # each crate dir; oxi-cli pulls in the whole dep tree.
         run: |
           cargo install --locked cargo-cyclonedx --version "^0.5"
-          cargo cyclonedx --format json --override-filename oxi --spec-version 1.5 \
-            || cargo cyclonedx --format json --override-filename oxi
-          # cargo-cyclonedx writes to target/ by default; relocate.
-          find . -maxdepth 5 -name 'oxi.cdx.json' -exec cp {} artifacts/ \;
-          ls -la artifacts/oxi.cdx.json || echo "::warning::SBOM generation failed; continuing without."
+          cargo cyclonedx --format json --override-filename oxi --spec-version 1.5
+          cp oxi-cli/oxi.json artifacts/oxi.cdx.json
+          rm -f oxi-*/oxi.json
+          ls -la artifacts/oxi.cdx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -134,3 +137,21 @@ jobs:
             artifacts/oxi.cdx.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Trigger crates.io publish ──────────────────────────────────
+  # A Release created with GITHUB_TOKEN does NOT emit a `release: published`
+  # event to other workflows (GitHub suppresses this to prevent loops), so
+  # publish.yml's `on: release` trigger never fires. Dispatch it explicitly
+  # here once the Release is live. publish.yml verifies the Release exists
+  # before publishing.
+  trigger-publish:
+    name: Trigger crates.io publish
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch publish workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run publish.yml -f dry_run=false
+          echo "publish.yml dispatched for $GITHUB_REF_NAME"
