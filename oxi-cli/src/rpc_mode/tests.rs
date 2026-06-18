@@ -375,10 +375,7 @@ fn test_paste_handler_extract_image_short_buffer() {
 #[test]
 fn test_paste_handler_extract_image_with_nulls() {
     let mut handler = utils::PasteHandler::new();
-    let mut buffer = vec![0u8; 100];
-    for i in 10..20 {
-        buffer[i] = 0;
-    }
+    let buffer = vec![0u8; 100];
     handler.buffer = buffer;
     let result = handler.extract_image_data();
     assert!(result.is_some());

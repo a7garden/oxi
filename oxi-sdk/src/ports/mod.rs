@@ -847,7 +847,7 @@ pub struct PortRegistry {
     /// Resource monitor.
     pub resources: Arc<dyn ResourceMonitor>,
     /// Model catalog — provider/model metadata source of truth.
-    /// Default: [`NoopModelCatalog`] (empty results).
+    /// Default: [`catalog::NoopModelCatalog`] (empty results).
     pub catalog: Arc<dyn catalog::ModelCatalog>,
 }
 

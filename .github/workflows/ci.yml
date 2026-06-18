@@ -47,11 +47,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      # NOTE: We intentionally stay on `cargo clippy --workspace` (no
-      # --all-targets) because test/bench code still uses a few `unwrap()`
-      # and other clippy::pedantic lints. Upgrading to --all-targets
-      # is tracked as a follow-up — see AGENTS.md "Pre-existing TODO".
-      - run: cargo clippy --workspace -- -D warnings
+      # Lint the full target set: lib + bins + tests + benches + examples.
+      # Test code relaxes exactly two test-idiom lints (`clippy::unwrap_used`
+      # and `clippy::field_reassign_with_default`) via
+      # `#![cfg_attr(test, allow(...))]` at each library crate root; shipped
+      # library code stays strict. See AGENTS.md "Code Style" for rationale.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   clippy-native-browser:
     name: Clippy (native-browser)

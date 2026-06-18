@@ -1250,7 +1250,7 @@ mod tests {
 
         // Verify Done has ToolUse stop reason
         let done = events.iter().find_map(|e| match e {
-            ProviderEvent::Done { reason, .. } => Some(reason.clone()),
+            ProviderEvent::Done { reason, .. } => Some(*reason),
             _ => None,
         });
         assert_eq!(done, Some(StopReason::ToolUse));
@@ -1602,7 +1602,7 @@ mod tests {
 
         // Done should have ToolUse stop reason
         let done = events2.iter().find_map(|e| match e {
-            ProviderEvent::Done { reason, .. } => Some(reason.clone()),
+            ProviderEvent::Done { reason, .. } => Some(*reason),
             _ => None,
         });
         assert_eq!(done, Some(StopReason::ToolUse));

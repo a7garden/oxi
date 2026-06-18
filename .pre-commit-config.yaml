@@ -45,8 +45,8 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        description: cargo clippy --workspace -- -D warnings
-        entry: cargo clippy --workspace -- -D warnings
+        description: cargo clippy --workspace --all-targets -- -D warnings
+        entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false

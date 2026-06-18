@@ -9,13 +9,13 @@
 //! # Protocol resolution
 //!
 //! The [`protocol_for`] function maps a models.dev `npm` string to oxi's
-//! [`Api`] enum + [`AuthMethod`]. This is the **only** protocol knowledge
+//! [`crate::Api`] enum + [`crate::catalog::provider::AuthMethod`]. This is the **only** protocol knowledge
 //! oxi has — 7 match arms covering all known API protocols. Unknown npm
 //! values default to OpenAI-compatible (`OpenAiCompletions` + `Bearer`).
 //!
 //! # Model-level overrides
 //!
-//! Per-model [`MdModelProvider`] can override three things:
+//! Per-model [`crate::catalog::models_dev::MdModelProvider`] can override three things:
 //! - `npm` → protocol + auth (via `protocol_for`)
 //! - `api` → base URL (55+ models as of 2026-06-17)
 //!

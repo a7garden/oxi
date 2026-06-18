@@ -485,7 +485,7 @@ mod tests {
         let (providers, models) = crate::catalog::materialize(&catalog, &meta, &Default::default());
         // Convert to ModelEntry format
         let mut entries: Vec<super::ModelEntry> = Vec::new();
-        for (_pid, model_list) in &models {
+        for model_list in models.values() {
             for bm in model_list {
                 entries.push(super::ModelEntry::from(bm));
             }

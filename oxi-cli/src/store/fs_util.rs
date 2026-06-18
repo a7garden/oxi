@@ -129,6 +129,10 @@ mod tests {
 
         // Restore perms so cleanup works, then check no temp orphan remains.
         let mut perms = fs::metadata(&root).unwrap().permissions();
+        // `set_readonly(false)` restores the owner-write bit on Unix (mode |=
+        // 0o200), which is all `remove_dir_all` needs. Clippy flags the
+        // incomplete restore; for this throwaway test fixture that is intended.
+        #[allow(clippy::permissions_set_readonly_false)]
         perms.set_readonly(false);
         fs::set_permissions(&root, perms).unwrap();
 

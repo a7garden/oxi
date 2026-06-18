@@ -414,10 +414,11 @@ pub mod liveness {
     /// (and any in-TUI operations: agent tool, `/issue` slash command, panel).
     ///
     /// Invariant: in TUI mode, [`crate::App::ownership_session_id`] MUST equal
-    /// this constant. The TUI panel's [`crate::tui::overlay::IssuesPanelOverlay::session_id`]
-    /// references it, and the agent's `ToolContext.session_id` is set from it,
-    /// so the flock acquired by `App` is the same one the panel and agent use
-    /// to check `is_session_alive`. Keep the two in sync.
+    /// this constant. The TUI panel's
+    /// `crate::tui::overlay::IssuesPanelOverlay::session_id()` references it,
+    /// and the agent's `ToolContext.session_id` is set from it, so the flock
+    /// acquired by `App` is the same one the panel and agent use to check
+    /// `is_session_alive`. Keep the two in sync.
     pub const TUI_OWNERSHIP_ID: &str = "tui";
 
     /// Path of the alive-lock file for `session_id` under `issues_dir`.
@@ -613,6 +614,7 @@ pub mod liveness {
                         .read(true)
                         .write(true)
                         .create(true)
+                        .truncate(false) // open-or-create without erasing (clippy::suspicious_open_options)
                         .open(path)
                 })
                 .unwrap();

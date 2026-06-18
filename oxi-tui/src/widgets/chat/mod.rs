@@ -391,12 +391,7 @@ mod tests {
         // Should produce multiple lines, all fitting within width 30
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
-            assert!(
-                w <= 30,
-                "Line width {} exceeds 30: '{}'",
-                w,
-                line.to_string()
-            );
+            assert!(w <= 30, "Line width {} exceeds 30: '{}'", w, line);
         }
         assert!(lines.len() > 1, "Expected multiple wrapped lines");
     }
@@ -407,12 +402,7 @@ mod tests {
         let lines = md_lines(text, 20, &ThemeStyles::default());
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
-            assert!(
-                w <= 20,
-                "Line width {} exceeds 20: '{}'",
-                w,
-                line.to_string()
-            );
+            assert!(w <= 20, "Line width {} exceeds 20: '{}'", w, line);
         }
         assert!(lines.len() > 1, "Expected multiple wrapped lines");
     }
@@ -425,12 +415,7 @@ mod tests {
         let lines = md_lines(text, 30, &ThemeStyles::default());
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
-            assert!(
-                w <= 30,
-                "Line width {} exceeds 30: '{}'",
-                w,
-                line.to_string()
-            );
+            assert!(w <= 30, "Line width {} exceeds 30: '{}'", w, line);
         }
         assert!(lines.len() > 1, "Expected multiple wrapped lines");
     }

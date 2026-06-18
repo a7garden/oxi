@@ -337,8 +337,7 @@ data: [DONE]
     mock.assert();
 
     // The stream may succeed or fail depending on response parsing
-    if result.is_ok() {
-        let mut stream = result.unwrap();
+    if let Ok(mut stream) = result {
         while let Some(event) = stream.next().await {
             let _ = event;
         }
@@ -383,8 +382,7 @@ data: [DONE]
     mock.assert();
 
     // The stream may succeed or fail depending on response parsing
-    if result.is_ok() {
-        let mut stream = result.unwrap();
+    if let Ok(mut stream) = result {
         while let Some(event) = stream.next().await {
             let _ = event;
         }

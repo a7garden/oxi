@@ -183,12 +183,12 @@ mod tests {
     #[test]
     fn test_sdk_result_ok() {
         let result: SdkResult<i32> = Ok(42);
-        assert_eq!(result.unwrap(), 42);
+        assert!(matches!(result, Ok(42)));
     }
 
     #[test]
     fn test_sdk_result_err() {
         let result: SdkResult<i32> = Err(SdkError::Cancelled);
-        assert!(matches!(result.unwrap_err(), SdkError::Cancelled));
+        assert!(matches!(result, Err(SdkError::Cancelled)));
     }
 }

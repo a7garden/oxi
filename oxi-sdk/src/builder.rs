@@ -374,10 +374,11 @@ impl OxiBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// use oxi_sdk::{OxiBuilder, ModelCatalog};
-    /// use std::sync::Arc;
+    /// use oxi_sdk::{OxiBuilder, NoopModelCatalog};
     ///
-    /// let catalog: Arc<dyn ModelCatalog> = /* ... */;
+    /// // `NoopModelCatalog` is the empty default used when no catalog is
+    /// // registered — pass any `Arc<dyn ModelCatalog>` here instead.
+    /// let catalog = NoopModelCatalog::new();
     /// let oxi = OxiBuilder::new()
     ///     .with_catalog(catalog)
     ///     .build();

@@ -215,10 +215,13 @@ Extension system (`src/extensions/types.rs`):
 ### Code Style
 
 - `cargo fmt` before every commit — no exceptions.
-- `cargo clippy --workspace -- -D warnings` must pass clean.
-  `clippy --all-targets` is **not** enforced yet (test/bench code has
-  pre-existing `unwrap()` and pedantic lints) — see "Pre-existing TODO"
-  below.
+- `cargo clippy --workspace --all-targets -- -D warnings` must pass clean
+  (the ci.yml `clippy` job and the pre-commit hook both enforce this).
+  Test/bench/example code relaxes exactly two test-idiom lints —
+  `clippy::unwrap_used` and `clippy::field_reassign_with_default` — via
+  `#![cfg_attr(test, allow(...))]` at each library crate root; shipped
+  (non-test) code still `warn`s on `unwrap_used`. Every other lint
+  (correctness, suspicious, style, complexity) is enforced even in tests.
 - **`native-browser` feature must always compile.** The `ci.yml`
   `clippy-native-browser` job runs `cargo clippy -p oxi-sdk --features
   native-browser -- -D warnings` on every PR. This feature compiles

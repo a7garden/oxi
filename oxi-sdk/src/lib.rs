@@ -217,6 +217,20 @@ pub use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxiBrows
 #[cfg(feature = "native-browser")]
 pub use oxibrowser_core::BrowserEvent;
 
+// ── MCP (Model Context Protocol) re-exports ───────────────────────────
+//
+// SDK consumers can use MCP servers alongside built-in tools.
+// `McpManager::spawn()` creates a manager; `OxiBuilder::with_mcp_config()`
+// injects a programmatic config; `mcp_tools()` auto-discovers from
+// standard config files. See `oxi_sdk::tool_factory::mcp_tools`.
+
+pub use oxi_agent::mcp::{
+    ConsentManager, ConsentState, DirectToolDef, DirectToolsConfig, LifecycleMode, McpCallResult,
+    McpConfig, McpConnectionStatus, McpContent, McpDashboardData, McpDirectTool, McpManager,
+    McpSamplingRequest, McpServerInfo, McpSettings, McpSettingsView, McpTool, McpToolDef,
+    McpToolInfo, MetadataCache, ServerEntry, ToolMetadata, ToolPrefix,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,17 +620,3 @@ mod tests {
         assert!(oxi.has_builtins());
     }
 }
-
-// ── MCP (Model Context Protocol) re-exports ───────────────────────────
-//
-// SDK consumers can use MCP servers alongside built-in tools.
-// `McpManager::spawn()` creates a manager; `OxiBuilder::with_mcp_config()`
-// injects a programmatic config; `mcp_tools()` auto-discovers from
-// standard config files. See `oxi_sdk::tool_factory::mcp_tools`.
-
-pub use oxi_agent::mcp::{
-    ConsentManager, ConsentState, DirectToolDef, DirectToolsConfig, LifecycleMode, McpCallResult,
-    McpConfig, McpConnectionStatus, McpContent, McpDashboardData, McpDirectTool, McpManager,
-    McpSamplingRequest, McpServerInfo, McpSettings, McpSettingsView, McpTool, McpToolDef,
-    McpToolInfo, MetadataCache, ServerEntry, ToolMetadata, ToolPrefix,
-};

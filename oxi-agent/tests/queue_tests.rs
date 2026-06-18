@@ -1,5 +1,11 @@
 //! Agent loop configuration tests
 
+// Integration tests use the same test-idiom pattern as inline unit tests
+// (`let mut c = Config::default(); c.field = ..;`), so relax the same lint
+// here to keep `cargo clippy --all-targets` clean. (`clippy::unwrap_used` is
+// already `allow` by default in integration-test crates.)
+#![allow(clippy::field_reassign_with_default)]
+
 #[cfg(test)]
 mod tests {
     use oxi_agent::AgentLoopConfig;

@@ -11,9 +11,6 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 // For direct access, we'll use a small trick: declare a local module that
 // re-uses the same deserialization types.
 
-use oxi_ai::ProviderEvent;
-use std::sync::Arc;
-
 /// Minimal replicated OpenAI SSE chunk for benchmarking parse performance.
 /// This mirrors `oxi_ai::providers::openai::parse_sse_events`.
 mod openai_parser {
@@ -40,6 +37,7 @@ mod openai_parser {
     #[derive(Debug, Deserialize)]
     struct Delta {
         content: Option<String>,
+        #[allow(dead_code)]
         tool_calls: Option<Vec<ToolCallDelta>>,
     }
 
@@ -47,6 +45,7 @@ mod openai_parser {
     struct ToolCallDelta {
         #[allow(dead_code)]
         index: Option<usize>,
+        #[allow(dead_code)]
         function: Option<FunctionDelta>,
     }
 
@@ -54,6 +53,7 @@ mod openai_parser {
     struct FunctionDelta {
         #[allow(dead_code)]
         name: Option<String>,
+        #[allow(dead_code)]
         arguments: Option<String>,
     }
 
@@ -249,19 +249,15 @@ mod anthropic_parser {
                     }
                 }
                 Some("content_block_delta") => {
-                    if let Some(delta) = &event.delta {
-                        match delta.type_.as_deref() {
-                            Some("text_delta") => {
-                                if let Some(text) = &delta.text {
-                                    events.push(ProviderEvent::TextDelta {
-                                        content_index: event.index.unwrap_or(0),
-                                        delta: text.clone(),
-                                        partial: Arc::new(partial_message.clone()),
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
+                    if let Some(delta) = &event.delta
+                        && let Some("text_delta") = delta.type_.as_deref()
+                        && let Some(text) = &delta.text
+                    {
+                        events.push(ProviderEvent::TextDelta {
+                            content_index: event.index.unwrap_or(0),
+                            delta: text.clone(),
+                            partial: Arc::new(partial_message.clone()),
+                        });
                     }
                 }
                 Some("message_delta") => {

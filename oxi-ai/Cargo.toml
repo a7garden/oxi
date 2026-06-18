@@ -10,7 +10,7 @@ authors = ["a7garden <a7garden@icloud.com>"]
 repository = "https://github.com/a7garden/oxi"
 keywords = ["ai", "llm", "openai", "anthropic", "claude"]
 categories = ["api-bindings", "asynchronous"]
-exclude = ["target/", "benches/"]
+exclude = ["target/"]
 
 [dependencies]
 # Async runtime

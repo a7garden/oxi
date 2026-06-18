@@ -40,7 +40,6 @@ fn main() {
         CostTrackerConfig {
             per_agent_budget: Some(10.0),
             global_budget: Some(100.0),
-            ..Default::default()
         },
     ));
     let model = oxi_ai::Model::new(

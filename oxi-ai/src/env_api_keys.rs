@@ -412,10 +412,8 @@ mod tests {
 
     #[test]
     fn test_vertex_adc_check_lazy() {
-        // The lazy static should be evaluated on first access
-        let result = *VERTEX_ADC_CHECK;
-        // Just ensure it doesn't panic
-        assert!(result == true || result == false);
+        // The lazy static should be evaluated on first access without panicking.
+        let _: bool = *VERTEX_ADC_CHECK;
     }
 
     #[test]
@@ -448,10 +446,9 @@ mod tests {
 
     #[test]
     fn test_bedrock_creds_check() {
-        // Without AWS credentials set, should return false
-        let result = has_bedrock_creds();
-        // Either true (if credentials exist) or false
-        assert!(result == true || result == false);
+        // Without AWS credentials set, should return false. Either way, the
+        // check must evaluate without panicking.
+        let _: bool = has_bedrock_creds();
     }
 
     #[test]

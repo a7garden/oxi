@@ -316,13 +316,4 @@ impl IssuesPanelOverlay {
         self.action_in_flight = true;
         tokio::spawn(f(store, id, tx));
     }
-
-    /// Prune `hash_cache` of entries no longer present in `items`.
-    /// Extracted so it can be tested without constructing a full overlay.
-    #[cfg(test)]
-    pub(super) fn prune_hash_cache_for_test(&mut self, live_ids: &HashSet<u32>) -> usize {
-        let before = self.hash_cache.len();
-        self.hash_cache.retain(|id, _| live_ids.contains(id));
-        before - self.hash_cache.len()
-    }
 }

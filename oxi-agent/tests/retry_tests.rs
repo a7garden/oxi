@@ -136,7 +136,6 @@ fn circuit_breaker_half_open_allows_requests() {
         // Use a non-tiny cooldown to avoid flaky timing on busy/slow CI.
         open_duration: Duration::from_millis(50), // short but stable
         half_open_successes: 2,
-        ..Default::default()
     };
     let cb = CircuitBreaker::new(config);
 
@@ -156,7 +155,6 @@ fn circuit_breaker_half_open_closes_after_enough_successes() {
         failure_threshold: 1,
         open_duration: Duration::from_millis(50),
         half_open_successes: 3,
-        ..Default::default()
     };
     let cb = CircuitBreaker::new(config);
 
@@ -185,7 +183,6 @@ fn circuit_breaker_half_open_reopens_on_failure() {
         failure_threshold: 1,
         open_duration: Duration::from_millis(50),
         half_open_successes: 3,
-        ..Default::default()
     };
     let cb = CircuitBreaker::new(config);
 
@@ -245,7 +242,7 @@ fn backoff_constants_are_sane() {
 #[test]
 fn backoff_doubles_each_attempt() {
     // Attempt 0 → 2^1 = 2s, Attempt 1 → 2^2 = 4s, Attempt 2 → 2^3 = 8s
-    let attempt_0 = BACKOFF_BASE_SECS.pow(0u32 + 1);
+    let attempt_0 = BACKOFF_BASE_SECS.pow(1);
     let attempt_1 = BACKOFF_BASE_SECS.pow(1u32 + 1);
     let attempt_2 = BACKOFF_BASE_SECS.pow(2u32 + 1);
 

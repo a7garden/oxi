@@ -458,7 +458,7 @@ mod tests {
         let _ = render_to_text(&mut panel, 80, 20);
         panel.pre_select(2);
         let _ = render_to_text(&mut panel, 80, 20);
-        assert!(panel.hash_cache.len() >= 1);
+        assert!(!panel.hash_cache.is_empty());
         // Delete one issue externally — refresh should prune its hash.
         store.invalidate();
         let path = store

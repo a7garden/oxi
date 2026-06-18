@@ -1,5 +1,12 @@
 #![warn(missing_docs)]
+// Relax two test-idiom lints under `cfg(test)` so `cargo clippy --all-targets`
+// stays clean without weakening the shipped library:
+//   - `clippy::unwrap_used` — `unwrap()`/`unwrap_err()` are idiomatic in tests;
+//     shipped (non-test) code still `warn`s on it (see the line below).
+//   - `clippy::field_reassign_with_default` — the `let mut x = X::default();
+//     x.f = ..;` test-setup pattern.
 #![warn(clippy::unwrap_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::field_reassign_with_default))]
 
 //! oxi-tui: Terminal UI library for oxi
 //!

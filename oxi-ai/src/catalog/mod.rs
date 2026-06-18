@@ -1,7 +1,7 @@
 //! Built-in provider catalog loader.
 //!
 //! All provider and model data is dynamically sourced from [models.dev](https://models.dev).
-//! See the [`materialize`] module for the conversion pipeline.
+//! See the [`mod@materialize`] module for the conversion pipeline.
 //!
 //! # Layered design
 //!

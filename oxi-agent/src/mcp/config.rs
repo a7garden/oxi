@@ -166,7 +166,7 @@ mod compat_tests {
         assert_eq!(fs.command.as_deref(), Some("npx"));
         assert_eq!(fs.idle_timeout, Some(15));
         assert!(fs.direct_tools.is_some());
-        assert_eq!(cfg.settings.as_ref().unwrap().tool_prefix.is_some(), true);
+        assert!(cfg.settings.as_ref().unwrap().tool_prefix.is_some());
         assert_eq!(cfg.settings.as_ref().unwrap().idle_timeout, Some(10));
     }
 

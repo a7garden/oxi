@@ -409,7 +409,7 @@ pub mod tokens {
             let tokens = estimate("Hello world, this is a test.");
             // Should be in a reasonable range (5–12)
             assert!(
-                tokens >= 4 && tokens <= 14,
+                (4..=14).contains(&tokens),
                 "expected 4–14 tokens for plain English sentence, got {}",
                 tokens
             );
@@ -432,7 +432,7 @@ pub mod tokens {
             let tokens = estimate(code);
             // Code is punctuation-heavy; expect reasonable estimate
             assert!(
-                tokens >= 4 && tokens <= 20,
+                (4..=20).contains(&tokens),
                 "expected 4–20 tokens for code snippet, got {}",
                 tokens
             );

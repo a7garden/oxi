@@ -20,7 +20,7 @@ use oxi_ai::{Cost, InputModality, Model};
 /// used; otherwise the caller should resolve the provider's base URL
 /// separately. Here we default to an empty string when neither is available
 /// — callers that need a provider base URL should use
-/// [`provider_base_url`](crate::bridge::provider_base_url).
+/// [`provider_base_url`].
 pub fn catalog_entry_to_model(provider: &str, entry: &CatalogModelEntry) -> Model {
     Model {
         id: entry.model_id.clone(),

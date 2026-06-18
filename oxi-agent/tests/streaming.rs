@@ -38,18 +38,22 @@ async fn test_read_tool_progress_streaming() {
     let result = result.unwrap();
     assert!(result.success);
 
-    // Verify we got progress updates
-    let updates = progress_updates.lock().unwrap();
-    assert!(
-        !updates.is_empty(),
-        "Expected progress updates for large file"
-    );
+    // Verify we got progress updates. The lock is scoped so the MutexGuard
+    // is dropped at the block end, before the cleanup await below
+    // (clippy::await_holding_lock does not credit an explicit `drop()`).
+    {
+        let updates = progress_updates.lock().unwrap();
+        assert!(
+            !updates.is_empty(),
+            "Expected progress updates for large file"
+        );
 
-    // Should have at least: start message and completion message
-    assert!(
-        updates.iter().any(|u| u.contains("Reading file")),
-        "Should have file start message"
-    );
+        // Should have at least: start message and completion message
+        assert!(
+            updates.iter().any(|u| u.contains("Reading file")),
+            "Should have file start message"
+        );
+    }
 
     // Clean up
     let _ = fs::remove_file(test_path).await;
@@ -151,10 +155,13 @@ async fn test_read_tool_small_file_no_progress() {
 
     assert!(result.is_ok());
 
-    // Small file should still get start/end messages but no percentage updates
-    let updates = progress_updates.lock().unwrap();
-    // Should have start message
-    assert!(!updates.is_empty(), "Should have at least start message");
+    // Small file should still get start/end messages but no percentage updates.
+    // Scoped so the MutexGuard is dropped before the cleanup await below.
+    {
+        let updates = progress_updates.lock().unwrap();
+        // Should have start message
+        assert!(!updates.is_empty(), "Should have at least start message");
+    }
 
     // Clean up
     let _ = tokio::fs::remove_file(test_path).await;
