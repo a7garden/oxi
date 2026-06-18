@@ -4,160 +4,160 @@
 # label set in sync with what new contributors expect from mature OSS.
 
 - name: bug
-  color: d73a4a
+  color: "d73a4a"
   description: Something isn't working as expected.
   aliases: [defect, broken]
 
 - name: enhancement
-  color: a2eeef
+  color: "a2eeef"
   description: New feature or request.
   aliases: [feature, feat]
 
 - name: documentation
-  color: 0075ca
+  color: "0075ca"
   description: Improvements or additions to documentation.
   aliases: [docs]
 
 - name: "good first issue"
-  color: 7057ff
+  color: "7057ff"
   description: Good for newcomers — small scope, clear acceptance criteria.
   aliases: [beginner, newcomer, easy]
 
 - name: "help wanted"
-  color: 008672
+  color: "008672"
   description: Extra attention is wanted — maintainer bandwidth is limited.
 
 - name: duplicate
-  color: cfd3d7
+  color: "cfd3d7"
   description: This issue or PR already exists.
 
 - name: invalid
-  color: e4e669
+  color: "e4e669"
   description: This doesn't seem right — closing until more info arrives.
 
 - name: wontfix
-  color: ffffff
+  color: "ffffff"
   description: This will not be worked on.
 
 - name: question
-  color: d876e3
+  color: "d876e3"
   description: Further information is requested.
   aliases: [discussion]
 
 # ── Area labels — which crate/module ───────────────────────────────
 - name: "area: ai"
-  color: 1d76db
+  color: "1d76db"
   description: oxi-ai — LLM provider abstraction, streaming, model DB.
 
 - name: "area: agent"
-  color: 1d76db
+  color: "1d76db"
   description: oxi-agent — tool calling, agent loop, MCP, browse.
 
 - name: "area: tui"
-  color: 1d76db
+  color: "1d76db"
   description: oxi-tui — terminal UI widgets, themes, markdown rendering.
 
 - name: "area: sdk"
-  color: 1d76db
+  color: "1d76db"
   description: oxi-sdk — multi-agent SDK, port system, builder API.
 
 - name: "area: cli"
-  color: 1d76db
+  color: "1d76db"
   description: oxi-cli — binary, RPC, print mode, command dispatch.
 
 - name: "area: ci"
-  color: fbca04
+  color: "fbca04"
   description: GitHub Actions, workflows, dependabot, supply chain.
 
 - name: "area: docs"
-  color: fbca04
+  color: "fbca04"
   description: README, AGENTS.md, CONTRIBUTING, RFCs, design docs.
 
 - name: "area: extensions"
-  color: 1d76db
+  color: "1d76db"
   description: Extension runtime (WASM + native), skills, packages.
 
 - name: "area: security"
-  color: b60205
+  color: "b60205"
   description: Security policy, advisory handling, sandboxing.
 
 # ── Priority labels — for triaging incoming issues ─────────────────
 - name: "priority: critical"
-  color: b60205
+  color: "b60205"
   description: Drop everything — production breakage or CVE.
   aliases: [p0]
 
 - name: "priority: high"
-  color: d93f0b
+  color: "d93f0b"
   description: Important — should land in the next release.
   aliases: [p1]
 
 - name: "priority: medium"
-  color: fbca04
+  color: "fbca04"
   description: Normal — addressed in regular cadence.
   aliases: [p2]
 
 - name: "priority: low"
-  color: 0e8a16
+  color: "0e8a16"
   description: Backlog — whenever bandwidth allows.
   aliases: [p3]
 
 # ── Status labels — workflow state ────────────────────────────────
 - name: "status: needs-triage"
-  color: ededed
+  color: "ededed"
   description: Awaiting maintainer review / reproduction.
 
 - name: "status: blocked"
-  color: b60205
+  color: "b60205"
   description: Cannot progress — waiting on external dependency.
 
 - name: "status: in-progress"
-  color: fbca04
+  color: "fbca04"
   description: Someone is actively working on this.
 
 - name: "status: review"
-  color: 1d76db
+  color: "1d76db"
   description: PR is open and awaiting code review.
 
 # ── Type labels — taxonomy ────────────────────────────────────────
 - name: "type: regression"
-  color: b60205
+  color: "b60205"
   description: Used to work, now broken.
 
 - name: "type: performance"
-  color: 5319e7
+  color: "5319e7"
   description: Performance, throughput, memory, or compile-time issue.
 
 - name: "type: refactor"
-  color: cfd3d7
+  color: "cfd3d7"
   description: Code reorganization without behavior change.
 
 - name: "type: breaking-change"
-  color: b60205
+  color: "b60205"
   description: Will require a migration guide or major version bump.
 
 # ── Provider labels — for bug reports against specific LLMs ──────
 - name: "provider: anthropic"
-  color: ccb255
+  color: "ccb255"
   description: Anthropic Claude-specific issue.
 
 - name: "provider: openai"
-  color: 10a37f
+  color: "10a37f"
   description: OpenAI / openai-responses-specific issue.
 
 - name: "provider: google"
-  color: 4285f4
+  color: "4285f4"
   description: Google Gemini / Vertex-specific issue.
 
 - name: "provider: other"
-  color: cfd3d7
+  color: "cfd3d7"
   description: Mistral, DeepSeek, Groq, xAI, OpenRouter, Azure, etc.
 
 # ── CI/Release pipeline labels ───────────────────────────────────
 - name: dependencies
-  color: 0366d6
+  color: "0366d6"
   description: Pull request updates a dependency file.
 
 - name: release
-  color: 7057ff
+  color: "7057ff"
   description: Marks a release-bound change.
