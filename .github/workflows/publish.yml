@@ -172,4 +172,22 @@ jobs:
           # tarball (the oxi-sdk 0.37.0 packaging bug). Topological order +
           # the "Wait for dependency" step above ensure each crate's internal
           # deps are already visible on crates.io when it verifies.
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+          #
+          # Idempotent: if the exact version is already on crates.io, treat
+          # it as success so the whole matrix can be safely re-run to publish
+          # only the crates a prior run missed (e.g. a transient curl/HTTP2
+          # error mid-matrix, as hit during the 0.37.1 oxi-cli step). Without
+          # this, re-running would fail-fast on every already-published crate
+          # and never reach the missing one.
+          set +e
+          cargo publish --token "$CARGO_REGISTRY_TOKEN" 2>&1 | tee /tmp/publish.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if grep -qiE "already exists on crates.io|already uploaded|already been published" /tmp/publish.log; then
+            echo "::notice::${{ matrix.crate }} is already published at this version; skipping."
+            exit 0
+          fi
+          exit "$status"

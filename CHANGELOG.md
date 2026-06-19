@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — release/publish 워크플로우 (v0.37.1 릴리스 중 발견)
+
+v0.37.1 릴리스 파이프라인에서 두 가지 자동화 결함이 드러나 수정했다.
+
+* **release.yml `trigger-publish` 잡에 checkout 누락**:
+  `gh workflow run publish.yml` 이 로컬 git 체크아웃에서 대상 워크플로우
+  파일을 식별하는데, checkout 단계가 없어 `fatal: not a git repository`
+  로 실패하던 것을 `actions/checkout@v5` 추가로 수정. 결과적으로
+  v0.37.1 은 GitHub Release 생성까지는 성공했지만 publish.yml 이
+  자동 dispatch 되지 않아 수동 dispatch 로 이어졌다.
+* **publish.yml 멱등성 부재**: 일부 크레이트만 게시된 뒤 일시적 네트워크
+  에러(curl HTTP2 framing)로 매트릭스가 중단된 경우, 재실행하면 이미
+  게시된 크레이트에서 `already exists` 에러로 실패해 남은 크레이트에
+  도달하지 못하던 것을 수정했다. 각 게시 단계가
+  `already exists/already uploaded/already been published` 메시지를
+  감지하면 성공으로 처리하도록 했다. (이번 0.37.1 의 `oxi-cli` 가 이
+  케이스로 실패했고, 로컬에서 직접 게시해 마무리했다.)
+
 ## [0.37.1] - 2026-06-19
 
 ### Fixed — CI 워크플로우 (v0.37.0 릴리스 직후 발견)

@@ -149,6 +149,11 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      # `gh workflow run` resolves the target workflow file from the *local*
+      # git checkout, so it needs an actions/checkout step. Without it the
+      # job fails with `fatal: not a git repository` (seen during the 0.37.1
+      # release, where this job ran in an empty workspace dir).
+      - uses: actions/checkout@v5
       - name: Dispatch publish workflow
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
