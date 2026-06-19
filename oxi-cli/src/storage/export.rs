@@ -411,351 +411,151 @@ pub fn ansi_lines_to_html(lines: &[&str]) -> String {
         .collect()
 }
 
-// ── Tool rendering ───────────────────────────────────────────────────
+// ── Tool rendering (structured) ──────────────────────────────────────
 
-/// Information about a detected tool operation in message text.
-/// Keep: used internally for structured tool rendering; may be exposed in future export formats.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-enum ToolOp {
-    Bash {
-        command: String,
-        output: String,
-        exit_code: Option<i32>,
-    },
-    FileRead {
-        path: String,
-        content: String,
-    },
-    FileWrite {
-        path: String,
-        content: String,
-    },
-    FileEdit {
-        path: String,
-        old_text: String,
-        new_text: String,
-    },
-    Search {
-        query: String,
-        results: Vec<String>,
-    },
+/// Extract text from a `ContentValue`, joining `Text` blocks (mirrors
+/// User/System handling). Non-text blocks (images) are skipped.
+fn extract_text(content: &crate::store::session::ContentValue) -> String {
+    use crate::store::session::{ContentBlock, ContentValue};
+    match content {
+        ContentValue::String(s) => s.clone(),
+        ContentValue::Blocks(blocks) => {
+            let mut text = String::new();
+            for block in blocks {
+                if let ContentBlock::Text { text: t } = block {
+                    text.push_str(t);
+                    text.push('\n');
+                }
+            }
+            text.trim().to_string()
+        }
+    }
 }
 
-/// Detect and render tool operations embedded in assistant message content.
-fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String> {
-    if !include_tool_calls {
-        return None;
+/// Render an `AssistantContentBlock::ToolCall` as a `.tool-call` block.
+/// Dispatches on tool name for per-tool formatting; unknown tools fall back
+/// to a generic label + JSON arguments.
+fn render_tool_call_block(name: &str, arguments: &serde_json::Value) -> String {
+    match name {
+        "bash" => render_bash_call(arguments),
+        "read" => render_read_call(arguments),
+        "write" => render_write_call(arguments),
+        "edit" | "edit_diff" => render_edit_call(arguments),
+        "grep" => render_search_call("G", "pattern", arguments),
+        "find" => render_search_call("F", "name", arguments),
+        "ls" => render_search_call("D", "path", arguments),
+        _ => render_generic_tool_call(name, arguments),
     }
+}
 
+/// Render a `bash` tool call as a `.tool-call.tool-bash` block.
+fn render_bash_call(arguments: &serde_json::Value) -> String {
+    let command = arguments
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let mut html = String::new();
-    let mut found = false;
-    let mut lines = content.lines().peekable();
-
-    while let Some(line) = lines.next() {
-        // Detect bash tool call: 🔧 followed by bash command in code block
-        if (line.starts_with("🔧 Running bash") || line.starts_with("🔧 bash"))
-            && lines.peek().is_some_and(|l| l.starts_with("```"))
-        {
-            found = true;
-            // Consume the ``` line
-            let _code_fence = lines.next();
-            let mut cmd = String::new();
-            let mut output_lines = Vec::new();
-            let mut in_output = false;
-
-            // Read command (single line typically)
-            if let Some(cmd_line) = lines.next() {
-                cmd.push_str(cmd_line);
-            }
-
-            // Look for output section
-            for line in lines.by_ref() {
-                if line.starts_with("```") {
-                    // End of code block
-                    break;
-                }
-                if line.starts_with("📤") || line.starts_with("result:") {
-                    in_output = true;
-                    continue;
-                }
-                if in_output {
-                    output_lines.push(line.to_string());
-                } else {
-                    // Still in command or before result marker
-                    cmd.push('\n');
-                    cmd.push_str(line);
-                }
-            }
-
-            html.push_str(&render_bash_tool(&cmd, &output_lines.join("\n")));
-            continue;
-        }
-
-        // Detect file read: lines with "📄" or "read" + path + code block
-        if (line.starts_with("📄 Reading") || line.starts_with("📄 read"))
-            && lines.peek().is_some_and(|l| l.starts_with("```"))
-        {
-            found = true;
-            let path = extract_path_from_line(line);
-            let _fence = lines.next(); // ```
-            let _lang = "";
-            let mut content_buf = String::new();
-            for line in lines.by_ref() {
-                if line.starts_with("```") {
-                    break;
-                }
-                content_buf.push_str(line);
-                content_buf.push('\n');
-            }
-            html.push_str(&render_file_read_tool(&path, &content_buf));
-            continue;
-        }
-
-        // Detect file write: "📝 Writing" or "📝 write" + path + code block
-        if (line.starts_with("📝 Writing") || line.starts_with("📝 write"))
-            && lines.peek().is_some_and(|l| l.starts_with("```"))
-        {
-            found = true;
-            let path = extract_path_from_line(line);
-            let _fence = lines.next();
-            let mut content_buf = String::new();
-            for line in lines.by_ref() {
-                if line.starts_with("```") {
-                    break;
-                }
-                content_buf.push_str(line);
-                content_buf.push('\n');
-            }
-            html.push_str(&render_file_write_tool(&path, &content_buf));
-            continue;
-        }
-
-        // Detect file edit: "✏️ Editing" or "✏️ edit" + path
-        if line.starts_with("✏️ Editing") || line.starts_with("✏️ edit") {
-            found = true;
-            let path = extract_path_from_line(line);
-            let mut old_text = String::new();
-            let mut new_text = String::new();
-
-            // Consume lines looking for old/new sections
-            while let Some(next) = lines.peek() {
-                if next.starts_with("🔧")
-                    || next.starts_with("📄")
-                    || next.starts_with("📝")
-                    || next.starts_with("✏️")
-                    || next.starts_with("📤")
-                {
-                    break;
-                }
-                let Some(l) = lines.next() else {
-                    break;
-                };
-                if l.contains("old:") || l.contains("Old text:") {
-                    // Collect old text
-                    while let Some(next) = lines.peek() {
-                        if next.contains("new:") || next.contains("New text:") {
-                            break;
-                        }
-                        let Some(ol) = lines.next() else {
-                            break;
-                        };
-                        if ol.starts_with("```") {
-                            continue;
-                        }
-                        old_text.push_str(ol);
-                        old_text.push('\n');
-                    }
-                } else if l.contains("new:") || l.contains("New text:") {
-                    while let Some(next) = lines.peek() {
-                        if next.starts_with("🔧")
-                            || next.starts_with("📄")
-                            || next.starts_with("📝")
-                            || next.starts_with("✏️")
-                            || next.starts_with("📤")
-                        {
-                            break;
-                        }
-                        let Some(nl) = lines.next() else {
-                            break;
-                        };
-                        if nl.starts_with("```") {
-                            continue;
-                        }
-                        new_text.push_str(nl);
-                        new_text.push('\n');
-                    }
-                }
-            }
-            html.push_str(&render_file_edit_tool(&path, &old_text, &new_text));
-            continue;
-        }
-
-        // Detect search: "🔍" or "grep"/"find"
-        if line.starts_with("🔍 Searching")
-            || line.starts_with("🔍 grep")
-            || line.starts_with("🔍 find")
-        {
-            found = true;
-            let query = line
-                .trim_start_matches(|c: char| !c.is_alphanumeric())
-                .trim()
-                .to_string();
-            let mut results = Vec::new();
-
-            while let Some(next) = lines.peek() {
-                if next.starts_with("🔧")
-                    || next.starts_with("📄")
-                    || next.starts_with("📝")
-                    || next.starts_with("✏️")
-                    || next.starts_with("📤")
-                    || next.trim().is_empty()
-                {
-                    break;
-                }
-                if let Some(r) = lines.next() {
-                    results.push(r.to_string());
-                }
-            }
-            html.push_str(&render_search_tool(&query, &results));
-            continue;
-        }
-    }
-
-    if found { Some(html) } else { None }
-}
-
-/// Extract a file path from a tool operation header line.
-fn extract_path_from_line(line: &str) -> String {
-    // Try to extract path after common patterns
-    let line = line.trim();
-    for prefix in &[
-        "📄 Reading ",
-        "📄 reading ",
-        "📄 Read ",
-        "📄 read ",
-        "📝 Writing ",
-        "📝 writing ",
-        "📝 Write ",
-        "📝 write ",
-        "✏️ Editing ",
-        "✏️ editing ",
-        "✏️ Edit ",
-        "✏️ edit ",
-    ] {
-        if let Some(rest) = line.strip_prefix(prefix) {
-            return rest.trim().trim_end_matches(':').to_string();
-        }
-    }
-    line.to_string()
-}
-
-/// Render a bash tool call and its output as styled HTML.
-fn render_bash_tool(command: &str, output: &str) -> String {
-    let mut html = String::new();
-    html.push_str("<div class=\"tool-block tool-bash\">\n");
+    html.push_str("<div class=\"tool-call tool-bash\">\n");
     html.push_str("<div class=\"tool-label\">⌨ Bash</div>\n");
-    html.push_str("<pre class=\"tool-command\"><code>");
+    html.push_str("<pre class=\"tool-command\"><code>$ ");
     html.push_str(&html_escape(command.trim()));
     html.push_str("</code></pre>\n");
-    if !output.trim().is_empty() {
-        html.push_str("<details class=\"tool-output-details\">\n");
-        html.push_str("<summary>Output</summary>\n");
-        html.push_str("<pre class=\"tool-output\"><code>");
-        html.push_str(&html_escape(output.trim()));
-        html.push_str("</code></pre>\n");
-        html.push_str("</details>\n");
-    }
     html.push_str("</div>\n");
     html
 }
 
-/// Render a file read operation as styled HTML.
-fn render_file_read_tool(path: &str, content: &str) -> String {
+/// Render a `read` tool call.
+fn render_read_call(arguments: &serde_json::Value) -> String {
+    let path = arguments
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let mut html = String::new();
-    html.push_str("<div class=\"tool-block tool-file-read\">\n");
+    html.push_str("<div class=\"tool-call\">\n");
     html.push_str("<div class=\"tool-label\">📄 Read: ");
     html.push_str(&html_escape(path));
     html.push_str("</div>\n");
-    html.push_str("<details class=\"tool-output-details\" open>\n");
-    html.push_str("<summary>Content</summary>\n");
-    html.push_str("<pre class=\"tool-output\"><code>");
-    html.push_str(&html_escape(content.trim()));
-    html.push_str("</code></pre>\n");
-    html.push_str("</details>\n");
     html.push_str("</div>\n");
     html
 }
 
-/// Render a file write operation as styled HTML.
-fn render_file_write_tool(path: &str, content: &str) -> String {
+/// Render a `write` tool call.
+fn render_write_call(arguments: &serde_json::Value) -> String {
+    let path = arguments
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let mut html = String::new();
-    html.push_str("<div class=\"tool-block tool-file-write\">\n");
+    html.push_str("<div class=\"tool-call\">\n");
     html.push_str("<div class=\"tool-label\">📝 Write: ");
     html.push_str(&html_escape(path));
     html.push_str("</div>\n");
-    html.push_str("<details class=\"tool-output-details\">\n");
-    html.push_str("<summary>Content</summary>\n");
-    html.push_str("<pre class=\"tool-output\"><code>");
-    html.push_str(&html_escape(content.trim()));
-    html.push_str("</code></pre>\n");
-    html.push_str("</details>\n");
     html.push_str("</div>\n");
     html
 }
 
-/// Render a file edit operation as styled HTML.
-fn render_file_edit_tool(path: &str, old_text: &str, new_text: &str) -> String {
+/// Render an `edit` / `edit_diff` tool call.
+fn render_edit_call(arguments: &serde_json::Value) -> String {
+    let path = arguments
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let mut html = String::new();
-    html.push_str("<div class=\"tool-block tool-file-edit\">\n");
+    html.push_str("<div class=\"tool-call\">\n");
     html.push_str("<div class=\"tool-label\">✏️ Edit: ");
     html.push_str(&html_escape(path));
     html.push_str("</div>\n");
-
-    if !old_text.trim().is_empty() {
-        html.push_str("<div class=\"edit-section edit-old\">\n");
-        html.push_str("<div class=\"edit-label\">− Removed</div>\n");
-        html.push_str("<pre class=\"tool-output\"><code>");
-        html.push_str(&html_escape(old_text.trim()));
-        html.push_str("</code></pre>\n");
-        html.push_str("</div>\n");
-    }
-
-    if !new_text.trim().is_empty() {
-        html.push_str("<div class=\"edit-section edit-new\">\n");
-        html.push_str("<div class=\"edit-label\">+ Added</div>\n");
-        html.push_str("<pre class=\"tool-output\"><code>");
-        html.push_str(&html_escape(new_text.trim()));
-        html.push_str("</code></pre>\n");
-        html.push_str("</div>\n");
-    }
-
     html.push_str("</div>\n");
     html
 }
 
-/// Render search results as styled HTML.
-fn render_search_tool(query: &str, results: &[String]) -> String {
+/// Render a `grep` / `find` / `ls` tool call.
+/// `tag` is the bracket label ([G]/[F]/[D]), `key` is the argument key
+/// holding the user's query (pattern for grep, name for find, path for ls).
+fn render_search_call(tag: &str, key: &str, arguments: &serde_json::Value) -> String {
+    let query = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");
     let mut html = String::new();
-    html.push_str("<div class=\"tool-block tool-search\">\n");
-    html.push_str("<div class=\"tool-label\">🔍 Search: ");
+    html.push_str("<div class=\"tool-call\">\n");
+    let _ = write!(html, "<div class=\"tool-label\">[{}] ", tag);
     html.push_str(&html_escape(query));
     html.push_str("</div>\n");
+    html.push_str("</div>\n");
+    html
+}
 
-    if results.is_empty() {
-        html.push_str("<div class=\"tool-no-results\">No results found</div>\n");
-    } else {
-        html.push_str("<div class=\"search-results\">\n");
-        for result in results {
-            // Render with ANSI support (grep output often has colors)
-            let rendered = ansi_to_html(result);
-            html.push_str("<div class=\"search-result-line\">");
-            html.push_str(&rendered);
-            html.push_str("</div>\n");
-        }
-        html.push_str("</div>\n");
+/// Generic fallback for unknown tools — label + raw JSON arguments.
+fn render_generic_tool_call(name: &str, arguments: &serde_json::Value) -> String {
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-call\">\n");
+    html.push_str("<div class=\"tool-label\">");
+    html.push_str(&html_escape(name));
+    html.push_str("</div>\n");
+    let args_str =
+        serde_json::to_string_pretty(arguments).unwrap_or_else(|_| arguments.to_string());
+    html.push_str("<pre><code>");
+    html.push_str(&html_escape(&args_str));
+    html.push_str("</code></pre>\n");
+    html.push_str("</div>\n");
+    html
+}
+
+/// Render an `AgentMessage::ToolResult` as a bare `.tool-result` block.
+/// Renders outside any `msg-*` wrapper — a tool result is a continuation of
+/// the tool-call flow, not an independent conversational message.
+fn render_tool_result_block(
+    content: &crate::store::session::ContentValue,
+    tool_call_id: &str,
+) -> String {
+    let text = extract_text(content);
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-result\" data-tool-call-id=\"");
+    html.push_str(&html_escape(tool_call_id));
+    html.push_str("\">\n");
+    if !text.trim().is_empty() {
+        html.push_str("<pre><code>");
+        html.push_str(&html_escape(text.trim()));
+        html.push_str("</code></pre>\n");
     }
-
     html.push_str("</div>\n");
     html
 }
@@ -940,19 +740,7 @@ fn render_entry(
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            let content_str: String = match content {
-                crate::store::session::ContentValue::String(s) => s.clone(),
-                crate::store::session::ContentValue::Blocks(blocks) => {
-                    let mut text = String::new();
-                    for block in blocks {
-                        if let crate::store::session::ContentBlock::Text { text: t } = block {
-                            text.push_str(t);
-                            text.push('\n');
-                        }
-                    }
-                    text.trim().to_string()
-                }
-            };
+            let content_str = extract_text(content);
             html.push_str(&render_markdown_with_options(&content_str, options));
             html.push_str("</div>\n</div>\n");
         }
@@ -963,24 +751,33 @@ fn render_entry(
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
 
-            // Extract text content for markdown rendering
-            let mut text_content = String::new();
+            // Iterate blocks in order, rendering each by type
             for block in content {
-                if let crate::store::session::AssistantContentBlock::Text { text } = block {
-                    text_content.push_str(text);
-                    text_content.push('\n');
+                match block {
+                    crate::store::session::AssistantContentBlock::Text { text } => {
+                        html.push_str(&render_markdown_with_options(text, options));
+                    }
+                    crate::store::session::AssistantContentBlock::ToolCall {
+                        name,
+                        arguments,
+                        ..
+                    } => {
+                        if options.include_tool_calls {
+                            html.push_str(&render_tool_call_block(name, arguments));
+                        }
+                    }
+                    crate::store::session::AssistantContentBlock::Thinking { thinking }
+                        if options.include_thinking =>
+                    {
+                        html.push_str(
+                            "<details class=\"thinking-block\"><summary>💭 Thinking</summary><div class=\"think-content\">",
+                        );
+                        html.push_str(&render_markdown_with_options(thinking, options));
+                        html.push_str("</div></details>\n");
+                    }
+                    // ImageResult / ToolPlan / Refusal — skip (out of scope)
+                    _ => {}
                 }
-            }
-
-            let text_str = text_content.trim().to_string();
-
-            // Try tool rendering first for assistant messages
-            if let Some(tool_html) = render_tool_blocks(&text_str, options.include_tool_calls) {
-                html.push_str(&tool_html);
-                // Also render the non-tool content via markdown
-                html.push_str(&render_markdown_with_options(&text_str, options));
-            } else {
-                html.push_str(&render_markdown_with_options(&text_str, options));
             }
 
             html.push_str("</div>\n</div>\n");
@@ -991,23 +788,19 @@ fn render_entry(
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            let content_str: String = match content {
-                crate::store::session::ContentValue::String(s) => s.clone(),
-                crate::store::session::ContentValue::Blocks(blocks) => {
-                    let mut text = String::new();
-                    for block in blocks {
-                        if let crate::store::session::ContentBlock::Text { text: t } = block {
-                            text.push_str(t);
-                            text.push('\n');
-                        }
-                    }
-                    text.trim().to_string()
-                }
-            };
+            let content_str = extract_text(content);
             html.push_str(&render_markdown_with_options(&content_str, options));
             html.push_str("</div>\n</div>\n");
         }
-        // Handle other message types (render them as system for simplicity)
+        AgentMessage::ToolResult {
+            content,
+            tool_call_id,
+        } => {
+            if options.include_tool_calls {
+                html.push_str(&render_tool_result_block(content, tool_call_id));
+            }
+        }
+        // Handle remaining message types (BashExecution, Custom, etc.)
         _ => {
             let content = entry.content();
             if !content.is_empty() {
@@ -1059,7 +852,6 @@ fn render_markdown(input: &str) -> String {
 
 /// Core markdown-to-HTML renderer (lightweight, no external crate).
 /// Keep: available for future HTML export pipelines and testable in isolation.
-#[allow(dead_code)]
 fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> String {
     let mut out = String::with_capacity(input.len() * 2);
     let mut in_code_block = false;
@@ -1125,31 +917,6 @@ fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> Str
             think_buf.push_str(line);
             think_buf.push('\n');
             continue;
-        }
-
-        // ── Tool calls (emoji-prefixed) ───────────────────────────
-        if options.include_tool_calls {
-            if line.starts_with("🔧 ") || line.starts_with("tool:") {
-                out.push_str("<div class=\"tool-call\">");
-                out.push_str(&render_inline(line));
-                out.push_str("</div>\n");
-                continue;
-            }
-            if line.starts_with("📤 ") || line.starts_with("result:") {
-                out.push_str("<div class=\"tool-result\">");
-                out.push_str(&render_inline(line));
-                out.push_str("</div>\n");
-                continue;
-            }
-        } else {
-            // Skip tool call lines
-            if line.starts_with("🔧 ")
-                || line.starts_with("tool:")
-                || line.starts_with("📤 ")
-                || line.starts_with("result:")
-            {
-                continue;
-            }
         }
 
         // ── Headings ──────────────────────────────────────────────
@@ -1490,12 +1257,7 @@ body.dark .tool-result { background: #1a2d2d; border-left: 3px solid #73daca; }
 body.light .tool-call  { background: #faf5ff; border-left: 3px solid #a78bfa; }
 body.light .tool-result { background: #f0fdfa; border-left: 3px solid #14b8a6; }
 
-/* ── Tool blocks (structured) ──────────────────────────────────── */
-.tool-block {
-  border-radius: 8px;
-  margin: 0.5rem 0;
-  overflow: hidden;
-}
+/* ── Tool call / result styles ───────────────────────────────── */
 .tool-label {
   padding: 0.35rem 0.75rem;
   font-weight: 600;
@@ -1516,83 +1278,6 @@ body.light .tool-bash .tool-label { background: #faf5ff; color: #7c3aed; }
   font-size: 0.85rem;
 }
 body.light .tool-bash .tool-command { background: #f6f8fa; }
-
-/* File read tool */
-body.dark .tool-file-read { border: 1px solid #1e3a5f; }
-body.light .tool-file-read { border: 1px solid #d0e0f0; }
-body.dark .tool-file-read .tool-label { background: #1a2d44; color: #7aa2f7; }
-body.light .tool-file-read .tool-label { background: #eff6ff; color: #2563eb; }
-
-/* File write tool */
-body.dark .tool-file-write { border: 1px solid #2d4a2d; }
-body.light .tool-file-write { border: 1px solid #d0f0d0; }
-body.dark .tool-file-write .tool-label { background: #1a2d1a; color: #9ece6a; }
-body.light .tool-file-write .tool-label { background: #f0fdf4; color: #16a34a; }
-
-/* File edit tool */
-body.dark .tool-file-edit { border: 1px solid #4a3a1a; }
-body.light .tool-file-edit { border: 1px solid #f0e0c0; }
-body.dark .tool-file-edit .tool-label { background: #2d2a1a; color: #e0af68; }
-body.light .tool-file-edit .tool-label { background: #fffbeb; color: #d97706; }
-.edit-section { margin: 0.35rem 0.5rem; }
-.edit-old { border-left: 3px solid #f7768e; }
-.edit-new { border-left: 3px solid #9ece6a; }
-body.light .edit-old { border-left-color: #ef4444; }
-body.light .edit-new { border-left-color: #22c55e; }
-.edit-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.15rem 0.5rem;
-}
-.edit-old .edit-label { color: #f7768e; }
-.edit-new .edit-label { color: #9ece6a; }
-body.light .edit-old .edit-label { color: #ef4444; }
-body.light .edit-new .edit-label { color: #22c55e; }
-
-/* Search tool */
-body.dark .tool-search { border: 1px solid #1a3a3a; }
-body.light .tool-search { border: 1px solid #d0f0f0; }
-body.dark .tool-search .tool-label { background: #1a2d2d; color: #73daca; }
-body.light .tool-search .tool-label { background: #f0fdfa; color: #14b8a6; }
-.search-results {
-  margin: 0.35rem 0.5rem;
-  font-family: monospace;
-  font-size: 0.85rem;
-}
-.search-result-line {
-  padding: 0.15rem 0.5rem;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-body.light .search-result-line { border-bottom-color: rgba(0,0,0,0.05); }
-.search-result-line:last-child { border-bottom: none; }
-.tool-no-results {
-  padding: 0.5rem 0.75rem;
-  opacity: 0.6;
-  font-style: italic;
-}
-
-/* Tool output details (collapsible) */
-.tool-output-details {
-  margin: 0.35rem 0.5rem;
-}
-.tool-output-details summary {
-  cursor: pointer;
-  font-size: 0.82rem;
-  color: #7982a9;
-  padding: 0.2rem 0;
-  user-select: none;
-}
-body.light .tool-output-details summary { color: #6b7280; }
-.tool-output-details summary:hover { color: inherit; }
-.tool-output {
-  background: #0d1117;
-  border-radius: 4px;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  max-height: 400px;
-  overflow: auto;
-}
-body.light .tool-output { background: #f6f8fa; }
 
 /* ── ANSI lines ────────────────────────────────────────────────── */
 .ansi-line {
@@ -1640,7 +1325,7 @@ document.addEventListener('DOMContentLoaded', () => {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::session::{AgentMessage, AssistantContentBlock};
+    use crate::store::session::{AgentMessage, AssistantContentBlock, ContentValue};
 
     fn make_entry(msg: AgentMessage) -> SessionEntry {
         SessionEntry {
@@ -1748,24 +1433,6 @@ mod tests {
     }
 
     #[test]
-    fn export_renders_tool_calls_and_results() {
-        let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text {
-                text: "🔧 Running bash\n```\nls -la\n```\n📤 result:\nfile1.txt\nfile2.txt".into(),
-            }],
-            provider: None,
-            model_id: None,
-            usage: None,
-            stop_reason: None,
-        })];
-        let meta = ExportMeta::default();
-        let html = export_html(&entries, &meta, None, None).unwrap();
-
-        assert!(html.contains("tool-call"));
-        assert!(html.contains("tool-result"));
-    }
-
-    #[test]
     fn export_renders_session_tree_navigation() {
         let tree = TreeNode {
             session_id: Uuid::new_v4(),
@@ -1846,24 +1513,40 @@ mod tests {
 
     #[test]
     fn export_options_skip_tool_calls() {
-        let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text {
-                text: "Here is my response with tool calls that should be hidden.".into(),
-            }],
-            provider: None,
-            model_id: None,
-            usage: None,
-            stop_reason: None,
-        })];
+        let entries = vec![
+            make_entry(AgentMessage::Assistant {
+                content: vec![
+                    AssistantContentBlock::Text {
+                        text: "Let me run a command.".into(),
+                    },
+                    AssistantContentBlock::ToolCall {
+                        id: "tc-1".into(),
+                        name: "bash".into(),
+                        arguments: serde_json::json!({"command": "ls -la"}),
+                    },
+                ],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
+            }),
+            make_entry(AgentMessage::ToolResult {
+                content: "file1.txt\nfile2.txt".into(),
+                tool_call_id: "tc-1".to_string(),
+            }),
+        ];
         let options = HtmlExportOptions {
             include_tool_calls: false,
             ..Default::default()
         };
         let meta = ExportMeta::default();
         let html = export_html_with_options(&entries, &meta, None, None, &options).unwrap();
-        // With include_tool_calls: false, lines starting with 🔧 or 📤 are skipped
-        // The response content is still rendered
-        assert!(html.contains("Here is my response"));
+        // Text still renders
+        assert!(html.contains("Let me run a command."));
+        // Tool call and result are hidden
+        assert!(!html.contains("<div class=\"tool-call"));
+        assert!(!html.contains("<div class=\"tool-result"));
+        assert!(!html.contains("ls -la"));
     }
 
     #[test]
@@ -2106,60 +1789,140 @@ mod tests {
         assert!(escaped.contains("&lt;script"));
     }
 
-    // ── Tool rendering tests ─────────────────────────────────────
+    // ── Tool rendering tests (structural input) ─────────────────
 
     #[test]
-    fn bash_tool_renders_command_and_output() {
-        let html = render_bash_tool("ls -la", "file1.txt\nfile2.txt");
+    fn tool_call_block_renders_bash() {
+        let args = serde_json::json!({"command": "ls -la"});
+        let html = render_tool_call_block("bash", &args);
+        assert!(html.contains("tool-call"));
         assert!(html.contains("tool-bash"));
         assert!(html.contains("ls -la"));
-        assert!(html.contains("file1.txt"));
-        assert!(html.contains("tool-output-details"));
     }
 
     #[test]
-    fn file_read_tool_renders_path_and_content() {
-        let html = render_file_read_tool("/path/to/file.rs", "fn main() {}");
-        assert!(html.contains("tool-file-read"));
-        assert!(html.contains("/path/to/file.rs"));
-        assert!(html.contains("fn main()"));
-    }
-
-    #[test]
-    fn file_write_tool_renders_path_and_content() {
-        let html = render_file_write_tool("/path/to/output.txt", "Hello world");
-        assert!(html.contains("tool-file-write"));
-        assert!(html.contains("/path/to/output.txt"));
-        assert!(html.contains("Hello world"));
-    }
-
-    #[test]
-    fn file_edit_tool_renders_diff() {
-        let html = render_file_edit_tool("/src/main.rs", "old code", "new code");
-        assert!(html.contains("tool-file-edit"));
+    fn tool_call_block_renders_read() {
+        let args = serde_json::json!({"path": "/src/main.rs"});
+        let html = render_tool_call_block("read", &args);
+        assert!(html.contains("tool-call"));
         assert!(html.contains("/src/main.rs"));
-        assert!(html.contains("edit-old"));
-        assert!(html.contains("edit-new"));
-        assert!(html.contains("old code"));
-        assert!(html.contains("new code"));
     }
 
     #[test]
-    fn search_tool_renders_results() {
-        let results = vec![
-            "src/main.rs:10:found match".to_string(),
-            "src/lib.rs:42:another match".to_string(),
-        ];
-        let html = render_search_tool("TODO", &results);
-        assert!(html.contains("tool-search"));
+    fn tool_call_block_renders_write() {
+        let args = serde_json::json!({"path": "/out.txt"});
+        let html = render_tool_call_block("write", &args);
+        assert!(html.contains("tool-call"));
+        assert!(html.contains("/out.txt"));
+    }
+
+    #[test]
+    fn tool_call_block_renders_edit() {
+        let args = serde_json::json!({"path": "/src/lib.rs"});
+        let html = render_tool_call_block("edit", &args);
+        assert!(html.contains("tool-call"));
+        assert!(html.contains("/src/lib.rs"));
+    }
+
+    #[test]
+    fn tool_call_block_renders_grep() {
+        let args = serde_json::json!({"pattern": "TODO"});
+        let html = render_tool_call_block("grep", &args);
+        assert!(html.contains("tool-call"));
+        assert!(html.contains("[G]"));
         assert!(html.contains("TODO"));
-        assert!(html.contains("found match"));
-        assert!(html.contains("another match"));
     }
 
     #[test]
-    fn search_tool_shows_no_results() {
-        let html = render_search_tool("missing", &[]);
-        assert!(html.contains("No results found"));
+    fn tool_call_block_renders_find() {
+        let args = serde_json::json!({"path": ".", "name": "*.rs"});
+        let html = render_tool_call_block("find", &args);
+        assert!(html.contains("tool-call"));
+        assert!(html.contains("[F]"));
+        // Should show the glob pattern (name), not the directory (path)
+        assert!(html.contains("*.rs"));
+        assert!(!html.contains("tool-label\">[F] .</div>")); // directory "." not shown
+    }
+
+    #[test]
+    fn tool_call_block_unknown_tool_falls_back() {
+        let args = serde_json::json!({"key": "value"});
+        let html = render_tool_call_block("frobnicate", &args);
+        assert!(html.contains("tool-call"));
+        assert!(html.contains("frobnicate"));
+        assert!(html.contains("&quot;key&quot;"));
+    }
+
+    #[test]
+    fn tool_result_block_renders_content_and_id() {
+        let content = ContentValue::String("command output".into());
+        let html = render_tool_result_block(&content, "tc-42");
+        assert!(html.contains("tool-result"));
+        assert!(html.contains("data-tool-call-id=\"tc-42\""));
+        assert!(html.contains("command output"));
+    }
+
+    #[test]
+    fn tool_result_block_no_msg_wrapper() {
+        let content = ContentValue::String("output".into());
+        let html = render_tool_result_block(&content, "tc-1");
+        // Must NOT contain a msg-* wrapper
+        assert!(!html.contains("msg msg-"));
+    }
+
+    #[test]
+    fn export_assistant_tool_call_renders_in_order() {
+        let entries = vec![make_entry(AgentMessage::Assistant {
+            content: vec![
+                AssistantContentBlock::Text {
+                    text: "alpha-marker".into(),
+                },
+                AssistantContentBlock::ToolCall {
+                    id: "tc-1".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({"command": "echo hi"}),
+                },
+                AssistantContentBlock::Text {
+                    text: "omega-marker".into(),
+                },
+            ],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        })];
+        let meta = ExportMeta::default();
+        let html = export_html(&entries, &meta, None, None).unwrap();
+        let pos_before = html.find("alpha-marker").unwrap();
+        let pos_tool = html.find("<div class=\"tool-call").unwrap();
+        let pos_after = html.find("omega-marker").unwrap();
+        assert!(pos_before < pos_tool);
+        assert!(pos_tool < pos_after);
+    }
+
+    #[test]
+    fn export_tool_result_entry_renders() {
+        let entries = vec![
+            make_entry(AgentMessage::Assistant {
+                content: vec![AssistantContentBlock::ToolCall {
+                    id: "tc-1".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({"command": "ls"}),
+                }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
+            }),
+            make_entry(AgentMessage::ToolResult {
+                content: "output here".into(),
+                tool_call_id: "tc-1".to_string(),
+            }),
+        ];
+        let meta = ExportMeta::default();
+        let html = export_html(&entries, &meta, None, None).unwrap();
+        assert!(html.contains("<div class=\"tool-result"));
+        assert!(html.contains("data-tool-call-id=\"tc-1\""));
+        assert!(html.contains("output here"));
     }
 }

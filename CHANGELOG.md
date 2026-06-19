@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed — HTML export tool 렌더링 재설계 (C1)
+
+`oxi-cli/src/storage/export.rs` 의 도구 호출 렌더링을 구조화된
+세션 데이터 기반으로 전면 재작성했다.
+
+* **데드 코드 제거**: 이모지 prefix (`🔧`/`📤`/`📄`/`📝`/`✏️`/`🔍`) 를
+  파싱하는 `render_tool_blocks`, `extract_path_from_line`, `ToolOp` enum,
+  5개 fused 렌더러 (`render_bash_tool` 등), `render_markdown_with_options`
+  내 이모지 분기, 그리고 이들이 사용하던 ~80줄의 dead CSS 를 삭제했다.
+  이 코드들은 실제 프로듀서가 없는 self-fulfilling 코드였다.
+* **구조적 렌더링 추가**: `AssistantContentBlock::ToolCall` 을 도구 이름별로
+  디스패치하는 `render_tool_call_block`, `AgentMessage::ToolResult` 를
+  bare `.tool-result` div 로 렌더하는 `render_tool_result_block` 를 추가.
+  `render_entry` 가 어시스턴트 블록을 순서대로 순회하도록 재구조화했다.
+* **`include_tool_calls` 의미 재정의**: 이모지 라인 필터링에서 구조적
+  엔트리 스킵으로 변경. `false` 시 `ToolCall` 블록과 `ToolResult` 엔트리를
+  완전히 제외한다.
+* **`find` 도구 라벨 수정**: 검색어(`name`)가 아닌 디렉토리(`path`) 가
+  표시되던 문제를 수정했다.
+* **`extract_text` 헬퍼**: `ContentValue` → text 추출 로직을 공용 함수로
+  통합하여 User/System/ToolResult arm 의 중복을 제거했다.
+* `BashExecution` 변형은 생산자가 없으므로 렌더링을 유보했다
+  (설계 문서 §3.7 참조).
+
 
 ### Fixed — release/publish 워크플로우 (v0.37.1 릴리스 중 발견)
 
