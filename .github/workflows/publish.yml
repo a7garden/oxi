@@ -44,7 +44,7 @@ jobs:
     name: Verify release artifacts exist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check that the release workflow ran for this tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         # `cargo package --list` only checks that the .crate tarball can be
@@ -113,7 +113,7 @@ jobs:
           - oxi-sdk
           - oxi-cli
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Wait for crates.io index to see the dependency's new version
         # Poll the crates.io API (not `cargo search`, which only does
