@@ -73,8 +73,12 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
-        # --no-verify skips the actual upload — it just checks that
-        # the .crate tarball can be assembled and metadata is valid.
+        # `cargo package --list` only checks that the .crate tarball can be
+        # assembled and metadata is valid — it does NOT compile. The real
+        # compile gate (which catches packaging-only bugs like a cross-crate
+        # `include_bytes!`) is `cargo publish`'s verify step in the `publish`
+        # job below. That gate must run per-crate *after* its internal deps
+        # are published (topological order), so it cannot live here.
         run: |
           set -euo pipefail
           for crate in oxi-ai oxi-agent oxi-tui oxi-sdk oxi-cli; do
@@ -160,4 +164,12 @@ jobs:
             echo "::error::Create one at https://crates.io/settings/tokens with publish scope."
             exit 1
           fi
-          cargo publish --token "$CARGO_REGISTRY_TOKEN" --no-verify
+          # NOTE: no `--no-verify`. `cargo publish` compiles the packaged
+          # tarball against its *registry* dependencies (path deps are
+          # stripped during packaging). This is the gate that catches bugs a
+          # workspace build cannot — e.g. a cross-crate `include_bytes!` that
+          # resolves in-tree but escapes the crate root in the published
+          # tarball (the oxi-sdk 0.37.0 packaging bug). Topological order +
+          # the "Wait for dependency" step above ensure each crate's internal
+          # deps are already visible on crates.io when it verifies.
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"

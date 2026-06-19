@@ -239,12 +239,17 @@ pub(crate) struct OverrideModel {
 
 /// Decompress and parse the compile-time embedded SNAP.
 ///
-/// `include_bytes!` resolves at compile time; the path is relative to this
-/// file. The snapshot lives in `oxi-ai/data/catalog/` because that's where
-/// it has always been — moving it to `oxi-sdk/data/` is a separate concern
-/// (deferred so PR 1 stays purely additive on oxi-ai).
+/// The raw bytes come from [`oxi_ai::catalog::snapshot_gzip_bytes`] — the
+/// single source of truth for the snapshot, owned by `oxi-ai`. `oxi-sdk`
+/// does **not** `include_bytes!` the file directly: the snapshot lives in
+/// `oxi-ai/data/catalog/` (a sibling crate), and a cross-crate
+/// `include_bytes!` path escapes the `oxi-sdk` package root, which made the
+/// published crate uncompilable for downstream consumers (fixed in 0.37.1).
+/// Reading the bytes through the `oxi-ai` API keeps the snapshot packaged
+/// exactly once and lets `oxi-sdk` parse it with its own [`MdCatalog`]
+/// schema below.
 fn load_snapshot() -> Option<MdCatalog> {
-    let compressed: &[u8] = include_bytes!("../../../../oxi-ai/data/catalog/_snapshot.json.gz");
+    let compressed: &[u8] = oxi_ai::catalog::snapshot_gzip_bytes();
     let mut decoder = flate2::read::GzDecoder::new(compressed);
     let mut json = String::new();
     decoder.read_to_string(&mut json).ok()?;

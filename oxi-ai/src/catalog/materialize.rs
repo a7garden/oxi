@@ -115,13 +115,30 @@ pub fn materialize(
     (providers, models)
 }
 
+/// Raw gzip bytes of the embedded models.dev snapshot.
+///
+/// Single source of truth for the compiled-in catalog snapshot. Sibling
+/// crates (notably `oxi-sdk`) reference these bytes through this accessor
+/// instead of their own `include_bytes!`, so the snapshot file is packaged
+/// exactly once — here, inside `oxi-ai` — and never escapes the crate root
+/// in a published artifact. (A cross-crate `include_bytes!` in `oxi-sdk`
+/// pointed at `oxi-ai/data/...` and made the published `oxi-sdk` crate
+/// uncompilable for downstream consumers — see 0.37.1.)
+///
+/// The path is relative to this source file and stays within `oxi-ai`'s
+/// own package, so it resolves correctly both in-tree and when `oxi-ai` is
+/// downloaded from crates.io.
+pub fn snapshot_gzip_bytes() -> &'static [u8] {
+    include_bytes!("../../data/catalog/_snapshot.json.gz")
+}
+
 /// Load the embedded SNAP snapshot, decompress it, and parse as `MdCatalog`.
 ///
 /// This is the single source for both the provider registry and the model
 /// database. No network access — the snapshot is embedded at compile time.
 pub fn load_snapshot_catalog() -> Option<MdCatalog> {
     use std::io::Read;
-    let compressed: &[u8] = include_bytes!("../../data/catalog/_snapshot.json.gz");
+    let compressed: &[u8] = snapshot_gzip_bytes();
     let mut decoder = flate2::read::GzDecoder::new(compressed);
     let mut json = String::new();
     decoder.read_to_string(&mut json).ok()?;

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.1] - 2026-06-19
+
 ### Fixed — CI 워크플로우 (v0.37.0 릴리스 직후 발견)
 
 v0.37.0 릴리스 시도에서 세 가지 CI 인프라 문제가 드러났다.
@@ -24,6 +26,54 @@ v0.37.0 릴리스 시도에서 세 가지 CI 인프라 문제가 드러났다.
   다른 워크플로우로 전파하지 않아 `publish.yml` 이 자동 실행되지 않던
   것을, `release.yml` 에 `trigger-publish` 잡을 추가해 Release 생성 직후
   `gh workflow run` 으로 명시적 dispatch 하도록 수정.
+
+### Fixed — published `oxi-sdk` 0.37.0 가 downstream 에서 컴파일되지 않던 결함 (crates.io 패키징 버그)
+
+crates.io 에 게시된 `oxi-sdk` 0.37.0 를 의존하는 consumer(oxios 등)가
+컴파일할 수 없었던 치명적 패키징 결함을 수정했다.
+
+```
+error: couldn't read '.../oxi-sdk-0.37.0/src/ports/fs/../../../../oxi-ai/data/catalog/_snapshot.json.gz':
+       No such file or directory
+  --> oxi-sdk-0.37.0/src/ports/fs/catalog.rs:247
+    include_bytes!("../../../../oxi-ai/data/catalog/_snapshot.json.gz")
+```
+
+- **근본 원인**: `oxi-sdk/src/ports/fs/catalog.rs::load_snapshot()` 가
+  크레이트 바깥(형제 크레이트 `oxi-ai/data/`)을 가리키는 경로로
+  `include_bytes!` 를 썼다. oxi 워크스페이스 안(in-tree) 에서는 상대경로가
+  해석되어 빌드/테스트가 통과하지만, crates.io 배포판은 `oxi-sdk` 자체
+  파일만 포함하므로 게시된 tarball 안에서 해당 파일이 존재하지 않는다
+  → consumer 컴파일 실패.
+- **왜 게시까지 통과했나**: `publish.yml` 의 게시 단계와 사전 검사 단계가
+  **모두** 컴파일 검증을 건너뛰었다 — 사전 검사는
+  `cargo package --no-verify --list` (메타데이터/파일 조립만), 게시는
+  `cargo publish --no-verify`. `include_bytes!` 경로 문제는 in-tree
+  빌드로는 절대 잡히지 않고, 오직 **게시된 tarball 을 registry 의존성에
+  대해 컴파일**(`cargo publish` 의 verify 단계)할 때만 드러난다.
+
+**수정**:
+
+- **`oxi-ai`**: `catalog::snapshot_gzip_bytes() -> &'static [u8]` 신규
+  공개 접근자. `oxi-ai` 자기 트리 안의 자체 포함 `include_bytes!` 로
+  snapshot 의 단일 진실 소스가 된다 (`catalog/materialize.rs` +
+  `catalog/mod.rs` 재내보내기). 기존 `load_snapshot_catalog()` 도 이 접근자를
+  사용하도록 통일.
+- **`oxi-sdk`**: `load_snapshot()` 가 직접 `include_bytes!` 하던 것을
+  `oxi_ai::catalog::snapshot_gzip_bytes()` 호출로 교체. 크레이트 바깥으로
+  빠져나가는 경로를 완전히 제거했고, oxi-sdk 의 자체 `MdCatalog` 스키마로
+  파싱하는 기존 동작은 그대로 유지.
+- **`publish.yml`**: 게시 단계의 `cargo publish --no-verify` 에서
+  `--no-verify` 제거. 이제 각 크레이트가 자기 registry 의존성에 대해
+  컴파일 검증된다 (위상 순서 게시 + 의존성 가시성 폴링이 이미
+  선행의존성의 신규 버전을 보장). 사전 검사(package-check) 단계는
+  메타데이터 검사로 유지하되, 실제 컴파일 게이트는 게시 단계임을
+  주석로 명시했다.
+
+**검증**: in-workspace 빌드 + 단위테스트 회귀 없음 (oxi-ai 553 / oxi-sdk 314 /
+catalog_port 19 전부 통과). `cargo package`(verify) 로 게시 시나리오 재현 —
+`oxi-sdk` 패키지 검증이 `oxi-ai` 0.37.1 의 registry 가시성을 요구함을
+확인(위상 순서 게시로 해결됨).
 
 ## [0.37.0] - 2026-06-18
 

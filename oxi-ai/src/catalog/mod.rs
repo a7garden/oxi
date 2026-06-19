@@ -21,7 +21,7 @@ pub mod override_;
 pub mod provider;
 pub mod runtime;
 
-pub use materialize::{ProductMeta, materialize, materialize_providers};
+pub use materialize::{ProductMeta, materialize, materialize_providers, snapshot_gzip_bytes};
 pub use model::BuiltinModelEntry;
 pub use models_dev::{MdCatalog, get as models_dev_get, init_models_dev, protocol_for, refresh};
 pub use override_::{
