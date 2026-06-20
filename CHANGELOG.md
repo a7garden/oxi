@@ -5,7 +5,24 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.39.0] - 2026-06-20
+### Added — SDK consumers can now use the todo tool with observable state
+
+`oxi-sdk` exposes the todo tool (`TodoProvider::default()`) for SDK consumers,
+backed by observable state via `RegistrySnapshot`.
+
+- **New `TodoProvider` trait** in `oxi_sdk::tool_providers` (with default impl
+  that wraps the built-in `TodoState` + `InMemoryTodoStore`).
+- **`RegistrySnapshot` observable state**: SDK consumers can subscribe to
+  `AgentGroupState` registries via `.state()`, getting a diff-driven snapshot
+  (`RegistrySnapshot`) that includes `todo_state: Vec<String>` for live TUI
+  rendering without polling.
+- **Todo tool wiring in `OxiBuilder`**: `with_todo_provider()` to register a
+  custom impl; default is `TodoProvider::default()` noop-compatible.
+- **Dependency**: the todo tool (always available, no `essential` flag), crate
+  metadata, and `constants` module are now exported from `oxi-sdk`.
+
+
 ## [0.38.0] - 2026-06-20
 ### Changed — HTML export tool 렌더링 재설계 (C1)
 
@@ -862,8 +879,8 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Cargo audit/deny**: Synced ignore lists across `.cargo/audit.toml` and `deny.toml`; added upgrade tracker comment for extism ≥ 1.22 (wasmtime ≥ 43)
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
-[0.29.0]: https://github.com/a7garden/oxi/compare/v0.28.0...v0.29.0
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.34.0...HEAD
+[0.39.0]: https://github.com/a7garden/oxi/compare/v0.38.0...v0.39.0
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.39.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 
