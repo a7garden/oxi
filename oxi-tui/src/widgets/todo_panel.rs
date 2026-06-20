@@ -146,6 +146,11 @@ impl TodoPanelState {
     pub fn is_empty(&self) -> bool {
         self.phases.iter().all(|p| p.tasks.is_empty())
     }
+    /// Replace all phases. Used by the host (oxi-cli) to sync from the
+    /// agent's `TodoStateProvider`.
+    pub fn set_phases(&mut self, phases: Vec<TodoPanelPhase>) {
+        self.phases = phases;
+    }
 }
 
 // ── Widget ────────────────────────────────────────────────────────────

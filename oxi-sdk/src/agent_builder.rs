@@ -86,6 +86,38 @@ impl<'a> AgentBuilder<'a> {
         self.system_prompt = Some(prompt.into());
         self
     }
+    /// Register a [`TodoStateProvider`] so the agent's `todo` tool works.
+    ///
+    /// The provider is shared between the agent (writer) and the host
+    /// application (reader), so you can observe phase changes in real time
+    /// by calling [`TodoStateProvider::get_phases()`] periodically.
+    ///
+    /// Use [`InMemoryTodoState`](crate::inmem::InMemoryTodoState) for a
+    /// ready-to-go in-memory implementation:
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use oxi_sdk::{AgentConfig, OxiBuilder, inmem::InMemoryTodoState};
+    ///
+    /// let todo = Arc::new(InMemoryTodoState::new());
+    /// let oxi = OxiBuilder::new().with_builtins().build();
+    /// let agent = oxi.agent(AgentConfig {
+    ///     model_id: "anthropic/claude-sonnet-4-20250514".into(),
+    ///     ..Default::default()
+    /// })
+    /// .with_todo(todo.clone())
+    /// .build()
+    /// .unwrap();
+    ///
+    /// // Observe later:
+    /// let phases = todo.get_phases();
+    /// ```
+    pub fn with_todo(mut self, todo: std::sync::Arc<dyn oxi_agent::tools::TodoStateProvider>) -> Self {
+        self.config.todo = Some(todo);
+        self.tools.register(oxi_agent::tools::todo::TodoTool);
+        self
+    }
+
 
     /// Register the standard coding tools (read, write, edit, bash, grep, find, ls, ...).
     pub fn coding_tools(self) -> Self {

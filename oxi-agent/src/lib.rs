@@ -97,11 +97,12 @@ pub use tools::{
     ToolContext, ToolError, ToolRegistry, WriteTool,
 };
 
-pub use tools::TodoStateProvider;
 pub use tools::todo::{
-    InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus,
+    TodoTool, InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus,
     TodoUpdateResult,
 };
+pub use tools::TodoStateProvider;
+
 pub use tools::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
 pub use tools::{LspAction, LspProvider};
 

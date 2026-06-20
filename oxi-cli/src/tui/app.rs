@@ -19,6 +19,8 @@ use oxi_tui::widgets::{
     footer::FooterState,
     input::InputState,
 };
+use oxi_agent::tools::{TodoStateProvider, todo::{TodoPhase, TodoStatus}};
+use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use std::io::{self, Write};
 use std::panic;
 use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
@@ -349,6 +351,9 @@ pub(crate) struct AppState {
     /// TUI startup. `None` when the TUI is not driven by an `Oxi` engine
     /// (e.g. unit tests using `AppState::new()`).
     pub catalog: Option<std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+    /// Todo state provider — shared with the agent's `todo` tool.
+    /// Polled every frame to sync the sticky panel.
+    pub todo_provider: Option<Arc<dyn TodoStateProvider>>,
     /// Todo panel state — synced from the agent's `todo` tool via
     /// `TodoStateProvider`. Rendered as a sticky panel above the input.
     pub todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState,
@@ -413,6 +418,32 @@ impl NotificationKind {
     }
 }
 
+/// Convert agent `TodoPhase` list to TUI `TodoPanelPhase` list and
+/// update the panel state. Called every frame from the main loop.
+fn sync_todo_panel(panel: &mut oxi_tui::widgets::todo_panel::TodoPanelState, phases: &[TodoPhase]) {
+    panel.set_phases(
+        phases
+            .iter()
+            .map(|p| TodoPanelPhase {
+                name: p.name.clone(),
+                tasks: p
+                    .tasks
+                    .iter()
+                    .map(|t| TodoPanelItem {
+                        content: t.content.clone(),
+                        status: match t.status {
+                            TodoStatus::Pending => TodoPanelStatus::Pending,
+                            TodoStatus::InProgress => TodoPanelStatus::InProgress,
+                            TodoStatus::Completed => TodoPanelStatus::Completed,
+                            TodoStatus::Abandoned => TodoPanelStatus::Abandoned,
+                        },
+                    })
+                    .collect(),
+            })
+            .collect(),
+    );
+}
+
 fn rand_u64() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -465,6 +496,7 @@ impl AppState {
             notifications: Vec::new(),
             issue_store: None,
             catalog: None,
+            todo_provider: None,
             todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState::new(),
         };
 
@@ -1231,6 +1263,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Inject the catalog port so TUI overlays/slash commands can query
         // models without going through legacy global state.
         state.catalog = Some(std::sync::Arc::clone(app.oxi().catalog()));
+        // Inject the todo state provider so the sticky panel syncs from
+        // the same `Arc<RwLock<Vec<TodoPhase>>>` the agent's `todo` tool
+        // mutates.
+        state.todo_provider = agent_session
+            .agent_ref()
+            .get_config()
+            .todo
+            .clone();
 
         // Restore previous messages if resuming
         if is_resuming && let Some(ref path) = session_target {
@@ -1379,6 +1419,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 if matches!(overlay.poll(), super::overlay::OverlayAction::Close) {
                     state.overlay_state = None;
                 }
+            }
+
+            // Sync todo panel from agent state (cheap: RwLock read + clone)
+            if let Some(ref provider) = state.todo_provider {
+                sync_todo_panel(&mut state.todo_panel, &provider.get_phases());
             }
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;

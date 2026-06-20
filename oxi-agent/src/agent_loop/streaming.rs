@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use super::helpers::sanitize_orphaned_tool_results;
 use super::stream_outcome::StreamOutcome;
+use super::ttsr::{MatchSource, TtsrEngine, TtsrMatchContext};
 
 pub(crate) async fn stream_assistant_response(
     loop_ref: &super::AgentLoop,

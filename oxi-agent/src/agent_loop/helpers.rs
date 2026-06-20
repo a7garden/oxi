@@ -78,8 +78,122 @@ mod tests {
         let external_stop = Arc::new(AtomicBool::new(true));
         assert!(should_stop_after_turn(&external_stop));
     }
-}
 
+    #[test]
+    fn test_sanitize_no_orphans() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
+        let mut messages = vec![
+            Message::User(oxi_ai::UserMessage::new("hello")),
+            Message::Assistant({
+                let mut m = oxi_ai::AssistantMessage::new(
+                    oxi_ai::Api::OpenAiCompletions,
+                    "agent",
+                    "gpt-4",
+                );
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_1",
+                    "bash",
+                    serde_json::json!({"cmd": "ls"}),
+                )));
+                m
+            }),
+            Message::ToolResult(ToolResultMessage::new(
+                "call_1",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("output"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        assert_eq!(removed, 0);
+        assert_eq!(messages.len(), 3);
+    }
+
+    #[test]
+    fn test_sanitize_removes_orphans() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolResultMessage};
+        let mut messages = vec![
+            Message::User(oxi_ai::UserMessage::new("hello")),
+            // This ToolResult has no preceding Assistant with tool_calls — orphaned.
+            Message::ToolResult(ToolResultMessage::new(
+                "orphan_1",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("orphan output"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        assert_eq!(removed, 1);
+        assert_eq!(messages.len(), 1);
+        assert!(matches!(messages[0], Message::User(_)));
+    }
+
+    #[test]
+    fn test_sanitize_tool_result_after_user_is_orphan() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolResultMessage};
+        // A user message resets the tool_calls context.
+        let mut messages = vec![
+            Message::User(oxi_ai::UserMessage::new("hello")),
+            // No assistant with tool_calls before this — orphaned.
+            Message::ToolResult(ToolResultMessage::new(
+                "call_x",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("result"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        assert_eq!(removed, 1);
+    }
+
+    #[test]
+    fn test_sanitize_multiple_orphans_removes_only_orphans() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
+        let mut messages = vec![
+            // Orphan 1
+            Message::ToolResult(ToolResultMessage::new(
+                "orphan_1",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("o1"))],
+            )),
+            // Orphan 2
+            Message::ToolResult(ToolResultMessage::new(
+                "orphan_2",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("o2"))],
+            )),
+            // Valid pair: assistant with tool_calls + tool result
+            Message::Assistant({
+                let mut m = oxi_ai::AssistantMessage::new(
+                    oxi_ai::Api::OpenAiCompletions,
+                    "agent",
+                    "gpt-4",
+                );
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_1",
+                    "read",
+                    serde_json::json!({"path": "foo"}),
+                )));
+                m
+            }),
+            Message::ToolResult(ToolResultMessage::new(
+                "call_1",
+                "read",
+                vec![ContentBlock::Text(TextContent::new("valid"))],
+            )),
+            // This one is orphaned — no preceding assistant with tool_calls
+            Message::ToolResult(ToolResultMessage::new(
+                "orphan_3",
+                "write",
+                vec![ContentBlock::Text(TextContent::new("o3"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        // Should remove 3 orphans (orphan_1, orphan_2, orphan_3)
+        assert_eq!(removed, 3);
+        // Only the valid assistant + valid tool result remain
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(messages[0], Message::Assistant(_)));
+        assert!(matches!(messages[1], Message::ToolResult(_)));
+    }
+}
 /// Remove orphaned `ToolResult` messages that lack a preceding
 /// `Assistant` message with `tool_calls` content blocks.
 ///

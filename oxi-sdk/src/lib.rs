@@ -184,6 +184,12 @@ pub use oxi_agent::{
     StructuredOutputError, ToolCallContext, ToolContext, ToolError, ToolExecutionMode,
     ToolRegistry, VisitReason, WebSearchTool, WriteTool,
 };
+// ── Todo tool types (agent-scoped, observable by SDK consumers) ──────
+pub use oxi_agent::{TodoStateProvider, TodoTool};
+pub use oxi_agent::tools::todo::{
+    TodoPhase, TodoItem, TodoStatus, TodoOp, TodoUpdateResult,
+};
+
 
 // ── Concrete provider re-exports ─────────────────────────────────────────
 //

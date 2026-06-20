@@ -25,8 +25,12 @@ pub enum StreamOutcome {
     },
 
     /// Provider error (stream ended with an error event).
-    /// Provider error (stream ended with an error event), with detail message.
-    Error { message: AssistantMessage, detail: String },
+    Error {
+        /// The partial assistant message at the point of error.
+        message: AssistantMessage,
+        /// Human-readable error detail from the provider.
+        detail: String,
+    },
 }
 
 impl StreamOutcome {
