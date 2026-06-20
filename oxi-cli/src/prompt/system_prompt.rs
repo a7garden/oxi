@@ -103,13 +103,65 @@ pub fn thinking_level_prompt(level: ThinkingLevel) -> Option<String> {
 }
 
 /// Default tool snippets used when building prompts for the agent loop.
+
+/// Hashline patch format specification embedded in the system prompt.
+/// Mirrors `oxi-hashline/src/prompt.md` — keep in sync.
+const HASHLINE_FORMAT_SPEC: &str = r#"
+
+## Hashline Patch Format
+
+This is the ONLY patch format for the `edit` tool. Every section is anchored
+on a `[PATH#TAG]` header from your most recent `read` or `search`.
+
+### Headers
+`[PATH#TAG]` — every section MUST start with the `[path#TAG]` header
+from your latest read/search. The TAG is a 4-hex content hash.
+
+### Ops
+- `SWAP N.=M:` — replace original lines N..M (inclusive) with the body rows.
+- `DEL N.=M` — delete original lines N..M (inclusive). No body.
+- `DEL N` — delete a single line N. No body.
+- `INS.PRE N:` — insert body rows immediately before line N.
+- `INS.POST N:` — insert body rows immediately after line N.
+- `INS.HEAD:` — insert body rows at the very start of the file.
+- `INS.TAIL:` — insert body rows at the very end of the file.
+
+### Body Rows
+Every row under a `:` header is `+TEXT` — a literal line of final content.
+`+` alone adds a blank line. There are NO `-old` rows.
+
+### Critical Rules
+- Line numbers come from your LATEST read/search. Stale tag? STOP, re-read.
+- RANGES ARE TIGHT. Cover ONLY lines that change.
+- THE BODY IS THE FINAL CONTENT. Only `+TEXT` rows.
+- Every applied edit mints a FRESH `[PATH#TAG]` and renumbers.
+- Multi-section patches are ALL-OR-NOTHING.
+
+### Example
+```
+[src/main.rs#A1B2]
+SWAP 5.=7:
++    let config = load_config()?;
++    let app = App::new(config);
++    app.run()
+INS.POST 10:
++    // Validate input before processing.
+DEL 15
+```
+
+### Anti-Patterns
+- Never use `-old:` or bare context lines. Body is ONLY `+TEXT`.
+- Never widen a range over unchanged lines.
+- Never use a stale tag. Re-read before every edit.
+- Never use `SWAP` for pure insertions. Use `INS.PRE`/`INS.POST`.
+"#;
 pub fn default_tool_snippets() -> std::collections::HashMap<String, String> {
     let mut m = std::collections::HashMap::new();
     m.insert("read".into(), "Read file contents (text or image)".into());
     m.insert("bash".into(), "Execute bash commands".into());
     m.insert(
         "edit".into(),
-        "Edit files with exact text replacement".into(),
+        "Edit files with line-anchored hashline patches (see format below)".into(),
     );
     m.insert("write".into(), "Write content to files".into());
     m.insert("grep".into(), "Search file contents with regex".into());
@@ -443,6 +495,9 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     );
 
     prompt.push_str(&append_section);
+
+    // ── Hashline format specification ──
+    prompt.push_str(HASHLINE_FORMAT_SPEC);
 
     // Append project context files
     if !options.context_files.is_empty() {

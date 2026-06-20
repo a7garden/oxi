@@ -323,7 +323,7 @@ impl IssueTool {
 /// title, labels, assignee). Used by both the agent tool and the CLI.
 pub fn format_issue_line(i: &Issue) -> String {
     let lock = if i.meta.assigned_to.is_some() {
-        "🔒"
+        "▣"
     } else {
         " "
     };
@@ -402,7 +402,7 @@ async fn cas_retry<T, F, Fut>(
 ) -> Result<T, IssueError>
 where
     F: FnMut(Option<String>) -> Fut,
-    Fut: std::future::Future<Output = Result<T, IssueError>> + Send,
+    Fut: Future<Output = Result<T, IssueError>> + Send,
     T: Send,
 {
     let mut hash = agent_hash;

@@ -97,6 +97,35 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
 
     let mut app = crate::App::from_oxi(oxi, settings, ownership_session_id).await?;
 
+    // v2.2: wire the MCP credential provider (OAuth2 client_credentials).
+    // Reads the same `mcp.json` files the agent uses, picks every server
+    // with an `oauth` block, and gives the manager a provider that can
+    // obtain + refresh access tokens on demand. No-op when no server
+    // declares `oauth`.
+    let mcp_cfg = oxi_agent::mcp::config::load_mcp_config();
+    let mut oauth_map: std::collections::HashMap<String, oxi_agent::mcp::types::OAuthConfig> =
+        std::collections::HashMap::new();
+    for (name, entry) in &mcp_cfg.mcp_servers {
+        if let Some(oc) = entry.oauth.clone() {
+            oauth_map.insert(name.clone(), oc);
+        }
+    }
+    if !oauth_map.is_empty()
+        && let Some(manager) = app.agent_tools().mcp_manager()
+    {
+        let config_dir = dirs::config_dir()
+            .map(|d| d.join("oxi"))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        match crate::mcp_credentials::FileMcpCredentialProvider::new(oauth_map, config_dir) {
+            Ok(provider) => {
+                manager.set_credential_provider(provider);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to construct MCP credential provider: {}", e);
+            }
+        }
+    }
+
     // Register built-in tools on the agent's tool registry.
     let tools = app.agent_tools();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

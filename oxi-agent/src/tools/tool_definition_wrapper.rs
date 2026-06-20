@@ -22,9 +22,9 @@ pub struct DynamicTool {
                 &str,
                 Value,
                 Option<oneshot::Receiver<()>>,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-            > + Send
+            )
+                -> std::pin::Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>>
+            + Send
             + Sync,
     >,
 }
@@ -41,7 +41,7 @@ impl DynamicTool {
             Value,
             Option<oneshot::Receiver<()>>,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+            Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>,
         > + Send
         + Sync
         + 'static,
@@ -63,7 +63,7 @@ impl DynamicTool {
             Value,
             Option<oneshot::Receiver<()>>,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+            Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>,
         > + Send
         + Sync
         + 'static,
@@ -126,9 +126,7 @@ pub trait ToolDefinitionLike: Send + Sync {
         tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-    >;
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>>;
 }
 
 /// Wrap a `ToolDefinitionLike` into an `Arc<dyn AgentTool>`.
@@ -293,9 +291,8 @@ mod tests {
             _tool_call_id: &str,
             _params: Value,
             _signal: Option<oneshot::Receiver<()>>,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-        > {
+        ) -> std::pin::Pin<Box<dyn Future<Output = Result<AgentToolResult, ToolError>> + Send>>
+        {
             Box::pin(async { Ok(AgentToolResult::success("mock result")) })
         }
     }

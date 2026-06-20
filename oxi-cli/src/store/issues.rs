@@ -205,10 +205,10 @@ pub struct Issue {
 }
 
 impl Issue {
-    /// Combined status badge for list rendering: `🔒 open`.
+    /// Combined status badge for list rendering: `▣ open`.
     pub fn list_badge(&self) -> String {
         let lock = if self.meta.assigned_to.is_some() {
-            "🔒 "
+            "▣ "
         } else {
             ""
         };
@@ -688,7 +688,7 @@ struct Cache {
     /// Title of the most recently updated open issue (for the indicator).
     latest_open_title: Option<String>,
     /// Number of currently-assigned (locked) open issues. Computed at the
-    /// same time as `open_count` so the indicator can show "3 open · 1 🔒".
+    /// same time as `open_count` so the indicator can show "3 open · 1 ▣".
     locked_open_count: usize,
     /// Highest priority among open issues (None if no open issues).
     /// Used for the priority dot in the footer indicator.

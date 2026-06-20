@@ -1,26 +1,30 @@
 //! Stdio transport for MCP.
 //!
 //! Spawns a child process and communicates over its stdin/stdout using
-//! Content-Length framed JSON-RPC messages. The transport is owned by a
-//! single [`crate::mcp::client::McpClient`] and is `&mut`-accessed
-//! exclusively by that client.
+//! **newline-delimited JSON** (JSONL) per the MCP stdio transport spec
+//! (modelcontextprotocol.io/specification/2025-03-26/basic/transports).
+//! Each JSON-RPC message is serialized as one line of JSON terminated by
+//! a single `\n`; the transport rejects any line that exceeds [`MAX_LINE_SIZE`].
+//!
+//! The transport is owned by a single [`crate::mcp::client::McpClient`] and
+//! is `&mut`-accessed exclusively by that client. The read loop in
+//! [`McpTransport::request`] dispatches inbound notifications and
+//! server→client requests to the installed [`InboundHandler`] inline.
 
-use super::McpTransport;
+use super::{InboundHandler, McpTransport};
 use crate::mcp::types::RawJsonRpcMessage;
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
 /// Default timeout for individual MCP requests (seconds).
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
-/// Maximum number of header lines before giving up (prevents infinite loop).
-const MAX_HEADER_LINES: usize = 64;
-
-/// Maximum allowed body size from an MCP server (10 MB).
-const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+/// Maximum allowed line size from an MCP server (10 MB).
+/// Guards against a buggy or hostile local server sending a runaway line
+/// that would otherwise cause unbounded allocation in the read buffer.
+const MAX_LINE_SIZE: usize = 10 * 1024 * 1024;
 
 /// Environment variables that servers must not override (security).
 const BLOCKED_ENV_VARS: &[&str] = &[
@@ -39,6 +43,8 @@ pub struct StdioTransport {
     stdin: ChildStdin,
     /// Buffered reader from the server's stdout.
     stdout: tokio::io::BufReader<ChildStdout>,
+    /// Inbound handler for notifications and server→client requests.
+    inbound_handler: Option<InboundHandler>,
 }
 
 impl std::fmt::Debug for StdioTransport {
@@ -54,7 +60,7 @@ impl StdioTransport {
     pub fn spawn(
         command: &str,
         args: &[String],
-        env: &HashMap<String, String>,
+        env: &std::collections::HashMap<String, String>,
         cwd: Option<&str>,
         debug: bool,
     ) -> Result<Self> {
@@ -100,6 +106,7 @@ impl StdioTransport {
             child: Some(child),
             stdin,
             stdout: tokio::io::BufReader::new(stdout),
+            inbound_handler: None,
         })
     }
 
@@ -110,6 +117,7 @@ impl StdioTransport {
             child: Some(child),
             stdin,
             stdout: tokio::io::BufReader::new(stdout),
+            inbound_handler: None,
         }
     }
 
@@ -117,21 +125,23 @@ impl StdioTransport {
     pub fn take_child(&mut self) -> Option<Child> {
         self.child.take()
     }
-}
 
-#[async_trait::async_trait]
-impl McpTransport for StdioTransport {
-    async fn send(&mut self, json: &str) -> Result<()> {
-        let bytes = json.as_bytes();
-        let header = format!("Content-Length: {}\r\n\r\n", bytes.len());
+    /// Write a single JSON-RPC message framed as one line of JSON + '\n'.
+    /// The MCP spec requires messages to be single-line; `serde_json`
+    /// never embeds raw newlines, so a trailing `\n` is sufficient.
+    async fn write_frame(&mut self, json: &str) -> Result<()> {
+        debug_assert!(
+            !json.contains('\n'),
+            "MCP 메시지에 내장 개행 금지 (스펙 위반)"
+        );
         self.stdin
-            .write_all(header.as_bytes())
-            .await
-            .context("Failed to write MCP header")?;
-        self.stdin
-            .write_all(bytes)
+            .write_all(json.as_bytes())
             .await
             .context("Failed to write MCP body")?;
+        self.stdin
+            .write_all(b"\n")
+            .await
+            .context("Failed to write MCP newline")?;
         self.stdin
             .flush()
             .await
@@ -139,31 +149,99 @@ impl McpTransport for StdioTransport {
         Ok(())
     }
 
-    async fn recv(&mut self) -> Result<RawJsonRpcMessage> {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
-            self.read_message_inner(),
-        )
+    /// Read one message (one line) from stdout, with a hard size cap.
+    /// Returns `Ok(None)` on clean EOF, `Err` on overflow or I/O failure.
+    async fn read_frame(&mut self) -> Result<Option<RawJsonRpcMessage>> {
+        match read_line_bounded(&mut self.stdout, MAX_LINE_SIZE).await? {
+            None => Ok(None),
+            Some(bytes) => {
+                let msg: RawJsonRpcMessage =
+                    serde_json::from_slice(&bytes).context("Failed to parse JSON-RPC message")?;
+                Ok(Some(msg))
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl McpTransport for StdioTransport {
+    async fn request(&mut self, id: u64, json: &str) -> Result<RawJsonRpcMessage> {
+        self.write_frame(json).await?;
+
+        // Read messages until the response with a matching id arrives.
+        // Anything else (notifications, server→client requests) is
+        // dispatched to the inbound handler inline.
+        let timeout = std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS);
+        tokio::time::timeout(timeout, async {
+            loop {
+                let msg = self
+                    .read_frame()
+                    .await
+                    .context("Failed to read MCP response")?
+                    .ok_or_else(|| anyhow::anyhow!("MCP server closed connection"))?;
+
+                let msg_id = msg.id;
+                if let Some(mid) = msg_id {
+                    if mid == id {
+                        return Ok(msg);
+                    }
+                    // Non-matching id — if it has a `method` it's a
+                    // server→client request; dispatch and maybe reply.
+                    if msg.method.is_some() {
+                        let response = match self.inbound_handler.as_mut() {
+                            Some(h) => h(msg),
+                            None => None,
+                        };
+                        if let Some(value) = response {
+                            let reply = serde_json::to_string(&value)
+                                .context("Failed to serialize inbound response")?;
+                            self.write_frame(&reply)
+                                .await
+                                .context("Failed to write response to server→client request")?;
+                        }
+                        continue;
+                    }
+                    // Orphan response (different id, no method). Should not
+                    // happen in normal operation — log and skip.
+                    tracing::warn!(
+                        "MCP: discarding response with non-matching id {} (expected {})",
+                        mid,
+                        id
+                    );
+                    continue;
+                }
+                // No id → notification → dispatch (return value ignored).
+                if let Some(h) = self.inbound_handler.as_mut() {
+                    h(msg);
+                }
+            }
+        })
         .await
-        .map_err(|_| {
-            anyhow::anyhow!("MCP read_message timed out after {}s", REQUEST_TIMEOUT_SECS)
-        })?
+        .map_err(|_| anyhow::anyhow!("MCP request timed out after {}s", REQUEST_TIMEOUT_SECS))?
+    }
+
+    async fn notify(&mut self, json: &str) -> Result<()> {
+        self.write_frame(json).await
+    }
+
+    fn set_inbound_handler(&mut self, handler: InboundHandler) {
+        self.inbound_handler = Some(handler);
     }
 
     async fn close(&mut self) -> Result<()> {
         let _ = self.stdin.shutdown().await;
-        // Try graceful shutdown first
+        // Graceful shutdown: SIGTERM then 5s then SIGKILL.
         #[cfg(unix)]
         {
             if let Some(mut child) = self.take_child()
-                && let Some(id) = child.id()
+                && let Some(pid) = child.id()
             {
                 // SAFETY: libc::kill sends a signal to a process. The PID comes
                 // from child.id() which is a valid running process. SIGTERM
                 // requests graceful termination. On race (process already
                 // exited), kill returns ESRCH harmlessly.
                 unsafe {
-                    libc::kill(id as libc::pid_t, libc::SIGTERM);
+                    libc::kill(pid as libc::pid_t, libc::SIGTERM);
                 }
                 match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {
                     Ok(Ok(_)) => return Ok(()),
@@ -187,59 +265,46 @@ impl McpTransport for StdioTransport {
     }
 }
 
-impl StdioTransport {
-    /// Read a single JSON-RPC message (Content-Length header + body).
-    async fn read_message_inner(&mut self) -> Result<RawJsonRpcMessage> {
-        let mut content_length: Option<usize> = None;
-        let mut lines_read = 0;
-        loop {
-            let mut line = String::new();
-            let bytes_read = self
-                .stdout
-                .read_line(&mut line)
-                .await
-                .context("Failed to read MCP header")?;
-            if bytes_read == 0 {
-                return Err(anyhow::anyhow!("MCP server closed connection"));
-            }
-            lines_read += 1;
-            if lines_read > MAX_HEADER_LINES {
+/// Bounded line reader over an [`AsyncBufRead`]. Reads until '\n' (included)
+/// or EOF. Caps the returned buffer at `max` bytes; returns an error if the
+/// line would exceed the cap, preventing unbounded allocation.
+async fn read_line_bounded<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    max: usize,
+) -> Result<Option<Vec<u8>>> {
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let chunk = reader
+            .fill_buf()
+            .await
+            .context("Failed to read from MCP stdout")?;
+        if chunk.is_empty() {
+            return if buf.is_empty() {
+                Ok(None)
+            } else {
+                Err(anyhow::anyhow!("MCP server closed connection mid-line"))
+            };
+        }
+        if let Some(pos) = chunk.iter().position(|&b| b == b'\n') {
+            let take = pos + 1;
+            if buf.len() + take > max {
                 return Err(anyhow::anyhow!(
-                    "MCP server sent too many header lines (>{})",
-                    MAX_HEADER_LINES
+                    "MCP line exceeds {} bytes (mid-line cap hit)",
+                    max
                 ));
             }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
-                content_length = Some(
-                    rest.trim()
-                        .parse::<usize>()
-                        .context("Invalid Content-Length header")?,
-                );
-            }
+            buf.extend_from_slice(&chunk[..take]);
+            reader.consume(take);
+            return Ok(Some(buf));
         }
-
-        let len = content_length.ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
-
-        if len > MAX_BODY_SIZE {
+        if buf.len() + chunk.len() > max {
             return Err(anyhow::anyhow!(
-                "MCP server sent oversized body: {} bytes (max {})",
-                len,
-                MAX_BODY_SIZE
+                "MCP line exceeds {} bytes (chunk would overflow)",
+                max
             ));
         }
-
-        let mut buf = vec![0u8; len];
-        self.stdout
-            .read_exact(&mut buf)
-            .await
-            .context("Failed to read MCP body")?;
-
-        let msg: RawJsonRpcMessage =
-            serde_json::from_slice(&buf).context("Failed to parse JSON-RPC message")?;
-        Ok(msg)
+        let n = chunk.len();
+        buf.extend_from_slice(chunk);
+        reader.consume(n);
     }
 }

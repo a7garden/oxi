@@ -504,6 +504,8 @@ impl Agent {
             workspace_dir,
             provider_options: self.config().config.provider_options.clone(),
             on_compaction: None,
+            ttsr_engine: self.config().config.ttsr_engine.clone(),
+            ..Default::default()
         };
 
         // Create AgentLoop. We give it a NEW SharedState and sync back after.
@@ -857,6 +859,8 @@ impl Agent {
             workspace_dir: inner.config.workspace_dir.clone(),
             provider_options: inner.config.provider_options.clone(),
             on_compaction: None,
+            ttsr_engine: inner.config.ttsr_engine.clone(),
+            ..Default::default()
         };
 
         let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);

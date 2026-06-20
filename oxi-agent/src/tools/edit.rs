@@ -11,12 +11,16 @@ use super::edit_diff::{
     strip_bom,
 };
 use super::file_mutation_queue::global_mutation_queue;
+use super::hashline_fs::TokioHashlineFs;
 use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
+use oxi_hashline::parser::split_patch_input;
+use oxi_hashline::patcher::Patcher;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -94,11 +98,18 @@ impl EditTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        // Hashline mode: if a `patch` field is present, use hashline dispatch.
+        let patch = params
+            .get("patch")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         EditInput {
             path,
             edits,
             dry_run,
             expected_hash,
+            patch,
         }
     }
 
@@ -201,6 +212,71 @@ impl EditTool {
             message: format!("Applied {} edit(s) to {}", edits.len(), input.path),
         })
     }
+
+    /// Apply a hashline patch.
+    async fn apply_hashline(
+        root_dir: &Path,
+        patch_text: &str,
+        dry_run: bool,
+        ctx: &ToolContext,
+    ) -> Result<EditOutput, ToolError> {
+        let snapshots = ctx.snapshot_store.clone().ok_or_else(|| {
+            "Hashline edit mode requires a snapshot store (not configured in this session)."
+                .to_string()
+        })?;
+
+        let patch = split_patch_input(patch_text, None).map_err(|e| e.to_string())?;
+
+        if dry_run {
+            // Preflight without writing.
+            let fs = Arc::new(TokioHashlineFs::new(root_dir.to_path_buf()));
+            let patcher = Patcher::new(fs, snapshots);
+            patcher.preflight(&patch).await.map_err(|e| e.to_string())?;
+            return Ok(EditOutput {
+                diff: String::new(),
+                first_changed_line: None,
+                applied: false,
+                message: "Dry run — no changes applied".to_string(),
+            });
+        }
+
+        let fs = Arc::new(TokioHashlineFs::new(root_dir.to_path_buf()));
+        let patcher = Patcher::new(fs, snapshots);
+        let result = patcher.apply(&patch).await.map_err(|e| e.to_string())?;
+
+        let mut diff_parts = Vec::new();
+        let mut messages = Vec::new();
+        let mut first_changed: Option<usize> = None;
+        for section in &result.sections {
+            if !section.diff.is_empty() {
+                diff_parts.push(format!(
+                    "[{}#{}]\n{}",
+                    section.path, section.new_hash, section.diff
+                ));
+            }
+            for w in &section.warnings {
+                diff_parts.push(format!("⚠ {w}"));
+            }
+            if first_changed.is_none() {
+                if let Some(line) = section.first_changed_line {
+                    first_changed = Some(line as usize);
+                }
+            }
+            messages.push(format!("{}#{}", section.path, section.new_hash));
+        }
+
+        let section_count = result.sections.len();
+        Ok(EditOutput {
+            diff: diff_parts.join("\n"),
+            first_changed_line: first_changed,
+            applied: true,
+            message: format!(
+                "Applied hashline patch to {} section(s). New tags: {}",
+                section_count,
+                messages.join(", ")
+            ),
+        })
+    }
 }
 
 impl Default for EditTool {
@@ -210,6 +286,7 @@ impl Default for EditTool {
 }
 
 /// Parsed edit input
+#[derive(Default)]
 struct EditInput {
     path: String,
     edits: Vec<EditEntry>,
@@ -217,6 +294,9 @@ struct EditInput {
     /// Hash of file content at last read. If provided, edit will be
     /// rejected if the file has been modified since.
     expected_hash: Option<String>,
+    /// Hashline patch text. When present, hashline mode is used instead of
+    /// str_replace.
+    patch: Option<String>,
 }
 
 /// A single edit entry
@@ -301,6 +381,10 @@ impl AgentTool for EditTool {
                 "expected_hash": {
                     "type": "string",
                     "description": "Hash of the file content at last read. If provided, the edit will be rejected if the file was modified since the hash was computed."
+                },
+                "patch": {
+                    "type": "string",
+                    "description": "Hashline patch text (*** Begin Patch … *** End Patch). When present, hashline line-anchored editing is used instead of str_replace. Mutually exclusive with edits/old_text/new_text."
                 }
             },
             "required": ["path"]
@@ -319,7 +403,14 @@ impl AgentTool for EditTool {
         // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-        match Self::apply_edits(root, &input).await {
+        // Dispatch: hashline mode if `patch` field is present, else str_replace.
+        let output = if let Some(ref patch_text) = input.patch {
+            Self::apply_hashline(root, patch_text, input.dry_run, ctx).await
+        } else {
+            Self::apply_edits(root, &input).await
+        };
+
+        match output {
             Ok(output) => {
                 let mut result =
                     AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
@@ -403,6 +494,7 @@ mod tests {
             }],
             dry_run: false,
             expected_hash: None,
+            ..Default::default()
         };
         let result = EditTool::apply_edits(Path::new("."), &input).await;
         assert!(result.is_err());
@@ -423,6 +515,7 @@ mod tests {
             }],
             dry_run: true,
             expected_hash: None,
+            ..Default::default()
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(!output.applied);
@@ -450,6 +543,7 @@ mod tests {
             }],
             dry_run: false,
             expected_hash: None,
+            ..Default::default()
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);
@@ -479,6 +573,7 @@ mod tests {
             ],
             dry_run: false,
             expected_hash: None,
+            ..Default::default()
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);
@@ -502,6 +597,7 @@ mod tests {
             }],
             dry_run: false,
             expected_hash: None,
+            ..Default::default()
         };
         EditTool::apply_edits(Path::new("."), &input).await.unwrap();
 
@@ -525,6 +621,7 @@ mod tests {
             }],
             dry_run: false,
             expected_hash: None,
+            ..Default::default()
         };
         EditTool::apply_edits(Path::new("."), &input).await.unwrap();
 
@@ -584,6 +681,7 @@ mod tests {
             }],
             dry_run: false,
             expected_hash: Some(hash),
+            ..Default::default()
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(!output.applied);
@@ -610,6 +708,7 @@ mod tests {
             }],
             dry_run: false,
             expected_hash: Some(hash),
+            ..Default::default()
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);

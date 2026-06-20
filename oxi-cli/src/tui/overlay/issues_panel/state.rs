@@ -300,7 +300,7 @@ impl IssuesPanelOverlay {
             ) -> Fut
             + Send
             + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
     {
         if self.action_in_flight {
             return;

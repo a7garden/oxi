@@ -122,6 +122,13 @@ pub trait OverlayComponent: std::fmt::Debug {
         OverlayAction::None
     }
 
+    /// Called every main-loop iteration (~50ms) before rendering.
+    /// Use for self-initiated actions like timeout expiry.
+    /// Default: no-op. Return `OverlayAction::Close` to dismiss the overlay.
+    fn poll(&mut self) -> OverlayAction {
+        OverlayAction::None
+    }
+
     /// Render the overlay into the given area.
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme);
 

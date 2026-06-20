@@ -65,7 +65,7 @@ impl IssuesPanelOverlay {
             .iter()
             .map(|i| {
                 let lock_glyph = if i.meta.assigned_to.is_some() {
-                    "🔒"
+                    "▣"
                 } else {
                     "  "
                 };

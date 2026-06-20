@@ -11,6 +11,7 @@ pub mod cron;
 pub mod event;
 pub mod memory;
 pub mod resources;
+pub mod url_router;
 
 pub use cron::InMemoryCronScheduler;
 pub use event::InProcessEventBus;

@@ -54,7 +54,7 @@ impl FileMutationQueue {
     pub async fn with_queue<F, Fut, T>(&self, path: &Path, f: F) -> T
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = T>,
+        Fut: Future<Output = T>,
     {
         let ops = self.op_counter.fetch_add(1, Ordering::Relaxed);
 

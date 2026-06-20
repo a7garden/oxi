@@ -481,6 +481,30 @@ impl OxiBuilder {
         self
     }
 
+    /// Register the internal URL router.
+    pub fn with_url_router(mut self, router: Arc<dyn crate::ports::InternalUrlRouter>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.url_router = router;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the rule registry (TTSR).
+    pub fn with_rules(mut self, rules: Arc<dyn crate::ports::RuleRegistry>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.rules = rules;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the embedding provider.
+    pub fn with_embeddings(mut self, embeddings: Arc<dyn crate::ports::EmbeddingProvider>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.embeddings = embeddings;
+        self.ports = Some(ports);
+        self
+    }
+
     /// Enable multi-provider routing with automatic complexity-based model selection.
     ///
     /// This registers a [`MultiProvider`](oxi_ai::multi_provider::MultiProvider) that routes requests based on task complexity,

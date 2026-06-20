@@ -23,4 +23,6 @@ pub mod stateful_list;
 #[allow(missing_docs)]
 pub mod table_list;
 #[allow(missing_docs)]
+pub mod todo_panel;
+#[allow(missing_docs)]
 pub mod tool_renderer;

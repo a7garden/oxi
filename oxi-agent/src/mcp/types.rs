@@ -47,8 +47,33 @@ pub struct ServerEntry {
     /// Tools to exclude from direct/proxy registration (Phase 3).
     #[serde(default, rename = "excludeTools", alias = "exclude_tools")]
     pub exclude_tools: Option<Vec<String>>,
+    /// Per-request timeout in milliseconds (`0` disables).
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    /// OAuth2 client credentials for this server (v2.2). When present,
+    /// the credential provider performs a `client_credentials` grant
+    /// against `token_url` to obtain (and refresh) an `Authorization:
+    /// Bearer …` header for HTTP transports.
+    #[serde(default)]
+    pub oauth: Option<OAuthConfig>,
 }
 
+/// OAuth2 client credentials configuration for an MCP server.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OAuthConfig {
+    /// Token endpoint (e.g. `https://auth.example.com/oauth/token`).
+    #[serde(rename = "tokenUrl", alias = "token_url")]
+    pub token_url: String,
+    /// OAuth2 client id.
+    #[serde(rename = "clientId", alias = "client_id")]
+    pub client_id: String,
+    /// OAuth2 client secret.
+    #[serde(rename = "clientSecret", alias = "client_secret")]
+    pub client_secret: String,
+    /// Optional scope to request.
+    #[serde(default)]
+    pub scope: Option<String>,
+}
 /// Server lifecycle modes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -80,6 +105,17 @@ pub struct McpSettings {
     /// all configured servers (Phase 3).
     #[serde(default, rename = "disableProxyTool", alias = "disable_proxy_tool")]
     pub disable_proxy_tool: Option<bool>,
+    /// Opt-in: also read MCP server definitions from third-party tools
+    /// (`.claude/mcp.json`, `.cursor/mcp.json`, ...) under the current
+    /// project. Oxi's own `.oxi/mcp.json` always wins. Default: false
+    /// (preserves oxi's identity; enable to ease adoption from
+    /// Claude/Cursor). See design §9.2 / G8.
+    #[serde(
+        default,
+        rename = "discoverExternalConfigs",
+        alias = "discover_external_configs"
+    )]
+    pub discover_external_configs: Option<bool>,
 }
 
 /// Tool name prefix strategy.

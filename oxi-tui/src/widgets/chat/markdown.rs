@@ -6,6 +6,7 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::render::mermaid::{MermaidRenderOptions, render_ascii_diagram, render_mermaid_ascii};
 use crate::table_renderer::render_markdown_table;
 use crate::theme::ThemeStyles;
 use crate::widgets::chat::highlight::highlight_code;
@@ -404,6 +405,14 @@ pub fn render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>
                 }
             }
             MarkdownSegment::Code { lang, content } => {
+                // Mermaid blocks: attempt ASCII render, fall back to code.
+                if lang == "mermaid" {
+                    let options = MermaidRenderOptions::default();
+                    if let Some(ascii) = render_mermaid_ascii(content, &options) {
+                        lines.extend(render_ascii_diagram(&ascii));
+                        continue;
+                    }
+                }
                 lines.extend(highlight_code(content, lang, styles));
             }
         }

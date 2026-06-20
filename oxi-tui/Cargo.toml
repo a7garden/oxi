@@ -38,6 +38,7 @@ unicode-width = "0.2"
 unicode-segmentation = "1"
 base64 = "0.22"
 dirs = "5"
+which = "7"
 pulldown-cmark = "0.13.3"
 
 [package.metadata.docs.rs]

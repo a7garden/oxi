@@ -88,6 +88,8 @@ pub enum SdkError {
     #[error("port not configured: {port} (use OxiBuilder::with_port_*(...))")]
     PortNotConfigured { port: &'static str },
 
+    #[error("unknown URL scheme: {scheme} (no handler registered)")]
+    UnknownScheme { scheme: String },
     // ── Catalog ─────────────────────────────────────────────────────────────
     /// The catalog port is not wired or returned no data for the request.
     #[error("catalog unavailable: {reason}")]

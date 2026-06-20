@@ -353,6 +353,15 @@ pub enum AgentEvent {
         to_model: String,
     },
 
+
+    /// A TTSR rule violation was detected during streaming.
+    /// The stream was aborted and a system reminder will be injected.
+    TtsrInterrupt {
+        /// Name of the violated rule.
+        rule_name: String,
+        /// Session identifier for logging.
+        session_id: Option<String>,
+    },
     /// The agent run was cancelled by the caller.
     Cancelled,
 
@@ -434,6 +443,7 @@ impl AgentEvent {
             AgentEvent::Compaction { .. } => "compaction",
             AgentEvent::Retry { .. } => "retry",
             AgentEvent::Fallback { .. } => "fallback",
+            AgentEvent::TtsrInterrupt { .. } => "ttsr_interrupt",
             AgentEvent::Cancelled => "cancelled",
             AgentEvent::PartialResponse { .. } => "partial_response",
             AgentEvent::AutoRetryStart { .. } => "auto_retry_start",

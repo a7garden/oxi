@@ -18,6 +18,10 @@ pub mod retry;
 pub mod streaming;
 /// Tool execution strategies.
 pub mod tool_exec;
+/// Stream outcome types for TTSR integration.
+pub mod stream_outcome;
+/// Time-Traveling Stream Rules engine.
+pub mod ttsr;
 
 // Re-export for sibling module access
 use crate::agent::ProviderResolver;
@@ -47,6 +51,7 @@ use self::retry::{
 use self::streaming::stream_assistant_response;
 use self::tool_exec::execute_tool_calls;
 
+pub use self::stream_outcome::StreamOutcome;
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
 /// AgentLoop.
@@ -80,6 +85,8 @@ pub struct AgentLoop {
     steering_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
     /// Follow-up hook from AgentHooks — same as steering but for follow-ups.
     follow_up_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
+    /// TTSR engine for stream rule checking.
+    ttsr_engine: Option<Arc<ttsr::TtsrEngine>>,
 }
 
 impl AgentLoop {
@@ -125,6 +132,7 @@ impl AgentLoop {
             resolver,
             steering_hook: None,
             follow_up_hook: None,
+            ttsr_engine: config.ttsr_engine.clone(),
         }
     }
 
@@ -215,6 +223,12 @@ impl AgentLoop {
             workspace_dir: workspace,
             root_dir: self.config.workspace_dir.clone(),
             session_id: self.session_id.clone(),
+            snapshot_store: self.config.snapshot_store.clone(),
+            memory: self.config.memory.clone(),
+            url_resolver: self.config.url_resolver.clone(),
+            todo: self.config.todo.clone(),
+            agent_pool: self.config.agent_pool.clone(),
+            lsp: self.config.lsp.clone(),
         }
     }
 
@@ -621,22 +635,51 @@ impl AgentLoop {
                     .await;
 
                 tracing::info!("[AGENT-LOOP] About to call stream_assistant_response");
-                let assistant_message =
-                    match stream_assistant_response(self, &mut messages, &emit).await {
-                        Ok(msg) => msg,
-                        Err(e) => {
-                            return Ok(self
-                                .handle_streaming_error(
-                                    e,
-                                    &mut messages,
-                                    &mut new_messages,
-                                    &mut events,
-                                    &emit,
-                                    turn_number,
-                                )
-                                .await);
-                        }
-                    };
+                let ttsr = self.ttsr_engine.as_deref();
+                let outcome = stream_assistant_response(self, &mut messages, &emit, ttsr).await;
+
+                let assistant_message = match outcome {
+                    StreamOutcome::Complete(msg) => msg,
+                    StreamOutcome::Error(msg) => {
+                        return Ok(self
+                            .handle_streaming_error(
+                                anyhow::anyhow!("Provider stream error: {:?}", msg.stop_reason),
+                                &mut messages,
+                                &mut new_messages,
+                                &mut events,
+                                &emit,
+                                turn_number,
+                            )
+                            .await);
+                    }
+                    StreamOutcome::Cancelled(msg) => {
+                        emit(AgentEvent::TurnEnd {
+                            turn_number,
+                            assistant_message: Message::Assistant(msg.clone()),
+                            tool_results: vec![],
+                        });
+                        return Ok((messages, events));
+                    }
+                    StreamOutcome::RuleInterrupt { partial, rule } => {
+                        tracing::info!(
+                            "RuleInterrupt: '{}' violated, retrying",
+                            rule.name
+                        );
+                        emit(AgentEvent::TtsrInterrupt {
+                            rule_name: rule.name.clone(),
+                            session_id: self.session_id.clone(),
+                        });
+                        messages.push(Message::Assistant(partial));
+                        let interrupt_body = format!(
+                            "<system-interrupt reason=\"rule_violation\" rule=\"{name}\">\n\
+                             Your output was interrupted because it violated a project rule.\n\
+                             Comply with: {content}\n</system-interrupt>",
+                            name = rule.name, content = rule.content
+                        );
+                        messages.push(Message::user(interrupt_body));
+                        continue;
+                    }
+                };
 
                 new_messages.push(Message::Assistant(assistant_message.clone()));
 
@@ -835,6 +878,26 @@ impl AgentLoop {
         Ok((messages, events))
     }
 
+    /// Build the compaction instruction, appending injected TTSR rule
+    /// names so that the model remembers rules already enforced.
+    fn build_compaction_instruction(&self) -> Option<String> {
+        let base = self.config.compaction_instruction.as_deref();
+        let injected = self
+            .ttsr_engine
+            .as_ref()
+            .map(|e| e.injected_records())
+            .unwrap_or_default();
+        if injected.is_empty() {
+            return base.map(|s| s.to_string());
+        }
+        let mut instr = base.map(|s| s.to_string()).unwrap_or_default();
+        instr.push_str("\n\nThe following rules have already been enforced in this session and corrections applied. Do NOT violate them again:");
+        for (name, _turn) in &injected {
+            instr.push_str(&format!("\n- {name}"));
+        }
+        Some(instr)
+    }
+
     async fn maybe_compact(&self, messages: &mut Vec<Message>, iteration: usize, emit: &EmitFn) {
         let context_text = serde_json::to_string(&*messages).unwrap_or_default();
         let context_tokens = estimate_tokens(&context_text);
@@ -854,11 +917,11 @@ impl AgentLoop {
         });
 
         let messages_to_compact: Vec<Message> = messages.to_vec();
-        let instruction = self.config.compaction_instruction.as_deref();
+        let instruction = self.build_compaction_instruction();
 
         match self
             .compaction_manager
-            .compact_if_needed(&messages_to_compact, instruction, context_tokens, iteration)
+            .compact_if_needed(&messages_to_compact, instruction.as_deref(), context_tokens, iteration)
             .await
         {
             Ok(Some(compacted)) => {
@@ -990,6 +1053,13 @@ mod session_id_wiring_tests {
             workspace_dir: None,
             provider_options: None,
             on_compaction: None,
+            snapshot_store: None,
+            memory: None,
+            url_resolver: None,
+            todo: None,
+            agent_pool: None,
+            lsp: None,
+            ttsr_engine: None,
         };
         AgentLoop::new_with_resolver(
             Arc::new(NopProvider),

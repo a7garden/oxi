@@ -15,7 +15,18 @@
 pub mod ansi;
 pub mod diff;
 pub mod image;
+pub mod mermaid;
 pub mod terminal;
+
+// ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
+
+/// Mermaid diagram rendering: ASCII conversion, cache, and box border output.
+pub use mermaid::{
+    MermaidColorMode, MermaidRenderOptions, clear_mermaid_cache, render_ascii_diagram,
+    render_mermaid_ascii,
+};
 
 use std::fmt;
 use std::io;

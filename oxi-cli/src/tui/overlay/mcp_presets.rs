@@ -65,51 +65,7 @@ pub fn presets() -> &'static [McpPreset] {
     static CACHE: OnceLock<Vec<McpPreset>> = OnceLock::new();
     CACHE.get_or_init(|| {
         vec![
-            // ── Local (stdio) — npm-installed reference servers ─────
-            McpPreset {
-                name: "filesystem",
-                summary: "Read / write / search files in a directory (official MCP server).",
-                tag: "stdio",
-                entry: ServerEntry {
-                    command: Some("npx".to_string()),
-                    args: Some(vec![
-                        "-y".to_string(),
-                        "@modelcontextprotocol/server-filesystem".to_string(),
-                        ".".to_string(),
-                    ]),
-                    ..ServerEntry::default()
-                },
-                env_placeholder: None,
-                requires_oauth: false,
-            },
-            McpPreset {
-                name: "everything",
-                summary: "Reference server: prompts, resources, tools — good for testing.",
-                tag: "stdio",
-                entry: ServerEntry {
-                    command: Some("npx".to_string()),
-                    args: Some(vec![
-                        "-y".to_string(),
-                        "@modelcontextprotocol/server-everything".to_string(),
-                    ]),
-                    ..ServerEntry::default()
-                },
-                env_placeholder: None,
-                requires_oauth: false,
-            },
-            McpPreset {
-                name: "git",
-                summary: "Read / search / manipulate local Git repositories.",
-                tag: "stdio",
-                entry: ServerEntry {
-                    command: Some("uvx".to_string()),
-                    args: Some(vec!["mcp-server-git".to_string()]),
-                    ..ServerEntry::default()
-                },
-                env_placeholder: None,
-                requires_oauth: false,
-            },
-            // ── Hosted (HTTP) — zero-install, browser-auth ───────────
+            // ── Hosted (HTTP) — zero-install docs lookup ─────────────
             McpPreset {
                 name: "context7",
                 summary: "Resolve library IDs and pull up-to-date docs into context.",
@@ -120,28 +76,6 @@ pub fn presets() -> &'static [McpPreset] {
                 },
                 env_placeholder: Some("CONTEXT7_API_KEY=…"),
                 requires_oauth: false,
-            },
-            McpPreset {
-                name: "gh_grep",
-                summary: "Grep by Vercel — search public code snippets on GitHub.",
-                tag: "http",
-                entry: ServerEntry {
-                    url: Some("https://mcp.grep.app".to_string()),
-                    ..ServerEntry::default()
-                },
-                env_placeholder: None,
-                requires_oauth: false,
-            },
-            McpPreset {
-                name: "sentry",
-                summary: "Query Sentry issues, projects, and error events.",
-                tag: "http+oauth",
-                entry: ServerEntry {
-                    url: Some("https://mcp.sentry.dev/mcp".to_string()),
-                    ..ServerEntry::default()
-                },
-                env_placeholder: None,
-                requires_oauth: true,
             },
         ]
     })

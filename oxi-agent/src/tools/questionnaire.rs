@@ -13,6 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::sync::oneshot;
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -24,14 +26,46 @@ use async_trait::async_trait;
 #[derive(Clone)]
 pub struct QuestionnaireBridge {
     inner: Arc<parking_lot::Mutex<Option<PendingQuestionnaire>>>,
+    /// Set to `true` when the TUI main loop starts polling.
+    /// In headless mode (`--print`, RPC) this stays `false`, allowing the
+    /// tool to refuse execution instead of hanging forever.
+    ui_attached: Arc<AtomicBool>,
+    /// Questionnaire overlay timeout. `None` = disabled (wait indefinitely).
+    /// Set at construction from `Settings::questionnaire_timeout_secs`.
+    timeout: Option<Duration>,
 }
 
 impl QuestionnaireBridge {
-    /// Create a new empty bridge.
+    /// Create a new empty bridge with no timeout and UI not attached.
     pub fn new() -> Self {
         Self {
             inner: Arc::new(parking_lot::Mutex::new(None)),
+            ui_attached: Arc::new(AtomicBool::new(false)),
+            timeout: None,
         }
+    }
+
+    /// Create a new bridge with a timeout duration.
+    pub fn with_timeout(timeout: Option<Duration>) -> Self {
+        Self {
+            timeout,
+            ..Self::new()
+        }
+    }
+
+    /// Signal that the TUI main loop is polling. Called once at TUI startup.
+    pub fn attach(&self) {
+        self.ui_attached.store(true, Ordering::SeqCst);
+    }
+
+    /// Returns `true` when the TUI is polling the bridge (interactive mode).
+    pub fn is_ui_attached(&self) -> bool {
+        self.ui_attached.load(Ordering::SeqCst)
+    }
+
+    /// Returns the configured timeout duration, if any.
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
     }
 
     /// Store a pending questionnaire. Called by `QuestionnaireTool::execute`.
@@ -73,6 +107,8 @@ pub struct PendingQuestionnaire {
     /// Sender end of the response channel. Dropping this (without sending) is
     /// equivalent to user dismiss.
     pub responder: oneshot::Sender<QuestionnaireResponse>,
+    /// Overlay timeout. `None` = disabled.
+    pub timeout: Option<Duration>,
 }
 
 /// A single question to ask the user.
@@ -94,6 +130,10 @@ pub struct Question {
     /// Whether multiple options can be selected. Defaults to `false`.
     #[serde(default)]
     pub multi_select: bool,
+    /// Recommended option index (0-based). Used for default cursor position,
+    /// visual marker, and timeout auto-selection fallback.
+    #[serde(default)]
+    pub recommended: Option<usize>,
 }
 
 fn default_true() -> bool {
@@ -118,6 +158,9 @@ pub struct QuestionnaireResponse {
     pub answers: Vec<Answer>,
     /// `true` if the user cancelled (Esc).
     pub cancelled: bool,
+    /// `true` if answers were auto-selected due to timeout.
+    #[serde(default)]
+    pub timed_out: bool,
 }
 
 /// A single answer to a question.
@@ -170,10 +213,13 @@ impl AgentTool for QuestionnaireTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user one or more questions. Use for clarifying requirements, \
-         getting preferences, or confirming decisions. For single questions, \
-         shows a simple option list. For multiple questions, shows a tab-based \
-         interface."
+        "Ask the user one or more questions via interactive overlay. \
+         Use ONLY when choices have materially different tradeoffs the user must \
+         decide. Default to action — pick the conservative/standard option and \
+         proceed when a reasonable default exists. Do not ask about implementation \
+         details findable in code, configs, or docs. Use 'recommended' to mark the \
+         default option; 'allowOther' defaults to true. Provide 2-5 concise options. \
+         Batch related questions in one call."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -230,11 +276,16 @@ impl AgentTool for QuestionnaireTool {
                                 "type": "boolean",
                                 "description": "Allow multiple selections (default: false)",
                                 "default": false
+                            },
+                            "recommended": {
+                                "type": "number",
+                                "description": "Recommended option index (0-based). Marks the default choice and is used for timeout auto-selection.",
+                                "minimum": 0
                             }
                         },
                         "required": ["id", "prompt"]
-                    }
                 }
+            },
             },
             "required": ["questions"]
         })
@@ -247,8 +298,17 @@ impl AgentTool for QuestionnaireTool {
         signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        // 0. Headless guard — refuse in non-interactive mode
+        if !self.bridge.is_ui_attached() {
+            return Ok(AgentToolResult::error(
+                "Questionnaire requires interactive TUI mode. \
+                 Not available in --print or RPC mode.",
+            ));
+        }
+
         // 1. Parse and validate
         let questions = parse_questions(&params)?;
+        let timeout = self.bridge.timeout();
 
         // 2. Create oneshot channel
         let (tx, rx) = oneshot::channel();
@@ -257,6 +317,7 @@ impl AgentTool for QuestionnaireTool {
         if !self.bridge.set(PendingQuestionnaire {
             questions,
             responder: tx,
+            timeout,
         }) {
             return Ok(AgentToolResult::error(
                 "Another questionnaire is already pending",
@@ -293,7 +354,10 @@ async fn select_with_abort(
                     if resp.cancelled {
                         Ok(AgentToolResult::success("User cancelled the questionnaire"))
                     } else {
-                        Ok(AgentToolResult::success(format_answers(&resp.answers)))
+                        Ok(AgentToolResult::success(format_answers(
+                            &resp.answers,
+                            resp.timed_out,
+                        )))
                     }
                 }
                 Err(_) => {
@@ -352,17 +416,23 @@ fn parse_questions(params: &serde_json::Value) -> Result<Vec<Question>, ToolErro
 }
 
 /// Format answers into a human-readable text for the tool result.
-fn format_answers(answers: &[Answer]) -> String {
+fn format_answers(answers: &[Answer], timed_out: bool) -> String {
+    let suffix = if timed_out {
+        " (auto-selected after timeout)"
+    } else {
+        ""
+    };
     answers
         .iter()
         .map(|a| {
-            if a.was_custom {
+            let base = if a.was_custom {
                 format!("{}: user wrote: {}", a.id, a.label)
             } else if let Some(idx) = a.index {
                 format!("{}: user selected: {}. {}", a.id, idx, a.label)
             } else {
                 format!("{}: user selected: {}", a.id, a.label)
-            }
+            };
+            format!("{base}{suffix}")
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -462,7 +532,7 @@ mod tests {
             was_custom: false,
             index: Some(1),
         }];
-        let text = format_answers(&answers);
+        let text = format_answers(&answers, false);
         assert_eq!(text, "lang: user selected: 1. Rust");
     }
 
@@ -475,7 +545,7 @@ mod tests {
             was_custom: true,
             index: None,
         }];
-        let text = format_answers(&answers);
+        let text = format_answers(&answers, false);
         assert_eq!(text, "name: user wrote: myproj");
     }
 
@@ -504,7 +574,7 @@ mod tests {
                 index: None,
             },
         ];
-        let text = format_answers(&answers);
+        let text = format_answers(&answers, false);
         assert_eq!(
             text,
             "lang: user selected: 1. Rust\ndb: user selected: 2. PostgreSQL\nauth: user wrote: jwt"
@@ -520,6 +590,7 @@ mod tests {
         let pending = PendingQuestionnaire {
             questions: vec![],
             responder: tx,
+            timeout: None,
         };
         assert!(bridge.set(pending));
         assert!(bridge.has_pending());
@@ -541,10 +612,70 @@ mod tests {
         bridge.set(PendingQuestionnaire {
             questions: vec![],
             responder: tx1,
+            timeout: None,
         });
         assert!(!bridge.set(PendingQuestionnaire {
             questions: vec![],
-            responder: tx2
+            responder: tx2,
+            timeout: None,
         }));
+    }
+
+    #[test]
+    fn test_ui_attached_flag() {
+        let bridge = QuestionnaireBridge::new();
+        assert!(!bridge.is_ui_attached());
+        bridge.attach();
+        assert!(bridge.is_ui_attached());
+    }
+
+    #[test]
+    fn test_bridge_with_timeout() {
+        let bridge = QuestionnaireBridge::with_timeout(Some(Duration::from_secs(30)));
+        assert_eq!(bridge.timeout(), Some(Duration::from_secs(30)));
+        assert!(!bridge.is_ui_attached()); // with_timeout doesn't attach
+
+        let no_timeout = QuestionnaireBridge::new();
+        assert_eq!(no_timeout.timeout(), None);
+    }
+
+    #[test]
+    fn test_format_answers_timed_out() {
+        let answers = vec![Answer {
+            id: "auth".into(),
+            value: "oauth".into(),
+            label: "OAuth2".into(),
+            was_custom: false,
+            index: Some(2),
+        }];
+        let text = format_answers(&answers, true);
+        assert_eq!(
+            text,
+            "auth: user selected: 2. OAuth2 (auto-selected after timeout)"
+        );
+    }
+
+    #[test]
+    fn test_question_deserializes_without_recommended() {
+        // recommended is optional with serde default — backward compatible
+        let json = serde_json::json!({
+            "id": "test",
+            "prompt": "Test question?",
+            "options": [{"value": "a", "label": "A"}]
+        });
+        let q: Question = serde_json::from_value(json).unwrap();
+        assert_eq!(q.recommended, None);
+    }
+
+    #[test]
+    fn test_question_deserializes_with_recommended() {
+        let json = serde_json::json!({
+            "id": "test",
+            "prompt": "Test question?",
+            "options": [{"value": "a", "label": "A"}, {"value": "b", "label": "B"}],
+            "recommended": 1
+        });
+        let q: Question = serde_json::from_value(json).unwrap();
+        assert_eq!(q.recommended, Some(1));
     }
 }

@@ -54,7 +54,7 @@ use std::sync::LazyLock;
 /// existing tokio context (e.g., from an agent tool callback or TUI handler).
 fn run_on_fresh_runtime<F, T>(future: F) -> Result<T>
 where
-    F: std::future::Future<Output = Result<T>> + Send,
+    F: Future<Output = Result<T>> + Send,
     T: Send,
 {
     std::thread::scope(|s| {

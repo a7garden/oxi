@@ -127,7 +127,7 @@ impl AgentTool for McpTool {
 
         // ── Route by priority ─────────────────────────────────────
         if let Some(action) = obj.get("action").and_then(|v| v.as_str()) {
-            return self.handle_action(action).await;
+            return self.handle_action(action, obj).await;
         }
 
         if let Some(tool_name) = obj.get("tool").and_then(|v| v.as_str()) {
@@ -228,13 +228,106 @@ impl McpTool {
         }
     }
 
-    async fn handle_action(&self, action: &str) -> Result<AgentToolResult, String> {
+    async fn handle_action(
+        &self,
+        action: &str,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<AgentToolResult, String> {
+        let server = obj.get("server").and_then(|v| v.as_str()).unwrap_or("");
         match action {
             "ui-messages" => Ok(AgentToolResult::success(
                 "No UI session messages available.",
             )),
+            "list-resources" => {
+                if server.is_empty() {
+                    return Ok(AgentToolResult::error(String::from(
+                        "list-resources requires 'server'",
+                    )));
+                }
+                match self.manager.list_resources(server).await {
+                    Ok(resources) => Ok(AgentToolResult::success(
+                        serde_json::to_string_pretty(&resources).unwrap_or_default(),
+                    )),
+                    Err(e) => Ok(AgentToolResult::error(format!(
+                        "list_resources('{}') failed: {}",
+                        server, e
+                    ))),
+                }
+            }
+            "read-resource" => {
+                let uri = obj.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+                if server.is_empty() || uri.is_empty() {
+                    return Ok(AgentToolResult::error(String::from(
+                        "read-resource requires 'server' and 'uri'",
+                    )));
+                }
+                match self.manager.read_resource(server, uri).await {
+                    Ok(content) => Ok(AgentToolResult::success(content::transform_mcp_content(
+                        &content,
+                    ))),
+                    Err(e) => Ok(AgentToolResult::error(format!(
+                        "read_resource('{}','{}') failed: {}",
+                        server, uri, e
+                    ))),
+                }
+            }
+            "list-prompts" => {
+                if server.is_empty() {
+                    return Ok(AgentToolResult::error(String::from(
+                        "list-prompts requires 'server'",
+                    )));
+                }
+                match self.manager.list_prompts(server).await {
+                    Ok(prompts) => {
+                        let summary: Vec<String> = prompts
+                            .iter()
+                            .map(|p| {
+                                format!(
+                                    "- {}{}",
+                                    p.name,
+                                    p.description
+                                        .as_deref()
+                                        .map(|d| format!(" — {}", d))
+                                        .unwrap_or_default()
+                                )
+                            })
+                            .collect();
+                        Ok(AgentToolResult::success(summary.join("\n")))
+                    }
+                    Err(e) => Ok(AgentToolResult::error(format!(
+                        "list_prompts('{}') failed: {}",
+                        server, e
+                    ))),
+                }
+            }
+            "get-prompt" => {
+                let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let arguments = obj
+                    .get("arguments")
+                    .and_then(|v| v.as_object())
+                    .map(|m| {
+                        m.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect::<std::collections::HashMap<_, _>>()
+                    })
+                    .unwrap_or_default();
+                if server.is_empty() || name.is_empty() {
+                    return Ok(AgentToolResult::error(String::from(
+                        "get-prompt requires 'server' and 'name'",
+                    )));
+                }
+                match self.manager.get_prompt(server, name, arguments).await {
+                    Ok(messages) => Ok(AgentToolResult::success(
+                        serde_json::to_string_pretty(&messages).unwrap_or_default(),
+                    )),
+                    Err(e) => Ok(AgentToolResult::error(format!(
+                        "get_prompt('{}','{}') failed: {}",
+                        server, name, e
+                    ))),
+                }
+            }
             _ => Ok(AgentToolResult::error(format!(
-                "Unknown action: '{}'. Supported: 'ui-messages'",
+                "Unknown action: '{}'. Supported: 'ui-messages', 'list-resources', 'read-resource', 'list-prompts', 'get-prompt'",
                 action
             ))),
         }

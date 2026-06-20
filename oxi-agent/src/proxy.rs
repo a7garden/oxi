@@ -693,7 +693,7 @@ pub struct ProxyServerConfig {
     pub request_handler: Arc<
         dyn Fn(
                 ProxyServerRequest,
-            ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send>>
+            ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send>>
             + Send
             + Sync,
     >,

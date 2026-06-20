@@ -224,7 +224,7 @@ pub struct CreateAgentSessionResult {
 /// This keeps session creation separate from service creation so callers
 /// can resolve model, thinking, tools, and other session inputs against
 /// the target cwd before constructing the session.
-pub fn create_agent_session_from_services(
+pub async fn create_agent_session_from_services(
     options: CreateAgentSessionFromServicesOptions,
 ) -> Result<CreateAgentSessionResult> {
     let services = &options.services;
@@ -256,14 +256,42 @@ pub fn create_agent_session_from_services(
     // Get provider and model
     if model_id.is_empty() {
         // No model — return minimal session, TUI setup wizard will handle configuration
+        let memory_block = if settings.memory_enabled {
+            let backend = crate::services::create_memory_backend(settings);
+            if let Some(ref backend) = backend {
+                crate::services::build_memory_recall(backend.as_ref(), &cwd).await
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        let memory_opt = if memory_block.is_empty() { None } else { Some(memory_block) };
+
+        // TTSR engine
+        let ttsr_engine: Option<Arc<oxi_agent::agent_loop::ttsr::TtsrEngine>> =
+            if settings.ttsr_enabled {
+                let rules = crate::discovery::rules::discover_rules(&services.cwd);
+                let registry: Arc<dyn oxi_agent::agent_loop::ttsr::RuleRegistry> =
+                    Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
+                let engine = oxi_agent::agent_loop::ttsr::TtsrEngine::new(
+                    registry,
+                    Default::default(),
+                );
+                Some(Arc::new(engine))
+            } else {
+                None
+            };
+
         let config = oxi_agent::AgentConfig {
             name: "oxi".to_string(),
             description: Some("oxi CLI agent".to_string()),
             model_id: String::new(),
-            system_prompt: Some(build_system_prompt(
+            system_prompt: Some(build_system_prompt_with_memory(
                 thinking_level,
                 settings.language_policy_enabled,
                 &settings.output_languages,
+                memory_opt,
             )),
             timeout_seconds: settings.tool_timeout_seconds,
             temperature: settings.effective_temperature(),
@@ -283,6 +311,7 @@ pub fn create_agent_session_from_services(
             output_mode: None,
             provider_options: None,
             session_id: None,
+            ttsr_engine,
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_sdk::get_provider("anthropic")
@@ -304,11 +333,44 @@ pub fn create_agent_session_from_services(
     let provider = oxi_sdk::get_provider(&provider_name)
         .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
 
+    // ── Memory recall (④) ──
+    let memory_block = if settings.memory_enabled {
+        let backend = crate::services::create_memory_backend(settings);
+        if let Some(ref backend) = backend {
+            crate::services::build_memory_recall(backend.as_ref(), &cwd).await
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // ── TTSR engine (③) ──
+    let ttsr_engine: Option<Arc<oxi_agent::agent_loop::ttsr::TtsrEngine>> =
+        if settings.ttsr_enabled {
+            let rules = crate::discovery::rules::discover_rules(&services.cwd);
+            let registry: Arc<dyn oxi_agent::agent_loop::ttsr::RuleRegistry> =
+                Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
+            let engine = oxi_agent::agent_loop::ttsr::TtsrEngine::new(
+                registry,
+                oxi_agent::agent_loop::ttsr::TtsrSettings {
+                    enabled: true,
+                    builtin_rules: settings.ttsr_interrupt_mode != "never",
+                    ..Default::default()
+                },
+            );
+            Some(Arc::new(engine))
+        } else {
+            None
+        };
+
     // Build agent config
-    let system_prompt = build_system_prompt(
+    let memory_block_opt = if memory_block.is_empty() { None } else { Some(memory_block) };
+    let system_prompt = build_system_prompt_with_memory(
         thinking_level,
         settings.language_policy_enabled,
         &settings.output_languages,
+        memory_block_opt,
     );
     let compaction_strategy = if settings.auto_compaction {
         oxi_sdk::CompactionStrategy::Threshold(0.8)
@@ -338,6 +400,7 @@ pub fn create_agent_session_from_services(
         output_mode: None,
         provider_options: None,
         session_id: None,
+        ttsr_engine,
     };
 
     let agent = Arc::new(oxi_agent::Agent::new(
@@ -760,6 +823,16 @@ pub(crate) fn build_system_prompt(
     language_policy_enabled: bool,
     languages: &std::collections::HashMap<String, String>,
 ) -> String {
+    build_system_prompt_with_memory(thinking_level, language_policy_enabled, languages, None)
+}
+
+/// Build the system prompt with an optional project-memory recall block.
+pub(crate) fn build_system_prompt_with_memory(
+    thinking_level: ThinkingLevel,
+    language_policy_enabled: bool,
+    languages: &std::collections::HashMap<String, String>,
+    memory_block: Option<String>,
+) -> String {
     let directive =
         crate::prompt::system_prompt::language_directive(language_policy_enabled, languages);
     let options = crate::prompt::system_prompt::BuildSystemPromptOptions {
@@ -770,6 +843,7 @@ pub(crate) fn build_system_prompt(
         selected_tools: crate::prompt::system_prompt::default_tool_names(),
         tool_snippets: crate::prompt::system_prompt::default_tool_snippets(),
         language_directive: directive,
+        append_system_prompt: memory_block,
         ..Default::default()
     };
 
@@ -838,14 +912,15 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
         })?;
         let services = Arc::new(services);
 
-        let result = create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
+        let handle = tokio::runtime::Handle::current();
+        let result = handle.block_on(create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
             services: services.clone(),
             session_manager: options.session_manager,
             model_id: None,
             thinking_level: None,
             scoped_models: Vec::new(),
             tool_registry: None,
-        })?;
+        }))?;
 
         Ok(CreateAgentSessionRuntimeResult {
             session: result.session,

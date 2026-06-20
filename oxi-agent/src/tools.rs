@@ -5,16 +5,197 @@ use crate::types::ToolDefinition;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::fmt;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Capability traits — lightweight interfaces tools need, implemented by the
+// composition root (oxi-cli) bridging to SDK ports. oxi-agent does NOT depend
+// on oxi-sdk, so these are defined here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A single memory item returned by [`MemoryBackend`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemoryItem {
+    /// Unique identifier.
+    pub id: String,
+    /// Memory kind: "fact", "preference", "context", "summary".
+    pub kind: String,
+    /// The memory content text.
+    pub content: String,
+    /// Project/scope identifier.
+    pub subject: String,
+}
+
+/// Memory backend for the `memory_*` tools. The composition root implements
+/// this, bridging to `oxi_sdk::ports::MemoryStore` + `EmbeddingProvider`.
+pub trait MemoryBackend: Send + Sync {
+    fn put<'a>(
+        &'a self,
+        content: &'a str,
+        kind: &'a str,
+        subject: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>>;
+    fn search<'a>(
+        &'a self,
+        query: &'a str,
+        k: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryItem>, ToolError>> + Send + 'a>>;
+    fn list<'a>(
+        &'a self,
+        subject: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryItem>, ToolError>> + Send + 'a>>;
+    fn delete<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ToolError>> + Send + 'a>>;
+}
+
+pub struct ResolvedContent {
+    /// The resolved text content.
+    pub content: String,
+    /// MIME type: "text/markdown", "application/json", "text/plain".
+    pub content_type: String,
+    /// True if the content is uneditable (suppresses hashline anchors).
+    pub immutable: bool,
+}
+
+/// URL resolver for internal protocol schemes. The composition root
+/// implements this, bridging to `oxi_sdk::ports::InternalUrlRouter`.
+pub trait UrlResolver: Send + Sync {
+    fn can_resolve(&self, input: &str) -> bool;
+    fn resolve<'a>(
+        &'a self,
+        uri: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResolvedContent, ToolError>> + Send + 'a>>;
+}
+
+/// Todo state access capability. Implemented by the composition root
+/// (oxi-cli) bridging to the session-scoped todo state. Used by the
+/// `todo` agent tool and the TUI sticky panel.
+pub trait TodoStateProvider: Send + Sync {
+    /// Return a snapshot of the current phase list (read-only, for TUI).
+    fn get_phases(&self) -> Vec<crate::tools::todo::TodoPhase>;
+
+    /// Apply a sequence of todo ops, returning the updated state, the
+    /// newly-completed transitions (for strikethrough animation), and
+    /// any error messages from ambiguous op references.
+    fn apply_ops<'a>(
+        &'a self,
+        ops: Vec<crate::tools::todo::TodoOp>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<crate::tools::todo::TodoUpdateResult, String>> + Send + 'a>,
+    >;
+}
+
+// ── Agent Hub capability (⑥) ──────────────────────────────────────────
+
+/// Agent kind for Hub display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    /// Main conversation agent.
+    Main,
+    /// Task-spawned sub-agent.
+    Task,
+    /// Observation-only advisor.
+    Advisor,
+}
+
+/// Hub display status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentHubStatus {
+    /// Currently executing.
+    Running,
+    /// Finished, idle.
+    Idle,
+    /// Parked (memory retained, not running).
+    Parked,
+    /// Abnormal termination.
+    Aborted,
+}
+
+/// Read-only agent info for Hub display.
+#[derive(Debug, Clone)]
+pub struct AgentInfo {
+    /// Unique identifier.
+    pub id: String,
+    /// Display name.
+    pub display_name: String,
+    /// Agent kind.
+    pub kind: AgentKind,
+    /// Current status.
+    pub status: AgentHubStatus,
+    /// Current task description (if any).
+    pub current_task: Option<String>,
+}
+
+/// Agent pool access capability. Implemented by the composition root
+/// to expose live sub-agent info to the Hub overlay and todo matching.
+pub trait AgentPoolProvider: Send + Sync {
+    /// List all known agents (main + sub-agents).
+    fn list_agents(&self) -> Vec<AgentInfo>;
+    /// Get a specific agent by ID.
+    fn get_agent(&self, id: &str) -> Option<AgentInfo>;
+}
+
+// ── LSP capability (⑧) ────────────────────────────────────────────────
+
+/// LSP action enum — the 14 operations the `lsp` tool supports.
+#[derive(Debug, Clone)]
+pub enum LspAction {
+    /// Get diagnostics for a file.
+    Diagnostics { file: String },
+    /// Go to definition.
+    Definition {
+        file: String,
+        line: u32,
+        symbol: Option<String>,
+    },
+    /// Find references.
+    References {
+        file: String,
+        line: u32,
+        symbol: Option<String>,
+    },
+    /// Hover info.
+    Hover {
+        file: String,
+        line: u32,
+        symbol: Option<String>,
+    },
+    /// Rename symbol.
+    Rename {
+        file: String,
+        line: u32,
+        symbol: String,
+        new_name: String,
+        apply: bool,
+    },
+    /// Get workspace/document symbols.
+    Symbols { file: String, query: Option<String> },
+    /// Get server status.
+    Status,
+}
+
+/// LSP access capability. Implemented by an `oxi-lsp` crate (feature-gated)
+/// or stubbed with `None` when LSP is disabled.
+pub trait LspProvider: Send + Sync {
+    /// Execute an LSP action and return formatted text output.
+    fn execute_action<'a>(
+        &'a self,
+        action: &'a LspAction,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>>;
+}
 
 /// Context passed to tools at execution time.
 ///
 /// This allows tools to operate on a specific workspace without being
 /// rebuilt. When `root_dir` is `Some`, tools use it as their base directory.
 /// When `None`, tools should fall back to `workspace_dir`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolContext {
     /// Primary workspace directory (used when root_dir is None).
     pub workspace_dir: PathBuf,
@@ -23,6 +204,44 @@ pub struct ToolContext {
     pub root_dir: Option<PathBuf>,
     /// Session identifier for logging/tracing.
     pub session_id: Option<String>,
+    /// Snapshot store for hashline tag emission/validation.
+    /// When `None`, hashline edit mode is unavailable.
+    pub snapshot_store: Option<Arc<dyn oxi_hashline::SnapshotStore>>,
+    /// Memory backend for `memory_*` tools.
+    /// When `None`, memory tools return an error.
+    pub memory: Option<Arc<dyn MemoryBackend>>,
+    /// URL resolver for internal protocol schemes (`issue://`, `pr://`, etc.).
+    /// When `None`, URL-prefixed paths are treated as regular file paths.
+    pub url_resolver: Option<Arc<dyn UrlResolver>>,
+    /// Todo state for the `todo` agent tool.
+    /// When `None`, the `todo` tool returns an error.
+    pub todo: Option<Arc<dyn TodoStateProvider>>,
+    /// Agent pool for Hub display and todo sub-agent matching.
+    pub agent_pool: Option<Arc<dyn AgentPoolProvider>>,
+    /// LSP provider for the `lsp` tool.
+    pub lsp: Option<Arc<dyn LspProvider>>,
+}
+
+impl fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("workspace_dir", &self.workspace_dir)
+            .field("root_dir", &self.root_dir)
+            .field("session_id", &self.session_id)
+            .field(
+                "snapshot_store",
+                &self.snapshot_store.as_ref().map(|_| "<dyn SnapshotStore>"),
+            )
+            .field(
+                "memory",
+                &self.memory.as_ref().map(|_| "<dyn MemoryBackend>"),
+            )
+            .field(
+                "url_resolver",
+                &self.url_resolver.as_ref().map(|_| "<dyn UrlResolver>"),
+            )
+            .finish()
+    }
 }
 
 impl ToolContext {
@@ -32,6 +251,12 @@ impl ToolContext {
             workspace_dir: workspace_dir.into(),
             root_dir: None,
             session_id: None,
+            snapshot_store: None,
+            memory: None,
+            url_resolver: None,
+            todo: None,
+            agent_pool: None,
+            lsp: None,
         }
     }
 
@@ -52,6 +277,30 @@ impl ToolContext {
         self.root_dir = Some(root_dir.into());
         self
     }
+
+    /// Set the snapshot store (enables hashline edit mode).
+    pub fn with_snapshot_store(mut self, store: Arc<dyn oxi_hashline::SnapshotStore>) -> Self {
+        self.snapshot_store = Some(store);
+        self
+    }
+
+    /// Set the memory backend (enables memory tools).
+    pub fn with_memory(mut self, memory: Arc<dyn MemoryBackend>) -> Self {
+        self.memory = Some(memory);
+        self
+    }
+
+    /// Set the URL resolver (enables internal URL dispatch).
+    pub fn with_url_resolver(mut self, resolver: Arc<dyn UrlResolver>) -> Self {
+        self.url_resolver = Some(resolver);
+        self
+    }
+
+    /// Set the todo state (enables the `todo` agent tool).
+    pub fn with_todo(mut self, todo: Arc<dyn TodoStateProvider>) -> Self {
+        self.todo = Some(todo);
+        self
+    }
 }
 
 impl Default for ToolContext {
@@ -60,6 +309,12 @@ impl Default for ToolContext {
             workspace_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             root_dir: None,
             session_id: None,
+            snapshot_store: None,
+            memory: None,
+            url_resolver: None,
+            todo: None,
+            agent_pool: None,
+            lsp: None,
         }
     }
 }
@@ -279,6 +534,8 @@ pub trait AgentTool: Send + Sync {
 pub mod bash;
 /// Browser tools (engine abstraction always compiled).
 pub mod browse;
+/// Conventional-commit tool (deterministic scope + LLM analysis).
+pub mod commit;
 /// Context7 documentation tools.
 pub mod context7;
 /// In-place file edit tool.
@@ -297,10 +554,22 @@ pub mod github;
 pub mod github_search;
 /// Content search (grep) tool.
 pub mod grep;
+/// TokioHashlineFs — tokio::fs-backed HashlineFs implementation.
+pub mod hashline_fs;
 /// Shared HTTP client singleton.
 pub mod http_client;
 /// Directory listing tool.
 pub mod ls;
+/// LSP tool (requires LspProvider capability).
+pub mod lsp;
+/// Memory recall tool — semantic search over stored memories.
+pub mod memory_recall;
+/// Memory reflect tool — persist a session summary to memory.
+pub mod memory_reflect;
+/// Memory retain tool — persist a memory item to the backend.
+pub mod memory_retain;
+/// Memory edit tool — update or delete a memory item.
+pub mod memory_edit;
 /// Path security (traversal protection).
 pub mod path_security;
 /// Path manipulation utilities.
@@ -315,6 +584,8 @@ pub mod render_utils;
 pub mod search_cache;
 /// Sub-agent delegation tool.
 pub mod subagent;
+/// Phased todo tool (init/start/done/drop/rm/append/view).
+pub mod todo;
 /// Tool definition wrapper helpers.
 pub mod tool_definition_wrapper;
 /// Output truncation helpers.
@@ -334,7 +605,12 @@ pub use read::ReadTool;
 // pub use search_cache;
 
 pub use crate::mcp::McpTool;
+pub use commit::CommitTool;
 pub use context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
+pub use memory_recall::MemoryRecallTool;
+pub use memory_edit::MemoryEditTool;
+pub use memory_reflect::MemoryReflectTool;
+pub use memory_retain::MemoryRetainTool;
 pub use questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 pub use subagent::SubagentTool;
 pub use write::WriteTool;
@@ -508,7 +784,12 @@ impl ToolRegistry {
                     .get_or_init(|| Arc::new(search_cache::SearchCache::new()))
                     .clone(),
             )),
-            Box::new(SubagentTool::with_cwd(cwd)),
+            Box::new(SubagentTool::with_cwd(cwd.clone())),
+            Box::new(todo::TodoTool),
+            Box::new(memory_recall::MemoryRecallTool),
+            Box::new(memory_reflect::MemoryReflectTool),
+            Box::new(memory_retain::MemoryRetainTool),
+            Box::new(memory_edit::MemoryEditTool),
         ];
 
         all_tools.push(Box::new(crate::mcp::McpTool::new(mcp_manager.clone())));
@@ -527,6 +808,7 @@ impl ToolRegistry {
         all_tools.push(Box::new(context7::Context7ResolveLibraryIdTool::new()));
         all_tools.push(Box::new(context7::Context7QueryDocsTool::new()));
         all_tools.push(Box::new(generate_image::GenerateImageTool::new()));
+        all_tools.push(Box::new(commit::CommitTool::unconfigured()));
 
         for tool in all_tools {
             if tool.essential() || !disabled.contains(tool.name()) {

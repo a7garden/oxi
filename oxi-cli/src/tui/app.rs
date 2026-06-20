@@ -349,6 +349,9 @@ pub(crate) struct AppState {
     /// TUI startup. `None` when the TUI is not driven by an `Oxi` engine
     /// (e.g. unit tests using `AppState::new()`).
     pub catalog: Option<std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+    /// Todo panel state — synced from the agent's `todo` tool via
+    /// `TodoStateProvider`. Rendered as a sticky panel above the input.
+    pub todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState,
 }
 
 /// A toast notification to display temporarily.
@@ -462,6 +465,7 @@ impl AppState {
             notifications: Vec::new(),
             issue_store: None,
             catalog: None,
+            todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState::new(),
         };
 
         // Load user keybindings from settings
@@ -909,7 +913,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 thinking_level: Some(settings.thinking_level),
                 scoped_models: Vec::new(),
                 tool_registry: Some(tools.clone()),
-            })?;
+            }).await?;
 
         let agent_session = create_result.session;
         if let Some(msg) = create_result.model_fallback_message {
@@ -1274,6 +1278,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         }
         *state.active_skills.write() = app.active_skills();
         state.questionnaire_bridge = questionnaire_bridge.clone();
+        if let Some(ref bridge) = questionnaire_bridge {
+            bridge.attach();
+        }
 
         // Push welcome message (only for new sessions, not resumed)
         if !is_resuming {
@@ -1365,6 +1372,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
             // Clean up expired notifications
             state.cleanup_notifications();
+
+            // Poll overlay for self-initiated actions (timeout auto-submit, etc.)
+            if let Some(ref mut overlay) = state.overlay_state {
+                if matches!(overlay.poll(), super::overlay::OverlayAction::Close) {
+                    state.overlay_state = None;
+                }
+            }
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
 
@@ -1472,6 +1486,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 state.overlay_state = Some(Box::new(QuestionnaireOverlay::new(
                     pending.questions,
                     pending.responder,
+                    pending.timeout,
                 )));
                 tracing::info!("[TUI] Questionnaire overlay opened");
             }

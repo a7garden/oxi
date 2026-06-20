@@ -56,6 +56,20 @@ pub struct AgentLoopConfig {
     /// compaction summaries to a memory store) without resorting to
     /// `tokio::spawn` fire-and-forget.
     pub on_compaction: Option<CompactionHook>,
+    /// Snapshot store for hashline edit mode.
+    pub snapshot_store: Option<Arc<dyn oxi_hashline::SnapshotStore>>,
+    /// Memory backend for memory tools.
+    pub memory: Option<Arc<dyn crate::tools::MemoryBackend>>,
+    /// URL resolver for internal protocol schemes.
+    pub url_resolver: Option<Arc<dyn crate::tools::UrlResolver>>,
+    /// Todo state provider for the `todo` tool.
+    pub todo: Option<Arc<dyn crate::tools::TodoStateProvider>>,
+    /// Agent pool for Hub display.
+    pub agent_pool: Option<Arc<dyn crate::tools::AgentPoolProvider>>,
+    /// LSP provider for the `lsp` tool.
+    pub lsp: Option<Arc<dyn crate::tools::LspProvider>>,
+    /// TTSR engine for stream rule checking.
+    pub ttsr_engine: Option<Arc<crate::agent_loop::ttsr::TtsrEngine>>,
 }
 
 impl Default for AgentLoopConfig {
@@ -80,6 +94,13 @@ impl Default for AgentLoopConfig {
             workspace_dir: None,
             provider_options: None,
             on_compaction: None,
+            snapshot_store: None,
+            memory: None,
+            url_resolver: None,
+            todo: None,
+            agent_pool: None,
+            lsp: None,
+            ttsr_engine: None,
         }
     }
 }

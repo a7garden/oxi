@@ -76,9 +76,17 @@ pub use state::{AgentState, SharedState};
 pub use structured_output::{OutputMode, StructuredOutput, StructuredOutputError};
 
 pub use mcp::{McpConfig, McpManager, McpTool};
+pub use tools::commit::{
+    CommitGroup, CommitTool, CommitType, ConventionalAnalysis, ConventionalDetail, NumstatEntry,
+    ScopeCandidate,
+};
 pub use tools::context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
 pub use tools::github::GitHubTool;
 pub use tools::github_search::GitHubSearchTool;
+pub use tools::memory_recall::MemoryRecallTool;
+pub use tools::memory_reflect::MemoryReflectTool;
+pub use tools::memory_retain::MemoryRetainTool;
+pub use tools::memory_edit::MemoryEditTool;
 pub use tools::questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 pub use tools::search_cache::{GetSearchResultsTool, SearchCache};
 pub use tools::subagent::SubagentTool;
@@ -88,6 +96,14 @@ pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool, LsTool, ReadTool,
     ToolContext, ToolError, ToolRegistry, WriteTool,
 };
+
+pub use tools::TodoStateProvider;
+pub use tools::todo::{
+    InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus,
+    TodoUpdateResult,
+};
+pub use tools::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
+pub use tools::{LspAction, LspProvider};
 
 /// Standard imports for oxi-agent usage.
 pub mod prelude {

@@ -34,6 +34,7 @@ dirs = "5"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
+regex = "1"
 
 # File-based port impls (fs/ sub-module). Always available in default build.
 toml = "0.8"

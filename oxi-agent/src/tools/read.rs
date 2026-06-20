@@ -3,18 +3,21 @@
 /// - Text files with line numbers, offset/limit, and truncation
 /// - Image files (jpg/png/gif/webp) returned as base64-encoded content blocks
 /// - Binary file detection
+/// - Snapshot tag emission for hashline editing
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
 use base64::Engine;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
+use oxi_hashline::format::{compute_file_hash, format_hashline_header};
+use oxi_hashline::normalize::{normalize_to_lf, strip_bom};
+use oxi_hashline::snapshots::SnapshotStore;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-
 /// Maximum bytes to read for binary detection
 const BINARY_DETECT_BYTES: usize = 8192;
 
@@ -102,12 +105,16 @@ impl ReadTool {
     }
 
     /// Read a text file with optional offset/limit, line numbers, and truncation.
+    /// When `snapshot_store` is provided and the file is fully read without
+    /// offset, records a snapshot and emits a `[path#TAG]` header for hashline.
     async fn read_text(
         path: &Path,
         offset: Option<usize>,
         limit: Option<usize>,
         progress_cb: &Option<ProgressCallback>,
+        snapshot_store: Option<(Arc<dyn SnapshotStore>, PathBuf)>,
     ) -> Result<AgentToolResult, ToolError> {
+
         let display_path = path.display();
 
         // Check file metadata
@@ -164,6 +171,18 @@ impl ReadTool {
         if let Some(cb) = progress_cb {
             cb(format!("Completed reading {} bytes", content.len()));
         }
+
+        // ── Snapshot recording for hashline ──
+        // Normalize content (LF, strip BOM) for hash computation. The hash must
+        // be derived from the full text even when only a subset of lines is shown
+        // (partial read via offset/limit), so that the tag always names the
+        // canonical file version the model is referencing.
+        let snap_data: Option<(Arc<dyn SnapshotStore>, PathBuf, String, String)> =
+            snapshot_store.map(|(store, canonical)| {
+                let normalized = normalize_to_lf(strip_bom(&content).text);
+                let hash = compute_file_hash(&normalized);
+                (store, canonical, hash, normalized)
+            });
 
         // Split into lines for offset/limit/numbering
         let all_lines: Vec<&str> = content.lines().collect();
@@ -251,6 +270,19 @@ impl ReadTool {
             ) + &output;
         }
 
+
+        // ── Emit hashline header and record snapshot ──
+        if let Some((store, canonical, hash, normalized)) = snap_data {
+            // Prepend [path#TAG] header so the model can anchor edits.
+            let header = format_hashline_header(&canonical.to_string_lossy(), &hash);
+            output = format!("{}\n{}", header, output);
+
+            // Record seen lines: 1-indexed line numbers actually displayed.
+            let seen: Vec<u32> = (start_idx as u32 + 1..=start_idx as u32 + output_lines as u32)
+                .collect();
+            store.record(&canonical.to_string_lossy(), &normalized, Some(&seen));
+        }
+
         Ok(AgentToolResult::success(output))
     }
 }
@@ -284,7 +316,7 @@ impl AgentTool for ReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to read (relative or absolute)"
+                    "description": "Path to the file to read (relative or absolute), or an internal URL (issue://N, pr://owner/repo/N, skill://name/SKILL.md, agent://id, etc.)"
                 },
                 "offset": {
                     "type": "number",
@@ -321,6 +353,16 @@ impl AgentTool for ReadTool {
             .and_then(|v| v.as_u64())
             .map(|n| n as usize);
 
+        // ── Internal URL dispatch ──
+        // If the input looks like an internal URL (scheme://…), try the
+        // configured resolver before falling through to file-system read.
+        if let Some(ref resolver) = ctx.url_resolver {
+            if resolver.can_resolve(path_str) {
+                let resolved = resolver.resolve(path_str).await?;
+                return Ok(AgentToolResult::success(resolved.content));
+            }
+        }
+
         // Security: validate path with PathGuard (use root_dir if set, else ctx)
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
         let guard = PathGuard::new(root);
@@ -354,8 +396,12 @@ impl AgentTool for ReadTool {
             return Self::read_image(path, &progress_cb).await;
         }
 
-        // Otherwise, read as text
-        Self::read_text(path, offset, limit, &progress_cb).await
+        // Otherwise, read as text (with snapshot if available for hashline)
+        let snap = ctx.snapshot_store.as_ref().map(|s| {
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            (s.clone(), canonical)
+        });
+        Self::read_text(path, offset, limit, &progress_cb, snap).await
     }
 
     fn on_progress(&self, callback: ProgressCallback) {

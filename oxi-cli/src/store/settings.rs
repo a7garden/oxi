@@ -22,7 +22,8 @@ use std::path::{Path, PathBuf};
 /// - 4: dynamic_models field + last_used_model/provider split
 /// - 5: output_languages field (TUI-only language policy)
 /// - 6: language_policy_enabled field (master toggle, default OFF)
-const SETTINGS_VERSION: u32 = 6;
+/// - 7: edit_format field (Hashline/StrReplace, default StrReplace)
+const SETTINGS_VERSION: u32 = 7;
 
 /// Known output channels for the TUI language policy.
 ///
@@ -92,6 +93,21 @@ pub enum ThinkingLevel {
     XHigh,
 }
 
+
+/// Edit format for the edit tool.
+///
+/// Controls whether the system prompt instructs the model to use hashline
+/// line-anchored patches or traditional str_replace. Hashline is the new
+/// format ported from omp — see `docs/designs/omp-adoption/01-hashline-edit.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EditFormat {
+    /// Hashline line-anchored editing (default).
+    #[default]
+    Hashline,
+    /// Traditional str_replace (legacy fallback).
+    StrReplace,
+}
 /// A custom OpenAI-compatible provider configuration.
 ///
 /// Custom providers are loaded from `~/.oxi/settings.toml` via `[[custom_provider]]` sections
@@ -189,6 +205,11 @@ pub struct Settings {
     /// Timeout in seconds for tool execution
     #[serde(default = "default_tool_timeout")]
     pub tool_timeout_seconds: u64,
+
+    /// Questionnaire overlay timeout in seconds. 0 = disabled (wait indefinitely).
+    /// When timeout fires, auto-selects the recommended option (or first option).
+    #[serde(default)]
+    pub questionnaire_timeout_secs: u64,
 
     // ── Resource lists (managed by `oxi config`) ────────────────────
     /// List of extension paths or npm package sources to load
@@ -327,6 +348,34 @@ pub struct Settings {
     /// policy regardless of this flag (see AGENTS.md pitfalls).
     #[serde(default = "default_false")]
     pub language_policy_enabled: bool,
+
+    /// Edit format for the edit tool.
+    ///
+    /// `str_replace` (default): traditional find-and-replace.
+    /// `hashline`: line-anchored patches with content-derived tags.
+    #[serde(default)]
+    pub edit_format: EditFormat,
+
+    // ── Hindsight memory (④) ─────────────────────────────────────────
+    /// Enable session-spanning memory tools (retain/recall/reflect/edit).
+    /// Default: false (opt-in).
+    #[serde(default = "default_false")]
+    pub memory_enabled: bool,
+
+    /// Path to the SQLite memory database. Default: `~/.oxi/memory/<project>.db`
+    /// when empty.
+    #[serde(default)]
+    pub memory_db_path: Option<PathBuf>,
+
+    // ── TTSR (③) ─────────────────────────────────────────────────────
+    /// Enable Time-Traveling Stream Rules (stream interrupt on rule violation).
+    /// Default: false (opt-in, stable-first).
+    #[serde(default = "default_false")]
+    pub ttsr_enabled: bool,
+
+    /// TTSR interrupt mode. Default: "prose_only".
+    #[serde(default = "default_ttsr_mode")]
+    pub ttsr_interrupt_mode: String,
 }
 
 fn default_theme() -> String {
@@ -347,6 +396,10 @@ fn default_true() -> bool {
 
 fn default_false() -> bool {
     false
+}
+
+fn default_ttsr_mode() -> String {
+    "prose_only".to_string()
 }
 
 fn default_circuit_failure_threshold() -> u32 {
@@ -382,6 +435,7 @@ impl Default for Settings {
             auto_compaction: true,
             disabled_tools: Vec::new(),
             tool_timeout_seconds: default_tool_timeout(),
+            questionnaire_timeout_secs: 0,
             extensions: Vec::new(),
             skills: Vec::new(),
             prompts: Vec::new(),
@@ -400,6 +454,11 @@ impl Default for Settings {
             keybindings: HashMap::new(),
             output_languages: HashMap::new(),
             language_policy_enabled: false,
+            edit_format: EditFormat::default(),
+            memory_enabled: false,
+            memory_db_path: None,
+            ttsr_enabled: false,
+            ttsr_interrupt_mode: default_ttsr_mode(),
         }
     }
 }
@@ -999,6 +1058,15 @@ impl Settings {
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
                     "Migrated settings from version 5 to {} (added language_policy_enabled, defaulting to OFF — toggle ON in /settings to activate existing channels)",
+                    SETTINGS_VERSION
+                );
+            }
+            6 => {
+                // Version 6 → 7: edit_format field added.
+                // `#[serde(default)]` fills with EditFormat::StrReplace (default).
+                settings.version = SETTINGS_VERSION;
+                tracing::info!(
+                    "Migrated settings from version 6 to {} (added edit_format, defaulting to str_replace)",
                     SETTINGS_VERSION
                 );
             }

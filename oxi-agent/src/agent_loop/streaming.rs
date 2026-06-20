@@ -4,20 +4,35 @@
 /// message. Each event carries a snapshot (`partial`) of this message.
 /// Done carries the complete accumulated message.
 ///
-/// This module simply forwards events to the agent loop emit function.
-use anyhow::{Error, Result};
+/// TTSR integration: when a [`TtsrEngine`](super::ttsr::TtsrEngine) is
+/// provided, every [`ProviderEvent::TextDelta`] is checked against
+/// registered rules. A match aborts the stream and returns
+/// [`StreamOutcome::RuleInterrupt`].
 use futures::StreamExt;
 use oxi_ai::{
     ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions, Tool as OxTool,
 };
 use std::collections::HashSet;
 
+use super::stream_outcome::StreamOutcome;
+use super::ttsr::{MatchSource, TtsrEngine, TtsrMatchContext};
+
 pub(crate) async fn stream_assistant_response(
     loop_ref: &super::AgentLoop,
     messages: &mut Vec<Message>,
     emit: &super::EmitFn,
-) -> Result<oxi_ai::AssistantMessage> {
-    let model = loop_ref.resolve_model()?;
+    ttsr: Option<&TtsrEngine>,
+) -> StreamOutcome {
+    let model = match loop_ref.resolve_model() {
+        Ok(m) => m,
+        Err(_) => {
+            return StreamOutcome::Error(oxi_ai::AssistantMessage::new(
+                oxi_ai::Api::OpenAiCompletions,
+                "agent",
+                &loop_ref.config.model_id,
+            ))
+        }
+    };
 
     let mut context = Context::new();
 
@@ -29,7 +44,6 @@ pub(crate) async fn stream_assistant_response(
         context.add_message(msg.clone());
     }
 
-    // Cache tool definitions serialization once to avoid repeated serde work.
     let tool_defs = loop_ref.tools.definitions();
     if !tool_defs.is_empty() {
         let mut oxi_tools = Vec::with_capacity(tool_defs.len());
@@ -49,37 +63,37 @@ pub(crate) async fn stream_assistant_response(
         ..Default::default()
     };
 
-    let stream =
-        super::retry::stream_with_retry(loop_ref, &model, &context, Some(stream_options), emit)
-            .await?;
+    let stream = match super::retry::stream_with_retry(
+        loop_ref,
+        &model,
+        &context,
+        Some(stream_options),
+        emit,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(_) => {
+            return StreamOutcome::Error(oxi_ai::AssistantMessage::new(
+                oxi_ai::Api::OpenAiCompletions,
+                "agent",
+                &loop_ref.config.model_id,
+            ))
+        }
+    };
 
-    // pi-mono pattern: track whether we've emitted MessageStart.
-    // Start event initializes the stream. Subsequent deltas carry
-    // accumulated partial messages (content grows in-place at the provider).
     let mut added_partial = false;
     let mut event_count = 0u32;
 
     let mut rx = stream;
-    // Maximum total time without any stream event before declaring the
-    // connection hung. LLM providers should emit events (at least heartbeat
-    // or thinking deltas) far more frequently than this.
     let stream_idle_timeout = std::time::Duration::from_secs(30);
-    // Interval for checking cancellation when no stream events arrive.
-    // This ensures Ctrl+C is detected within ~500ms even if the provider
-    // stream is completely hung (no events at all).
     let cancel_check_interval = std::time::Duration::from_millis(500);
     let mut last_event_at = std::time::Instant::now();
 
     loop {
-        // Three-way select:
-        //   1. Stream event arrived → process it
-        //   2. Cancel-check interval elapsed → poll external_stop
-        //   3. (implicit) Both the above are racing; the shorter timer
-        //      (500ms) fires first unless a stream event arrives.
         let next_event = tokio::select! {
             event = rx.next() => event,
             _ = tokio::time::sleep(cancel_check_interval) => {
-                // Periodic wake-up: check cancellation and idle timeout.
                 if loop_ref.is_cancelled() {
                     tracing::info!(
                         "Stream cancelled (detected in periodic check)"
@@ -94,17 +108,16 @@ pub(crate) async fn stream_assistant_response(
                             message: last_msg.clone(),
                         });
                         if let Message::Assistant(m) = &last_msg {
-                            return Ok(m.clone());
+                            return StreamOutcome::Cancelled(m.clone());
                         }
                     }
-                    return Ok(oxi_ai::AssistantMessage::new(
+                    return StreamOutcome::Cancelled(oxi_ai::AssistantMessage::new(
                         oxi_ai::Api::OpenAiCompletions,
                         "agent",
                         &loop_ref.config.model_id,
                     ));
                 }
 
-                // Check stream idle timeout
                 if last_event_at.elapsed() >= stream_idle_timeout {
                     tracing::warn!(
                         "Stream idle timeout ({:?}) reached after {} events",
@@ -136,25 +149,20 @@ pub(crate) async fn stream_assistant_response(
                         ),
                         session_id: loop_ref.session_id.clone(),
                     });
-                    return Ok(err_asst);
+                    return StreamOutcome::Error(err_asst);
                 }
 
-                // No cancellation, no timeout — go back to waiting.
                 continue;
             }
         };
 
         let event = match next_event {
             Some(e) => e,
-            None => break, // Stream closed normally
+            None => break,
         };
 
-        // Received a stream event — reset idle timer.
         last_event_at = std::time::Instant::now();
 
-        // Check if the agent was cancelled (Ctrl+C) since the last event.
-        // `external_stop` is set by the emit callback (Layer 2) which polls
-        // the should_stop flag on *every* event, not just TurnEnd.
         if loop_ref.is_cancelled() {
             tracing::info!("Stream cancelled after {} events", event_count);
             if added_partial {
@@ -167,10 +175,10 @@ pub(crate) async fn stream_assistant_response(
                     message: last_msg.clone(),
                 });
                 if let Message::Assistant(m) = &last_msg {
-                    return Ok(m.clone());
+                    return StreamOutcome::Cancelled(m.clone());
                 }
             }
-            return Ok(oxi_ai::AssistantMessage::new(
+            return StreamOutcome::Cancelled(oxi_ai::AssistantMessage::new(
                 oxi_ai::Api::OpenAiCompletions,
                 "agent",
                 &loop_ref.config.model_id,
@@ -188,8 +196,11 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
-            // ── Fallback events ───────────────────────────────────────
-            ProviderEvent::FallbackStart { from_model, to_model, .. } => {
+            ProviderEvent::FallbackStart {
+                from_model,
+                to_model,
+                ..
+            } => {
                 tracing::info!(
                     "Stream event #{}: Fallback from {} to {}",
                     event_count, from_model, to_model
@@ -200,12 +211,14 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
-            ProviderEvent::FallbackExhausted { models_tried, final_error } => {
+            ProviderEvent::FallbackExhausted {
+                models_tried,
+                final_error,
+            } => {
                 tracing::warn!(
                     "Stream event #{}: All fallback models exhausted. Tried: {:?}, error: {}",
                     event_count, models_tried, final_error
                 );
-                // Emit a fallback event for the last failed model
                 if let Some(last_model) = models_tried.last() {
                     emit(super::AgentEvent::Fallback {
                         from_model: last_model.clone(),
@@ -214,9 +227,63 @@ pub(crate) async fn stream_assistant_response(
                 }
             }
 
-            ProviderEvent::TextDelta { delta, partial, .. } => {
-                // Replace the last assistant message with the provider's
-                // accumulated snapshot (pi-mono: content grows in partial).
+            ProviderEvent::TextDelta {
+                delta, partial, ..
+            } => {
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = (*partial).clone();
+                    }
+                }
+                let last_msg = messages.last().expect("non-empty").clone();
+                let delta_clone = delta.clone();
+                emit(super::AgentEvent::MessageUpdate {
+                    message: last_msg,
+                    delta: Some(delta),
+                });
+
+                // ── TTSR check ──
+                if let Some(engine) = ttsr {
+                    let ctx = TtsrMatchContext {
+                        source: MatchSource::Text,
+                        file_paths: vec![],
+                        tool_name: None,
+                    };
+                    let violations = engine.check_delta(&delta_clone, &ctx);
+                    if !violations.is_empty() {
+                        let mut partial_msg = messages
+                            .last()
+                            .and_then(|m| match m {
+                                Message::Assistant(a) => Some(a.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| {
+                                oxi_ai::AssistantMessage::new(
+                                    oxi_ai::Api::OpenAiCompletions,
+                                    "agent",
+                                    &loop_ref.config.model_id,
+                                )
+                            });
+                        partial_msg.stop_reason = StopReason::Aborted;
+                        return StreamOutcome::RuleInterrupt {
+                            partial: partial_msg,
+                            rule: violations.into_iter().next().expect("non-empty"),
+                        };
+                    }
+                }
+            }
+
+            ProviderEvent::ThinkingStart { partial, .. } if added_partial => {
+                let last_idx = messages.len() - 1;
+                if let Message::Assistant(ref mut m) = messages[last_idx] {
+                    *m = (*partial).clone();
+                }
+            }
+
+            ProviderEvent::ThinkingDelta {
+                delta, partial, ..
+            } => {
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -230,69 +297,35 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
-            ProviderEvent::ThinkingStart { partial, .. }
-                // ThinkingStart arrives before ThinkingDelta.
-                // Update the snapshot.
-                if added_partial => {
-                    let last_idx = messages.len() - 1;
-                    if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = (*partial).clone();
-                    }
+            ProviderEvent::ToolCallStart { partial, .. } if added_partial => {
+                let last_idx = messages.len() - 1;
+                if let Message::Assistant(ref mut m) = messages[last_idx] {
+                    *m = (*partial).clone();
                 }
+            }
 
-            ProviderEvent::ThinkingDelta { delta, partial, .. } => {
-                if added_partial {
-                    let last_idx = messages.len() - 1;
-                    if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = (*partial).clone();
-                    }
+            ProviderEvent::ToolCallDelta { partial, .. } if added_partial => {
+                let last_idx = messages.len() - 1;
+                if let Message::Assistant(ref mut m) = messages[last_idx] {
+                    *m = (*partial).clone();
+                }
+            }
+
+            ProviderEvent::ToolCallEnd { tool_call, .. } if added_partial => {
+                let last_idx = messages.len() - 1;
+                if let Message::Assistant(ref mut m) = messages[last_idx] {
+                    m.content.push(ContentBlock::ToolCall(tool_call));
                 }
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageUpdate {
                     message: last_msg,
-                    delta: Some(delta),
+                    delta: None,
                 });
             }
-
-            ProviderEvent::ToolCallStart { partial, .. }
-                if added_partial => {
-                    let last_idx = messages.len() - 1;
-                    if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = (*partial).clone();
-                    }
-                }
-
-            ProviderEvent::ToolCallDelta { partial, .. }
-                if added_partial => {
-                    let last_idx = messages.len() - 1;
-                    if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = (*partial).clone();
-                    }
-                }
-
-            ProviderEvent::ToolCallEnd { tool_call, .. }
-                // Add the tool call directly to our tracked message.
-                if added_partial => {
-                    let last_idx = messages.len() - 1;
-                    if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        m.content.push(ContentBlock::ToolCall(tool_call));
-                    }
-                    // CRITICAL: emit MessageUpdate so the TUI sees the ToolCall block.
-                    // Without this, tool calls are never rendered (matching pi's behavior
-                    // where toolcall_end emits message_update).
-                    let last_msg = messages.last().expect("non-empty").clone();
-                    emit(super::AgentEvent::MessageUpdate {
-                        message: last_msg,
-                        delta: None,
-                    });
-                }
 
             ProviderEvent::Done { message, .. } => {
-                // Record success in circuit breaker — the provider returned a
-                // complete response without errors.
                 loop_ref.circuit_breaker.record_success();
 
-                // Record token usage into shared state and emit event
                 let (input, output) = (message.usage.input, message.usage.output);
                 if input > 0 || output > 0 {
                     loop_ref.state.update(|s| {
@@ -309,21 +342,10 @@ pub(crate) async fn stream_assistant_response(
                     event_count,
                     message.stop_reason
                 );
-                // Merge strategy: providers accumulate tool calls differently.
-                //   - Anthropic: ToolCallEnd adds to partial_message; Done clones it.
-                //     Both `messages[last]` and `message` contain the same tool calls.
-                //   - OpenAI: ToolCallEnd is emitted just before Done (not accumulated).
-                //     `messages[last]` has tool calls from ToolCallEnd; Done's message
-                //     may or may not include them.
-                //   - Some providers: Only Done carries tool calls.
-                //
-                // We merge by ID-based union: take the Done message as base, then
-                // add any tool calls from the accumulated partial that aren't already
-                // in the Done message.
+
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        // Collect tool-call IDs already present in the Done message.
                         let mut seen_ids: HashSet<String> = message
                             .content
                             .iter()
@@ -333,8 +355,6 @@ pub(crate) async fn stream_assistant_response(
                             })
                             .collect();
 
-                        // Collect tool calls from the accumulated partial that
-                        // the Done message doesn't already have.
                         let extra_tool_calls: Vec<ContentBlock> = m
                             .content
                             .iter()
@@ -346,9 +366,6 @@ pub(crate) async fn stream_assistant_response(
                             .collect();
 
                         let tc_count = extra_tool_calls.len();
-
-                        // Replace with the Done message (authoritative for text,
-                        // usage, stop_reason) then append missing tool calls.
                         *m = message.clone();
                         m.content.extend(extra_tool_calls);
 
@@ -366,18 +383,14 @@ pub(crate) async fn stream_assistant_response(
                 emit(super::AgentEvent::MessageEnd {
                     message: last_msg.clone(),
                 });
-                // Return the message we actually stored (with tool calls preserved)
                 if let Message::Assistant(m) = &last_msg {
-                    return Ok(m.clone());
+                    return StreamOutcome::Complete(m.clone());
                 } else {
-                    return Ok(message);
+                    return StreamOutcome::Complete(message);
                 }
             }
 
             ProviderEvent::Error { mut error, .. } => {
-                // Record failure in circuit breaker — the provider stream
-                // produced an error event after the connection was established.
-                // (connection-level failures are recorded in stream_with_retry)
                 loop_ref.circuit_breaker.record_failure();
 
                 tracing::info!("Stream event #{}: Error", event_count);
@@ -387,7 +400,10 @@ pub(crate) async fn stream_assistant_response(
                 } else {
                     raw_msg
                 };
-                tracing::error!(session_id = ?loop_ref.session_id, "Provider stream error: {}", friendly);
+                tracing::error!(
+                    session_id = ?loop_ref.session_id,
+                    "Provider stream error: {}", friendly
+                );
 
                 error.stop_reason = StopReason::Error;
 
@@ -408,7 +424,7 @@ pub(crate) async fn stream_assistant_response(
                     session_id: loop_ref.session_id.clone(),
                 });
 
-                return Ok(error);
+                return StreamOutcome::Error(error);
             }
 
             _ => {}
@@ -417,17 +433,23 @@ pub(crate) async fn stream_assistant_response(
 
     tracing::info!("Stream ended after {} events", event_count);
 
-    let final_message = messages
+    let final_message = match messages
         .last()
         .and_then(|m| match m {
             Message::Assistant(a) => Some(a.clone()),
             _ => None,
-        })
-        .ok_or_else(|| Error::msg("No assistant message in context"))?;
+        }) {
+        Some(m) => m,
+        None => {
+            return StreamOutcome::Error(oxi_ai::AssistantMessage::new(
+                oxi_ai::Api::OpenAiCompletions,
+                "agent",
+                &loop_ref.config.model_id,
+            ))
+        }
+    };
 
     if !added_partial {
-        // Stream ended without a Start event — emit synthetic MessageStart
-        // so the TUI enters streaming state before MessageEnd finalizes.
         tracing::warn!("Stream ended without Start event, emitting synthetic MessageStart");
         emit(super::AgentEvent::MessageStart {
             message: Message::Assistant(final_message.clone()),
@@ -437,5 +459,5 @@ pub(crate) async fn stream_assistant_response(
     emit(super::AgentEvent::MessageEnd {
         message: Message::Assistant(final_message.clone()),
     });
-    Ok(final_message)
+    StreamOutcome::Complete(final_message)
 }

@@ -15,6 +15,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 // ── Overlay ────────────────────────────────────────────────────────────
 
@@ -36,17 +37,32 @@ pub struct QuestionnaireOverlay {
     input_question_id: String,
     /// The responder — Option so we can take() it on submit.
     responder: Option<tokio::sync::oneshot::Sender<QuestionnaireResponse>>,
+    /// Overlay timeout. `None` = disabled.
+    timeout: Option<Duration>,
+    /// When the overlay was created (for timeout countdown).
+    started_at: Instant,
+    /// Whether answers were auto-selected due to timeout.
+    timed_out: bool,
 }
 
 impl QuestionnaireOverlay {
     pub fn new(
         questions: Vec<Question>,
         responder: tokio::sync::oneshot::Sender<QuestionnaireResponse>,
+        timeout: Option<Duration>,
     ) -> Self {
+        // Initial cursor: recommended option of the first question
+        let initial_cursor = questions
+            .first()
+            .and_then(|q| q.recommended)
+            .filter(|&idx| idx < questions[0].options.len())
+            .unwrap_or(0);
+
         if questions.is_empty() {
             let _ = responder.send(QuestionnaireResponse {
                 answers: vec![],
                 cancelled: false,
+                timed_out: false,
             });
             return Self {
                 questions,
@@ -58,19 +74,25 @@ impl QuestionnaireOverlay {
                 input_text: String::new(),
                 input_question_id: String::new(),
                 responder: None,
+                timeout: None,
+                started_at: Instant::now(),
+                timed_out: false,
             };
         }
 
         Self {
             questions,
             current_tab: 0,
-            option_cursor: 0,
+            option_cursor: initial_cursor,
             selected: HashMap::new(),
             answers: HashMap::new(),
             input_mode: false,
             input_text: String::new(),
             input_question_id: String::new(),
             responder: Some(responder),
+            timeout,
+            started_at: Instant::now(),
+            timed_out: false,
         }
     }
 
@@ -91,9 +113,10 @@ impl QuestionnaireOverlay {
     }
 
     fn all_answered(&self) -> bool {
-        self.questions
-            .iter()
-            .all(|q| self.answers.contains_key(&q.id))
+        self.questions.iter().enumerate().all(|(i, q)| {
+            self.answers.contains_key(&q.id)
+                || (q.multi_select && self.selected.get(&i).is_some_and(|s| !s.is_empty()))
+        })
     }
 
     fn toggle_multi(&mut self, tab_idx: usize, opt_idx: usize) {
@@ -134,12 +157,12 @@ impl QuestionnaireOverlay {
         for i in (self.current_tab + 1)..self.total_tabs() {
             if i >= self.submit_tab() {
                 self.current_tab = self.submit_tab();
-                self.option_cursor = 0;
+                self.option_cursor = self.cursor_for_tab(self.submit_tab());
                 return;
             }
             if !self.answers.contains_key(&self.questions[i].id) {
                 self.current_tab = i;
-                self.option_cursor = 0;
+                self.option_cursor = self.cursor_for_tab(i);
                 return;
             }
         }
@@ -147,10 +170,142 @@ impl QuestionnaireOverlay {
         self.option_cursor = 0;
     }
 
+    /// Compute the initial cursor for a tab: the recommended option index if valid.
+    fn cursor_for_tab(&self, tab_idx: usize) -> usize {
+        self.questions
+            .get(tab_idx)
+            .and_then(|q| q.recommended)
+            .filter(|&idx| {
+                self.questions
+                    .get(tab_idx)
+                    .is_some_and(|q| idx < q.options.len())
+            })
+            .unwrap_or(0)
+    }
+
+    /// Convert multi-select `self.selected` entries into `self.answers`.
+    /// Must be called before `do_submit` and before checking `all_answered`
+    /// from mutation contexts.
+    fn convert_selected_to_answers(&mut self) {
+        let tab_indices: Vec<usize> = self.selected.keys().copied().collect();
+        for tab_idx in tab_indices {
+            let Some(q) = self.questions.get(tab_idx) else {
+                continue;
+            };
+            if !q.multi_select {
+                continue;
+            }
+            let Some(indices) = self.selected.get(&tab_idx) else {
+                continue;
+            };
+            if indices.is_empty() {
+                continue;
+            }
+            // Collect sorted for deterministic order
+            let mut sorted: Vec<usize> = indices.iter().copied().collect();
+            sorted.sort_unstable();
+            let labels: Vec<&str> = sorted
+                .iter()
+                .filter_map(|&i| q.options.get(i).map(|o| o.label.as_str()))
+                .collect();
+            let values: Vec<&str> = sorted
+                .iter()
+                .filter_map(|&i| q.options.get(i).map(|o| o.value.as_str()))
+                .collect();
+            self.answers.insert(
+                q.id.clone(),
+                Answer {
+                    id: q.id.clone(),
+                    value: values.join(", "),
+                    label: labels.join(", "),
+                    was_custom: false,
+                    index: None,
+                },
+            );
+        }
+    }
+
+    /// Auto-select defaults (recommended or first option) for unanswered questions.
+    fn auto_select_defaults(&mut self) {
+        // Collect decisions first (immutable borrow phase)
+        let multi_decisions: Vec<(usize, usize)> = self
+            .questions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, q)| {
+                if self.answers.contains_key(&q.id) {
+                    return None;
+                }
+                if q.multi_select && self.selected.get(&i).is_some_and(|s| !s.is_empty()) {
+                    return None;
+                }
+                let default_idx = q
+                    .recommended
+                    .filter(|&idx| idx < q.options.len())
+                    .unwrap_or(0);
+                if q.multi_select {
+                    Some((i, default_idx))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let single_decisions: Vec<(String, String, String, usize)> = self
+            .questions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, q)| {
+                if self.answers.contains_key(&q.id) {
+                    return None;
+                }
+                if q.multi_select && self.selected.get(&i).is_some_and(|s| !s.is_empty()) {
+                    return None;
+                }
+                let default_idx = q
+                    .recommended
+                    .filter(|&idx| idx < q.options.len())
+                    .unwrap_or(0);
+                if !q.multi_select {
+                    q.options.get(default_idx).map(|opt| {
+                        (
+                            q.id.clone(),
+                            opt.value.clone(),
+                            opt.label.clone(),
+                            default_idx + 1,
+                        )
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Apply decisions (mutable borrow phase)
+        for (i, default_idx) in multi_decisions {
+            self.selected.entry(i).or_default().insert(default_idx);
+        }
+        for (id, value, label, rec_idx) in single_decisions {
+            self.save_answer(id, value, label, false, Some(rec_idx));
+        }
+        self.convert_selected_to_answers();
+    }
+
+    /// Remaining seconds before timeout, or `None` if no timeout.
+    fn remaining_secs(&self) -> Option<u64> {
+        self.timeout
+            .map(|dur| dur.saturating_sub(self.started_at.elapsed()).as_secs())
+    }
+
     fn do_submit(&mut self, cancelled: bool) {
+        self.convert_selected_to_answers();
         let answers: Vec<Answer> = std::mem::take(&mut self.answers).into_values().collect();
         if let Some(responder) = self.responder.take() {
-            let _ = responder.send(QuestionnaireResponse { answers, cancelled });
+            let _ = responder.send(QuestionnaireResponse {
+                answers,
+                cancelled,
+                timed_out: self.timed_out,
+            });
         }
     }
 }
@@ -162,6 +317,26 @@ impl std::fmt::Debug for QuestionnaireOverlay {
             .field("current_tab", &self.current_tab)
             .field("input_mode", &self.input_mode)
             .finish()
+    }
+}
+
+/// Timeout check: called every ~50ms by the main loop.
+/// No-op when timeout is disabled. When it fires, auto-selects defaults
+/// and submits, returning Close to dismiss the overlay.
+impl QuestionnaireOverlay {
+    fn check_timeout(&mut self) -> bool {
+        if self.timed_out {
+            return true;
+        }
+        if let Some(timeout) = self.timeout {
+            if self.started_at.elapsed() >= timeout {
+                self.timed_out = true;
+                self.auto_select_defaults();
+                self.do_submit(false);
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -207,13 +382,13 @@ impl OverlayComponent for QuestionnaireOverlay {
             match key.code {
                 KeyCode::Tab | KeyCode::Right => {
                     self.current_tab = (self.current_tab + 1) % self.total_tabs();
-                    self.option_cursor = 0;
+                    self.option_cursor = self.cursor_for_tab(self.current_tab);
                     return OverlayAction::None;
                 }
                 KeyCode::BackTab | KeyCode::Left => {
                     self.current_tab =
                         (self.current_tab + self.total_tabs() - 1) % self.total_tabs();
-                    self.option_cursor = 0;
+                    self.option_cursor = self.cursor_for_tab(self.current_tab);
                     return OverlayAction::None;
                 }
                 _ => {}
@@ -310,6 +485,14 @@ impl OverlayComponent for QuestionnaireOverlay {
         self.render_content(frame, inner, theme);
     }
 
+    fn poll(&mut self) -> OverlayAction {
+        if self.check_timeout() {
+            OverlayAction::Close
+        } else {
+            OverlayAction::None
+        }
+    }
+
     fn hint(&self) -> &str {
         if self.input_mode {
             " Enter submit  |  Esc cancel"
@@ -391,6 +574,18 @@ impl QuestionnaireOverlay {
             Span::styled(" ? ", styles.accent.add_modifier(Modifier::BOLD)),
             Span::styled(q.prompt.clone(), styles.normal),
         ]));
+        // Countdown timer line
+        if let Some(secs) = self.remaining_secs() {
+            let timer_style = if secs <= 5 {
+                styles.warning.add_modifier(Modifier::BOLD)
+            } else {
+                styles.muted
+            };
+            lines.push(Line::from(Span::styled(
+                format!(" ⏱ {}s remaining", secs),
+                timer_style,
+            )));
+        }
         lines.push(Line::from(Span::styled(
             sep_line.to_string(),
             Style::default().fg(fg),
@@ -420,6 +615,12 @@ impl QuestionnaireOverlay {
                         format!("{}. {}{}", i + 1, check_str, opt.label),
                         if is_sel { styles.accent } else { styles.normal },
                     ),
+                    // Recommended marker
+                    if Some(i) == q.recommended {
+                        Span::styled(" ★", styles.warning)
+                    } else {
+                        Span::raw("")
+                    },
                 ]));
 
                 if let Some(ref desc) = opt.description {
@@ -646,5 +847,139 @@ impl QuestionnaireOverlay {
             " →".to_string(),
             right_style,
         )]));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxi_agent::tools::questionnaire::{Question, QuestionOption, QuestionnaireResponse};
+    use tokio::sync::oneshot;
+
+    fn make_question(id: &str, multi: bool, recommended: Option<usize>) -> Question {
+        Question {
+            id: id.into(),
+            label: id.into(),
+            prompt: format!("Choose {}?", id),
+            options: vec![
+                QuestionOption {
+                    value: "a".into(),
+                    label: "Option A".into(),
+                    description: None,
+                },
+                QuestionOption {
+                    value: "b".into(),
+                    label: "Option B".into(),
+                    description: None,
+                },
+            ],
+            allow_other: false,
+            multi_select: multi,
+            recommended,
+        }
+    }
+
+    fn make_overlay(
+        questions: Vec<Question>,
+    ) -> (
+        QuestionnaireOverlay,
+        oneshot::Receiver<QuestionnaireResponse>,
+    ) {
+        let (tx, rx) = oneshot::channel();
+        let overlay = QuestionnaireOverlay::new(questions, tx, None);
+        (overlay, rx)
+    }
+
+    #[test]
+    fn test_all_answered_single_select() {
+        let (mut overlay, _rx) = make_overlay(vec![make_question("q1", false, None)]);
+        assert!(!overlay.all_answered());
+        overlay.save_answer("q1".into(), "a".into(), "Option A".into(), false, Some(1));
+        assert!(overlay.all_answered());
+    }
+
+    #[test]
+    fn test_all_answered_multiselect_with_selected() {
+        let (mut overlay, _rx) = make_overlay(vec![make_question("q1", true, None)]);
+        // Not answered initially
+        assert!(!overlay.all_answered());
+        // Toggle a selection
+        overlay.toggle_multi(0, 0);
+        // Now considered answered (has non-empty selected set)
+        assert!(overlay.all_answered());
+        // Toggle off
+        overlay.toggle_multi(0, 0);
+        assert!(!overlay.all_answered());
+    }
+
+    #[test]
+    fn test_convert_selected_to_answers() {
+        let (mut overlay, _rx) = make_overlay(vec![make_question("q1", true, None)]);
+        overlay.toggle_multi(0, 0);
+        overlay.toggle_multi(0, 1);
+        assert!(overlay.answers.is_empty());
+
+        overlay.convert_selected_to_answers();
+        let ans = overlay.answers.get("q1").expect("answer should exist");
+        assert_eq!(ans.value, "a, b");
+        assert_eq!(ans.label, "Option A, Option B");
+        assert!(!ans.was_custom);
+        assert!(ans.index.is_none()); // multi-select has no single index
+    }
+
+    #[test]
+    fn test_convert_selected_empty_does_nothing() {
+        let (mut overlay, _rx) = make_overlay(vec![make_question("q1", true, None)]);
+        overlay.convert_selected_to_answers();
+        assert!(overlay.answers.is_empty());
+    }
+
+    #[test]
+    fn test_auto_select_defaults_recommended() {
+        let (mut overlay, _rx) = make_overlay(vec![
+            make_question("q1", false, Some(1)), // recommended = index 1
+            make_question("q2", true, None),     // no recommended → index 0
+        ]);
+        overlay.auto_select_defaults();
+
+        // q1: single-select → recommended (index 1 = "b")
+        let ans1 = overlay.answers.get("q1").expect("q1 should be answered");
+        assert_eq!(ans1.value, "b");
+        assert_eq!(ans1.label, "Option B");
+
+        // q2: multi-select → first option (index 0 = "a"), converted to answers
+        let ans2 = overlay.answers.get("q2").expect("q2 should be answered");
+        assert_eq!(ans2.value, "a");
+    }
+
+    #[test]
+    fn test_auto_select_skips_already_answered() {
+        let (mut overlay, _rx) = make_overlay(vec![make_question("q1", false, Some(1))]);
+        // Pre-answer with option A (index 0)
+        overlay.save_answer("q1".into(), "a".into(), "Option A".into(), false, Some(1));
+        overlay.auto_select_defaults();
+        // Should still be option A, not overwritten by recommended (option B)
+        let ans = overlay.answers.get("q1").unwrap();
+        assert_eq!(ans.value, "a");
+    }
+
+    #[test]
+    fn test_timeout_does_not_fire_without_config() {
+        let (mut overlay, _rx) = make_overlay(vec![make_question("q1", false, None)]);
+        // No timeout configured → check_timeout always returns false
+        assert!(!overlay.check_timeout());
+        assert!(!overlay.timed_out);
+    }
+
+    #[test]
+    fn test_initial_cursor_uses_recommended() {
+        let (overlay, _rx) = make_overlay(vec![make_question("q1", false, Some(1))]);
+        assert_eq!(overlay.option_cursor, 1); // recommended index
+    }
+
+    #[test]
+    fn test_initial_cursor_zero_without_recommended() {
+        let (overlay, _rx) = make_overlay(vec![make_question("q1", false, None)]);
+        assert_eq!(overlay.option_cursor, 0);
     }
 }

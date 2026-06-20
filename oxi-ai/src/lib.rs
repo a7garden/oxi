@@ -128,7 +128,8 @@ pub use high_level::{complete, estimate_tokens};
 
 /// Compaction strategies and managers for long conversations.
 pub use compaction::{
-    CompactedContext, CompactionManager, CompactionStrategy, Compactor, LlmCompactor,
+    CompactedContext, CompactionManager, CompactionStrategy, Compactor, ContextTransformer,
+    LlmCompactor, NoopContextTransformer,
 };
 
 // Complexity-based routing

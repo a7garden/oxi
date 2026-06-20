@@ -482,7 +482,7 @@ pub fn format_issue_result(
                 Span::styled(format!("  {display}"), muted_style)
             } else if display.contains("[open]") {
                 Span::styled(format!("  {display}"), styles.normal)
-            } else if display.contains("🔒") {
+            } else if display.contains("▣") {
                 Span::styled(format!("  {display}"), styles.warning)
             } else {
                 Span::styled(format!("  {display}"), muted_style)
@@ -541,6 +541,111 @@ pub fn format_generic_call(
     lines
 }
 
+/// Format the `questionnaire` tool call — renders each question prompt with
+/// its options, highlighting the recommended option (matching index) with a ★.
+pub fn format_questionnaire_call(
+    args: &Value,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
+    let questions = match args.get("questions").and_then(|v| v.as_array()) {
+        Some(qs) if !qs.is_empty() => qs,
+        _ => {
+            // Missing or malformed arguments — degrade to a single header line.
+            return vec![Line::from(Span::styled(
+                "questionnaire".to_string(),
+                styles.accent.add_modifier(Modifier::BOLD),
+            ))];
+        }
+    };
+
+    let count = questions.len();
+    let header = Line::from(Span::styled(
+        format!(
+            "❓ Questionnaire ({} question{})",
+            count,
+            if count == 1 { "" } else { "s" }
+        ),
+        styles.accent.add_modifier(Modifier::BOLD),
+    ));
+
+    let mut lines = vec![header];
+    for q in questions {
+        let prompt = q
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(no prompt)");
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  ? {}",
+                truncate_to_width(prompt, max_width.saturating_sub(4))
+            ),
+            styles.accent,
+        )));
+
+        if let Some(options) = q.get("options").and_then(|v| v.as_array()) {
+            for (i, opt) in options.iter().enumerate() {
+                let label = opt
+                    .get("label")
+                    .or_else(|| opt.get("value"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let is_recommended =
+                    q.get("recommended").and_then(|v| v.as_u64()) == Some(i as u64);
+                let (marker, style) = if is_recommended {
+                    ("★", styles.accent)
+                } else {
+                    ("○", styles.muted)
+                };
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "    {} {}",
+                        marker,
+                        truncate_to_width(label, max_width.saturating_sub(6))
+                    ),
+                    style,
+                )));
+            }
+        }
+    }
+
+    lines
+}
+
+/// Format the `questionnaire` tool result — one header line (answered or
+/// cancelled) followed by one `id → answer` line per question, with a ⏱
+/// marker on entries that were auto-selected after a timeout.
+pub fn format_questionnaire_result(
+    result: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    let is_cancelled = result.to_lowercase().contains("cancelled");
+    let header = if is_cancelled {
+        Line::from(Span::styled("⚠ Cancelled".to_string(), styles.warning))
+    } else {
+        Line::from(Span::styled("✓ Answered".to_string(), styles.success))
+    };
+    lines.push(header);
+
+    for raw in result.lines() {
+        let timed_out = raw.contains("(auto-selected after timeout)");
+        let marker = if timed_out { " ⏱" } else { "" };
+        let body = match raw.split_once(": ") {
+            Some((id, rest)) => format!("  {} → {}{}", id, rest, marker),
+            None => format!("  {}{}", raw, marker),
+        };
+        lines.push(Line::from(Span::styled(
+            truncate_to_width(&body, max_width),
+            styles.muted,
+        )));
+    }
+
+    lines
+}
+
 /// Format a tool call by tool name.
 pub fn format_tool_call(
     name: &str,
@@ -557,6 +662,7 @@ pub fn format_tool_call(
         "write" => format_write_call(&args, styles),
         "grep" | "find" | "ls" => format_search_call(name, &args, styles),
         "issue" => format_issue_call(&args, max_width, styles),
+        "questionnaire" => format_questionnaire_call(&args, max_width, styles),
         _ => format_generic_call(name, &args, max_width, styles),
     }
 }
@@ -792,6 +898,7 @@ pub fn format_tool_result(
         "bash" => format_bash_result(result, max_width, styles),
         "read" => format_read_result(result, max_width, styles),
         "issue" => format_issue_result(result, max_width, styles),
+        "questionnaire" => format_questionnaire_result(result, max_width, styles),
         _ => format_generic_result(result, max_width, styles),
     }
 }
@@ -849,6 +956,9 @@ pub fn measure_call_height(name: &str, arguments: &str, max_width: usize) -> u16
                 }
                 _ => base + 1,
             }
+        }
+        "questionnaire" => {
+            format_questionnaire_call(&args, max_width, &ThemeStyles::default()).len() as u16
         }
         _ => {
             // Generic: 1 header + up to 3 args
@@ -933,6 +1043,7 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
                 shown as u16 + extra
             }
         }
+        "questionnaire" => 1 + result.lines().count() as u16,
         _ => {
             let total = result.lines().count();
             let shown = total.min(GENERIC_PREVIEW_LINES);
@@ -1177,7 +1288,7 @@ mod tests {
     fn test_format_issue_result_list_multiline_color() {
         let result = "\
 #1    [open]    medium     Fix login bug
-#2    [open]    high   🔒  Refactor auth
+#2    [open]    high   ▣  Refactor auth
 #3    [closed]  low       Old task";
         let lines = format_issue_result(result, 80, &ThemeStyles::default());
         // 3 entries + no truncation hint.

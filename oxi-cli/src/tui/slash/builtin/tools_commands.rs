@@ -111,13 +111,49 @@ impl SlashCommand for McpCommand {
         "mcp"
     }
     fn description(&self) -> &str {
-        "Manage MCP servers (Quick Add presets / add / edit / remove) or open status dashboard"
+        "Manage MCP servers (Quick Add presets / add / edit / remove / reauth) or open status dashboard"
     }
     fn usage(&self) -> &str {
-        "/mcp <dashboard|status>"
+        "/mcp <dashboard|status|reauth <server>>"
     }
     fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
         let session = ctx.session;
+        // /mcp reauth <server> — force-refresh OAuth credentials (v2.2).
+        let trimmed = args.trim();
+        if trimmed == "reauth" || trimmed.starts_with("reauth ") {
+            let server = trimmed.strip_prefix("reauth").unwrap_or("").trim();
+            if server.is_empty() {
+                ctx.state.add_notification(
+                    "Usage: /mcp reauth <server>".into(),
+                    NotificationKind::Warning,
+                );
+                return SlashOutcome::Handled;
+            }
+            match session.agent_ref().tools().mcp_manager() {
+                Some(m) => {
+                    let server_owned = server.to_string();
+                    let mgr = m.clone();
+                    let result = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(mgr.reauth_server(&server_owned))
+                    });
+                    match result {
+                        Ok(()) => ctx.state.add_notification(
+                            format!("Reauthenticated MCP server '{}'", server_owned),
+                            NotificationKind::Info,
+                        ),
+                        Err(e) => ctx.state.add_notification(
+                            format!("MCP reauth '{}' failed: {}", server_owned, e),
+                            NotificationKind::Error,
+                        ),
+                    }
+                }
+                None => ctx.state.add_notification(
+                    "MCP runtime manager unavailable.".into(),
+                    NotificationKind::Warning,
+                ),
+            }
+            return SlashOutcome::Handled;
+        }
         match args.trim() {
             // Dashboard is a read-only runtime view; it requires the live
             // manager. Fall back to a helpful notice when missing.
@@ -174,7 +210,7 @@ impl SlashCommand for McpCommand {
         _session: &AgentSession,
         _state: &AppState,
     ) -> Vec<CompletionItem> {
-        static_subcommands(prefix, "mcp", &["dashboard", "status"])
+        static_subcommands(prefix, "mcp", &["dashboard", "status", "reauth"])
     }
 }
 

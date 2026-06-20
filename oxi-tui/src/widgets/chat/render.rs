@@ -398,7 +398,7 @@ impl Widget for EntryWidget<'_> {
                 // Actual protocol output happens post-render in app.rs
                 let lines = vec![
                     Line::from(Span::styled(
-                        format!("\u{1F5BC} [image: {}, {}]", mime_type, size_str),
+                        format!("[image: {}, {}]", mime_type, size_str),
                         self.styles.normal,
                     )),
                     Line::from(Span::styled(

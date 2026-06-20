@@ -18,12 +18,15 @@
 pub mod bootstrap;
 pub mod cli;
 pub mod main_dispatch;
+pub mod mcp_credentials;
 pub mod print_mode;
 pub mod services;
+pub mod internal_urls;
 pub mod setup_wizard;
 pub mod store;
 
 // ─── Directory groups ───────────────────────────────────────────────────────
+pub mod discovery;
 pub(crate) mod app;
 pub(crate) mod context;
 pub mod extensions; // public for main.rs
@@ -276,6 +279,7 @@ impl App {
             output_mode: None,
             provider_options: None,
             session_id: Some(ownership_session_id.clone()),
+            ttsr_engine: None,
         };
 
         // Build the agent via the SDK's AgentBuilder — no manual wiring.
@@ -287,8 +291,18 @@ impl App {
             .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
         let agent = Arc::new(agent);
 
-        let bridge =
-            std::sync::Arc::new(oxi_agent::tools::questionnaire::QuestionnaireBridge::new());
+        let questionnaire_timeout = if settings.questionnaire_timeout_secs > 0 {
+            Some(std::time::Duration::from_secs(
+                settings.questionnaire_timeout_secs,
+            ))
+        } else {
+            None
+        };
+        let bridge = std::sync::Arc::new(
+            oxi_agent::tools::questionnaire::QuestionnaireBridge::with_timeout(
+                questionnaire_timeout,
+            ),
+        );
         let questionnaire_tool =
             oxi_agent::tools::questionnaire::QuestionnaireTool::new(bridge.clone());
         agent

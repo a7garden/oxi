@@ -179,6 +179,12 @@ pub struct AgentConfig {
     /// thinking, OpenAI reasoning_effort, Google thinkingConfig).
     #[serde(default)]
     pub provider_options: Option<oxi_ai::ProviderOptions>,
+
+    /// TTSR engine for stream rule checking. When set, streaming output
+    /// is checked against registered rules and violations trigger
+    /// [`crate::agent_loop::StreamOutcome::RuleInterrupt`].
+    #[serde(skip, default)]
+    pub ttsr_engine: Option<std::sync::Arc<crate::agent_loop::ttsr::TtsrEngine>>,
 }
 
 impl Default for AgentConfig {
@@ -199,6 +205,7 @@ impl Default for AgentConfig {
             output_mode: None,
             provider_options: None,
             session_id: None,
+            ttsr_engine: None,
         }
     }
 }

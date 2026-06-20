@@ -35,6 +35,7 @@
 
 pub mod catalog;
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -814,6 +815,195 @@ impl ResourceMonitor for NoopResourceMonitor {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Port 12 — InternalUrlRouter: protocol-scheme virtual path resolution.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A resolved virtual URL result. Consumed by `read`/`search` tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedUrl {
+    /// Normalized original URL (debug/logging).
+    pub url: String,
+    /// Resolved text content.
+    pub content: String,
+    /// MIME type: "text/markdown" | "application/json" | "text/plain".
+    pub content_type: String,
+    /// Byte size (optional).
+    pub size: Option<usize>,
+    /// Debug source path (not exposed to model).
+    pub source_path: Option<String>,
+    /// Extra notes (resolution warnings, etc.).
+    pub notes: Vec<String>,
+    /// true → uneditable (hashline anchor suppression).
+    pub immutable: bool,
+}
+
+/// Router call context (identifies the calling session).
+#[derive(Debug, Clone, Default)]
+pub struct ResolveContext {
+    pub cwd: Option<PathBuf>,
+    pub session_id: Option<String>,
+}
+
+/// Resolves `scheme://path` URIs (issue://, pr://, agent://, etc.) into text.
+pub trait InternalUrlRouter: Send + Sync + 'static {
+    fn resolve<'a>(
+        &'a self,
+        uri: &'a str,
+        ctx: &'a ResolveContext,
+    ) -> Pin<Box<dyn Future<Output = Result<ResolvedUrl, SdkError>> + Send + 'a>>;
+
+    /// Schemes this router handles. Empty = handles none.
+    fn schemes(&self) -> &[&str] {
+        &[]
+    }
+
+    /// Currently registered schemes (for diagnostics). Default: empty.
+    fn registered_schemes(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopInternalUrlRouter;
+
+impl InternalUrlRouter for NoopInternalUrlRouter {
+    fn resolve<'a>(
+        &'a self,
+        _uri: &'a str,
+        _ctx: &'a ResolveContext,
+    ) -> Pin<Box<dyn Future<Output = Result<ResolvedUrl, SdkError>> + Send + 'a>> {
+        Box::pin(async {
+            Err(SdkError::PortNotConfigured {
+                port: "InternalUrlRouter",
+            })
+        })
+    }
+}
+
+/// Single-scheme handler contract. Products implement one per scheme
+/// (issue://, pr://, agent://, etc.) and register them with the router.
+#[async_trait]
+pub trait ProtocolHandler: Send + Sync {
+    /// Lowercase scheme this handler serves ("issue", "pr", …).
+    fn scheme(&self) -> &str;
+    /// When true, the resolved content is immutable (hashline anchor suppressed).
+    fn immutable(&self) -> bool {
+        false
+    }
+    /// Resolve a URL path (scheme already stripped) to text content.
+    async fn resolve(
+        &self,
+        url: &str,
+        selector: Option<&str>,
+        ctx: &ResolveContext,
+    ) -> Result<ResolvedUrl, SdkError>;
+}
+
+/// Auto-completion entry returned by a handler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UrlCompletion {
+    pub value: String,
+    pub label: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Line map metadata for selector processing (read tool delegates to this).
+#[derive(Debug, Clone, Default)]
+pub struct LineMap {
+    pub total_lines: u32,
+    /// 1-indexed displayable ranges (gaps represent elided regions).
+    pub displayable: Option<Vec<(u32, u32)>>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Port 13 — RuleRegistry: TTSR rules source.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A TTSR rule. Condition is a regex matched against streaming output.
+#[derive(Debug, Clone)]
+pub struct Rule {
+    pub name: String,
+    pub content: String,
+    pub description: Option<String>,
+    /// Regex patterns to match against stream text.
+    pub condition: Vec<regex::Regex>,
+    /// Scope tokens limiting which stream sources trigger.
+    pub scope: Vec<ScopeToken>,
+    pub interrupt_mode: InterruptMode,
+    pub globs: Vec<String>,
+    /// If true, always included in system prompt.
+    pub always_apply: bool,
+    pub source: RuleSource,
+}
+
+#[derive(Debug, Clone)]
+pub enum ScopeToken {
+    Text,
+    Thinking,
+    Tool { name: String, globs: Vec<String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptMode {
+    Never,
+    ProseOnly,
+    ToolOnly,
+    Always,
+}
+
+#[derive(Debug, Clone)]
+pub enum RuleSource {
+    BuiltinDefaults,
+    Project,
+    User,
+}
+
+pub trait RuleRegistry: Send + Sync + 'static {
+    fn rules<'a>(&'a self) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>>;
+    fn mark_injected(&self, _name: &str, _turn: u64) {}
+    fn injected_records(&self) -> Vec<(String, u64)> {
+        Vec::new()
+    }
+    fn restore(&self, _records: Vec<(String, u64)>) {}
+}
+
+#[derive(Default)]
+pub struct NoopRuleRegistry;
+
+impl RuleRegistry for NoopRuleRegistry {
+    fn rules<'a>(&'a self) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>> {
+        Box::pin(async { Vec::new() })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Port 14 — EmbeddingProvider: text → vector for semantic search.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Produces dense vector embeddings for semantic memory search.
+pub trait EmbeddingProvider: Send + Sync + 'static {
+    fn embed<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<f32>, SdkError>> + Send + 'a>>;
+}
+
+pub struct NoopEmbeddingProvider;
+
+impl EmbeddingProvider for NoopEmbeddingProvider {
+    fn embed<'a>(
+        &'a self,
+        _text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<f32>, SdkError>> + Send + 'a>> {
+        Box::pin(async {
+            Err(SdkError::PortNotConfigured {
+                port: "EmbeddingProvider",
+            })
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Registry — a single Arc<dyn ...> set registered on Oxi
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -849,6 +1039,15 @@ pub struct PortRegistry {
     /// Model catalog — provider/model metadata source of truth.
     /// Default: [`catalog::NoopModelCatalog`] (empty results).
     pub catalog: Arc<dyn catalog::ModelCatalog>,
+    /// Internal URL router — protocol-scheme dispatch.
+    /// Default: [`NoopInternalUrlRouter`].
+    pub url_router: Arc<dyn InternalUrlRouter>,
+    /// Rule registry — TTSR rules.
+    /// Default: [`NoopRuleRegistry`].
+    pub rules: Arc<dyn RuleRegistry>,
+    /// Embedding provider — text→vector for semantic search.
+    /// Default: [`NoopEmbeddingProvider`].
+    pub embeddings: Arc<dyn EmbeddingProvider>,
 }
 
 impl std::fmt::Debug for PortRegistry {
@@ -866,6 +1065,9 @@ impl std::fmt::Debug for PortRegistry {
             .field("cron", &"<dyn CronScheduler>")
             .field("resources", &"<dyn ResourceMonitor>")
             .field("catalog", &"<dyn ModelCatalog>")
+            .field("url_router", &"<dyn InternalUrlRouter>")
+            .field("rules", &"<dyn RuleRegistry>")
+            .field("embeddings", &"<dyn EmbeddingProvider>")
             .finish()
     }
 }
@@ -893,6 +1095,9 @@ impl PortRegistry {
             cron: Arc::new(NoopCronScheduler),
             resources: Arc::new(NoopResourceMonitor),
             catalog: catalog::NoopModelCatalog::new(),
+            url_router: Arc::new(NoopInternalUrlRouter),
+            rules: Arc::new(NoopRuleRegistry),
+            embeddings: Arc::new(NoopEmbeddingProvider),
         }
     }
 

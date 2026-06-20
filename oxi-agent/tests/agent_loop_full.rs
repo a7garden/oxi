@@ -300,6 +300,7 @@ mod tests {
             workspace_dir: None,
             provider_options: None,
             on_compaction: None,
+            ..Default::default()
         }
     }
 

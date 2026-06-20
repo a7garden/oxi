@@ -60,10 +60,14 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     let input_height = state.input.required_height(content_width, INPUT_MAX_HEIGHT);
     let input_area_height = 1 + queue_lines + input_height; // status + queue + input
 
+    // Todo panel height (0 if no phases)
+    let todo_height = state.todo_panel.line_count() as u16;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),                    // Chat
+            Constraint::Length(todo_height),       // Todo sticky panel
             Constraint::Length(input_area_height), // Status + queue + input (dynamic)
             Constraint::Length(3),                 // Footer
         ])
@@ -71,17 +75,26 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
 
+    // Todo sticky panel (only renders if non-empty)
+    if todo_height > 0 {
+        f.render_stateful_widget(
+            oxi_tui::widgets::todo_panel::TodoPanel::new(theme),
+            chunks[2],
+            &mut state.todo_panel,
+        );
+    }
+
     // Input area (status line + optional queue + input)
-    render_input_area(f, chunks[1], state, theme);
+    render_input_area(f, chunks[2], state, theme);
 
     // Slash popup — overlay above the input area
     if state.slash_completion_active {
-        render_slash_popup_overlay(f, chunks[1], state, theme);
+        render_slash_popup_overlay(f, chunks[2], state, theme);
     }
 
     // File path completion popup
     if state.file_completion_active {
-        render_file_completion_popup(f, chunks[1], state, theme);
+        render_file_completion_popup(f, chunks[2], state, theme);
     }
 
     // Status bar
@@ -95,15 +108,18 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
             if s.is_empty() {
                 String::new()
             } else {
+                // Priority uses block-shade density (no color needed — the
+                // footer extra_right is a single String rendered with one
+                // accent color, so per-priority color is impossible here).
                 let prio = match s.top_priority {
-                    Some(crate::store::issues::Priority::Critical) => "🔴",
-                    Some(crate::store::issues::Priority::High) => "🟠",
-                    Some(crate::store::issues::Priority::Medium) => "🟡",
-                    Some(crate::store::issues::Priority::Low) => "🟢",
+                    Some(crate::store::issues::Priority::Critical) => "█",
+                    Some(crate::store::issues::Priority::High) => "▓",
+                    Some(crate::store::issues::Priority::Medium) => "▒",
+                    Some(crate::store::issues::Priority::Low) => "░",
                     None => "",
                 };
                 let lock = if s.locked_open_count > 0 {
-                    format!(" \u{1F512}{}", s.locked_open_count)
+                    format!(" \u{25A6}{}", s.locked_open_count)
                 } else {
                     String::new()
                 };
@@ -111,12 +127,12 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
                     Some(t) => format!(" · {}", truncate_for_footer(t)),
                     None => String::new(),
                 };
-                format!("{prio}\u{1F4CB} {}{lock}{title_part}", s.open_count)
+                format!("{prio}# {}{lock}{title_part}", s.open_count)
             }
         }
         None => String::new(),
     };
-    f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
+    f.render_stateful_widget(Footer::new(theme), chunks[3], &mut state.footer_state);
 
     // Notifications (toasts) — rendered on top of everything
     render_notifications(f, size, state, theme);

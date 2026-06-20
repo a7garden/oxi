@@ -1,26 +1,20 @@
 //! MCP JSON-RPC client.
 //!
 //! Communicates with an MCP server through a [`McpTransport`]
-//! (currently only [`StdioTransport`]). Owns the request/response correlation
-//! and ID counter, but delegates raw I/O to the transport.
+//! (currently only [`StdioTransport`]). Owns the request id counter and
+//! high-level methods (`tools/list`, `tools/call`, ...); delegates raw I/O
+//! and request/response correlation to the transport.
 
-use super::transport::{McpTransport, stdio::StdioTransport};
+use super::transport::{InboundHandler, McpTransport, stdio::StdioTransport};
 use super::types::{
     JsonRpcNotification, JsonRpcRequest, McpCallResult, McpContent, McpToolDef, RawJsonRpcMessage,
     ServerInfo,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// MCP protocol version we advertise during initialization.
 const MCP_PROTOCOL_VERSION: &str = "2025-03-26";
-
-/// Default timeout for individual MCP requests (seconds).
-const REQUEST_TIMEOUT_SECS: u64 = 30;
-
-/// Maximum number of orphaned responses to drain on timeout.
-const MAX_DRAIN_RESPONSES: usize = 16;
 
 /// MCP prompt template.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -40,7 +34,7 @@ pub struct McpPrompt {
 pub struct McpPromptArgument {
     /// Argument name.
     pub name: String,
-    /// Optional human-readable description of the argument.
+    /// Optional human-readable description.
     #[serde(default)]
     pub description: Option<String>,
     /// Whether the argument must be supplied.
@@ -53,7 +47,7 @@ pub struct McpPromptArgument {
 pub enum McpLogLevel {
     /// Fine-grained diagnostic information.
     Debug,
-    /// General informational messages.
+    /// General informational information.
     Info,
     /// Normal-but-significant conditions.
     Notice,
@@ -125,8 +119,9 @@ impl McpClient {
     ///
     /// Performs the full initialization handshake:
     /// 1. Spawn the process
-    /// 2. Send `initialize` request
-    /// 3. Send `notifications/initialized`
+    /// 2. Install the default inbound responder
+    /// 3. Send `initialize` request
+    /// 4. Send `notifications/initialized`
     pub async fn connect(
         command: &str,
         args: &[String],
@@ -136,24 +131,16 @@ impl McpClient {
     ) -> Result<Self> {
         let transport: Box<dyn McpTransport> =
             Box::new(StdioTransport::spawn(command, args, env, cwd, debug)?);
-
-        let mut client = Self {
-            transport,
-            next_id: 1,
-            server_info: ServerInfo {
-                name: String::new(),
-                version: None,
-                protocol_version: String::new(),
-            },
-        };
-
-        client.initialize().await?;
-        Ok(client)
+        Self::connect_with_transport(transport).await
     }
 
     /// Connect through a pre-built transport (used by tests and by future
-    /// HTTP/SSE transports).
-    pub async fn connect_with_transport(transport: Box<dyn McpTransport>) -> Result<Self> {
+    /// HTTP/SSE transports). Installs the default inbound responder
+    /// (`ping` → empty result, `roots/list` → empty roots, others → -32601)
+    /// before the initialize handshake so the client does not deadlock on
+    /// servers that send requests between responses.
+    pub async fn connect_with_transport(mut transport: Box<dyn McpTransport>) -> Result<Self> {
+        transport.set_inbound_handler(default_inbound_handler());
         let mut client = Self {
             transport,
             next_id: 1,
@@ -205,7 +192,7 @@ impl McpClient {
         };
         let json = serde_json::to_string(&notification)?;
         self.transport
-            .send(&json)
+            .notify(&json)
             .await
             .context("Failed to send notifications/initialized")?;
 
@@ -327,7 +314,7 @@ impl McpClient {
     pub async fn get_prompt(
         &mut self,
         name: &str,
-        args: std::collections::HashMap<String, String>,
+        args: HashMap<String, String>,
     ) -> Result<Vec<serde_json::Value>> {
         let params = serde_json::json!({
             "name": name,
@@ -370,6 +357,14 @@ impl McpClient {
         self.transport.is_connected()
     }
 
+    /// Replace the inbound handler installed by `connect_with_transport`.
+    /// Used by [`crate::mcp::McpManager`] to install its manager-level
+    /// handler (notifications/tools/list_changed refresh, ...) after
+    /// the initialize handshake.
+    pub fn set_inbound_handler(&mut self, handler: InboundHandler) {
+        self.transport.set_inbound_handler(handler);
+    }
+
     /// Shut down the client gracefully.
     pub async fn close(&mut self) -> Result<()> {
         self.transport.close().await
@@ -378,9 +373,7 @@ impl McpClient {
     // ── JSON-RPC request/response correlation ─────────────────────
 
     /// Send a JSON-RPC request and wait for the matching response.
-    ///
-    /// On timeout, drains orphaned responses to prevent ID mismatch on
-    /// subsequent requests.
+    /// Correlation is handled by the transport.
     async fn send_request(
         &mut self,
         method: &str,
@@ -397,104 +390,50 @@ impl McpClient {
         };
 
         let json = serde_json::to_string(&request)?;
-        self.transport
-            .send(&json)
+        let resp = self
+            .transport
+            .request(id, &json)
             .await
-            .with_context(|| format!("MCP send '{}' failed", method))?;
+            .with_context(|| format!("MCP request '{}' failed", method))?;
 
-        let timeout = std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS);
-        let result = tokio::time::timeout(timeout, async {
-            loop {
-                let msg = self
-                    .transport
-                    .recv()
-                    .await
-                    .context("Failed to read MCP response")?;
-                if let Some(response_id) = msg.id
-                    && response_id == id
-                {
-                    if let Some(error) = msg.error {
-                        return Err(anyhow::anyhow!(
-                            "JSON-RPC error {}: {}",
-                            error.code,
-                            error.message
-                        ));
-                    }
-                    return Ok(msg.result.unwrap_or(serde_json::Value::Null));
-                }
-                // Notification or unmatched response — skip
-            }
+        if let Some(error) = resp.error {
+            return Err(anyhow::anyhow!(
+                "JSON-RPC error {}: {}",
+                error.code,
+                error.message
+            ));
+        }
+        Ok(resp.result.unwrap_or(serde_json::Value::Null))
+    }
+}
+
+/// Default inbound responder for server→client requests and notifications.
+///
+/// Used by [`McpClient::connect_with_transport`] so the client can talk to
+/// MCP servers that send `ping` or `roots/list` (or any server→client
+/// request) during the handshake without deadlocking the request loop.
+///
+/// - `ping` → `{"result": {}}`
+/// - `roots/list` → `{"result": {"roots": []}}`
+/// - other server→client requests → `{"error": {"code": -32601, ...}}`
+/// - notifications (no id) → no response (handler return is ignored)
+fn default_inbound_handler() -> InboundHandler {
+    Box::new(|msg: RawJsonRpcMessage| -> Option<serde_json::Value> {
+        // Only build a response for server→client requests (id present).
+        let id = msg.id?;
+        let method = msg.method.as_deref()?;
+        Some(match method {
+            "ping" => serde_json::json!({"jsonrpc": "2.0", "id": id, "result": {}}),
+            "roots/list" => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"roots": []}
+            }),
+            _ => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32601, "message": "Method not found"}
+            }),
         })
-        .await;
-
-        match result {
-            Ok(inner) => inner.with_context(|| format!("MCP request '{}' failed", method)),
-            Err(_) => {
-                tracing::warn!(
-                    "MCP request '{}' timed out after {}s, draining orphaned responses",
-                    method,
-                    REQUEST_TIMEOUT_SECS
-                );
-                self.drain_orphaned_responses(MAX_DRAIN_RESPONSES).await;
-                Err(anyhow::anyhow!(
-                    "MCP request '{}' timed out after {}s",
-                    method,
-                    REQUEST_TIMEOUT_SECS
-                ))
-            }
-        }
-    }
-
-    /// Drain up to `max` orphaned responses from the transport.
-    async fn drain_orphaned_responses(&mut self, max: usize) {
-        for _ in 0..max {
-            match tokio::time::timeout(std::time::Duration::from_millis(100), self.transport.recv())
-                .await
-            {
-                Ok(Ok(_)) => continue,
-                _ => break,
-            }
-        }
-    }
-}
-
-/// Write a JSON-RPC message with Content-Length framing.
-#[allow(dead_code)]
-pub async fn write_framed<W: AsyncWriteExt + Unpin>(writer: &mut W, json: &str) -> Result<()> {
-    let bytes = json.as_bytes();
-    let header = format!("Content-Length: {}\r\n\r\n", bytes.len());
-    writer.write_all(header.as_bytes()).await?;
-    writer.write_all(bytes).await?;
-    writer.flush().await?;
-    Ok(())
-}
-
-/// Read a single Content-Length framed message from a buffered reader.
-#[allow(dead_code)]
-pub async fn read_framed<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<RawJsonRpcMessage> {
-    let mut content_length: Option<usize> = None;
-    loop {
-        let mut line = String::new();
-        let bytes_read = reader.read_line(&mut line).await?;
-        if bytes_read == 0 {
-            return Err(anyhow::anyhow!("MCP server closed connection"));
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
-            content_length = Some(
-                rest.trim()
-                    .parse::<usize>()
-                    .context("Invalid Content-Length header")?,
-            );
-        }
-    }
-    let len = content_length.ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
-    let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf).await?;
-    let msg: RawJsonRpcMessage =
-        serde_json::from_slice(&buf).context("Failed to parse JSON-RPC message")?;
-    Ok(msg)
+    })
 }

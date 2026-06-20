@@ -217,8 +217,71 @@ fn ensure_parent(path: &Path) -> Result<()> {
     Ok(())
 }
 
+// ── Memory backend helpers (Hindsight ④) ──────────────────────────────
+
+/// Create a memory backend if memory is enabled in settings.
+/// Returns `None` when `memory_enabled` is false or the database cannot
+/// be opened.
+pub fn create_memory_backend(
+    settings: &crate::store::settings::Settings,
+) -> Option<Arc<dyn oxi_agent::tools::MemoryBackend>> {
+    if !settings.memory_enabled {
+        return None;
+    }
+    let db_path = settings
+        .memory_db_path
+        .clone()
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".oxi")
+                .join("memory")
+                .join("project.db")
+        });
+    // Ensure the parent directory exists.
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match crate::store::memory_sqlite::SqliteMemoryStore::open(&db_path) {
+        Ok(store) => Some(Arc::new(store)),
+        Err(e) => {
+            tracing::warn!("Failed to open memory database at {}: {e}", db_path.display());
+            None
+        }
+    }
+}
+
+/// Build a project-memory recall block for injection into the system prompt.
+/// Returns an empty string when no memories exist.
+pub async fn build_memory_recall(
+    backend: &dyn oxi_agent::tools::MemoryBackend,
+    subject: &str,
+) -> String {
+    match backend.list(subject).await {
+        Ok(items) if !items.is_empty() => {
+            let mut block = String::from("\n\n## Project Memory\n\nThe following facts were learned in previous sessions:\n");
+            for item in &items {
+                block.push_str(&format!("- [{}] {}\n", item.kind, item.content));
+            }
+            block
+        }
+        _ => String::new(),
+    }
+}
+
+/// Store a session summary into the memory backend.
+pub async fn session_reflect(
+    backend: &dyn oxi_agent::tools::MemoryBackend,
+    subject: &str,
+    summary: &str,
+) {
+    if let Err(e) = backend.put(summary, "summary", subject).await {
+        tracing::warn!("Failed to store session memory: {e}");
+    }
+}
 #[cfg(test)]
 mod tests {
+    
     use super::*;
 
     #[test]

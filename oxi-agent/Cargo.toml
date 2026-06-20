@@ -14,6 +14,7 @@ exclude = ["target/", "benches/"]
 
 [dependencies]
 oxi-ai = { version = "0.37.1", path = "../oxi-ai" }
+oxi-hashline = { version = "0.37.1", path = "../oxi-hashline" }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }

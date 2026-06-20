@@ -46,23 +46,54 @@ pub fn load_mcp_config() -> McpConfig {
 }
 
 /// Load MCP configuration from a specific working directory.
+///
+/// oxi's own paths are merged first (later files override earlier).
+/// Then, if `settings.discoverExternalConfigs` is enabled, third-party
+/// tool configs ([`external_paths`]) are merged with **lower priority**:
+/// they only add server entries oxi did not already define and never
+/// override oxi's `settings`. v2.4 / G8.
 pub fn load_mcp_config_from(cwd: &Path) -> McpConfig {
     let mut merged = McpConfig::default();
 
     for path in config_paths(cwd) {
         if let Some(config) = read_config_file(&path) {
-            // Merge server entries (later files override)
             for (name, entry) in config.mcp_servers {
                 merged.mcp_servers.insert(name, entry);
             }
-            // Use the last settings found
             if config.settings.is_some() {
                 merged.settings = config.settings;
             }
         }
     }
 
+    // Opt-in third-party discovery. oxi's own entries + settings win.
+    let discover = merged
+        .settings
+        .as_ref()
+        .and_then(|s| s.discover_external_configs)
+        .unwrap_or(false);
+    if discover {
+        for path in external_paths(cwd) {
+            if let Some(config) = read_config_file(&path) {
+                for (name, entry) in config.mcp_servers {
+                    merged.mcp_servers.entry(name).or_insert(entry);
+                }
+            }
+        }
+    }
+
     merged
+}
+
+/// Third-party tool config files to optionally discover (v2.4 / G8).
+/// Only files using the same `{"mcpServers": {...}}` schema as oxi are
+/// supported here; VS Code's `{"servers": ...}` and opencode's
+/// `{"mcp": ...}` schemas need normalization and are out of v2.4 scope.
+fn external_paths(cwd: &Path) -> Vec<PathBuf> {
+    vec![
+        cwd.join(".claude").join("mcp.json"),
+        cwd.join(".cursor").join("mcp.json"),
+    ]
 }
 
 /// Read and parse a single config file. Returns `None` if the file
@@ -75,7 +106,10 @@ pub fn read_config_file(path: &Path) -> Option<McpConfig> {
     let content = std::fs::read_to_string(path).ok()?;
 
     match serde_json::from_str::<McpConfig>(&content) {
-        Ok(config) => Some(config),
+        Ok(mut config) => {
+            resolve_config(&mut config);
+            Some(config)
+        }
         Err(e) => {
             tracing::warn!("Failed to parse MCP config {}: {}", path.display(), e);
             None
@@ -103,6 +137,146 @@ pub fn default_write_path_project(cwd: &Path) -> PathBuf {
 /// which wants to edit "the file" whether or not it exists yet.
 pub fn load_or_default(path: &Path) -> McpConfig {
     read_config_file(path).unwrap_or_default()
+}
+
+/// Resolve [`ServerEntry`] string fields against the process environment
+/// and (for `!cmd` values) the host shell. Called by [`read_config_file`]
+/// after parsing so that values stored in `mcp.json` are ready to use at
+/// connect time without further substitution.
+///
+/// Rules (matching the OMP behaviour):
+/// - Values starting with `!` run through a shell (`sh -c` on Unix,
+///   `cmd /C` on Windows) with a 10s timeout. The trimmed stdout replaces
+///   the value; failure or empty stdout yields `None`.
+/// - Other values have `${VAR}` and `${VAR:-default}` placeholders
+///   expanded against the process environment; unresolved placeholders
+///   remain literal (so a misconfigured value surfaces rather than
+///   silently disappearing).
+pub fn resolve_config(cfg: &mut McpConfig) {
+    for (name, entry) in cfg.mcp_servers.iter_mut() {
+        if let Some(s) = entry.command.as_ref() {
+            entry.command = match resolve_value(s) {
+                Some(v) => Some(v),
+                None => {
+                    tracing::warn!("MCP server '{}': failed to resolve command", name);
+                    None
+                }
+            };
+        }
+        if let Some(args) = entry.args.as_mut() {
+            args.retain_mut(|a| match resolve_value(a) {
+                Some(r) => {
+                    *a = r;
+                    true
+                }
+                None => false,
+            });
+        }
+        if let Some(s) = entry.cwd.as_ref() {
+            entry.cwd = match resolve_value(s) {
+                Some(v) => Some(v),
+                None => {
+                    tracing::warn!("MCP server '{}': failed to resolve cwd", name);
+                    None
+                }
+            };
+        }
+        if let Some(s) = entry.url.as_ref() {
+            entry.url = match resolve_value(s) {
+                Some(v) => Some(v),
+                None => {
+                    tracing::warn!("MCP server '{}': failed to resolve url", name);
+                    None
+                }
+            };
+        }
+        if let Some(env) = entry.env.as_mut() {
+            env.retain(|_, v| match resolve_value(v) {
+                Some(r) => {
+                    *v = r;
+                    true
+                }
+                None => false,
+            });
+        }
+        if let Some(headers) = entry.headers.as_mut() {
+            headers.retain(|_, v| match resolve_value(v) {
+                Some(r) => {
+                    *v = r;
+                    true
+                }
+                None => false,
+            });
+        }
+    }
+}
+
+fn resolve_value(value: &str) -> Option<String> {
+    if let Some(cmd) = value.strip_prefix('!') {
+        run_shell_capture(cmd, std::time::Duration::from_secs(10))
+    } else {
+        Some(expand_env_placeholders(value))
+    }
+}
+
+fn run_shell_capture(cmd: &str, timeout: std::time::Duration) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let thread_cmd = cmd.to_string();
+    std::thread::spawn(move || {
+        let result = shell_command_output(&thread_cmd);
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(out)) => {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(unix)]
+fn shell_command_output(cmd: &str) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("sh").arg("-c").arg(cmd).output()
+}
+
+#[cfg(not(unix))]
+fn shell_command_output(cmd: &str) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("cmd")
+        .arg("/C")
+        .arg(cmd)
+        .output()
+}
+
+fn expand_env_placeholders(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+            if let Some(end_rel) = input[i + 2..].find('}') {
+                let inner = &input[i + 2..i + 2 + end_rel];
+                let (name, default) = match inner.split_once(":-") {
+                    Some((n, d)) => (n, Some(d)),
+                    None => (inner, None),
+                };
+                let value = std::env::var(name)
+                    .ok()
+                    .or_else(|| default.map(|d| d.to_string()));
+                if let Some(v) = value {
+                    out.push_str(&v);
+                } else {
+                    out.push_str(&input[i..i + 2 + end_rel + 1]);
+                }
+                i += 2 + end_rel + 1;
+                continue;
+            }
+        }
+        let ch = input[i..].chars().next().expect("valid UTF-8 boundary");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// Atomically write a full [`McpConfig`] to `path` as pretty-printed

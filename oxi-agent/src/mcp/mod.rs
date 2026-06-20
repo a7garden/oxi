@@ -43,6 +43,7 @@
 //! }
 //! ```
 
+pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod config;
@@ -54,12 +55,13 @@ pub mod tool;
 pub mod transport;
 pub mod types;
 
+pub use auth::{Credential, McpCredentialProvider, NoopCredentialProvider};
 pub use cache::MetadataCache;
 pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument, McpSamplingRequest};
 pub use consent::ConsentManager;
 pub use direct_tool::McpDirectTool;
 pub use tool::McpTool;
-pub use transport::{McpTransport, stdio::StdioTransport};
+pub use transport::{McpTransport, http::StreamableHttpTransport, stdio::StdioTransport};
 pub use types::{
     ConsentState, DirectToolDef, DirectToolsConfig, LifecycleMode, McpCallResult, McpConfig,
     McpConnectionStatus, McpContent, McpDashboardData, McpServerInfo, McpSettings, McpSettingsView,
@@ -76,6 +78,7 @@ use std::time::{Duration, Instant};
 use lifecycle::{LifecycleEvent, channel as lifecycle_channel, lifecycle_event_loop};
 
 /// Default back-off period after a server connection failure (seconds).
+
 pub const DEFAULT_FAILURE_BACKOFF_SECS: u64 = 30;
 /// Default global idle timeout (minutes).
 pub const DEFAULT_IDLE_TIMEOUT_MINS: u64 = 10;
@@ -112,6 +115,11 @@ pub struct McpManager {
     /// Handle to the background lifecycle task (kept alive via `Arc<Self>`).
     /// `None` when constructed with `new_no_spawn()` outside a runtime.
     _lifecycle_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Authentication credential provider for MCP servers.
+    /// Defaults to [`NoopCredentialProvider`]; replace via
+    /// [`McpManager::set_credential_provider`] to enable authenticated
+    /// servers (API keys, OAuth).
+    credential_provider: parking_lot::RwLock<Arc<dyn McpCredentialProvider>>,
 }
 
 impl std::fmt::Debug for McpManager {
@@ -212,6 +220,9 @@ impl McpManager {
                 consent,
                 lifecycle_tx,
                 _lifecycle_handle,
+                credential_provider: parking_lot::RwLock::new(
+                    Arc::new(NoopCredentialProvider) as Arc<dyn McpCredentialProvider>
+                ),
             }
         });
 
@@ -274,6 +285,9 @@ impl McpManager {
             consent,
             lifecycle_tx,
             _lifecycle_handle: handle,
+            credential_provider: parking_lot::RwLock::new(
+                Arc::new(NoopCredentialProvider) as Arc<dyn McpCredentialProvider>
+            ),
         }
     }
 
@@ -297,6 +311,17 @@ impl McpManager {
     /// can reach them immediately.
     pub fn replace_config(&self, new_config: McpConfig) {
         *self.config.write() = new_config;
+    }
+
+    /// Inject a credential provider. Replaces the noop default.
+    /// Called by oxi-cli bootstrap (or any host product) to enable
+    /// authenticated MCP servers.
+    ///
+    /// Existing transports retain the provider they were constructed
+    /// with; new transports created after this call pick up the new
+    /// one at their next construction.
+    pub fn set_credential_provider(&self, provider: Arc<dyn McpCredentialProvider>) {
+        *self.credential_provider.write() = provider;
     }
 
     /// Get the consent manager.
@@ -527,32 +552,53 @@ impl McpManager {
 
     // ── Connect / disconnect ──────────────────────────────────────
 
-    /// Connect to a specific MCP server by name. Stores the connected
-    /// client, lists tools, and updates the metadata cache.
+    /// Connect to a specific MCP server by name. Selects the transport
+    /// from the entry: `command` → stdio (spawn), `url` → Streamable HTTP.
+    /// Stores the connected client and updates the metadata cache.
     pub async fn connect(self: &Arc<Self>, server_name: &str) -> Result<String> {
-        let (command, args, env, cwd, debug) = {
+        let (command, args, env, cwd, debug, url, timeout_ms) = {
             let config = self.config.read();
             let entry = config
                 .mcp_servers
                 .get(server_name)
                 .ok_or_else(|| anyhow::anyhow!("Server '{}' not found", server_name))?;
-            let command = entry.command.clone().ok_or_else(|| {
-                anyhow::anyhow!("Server '{}' has no command configured", server_name)
-            })?;
-            let args = entry.args.clone().unwrap_or_default();
-            let env = entry.env.clone().unwrap_or_default();
-            let cwd = entry.cwd.clone();
-            let debug = entry.debug.unwrap_or(false);
-            (command, args, env, cwd, debug)
+            (
+                entry.command.clone(),
+                entry.args.clone().unwrap_or_default(),
+                entry.env.clone().unwrap_or_default(),
+                entry.cwd.clone(),
+                entry.debug.unwrap_or(false),
+                entry.url.clone(),
+                entry
+                    .timeout
+                    .unwrap_or(crate::mcp::transport::http::DEFAULT_TIMEOUT_MS),
+            )
         };
 
-        let mut client = McpClient::connect(&command, &args, &env, cwd.as_deref(), debug)
+        let provider = self.credential_provider.read().clone();
+        let transport: Box<dyn McpTransport> = match (command, url) {
+            (Some(cmd), _) => Box::new(
+                StdioTransport::spawn(&cmd, &args, &env, cwd.as_deref(), debug)
+                    .with_context(|| format!("Failed to spawn MCP server '{}'", server_name))?,
+            ),
+            (None, Some(endpoint)) => Box::new(
+                StreamableHttpTransport::new(server_name, &endpoint, Some(provider), timeout_ms)
+                    .with_context(|| {
+                        format!("Failed to build HTTP transport for '{}'", server_name)
+                    })?,
+            ),
+            (None, None) => anyhow::bail!(
+                "Server '{}' has neither 'command' nor 'url' configured",
+                server_name
+            ),
+        };
+
+        let mut client = McpClient::connect_with_transport(transport)
             .await
             .with_context(|| format!("Failed to connect to MCP server '{}'", server_name))?;
 
         let tools = client.list_tools().await.unwrap_or_default();
 
-        // Persist to cache (original names only).
         if let Err(e) = self.cache.update(server_name, &tools) {
             tracing::warn!("MCP: failed to update cache for '{}': {}", server_name, e);
         }
@@ -649,8 +695,20 @@ impl McpManager {
         Ok(())
     }
 
-    /// Health check + reconnect for a keep-alive server.
+    /// Health check + reconnect for a keep-alive server (v2.3 G6).
+    ///
+    /// Retries reconnect with exponential backoff (500ms, 1s, 2s) so a
+    /// single transient blip no longer permanently kills the health
+    /// check (v2.0 only attempted reconnect once before giving up).
+    /// A per-server circuit breaker (5 failures / 30s → pause) is the
+    /// planned 2nd defence; see design §8.
     async fn health_check_and_reconnect(self: &Arc<Self>, server_name: &str) -> Result<()> {
+        const BACKOFFS: [Duration; 3] = [
+            Duration::from_millis(500),
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+        ];
+        // Fast path: a healthy client answers a ping.
         {
             let mut inner = self.inner.lock().await;
             if let Some(client) = inner.clients.get_mut(server_name)
@@ -659,8 +717,64 @@ impl McpManager {
                 return Ok(());
             }
         }
-        // Connection is down: try to reconnect.
-        self.connect(server_name).await.map(|_| ())
+        // Reconnect with backoff. On success → return; on final failure → Err.
+        for (i, delay) in BACKOFFS.iter().enumerate() {
+            tracing::warn!(
+                "MCP: health check '{}' failed; reconnect attempt {}/{} after {:?}",
+                server_name,
+                i + 1,
+                BACKOFFS.len(),
+                delay
+            );
+            tokio::time::sleep(*delay).await;
+            match self.connect(server_name).await {
+                Ok(_) => return Ok(()),
+                Err(e) => tracing::warn!(
+                    "MCP: reconnect attempt {} for '{}' failed: {}",
+                    i + 1,
+                    server_name,
+                    e
+                ),
+            }
+        }
+        Err(anyhow::anyhow!(
+            "Health check for '{}' exhausted {} reconnect attempts",
+            server_name,
+            BACKOFFS.len()
+        ))
+    }
+
+    /// Force-refresh the OAuth credential for `server_name` (v2.2).
+    /// Used by `/mcp reauth <server>` to rotate credentials without
+    /// restarting the process. Returns an error if no credential
+    /// provider is configured, the server has no `url`, or the
+    /// refresh fails.
+    pub async fn reauth_server(self: &Arc<Self>, server_name: &str) -> Result<()> {
+        let url = {
+            let config = self.config.read();
+            config
+                .mcp_servers
+                .get(server_name)
+                .and_then(|e| e.url.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Server '{}' not found or has no URL (auth requires Streamable HTTP)",
+                        server_name
+                    )
+                })?
+        };
+        let cred = self
+            .credential_provider
+            .read()
+            .refresh(server_name, &url)
+            .await;
+        match cred {
+            Some(_) => Ok(()),
+            None => Err(anyhow::anyhow!(
+                "Credential refresh for '{}' failed (see logs for details)",
+                server_name
+            )),
+        }
     }
 
     // ── Tool operations ───────────────────────────────────────────
@@ -704,6 +818,74 @@ impl McpManager {
             content: vec![McpContent::Text { text }],
             is_error: result.is_error,
         })
+    }
+
+    /// List resources from a connected MCP server (v2.3 G5).
+    pub async fn list_resources(
+        self: &Arc<Self>,
+        server_name: &str,
+    ) -> Result<Vec<serde_json::Value>> {
+        self.ensure_connected(server_name).await;
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow::anyhow!("Server '{}' not connected", server_name))?;
+        client
+            .list_resources()
+            .await
+            .with_context(|| format!("list_resources on '{}' failed", server_name))
+    }
+
+    /// Read a resource URI from a connected MCP server (v2.3 G5).
+    pub async fn read_resource(
+        self: &Arc<Self>,
+        server_name: &str,
+        uri: &str,
+    ) -> Result<Vec<McpContent>> {
+        self.ensure_connected(server_name).await;
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow::anyhow!("Server '{}' not connected", server_name))?;
+        client
+            .read_resource(uri)
+            .await
+            .with_context(|| format!("read_resource '{}' on '{}' failed", uri, server_name))
+    }
+
+    /// List prompt templates from a connected MCP server (v2.3 G5).
+    pub async fn list_prompts(self: &Arc<Self>, server_name: &str) -> Result<Vec<McpPrompt>> {
+        self.ensure_connected(server_name).await;
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow::anyhow!("Server '{}' not connected", server_name))?;
+        client
+            .list_prompts()
+            .await
+            .with_context(|| format!("list_prompts on '{}' failed", server_name))
+    }
+
+    /// Get a prompt template with arguments (v2.3 G5).
+    pub async fn get_prompt(
+        self: &Arc<Self>,
+        server_name: &str,
+        name: &str,
+        arguments: std::collections::HashMap<String, String>,
+    ) -> Result<Vec<serde_json::Value>> {
+        self.ensure_connected(server_name).await;
+        let mut inner = self.inner.lock().await;
+        let client = inner
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow::anyhow!("Server '{}' not connected", server_name))?;
+        client
+            .get_prompt(name, arguments)
+            .await
+            .with_context(|| format!("get_prompt '{}' on '{}' failed", name, server_name))
     }
 
     /// Reset (or start) the idle-disconnect timer for a server.
@@ -1156,6 +1338,7 @@ mod tests {
             cache,
             consent,
             lifecycle_tx,
+            credential_provider: parking_lot::RwLock::new(Arc::new(NoopCredentialProvider)),
             _lifecycle_handle: Some(tokio::spawn(async {})),
         });
 

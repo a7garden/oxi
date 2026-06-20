@@ -1140,7 +1140,7 @@ impl McpConfigOverlay {
         frame.render_widget(Clear, popup);
 
         let title = Line::from(vec![
-            Span::styled(" \u{1f527} MCP Servers ", styles.accent),
+            Span::styled(" \u{2699} MCP Servers ", styles.accent),
             Span::styled(
                 format!(
                     "— {} ({})",
@@ -1333,7 +1333,7 @@ impl McpConfigOverlay {
         let verb = if is_new { "Add" } else { "Edit" };
         let border = Block::default()
             .title(Line::from(Span::styled(
-                format!(" \u{1f527} {verb} MCP Server "),
+                format!(" \u{2699} {verb} MCP Server "),
                 styles.accent,
             )))
             .borders(Borders::ALL)
@@ -1672,7 +1672,7 @@ impl McpConfigOverlay {
         frame.render_widget(Clear, popup);
 
         let title = Line::from(vec![
-            Span::styled(" \u{2728} Quick Add MCP Server ", styles.accent),
+            Span::styled(" Quick Add MCP Server ", styles.accent),
             Span::styled("— pick a preset to pre-fill the form, or ", styles.muted),
             Span::styled("c", styles.accent),
             Span::styled(" for custom.", styles.muted),
@@ -1726,7 +1726,7 @@ impl McpConfigOverlay {
                     Span::raw("  "),
                     Span::styled(format!("[{}]", p.tag), styles.muted),
                     if p.requires_oauth {
-                        Span::styled("  \u{1f511} oauth", styles.warning)
+                        Span::styled("  oauth", styles.warning)
                     } else {
                         Span::raw("")
                     },

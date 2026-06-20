@@ -429,6 +429,32 @@ pub trait Compactor: Send + Sync {
     }
 }
 
+/// Context transformer — applied before provider stream call.
+///
+/// Used by snapcompact inline imaging to replace large tool results
+/// with PNG frames, reducing token usage on vision-capable models.
+pub trait ContextTransformer: Send + Sync {
+    /// Transform the context before sending to the provider.
+    fn transform<'a>(
+        &'a self,
+        context: &'a Context,
+        model: &'a Model,
+    ) -> Pin<Box<dyn Future<Output = Context> + Send + 'a>>;
+}
+
+/// A no-op transformer that returns the context unchanged.
+pub struct NoopContextTransformer;
+
+impl ContextTransformer for NoopContextTransformer {
+    fn transform<'a>(
+        &'a self,
+        context: &'a Context,
+        _model: &'a Model,
+    ) -> Pin<Box<dyn Future<Output = Context> + Send + 'a>> {
+        Box::pin(async move { context.clone() })
+    }
+}
+
 /// LLM-based compactor that uses the model itself to summarize
 pub struct LlmCompactor {
     model: Model,
