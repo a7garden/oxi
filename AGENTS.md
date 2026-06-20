@@ -11,7 +11,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Version | see `Cargo.toml` / `git tag` — single source of truth (do NOT hardcode the number here; it drifts) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
-| Workflows | `ci.yml` (8 jobs: fmt/clippy/clippy-native-browser/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `release.yml` (aarch64-apple-darwin + SHA256SUMS + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |
+| Workflows | `ci.yml` (8 jobs: fmt/clippy/clippy-native-browser/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `publish.yml` (crates.io, unified), `build-binaries.yml`, `sbom.yml`, `labels.yml` |
 
 > The legacy `oxi-store` crate (settings, sessions, auth) was absorbed
 > into `oxi-cli/src/store/` as a self-contained sub-module. The legacy
@@ -337,11 +337,9 @@ oxi ships a multi-stage pipeline. The full source is under
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `clippy-native-browser`, `smoke-test`, `audit`, `deny`, `msrv`, `doc`. ~2-3 min for the fast jobs. |
-| `test.yml` | PR + push to main + release | Full nextest matrix on **macos-latest** (Apple Silicon), plus doc tests. Replaces the older "smoke on PR, full on main" split. |
+| `publish.yml` | `v*` tag push + manual | Single workflow: tag-on-main verification, packaging dry-run, then `cargo publish` in topological order. All on `ubuntu-latest` (GitHub-hosted). No binaries, no GitHub Release, no self-hosted runners. |
 | `pr-gate.yml` | PR opened/synchronized/reopened | Conventional-Commit title, PR size ≤ 4000 lines, no merge commits, issue linkage. |
-| `release.yml` | `v*` tag push | Build `aarch64-apple-darwin`, `tag-check` (rejects stale tags), `SHA256SUMS` + CycloneDX SBOM, GitHub Release, then dispatches `publish.yml`. |
 | `build-binaries.yml` | weekly cron + manual | Continuous binary build (no release artifact) for sanity. |
-| `publish.yml` | dispatched by `release.yml` + manual | `cargo publish` to crates.io in topological order with a dry-run pre-flight. Requires `CARGO_TOKEN`. |
 | `sbom.yml` | push to main + release | Generates CycloneDX 1.5 SBOM and submits it to GitHub's dependency-graph API. |
 | `labels.yml` | weekly + labels.yml change | Syncs `.github/labels.yml` to the repo's label set via `EndBug/label-sync`. |
 
@@ -351,23 +349,20 @@ oxi ships a multi-stage pipeline. The full source is under
 |--------|---------|:---:|---------------|
 | `CARGO_TOKEN` | `publish.yml` | ✅ **Yes** (to publish) | <https://crates.io/settings/tokens>, scope: publish |
 
-**Scope decisions (2026-06-07):**
+**Scope decisions (2026-06-20):**
 
 - **Distribution channel:** crates.io only. No Homebrew tap, no Scoop bucket.
-- **Build target:** `aarch64-apple-darwin` (macOS Apple Silicon) only.
-  The maintainer does not have access to Linux or Windows build
-  environments, so cross-OS verification is not part of this pipeline.
-  To re-enable other targets, add an entry to the `matrix` in
-  `release.yml`/`build-binaries.yml` and a matching runner in
-  `test.yml`.
-- **Supply chain:** SHA256SUMS generated on every release (unsigned).
-  No GPG signing, no Codecov coverage reporting.
+  No binary builds, no GitHub Release artifacts.
+- **Runner:** `ubuntu-latest` (GitHub-hosted) only. Self-hosted runners are
+  no longer required — `release.yml` was replaced by a unified `publish.yml`
+  that runs entirely on GitHub infrastructure.
+- **Supply chain:** crates.io package signing. No SHA256SUMS, no GPG, no SBOM
+  in the publish pipeline (the `sbom.yml` workflow still generates CycloneDX
+  SBOMs on push to main and release).
 
 With **only** `CARGO_TOKEN` configured, the full pipeline runs:
-CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + release build
-(`release.yml`) + crates.io publish (`publish.yml`) + SBOM + label sync.
-
-## Design Principles
+CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
+(`publish.yml`) + SBOM + label sync.
 
 1. **Streaming-first** — every provider streams tokens. No blocking request/response.
 2. **Provider-agnostic** — all LLM providers share the same `Provider` trait and message types.
