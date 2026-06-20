@@ -33,7 +33,7 @@ jobs:
           # other targets, add an entry to this matrix and a matching
           # test runner in test.yml.
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: [self-hosted, macOS, ARM64]
             artifact_name: oxi
             archive_ext: tar.gz
 
