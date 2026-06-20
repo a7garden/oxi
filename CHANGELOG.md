@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.38.0] - 2026-06-20
 ### Changed — HTML export tool 렌더링 재설계 (C1)
 
 `oxi-cli/src/storage/export.rs` 의 도구 호출 렌더링을 구조화된
@@ -677,7 +678,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
   - Release job now generates `SHA256SUMS` next to binaries.
   - CycloneDX 1.5 SBOM (`oxi.cdx.json`) attached to the GitHub release.
   - Matrix simplified to a single target (`aarch64-apple-darwin`).
-- **`publish.yml`** (new) — publishes all 5 workspace crates to
+- **`publish.yml`** (new) — publishes all 6 workspace crates to
   `crates.io` in topological order on `release: published`, with a
   dry-run `cargo package --no-verify` pre-flight. Requires `CARGO_TOKEN`
   secret. Run `workflow_dispatch` for a manual dry run.

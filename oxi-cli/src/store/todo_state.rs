@@ -15,6 +15,7 @@ use parking_lot::RwLock;
 ///
 /// `TodoStateProvider` 특성 구현 — `todo` 도구와 sticky panel이 공유.
 /// TUI 채널로 갱신 알림을 보내려면 `notifier: Option<Box<dyn Fn>>`를 추가.
+#[derive(Debug)]
 pub struct TodoState {
     phases: RwLock<Vec<TodoPhase>>,
 }

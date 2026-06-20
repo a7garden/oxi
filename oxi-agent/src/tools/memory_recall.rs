@@ -108,6 +108,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Returns canned search results and records the requested `k`.
+    #[derive(Debug)]
     struct MockMemory {
         items: Vec<MemoryItem>,
         last_k: Mutex<Option<usize>>,

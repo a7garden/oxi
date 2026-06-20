@@ -123,7 +123,10 @@ impl oxi_agent::agent_loop::ttsr::RuleRegistry for StaticRuleRegistry {
     }
 
     fn mark_injected(&self, name: &str, turn: u64) {
-        self.injections.write().unwrap().push((name.to_string(), turn));
+        self.injections
+            .write()
+            .unwrap()
+            .push((name.to_string(), turn));
     }
 
     fn injected_records(&self) -> Vec<(String, u64)> {

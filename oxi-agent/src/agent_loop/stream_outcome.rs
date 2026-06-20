@@ -4,8 +4,8 @@
 //! to signal TTSR rule violations without repurposing the existing cancel /
 //! error mechanisms.
 
-use oxi_ai::AssistantMessage;
 use super::ttsr::Rule;
+use oxi_ai::AssistantMessage;
 
 /// Result of a streaming completion attempt.
 pub enum StreamOutcome {
@@ -25,16 +25,15 @@ pub enum StreamOutcome {
     },
 
     /// Provider error (stream ended with an error event).
-    Error(AssistantMessage),
+    /// Provider error (stream ended with an error event), with detail message.
+    Error { message: AssistantMessage, detail: String },
 }
 
 impl StreamOutcome {
     /// Extract the assistant message regardless of outcome.
     pub fn into_message(self) -> AssistantMessage {
         match self {
-            StreamOutcome::Complete(m)
-            | StreamOutcome::Cancelled(m)
-            | StreamOutcome::Error(m) => m,
+            StreamOutcome::Complete(m) | StreamOutcome::Cancelled(m) | StreamOutcome::Error { message: m, .. } => m,
             StreamOutcome::RuleInterrupt { partial, .. } => partial,
         }
     }

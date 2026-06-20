@@ -83,10 +83,10 @@ pub use tools::commit::{
 pub use tools::context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
 pub use tools::github::GitHubTool;
 pub use tools::github_search::GitHubSearchTool;
+pub use tools::memory_edit::MemoryEditTool;
 pub use tools::memory_recall::MemoryRecallTool;
 pub use tools::memory_reflect::MemoryReflectTool;
 pub use tools::memory_retain::MemoryRetainTool;
-pub use tools::memory_edit::MemoryEditTool;
 pub use tools::questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 pub use tools::search_cache::{GetSearchResultsTool, SearchCache};
 pub use tools::subagent::SubagentTool;

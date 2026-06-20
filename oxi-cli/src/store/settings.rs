@@ -93,7 +93,6 @@ pub enum ThinkingLevel {
     XHigh,
 }
 
-
 /// Edit format for the edit tool.
 ///
 /// Controls whether the system prompt instructs the model to use hashline

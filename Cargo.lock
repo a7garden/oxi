@@ -3721,7 +3721,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.37.1"
+version = "0.38.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3751,7 +3751,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-ai"
-version = "0.37.1"
+version = "0.38.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3789,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.37.1"
+version = "0.38.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3839,7 +3839,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-hashline"
-version = "0.37.1"
+version = "0.38.0"
 dependencies = [
  "async-trait",
  "lru 0.12.5",
@@ -3855,7 +3855,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.37.1"
+version = "0.38.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3888,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-tui"
-version = "0.37.1"
+version = "0.38.0"
 dependencies = [
  "anyhow",
  "base64",

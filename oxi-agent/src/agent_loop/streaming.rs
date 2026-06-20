@@ -14,8 +14,8 @@ use oxi_ai::{
 };
 use std::collections::HashSet;
 
+use super::helpers::sanitize_orphaned_tool_results;
 use super::stream_outcome::StreamOutcome;
-use super::ttsr::{MatchSource, TtsrEngine, TtsrMatchContext};
 
 pub(crate) async fn stream_assistant_response(
     loop_ref: &super::AgentLoop,
@@ -26,13 +26,28 @@ pub(crate) async fn stream_assistant_response(
     let model = match loop_ref.resolve_model() {
         Ok(m) => m,
         Err(_) => {
-            return StreamOutcome::Error(oxi_ai::AssistantMessage::new(
-                oxi_ai::Api::OpenAiCompletions,
-                "agent",
-                &loop_ref.config.model_id,
-            ))
+            return StreamOutcome::Error {
+                message: oxi_ai::AssistantMessage::new(
+                    oxi_ai::Api::OpenAiCompletions,
+                    "agent",
+                    &loop_ref.config.model_id,
+                ),
+                detail: "Failed to resolve model".to_string(),
+            };
         }
     };
+
+    // Proactively sanitize orphaned tool results to prevent provider
+    // errors like "Messages with role 'tool' must be a response to a
+    // preceding message with 'tool_calls'".
+    let removed = sanitize_orphaned_tool_results(messages);
+    if removed > 0 {
+        tracing::warn!(
+            session_id = ?loop_ref.session_id,
+            removed,
+            "Sanitized orphaned tool results before streaming"
+        );
+    }
 
     let mut context = Context::new();
 
@@ -73,12 +88,15 @@ pub(crate) async fn stream_assistant_response(
     .await
     {
         Ok(s) => s,
-        Err(_) => {
-            return StreamOutcome::Error(oxi_ai::AssistantMessage::new(
-                oxi_ai::Api::OpenAiCompletions,
-                "agent",
-                &loop_ref.config.model_id,
-            ))
+        Err(e) => {
+            return StreamOutcome::Error {
+                message: oxi_ai::AssistantMessage::new(
+                    oxi_ai::Api::OpenAiCompletions,
+                    "agent",
+                    &loop_ref.config.model_id,
+                ),
+                detail: e.to_string(),
+            };
         }
     };
 
@@ -149,7 +167,7 @@ pub(crate) async fn stream_assistant_response(
                         ),
                         session_id: loop_ref.session_id.clone(),
                     });
-                    return StreamOutcome::Error(err_asst);
+                    return StreamOutcome::Error { message: err_asst, detail: format!("Stream timed out after {:?} of inactivity", stream_idle_timeout) };
                 }
 
                 continue;
@@ -203,7 +221,9 @@ pub(crate) async fn stream_assistant_response(
             } => {
                 tracing::info!(
                     "Stream event #{}: Fallback from {} to {}",
-                    event_count, from_model, to_model
+                    event_count,
+                    from_model,
+                    to_model
                 );
                 emit(super::AgentEvent::Fallback {
                     from_model,
@@ -217,7 +237,9 @@ pub(crate) async fn stream_assistant_response(
             } => {
                 tracing::warn!(
                     "Stream event #{}: All fallback models exhausted. Tried: {:?}, error: {}",
-                    event_count, models_tried, final_error
+                    event_count,
+                    models_tried,
+                    final_error
                 );
                 if let Some(last_model) = models_tried.last() {
                     emit(super::AgentEvent::Fallback {
@@ -227,9 +249,7 @@ pub(crate) async fn stream_assistant_response(
                 }
             }
 
-            ProviderEvent::TextDelta {
-                delta, partial, ..
-            } => {
+            ProviderEvent::TextDelta { delta, partial, .. } => {
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -281,9 +301,7 @@ pub(crate) async fn stream_assistant_response(
                 }
             }
 
-            ProviderEvent::ThinkingDelta {
-                delta, partial, ..
-            } => {
+            ProviderEvent::ThinkingDelta { delta, partial, .. } => {
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -424,7 +442,7 @@ pub(crate) async fn stream_assistant_response(
                     session_id: loop_ref.session_id.clone(),
                 });
 
-                return StreamOutcome::Error(error);
+                return StreamOutcome::Error { message: error, detail: format!("⚠ {}", friendly) };
             }
 
             _ => {}
@@ -433,19 +451,20 @@ pub(crate) async fn stream_assistant_response(
 
     tracing::info!("Stream ended after {} events", event_count);
 
-    let final_message = match messages
-        .last()
-        .and_then(|m| match m {
-            Message::Assistant(a) => Some(a.clone()),
-            _ => None,
-        }) {
+    let final_message = match messages.last().and_then(|m| match m {
+        Message::Assistant(a) => Some(a.clone()),
+        _ => None,
+    }) {
         Some(m) => m,
         None => {
-            return StreamOutcome::Error(oxi_ai::AssistantMessage::new(
-                oxi_ai::Api::OpenAiCompletions,
-                "agent",
-                &loop_ref.config.model_id,
-            ))
+            return StreamOutcome::Error {
+                message: oxi_ai::AssistantMessage::new(
+                    oxi_ai::Api::OpenAiCompletions,
+                    "agent",
+                    &loop_ref.config.model_id,
+                ),
+                detail: "No final assistant message in stream".to_string(),
+            };
         }
     };
 

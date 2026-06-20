@@ -7,9 +7,9 @@
 //! Ported from omp `packages/coding-agent/src/internal-urls/router.ts`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 #[cfg(test)]
 use async_trait::async_trait;
@@ -75,7 +75,9 @@ impl CompositeUrlRouter {
                     if i + 2 < len && bytes[i + 1] == b'/' && bytes[i + 2] == b'/' {
                         let scheme = &input[..i];
                         // http and https are web URLs, not internal.
-                        if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") {
+                        if scheme.eq_ignore_ascii_case("http")
+                            || scheme.eq_ignore_ascii_case("https")
+                        {
                             return None;
                         }
                         return Some(scheme);
@@ -123,20 +125,15 @@ impl InternalUrlRouter for CompositeUrlRouter {
         ctx: &'a ResolveContext,
     ) -> Pin<Box<dyn Future<Output = Result<ResolvedUrl, SdkError>> + Send + 'a>> {
         Box::pin(async move {
-            let (scheme, path) = Self::split_uri(uri).ok_or_else(|| {
-                SdkError::UnknownScheme {
-                    scheme: uri.to_string(),
-                }
+            let (scheme, path) = Self::split_uri(uri).ok_or_else(|| SdkError::UnknownScheme {
+                scheme: uri.to_string(),
             })?;
 
-            let handler = self
-                .handlers
-                .read()
-                .get(scheme)
-                .cloned()
-                .ok_or_else(|| SdkError::UnknownScheme {
+            let handler = self.handlers.read().get(scheme).cloned().ok_or_else(|| {
+                SdkError::UnknownScheme {
                     scheme: scheme.to_string(),
-                })?;
+                }
+            })?;
 
             let mut resolved = handler.resolve(path, None, ctx).await?;
             resolved.immutable = resolved.immutable || handler.immutable();
@@ -152,7 +149,10 @@ mod tests {
 
     #[test]
     fn test_parse_scheme_valid() {
-        assert_eq!(CompositeUrlRouter::parse_scheme("issue://1428"), Some("issue"));
+        assert_eq!(
+            CompositeUrlRouter::parse_scheme("issue://1428"),
+            Some("issue")
+        );
         assert_eq!(
             CompositeUrlRouter::parse_scheme("pr://owner/repo/1428"),
             Some("pr")
@@ -174,10 +174,7 @@ mod tests {
     #[test]
     fn test_parse_scheme_rejects_regular_paths() {
         assert_eq!(CompositeUrlRouter::parse_scheme("src/main.rs"), None);
-        assert_eq!(
-            CompositeUrlRouter::parse_scheme("/absolute/path"),
-            None,
-        );
+        assert_eq!(CompositeUrlRouter::parse_scheme("/absolute/path"), None,);
         assert_eq!(CompositeUrlRouter::parse_scheme("relative/path"), None);
     }
 
@@ -192,8 +189,7 @@ mod tests {
 
     #[test]
     fn test_split_uri() {
-        let (scheme, path) =
-            CompositeUrlRouter::split_uri("pr://owner/repo/1428/diff/1").unwrap();
+        let (scheme, path) = CompositeUrlRouter::split_uri("pr://owner/repo/1428/diff/1").unwrap();
         assert_eq!(scheme, "pr");
         assert_eq!(path, "owner/repo/1428/diff/1");
     }

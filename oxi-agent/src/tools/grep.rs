@@ -417,7 +417,6 @@ impl AgentTool for GrepTool {
             .and_then(|v: &Value| v.as_u64())
             .unwrap_or(100) as usize;
 
-
         // ── Internal URL dispatch ──
         // If the input looks like an internal URL (scheme://…), resolve
         // content and search in-memory instead of touching the filesystem.

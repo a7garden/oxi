@@ -81,7 +81,7 @@ jobs:
         # are published (topological order), so it cannot live here.
         run: |
           set -euo pipefail
-          for crate in oxi-ai oxi-agent oxi-tui oxi-sdk oxi-cli; do
+          for crate in oxi-ai oxi-agent oxi-hashline oxi-tui oxi-sdk oxi-cli; do
             echo "─── Packaging $crate ───"
             (cd "$crate" && cargo package --no-verify --list)
           done
@@ -107,6 +107,7 @@ jobs:
       max-parallel: 1
       matrix:
         crate:
+          - oxi-hashline
           - oxi-ai
           - oxi-tui
           - oxi-agent
@@ -124,7 +125,7 @@ jobs:
           # Map each crate to the internal dependency it must wait for
           # (the one published immediately before it in topo order).
           case "$CRATE" in
-            oxi-ai|oxi-tui) WAIT=""; exit 0 ;;
+            oxi-hashline|oxi-ai|oxi-tui) WAIT=""; exit 0 ;;
             oxi-agent) WAIT="oxi-ai" ;;
             oxi-sdk) WAIT="oxi-agent" ;;
             oxi-cli) WAIT="oxi-sdk" ;;

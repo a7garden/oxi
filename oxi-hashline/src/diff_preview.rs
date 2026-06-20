@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn unchanged_lines_far_from_change_are_trimmed() {
         // A change at line 1; the long tail must be trimmed away.
-        let before: String = "head\n".repeat(1) + &"tail\n".repeat(50);
+        let before: String = "head\n".to_string() + &"tail\n".repeat(50);
         let after: String = "CHANGED\n".to_string() + &"tail\n".repeat(50);
         let lines = preview(&before, &after);
         assert!(lines.iter().any(|l| l == "1:CHANGED"));

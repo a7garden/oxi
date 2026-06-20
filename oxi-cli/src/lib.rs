@@ -17,18 +17,18 @@
 // cli must be pub for main.rs binary
 pub mod bootstrap;
 pub mod cli;
+pub mod internal_urls;
 pub mod main_dispatch;
 pub mod mcp_credentials;
 pub mod print_mode;
 pub mod services;
-pub mod internal_urls;
 pub mod setup_wizard;
 pub mod store;
 
 // ─── Directory groups ───────────────────────────────────────────────────────
-pub mod discovery;
 pub(crate) mod app;
 pub(crate) mod context;
+pub mod discovery;
 pub mod extensions; // public for main.rs
 pub(crate) mod infra;
 pub(crate) mod media;
@@ -280,6 +280,9 @@ impl App {
             provider_options: None,
             session_id: Some(ownership_session_id.clone()),
             ttsr_engine: None,
+            memory: None,
+            todo: None,
+            agent_pool: None,
         };
 
         // Build the agent via the SDK's AgentBuilder — no manual wiring.

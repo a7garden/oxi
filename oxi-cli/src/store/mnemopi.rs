@@ -16,6 +16,7 @@ use std::pin::Pin;
 /// Implements `MemoryBackend` for the `memory_*` agent tools.
 /// Each memory is stored with an auto-generated ID, kind, content, and subject.
 /// Search is simple substring matching (no embeddings).
+#[derive(Debug)]
 pub struct MnemopiStore {
     /// In-memory cache of all memories, keyed by ID.
     memories: RwLock<HashMap<String, StoredMemory>>,

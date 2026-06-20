@@ -8,8 +8,8 @@
 //! Uses the GitHub REST API with optional `GITHUB_TOKEN`/`GH_TOKEN` auth.
 
 use async_trait::async_trait;
-use oxi_sdk::ports::{ProtocolHandler, ResolveContext, ResolvedUrl};
 use oxi_sdk::SdkError;
+use oxi_sdk::ports::{ProtocolHandler, ResolveContext, ResolvedUrl};
 use serde::Deserialize;
 
 use super::{detect_github_repo, github_token};

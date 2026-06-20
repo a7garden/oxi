@@ -32,7 +32,7 @@ pub struct MemoryItem {
 
 /// Memory backend for the `memory_*` tools. The composition root implements
 /// this, bridging to `oxi_sdk::ports::MemoryStore` + `EmbeddingProvider`.
-pub trait MemoryBackend: Send + Sync {
+pub trait MemoryBackend: Send + Sync + std::fmt::Debug {
     fn put<'a>(
         &'a self,
         content: &'a str,
@@ -65,7 +65,7 @@ pub struct ResolvedContent {
 
 /// URL resolver for internal protocol schemes. The composition root
 /// implements this, bridging to `oxi_sdk::ports::InternalUrlRouter`.
-pub trait UrlResolver: Send + Sync {
+pub trait UrlResolver: Send + Sync + std::fmt::Debug {
     fn can_resolve(&self, input: &str) -> bool;
     fn resolve<'a>(
         &'a self,
@@ -76,7 +76,7 @@ pub trait UrlResolver: Send + Sync {
 /// Todo state access capability. Implemented by the composition root
 /// (oxi-cli) bridging to the session-scoped todo state. Used by the
 /// `todo` agent tool and the TUI sticky panel.
-pub trait TodoStateProvider: Send + Sync {
+pub trait TodoStateProvider: Send + Sync + std::fmt::Debug {
     /// Return a snapshot of the current phase list (read-only, for TUI).
     fn get_phases(&self) -> Vec<crate::tools::todo::TodoPhase>;
 
@@ -134,7 +134,7 @@ pub struct AgentInfo {
 
 /// Agent pool access capability. Implemented by the composition root
 /// to expose live sub-agent info to the Hub overlay and todo matching.
-pub trait AgentPoolProvider: Send + Sync {
+pub trait AgentPoolProvider: Send + Sync + std::fmt::Debug {
     /// List all known agents (main + sub-agents).
     fn list_agents(&self) -> Vec<AgentInfo>;
     /// Get a specific agent by ID.
@@ -182,7 +182,7 @@ pub enum LspAction {
 
 /// LSP access capability. Implemented by an `oxi-lsp` crate (feature-gated)
 /// or stubbed with `None` when LSP is disabled.
-pub trait LspProvider: Send + Sync {
+pub trait LspProvider: Send + Sync + std::fmt::Debug {
     /// Execute an LSP action and return formatted text output.
     fn execute_action<'a>(
         &'a self,
@@ -562,14 +562,14 @@ pub mod http_client;
 pub mod ls;
 /// LSP tool (requires LspProvider capability).
 pub mod lsp;
+/// Memory edit tool — update or delete a memory item.
+pub mod memory_edit;
 /// Memory recall tool — semantic search over stored memories.
 pub mod memory_recall;
 /// Memory reflect tool — persist a session summary to memory.
 pub mod memory_reflect;
 /// Memory retain tool — persist a memory item to the backend.
 pub mod memory_retain;
-/// Memory edit tool — update or delete a memory item.
-pub mod memory_edit;
 /// Path security (traversal protection).
 pub mod path_security;
 /// Path manipulation utilities.
@@ -607,8 +607,8 @@ pub use read::ReadTool;
 pub use crate::mcp::McpTool;
 pub use commit::CommitTool;
 pub use context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
-pub use memory_recall::MemoryRecallTool;
 pub use memory_edit::MemoryEditTool;
+pub use memory_recall::MemoryRecallTool;
 pub use memory_reflect::MemoryReflectTool;
 pub use memory_retain::MemoryRetainTool;
 pub use questionnaire::{QuestionnaireBridge, QuestionnaireTool};

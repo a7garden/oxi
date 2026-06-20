@@ -14,12 +14,12 @@ pub mod helpers;
 pub mod queues;
 /// Retry logic for the agent loop.
 pub mod retry;
+/// Stream outcome types for TTSR integration.
+pub mod stream_outcome;
 /// Streaming response handling.
 pub mod streaming;
 /// Tool execution strategies.
 pub mod tool_exec;
-/// Stream outcome types for TTSR integration.
-pub mod stream_outcome;
 /// Time-Traveling Stream Rules engine.
 pub mod ttsr;
 
@@ -40,7 +40,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use self::helpers::should_stop_after_turn;
+use self::helpers::{sanitize_orphaned_tool_results, should_stop_after_turn};
 use self::queues::{
     clear_all_queues, clear_follow_up_queue, clear_steering_queue, drain_follow_up_queue,
     drain_steering_queue, try_push_follow_up, try_push_steering,
@@ -640,10 +640,39 @@ impl AgentLoop {
 
                 let assistant_message = match outcome {
                     StreamOutcome::Complete(msg) => msg,
-                    StreamOutcome::Error(msg) => {
+                    StreamOutcome::Error { message: _message, detail } => {
+                        // Check for message-ordering errors that can be recovered
+                        // by removing orphaned tool results.
+                        let is_tool_ordering_error = detail.contains("tool")
+                            && (detail.contains("must be a response")
+                                || detail.contains("preceding")
+                                || detail.contains("tool_calls"));
+
+                        if is_tool_ordering_error {
+                            let removed = sanitize_orphaned_tool_results(&mut messages);
+                            tracing::warn!(
+                                session_id = ?self.session_id,
+                                removed,
+                                detail = %detail,
+                                "Message-ordering error detected, removed orphaned tool results, retrying"
+                            );
+                            if removed > 0 {
+                                // Don't push the error message to history; retry the turn.
+                                emit(AgentEvent::Error {
+                                    message: format!(
+                                        "⚠ Provider rejected message order: {}. Removed {} orphaned tool results, retrying…",
+                                        detail, removed
+                                    ),
+                                    session_id: self.session_id.clone(),
+                                });
+                                continue; // Retry the turn with sanitized messages
+                            }
+                        }
+
+                        // Unrecoverable — fall through to error handler.
                         return Ok(self
                             .handle_streaming_error(
-                                anyhow::anyhow!("Provider stream error: {:?}", msg.stop_reason),
+                                anyhow::anyhow!("Provider stream error: {}", detail),
                                 &mut messages,
                                 &mut new_messages,
                                 &mut events,
@@ -661,10 +690,7 @@ impl AgentLoop {
                         return Ok((messages, events));
                     }
                     StreamOutcome::RuleInterrupt { partial, rule } => {
-                        tracing::info!(
-                            "RuleInterrupt: '{}' violated, retrying",
-                            rule.name
-                        );
+                        tracing::info!("RuleInterrupt: '{}' violated, retrying", rule.name);
                         emit(AgentEvent::TtsrInterrupt {
                             rule_name: rule.name.clone(),
                             session_id: self.session_id.clone(),
@@ -674,7 +700,8 @@ impl AgentLoop {
                             "<system-interrupt reason=\"rule_violation\" rule=\"{name}\">\n\
                              Your output was interrupted because it violated a project rule.\n\
                              Comply with: {content}\n</system-interrupt>",
-                            name = rule.name, content = rule.content
+                            name = rule.name,
+                            content = rule.content
                         );
                         messages.push(Message::user(interrupt_body));
                         continue;
@@ -921,7 +948,12 @@ impl AgentLoop {
 
         match self
             .compaction_manager
-            .compact_if_needed(&messages_to_compact, instruction.as_deref(), context_tokens, iteration)
+            .compact_if_needed(
+                &messages_to_compact,
+                instruction.as_deref(),
+                context_tokens,
+                iteration,
+            )
             .await
         {
             Ok(Some(compacted)) => {

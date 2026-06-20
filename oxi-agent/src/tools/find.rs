@@ -389,13 +389,12 @@ impl AgentTool for FindTool {
             .and_then(|v: &Value| v.as_bool())
             .unwrap_or(false);
 
-
         // ── Internal URL guard ──
         // find is filesystem-only; reject internal URLs gracefully.
         if let Some(ref resolver) = ctx.url_resolver {
             if resolver.can_resolve(path) {
                 return Ok(AgentToolResult::error(
-                    "find does not support internal URLs. Use grep for searching URL content."
+                    "find does not support internal URLs. Use grep for searching URL content.",
                 ));
             }
         }

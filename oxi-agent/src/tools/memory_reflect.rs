@@ -88,6 +88,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Records every `put` call; the remaining trait methods are stubbed.
+    #[derive(Debug)]
     struct MockMemory {
         puts: Mutex<Vec<(String, String, String)>>,
     }

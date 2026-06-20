@@ -266,22 +266,24 @@ pub async fn create_agent_session_from_services(
         } else {
             String::new()
         };
-        let memory_opt = if memory_block.is_empty() { None } else { Some(memory_block) };
+        let memory_opt = if memory_block.is_empty() {
+            None
+        } else {
+            Some(memory_block)
+        };
 
         // TTSR engine
-        let ttsr_engine: Option<Arc<oxi_agent::agent_loop::ttsr::TtsrEngine>> =
-            if settings.ttsr_enabled {
-                let rules = crate::discovery::rules::discover_rules(&services.cwd);
-                let registry: Arc<dyn oxi_agent::agent_loop::ttsr::RuleRegistry> =
-                    Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
-                let engine = oxi_agent::agent_loop::ttsr::TtsrEngine::new(
-                    registry,
-                    Default::default(),
-                );
-                Some(Arc::new(engine))
-            } else {
-                None
-            };
+        let ttsr_engine: Option<Arc<oxi_agent::agent_loop::ttsr::TtsrEngine>> = if settings
+            .ttsr_enabled
+        {
+            let rules = crate::discovery::rules::discover_rules(&services.cwd);
+            let registry: Arc<dyn oxi_agent::agent_loop::ttsr::RuleRegistry> =
+                Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
+            let engine = oxi_agent::agent_loop::ttsr::TtsrEngine::new(registry, Default::default());
+            Some(Arc::new(engine))
+        } else {
+            None
+        };
 
         let config = oxi_agent::AgentConfig {
             name: "oxi".to_string(),
@@ -312,6 +314,9 @@ pub async fn create_agent_session_from_services(
             provider_options: None,
             session_id: None,
             ttsr_engine,
+            memory: None,
+            todo: Some(Arc::new(crate::store::todo_state::TodoState::new())),
+            agent_pool: None,
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_sdk::get_provider("anthropic")
@@ -332,40 +337,39 @@ pub async fn create_agent_session_from_services(
 
     let provider = oxi_sdk::get_provider(&provider_name)
         .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
-
-    // ── Memory recall (④) ──
-    let memory_block = if settings.memory_enabled {
-        let backend = crate::services::create_memory_backend(settings);
-        if let Some(ref backend) = backend {
-            crate::services::build_memory_recall(backend.as_ref(), &cwd).await
-        } else {
-            String::new()
-        }
+    let memory_backend: Option<Arc<dyn oxi_agent::tools::MemoryBackend>> =
+        crate::services::create_memory_backend(settings);
+    let memory_block = if let Some(ref backend) = memory_backend {
+        crate::services::build_memory_recall(backend.as_ref(), &cwd).await
     } else {
         String::new()
     };
 
     // ── TTSR engine (③) ──
-    let ttsr_engine: Option<Arc<oxi_agent::agent_loop::ttsr::TtsrEngine>> =
-        if settings.ttsr_enabled {
-            let rules = crate::discovery::rules::discover_rules(&services.cwd);
-            let registry: Arc<dyn oxi_agent::agent_loop::ttsr::RuleRegistry> =
-                Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
-            let engine = oxi_agent::agent_loop::ttsr::TtsrEngine::new(
-                registry,
-                oxi_agent::agent_loop::ttsr::TtsrSettings {
-                    enabled: true,
-                    builtin_rules: settings.ttsr_interrupt_mode != "never",
-                    ..Default::default()
-                },
-            );
-            Some(Arc::new(engine))
-        } else {
-            None
-        };
+    let ttsr_engine: Option<Arc<oxi_agent::agent_loop::ttsr::TtsrEngine>> = if settings.ttsr_enabled
+    {
+        let rules = crate::discovery::rules::discover_rules(&services.cwd);
+        let registry: Arc<dyn oxi_agent::agent_loop::ttsr::RuleRegistry> =
+            Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
+        let engine = oxi_agent::agent_loop::ttsr::TtsrEngine::new(
+            registry,
+            oxi_agent::agent_loop::ttsr::TtsrSettings {
+                enabled: true,
+                builtin_rules: settings.ttsr_interrupt_mode != "never",
+                ..Default::default()
+            },
+        );
+        Some(Arc::new(engine))
+    } else {
+        None
+    };
 
     // Build agent config
-    let memory_block_opt = if memory_block.is_empty() { None } else { Some(memory_block) };
+    let memory_block_opt = if memory_block.is_empty() {
+        None
+    } else {
+        Some(memory_block)
+    };
     let system_prompt = build_system_prompt_with_memory(
         thinking_level,
         settings.language_policy_enabled,
@@ -401,6 +405,9 @@ pub async fn create_agent_session_from_services(
         provider_options: None,
         session_id: None,
         ttsr_engine,
+        memory: memory_backend,
+        todo: Some(Arc::new(crate::store::todo_state::TodoState::new())),
+        agent_pool: None,
     };
 
     let agent = Arc::new(oxi_agent::Agent::new(
@@ -826,6 +833,27 @@ pub(crate) fn build_system_prompt(
     build_system_prompt_with_memory(thinking_level, language_policy_enabled, languages, None)
 }
 
+/// Combine memory block with tool usage guidance for system prompt.
+fn append_memory_and_tool_guidance(memory_block: Option<String>) -> Option<String> {
+    let tool_guidance = "\n\n## Task Management\n\
+        When working on multi-step tasks (3+ steps), use the `todo` tool to plan, start, and complete \
+        phases before writing code. Tasks are 5-10 words describing WHAT not HOW.\n\
+        \n## Project Memory\n\
+        Use `memory_retain` to save project facts/preferences across sessions. \
+        Use `memory_recall` to search past knowledge. Use `memory_reflect` at session end.\n\
+        \n## Commit Messages\n\
+        Use `commit` with `--dry-run` first to preview conventional commit messages. \
+        Handles scope detection, validation, and changelog updates.\n\
+        \n## Diagrams\n\
+        Use ` ```mermaid ` code blocks to explain architecture and flow. \
+        They render as ASCII diagrams in the terminal.";
+
+    match memory_block {
+        Some(mem) => Some(format!("{}{}", mem, tool_guidance)),
+        None => Some(tool_guidance.to_string()),
+    }
+}
+
 /// Build the system prompt with an optional project-memory recall block.
 pub(crate) fn build_system_prompt_with_memory(
     thinking_level: ThinkingLevel,
@@ -843,7 +871,7 @@ pub(crate) fn build_system_prompt_with_memory(
         selected_tools: crate::prompt::system_prompt::default_tool_names(),
         tool_snippets: crate::prompt::system_prompt::default_tool_snippets(),
         language_directive: directive,
-        append_system_prompt: memory_block,
+        append_system_prompt: append_memory_and_tool_guidance(memory_block),
         ..Default::default()
     };
 
@@ -913,14 +941,16 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
         let services = Arc::new(services);
 
         let handle = tokio::runtime::Handle::current();
-        let result = handle.block_on(create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
-            services: services.clone(),
-            session_manager: options.session_manager,
-            model_id: None,
-            thinking_level: None,
-            scoped_models: Vec::new(),
-            tool_registry: None,
-        }))?;
+        let result = handle.block_on(create_agent_session_from_services(
+            CreateAgentSessionFromServicesOptions {
+                services: services.clone(),
+                session_manager: options.session_manager,
+                model_id: None,
+                thinking_level: None,
+                scoped_models: Vec::new(),
+                tool_registry: None,
+            },
+        ))?;
 
         Ok(CreateAgentSessionRuntimeResult {
             session: result.session,

@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 /// Implements [`MemoryBackend`] for the `memory_*` agent tools.
 /// Each memory is stored with an auto-generated UUID, kind, content, and subject.
 /// The schema reserves an `embedding` column for future cosine-search support.
+#[derive(Debug)]
 pub struct SqliteMemoryStore {
     db: Mutex<Connection>,
 }

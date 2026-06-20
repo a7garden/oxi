@@ -353,7 +353,6 @@ pub enum AgentEvent {
         to_model: String,
     },
 
-
     /// A TTSR rule violation was detected during streaming.
     /// The stream was aborted and a system reminder will be injected.
     TtsrInterrupt {

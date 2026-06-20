@@ -114,7 +114,6 @@ impl ReadTool {
         progress_cb: &Option<ProgressCallback>,
         snapshot_store: Option<(Arc<dyn SnapshotStore>, PathBuf)>,
     ) -> Result<AgentToolResult, ToolError> {
-
         let display_path = path.display();
 
         // Check file metadata
@@ -177,8 +176,8 @@ impl ReadTool {
         // be derived from the full text even when only a subset of lines is shown
         // (partial read via offset/limit), so that the tag always names the
         // canonical file version the model is referencing.
-        let snap_data: Option<(Arc<dyn SnapshotStore>, PathBuf, String, String)> =
-            snapshot_store.map(|(store, canonical)| {
+        let snap_data: Option<(Arc<dyn SnapshotStore>, PathBuf, String, String)> = snapshot_store
+            .map(|(store, canonical)| {
                 let normalized = normalize_to_lf(strip_bom(&content).text);
                 let hash = compute_file_hash(&normalized);
                 (store, canonical, hash, normalized)
@@ -270,7 +269,6 @@ impl ReadTool {
             ) + &output;
         }
 
-
         // ── Emit hashline header and record snapshot ──
         if let Some((store, canonical, hash, normalized)) = snap_data {
             // Prepend [path#TAG] header so the model can anchor edits.
@@ -278,8 +276,8 @@ impl ReadTool {
             output = format!("{}\n{}", header, output);
 
             // Record seen lines: 1-indexed line numbers actually displayed.
-            let seen: Vec<u32> = (start_idx as u32 + 1..=start_idx as u32 + output_lines as u32)
-                .collect();
+            let seen: Vec<u32> =
+                (start_idx as u32 + 1..=start_idx as u32 + output_lines as u32).collect();
             store.record(&canonical.to_string_lossy(), &normalized, Some(&seen));
         }
 

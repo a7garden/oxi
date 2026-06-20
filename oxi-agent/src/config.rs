@@ -185,6 +185,16 @@ pub struct AgentConfig {
     /// [`crate::agent_loop::StreamOutcome::RuleInterrupt`].
     #[serde(skip, default)]
     pub ttsr_engine: Option<std::sync::Arc<crate::agent_loop::ttsr::TtsrEngine>>,
+
+    /// Memory backend for `memory_*` tools.
+    #[serde(skip, default)]
+    pub memory: Option<std::sync::Arc<dyn crate::tools::MemoryBackend>>,
+    /// Todo state provider for the `todo` tool.
+    #[serde(skip, default)]
+    pub todo: Option<std::sync::Arc<dyn crate::tools::TodoStateProvider>>,
+    /// Agent pool for Hub display and sub-agent matching.
+    #[serde(skip, default)]
+    pub agent_pool: Option<std::sync::Arc<dyn crate::tools::AgentPoolProvider>>,
 }
 
 impl Default for AgentConfig {
@@ -206,6 +216,9 @@ impl Default for AgentConfig {
             provider_options: None,
             session_id: None,
             ttsr_engine: None,
+            memory: None,
+            todo: None,
+            agent_pool: None,
         }
     }
 }

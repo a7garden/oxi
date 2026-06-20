@@ -913,7 +913,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 thinking_level: Some(settings.thinking_level),
                 scoped_models: Vec::new(),
                 tool_registry: Some(tools.clone()),
-            }).await?;
+            })
+            .await?;
 
         let agent_session = create_result.session;
         if let Some(msg) = create_result.model_fallback_message {

@@ -480,7 +480,7 @@ mod tests {
         fs.put("f.rs", "a\nb\n");
 
         let patch_text = "*** Begin Patch\n[f.rs#FFFF]\nSWAP 1.=1:\n+x\n*** End Patch";
-        let patch = crate::parser::split_patch_input(&patch_text, None).unwrap();
+        let patch = crate::parser::split_patch_input(patch_text, None).unwrap();
         let result = patcher.apply(&patch).await;
 
         assert!(result.is_err());
@@ -495,8 +495,8 @@ mod tests {
 
         // Tag doesn't match, but it's a HEAD insert (position-independent).
         let patch_text = "*** Begin Patch\n[f.rs#FFFF]\nINS.HEAD:\n+prefix\n*** End Patch";
-        let patch = crate::parser::split_patch_input(&patch_text, None).unwrap();
-        let result = patcher.apply(&patch).await.unwrap();
+        let patch = crate::parser::split_patch_input(patch_text, None).unwrap();
+        let _result = patcher.apply(&patch).await.unwrap();
 
         let new_content = fs.read_text("f.rs").await.unwrap();
         assert!(new_content.starts_with("prefix"));
@@ -509,8 +509,8 @@ mod tests {
 
         // No #TAG in header.
         let patch_text = "*** Begin Patch\n[f.rs]\nSWAP 1.=1:\n+x\n*** End Patch";
-        let patch = crate::parser::split_patch_input(&patch_text, None).unwrap();
-        let result = patcher.apply(&patch).await.unwrap();
+        let patch = crate::parser::split_patch_input(patch_text, None).unwrap();
+        let _result = patcher.apply(&patch).await.unwrap();
 
         let new_content = fs.read_text("f.rs").await.unwrap();
         assert!(new_content.starts_with("x\n"));
@@ -544,7 +544,7 @@ mod tests {
         // the raw strings differ; the patcher's canonical-path check catches it.
         let patch_text =
             "*** Begin Patch\n[f.rs]\nSWAP 1.=1:\n+x\n[./f.rs]\nSWAP 2.=2:\n+y\n*** End Patch";
-        let patch = crate::parser::split_patch_input(&patch_text, None).unwrap();
+        let patch = crate::parser::split_patch_input(patch_text, None).unwrap();
         let result = patcher.apply(&patch).await;
 
         assert!(matches!(

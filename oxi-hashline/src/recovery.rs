@@ -55,7 +55,7 @@ pub enum RecoveryFailure {
     /// this.
     ExternalModification {
         /// The head snapshot the tag resolved to.
-        snapshot: Snapshot,
+        snapshot: Box<Snapshot>,
     },
     /// The session-chain guards failed (line count or anchor content changed
     /// between the tagged snapshot and live).
@@ -93,7 +93,7 @@ impl<'a> Recovery<'a> {
 
         let is_head = self.store.head(args.path).as_ref() == Some(&snapshot);
         if is_head {
-            return Err(RecoveryFailure::ExternalModification { snapshot });
+            return Err(RecoveryFailure::ExternalModification { snapshot: Box::new(snapshot) });
         }
 
         replay_session_chain(&snapshot, args.current_text, args.edits)

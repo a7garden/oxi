@@ -505,6 +505,9 @@ impl Agent {
             provider_options: self.config().config.provider_options.clone(),
             on_compaction: None,
             ttsr_engine: self.config().config.ttsr_engine.clone(),
+            memory: self.config().config.memory.clone(),
+            todo: self.config().config.todo.clone(),
+            agent_pool: self.config().config.agent_pool.clone(),
             ..Default::default()
         };
 

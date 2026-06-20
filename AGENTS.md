@@ -7,7 +7,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Item | Value |
 |------|-------|
 | Language | Rust 2024 edition |
-| Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli` (5 crates) |
+|Workspace crates|`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`, `oxi-hashline` (6 crates)|
 | Version | see `Cargo.toml` / `git tag` — single source of truth (do NOT hardcode the number here; it drifts) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
@@ -26,15 +26,14 @@ oxi/
 ├── oxi-agent/    Agent runtime — tool-calling loop, MCP client, built-in tools
 ├── oxi-tui/      Terminal UI widgets — chat, themes, markdown rendering (ratatui)
 ├── oxi-sdk/      Multi-agent SDK + port contract: 11 port traits + reference impls
-└── oxi-cli/      CLI binary — composition root (TUI + RPC + print modes)
-```
+├── oxi-cli/      CLI binary — composition root (TUI + RPC + print modes)
+└── oxi-hashline/  Line-anchored patch format for AI-assisted code editing
 
 ### Dependency Flow
 
-```
-oxi-ai  ←  oxi-agent  ←  oxi-sdk  ←  oxi-cli
-oxi-tui  (independent, no oxi-* deps)  ←  oxi-cli
-```
+oxi-hashline  (independent, no oxi-* deps)  →  oxi-agent
+oxi-ai  →  oxi-agent  →  oxi-sdk  →  oxi-cli
+oxi-tui  (independent, no oxi-* deps)  →  oxi-cli
 
 `oxi-ai` is the foundation layer with zero internal dependencies.
 `oxi-cli` is the integration layer that depends on all other crates.

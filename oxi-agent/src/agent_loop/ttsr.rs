@@ -12,10 +12,9 @@
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
-
+use std::sync::Arc;
 
 // ── Local type definitions (mirrors oxi_sdk::ports to avoid a dependency cycle) ─
 
@@ -49,7 +48,6 @@ pub enum ScopeToken {
     },
 }
 
-
 /// Where a rule originated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleSource {
@@ -79,9 +77,7 @@ pub struct Rule {
 /// This is a simplified version of `oxi_sdk::ports::RuleRegistry` that lives
 /// in oxi-agent to avoid a dependency cycle.
 pub trait RuleRegistry: Send + Sync + 'static {
-    fn rules<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>>;
+    fn rules<'a>(&'a self) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>>;
 
     /// Mark that a rule was injected at a given turn.
     fn mark_injected(&self, _name: &str, _turn: u64) {}
@@ -218,7 +214,6 @@ impl TtsrEngine {
         self.match_buffer(snapshot, ctx).into_iter().collect()
     }
 
-
     /// Return all injected rule records for compaction survival.
     pub fn injected_records(&self) -> Vec<(String, u64)> {
         self.rules.injected_records()
@@ -265,11 +260,7 @@ impl TtsrEngine {
             }
 
             // ── Condition matching ──
-            if !rule
-                .condition
-                .iter()
-                .any(|re| re.is_match(buf))
-            {
+            if !rule.condition.iter().any(|re| re.is_match(buf)) {
                 continue;
             }
 
@@ -355,9 +346,7 @@ mod tests {
     }
 
     impl RuleRegistry for StaticRegistry {
-        fn rules<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>> {
+        fn rules<'a>(&'a self) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>> {
             Box::pin(std::future::ready(self.rules.clone()))
         }
 
@@ -494,9 +483,7 @@ mod tests {
             file_paths: vec![],
             tool_name: Some("write".to_string()),
         };
-        assert!(engine
-            .check_delta("bad code", &write_ctx)
-            .is_empty());
+        assert!(engine.check_delta("bad code", &write_ctx).is_empty());
     }
 
     #[test]

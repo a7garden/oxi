@@ -109,6 +109,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Records every `put` and `delete` call.
+    #[derive(Debug)]
     struct MockMemory {
         puts: Mutex<Vec<(String, String, String)>>,
         deletes: Mutex<Vec<String>>,
@@ -180,7 +181,10 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert_eq!(result.output, "Updated memory item (old id: mem-1, new id: new-id).");
+        assert_eq!(
+            result.output,
+            "Updated memory item (old id: mem-1, new id: new-id)."
+        );
         let puts = mock.puts.lock();
         assert_eq!(puts.len(), 1);
         assert_eq!(puts[0].0, "updated");
