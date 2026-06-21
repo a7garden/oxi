@@ -17,6 +17,8 @@ pub mod ansi;
 mod deccara;
 pub mod diff;
 pub mod image;
+#[allow(missing_docs)]
+pub(crate) mod latex;
 pub mod mermaid;
 pub mod terminal;
 

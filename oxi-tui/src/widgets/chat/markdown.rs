@@ -79,8 +79,12 @@ pub(crate) fn fix_bare_code_fences(content: &str) -> String {
 /// Tables are rendered using pulldown-cmark with width-aware column sizing.
 /// `width` limits table width to prevent overflow.
 pub(crate) fn md_lines(content: &str, width: u16, styles: &ThemeStyles) -> Vec<Line<'static>> {
+    // Rewrite $...$ / $$...$$ math runs into Unicode before rendering, so the
+    // model's LaTeX renders as real glyphs (α, ², ∑) instead of verbatim
+    // commands. No-op (returns a clone) when there are no math delimiters.
+    let content = crate::render::latex::latex_to_unicode_owned(content);
     // Try table rendering first (pulldown-cmark based)
-    let table_lines = render_markdown_table(content, width);
+    let table_lines = render_markdown_table(&content, width);
     if !table_lines.is_empty() {
         // render_markdown_table handles table cell wrapping internally,
         // but non-table text (before/after the table) comes from
@@ -95,7 +99,7 @@ pub(crate) fn md_lines(content: &str, width: u16, styles: &ThemeStyles) -> Vec<L
     // Paragraph::wrap would be used at render time, but it only
     // breaks at whitespace — CJK characters that lack spaces between
     // them would be treated as a single giant "word" and overflow.
-    let raw_lines = render_markdown(content, styles);
+    let raw_lines = render_markdown(&content, styles);
     wrap_lines_styled(&raw_lines, width)
 }
 

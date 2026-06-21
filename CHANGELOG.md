@@ -36,6 +36,37 @@ design.
   draw, no restart needed. Also a new step in `oxi setup` (step 4: Glyph Set)
   with per-preset sample preview.
 
+### Changed — `questionnaire` → `ask` (omp-style sequential selector)
+
+The interactive user-questioning tool was redesigned to match omp's `ask`
+design. Full design in `docs/designs/2026-06-21-omp-ask-redesign.md`.
+
+- **Renamed**: tool `questionnaire` → `ask`; types `QuestionnaireTool` →
+  `AskTool`, `QuestionnaireBridge` → `AskBridge`, `PendingQuestionnaire` →
+  `PendingAsk`, `QuestionnaireResponse` → `AskResponse`,
+  `QuestionnaireOverlay` → `AskOverlay`. Settings field
+  `questionnaire_timeout_secs` → `ask_timeout_secs` (serde alias kept for
+  migration).
+- **Sequential one-question-at-a-time flow** (was tabbed modal): one question
+  per screen, ←/→ to navigate between questions with `(k/N)` progress.
+- **omp-style markers**: radio (`◉`/`○`) for single-choice, checkbox (`☑`/`☐`)
+  for multi-select, drawn inline on each option row — not just the transcript
+  preview.
+- **"Other (type your own)" auto-appended** to every question with
+  `allow_other`; selecting it opens an inline text editor.
+- **"Done selecting"** row for multi-select; **"(Recommended)"** suffix on the
+  recommended option label; **countdown timer** `(Ns)` in the title.
+- **Compact mode + fuzzy search** when options exceed 12 (label-only rows +
+  highlighted-option description + type-to-search filter).
+- **Filled-menu transcript result**: `format_ask_result` reconstructs every
+  offered option with its selection marker filled in (success vs dim), plus
+  custom free-text and an "auto-selected after timeout" footer — by combining
+  the call arguments (full option list) with the result text. The
+  `format_tool_result` / cache `format_result` API gained an `arguments`
+  parameter for tools that need the original call JSON.
+- **Prompt discipline** (omp `ask.md`): "default to action", "do NOT include
+  Other — UI adds it", "2-5 concise options", `recommended` marks the default.
+
 ### Changed — TUI rendering efficiency (omp parity, Phase 0)
 
 Three low-risk improvements to the `DiffBackend` cell writer and tool-block
@@ -103,6 +134,20 @@ ANSI-string parser).
 - **Gated on `caps.deccara`** (Kitty/Ghostty only) with an `OXI_NO_DECCARA=1`
   kill switch. No effect on other terminals.
 
+### Added — LaTeX math → Unicode in markdown (omp parity, Phase 3)
+
+Inline `$...$` and display `$$...$$` math in markdown is now rewritten to
+Unicode before rendering, so the model's `$\alpha + \beta = x^2$` renders as
+`α + β = x²` instead of verbatim LaTeX. Adapted from omp's
+`latex-to-unicode.ts`, scoped to the common subset.
+
+- **New `render::latex` module** (pure, unit-tested): Greek letters, common
+  operators/relations, and `^`/`_` scripts over digits and the letters that
+  have Unicode super/subscript forms. Unmapped commands/scripts fall back to
+  the literal source, so output is always readable.
+- **Currency-safe**: a bare `$5`/`$10` (no `\`, `^`, or `_`) is left verbatim —
+  only bodies that look like math are converted. Escaped `\$` is respected.
+- Wired into `md_lines` so both the table and regular markdown paths benefit.
 
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state
