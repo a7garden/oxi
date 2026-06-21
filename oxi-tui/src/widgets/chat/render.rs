@@ -15,6 +15,7 @@ use crate::widgets::chat::dashboard::dashboard_lines;
 use crate::widgets::chat::layout::LayoutKind;
 use crate::widgets::chat::markdown::{filter_tool_json, md_lines};
 use crate::widgets::chat::types::ToolCallStatus;
+use crate::widgets::tool_renderer::ToolFormatCache;
 
 // ── Rendering into ScrollView ─────────────────────────────────────────
 
@@ -22,11 +23,22 @@ use crate::widgets::chat::types::ToolCallStatus;
 pub(crate) struct EntryWidget<'a> {
     pub entry: &'a LayoutKind,
     pub styles: &'a ThemeStyles,
+    /// Memoized tool-call/result formatting. Only consulted by the `ToolBox`
+    /// branch; other branches carry it unused.
+    pub cache: &'a mut ToolFormatCache,
 }
 
 impl<'a> EntryWidget<'a> {
-    pub fn new(entry: &'a LayoutKind, styles: &'a ThemeStyles) -> Self {
-        Self { entry, styles }
+    pub fn new(
+        entry: &'a LayoutKind,
+        styles: &'a ThemeStyles,
+        cache: &'a mut ToolFormatCache,
+    ) -> Self {
+        Self {
+            entry,
+            styles,
+            cache,
+        }
     }
 }
 
@@ -90,7 +102,6 @@ impl Widget for EntryWidget<'_> {
                 expanded,
                 key: _,
             } => {
-                use crate::widgets::tool_renderer::{format_tool_call, format_tool_result};
                 let sym = self.styles.symbols;
                 let (icon, border_style) = match status {
                     ToolCallStatus::Requested => (sym.dot_off, self.styles.muted),
@@ -156,7 +167,12 @@ impl Widget for EntryWidget<'_> {
                     .saturating_sub(duration_suffix_w)
                     .max(20);
 
-                let call_lines = format_tool_call(name, arguments, header_avail, self.styles);
+                // Memoized: skip the JSON parse + per-tool dispatch when the
+                // (name, arguments, width) triple is unchanged across frames.
+                let styles_snapshot = *self.styles;
+                let call_lines =
+                    self.cache
+                        .format_call(styles_snapshot, name, arguments, header_avail);
                 for (i, line) in call_lines.into_iter().enumerate() {
                     if i == 0 {
                         // Prepend icon to first line, append duration if available
@@ -180,12 +196,22 @@ impl Widget for EntryWidget<'_> {
                     }
                 }
 
-                // Separator line between call and result — full width to match borders
+                // Section separator between call and result — uses box tees
+                // (├─┤) so the result reads as a framed sub-section of the
+                // tool box rather than a free-floating rule. Falls back to a
+                // plain rule if the inner area is too narrow for the tees.
                 if has_result {
-                    content_lines.push(Line::from(Span::styled(
-                        self.styles.symbols.rule.repeat(max_w),
-                        border_style,
-                    )));
+                    let sep_line = if max_w >= 2 {
+                        format!(
+                            "{}{}{}",
+                            sym.sharp_tee_right,
+                            sym.sharp_h.repeat(max_w - 2),
+                            sym.sharp_tee_left,
+                        )
+                    } else {
+                        sym.rule.repeat(max_w)
+                    };
+                    content_lines.push(Line::from(Span::styled(sep_line, border_style)));
                 }
 
                 // Format result
@@ -217,8 +243,14 @@ impl Widget for EntryWidget<'_> {
                             )));
                         }
                     } else {
-                        let result_lines =
-                            format_tool_result(name, result_content, *is_err, max_w, self.styles);
+                        let styles_snapshot = *self.styles;
+                        let result_lines = self.cache.format_result(
+                            styles_snapshot,
+                            name,
+                            result_content,
+                            *is_err,
+                            max_w,
+                        );
                         content_lines.extend(result_lines);
                     }
 

@@ -134,12 +134,14 @@ impl StatefulWidget for ChatView<'_> {
             // EntryWidget would draw starting from row 0 of the rect
             // (top border, first lines) instead of the clipped rows.
             if entry.y >= scroll_offset {
-                EntryWidget::new(&entry.kind, &styles).render(rect, buf);
+                EntryWidget::new(&entry.kind, &styles, &mut state.tool_format_cache)
+                    .render(rect, buf);
             } else {
                 let hidden = scroll_offset - entry.y;
                 let tmp_rect = Rect::new(0, 0, inner_width, entry.height);
                 let mut tmp = ratatui::buffer::Buffer::empty(tmp_rect);
-                EntryWidget::new(&entry.kind, &styles).render(tmp_rect, &mut tmp);
+                EntryWidget::new(&entry.kind, &styles, &mut state.tool_format_cache)
+                    .render(tmp_rect, &mut tmp);
                 // Copy visible rows from the temp buffer to the frame buffer.
                 // Uses row-level clone instead of per-cell iteration for
                 // better performance on wide terminals.

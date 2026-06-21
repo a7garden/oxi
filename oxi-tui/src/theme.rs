@@ -180,7 +180,7 @@ impl ColorScheme {
 ///
 /// Every style field is a `Style` with only the relevant property set (fg or bg),
 /// so they compose correctly via `Style::patch()`.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ThemeStyles {
     // ── Text ──────────────────────────────────────────────────────
     /// Normal / default text style.

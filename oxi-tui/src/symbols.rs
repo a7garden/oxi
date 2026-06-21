@@ -207,6 +207,10 @@ pub struct Symbols {
     pub sharp_v: &'static str,
     /// Sharp box: four-way cross.
     pub sharp_cross: &'static str,
+    /// Sharp box: tee pointing right (`├`) — left junction of a section bar.
+    pub sharp_tee_right: &'static str,
+    /// Sharp box: tee pointing left (`┤`) — right junction of a section bar.
+    pub sharp_tee_left: &'static str,
 
     // ── Separators ───────────────────────────────────────────────────
     /// Filled block bar (e.g. `▌` / `#`).
@@ -331,6 +335,8 @@ impl Symbols {
             sharp_h: "─",
             sharp_v: "│",
             sharp_cross: "┼",
+            sharp_tee_right: "├",
+            sharp_tee_left: "┤",
             sep_block: "▌",
             sep_dot: " · ",
             sep_pipe: " │ ",
@@ -407,6 +413,8 @@ impl Symbols {
             sharp_h: "-",
             sharp_v: "|",
             sharp_cross: "+",
+            sharp_tee_right: "+",
+            sharp_tee_left: "+",
             sep_block: "#",
             sep_dot: " - ",
             sep_pipe: " | ",
@@ -483,6 +491,8 @@ impl Symbols {
             sharp_h: "─",
             sharp_v: "│",
             sharp_cross: "┼",
+            sharp_tee_right: "├",
+            sharp_tee_left: "┤",
             sep_block: "\u{e0b0}", //
             sep_dot: " \u{f111} ",
             sep_pipe: " \u{e0b3} ",

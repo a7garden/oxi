@@ -32,6 +32,32 @@ design.
   presets) and **applied immediately** — the main loop rebuilds the live
   theme from freshly-loaded settings on the next draw, no restart needed.
 
+### Changed — TUI rendering efficiency (omp parity, Phase 0)
+
+Three low-risk improvements to the `DiffBackend` cell writer and tool-block
+rendering, closing the bulk of the byte/CPU gap with omp's TUI. Full design in
+`docs/designs/2026-06-20-oxi-tui-improvement-plan.md`.
+
+- **SGR attribute delta (`render::mod`)**: the cell writer no longer emits a
+  full `SGR 0` reset plus fg/bg re-apply on every modifier change. Instead it
+  emits only the minimal SGR off/on delta (`modifier_delta_codes`), which
+  leaves fg/bg untouched — so an intra-row style transition (common in tool
+  boxes and markdown) costs a few bytes instead of a reset + two color
+  re-emits. Bold/dim share SGR 22 and are re-enabled correctly after a clear.
+  First cell of a changed row force-clears attributes by diffing from the
+  all-attributes mask (terminal state is unknown after skipped rows).
+- **Tool-block formatting cache (`ToolFormatCache`)**: `format_tool_call` /
+  `format_tool_result` are now memoized in `ChatViewState`, keyed by an input
+  hash and invalidated wholesale on any theme/glyph-set change (via
+  `ThemeStyles: PartialEq`). Completed tool blocks skip the JSON parse, diff
+  auto-detection, and per-tool dispatch on cache hit (soft cap 512 entries).
+- **Boxed section separator**: the rule between a tool call and its result now
+  uses sharp-box tees (`├─┤` via new `Symbols::sharp_tee_right` /
+  `sharp_tee_left`, with `+` ASCII fallback) so the result reads as a framed
+  sub-section instead of a free-floating divider.
+
+`ThemeStyles` now derives `PartialEq` to support cache invalidation.
+
 
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state

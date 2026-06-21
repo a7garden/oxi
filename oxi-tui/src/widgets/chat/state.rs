@@ -10,6 +10,7 @@ use crate::widgets::chat::markdown::extract_last_code_block;
 use crate::widgets::chat::types::{
     ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus,
 };
+use crate::widgets::tool_renderer::ToolFormatCache;
 
 // ── Limits (truncation at ingest) ──────────────────────────────────────
 
@@ -117,6 +118,9 @@ pub struct ChatViewState {
     pub last_code_block: Option<String>,
     pub pending_images: Vec<(String, String)>,
     tool_tracker: ToolCallTracker,
+    /// Memoized tool-call / tool-result formatting. Keyed by input hash;
+    /// invalidated automatically when the theme or glyph set changes.
+    pub(crate) tool_format_cache: ToolFormatCache,
     /// Vertical scroll offset (0 = top)
     pub scroll_offset: u16,
     /// When true, auto-scroll to bottom on each render (streaming)

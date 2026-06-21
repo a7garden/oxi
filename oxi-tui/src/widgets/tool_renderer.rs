@@ -13,6 +13,9 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::text::truncate_to_width;
 use crate::theme::ThemeStyles;
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -24,6 +27,102 @@ const DIFF_PREVIEW_LINES: usize = 8;
 const READ_PREVIEW_LINES: usize = 4;
 /// Maximum content lines for generic results
 const GENERIC_PREVIEW_LINES: usize = 4;
+
+// ── Format cache ─────────────────────────────────────────────────────────
+
+/// Soft cap on cached entries per formatter. On overflow the whole map is
+/// dropped (no LRU bookkeeping) — a session rarely produces this many
+/// *distinct* formatted strings, and the cost of a cold re-render is tiny.
+const TOOL_FORMAT_CACHE_CAP: usize = 512;
+
+/// Memoization cache for the two expensive tool-block formatters
+/// ([`format_tool_call`] / [`format_tool_result`]).
+///
+/// Completed tool blocks are reformatted on every render frame even though
+/// their inputs rarely change. This cache keys formatted output by a hash of
+/// the formatter's inputs and returns a clone on hit, skipping the JSON parse,
+/// diff auto-detection, and per-tool dispatch. omp's `CachedOutputBlock` uses
+/// the same idea with a bigint hash.
+///
+/// The stored [`ThemeStyles`] invalidates the entire cache on a theme or
+/// glyph-set change (hot-reload / `/settings`), so nothing ever renders with
+/// stale colors or icons.
+#[derive(Debug, Default)]
+pub struct ToolFormatCache {
+    /// Style bundle the cached lines were rendered with. Any change (theme
+    /// hot-reload, glyph-set switch) drops every entry.
+    styles: Option<ThemeStyles>,
+    /// `format_tool_call` outputs, keyed by `(name, arguments, max_width)`.
+    calls: HashMap<u64, Vec<Line<'static>>>,
+    /// `format_tool_result` outputs, keyed by `(name, result, is_error, max_width)`.
+    results: HashMap<u64, Vec<Line<'static>>>,
+}
+
+impl ToolFormatCache {
+    fn key(parts: &[&str], flags: &[usize]) -> u64 {
+        let mut h = DefaultHasher::new();
+        for p in parts {
+            p.hash(&mut h);
+        }
+        for f in flags {
+            f.hash(&mut h);
+        }
+        h.finish()
+    }
+
+    fn invalidate_if_styles_changed(&mut self, styles: ThemeStyles) {
+        if self.styles != Some(styles) {
+            self.styles = Some(styles);
+            self.calls.clear();
+            self.results.clear();
+        }
+    }
+
+    /// Memoized [`format_tool_call`]. Returns a clone of the cached lines when
+    /// `(name, arguments, max_width)` and the active styles are unchanged.
+    pub fn format_call(
+        &mut self,
+        styles: ThemeStyles,
+        name: &str,
+        arguments: &str,
+        max_width: usize,
+    ) -> Vec<Line<'static>> {
+        self.invalidate_if_styles_changed(styles);
+        let key = Self::key(&[name, arguments], &[max_width]);
+        if let Some(lines) = self.calls.get(&key) {
+            return lines.clone();
+        }
+        if self.calls.len() >= TOOL_FORMAT_CACHE_CAP {
+            self.calls.clear();
+        }
+        let lines = format_tool_call(name, arguments, max_width, &styles);
+        self.calls.insert(key, lines.clone());
+        lines
+    }
+
+    /// Memoized [`format_tool_result`]. Returns a clone of the cached lines
+    /// when `(name, result, is_error, max_width)` and the styles are unchanged.
+    pub fn format_result(
+        &mut self,
+        styles: ThemeStyles,
+        name: &str,
+        result: &str,
+        is_error: bool,
+        max_width: usize,
+    ) -> Vec<Line<'static>> {
+        self.invalidate_if_styles_changed(styles);
+        let key = Self::key(&[name, result], &[if is_error { 1 } else { 0 }, max_width]);
+        if let Some(lines) = self.results.get(&key) {
+            return lines.clone();
+        }
+        if self.results.len() >= TOOL_FORMAT_CACHE_CAP {
+            self.results.clear();
+        }
+        let lines = format_tool_result(name, result, is_error, max_width, &styles);
+        self.results.insert(key, lines.clone());
+        lines
+    }
+}
 
 // ── Path utilities ───────────────────────────────────────────────────────
 
