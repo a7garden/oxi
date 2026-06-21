@@ -463,7 +463,9 @@ fn is_valid_scope_chars(scope: &str) -> bool {
             return false;
         }
         let mut chars = segment.chars();
-        let first = chars.next().unwrap();
+        let Some(first) = chars.next() else {
+            return false;
+        };
         if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
             return false;
         }
@@ -509,7 +511,7 @@ pub fn normalize_summary(summary: &str) -> String {
 /// - a dependency references an unknown group id,
 /// - a group depends on itself, or
 /// - a dependency cycle is detected.
-pub fn compute_dependency_order(groups: &mut Vec<CommitGroup>) -> Result<(), String> {
+pub fn compute_dependency_order(groups: &mut [CommitGroup]) -> Result<(), String> {
     let n = groups.len();
     let id_to_index: HashMap<&str, usize> = groups
         .iter()
@@ -699,12 +701,12 @@ fn parse_analysis_response(
     msg: &oxi_ai::AssistantMessage,
 ) -> Result<(ConventionalAnalysis, String), String> {
     for block in &msg.content {
-        if let oxi_ai::ContentBlock::ToolCall(call) = block {
-            if call.name == "create_conventional_analysis" {
-                let plan: LlmAnalysis = serde_json::from_value(call.arguments.clone())
-                    .map_err(|e| format!("Invalid analysis tool arguments: {e}"))?;
-                return Ok(split_plan(plan));
-            }
+        if let oxi_ai::ContentBlock::ToolCall(call) = block
+            && call.name == "create_conventional_analysis"
+        {
+            let plan: LlmAnalysis = serde_json::from_value(call.arguments.clone())
+                .map_err(|e| format!("Invalid analysis tool arguments: {e}"))?;
+            return Ok(split_plan(plan));
         }
     }
 
@@ -1237,10 +1239,10 @@ impl AgentTool for CommitTool {
         let hash = git.head_short().unwrap_or_else(|_| "unknown".to_string());
 
         // 7. Changelog (best-effort, non-fatal).
-        if !args.no_changelog {
-            if let Err(e) = update_changelog(&cwd, &analysis) {
-                tracing::warn!("commit tool: changelog update failed: {e}");
-            }
+        if !args.no_changelog
+            && let Err(e) = update_changelog(&cwd, &analysis)
+        {
+            tracing::warn!("commit tool: changelog update failed: {e}");
         }
 
         // 8. Push (optional).

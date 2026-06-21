@@ -189,11 +189,11 @@ fn format_issue_markdown(issue: &GhIssue) -> String {
     }
 
     // Labels
-    if let Some(ref labels) = issue.labels {
-        if !labels.is_empty() {
-            let label_names: Vec<&str> = labels.iter().map(|l| l.name.as_str()).collect();
-            md.push_str(&format!("**Labels:** {}\n\n", label_names.join(", ")));
-        }
+    if let Some(ref labels) = issue.labels
+        && !labels.is_empty()
+    {
+        let label_names: Vec<&str> = labels.iter().map(|l| l.name.as_str()).collect();
+        md.push_str(&format!("**Labels:** {}\n\n", label_names.join(", ")));
     }
 
     // Dates
@@ -207,12 +207,12 @@ fn format_issue_markdown(issue: &GhIssue) -> String {
     md.push('\n');
 
     // Body
-    if let Some(ref body) = issue.body {
-        if !body.is_empty() {
-            md.push_str("---\n\n");
-            md.push_str(body);
-            md.push('\n');
-        }
+    if let Some(ref body) = issue.body
+        && !body.is_empty()
+    {
+        md.push_str("---\n\n");
+        md.push_str(body);
+        md.push('\n');
     }
 
     md

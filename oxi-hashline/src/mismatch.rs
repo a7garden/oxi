@@ -91,10 +91,18 @@ impl MismatchError {
 pub enum HashlineError {
     /// A patch grammar / structural parse error at a given line.
     #[error("Parse error at line {line}: {msg}")]
-    Parse { line: u32, msg: String },
+    Parse {
+        /// 1-indexed source line where the parse error occurred.
+        line: u32,
+        /// Human-readable parse error detail.
+        msg: String,
+    },
     /// File does not exist.
     #[error("File not found: {path}. Use the write tool to create new files.")]
-    NotFound { path: String },
+    NotFound {
+        /// Canonical file path that could not be found.
+        path: String,
+    },
     /// Section omitted the mandatory snapshot tag (omp `missingSnapshotTagMessage`).
     #[error("{0}")]
     MissingSnapshotTag(String),
@@ -104,19 +112,33 @@ pub enum HashlineError {
     /// Snapshot tag mismatch with live content (omp `MismatchError`).
     #[error("{detail}")]
     Mismatch {
+        /// Pre-formatted diagnostic message.
         detail: String,
+        /// Snapshot tag the section was bound to.
         expected: String,
+        /// Snapshot tag the live file actually produced.
         actual: String,
     },
     /// Multiple sections resolve to the same canonical path.
     #[error("Multiple sections resolve to {path}")]
-    DuplicateCanonicalPath { path: String },
+    DuplicateCanonicalPath {
+        /// Canonical path targeted by more than one section.
+        path: String,
+    },
     /// Edits resulted in no net change.
     #[error("Edits to {path} resulted in no changes")]
-    NoOp { path: String },
+    NoOp {
+        /// Path whose applied edits produced no net change.
+        path: String,
+    },
     /// Anchor line out of bounds for the file.
     #[error("Line {line} does not exist (file has {total} lines)")]
-    LineOutOfBounds { line: u32, total: usize },
+    LineOutOfBounds {
+        /// 1-indexed anchor line that exceeds the file's bounds.
+        line: u32,
+        /// Total number of lines in the file.
+        total: usize,
+    },
     /// Underlying I/O error.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

@@ -215,10 +215,10 @@ pub struct Settings {
     #[serde(default = "default_tool_timeout")]
     pub tool_timeout_seconds: u64,
 
-    /// Questionnaire overlay timeout in seconds. 0 = disabled (wait indefinitely).
-    /// When timeout fires, auto-selects the recommended option (or first option).
-    #[serde(default)]
-    pub questionnaire_timeout_secs: u64,
+    /// Ask overlay timeout in seconds. 0 = disabled (wait indefinitely).
+    /// When timeout fires, auto-selects the recommended option (or first).
+    #[serde(default, alias = "questionnaire_timeout_secs")]
+    pub ask_timeout_secs: u64,
 
     // ── Resource lists (managed by `oxi config`) ────────────────────
     /// List of extension paths or npm package sources to load
@@ -445,7 +445,7 @@ impl Default for Settings {
             auto_compaction: true,
             disabled_tools: Vec::new(),
             tool_timeout_seconds: default_tool_timeout(),
-            questionnaire_timeout_secs: 0,
+            ask_timeout_secs: 0,
             extensions: Vec::new(),
             skills: Vec::new(),
             prompts: Vec::new(),

@@ -7,7 +7,9 @@
 /// Line ending style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
+    /// Windows-style carriage-return + line-feed (`\r\n`).
     Crlf,
+    /// Unix-style line-feed (`\n`).
     Lf,
 }
 

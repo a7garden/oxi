@@ -73,12 +73,8 @@ impl TodoStateProvider for TodoState {
     ) -> Pin<Box<dyn Future<Output = Result<TodoUpdateResult, ToolError>> + Send + 'a>> {
         Box::pin(async move {
             // RwLock 가드는 동기 acquire → await 전에 drop
-            let result = {
-                let mut phases = self.phases.write();
-                let r = oxi_agent::tools::todo::apply_ops(&mut phases, &ops);
-                r
-            };
-            Ok(result)
+            let mut phases = self.phases.write();
+            Ok(oxi_agent::tools::todo::apply_ops(&mut phases, &ops))
         })
     }
 }

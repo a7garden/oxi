@@ -354,11 +354,11 @@ impl AgentTool for ReadTool {
         // ── Internal URL dispatch ──
         // If the input looks like an internal URL (scheme://…), try the
         // configured resolver before falling through to file-system read.
-        if let Some(ref resolver) = ctx.url_resolver {
-            if resolver.can_resolve(path_str) {
-                let resolved = resolver.resolve(path_str).await?;
-                return Ok(AgentToolResult::success(resolved.content));
-            }
+        if let Some(ref resolver) = ctx.url_resolver
+            && resolver.can_resolve(path_str)
+        {
+            let resolved = resolver.resolve(path_str).await?;
+            return Ok(AgentToolResult::success(resolved.content));
         }
 
         // Security: validate path with PathGuard (use root_dir if set, else ctx)

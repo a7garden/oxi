@@ -76,6 +76,7 @@ pub use state::{AgentState, SharedState};
 pub use structured_output::{OutputMode, StructuredOutput, StructuredOutputError};
 
 pub use mcp::{McpConfig, McpManager, McpTool};
+pub use tools::ask::{AskBridge, AskTool};
 pub use tools::commit::{
     CommitGroup, CommitTool, CommitType, ConventionalAnalysis, ConventionalDetail, NumstatEntry,
     ScopeCandidate,
@@ -87,7 +88,6 @@ pub use tools::memory_edit::MemoryEditTool;
 pub use tools::memory_recall::MemoryRecallTool;
 pub use tools::memory_reflect::MemoryReflectTool;
 pub use tools::memory_retain::MemoryRetainTool;
-pub use tools::questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 pub use tools::search_cache::{GetSearchResultsTool, SearchCache};
 pub use tools::subagent::SubagentTool;
 pub use tools::web_search::WebSearchTool;
@@ -97,11 +97,11 @@ pub use tools::{
     ToolContext, ToolError, ToolRegistry, WriteTool,
 };
 
+pub use tools::TodoStateProvider;
 pub use tools::todo::{
-    TodoTool, InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus,
+    InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus, TodoTool,
     TodoUpdateResult,
 };
-pub use tools::TodoStateProvider;
 
 pub use tools::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
 pub use tools::{LspAction, LspProvider};
@@ -115,10 +115,10 @@ pub mod prelude {
     pub use crate::events::AgentEvent;
     pub use crate::mcp::{McpConfig, McpManager, McpTool};
     pub use crate::state::{AgentState, SharedState};
+    pub use crate::tools::ask::{AskBridge, AskTool};
     pub use crate::tools::context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
     pub use crate::tools::github::GitHubTool;
     pub use crate::tools::github_search::GitHubSearchTool;
-    pub use crate::tools::questionnaire::{QuestionnaireBridge, QuestionnaireTool};
     pub use crate::tools::search_cache::{GetSearchResultsTool, SearchCache};
     pub use crate::tools::subagent::SubagentTool;
     pub use crate::tools::web_search::WebSearchTool;

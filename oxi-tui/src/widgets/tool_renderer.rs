@@ -101,13 +101,15 @@ impl ToolFormatCache {
     }
 
     /// Memoized [`format_tool_result`]. Returns a clone of the cached lines
-    /// when `(name, result, is_error, max_width)` and the styles are unchanged.
+    /// when `(name, result, is_error, arguments, max_width)` and the styles are
+    /// unchanged.
     pub fn format_result(
         &mut self,
         styles: ThemeStyles,
         name: &str,
         result: &str,
         is_error: bool,
+        arguments: Option<&str>,
         max_width: usize,
     ) -> Vec<Line<'static>> {
         self.invalidate_if_styles_changed(styles);
@@ -118,7 +120,7 @@ impl ToolFormatCache {
         if self.results.len() >= TOOL_FORMAT_CACHE_CAP {
             self.results.clear();
         }
-        let lines = format_tool_result(name, result, is_error, max_width, &styles);
+        let lines = format_tool_result(name, result, is_error, arguments, max_width, &styles);
         self.results.insert(key, lines.clone());
         lines
     }
@@ -647,44 +649,78 @@ pub fn format_generic_call(
     lines
 }
 
-/// Format the `questionnaire` tool call — renders each question prompt with
-/// its options, highlighting the recommended option (matching index) with a ★.
-pub fn format_questionnaire_call(
-    args: &Value,
-    max_width: usize,
-    styles: &ThemeStyles,
-) -> Vec<Line<'static>> {
+/// Format the `ask` tool call — renders each question prompt with its options
+/// using omp-style radio (single) / checkbox (multi) markers, with a
+/// "(Recommended)" suffix on the recommended option. Mirrors omp
+/// `renderQuestionOptionLines`.
+pub fn format_ask_call(args: &Value, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
     let questions = match args.get("questions").and_then(|v| v.as_array()) {
         Some(qs) if !qs.is_empty() => qs,
         _ => {
             // Missing or malformed arguments — degrade to a single header line.
             return vec![Line::from(Span::styled(
-                "questionnaire".to_string(),
+                "ask".to_string(),
                 styles.accent.add_modifier(Modifier::BOLD),
             ))];
         }
     };
 
     let count = questions.len();
-    let header = Line::from(Span::styled(
-        format!(
-            "{} Questionnaire ({} question{})",
-            styles.symbols.tool_ask,
-            count,
-            if count == 1 { "" } else { "s" }
+    let sym = styles.symbols;
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!("{} Ask", sym.tool_ask),
+            styles.accent.add_modifier(Modifier::BOLD),
         ),
-        styles.accent.add_modifier(Modifier::BOLD),
-    ));
+        Span::styled(
+            if count == 1 {
+                format!("{}{} question", sym.sep_dot, count)
+            } else {
+                format!("{}{} questions", sym.sep_dot, count)
+            },
+            styles.muted,
+        ),
+    ])];
 
-    let mut lines = vec![header];
     for q in questions {
         let prompt = q
             .get("prompt")
             .and_then(|v| v.as_str())
             .unwrap_or("(no prompt)");
+        let multi = q
+            .get("multiSelect")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let recommended = q
+            .get("recommended")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+
+        // Section tag for multi-question calls.
+        if count > 1 {
+            let id = q.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let mut meta: Vec<String> = Vec::new();
+            if multi {
+                meta.push("multi".to_string());
+            }
+            if let Some(opts) = q.get("options").and_then(|v| v.as_array()) {
+                meta.push(format!("options:{}", opts.len()));
+            }
+            let meta_str = if meta.is_empty() {
+                String::new()
+            } else {
+                format!("{}{}", sym.sep_dot, meta.join(sym.sep_dot))
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("[{}]", id), styles.muted),
+                Span::styled(meta_str, styles.muted),
+            ]));
+        }
+
         lines.push(Line::from(Span::styled(
             format!(
-                "  ? {}",
+                "  {} {}",
+                sym.tool_ask,
                 truncate_to_width(prompt, max_width.saturating_sub(4))
             ),
             styles.accent,
@@ -697,21 +733,34 @@ pub fn format_questionnaire_call(
                     .or_else(|| opt.get("value"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let is_recommended =
-                    q.get("recommended").and_then(|v| v.as_u64()) == Some(i as u64);
-                let (marker, style) = if is_recommended {
-                    (styles.symbols.nav_selected, styles.accent)
+                let is_rec = recommended == Some(i);
+                let display = if is_rec {
+                    format!("{}{}", label, RECOMMENDED_SUFFIX)
                 } else {
-                    (styles.symbols.radio_off, styles.muted)
+                    label.to_string()
                 };
-                lines.push(Line::from(Span::styled(
-                    format!(
-                        "    {} {}",
-                        marker,
-                        truncate_to_width(label, max_width.saturating_sub(6))
+                let marker = if multi {
+                    sym.checkbox_off
+                } else {
+                    sym.radio_off
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(format!("{} ", marker), styles.muted),
+                    Span::styled(
+                        truncate_to_width(&display, max_width.saturating_sub(6)),
+                        if is_rec { styles.accent } else { styles.normal },
                     ),
-                    style,
-                )));
+                ]));
+                // Description indented below (omp: ↳ desc)
+                if let Some(desc) = opt.get("description").and_then(|v| v.as_str())
+                    && !desc.trim().is_empty()
+                {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(format!("{} {}", sym.nav_expand, desc.trim()), styles.muted),
+                    ]));
+                }
             }
         }
     }
@@ -719,52 +768,232 @@ pub fn format_questionnaire_call(
     lines
 }
 
-/// Format the `questionnaire` tool result — one header line (answered or
-/// cancelled) followed by one `id → answer` line per question, with a ⏱
-/// marker on entries that were auto-selected after a timeout.
-pub fn format_questionnaire_result(
+/// "(Recommended)" suffix — matches the overlay and omp `RECOMMENDED_SUFFIX`.
+const RECOMMENDED_SUFFIX: &str = " (Recommended)";
+
+/// Format the `ask` tool result as an omp-style "filled menu": every offered
+/// option is re-shown with its selection marker filled in (radio filled /
+/// checkbox checked), plus any custom free-text answer. Reconstructs the
+/// option list from the call `arguments` (JSON) and matches selection from
+/// the result text. Mirrors omp `renderAnswerOptionLines`.
+///
+/// `arguments` carries the original call JSON so tools like `ask` can
+/// reconstruct a "filled menu" (all options + which were selected). Tools
+/// that don't need it ignore the parameter.
+pub fn format_ask_result(
     result: &str,
+    arguments: Option<&str>,
     max_width: usize,
     styles: &ThemeStyles,
 ) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+    let sym = styles.symbols;
+    // Match the exact cancellation phrases the tool emits — not a loose
+    // "cancel" substring, which would false-positive on ids/labels like
+    // "cancel_policy: Full refund".
+    let lower = result.to_lowercase();
+    let is_cancelled = lower.starts_with("user cancelled")
+        || lower.starts_with("question dismissed")
+        || lower.starts_with("question cancelled");
 
-    let is_cancelled = result.to_lowercase().contains("cancelled");
+    // Parse the call arguments to recover the question structure.
+    let questions = arguments
+        .and_then(|a| serde_json::from_str::<Value>(a).ok())
+        .and_then(|v| v.get("questions").and_then(|q| q.as_array()).cloned())
+        .unwrap_or_default();
+
+    // Parse result lines into id → ParsedAnswer.
+    let parsed = parse_ask_result(result);
+
     let header = if is_cancelled {
-        Line::from(Span::styled(
-            format!("{} Cancelled", styles.symbols.status_warning),
-            styles.warning,
-        ))
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", sym.status_warning),
+                styles.warning.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Ask", styles.warning.add_modifier(Modifier::BOLD)),
+        ])
     } else {
-        Line::from(Span::styled(
-            format!("{} Answered", styles.symbols.status_success),
-            styles.success,
-        ))
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", sym.status_success),
+                styles.success.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{} Ask", sym.tool_ask),
+                styles.success.add_modifier(Modifier::BOLD),
+            ),
+        ])
     };
-    lines.push(header);
+    let mut lines = vec![header];
 
-    for raw in result.lines() {
-        let timed_out = raw.contains("(auto-selected after timeout)");
-        let marker = if timed_out {
-            format!(" {}", styles.symbols.icon_time)
-        } else {
-            String::new()
-        };
-        let body = match raw.split_once(": ") {
-            Some((id, rest)) => {
-                format!("  {} {} {}{}", id, styles.symbols.arrow_right, rest, marker)
+    // If we couldn't recover the questions, fall back to raw result lines.
+    if questions.is_empty() {
+        for raw in result.lines() {
+            if !raw.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", truncate_to_width(raw, max_width.saturating_sub(2))),
+                    styles.muted,
+                )));
             }
-            None => format!("  {}{}", raw, marker),
-        };
+        }
+        return lines;
+    }
+
+    for q in questions {
+        let prompt = q.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+        let id = q.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let multi = q
+            .get("multiSelect")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // `recommended` is not re-rendered in the answered view — the filled
+        // marker is the signal. Options come from the call arguments.
+        let options = q
+            .get("options")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let answer = parsed.iter().find(|p| p.id == id);
+        let selected: Vec<&str> = answer
+            .map(|a| a.labels.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        let selected_set: std::collections::HashSet<&str> = selected.iter().copied().collect();
+
+        // Question prompt
         lines.push(Line::from(Span::styled(
-            truncate_to_width(&body, max_width),
-            styles.muted,
+            format!(
+                "  {} {}",
+                sym.tool_ask,
+                truncate_to_width(prompt, max_width.saturating_sub(4))
+            ),
+            styles.accent,
         )));
+
+        let has_selection = !selected.is_empty() || answer.is_some_and(|a| a.custom.is_some());
+
+        if !has_selection {
+            // No answer recorded (cancelled, or dismissed before reaching
+            // this question). Show a clear warning marker instead of hollow
+            // options — matches omp `renderAnswerOptionLines`.
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(format!("{} Cancelled", sym.status_warning), styles.warning),
+            ]));
+        } else {
+            // Render every offered option with filled/hollow markers.
+            for opt in options.iter() {
+                let label = opt
+                    .get("label")
+                    .or_else(|| opt.get("value"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let is_sel = selected_set.contains(label);
+                let (marker, mstyle, lstyle) = if is_sel {
+                    let m = if multi { sym.checkbox_on } else { sym.radio_on };
+                    (m, styles.success, styles.normal)
+                } else {
+                    let m = if multi {
+                        sym.checkbox_off
+                    } else {
+                        sym.radio_off
+                    };
+                    (m, styles.muted, styles.muted)
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(format!("{} ", marker), mstyle),
+                    Span::styled(
+                        truncate_to_width(label, max_width.saturating_sub(6)),
+                        lstyle,
+                    ),
+                ]));
+                // The filled marker already conveys the choice — no
+                // "(Recommended)" suffix needed in the answered view.
+            }
+            // Custom free-text answer (allowOther).
+            if let Some(custom) = answer.and_then(|a| a.custom.as_deref()) {
+                for (ci, cline) in custom.lines().enumerate() {
+                    if ci == 0 {
+                        lines.push(Line::from(vec![
+                            Span::raw("    "),
+                            Span::styled(format!("{} ", sym.status_success), styles.success),
+                            Span::styled(
+                                truncate_to_width(cline, max_width.saturating_sub(6)),
+                                styles.normal,
+                            ),
+                        ]));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            format!(
+                                "      {}",
+                                truncate_to_width(cline, max_width.saturating_sub(6))
+                            ),
+                            styles.normal,
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Timeout footer.
+        if answer.is_some_and(|a| a.timed_out) {
+            lines.push(Line::from(Span::styled(
+                "    auto-selected after timeout \u{2014} not a user choice".to_string(),
+                styles.muted,
+            )));
+        }
     }
 
     lines
 }
 
+/// A parsed answer line from the ask tool result text.
+struct ParsedAnswer {
+    id: String,
+    /// Selected option labels (single = one element, multi = many).
+    labels: Vec<String>,
+    /// Custom free-text input (allowOther), if any.
+    custom: Option<String>,
+    timed_out: bool,
+}
+
+/// Parse the ask result text into per-question answers.
+///
+/// Format produced by `ask::format_answers`:
+/// - single: `id: label`
+/// - multi:  `id: [a, b]`
+/// - custom: `id: "text"`
+/// - timeout suffix: ` (auto-selected after timeout)`
+fn parse_ask_result(result: &str) -> Vec<ParsedAnswer> {
+    let mut out = Vec::new();
+    for raw in result.lines() {
+        let timed_out = raw.contains("(auto-selected after timeout)");
+        let body = raw.replace(" (auto-selected after timeout)", "");
+        let Some((id, rest)) = body.split_once(": ") else {
+            continue;
+        };
+        let rest = rest.trim();
+        // custom: `"text"`
+        let (labels, custom) =
+            if let Some(inner) = rest.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+                (Vec::new(), Some(inner.to_string()))
+            } else if let Some(inner) = rest.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                // multi: [a, b]
+                let labels = inner.split(", ").map(|s| s.trim().to_string()).collect();
+                (labels, None)
+            } else {
+                (vec![rest.to_string()], None)
+            };
+        out.push(ParsedAnswer {
+            id: id.trim().to_string(),
+            labels,
+            custom,
+            timed_out,
+        });
+    }
+    out
+}
 /// Format a tool call by tool name.
 pub fn format_tool_call(
     name: &str,
@@ -781,7 +1010,7 @@ pub fn format_tool_call(
         "write" => format_write_call(&args, styles),
         "grep" | "find" | "ls" => format_search_call(name, &args, styles),
         "issue" => format_issue_call(&args, max_width, styles),
-        "questionnaire" => format_questionnaire_call(&args, max_width, styles),
+        "ask" => format_ask_call(&args, max_width, styles),
         _ => format_generic_call(name, &args, max_width, styles),
     }
 }
@@ -996,10 +1225,15 @@ pub fn format_generic_result(
 }
 
 /// Format a tool result by tool name.
+///
+/// `arguments` carries the original call JSON so tools like `ask` can
+/// reconstruct a "filled menu" (all options + which were selected). Tools
+/// that don't need it ignore the parameter.
 pub fn format_tool_result(
     name: &str,
     result: &str,
     is_error: bool,
+    arguments: Option<&str>,
     max_width: usize,
     styles: &ThemeStyles,
 ) -> Vec<Line<'static>> {
@@ -1017,7 +1251,7 @@ pub fn format_tool_result(
         "bash" => format_bash_result(result, max_width, styles),
         "read" => format_read_result(result, max_width, styles),
         "issue" => format_issue_result(result, max_width, styles),
-        "questionnaire" => format_questionnaire_result(result, max_width, styles),
+        "ask" => format_ask_result(result, arguments, max_width, styles),
         _ => format_generic_result(result, max_width, styles),
     }
 }
@@ -1076,9 +1310,7 @@ pub fn measure_call_height(name: &str, arguments: &str, max_width: usize) -> u16
                 _ => base + 1,
             }
         }
-        "questionnaire" => {
-            format_questionnaire_call(&args, max_width, &ThemeStyles::default()).len() as u16
-        }
+        "ask" => format_ask_call(&args, max_width, &ThemeStyles::default()).len() as u16,
         _ => {
             // Generic: 1 header + up to 3 args
             let args_count = args.as_object().map(|o| o.len().min(3)).unwrap_or(0);
@@ -1162,7 +1394,7 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
                 shown as u16 + extra
             }
         }
-        "questionnaire" => 1 + result.lines().count() as u16,
+        "ask" => 1 + result.lines().count() as u16,
         _ => {
             let total = result.lines().count();
             let shown = total.min(GENERIC_PREVIEW_LINES);

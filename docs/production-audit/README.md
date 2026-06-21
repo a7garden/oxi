@@ -1,5 +1,12 @@
 # Production Audit — Area Briefs
 
+> ⚠️ **HISTORICAL SNAPSHOT.** This survey was generated 2026-05-31 and reflects
+> the repo state *at that time*. It is **not current** — the edition is now 2024,
+> the crate set is `oxi-hashline` (not `oxi-store`), the model catalog is
+> materialized from models.dev (5000+ models / 70+ providers), and the clippy
+> gate status has changed. Treat the numbers below as a point-in-time record,
+> not a live status report. For current state, inspect HEAD directly.
+
 > **Purpose:** One markdown brief per area. Each brief is a self-contained task
 > that an agent can read and execute independently in a separate session.
 >

@@ -561,6 +561,7 @@ pub struct Persona {
     pub allowed_tools: Option<Vec<String>>,
 }
 
+/// Source of personas (system prompt fragments) selectable by name.
 pub trait PersonaProvider: Send + Sync + 'static {
     /// List all known personas.
     fn list(&self) -> Pin<Box<dyn Future<Output = Result<Vec<Persona>, SdkError>> + Send + '_>>;
@@ -571,6 +572,7 @@ pub trait PersonaProvider: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<Option<Persona>, SdkError>> + Send + '_>>;
 }
 
+/// Noop provider: lists nothing, lookups return `None`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopPersonaProvider;
 
@@ -611,11 +613,18 @@ pub enum AccessDecision {
     /// Allow but emit an audit event.
     AllowWithAudit,
     /// Deny with reason.
-    Deny { reason: String },
+    Deny {
+        /// Why access was denied.
+        reason: String,
+    },
     /// Pause and request human approval.
-    RequireApproval { reason: String },
+    RequireApproval {
+        /// Why human approval is required.
+        reason: String,
+    },
 }
 
+/// Pre-execution policy check for tool invocations.
 pub trait AccessGate: Send + Sync + 'static {
     /// Decide whether `request` may proceed.
     fn check(
@@ -624,6 +633,7 @@ pub trait AccessGate: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<AccessDecision, SdkError>> + Send + '_>>;
 }
 
+/// Permissive gate: every request is `Allow`ed.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AllowAllAccessGate;
 
@@ -640,6 +650,7 @@ impl AccessGate for AllowAllAccessGate {
 // Port 8 — CapabilityResolver: which tools a subject may see
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Resolves the set of tools visible to a given subject.
 pub trait CapabilityResolver: Send + Sync + 'static {
     /// Returns the set of tool names visible to `subject`.
     fn visible_tools(
@@ -648,6 +659,7 @@ pub trait CapabilityResolver: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SdkError>> + Send + '_>>;
 }
 
+/// Resolver that exposes no tools to any subject.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EmptyCapabilityResolver;
 
@@ -681,6 +693,7 @@ pub struct MemoryEntry {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Episodic / semantic / procedural memory store with optional vector search.
 pub trait MemoryStore: Send + Sync + 'static {
     /// Persist a memory entry.
     fn put(
@@ -702,6 +715,7 @@ pub trait MemoryStore: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryEntry>, SdkError>> + Send + '_>>;
 }
 
+/// Noop store: `put` errors, `list` and `search` return empty.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopMemoryStore;
 
@@ -741,18 +755,23 @@ pub struct CronJob {
     pub payload: Option<PortValue>,
 }
 
+/// Registers and introspects time-based jobs.
 pub trait CronScheduler: Send + Sync + 'static {
+    /// Register a new job (replaces any existing job with the same id).
     fn register(
         &self,
         job: CronJob,
     ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>>;
+    /// Remove a previously registered job by id.
     fn unregister(
         &self,
         id: &str,
     ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>>;
+    /// List all currently registered jobs.
     fn list(&self) -> Pin<Box<dyn Future<Output = Result<Vec<CronJob>, SdkError>> + Send + '_>>;
 }
 
+/// Noop scheduler: `register` errors, `list` is empty.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopCronScheduler;
 
@@ -785,13 +804,19 @@ impl CronScheduler for NoopCronScheduler {
 /// Current resource usage snapshot.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResourceUsage {
+    /// CPU usage percentage (0–100).
     pub cpu_percent: f32,
+    /// Resident memory in bytes.
     pub memory_bytes: u64,
+    /// Disk usage in bytes.
     pub disk_bytes: u64,
+    /// Number of currently running agents.
     pub active_agents: usize,
+    /// Total tokens consumed across all agents.
     pub tokens_consumed: u64,
 }
 
+/// Reports current resource usage and whether the budget is exceeded.
 pub trait ResourceMonitor: Send + Sync + 'static {
     /// Snapshot the current usage.
     fn snapshot(
@@ -803,6 +828,7 @@ pub trait ResourceMonitor: Send + Sync + 'static {
     }
 }
 
+/// Noop monitor: reports zero usage and never exceeds budget.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopResourceMonitor;
 
@@ -840,12 +866,15 @@ pub struct ResolvedUrl {
 /// Router call context (identifies the calling session).
 #[derive(Debug, Clone, Default)]
 pub struct ResolveContext {
+    /// Working directory of the calling session.
     pub cwd: Option<PathBuf>,
+    /// Identifier of the calling session.
     pub session_id: Option<String>,
 }
 
 /// Resolves `scheme://path` URIs (issue://, pr://, agent://, etc.) into text.
 pub trait InternalUrlRouter: Send + Sync + 'static {
+    /// Resolve a `scheme://path` URI to text content.
     fn resolve<'a>(
         &'a self,
         uri: &'a str,
@@ -863,6 +892,7 @@ pub trait InternalUrlRouter: Send + Sync + 'static {
     }
 }
 
+/// Noop router: `resolve` always errors with `PortNotConfigured`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopInternalUrlRouter;
 
@@ -902,14 +932,18 @@ pub trait ProtocolHandler: Send + Sync {
 /// Auto-completion entry returned by a handler.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UrlCompletion {
+    /// Completion text to insert.
     pub value: String,
+    /// Short label for the completion menu.
     pub label: Option<String>,
+    /// Longer description shown alongside the label.
     pub description: Option<String>,
 }
 
 /// Line map metadata for selector processing (read tool delegates to this).
 #[derive(Debug, Clone, Default)]
 pub struct LineMap {
+    /// Total number of lines in the source.
     pub total_lines: u32,
     /// 1-indexed displayable ranges (gaps represent elided regions).
     pub displayable: Option<Vec<(u32, u32)>>,
@@ -922,51 +956,81 @@ pub struct LineMap {
 /// A TTSR rule. Condition is a regex matched against streaming output.
 #[derive(Debug, Clone)]
 pub struct Rule {
+    /// Rule name (unique identifier).
     pub name: String,
+    /// Rule body injected into the system prompt when conditions match.
     pub content: String,
+    /// Human-readable summary of what the rule does.
     pub description: Option<String>,
     /// Regex patterns to match against stream text.
     pub condition: Vec<regex::Regex>,
     /// Scope tokens limiting which stream sources trigger.
     pub scope: Vec<ScopeToken>,
+    /// When (if ever) this rule interrupts the agent loop.
     pub interrupt_mode: InterruptMode,
+    /// File globs that further restrict the rule's applicability.
     pub globs: Vec<String>,
     /// If true, always included in system prompt.
     pub always_apply: bool,
+    /// Where the rule was loaded from.
     pub source: RuleSource,
 }
 
+/// Stream-source scope a TTSR rule can match against.
 #[derive(Debug, Clone)]
 pub enum ScopeToken {
+    /// Matches assistant prose output.
     Text,
+    /// Matches model thinking/reasoning output.
     Thinking,
-    Tool { name: String, globs: Vec<String> },
+    /// Matches tool-call arguments, optionally filtered by tool name and globs.
+    Tool {
+        /// Tool name to match.
+        name: String,
+        /// File globs that restrict which tool calls this scope matches.
+        globs: Vec<String>,
+    },
 }
 
+/// When a TTSR rule fires relative to prose/tool output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterruptMode {
+    /// Never interrupts.
     Never,
+    /// Interrupts on prose output only.
     ProseOnly,
+    /// Interrupts on tool output only.
     ToolOnly,
+    /// Interrupts on any matching output.
     Always,
 }
 
+/// Origin of a TTSR rule.
 #[derive(Debug, Clone)]
 pub enum RuleSource {
+    /// Shipped with the SDK.
     BuiltinDefaults,
+    /// Loaded from the project's rule files.
     Project,
+    /// Loaded from the user's global rule files.
     User,
 }
 
+/// Source of TTSR rules and injection bookkeeping.
 pub trait RuleRegistry: Send + Sync + 'static {
+    /// Return all currently active rules.
     fn rules<'a>(&'a self) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>>;
+    /// Record that `name` was injected on `turn` (dedup bookkeeping).
     fn mark_injected(&self, _name: &str, _turn: u64) {}
+    /// Return all (name, turn) injection records.
     fn injected_records(&self) -> Vec<(String, u64)> {
         Vec::new()
     }
+    /// Restore injection records (e.g. after compaction).
     fn restore(&self, _records: Vec<(String, u64)>) {}
 }
 
+/// Noop registry: returns no rules.
 #[derive(Default)]
 pub struct NoopRuleRegistry;
 
@@ -982,12 +1046,14 @@ impl RuleRegistry for NoopRuleRegistry {
 
 /// Produces dense vector embeddings for semantic memory search.
 pub trait EmbeddingProvider: Send + Sync + 'static {
+    /// Produce a dense embedding vector for `text`.
     fn embed<'a>(
         &'a self,
         text: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<f32>, SdkError>> + Send + 'a>>;
 }
 
+/// Noop provider: `embed` always errors with `PortNotConfigured`.
 pub struct NoopEmbeddingProvider;
 
 impl EmbeddingProvider for NoopEmbeddingProvider {

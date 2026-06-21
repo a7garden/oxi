@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{AgentTool, AgentToolResult, LspAction, LspProvider, ToolContext, ToolError};
+use super::{AgentTool, AgentToolResult, LspAction, ToolContext, ToolError};
 
 /// `lsp` agent tool — IDE-grade code intelligence.
 ///

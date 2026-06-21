@@ -9,6 +9,7 @@ use oxi_tui::Theme;
 use ratatui::{Frame, layout::Rect};
 
 pub mod anchor;
+pub mod ask;
 pub mod extensions;
 pub mod factories;
 pub mod fork_select;
@@ -18,7 +19,6 @@ pub mod mcp_dashboard;
 pub mod mcp_presets;
 pub mod model_select_inline;
 pub mod provider_select;
-pub mod questionnaire;
 pub mod router_integration;
 pub mod router_setup;
 pub mod settings;

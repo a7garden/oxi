@@ -8,7 +8,9 @@ use tokio::sync::broadcast;
 /// Namespaced key for shared memory.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MemoryKey {
+    /// Logical grouping for the key.
     pub namespace: String,
+    /// Key name within the namespace.
     pub key: String,
 }
 
@@ -25,21 +27,31 @@ impl MemoryKey {
 /// A value entry with version and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
+    /// Stored JSON value.
     pub value: serde_json::Value,
+    /// Monotonically increasing version for optimistic locking.
     pub version: u64,
+    /// Wall-clock time of last modification, in ms since Unix epoch.
     pub modified_at_ms: u64,
+    /// Identifier of the agent that last wrote the value.
     pub modified_by: String,
 }
 
 /// Events emitted by shared memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MemoryEvent {
+    /// A value was written or updated.
     Written {
+        /// Namespaced key that was written.
         key: MemoryKey,
+        /// New version number of the entry.
         version: u64,
+        /// Identifier of the writing agent.
         author: String,
     },
+    /// A value was removed.
     Deleted {
+        /// Namespaced key that was deleted.
         key: MemoryKey,
     },
 }

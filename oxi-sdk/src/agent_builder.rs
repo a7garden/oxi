@@ -59,6 +59,7 @@ pub struct AgentBuilder<'a> {
 }
 
 impl<'a> AgentBuilder<'a> {
+    /// Create a new builder bound to the given [`Oxi`] instance with the provided agent config.
     pub fn new(oxi: &'a Oxi, config: AgentConfig) -> Self {
         Self {
             oxi,
@@ -112,12 +113,14 @@ impl<'a> AgentBuilder<'a> {
     /// // Observe later:
     /// let phases = todo.get_phases();
     /// ```
-    pub fn with_todo(mut self, todo: std::sync::Arc<dyn oxi_agent::tools::TodoStateProvider>) -> Self {
+    pub fn with_todo(
+        mut self,
+        todo: std::sync::Arc<dyn oxi_agent::tools::TodoStateProvider>,
+    ) -> Self {
         self.config.todo = Some(todo);
         self.tools.register(oxi_agent::tools::todo::TodoTool);
         self
     }
-
 
     /// Register the standard coding tools (read, write, edit, bash, grep, find, ls, ...).
     pub fn coding_tools(self) -> Self {

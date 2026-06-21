@@ -12,32 +12,49 @@ use tokio::sync::broadcast;
 pub enum AuditEntry {
     /// A security capability check.
     SecurityDecision {
+        /// Principal requesting the capability (e.g. agent or user id).
         subject: String,
+        /// Capability that was checked.
         capability: String,
+        /// Whether the capability was granted.
         granted: bool,
+        /// Unix-millisecond timestamp of the decision.
         timestamp_ms: u64,
     },
     /// A tool execution event.
     ToolExecution {
+        /// ID of the agent that invoked the tool.
         agent_id: String,
+        /// Name of the tool that was executed.
         tool_name: String,
+        /// Short summary of the tool call parameters.
         params_summary: String,
+        /// Whether the tool execution succeeded.
         success: bool,
+        /// Execution duration in milliseconds.
         duration_ms: u64,
+        /// Unix-millisecond timestamp of the execution.
         timestamp_ms: u64,
     },
     /// An agent lifecycle event.
     Lifecycle {
+        /// ID of the agent whose lifecycle changed.
         agent_id: String,
+        /// Description of the lifecycle event.
         event: String,
+        /// Unix-millisecond timestamp of the event.
         timestamp_ms: u64,
     },
     /// A custom entry with arbitrary metadata.
     Custom {
+        /// Free-form category label for grouping custom entries.
         category: String,
+        /// Human-readable message describing the entry.
         message: String,
+        /// Arbitrary structured metadata.
         #[serde(default)]
         metadata: HashMap<String, serde_json::Value>,
+        /// Unix-millisecond timestamp of the entry.
         timestamp_ms: u64,
     },
 }

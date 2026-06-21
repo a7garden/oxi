@@ -90,6 +90,8 @@ pub enum Action {
     ToggleRouting,
     /// Toggle steering queue panel.
     ToggleQueue,
+    /// Toggle expand/collapse of the topmost visible thinking or tool block.
+    ToggleExpand,
     /// Copy last code block to clipboard.
     CopyCodeBlock,
     /// Open last image in viewer.
@@ -250,6 +252,7 @@ impl KeybindingsManager {
             (OpenProviderSetup, vec!["Ctrl+o"]),
             (ToggleRouting, vec!["Ctrl+r"]),
             (ToggleQueue, vec!["Ctrl+q"]),
+            (ToggleExpand, vec!["Ctrl+t"]),
             (CopyCodeBlock, vec!["Ctrl+y"]),
             (OpenImage, vec!["Ctrl+i"]),
             // ── Completion ──

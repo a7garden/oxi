@@ -21,6 +21,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   # ── Tag ancestry check ────────────────────────────────────────
@@ -68,8 +69,34 @@ jobs:
         run: |
           for crate in oxi-hashline oxi-ai oxi-tui oxi-agent oxi-sdk oxi-cli; do
             echo "─── $crate ───"
-            (cd "$crate" && cargo package --no-verify --list)
+            (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
+
+  # ── Correctness gate ─────────────────────────────────────────
+  # Mirrors ci.yml (fmt + clippy) and test.yml (nextest). Publish MUST NOT
+  # proceed if the workspace fails its own quality gate. Uses the pinned MSRV
+  # (1.96) so the lint result matches ci.yml exactly.
+  verify:
+    name: fmt + clippy + nextest
+    needs: tag-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "publish-verify"
+      - uses: taiki-e/install-action@nextest
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo nextest
+        run: cargo nextest run --workspace --profile ci
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces order: oxi-hashline →
@@ -78,7 +105,7 @@ jobs:
   # propagate (~30-60s) before publishing.
   publish:
     name: publish ${{ matrix.crate }}
-    needs: tag-check
+    needs: [tag-check, package-check, verify]
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15

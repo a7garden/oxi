@@ -640,7 +640,10 @@ impl AgentLoop {
 
                 let assistant_message = match outcome {
                     StreamOutcome::Complete(msg) => msg,
-                    StreamOutcome::Error { message: _message, detail } => {
+                    StreamOutcome::Error {
+                        message: _message,
+                        detail,
+                    } => {
                         // Check for message-ordering errors that can be recovered
                         // by removing orphaned tool results.
                         let is_tool_ordering_error = detail.contains("tool")

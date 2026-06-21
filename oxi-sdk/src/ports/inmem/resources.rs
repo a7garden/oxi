@@ -35,6 +35,7 @@ impl Default for CountingResourceMonitor {
 }
 
 impl CountingResourceMonitor {
+    /// Create a monitor with both counters at zero.
     pub fn new() -> Self {
         Self {
             active_agents: Arc::new(AtomicU64::new(0)),
@@ -42,14 +43,17 @@ impl CountingResourceMonitor {
         }
     }
 
+    /// Increment the active-agent counter by one.
     pub fn inc_active(&self) {
         self.active_agents.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Decrement the active-agent counter by one.
     pub fn dec_active(&self) {
         self.active_agents.fetch_sub(1, Ordering::Relaxed);
     }
 
+    /// Add `n` tokens to the consumed-tokens counter.
     pub fn add_tokens(&self, n: u64) {
         self.tokens.fetch_add(n, Ordering::Relaxed);
     }

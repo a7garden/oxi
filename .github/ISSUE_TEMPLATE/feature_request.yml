@@ -35,7 +35,7 @@ body:
         - oxi-ai (LLM providers)
         - oxi-agent (tools, agent loop)
         - oxi-tui (terminal UI)
-        - oxi-store (sessions, settings)
+        - oxi-hashline (patch format)
         - oxi-sdk (multi-agent SDK)
         - oxi-cli (binary, CLI interface)
         - Extensions / Skills

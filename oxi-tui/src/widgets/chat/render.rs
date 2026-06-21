@@ -249,6 +249,7 @@ impl Widget for EntryWidget<'_> {
                             name,
                             result_content,
                             *is_err,
+                            Some(arguments),
                             max_w,
                         );
                         content_lines.extend(result_lines);

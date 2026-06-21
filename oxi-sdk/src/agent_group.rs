@@ -242,20 +242,16 @@ impl AgentGroup {
         Ok(results)
     }
 
-    /// Orchestrated: leader delegates to workers.
+    /// Orchestrated delegation is **not yet implemented**.
     ///
-    /// **NOTE**: Currently a stub. Only the leader agent executes the prompt.
-    /// Full implementation will:
-    /// 1. Leader analyzes and decomposes the prompt into subtasks
-    /// 2. Subtasks are distributed to worker agents
-    /// 3. Workers execute in parallel via MessageBus
-    /// 4. Leader collects and merges results
-    //
-    // TODO: Implement full orchestrated delegation
-    //       See: https://github.com/a7garden/oxi/issues/XXX
+    /// Returns an explicit error rather than silently degrading to a
+    /// single-agent run, so callers know orchestration is unavailable. Full
+    /// worker delegation (leader decomposes → workers execute in parallel →
+    /// leader merges) is planned for a future release; until then, use the
+    /// `Parallel` or `Pipeline` strategy.
     async fn run_orchestrated(
         &self,
-        prompt: String,
+        _prompt: String,
         leader_idx: usize,
     ) -> Result<Vec<AgentGroupOutput>> {
         if leader_idx >= self.agents.len() {
@@ -265,16 +261,9 @@ impl AgentGroup {
                 self.agents.len()
             );
         }
-
-        let leader = &self.agents[leader_idx];
-        let (response, _events) = leader.run(prompt).await?;
-
-        Ok(vec![AgentGroupOutput {
-            name: leader.model_id(),
-            content: response.content,
-            success: true,
-            error: None,
-        }])
+        anyhow::bail!(
+            "Orchestrated delegation is not yet implemented; use Parallel or Pipeline strategy"
+        );
     }
 }
 

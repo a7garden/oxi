@@ -78,7 +78,6 @@ use std::time::{Duration, Instant};
 use lifecycle::{LifecycleEvent, channel as lifecycle_channel, lifecycle_event_loop};
 
 /// Default back-off period after a server connection failure (seconds).
-
 pub const DEFAULT_FAILURE_BACKOFF_SECS: u64 = 30;
 /// Default global idle timeout (minutes).
 pub const DEFAULT_IDLE_TIMEOUT_MINS: u64 = 10;
@@ -763,11 +762,11 @@ impl McpManager {
                     )
                 })?
         };
-        let cred = self
-            .credential_provider
-            .read()
-            .refresh(server_name, &url)
-            .await;
+        let provider = {
+            let guard = self.credential_provider.read();
+            Arc::clone(&*guard)
+        };
+        let cred = provider.refresh(server_name, &url).await;
         match cred {
             Some(_) => Ok(()),
             None => Err(anyhow::anyhow!(

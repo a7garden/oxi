@@ -5,6 +5,7 @@
 //!
 //! Ported from omp's `packages/hashline/` (TypeScript). Same algorithms,
 //! same test contracts, Rust idioms.
+#![warn(missing_docs)]
 
 pub mod apply;
 pub mod diff_preview;

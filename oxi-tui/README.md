@@ -237,7 +237,9 @@ match mgr.match_action(&key_id) {
   wrapping, and string-width that ignore SGR escapes.
 - **Diffs** (`render::diff`): colored unified-diff rendering with `+`/`-`
   stat counting.
-- **Mermaid** (`render::mermaid`): Mermaid graph → ASCII box diagram, cached.
+- **Mermaid** (`render::mermaid`): pure-Rust Mermaid → ASCII diagram renderer
+  (flowchart, sequence, state, class) with a process-level render cache. No
+  external `mmdc` / Node dependency — single-binary self-contained.
 
 ## Conventions
 

@@ -63,19 +63,28 @@ impl CostBreakdown {
 /// Per-agent cost snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostSnapshot {
+    /// ID of the agent this snapshot covers.
     pub agent_id: String,
+    /// Token usage accumulated for the agent.
     pub usage: TokenUsage,
+    /// Computed cost breakdown for the agent.
     pub cost: CostBreakdown,
+    /// Remaining budget in USD, if a budget is set.
     pub budget_remaining: Option<f64>,
 }
 
 /// Global cost snapshot across all agents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalCostSnapshot {
+    /// Number of agents tracked.
     pub total_agents: usize,
+    /// Aggregate token usage across all agents.
     pub total_usage: TokenUsage,
+    /// Aggregate cost across all agents.
     pub total_cost: CostBreakdown,
+    /// Remaining global budget in USD, if set.
     pub global_budget_remaining: Option<f64>,
+    /// Per-agent cost snapshots.
     pub per_agent: Vec<CostSnapshot>,
 }
 

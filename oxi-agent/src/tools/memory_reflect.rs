@@ -27,8 +27,7 @@ impl AgentTool for MemoryReflectTool {
 
     fn description(&self) -> &str {
         "Save a session summary or reflection to long-term memory. \
-         Pass an explicit `summary`; automatic summarisation is not yet \
-         implemented."
+         A non-empty `summary` is required."
     }
 
     fn essential(&self) -> bool {
@@ -41,10 +40,10 @@ impl AgentTool for MemoryReflectTool {
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "Optional session summary to persist. If omitted, \
-                     returns a placeholder (auto-summary not yet implemented)."
+                    "description": "Session summary to persist to long-term memory."
                 }
-            }
+            },
+            "required": ["summary"]
         })
     }
 
@@ -59,22 +58,18 @@ impl AgentTool for MemoryReflectTool {
 
         let subject = ctx.session_id.as_deref().unwrap_or("default");
 
-        if let Some(summary) = params.get("summary").and_then(|v| v.as_str()) {
-            if summary.trim().is_empty() {
-                return Err("summary must not be empty".into());
-            }
-            backend.put(summary, "summary", subject).await?;
-            return Ok(AgentToolResult::success(format!(
-                "Reflected session summary to memory (subject: {}).",
-                subject
-            )));
+        let summary = params
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .ok_or("missing required parameter: summary")?;
+        if summary.trim().is_empty() {
+            return Err("summary must not be empty".into());
         }
-
-        // No summary provided — automatic LLM summarisation is a future
-        // enhancement. Return an explicit placeholder.
-        Ok(AgentToolResult::success(
-            "Reflection skipped: no summary provided and automatic summarisation is not yet implemented.",
-        ))
+        backend.put(summary, "summary", subject).await?;
+        Ok(AgentToolResult::success(format!(
+            "Reflected session summary to memory (subject: {}).",
+            subject
+        )))
     }
 }
 
@@ -161,15 +156,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reflect_without_summary_returns_placeholder() {
+    async fn reflect_without_summary_errors() {
         let mock = Arc::new(MockMemory::new());
         let ctx = ToolContext::default().with_memory(mock.clone());
-        let result = MemoryReflectTool
+        let err = MemoryReflectTool
             .execute("c1", json!({}), None, &ctx)
             .await
-            .unwrap();
-        assert!(result.success);
-        assert!(result.output.contains("Reflection skipped"));
+            .unwrap_err();
+        assert!(err.contains("summary"));
         assert!(mock.puts.lock().is_empty());
     }
 

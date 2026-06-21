@@ -89,13 +89,13 @@ impl AgentTool for MemoryRetainTool {
 
         // `importance` is validated for forward-compatibility; the current
         // `MemoryBackend::put` signature does not persist it.
-        if let Some(importance) = params.get("importance").and_then(|v| v.as_f64()) {
-            if !(0.0..=1.0).contains(&importance) {
-                return Err(format!(
-                    "importance must be between 0 and 1, got {}",
-                    importance
-                ));
-            }
+        if let Some(importance) = params.get("importance").and_then(|v| v.as_f64())
+            && !(0.0..=1.0).contains(&importance)
+        {
+            return Err(format!(
+                "importance must be between 0 and 1, got {}",
+                importance
+            ));
         }
 
         let subject = ctx.session_id.as_deref().unwrap_or("default");

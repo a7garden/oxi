@@ -420,82 +420,82 @@ impl AgentTool for GrepTool {
         // ── Internal URL dispatch ──
         // If the input looks like an internal URL (scheme://…), resolve
         // content and search in-memory instead of touching the filesystem.
-        if let Some(ref resolver) = ctx.url_resolver {
-            if resolver.can_resolve(path) {
-                let resolved = resolver.resolve(path).await?;
+        if let Some(ref resolver) = ctx.url_resolver
+            && resolver.can_resolve(path)
+        {
+            let resolved = resolver.resolve(path).await?;
 
-                // Build the regex (same as grep_impl)
-                let pattern_str = if literal {
-                    regex::escape(pattern)
-                } else {
-                    pattern.to_string()
-                };
-                let re = RegexBuilder::new(&pattern_str)
-                    .case_insensitive(case_insensitive)
-                    .build()
-                    .map_err(|e| format!("Invalid pattern '{}': {}", pattern, e))?;
+            // Build the regex (same as grep_impl)
+            let pattern_str = if literal {
+                regex::escape(pattern)
+            } else {
+                pattern.to_string()
+            };
+            let re = RegexBuilder::new(&pattern_str)
+                .case_insensitive(case_insensitive)
+                .build()
+                .map_err(|e| format!("Invalid pattern '{}': {}", pattern, e))?;
 
-                let lines: Vec<&str> = resolved.content.lines().collect();
-                let mut matches: Vec<String> = Vec::new();
-                let mut lines_truncated = false;
+            let lines: Vec<&str> = resolved.content.lines().collect();
+            let mut matches: Vec<String> = Vec::new();
+            let mut lines_truncated = false;
 
-                for (i, line) in lines.iter().enumerate() {
+            for (i, line) in lines.iter().enumerate() {
+                if matches.len() >= max_results {
+                    break;
+                }
+                if re.is_match(line) {
+                    // Context before
+                    if context > 0 && i > 0 {
+                        let start = i.saturating_sub(context);
+                        for (j, ctx_line) in lines.iter().enumerate().take(i).skip(start) {
+                            let (truncated, was_trunc) = truncate_line(ctx_line);
+                            if was_trunc {
+                                lines_truncated = true;
+                            }
+                            matches.push(format!("{}-{}- {}", path, j + 1, truncated));
+                        }
+                    }
+
+                    // The match line
+                    let (truncated, was_trunc) = truncate_line(line);
+                    if was_trunc {
+                        lines_truncated = true;
+                    }
+                    matches.push(format!("{}:{}: {}", path, i + 1, truncated));
+
+                    // Context after
+                    if context > 0 {
+                        let end = std::cmp::min(lines.len(), i + context + 1);
+                        for (j, ctx_line) in lines.iter().enumerate().take(end).skip(i + 1) {
+                            let (truncated, was_trunc) = truncate_line(ctx_line);
+                            if was_trunc {
+                                lines_truncated = true;
+                            }
+                            matches.push(format!("{}-{}- {}", path, j + 1, truncated));
+                        }
+                    }
+
                     if matches.len() >= max_results {
                         break;
                     }
-                    if re.is_match(line) {
-                        // Context before
-                        if context > 0 && i > 0 {
-                            let start = i.saturating_sub(context);
-                            for (j, ctx_line) in lines.iter().enumerate().take(i).skip(start) {
-                                let (truncated, was_trunc) = truncate_line(ctx_line);
-                                if was_trunc {
-                                    lines_truncated = true;
-                                }
-                                matches.push(format!("{}-{}- {}", path, j + 1, truncated));
-                            }
-                        }
-
-                        // The match line
-                        let (truncated, was_trunc) = truncate_line(line);
-                        if was_trunc {
-                            lines_truncated = true;
-                        }
-                        matches.push(format!("{}:{}: {}", path, i + 1, truncated));
-
-                        // Context after
-                        if context > 0 {
-                            let end = std::cmp::min(lines.len(), i + context + 1);
-                            for (j, ctx_line) in lines.iter().enumerate().take(end).skip(i + 1) {
-                                let (truncated, was_trunc) = truncate_line(ctx_line);
-                                if was_trunc {
-                                    lines_truncated = true;
-                                }
-                                matches.push(format!("{}-{}- {}", path, j + 1, truncated));
-                            }
-                        }
-
-                        if matches.len() >= max_results {
-                            break;
-                        }
-                    }
                 }
-
-                let output = if matches.is_empty() {
-                    "No matches found".to_string()
-                } else {
-                    format!("Found {} matches:\n{}", matches.len(), matches.join("\n"))
-                };
-
-                let mut result = AgentToolResult::success(output);
-                if lines_truncated {
-                    result.metadata = Some(json!({
-                        "lines_truncated": true,
-                        "message": "Some lines truncated to 500 chars. Use read tool to see full lines."
-                    }));
-                }
-                return Ok(result);
             }
+
+            let output = if matches.is_empty() {
+                "No matches found".to_string()
+            } else {
+                format!("Found {} matches:\n{}", matches.len(), matches.join("\n"))
+            };
+
+            let mut result = AgentToolResult::success(output);
+            if lines_truncated {
+                result.metadata = Some(json!({
+                    "lines_truncated": true,
+                    "message": "Some lines truncated to 500 chars. Use read tool to see full lines."
+                }));
+            }
+            return Ok(result);
         }
 
         // Use root_dir if set, else ctx.root()

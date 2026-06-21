@@ -110,25 +110,25 @@ impl StreamableHttpTransport {
                 .parse()
                 .expect("static Accept header is valid"),
         );
-        if let Some(sid) = self.session_id.lock().await.as_deref() {
-            if let Ok(v) = sid.parse() {
-                headers.insert("Mcp-Session-Id", v);
-            }
+        if let Some(sid) = self.session_id.lock().await.as_deref()
+            && let Ok(v) = sid.parse()
+        {
+            headers.insert("Mcp-Session-Id", v);
         }
-        if let Some(cred) = credential {
-            if let Ok(v) = format!("Bearer {}", cred.access_token).parse() {
-                headers.insert(reqwest::header::AUTHORIZATION, v);
-            }
+        if let Some(cred) = credential
+            && let Ok(v) = format!("Bearer {}", cred.access_token).parse()
+        {
+            headers.insert(reqwest::header::AUTHORIZATION, v);
         }
         headers
     }
 
     /// Capture `Mcp-Session-Id` from a response header if present.
     async fn capture_session_id(&self, resp: &reqwest::Response) {
-        if let Some(v) = resp.headers().get("Mcp-Session-Id") {
-            if let Ok(s) = v.to_str() {
-                *self.session_id.lock().await = Some(s.to_string());
-            }
+        if let Some(v) = resp.headers().get("Mcp-Session-Id")
+            && let Ok(s) = v.to_str()
+        {
+            *self.session_id.lock().await = Some(s.to_string());
         }
     }
 
@@ -180,14 +180,10 @@ impl McpTransport for StreamableHttpTransport {
 
         // Refresh-on-401/403 with exactly one retry.
         if (status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN)
-            && self.credential_provider.is_some()
+            && let Some(provider) = self.credential_provider.as_ref()
         {
             // Drop the failed response body.
             drop(resp);
-            let provider = self
-                .credential_provider
-                .as_ref()
-                .expect("checked is_some above");
             let refreshed = provider.refresh(&self.server_name, &self.endpoint).await;
             let credential2 = match refreshed {
                 Some(_) => {
@@ -254,15 +250,15 @@ impl McpTransport for StreamableHttpTransport {
         *self.closed.lock().await = true;
         // Best-effort DELETE to terminate the session.
         let sid = self.session_id.lock().await.clone();
-        if let Some(sid) = sid {
-            if let Ok(v) = sid.parse::<reqwest::header::HeaderValue>() {
-                let _ = self
-                    .client
-                    .delete(&self.endpoint)
-                    .header("Mcp-Session-Id", v)
-                    .send()
-                    .await;
-            }
+        if let Some(sid) = sid
+            && let Ok(v) = sid.parse::<reqwest::header::HeaderValue>()
+        {
+            let _ = self
+                .client
+                .delete(&self.endpoint)
+                .header("Mcp-Session-Id", v)
+                .send()
+                .await;
         }
         Ok(())
     }
@@ -366,10 +362,5 @@ fn parse_sse_event(buffer: &[u8]) -> Option<(Option<Vec<u8>>, usize)> {
 }
 
 fn find_sse_delim(buffer: &[u8]) -> Option<usize> {
-    for i in 0..buffer.len().saturating_sub(1) {
-        if buffer[i] == b'\n' && buffer[i + 1] == b'\n' {
-            return Some(i);
-        }
-    }
-    None
+    (0..buffer.len().saturating_sub(1)).find(|&i| buffer[i] == b'\n' && buffer[i + 1] == b'\n')
 }

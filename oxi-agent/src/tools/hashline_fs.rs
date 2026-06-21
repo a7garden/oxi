@@ -66,13 +66,14 @@ impl HashlineFs for TokioHashlineFs {
     async fn preflight_write(&self, path: &str) -> Result<(), HashlineError> {
         let validated = self.validate(path)?;
         // Check that the parent directory exists.
-        if let Some(parent) = validated.parent() {
-            if !parent.as_os_str().is_empty() && !fs::metadata(parent).await.is_ok() {
-                return Err(HashlineError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Parent directory does not exist: {}", parent.display()),
-                )));
-            }
+        if let Some(parent) = validated.parent()
+            && !parent.as_os_str().is_empty()
+            && fs::metadata(parent).await.is_err()
+        {
+            return Err(HashlineError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Parent directory does not exist: {}", parent.display()),
+            )));
         }
         Ok(())
     }

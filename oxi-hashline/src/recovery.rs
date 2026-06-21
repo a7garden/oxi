@@ -93,7 +93,9 @@ impl<'a> Recovery<'a> {
 
         let is_head = self.store.head(args.path).as_ref() == Some(&snapshot);
         if is_head {
-            return Err(RecoveryFailure::ExternalModification { snapshot: Box::new(snapshot) });
+            return Err(RecoveryFailure::ExternalModification {
+                snapshot: Box::new(snapshot),
+            });
         }
 
         replay_session_chain(&snapshot, args.current_text, args.edits)

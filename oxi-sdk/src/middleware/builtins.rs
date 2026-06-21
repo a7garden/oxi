@@ -35,6 +35,7 @@ pub struct RateLimitMiddleware {
 }
 
 impl RateLimitMiddleware {
+    /// Create a rate limiter allowing at most `max_calls_per_minute` calls per minute.
     pub fn new(max_calls_per_minute: usize) -> Self {
         Self {
             max_calls_per_minute,
@@ -87,6 +88,7 @@ pub struct LoggingMiddleware {
 }
 
 impl LoggingMiddleware {
+    /// Create a logging middleware that emits at the given tracing `level`.
     pub fn new(level: Level) -> Self {
         Self { _level: level }
     }
@@ -140,6 +142,7 @@ pub struct TokenBudgetMiddleware {
 }
 
 impl TokenBudgetMiddleware {
+    /// Create a token budget that terminates the agent once cumulative usage exceeds `max_tokens`.
     pub fn new(max_tokens: usize) -> Self {
         Self {
             max_tokens,
@@ -226,6 +229,7 @@ pub struct ContentFilterMiddleware {
 }
 
 impl ContentFilterMiddleware {
+    /// Create a content filter blocking any content matching the given patterns.
     pub fn new(blocked: Vec<String>) -> Self {
         Self { blocked }
     }

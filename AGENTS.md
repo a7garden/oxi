@@ -25,7 +25,7 @@ oxi/
 ├── oxi-ai/       Unified LLM API — streaming, multi-provider abstraction
 ├── oxi-agent/    Agent runtime — tool-calling loop, MCP client, built-in tools
 ├── oxi-tui/      Terminal UI widgets — chat, themes, markdown rendering (ratatui)
-├── oxi-sdk/      Multi-agent SDK + port contract: 11 port traits + reference impls
+├── oxi-sdk/      Multi-agent SDK + port contract: 15 port traits + reference impls
 ├── oxi-cli/      CLI binary — composition root (TUI + RPC + print modes)
 └── oxi-hashline/  Line-anchored patch format for AI-assisted code editing
 
@@ -41,7 +41,7 @@ Never create circular dependencies between crates.
 
 ## Port System (oxi-sdk)
 
-`oxi-sdk` defines **11 port traits** as the contract between the SDK
+`oxi-sdk` defines **15 port traits** as the contract between the SDK
 and product-specific infrastructure. Each port has a noop default;
 products register their own implementations via `OxiBuilder::with_port_*`
 or `with_ports(PortRegistry)`.
@@ -59,6 +59,12 @@ or `with_ports(PortRegistry)`.
 | `MemoryStore` | Episodic / semantic | ✅ `InMemoryMemoryStore` | 🔜 TBD |
 | `CronScheduler` | Time-based triggers | ✅ `InMemoryCronScheduler` | 🔜 TBD |
 | `ResourceMonitor` | Usage limits | ✅ `CountingResourceMonitor` | 🔜 TBD |
+| `InternalUrlRouter` | Resolve internal URIs (`skill://`, `issue://`, …) | ✅ wired | 🔜 TBD |
+| `ProtocolHandler` | Handle internal-protocol requests | 🔜 TBD | 🔜 TBD |
+| `RuleRegistry` | Project steering rules (TTSR) | ✅ wired | 🔜 TBD |
+| `EmbeddingProvider` | Vector embeddings for memory | 🔜 TBD | 🔜 TBD |
+
+(Plus `ModelCatalog` in `ports/catalog.rs` for catalog/model-data access.) See `oxi-sdk/src/ports/mod.rs` for the canonical trait list.
 
 Reference implementations live in `oxi-sdk/src/ports/fs/` (file-based)
 and `oxi-sdk/src/ports/inmem/` (in-memory). See `docs/PORT_GUIDE.md`
@@ -85,8 +91,8 @@ pub trait Provider: Send + Sync + 'static {
 ```
 
 **8 built-in providers** in `src/providers/`: openai, openai-responses, anthropic, google, vertex, mistral, azure, bedrock.
-`model_db.rs` indexes pricing/context/feature data for 1099 models across 30+
-providers, sourced from a 3-tier catalog (`data/catalog/*.toml`):
+`model_db.rs` indexes pricing/context/feature data for 5000+ models across 70+
+providers, sourced from a materialized catalog (see `catalog/`):
 - **Layer 1** — built-in TOML (`include_str!`-ed at build time)
 - **Layer 2** — user overrides (`~/.oxi/catalog/overrides.toml`)
 - **Layer 2.5** — **models.dev live enrichment** (`catalog/models_dev.rs`):
@@ -122,7 +128,7 @@ pub trait AgentTool: Send + Sync {
 }
 ```
 
-**17 tools** in `src/tools/`: bash, read, write, edit, edit_diff, ls, find, grep, github, github_search, subagent, questionnaire, context7 (2 sub-tools), web_search, get_search_results, generate_image, search_cache.
+**~21 tools** across `src/tools/` (registered by `ToolRegistry::with_builtins_cwd`, plus `ask` wired by the `oxi-cli` composition root): read, write, edit, bash, grep, find, ls, todo, ask, web_search, get_search_results, github, subagent, memory_recall, memory_reflect, memory_retain, memory_edit, mcp, context7 (2 sub-tools), generate_image, commit.
 **7 essential tools** (cannot be disabled): read, write, edit, bash, grep, find, ls.
 `agent_loop/` contains streaming, tool execution, retry logic, and queue management.
 `mcp/` implements Model Context Protocol client.

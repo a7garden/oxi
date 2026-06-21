@@ -49,14 +49,12 @@ pub fn discover_rules(project_dir: &Path) -> Vec<Rule> {
         let fallback_path = project_dir.join(fallback);
         if fallback_path.is_dir() {
             rules.extend(scan_mdc_dir(&fallback_path, RuleSource::Project));
-        } else if fallback_path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&fallback_path) {
-                if let Some(rule) =
-                    builtin_rules::parse_rule_file(&content, fallback, RuleSource::Project)
-                {
-                    rules.push(rule);
-                }
-            }
+        } else if fallback_path.is_file()
+            && let Ok(content) = std::fs::read_to_string(&fallback_path)
+            && let Some(rule) =
+                builtin_rules::parse_rule_file(&content, fallback, RuleSource::Project)
+        {
+            rules.push(rule);
         }
     }
 
@@ -106,6 +104,7 @@ pub struct StaticRuleRegistry {
 }
 
 impl StaticRuleRegistry {
+    /// Create a new registry holding the given static list of `rules`.
     pub fn new(rules: Vec<Rule>) -> Self {
         Self {
             rules: std::sync::RwLock::new(rules),
@@ -118,22 +117,32 @@ impl oxi_agent::agent_loop::ttsr::RuleRegistry for StaticRuleRegistry {
     fn rules<'a>(
         &'a self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<Rule>> + Send + 'a>> {
-        let rules = self.rules.read().unwrap().clone();
+        let rules = self
+            .rules
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         Box::pin(std::future::ready(rules))
     }
 
     fn mark_injected(&self, name: &str, turn: u64) {
         self.injections
             .write()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((name.to_string(), turn));
     }
 
     fn injected_records(&self) -> Vec<(String, u64)> {
-        self.injections.read().unwrap().clone()
+        self.injections
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn restore(&self, records: Vec<(String, u64)>) {
-        *self.injections.write().unwrap() = records;
+        *self
+            .injections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = records;
     }
 }

@@ -3,8 +3,10 @@
 //! Loads `.wasm` extension files from `~/.oxi/extensions/` and project-local
 //! `.oxi/extensions/`. Each extension exports well-known functions (`init`,
 //! `register_tools`, `execute_tool`) called via Extism's JSON-in/JSON-out
-//! protocol. Extensions run inside a WASM sandbox with zero host access by
-//! default — HTTP access is granted via the `oxi_http_request` host function.
+//! protocol. Extensions run inside a WASM sandbox (WASI enabled). Host access
+//! is provided through injected host functions; arbitrary command execution
+//! (`oxi_exec`) is **disabled by default** and must be opted in via the
+//! `OXI_EXTENSION_EXEC=1` environment variable.
 
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Function, PTR, UserData, Val};
@@ -30,7 +32,6 @@ pub struct ExtensionInfo {
     /// Permissions requested by the extension.
     /// Supported: "fs_read", "fs_write", "exec", "env", "network"
     #[serde(default)]
-    #[allow(dead_code)]
     pub permissions: Vec<String>,
 }
 
@@ -330,6 +331,23 @@ fn host_oxi_exec(
     _user_data: UserData<()>,
 ) -> Result<(), extism::Error> {
     let result: anyhow::Result<()> = (|| {
+        // Security: arbitrary command execution is OFF by default. The host
+        // must opt in explicitly via `OXI_EXTENSION_EXEC=1`. This restores a
+        // least-privilege default — extensions cannot run commands unless the
+        // user enables it.
+        if std::env::var("OXI_EXTENSION_EXEC").ok().as_deref() != Some("1") {
+            let response = serde_json::json!({
+                "success": false,
+                "error": "oxi_exec is disabled; set OXI_EXTENSION_EXEC=1 to allow extensions to run commands",
+                "exit_code": -1,
+            });
+            let output = serde_json::to_string(&response)?;
+            let handle = plugin.memory_new(&output)?;
+            if !outputs.is_empty() {
+                outputs[0] = plugin.memory_to_val(handle);
+            }
+            return Ok(());
+        }
         let input_json: String = plugin.memory_get_val(&inputs[0])?;
 
         #[derive(Deserialize)]
@@ -994,6 +1012,17 @@ impl WasmExtensionManager {
                 }
             }
         };
+        // Surface requested permissions and warn on privileged asks. `exec`
+        // stays call-time gated by OXI_EXTENSION_EXEC (see host_oxi_exec).
+        if !info.permissions.is_empty() {
+            tracing::info!(name = %info.name, perms = ?info.permissions, "extension permissions requested");
+        }
+        if info.permissions.iter().any(|p| p == "exec") {
+            tracing::warn!(
+                name = %info.name,
+                "extension requested 'exec' permission — oxi_exec stays disabled unless OXI_EXTENSION_EXEC=1 is set"
+            );
+        }
 
         // Set extension context so KV operations during register_tools/register_commands
         // are properly namespaced

@@ -7,23 +7,38 @@ use crate::types::Cursor;
 
 // ── Sigils & separators ──────────────────────────────────────────────────
 
+/// Opening sigil of a hashline section header.
 pub const HL_FILE_PREFIX: &str = "[";
+/// Closing sigil of a hashline section header.
 pub const HL_FILE_SUFFIX: &str = "]";
+/// Sigil prefixing each literal payload row.
 pub const HL_PAYLOAD_REPLACE: char = '+';
 
+/// Keyword marking a replacement hunk header.
 pub const HL_REPLACE_KEYWORD: &str = "SWAP";
+/// Keyword marking a deletion hunk header.
 pub const HL_DELETE_KEYWORD: &str = "DEL";
+/// Keyword marking an insertion hunk header.
 pub const HL_INSERT_KEYWORD: &str = "INS";
+/// `INS` sub-keyword: insert before the anchor line.
 pub const HL_INSERT_BEFORE: &str = "PRE";
+/// `INS` sub-keyword: insert after the anchor line.
 pub const HL_INSERT_AFTER: &str = "POST";
+/// `INS` sub-keyword: insert at the very top of the file.
 pub const HL_INSERT_HEAD: &str = "HEAD";
+/// `INS` sub-keyword: insert at the very bottom of the file.
 pub const HL_INSERT_TAIL: &str = "TAIL";
 
+/// Colon terminating a hunk header.
 pub const HL_HEADER_COLON: char = ':';
+/// Separator between a path and its hash tag.
 pub const HL_FILE_HASH_SEP: char = '#';
+/// Separator in an inclusive `start.=end` range.
 pub const HL_RANGE_SEP: &str = ".=";
+/// Separator between a line number and its body text.
 pub const HL_LINE_BODY_SEP: char = ':';
 
+/// Length, in hex characters, of a content hash tag.
 pub const HL_FILE_HASH_LENGTH: usize = 4;
 
 // ── Normalisation & hashing ──────────────────────────────────────────────

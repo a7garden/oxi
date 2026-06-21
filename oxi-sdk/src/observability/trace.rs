@@ -66,59 +66,86 @@ impl std::fmt::Display for SpanId {
 
 // ── SpanKind ────────────────────────────────────────────────────────────────
 
+/// Role or classification of a span within a trace.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum SpanKind {
+    /// Span covering an agent's execution.
     Agent,
+    /// Span covering a tool invocation.
     #[default]
     Tool,
+    /// Span covering an LLM request/response.
     Llm,
+    /// Span covering internal SDK work.
     Internal,
 }
 
 // ── SpanStatus ───────────────────────────────────────────────────────────────
 
+/// Outcome status of a span.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum SpanStatus {
+    /// The span completed successfully.
     #[default]
     Ok,
+    /// The span completed with an error.
     Error {
+        /// Message describing the error.
         message: String,
     },
 }
 
 // ── SpanContext ──────────────────────────────────────────────────────────────
 
+/// Identifies a span within a trace and links it to its parent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpanContext {
+    /// Trace this span belongs to.
     pub trace_id: TraceId,
+    /// Unique id of this span.
     pub span_id: SpanId,
+    /// Id of the parent span, if any.
     pub parent_span_id: Option<SpanId>,
 }
 
 // ── SpanEvent ─────────────────────────────────────────────────────────────────
 
+/// A timestamped event recorded on a span.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpanEvent {
+    /// Human-readable name of the event.
     pub name: String,
+    /// Wall-clock time the event occurred, in milliseconds.
     pub timestamp_ms: u64,
+    /// Arbitrary key/value attributes for the event.
     #[serde(default)]
     pub attributes: Vec<(String, serde_json::Value)>,
 }
 
 // ── Span ─────────────────────────────────────────────────────────────────────
 
+/// A single unit of work within a trace, with timing, status, and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Span {
+    /// Identifier and parent link for this span.
     pub context: SpanContext,
+    /// Human-readable name of the operation.
     pub name: String,
+    /// Classification of the span.
     pub kind: SpanKind,
+    /// Wall-clock start time in milliseconds.
     pub start_ms: u64,
+    /// Wall-clock end time in milliseconds, once the span is closed.
     pub end_ms: Option<u64>,
+    /// Outcome of the span.
     pub status: SpanStatus,
+    /// Arbitrary key/value metadata attached to the span.
     #[serde(default)]
     pub attributes: HashMap<String, serde_json::Value>,
+    /// Timestamped events recorded during the span.
     #[serde(default)]
     pub events: Vec<SpanEvent>,
+    /// Links to related span contexts (e.g. cross-trace references).
     #[serde(default)]
     pub links: Vec<SpanContext>,
 }
@@ -136,6 +163,7 @@ impl Span {
 
 // ── Tracer ────────────────────────────────────────────────────────────────────
 
+/// Collects completed spans and broadcasts them to subscribers.
 #[derive(Debug)]
 pub struct Tracer {
     spans: Arc<RwLock<Vec<Span>>>,
@@ -223,24 +251,30 @@ impl Default for Tracer {
 
 // ── SpanGuard ────────────────────────────────────────────────────────────────
 
+/// RAII guard for an in-flight span; finalizes and records the span on drop.
 pub struct SpanGuard<'a> {
     tracer: &'a Tracer,
     span: Span,
 }
 
 impl<'a> SpanGuard<'a> {
+    /// Borrowed span context (trace, span, and parent ids).
     pub fn context(&self) -> &SpanContext {
         &self.span.context
     }
+    /// Trace id this span belongs to.
     pub fn trace_id(&self) -> TraceId {
         self.span.context.trace_id
     }
+    /// Unique id of this span.
     pub fn span_id(&self) -> SpanId {
         self.span.context.span_id
     }
+    /// Attach a key/value attribute to the span.
     pub fn set_attribute(&mut self, key: &str, value: serde_json::Value) {
         self.span.attributes.insert(key.to_string(), value);
     }
+    /// Record a named, timestamped event on the span.
     pub fn add_event(&mut self, name: &str) {
         self.span.events.push(SpanEvent {
             name: name.to_string(),
@@ -248,6 +282,7 @@ impl<'a> SpanGuard<'a> {
             attributes: vec![],
         });
     }
+    /// Mark the span as failed with the given error message.
     pub fn set_error(&mut self, message: &str) {
         self.span.status = SpanStatus::Error {
             message: message.to_string(),

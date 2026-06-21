@@ -75,6 +75,9 @@ impl StatefulWidget for ChatView<'_> {
             })
             .unwrap_or(0);
         state.content_height = total_height;
+        // Stash the rendered viewport rect so keyboard-driven toggles can
+        // pick which collapsible block sits at the viewport top.
+        state.viewport_rect = area;
 
         // Auto-scroll: update scroll_offset to show bottom of content
         if state.auto_scroll {

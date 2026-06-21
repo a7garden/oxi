@@ -72,39 +72,67 @@ impl AgentStatus {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AgentLifecycleEvent {
+    /// An agent was spawned into the pool.
     Spawned {
+        /// Identifier of the spawned agent.
         agent_id: String,
+        /// Identifier of the parent agent, if spawned as a child.
         parent_id: Option<String>,
+        /// Identifier of the model the agent is configured to use.
         model_id: String,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
     },
+    /// An agent began a run.
     RunStart {
+        /// Identifier of the agent.
         agent_id: String,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
     },
+    /// An agent completed a run.
     RunEnd {
+        /// Identifier of the agent.
         agent_id: String,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
+        /// Whether the run completed without error.
         success: bool,
     },
+    /// An agent was suspended and its state snapshotted.
     Suspended {
+        /// Identifier of the agent.
         agent_id: String,
+        /// Captured state snapshot at suspension time.
         snapshot: Box<AgentSnapshot>,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
     },
+    /// A suspended agent resumed execution.
     Resumed {
+        /// Identifier of the agent.
         agent_id: String,
+        /// Identifier of the snapshot resumed from, if any.
         from_snapshot_id: Option<String>,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
     },
+    /// An agent was permanently terminated.
     Terminated {
+        /// Identifier of the agent.
         agent_id: String,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
     },
+    /// An agent switched its underlying model.
     ModelSwitched {
+        /// Identifier of the agent.
         agent_id: String,
+        /// Identifier of the previous model.
         from_model: String,
+        /// Identifier of the new model.
         to_model: String,
+        /// Wall-clock time of the event, in ms since Unix epoch.
         timestamp_ms: u64,
     },
 }

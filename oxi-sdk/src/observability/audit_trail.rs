@@ -23,12 +23,18 @@ pub type AgentId = String;
 pub enum AuditError {
     /// Chain link broken at given sequence number.
     ChainBroken {
+        /// Sequence number of the broken link.
         seq: u64,
+        /// Hash expected at this link.
         expected: String,
+        /// Hash actually found at this link.
         found: String,
     },
     /// Invalid timestamp detected.
-    InvalidTimestamp { seq: u64 },
+    InvalidTimestamp {
+        /// Sequence number of the entry with the bad timestamp.
+        seq: u64,
+    },
     /// Failed to export audit log.
     ExportFailed(String),
 }
@@ -65,29 +71,71 @@ impl std::error::Error for AuditError {}
 #[serde(tag = "type", content = "data")]
 pub enum AuditAction {
     /// Agent spawned with task type.
-    AgentSpawn { task_type: String },
+    AgentSpawn {
+        /// Type/category of the task the agent was spawned for.
+        task_type: String,
+    },
     /// Agent exited with reason.
-    AgentExit { reason: String },
+    AgentExit {
+        /// Reason the agent exited.
+        reason: String,
+    },
     /// Tool was called.
-    ToolCall { tool: String, args_json: String },
+    ToolCall {
+        /// Name of the tool that was invoked.
+        tool: String,
+        /// JSON-encoded arguments passed to the tool.
+        args_json: String,
+    },
     /// Tool returned a result.
-    ToolResult { tool: String, success: bool },
+    ToolResult {
+        /// Name of the tool that produced the result.
+        tool: String,
+        /// Whether the tool call succeeded.
+        success: bool,
+    },
     /// Memory entry written.
-    MemoryWrite { entry_id: String },
+    MemoryWrite {
+        /// Identifier of the memory entry that was written.
+        entry_id: String,
+    },
     /// Memory entry read.
-    MemoryRead { entry_id: String },
+    MemoryRead {
+        /// Identifier of the memory entry that was read.
+        entry_id: String,
+    },
     /// Configuration changed.
-    ConfigChange { key: String },
+    ConfigChange {
+        /// Configuration key that changed.
+        key: String,
+    },
     /// Program installed.
-    ProgramInstall { program: String, version: String },
+    ProgramInstall {
+        /// Name of the program that was installed.
+        program: String,
+        /// Version of the program that was installed.
+        version: String,
+    },
     /// Cron job triggered.
-    CronTrigger { job_id: String },
+    CronTrigger {
+        /// Identifier of the cron job that fired.
+        job_id: String,
+    },
     /// Git commit created.
-    GitCommit { message: String },
+    GitCommit {
+        /// Commit message of the created commit.
+        message: String,
+    },
     /// Access was denied.
-    AccessDenied { permission: String },
+    AccessDenied {
+        /// Permission that was denied.
+        permission: String,
+    },
     /// Other/unclassified action.
-    Other { detail: String },
+    Other {
+        /// Free-form description of the unclassified action.
+        detail: String,
+    },
 }
 
 // ─── Audit Entry ─────────────────────────────────────────────────────────────

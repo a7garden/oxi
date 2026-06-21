@@ -103,25 +103,39 @@ impl std::fmt::Display for AccessDenied {
 pub enum CheckRequest<'a> {
     /// Tool usage.
     Tool {
+        /// Agent context whose permissions are being checked.
         context: &'a AgentContext,
+        /// Name of the tool the agent wants to invoke.
         tool_name: &'a str,
     },
     /// Path access.
     Path {
+        /// Agent context whose permissions are being checked.
         context: &'a AgentContext,
+        /// Filesystem path the agent wants to access.
         path: &'a Path,
+        /// Requested access mode (read or write).
         mode: PathMode,
     },
     /// Command execution.
     Exec {
+        /// Agent context whose permissions are being checked.
         context: &'a AgentContext,
+        /// Name of the binary the agent wants to execute.
         binary: &'a str,
+        /// Arguments passed to the binary.
         args: &'a [String],
     },
     /// Network access.
-    Network { context: &'a AgentContext },
+    Network {
+        /// Agent context whose permissions are being checked.
+        context: &'a AgentContext,
+    },
     /// Agent fork.
-    Fork { context: &'a AgentContext },
+    Fork {
+        /// Agent context whose permissions are being checked.
+        context: &'a AgentContext,
+    },
 }
 
 impl<'a> CheckRequest<'a> {

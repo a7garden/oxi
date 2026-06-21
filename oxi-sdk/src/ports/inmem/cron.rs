@@ -13,6 +13,11 @@ use std::pin::Pin;
 use crate::SdkError;
 use crate::ports::{CronJob, CronScheduler};
 
+/// In-process `CronScheduler` that stores jobs in a `HashMap` behind a mutex.
+///
+/// See the module docs: this implementation registers and lists jobs but
+/// does not fire them on a wall-clock schedule — callers drive firing
+/// themselves.
 pub struct InMemoryCronScheduler {
     jobs: Mutex<HashMap<String, CronJob>>,
 }
@@ -30,6 +35,7 @@ impl Default for InMemoryCronScheduler {
 }
 
 impl InMemoryCronScheduler {
+    /// Create an empty scheduler.
     pub fn new() -> Self {
         Self {
             jobs: Mutex::new(HashMap::new()),

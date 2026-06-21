@@ -12,18 +12,25 @@ use super::Middleware;
 /// Plugin manifest — metadata for a plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginManifest {
+    /// Human-readable name of the plugin, also used as its lookup key.
     pub name: String,
+    /// Version string of the plugin.
     pub version: String,
+    /// Middleware phases this plugin participates in.
     pub phases: Vec<String>,
+    /// Path or symbol resolved to load the plugin entry point.
     pub entry_point: String,
+    /// Capability strings the plugin is permitted to use.
     pub permissions: Vec<String>,
 }
 
 impl PluginManifest {
+    /// Parse a manifest from a JSON string.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
 
+    /// Read and parse a manifest from a JSON file on disk.
     pub fn from_file(path: &Path) -> std::io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         serde_json::from_str(&content)
@@ -31,6 +38,7 @@ impl PluginManifest {
     }
 }
 
+/// Loads and manages dynamically-discovered middleware plugins.
 pub struct PluginLoader {
     #[expect(dead_code)]
     plugins_dir: PathBuf,
@@ -39,6 +47,7 @@ pub struct PluginLoader {
 }
 
 impl PluginLoader {
+    /// Create a loader rooted at the given plugins directory.
     pub fn new(plugins_dir: impl Into<PathBuf>) -> Self {
         Self {
             plugins_dir: plugins_dir.into(),
@@ -47,6 +56,7 @@ impl PluginLoader {
         }
     }
 
+    /// Load a plugin from its manifest file, registering it by name.
     pub async fn load(&self, manifest_path: &Path) -> anyhow::Result<String> {
         let manifest = PluginManifest::from_file(manifest_path)
             .map_err(|e| anyhow::anyhow!("Failed to load manifest: {}", e))?;
@@ -56,15 +66,18 @@ impl PluginLoader {
         Ok(name)
     }
 
+    /// Return all currently loaded middlewares.
     pub fn middlewares(&self) -> Vec<Arc<dyn Middleware>> {
         let loaded = self.loaded.read();
         loaded.values().cloned().collect()
     }
 
+    /// Look up a loaded middleware by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Middleware>> {
         self.loaded.read().get(name).cloned()
     }
 
+    /// Remove the plugin with the given name; returns `true` if it was present.
     pub fn unload(&self, name: &str) -> bool {
         let mut loaded = self.loaded.write();
         let removed = loaded.remove(name).is_some();
@@ -73,6 +86,7 @@ impl PluginLoader {
         removed
     }
 
+    /// Register an already-constructed middleware, keyed by its [`Middleware::name`].
     pub fn register(&self, middleware: Arc<dyn Middleware>) {
         let mut loaded = self.loaded.write();
         loaded.insert(middleware.name().to_string(), middleware);

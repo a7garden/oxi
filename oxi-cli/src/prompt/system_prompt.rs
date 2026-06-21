@@ -103,7 +103,6 @@ pub fn thinking_level_prompt(level: ThinkingLevel) -> Option<String> {
 }
 
 /// Default tool snippets used when building prompts for the agent loop.
-
 /// Hashline patch format specification embedded in the system prompt.
 /// Mirrors `oxi-hashline/src/prompt.md` — keep in sync.
 const HASHLINE_FORMAT_SPEC: &str = r#"

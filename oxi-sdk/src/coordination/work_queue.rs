@@ -42,42 +42,85 @@ pub struct WorkItem {
 /// Status of a work item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorkStatus {
+    /// Waiting to be claimed by a worker.
     Pending,
+    /// Atomically claimed by an agent but not yet started.
     Claimed,
+    /// Currently being executed by an agent.
     InProgress,
+    /// Finished successfully.
     Completed,
+    /// Finished unsuccessfully after exhausting retries.
     Failed,
+    /// Cancelled before or during execution.
     Cancelled,
 }
 
 /// Result of work item execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkResult {
+    /// Whether the work completed without error.
     pub success: bool,
+    /// Output produced by the worker.
     pub content: String,
+    /// Error message if the work failed.
     pub error: Option<String>,
+    /// Wall-clock execution time in milliseconds.
     pub duration_ms: u64,
+    /// Model tokens consumed, if tracked.
     pub tokens_used: Option<u64>,
 }
 
 /// Events emitted by the work queue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkEvent {
-    Enqueued { id: WorkId, work_type: String },
-    Claimed { id: WorkId, agent_id: String },
-    Started { id: WorkId },
-    Completed { id: WorkId, success: bool },
-    Cancelled { id: WorkId },
+    /// A work item was added to the queue.
+    Enqueued {
+        /// Identifier of the work item.
+        id: WorkId,
+        /// Type category of the work item.
+        work_type: String,
+    },
+    /// A work item was claimed by an agent.
+    Claimed {
+        /// Identifier of the work item.
+        id: WorkId,
+        /// Identifier of the claiming agent.
+        agent_id: String,
+    },
+    /// Claimed work began executing.
+    Started {
+        /// Identifier of the work item.
+        id: WorkId,
+    },
+    /// A work item finished.
+    Completed {
+        /// Identifier of the work item.
+        id: WorkId,
+        /// Whether the work succeeded.
+        success: bool,
+    },
+    /// A work item was cancelled.
+    Cancelled {
+        /// Identifier of the work item.
+        id: WorkId,
+    },
 }
 
 /// Queue statistics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkQueueStats {
+    /// Number of items waiting to be claimed.
     pub pending: usize,
+    /// Number of items claimed but not started.
     pub claimed: usize,
+    /// Number of items currently executing.
     pub in_progress: usize,
+    /// Number of items finished successfully.
     pub completed: usize,
+    /// Number of items that failed.
     pub failed: usize,
+    /// Number of items cancelled.
     pub cancelled: usize,
 }
 

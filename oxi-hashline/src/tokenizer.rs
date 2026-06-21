@@ -231,13 +231,25 @@ fn scan_header_range(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockTarget {
     /// `SWAP start.=end:` — replace the inclusive range.
-    Replace { range: ParsedRange },
+    Replace {
+        /// Inclusive source line range overwritten by the hunk's body.
+        range: ParsedRange,
+    },
     /// `DEL start` or `DEL start.=end` — delete the inclusive range (no body).
-    Delete { range: ParsedRange },
+    Delete {
+        /// Inclusive source line range removed by the hunk.
+        range: ParsedRange,
+    },
     /// `INS.PRE N:` — insert before line N.
-    InsertBefore { anchor: Anchor },
+    InsertBefore {
+        /// Anchor line that the hunk's body rows precede.
+        anchor: Anchor,
+    },
     /// `INS.POST N:` — insert after line N.
-    InsertAfter { anchor: Anchor },
+    InsertAfter {
+        /// Anchor line that the hunk's body rows follow.
+        anchor: Anchor,
+    },
     /// `INS.HEAD:` — insert at the very top.
     Bof,
     /// `INS.TAIL:` — insert at the very bottom.
@@ -423,25 +435,55 @@ fn try_parse_header(line: &str) -> Option<HeaderScan> {
 #[derive(Debug, Clone)]
 pub enum Token {
     /// An empty line.
-    Blank { line_num: u32 },
+    Blank {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+    },
     /// `*** Begin Patch` — envelope start, consumed.
-    EnvelopeBegin { line_num: u32 },
+    EnvelopeBegin {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+    },
     /// `*** End Patch` — envelope end, terminates parsing.
-    EnvelopeEnd { line_num: u32 },
+    EnvelopeEnd {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+    },
     /// `*** Abort` — truncation sentinel, terminates parsing.
-    Abort { line_num: u32 },
+    Abort {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+    },
     /// `[PATH]` or `[PATH#HASH]` section header.
     Header {
+        /// 1-indexed line number in the source patch text.
         line_num: u32,
+        /// File path inside the brackets.
         path: String,
+        /// Content hash tag after `#`, if the header carried one.
         file_hash: Option<String>,
     },
     /// A hunk header verb + target.
-    Op { line_num: u32, target: BlockTarget },
+    Op {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+        /// Parsed verb and target of the hunk header.
+        target: BlockTarget,
+    },
     /// A `+TEXT` body row.
-    PayloadLiteral { line_num: u32, text: String },
+    PayloadLiteral {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+        /// Literal body text following the leading `+`.
+        text: String,
+    },
     /// Anything else (contamination check happens downstream).
-    Raw { line_num: u32, text: String },
+    Raw {
+        /// 1-indexed line number in the source patch text.
+        line_num: u32,
+        /// Unmodified text of the unrecognized line.
+        text: String,
+    },
 }
 
 impl Token {

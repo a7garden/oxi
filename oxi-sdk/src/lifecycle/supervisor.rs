@@ -75,9 +75,17 @@ pub enum RestartBackoff {
     /// No delay.
     None,
     /// Fixed delay.
-    Fixed { delay_ms: u64 },
+    Fixed {
+        /// Delay before restarting, in milliseconds.
+        delay_ms: u64,
+    },
     /// Exponential with cap.
-    Exponential { base_ms: u64, max_ms: u64 },
+    Exponential {
+        /// Initial delay before restarting, in milliseconds.
+        base_ms: u64,
+        /// Upper bound on the exponential delay, in milliseconds.
+        max_ms: u64,
+    },
 }
 
 // ── AgentHandle ──────────────────────────────────────────────────────────

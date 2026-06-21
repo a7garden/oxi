@@ -1,6 +1,6 @@
 # 세부 설계 ⑫ — Mermaid 터미널 렌더링
 
-> 상태: 설계 v1 (구현 전 합의용)
+> 상태: **설계 v1 (구현 전 합의용)** — 그러나 아래 "(A) mmdc 기본" 설계는 단일-바이너리 원칙 위반으로 폐기됨. **2026-06-21 순수 Rust 서브셋 렌더러로 재구현됨** (CHANGELOG `[Unreleased]` 참조).
 > 작성: 2026-06-19
 > 선행: [`00-master-plan.md`](./00-master-plan.md)
 > omp 분석: `modes/theme/mermaid-cache.ts`, `@oh-my-pi/pi-utils`의 `renderMermaidAsciiSafe`

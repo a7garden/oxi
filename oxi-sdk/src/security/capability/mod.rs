@@ -19,58 +19,87 @@ use std::time::Duration;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Capability {
     // ── File system ──
+    /// Read files matching a glob pattern.
     FileRead {
+        /// Glob pattern selecting the paths this capability permits reading (e.g. `src/**/*.rs`).
         path_pattern: String,
     },
+    /// Write or create files matching a glob pattern.
     FileWrite {
+        /// Glob pattern selecting the paths this capability permits writing or creating.
         path_pattern: String,
     },
+    /// Edit existing files matching a glob pattern.
     FileEdit {
+        /// Glob pattern selecting the paths this capability permits editing.
         path_pattern: String,
     },
+    /// List directory entries matching a glob pattern.
     FileList {
+        /// Glob pattern selecting the paths this capability permits listing.
         path_pattern: String,
     },
+    /// Find files matching a glob pattern.
     FileFind {
+        /// Glob pattern selecting the paths this capability permits finding.
         path_pattern: String,
     },
 
     // ── Execution ──
+    /// Execute a restricted set of shell commands.
     Bash {
+        /// Command names or [`StringPattern`] matchers the agent is permitted to invoke.
         allowed_commands: Vec<StringPattern>,
+        /// Maximum wall-clock seconds a single command may run before being killed.
         #[serde(default)]
         timeout_secs: Option<u64>,
     },
 
     // ── Network ──
+    /// Make outbound network requests to a set of domains.
     Network {
+        /// Domains the agent is permitted to contact (e.g. `api.example.com`).
         allowed_domains: Vec<String>,
     },
+    /// Browse web pages on a set of domains.
     WebBrowse {
+        /// Domains the agent is permitted to browse.
         allowed_domains: Vec<String>,
     },
 
     // ── Agent ──
+    /// Spawn child agents as subagents.
     Subagent {
+        /// Maximum number of concurrent children this grant permits (`None` = unbounded).
         max_children: Option<usize>,
     },
+    /// Read from an inter-agent message bus channel.
     BusRead {
+        /// Channel name the grant covers (`None` = all channels).
         channel: Option<String>,
     },
+    /// Write to an inter-agent message bus channel.
     BusWrite {
+        /// Channel name the grant covers (`None` = all channels).
         channel: Option<String>,
     },
 
     // ── Environment ──
+    /// Read environment variables.
     EnvRead {
+        /// Names of environment variables the agent is permitted to read.
         allowed_vars: Vec<String>,
     },
 
     // ── Meta ──
+    /// Invoke a named tool.
     ToolUse {
+        /// Name of the tool this capability permits calling.
         tool_name: String,
     },
+    /// Access MCP server resources.
     McpAccess {
+        /// Patterns matching the MCP resource URIs the agent may access.
         resource_patterns: Vec<String>,
     },
 }
@@ -174,7 +203,9 @@ impl Capability {
 /// Pattern for matching strings — either a literal or a wildcard.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StringPattern {
+    /// Matches a single literal string exactly.
     Literal(String),
+    /// Matches any string (the `*` wildcard).
     Wildcard,
 }
 
@@ -235,8 +266,11 @@ fn domain_matches(granted: &[String], required: &[String]) -> bool {
 /// The subject of a capability grant or check.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapabilitySubject {
+    /// A specific agent, identified by its id.
     Agent(String),
+    /// A tool, identified by name.
     Tool(String),
+    /// A group of agents, identified by name.
     Group(String),
 }
 

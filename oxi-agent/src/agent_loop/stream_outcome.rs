@@ -37,7 +37,9 @@ impl StreamOutcome {
     /// Extract the assistant message regardless of outcome.
     pub fn into_message(self) -> AssistantMessage {
         match self {
-            StreamOutcome::Complete(m) | StreamOutcome::Cancelled(m) | StreamOutcome::Error { message: m, .. } => m,
+            StreamOutcome::Complete(m)
+            | StreamOutcome::Cancelled(m)
+            | StreamOutcome::Error { message: m, .. } => m,
             StreamOutcome::RuleInterrupt { partial, .. } => partial,
         }
     }

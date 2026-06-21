@@ -443,7 +443,10 @@ pub(crate) async fn stream_assistant_response(
                     session_id: loop_ref.session_id.clone(),
                 });
 
-                return StreamOutcome::Error { message: error, detail: format!("⚠ {}", friendly) };
+                return StreamOutcome::Error {
+                    message: error,
+                    detail: format!("⚠ {}", friendly),
+                };
             }
 
             _ => {}

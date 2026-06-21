@@ -170,31 +170,47 @@ impl RbacPolicy {
 /// RBAC audit entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RbacAuditEntry {
+    /// When the access decision was recorded.
     pub timestamp: DateTime<Utc>,
+    /// Who performed the access attempt.
     pub subject: Subject,
+    /// Action that was requested.
     pub action: Action,
+    /// Resource the action targeted.
     pub resource: String,
+    /// Whether the action was permitted.
     pub allowed: bool,
+    /// Optional human-readable explanation of the decision.
     pub reason: Option<String>,
 }
 
 /// Pending HitL approval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingApproval {
+    /// Unique identifier for this approval request.
     pub id: Uuid,
+    /// Subject requesting the gated action.
     pub subject: Subject,
+    /// Action requiring approval.
     pub action: Action,
+    /// Resource the action targets.
     pub resource: String,
+    /// Human-readable justification for the request.
     pub reason: String,
+    /// When the approval was requested.
     pub created_at: DateTime<Utc>,
 }
 
 /// Approval status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApprovalStatus {
+    /// Awaiting a human decision.
     Pending,
+    /// A human reviewer granted the request.
     Approved,
+    /// A human reviewer denied the request.
     Rejected,
+    /// The request expired before a decision was made.
     Expired,
 }
 

@@ -149,8 +149,11 @@ impl std::fmt::Display for CatalogProtocol {
 /// internal lock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogModelEntry {
+    /// Provider identifier this model belongs to (e.g. `"anthropic"`).
     pub provider: String,
+    /// Model identifier (e.g. `"claude-3-opus-20240229"`).
     pub model_id: String,
+    /// Human-readable display name.
     pub name: String,
 
     /// Protocol for this specific model. May differ from the parent
@@ -164,38 +167,58 @@ pub struct CatalogModelEntry {
     /// See dynamic-catalog §2.2 (v3 — 55 models).
     pub base_url: Option<String>,
 
+    /// Whether the model supports reasoning/thinking output.
     pub reasoning: bool,
+    /// Whether the model accepts image inputs.
     pub supports_vision: bool,
 
     /// USD per million tokens. `0.0` = free or undisclosed by upstream.
     pub cost_input: f64,
+    /// USD per million output tokens.
     pub cost_output: f64,
+    /// USD per million cache-read tokens.
     pub cost_cache_read: f64,
+    /// USD per million cache-write tokens.
     pub cost_cache_write: f64,
 
+    /// Maximum context length in tokens.
     pub context_window: u32,
+    /// Maximum output tokens per response.
     pub max_tokens: u32,
 
     /// Input modalities (e.g. `["text", "image"]`). Empty = unknown.
     pub input_modalities: Vec<String>,
+    /// Release date (free-form string from upstream, may be absent).
     pub release_date: Option<String>,
+    /// Lifecycle status (e.g. `"ga"`, `"preview"`, `"deprecated"`).
     pub status: Option<String>,
 }
 
+/// Provider-level metadata snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogProviderEntry {
+    /// Provider identifier (e.g. `"anthropic"`).
     pub id: String,
+    /// Human-readable provider name.
     pub display_name: String,
+    /// Alternate identifiers accepted on the CLI/config.
     pub aliases: Vec<String>,
+    /// Default wire protocol for this provider's models.
     pub protocol: CatalogProtocol,
+    /// Primary environment variable holding the API key (e.g. `ANTHROPIC_API_KEY`).
     pub env_key: Option<String>,
+    /// Additional environment variables the provider requires.
     pub extra_env_keys: Vec<String>,
+    /// API base URL override (`None` = protocol default).
     pub base_url: Option<String>,
+    /// Extra HTTP headers appended to every request.
     pub extra_headers: Vec<(String, String)>,
     /// `category` and `description` may be empty (models.dev does not
     /// provide them). The UI uses alphabet sort as fallback.
     pub category: String,
+    /// Free-form provider description (may be empty; models.dev omits it).
     pub description: String,
+    /// Whether the provider is enabled by default in the UI.
     pub default_enabled: bool,
 }
 
@@ -211,15 +234,23 @@ pub enum RefreshOutcome {
     Unchanged,
     /// Snapshot replaced with newer data.
     Updated {
+        /// Number of providers in the new snapshot.
         provider_count: usize,
+        /// Number of models in the new snapshot.
         model_count: usize,
     },
     /// No network attempted; served from stale cache or SNAP.
     /// (e.g. `OXI_MODELS_DEV_DISABLE_FETCH=1`, mtime window fresh.)
-    Offline { reason: &'static str },
+    Offline {
+        /// Why no network was attempted.
+        reason: &'static str,
+    },
     /// Refresh attempted and failed. Previous snapshot still in effect.
     /// Not an `Err` — see type-level doc above.
-    Failed { reason: String },
+    Failed {
+        /// Why the refresh failed.
+        reason: String,
+    },
 }
 
 /// Per-entry origin. UI uses this for "local" badges; debugging uses it
@@ -243,24 +274,34 @@ pub enum CatalogSource {
 pub enum CatalogEvent {
     /// Snapshot changed. New state available via read methods.
     Updated {
+        /// Number of providers in the new snapshot.
         provider_count: usize,
+        /// Number of models in the new snapshot.
         model_count: usize,
     },
     /// Refresh failed; previous snapshot still in effect.
     RefreshFailed {
+        /// Why the refresh failed.
         reason: String,
+        /// Providers still in effect from the previous snapshot.
         provider_count: usize,
+        /// Models still in effect from the previous snapshot.
         model_count: usize,
     },
     /// User override file applied or modified.
     OverrideApplied {
+        /// Path to the override file.
         path: PathBuf,
+        /// Number of provider entries overridden.
         provider_overrides: usize,
+        /// Number of model entries overridden.
         model_overrides: usize,
     },
     /// Local discovery added new models.
     LocalDiscovered {
+        /// Base URL of the local `/v1/models` endpoint.
         base_url: String,
+        /// Number of models discovered.
         model_count: usize,
     },
 }
@@ -382,6 +423,7 @@ pub struct NoopModelCatalog {
 }
 
 impl NoopModelCatalog {
+    /// Create a new empty noop catalog wrapped in an `Arc`.
     pub fn new() -> std::sync::Arc<Self> {
         let (tx, _) = broadcast::channel(16);
         std::sync::Arc::new(Self { tx })

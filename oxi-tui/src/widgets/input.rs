@@ -49,6 +49,7 @@ impl Default for InputState {
 }
 
 impl InputState {
+    /// Create a new empty input state.
     pub fn new() -> Self {
         Self::default()
     }
@@ -71,6 +72,7 @@ impl InputState {
         self.textarea.lines().to_vec()
     }
 
+    /// Clear all content.
     pub fn clear(&mut self) {
         self.textarea.clear();
     }
@@ -255,6 +257,7 @@ pub struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
+    /// Create a new input widget bound to the given theme.
     pub fn new(theme: &'a Theme) -> Self {
         Self {
             theme,
@@ -262,6 +265,7 @@ impl<'a> Input<'a> {
         }
     }
 
+    /// Set the placeholder text shown when the input is empty.
     pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = Some(placeholder);
         self

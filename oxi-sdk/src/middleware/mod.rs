@@ -5,6 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+/// Bridge connecting the legacy hooks API to the middleware pipeline.
 pub mod bridge;
 pub mod builtins;
 pub mod plugin;
@@ -18,55 +19,83 @@ pub use plugin::{PluginLoader, PluginManifest};
 /// Middleware execution phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MiddlewarePhase {
+    /// Before the request is sent to the LLM.
     BeforeLlm,
+    /// After the LLM response is received.
     AfterLlm,
+    /// Before a tool is invoked.
     BeforeTool,
+    /// After a tool invocation completes.
     AfterTool,
+    /// Before the agent run begins.
     BeforeRun,
+    /// After the agent run completes.
     AfterRun,
 }
 
 /// Middleware data — context passed to middlewares per phase.
 #[derive(Clone)]
 pub enum MiddlewareData {
+    /// Payload for the [`MiddlewarePhase::BeforeLlm`] phase.
     BeforeLlm {
+        /// Outgoing messages that will be sent to the model.
         messages: Vec<oxi_ai::Message>,
+        /// Identifier of the model that will receive the request.
         model_id: String,
     },
+    /// Payload for the [`MiddlewarePhase::AfterLlm`] phase.
     AfterLlm {
+        /// Text returned by the model.
         response_text: String,
         /// Token usage from the LLM response, if available.
         tokens_used: Option<crate::observability::TokenUsage>,
     },
+    /// Payload for the [`MiddlewarePhase::BeforeTool`] phase.
     BeforeTool {
+        /// Name of the tool about to be invoked.
         tool_name: String,
+        /// Parameters that will be passed to the tool.
         params: Value,
     },
+    /// Payload for the [`MiddlewarePhase::AfterTool`] phase.
     AfterTool {
+        /// Name of the tool that was invoked.
         tool_name: String,
+        /// Parameters that were passed to the tool.
         params: Value,
+        /// Serialized result returned by the tool.
         result: String,
     },
+    /// Payload for the [`MiddlewarePhase::BeforeRun`] phase.
     BeforeRun {
+        /// User prompt that initiated the run.
         prompt: String,
     },
+    /// Payload for the [`MiddlewarePhase::AfterRun`] phase.
     AfterRun {
+        /// Final response produced by the run.
         response: String,
+        /// Whether the run completed successfully.
         success: bool,
+        /// Wall-clock duration of the run, in milliseconds.
         duration_ms: u64,
     },
 }
 
 /// Context passed to middleware during execution.
 pub struct MiddlewareContext {
+    /// Phase that triggered this invocation.
     pub phase: MiddlewarePhase,
+    /// Identifier of the agent whose pipeline is executing.
     pub agent_id: String,
     /// Distributed trace context, if tracing is enabled.
     pub trace_id: Option<crate::observability::TraceId>,
+    /// Phase-specific payload for this invocation.
     pub data: MiddlewareData,
 }
 
 impl MiddlewareContext {
+    /// Create a context with no trace ID.
     pub fn new(phase: MiddlewarePhase, agent_id: &str, data: MiddlewareData) -> Self {
         Self {
             phase,
@@ -91,6 +120,7 @@ impl MiddlewareContext {
         }
     }
 
+    /// Returns the tool name when the phase is tool-related, else `None`.
     pub fn tool_name(&self) -> Option<&str> {
         match &self.data {
             MiddlewareData::BeforeTool { tool_name, .. } => Some(tool_name),
@@ -103,17 +133,22 @@ impl MiddlewareContext {
 /// Middleware action — determines how the pipeline continues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MiddlewareAction {
+    /// Allow the pipeline to proceed to the next middleware.
     Continue,
+    /// Block the current action (see [`MiddlewareResult::block`]).
     Block,
+    /// Terminate the entire agent loop.
     Terminate,
 }
 
 /// Result of middleware execution.
 #[derive(Clone)]
 pub struct MiddlewareResult {
+    /// How the pipeline should proceed after this middleware runs.
     pub action: MiddlewareAction,
     /// If set, the pipeline replaces the current data with this before continuing.
     pub modified_data: Option<MiddlewareData>,
+    /// Human-readable explanation, typically set on block or terminate.
     pub reason: Option<String>,
 }
 
@@ -160,12 +195,15 @@ impl MiddlewareResult {
             reason: Some(reason.into()),
         }
     }
+    /// Returns `true` if the action is [`MiddlewareAction::Continue`].
     pub fn is_continue(&self) -> bool {
         self.action == MiddlewareAction::Continue
     }
+    /// Returns `true` if the action is [`MiddlewareAction::Block`].
     pub fn is_block(&self) -> bool {
         self.action == MiddlewareAction::Block
     }
+    /// Returns `true` if the action is [`MiddlewareAction::Terminate`].
     pub fn is_terminate(&self) -> bool {
         self.action == MiddlewareAction::Terminate
     }
@@ -173,33 +211,41 @@ impl MiddlewareResult {
 
 /// Middleware trait — implement this to add behavior to the agent pipeline.
 pub trait Middleware: Send + Sync {
+    /// Human-readable name of this middleware, used for logging and lookup.
     fn name(&self) -> &str;
+    /// Phases at which this middleware wishes to be invoked.
     fn phases(&self) -> Vec<MiddlewarePhase>;
+    /// Inspect the context for the current phase and return a result.
     fn handle<'a>(
         &'a self,
         ctx: &'a MiddlewareContext,
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>>;
 }
 
+/// Ordered chain of middlewares executed phase by phase.
 #[derive(Default)]
 pub struct MiddlewarePipeline {
     middlewares: Vec<Arc<dyn Middleware>>,
 }
 
 impl MiddlewarePipeline {
+    /// Create an empty pipeline.
     pub fn new() -> Self {
         Self {
             middlewares: Vec::new(),
         }
     }
+    /// Append an owned middleware to the chain, returning the pipeline for chaining.
     pub fn push<M: Middleware + 'static>(mut self, mw: M) -> Self {
         self.middlewares.push(Arc::new(mw));
         self
     }
+    /// Append a shared ([`Arc`]) middleware to the chain.
     pub fn add_arc(mut self, mw: Arc<dyn Middleware>) -> Self {
         self.middlewares.push(mw);
         self
     }
+    /// Run every middleware registered for the context's phase, in order.
     pub async fn execute(&self, ctx: &MiddlewareContext) -> MiddlewareResult {
         for mw in &self.middlewares {
             if !mw.phases().contains(&ctx.phase) {
@@ -212,9 +258,11 @@ impl MiddlewarePipeline {
         }
         MiddlewareResult::pass()
     }
+    /// Names of the registered middlewares, in registration order.
     pub fn names(&self) -> Vec<&str> {
         self.middlewares.iter().map(|m| m.name()).collect()
     }
+    /// Returns `true` if no middlewares are registered.
     pub fn is_empty(&self) -> bool {
         self.middlewares.is_empty()
     }

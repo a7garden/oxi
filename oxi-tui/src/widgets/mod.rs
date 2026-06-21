@@ -14,8 +14,9 @@ pub mod completion;
 pub mod dashboard;
 #[allow(missing_docs)]
 pub mod footer;
-#[allow(missing_docs)]
 pub mod input;
+#[allow(missing_docs)]
+pub mod list_selector;
 #[allow(missing_docs)]
 pub mod routing;
 #[allow(missing_docs)]

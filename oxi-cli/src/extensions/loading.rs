@@ -117,6 +117,20 @@ fn discover_in_dir(dir: &Path, out: &mut Vec<PathBuf>) {
 /// a compatible Rust toolchain version.
 pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
     let path_display = path.display().to_string();
+    // Security: native extensions are unsandboxed arbitrary in-process code
+    // (loaded via libloading with no sandbox). Require explicit opt-in so
+    // they cannot execute by default — mirrors the `OXI_EXTENSION_EXEC`
+    // opt-in for WASM extensions.
+    if std::env::var("OXI_NATIVE_EXTENSIONS").ok().as_deref() != Some("1") {
+        tracing::warn!(
+            path = %path_display,
+            "native extension skipped — set OXI_NATIVE_EXTENSIONS=1 to load unsandboxed extensions"
+        );
+        anyhow::bail!(
+            "Native extensions are disabled; set OXI_NATIVE_EXTENSIONS=1 to load '{}'",
+            path_display
+        );
+    }
 
     if !path.exists() {
         anyhow::bail!("Extension file not found: {}", path_display);

@@ -1424,10 +1424,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             state.cleanup_notifications();
 
             // Poll overlay for self-initiated actions (timeout auto-submit, etc.)
-            if let Some(ref mut overlay) = state.overlay_state {
-                if matches!(overlay.poll(), super::overlay::OverlayAction::Close) {
-                    state.overlay_state = None;
-                }
+            if let Some(ref mut overlay) = state.overlay_state
+                && matches!(overlay.poll(), super::overlay::OverlayAction::Close)
+            {
+                state.overlay_state = None;
             }
 
             // Sync todo panel from agent state (cheap: RwLock read + clone)

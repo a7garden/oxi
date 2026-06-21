@@ -257,10 +257,10 @@ impl EditTool {
             for w in &section.warnings {
                 diff_parts.push(format!("⚠ {w}"));
             }
-            if first_changed.is_none() {
-                if let Some(line) = section.first_changed_line {
-                    first_changed = Some(line as usize);
-                }
+            if first_changed.is_none()
+                && let Some(line) = section.first_changed_line
+            {
+                first_changed = Some(line as usize);
             }
             messages.push(format!("{}#{}", section.path, section.new_hash));
         }

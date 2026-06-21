@@ -137,6 +137,10 @@ pub struct ChatViewState {
     pub thinking_regions: Vec<(u16, u16, String)>,
     /// Clickable tool result regions: (y_start, y_end, key).
     pub tool_regions: Vec<(u16, u16, String)>,
+    /// Last rendered chat viewport rect (absolute screen coords).
+    /// Populated each render; read by the keyboard toggle handler to find
+    /// which collapsible block is at the viewport top.
+    pub viewport_rect: ratatui::layout::Rect,
 }
 
 impl ChatViewState {

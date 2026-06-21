@@ -63,6 +63,7 @@ impl TomlCapabilityResolver {
         }
     }
 
+    /// Re-read the TOML file and replace the in-memory rules. No-op (returns `Ok(())`) if this resolver was not created from a file.
     pub fn reload(&self) -> std::io::Result<()> {
         let Some(path) = &self.path else {
             return Ok(());

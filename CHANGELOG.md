@@ -5,7 +5,42 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.40.0] - 2026-06-21
+### Fixed — production-readiness audit remediation
+
+A full production-readiness audit found the workspace failing its own
+`cargo clippy --workspace --all-targets -- -D warnings` gate (115 errors),
+publishing not gated on CI, and several lying stubs. All resolved:
+
+- **Clippy gate restored (115 → 0 errors).** Documented all undocumented
+  public items across `oxi-agent`/`oxi-tui`/`oxi-cli`; fixed correctness
+  lints: `await`-holding-a-`MutexGuard` (`mcp/mod.rs`), a dead
+  `&& false` branch in the `todo` tool, `unwrap()`/`expect()` panic sites
+  in `commit`/`todo`/`discovery` (replaced with `?`/poison-recovery),
+  `collapsible_if`/`let_and_return`/`needless_borrow`/`len_zero`, and an
+  `items-after-test-module` structural issue.
+- **Publishing now gated on CI.** `publish.yml` `publish` job depends on a
+  new `verify` job (fmt + clippy + nextest on MSRV 1.96) and `package-check`
+  (now `cargo package`, no longer `--no-verify --list`). Broken code can no
+  longer reach crates.io via a `v*` tag.
+- **Extension security hardened (default-deny).** `oxi_exec` (WASM) and
+  native-extension loading (unsandboxed `libloading`) are now **off by
+  default**, opt-in via `OXI_EXTENSION_EXEC=1` / `OXI_NATIVE_EXTENSIONS=1`.
+  Extension `permissions` are now parsed and logged (no longer dead code).
+  The misleading "zero host access by default" docstring was corrected.
+- **`lru` 0.12.5 → 0.18.0** (`oxi-hashline`), dropping the
+  RUSTSEC-2026-0002 unsound advisory and unifying a duplicated dependency.
+- **Stubs made honest.** `AgentGroup::run_orchestrated` now returns an
+  explicit "not implemented" error instead of silently running only the
+  leader; `memory_reflect` now requires a `summary` instead of returning a
+  success placeholder for a no-op.
+- **Docs brought current.** AGENTS.md stale counts fixed (11→15 port
+  traits, 17→~21 tools incl. the `questionnaire`→`ask` rename, 1099→5000+
+  models / 30+→70+ providers); `oxi-store`/`oxi-fs` references removed from
+  CODEOWNERS, CONTRIBUTING, the issue template, PORT_GUIDE, and the
+  production-audit README (marked historical); `oxi-hashline` gained a
+  README and LICENSE file.
+
 ### Added — selectable Unicode / ASCII / Nerd Font glyph set (default: Unicode)
 
 Every UI symbol (status markers, list cursors, box drawing, spinners, icons)
@@ -66,6 +101,22 @@ design. Full design in `docs/designs/2026-06-21-omp-ask-redesign.md`.
   parameter for tools that need the original call JSON.
 - **Prompt discipline** (omp `ask.md`): "default to action", "do NOT include
   Other — UI adds it", "2-5 concise options", `recommended` marks the default.
+- **Ownership identity**: `AskBridge::attach_with_session(session_id)` binds
+  the bridge to a non-empty session identity (mirrors the issue-system
+  invariant from AGENTS.md pitfall "Issue-system ownership identity (Phase 0 /
+  defect #13)"). `AskTool::execute` refuses to run when the identity is empty,
+  preventing concurrent agents from impersonating each other's ask overlays.
+- **Dead-code cleanup**: removed 5 unused overlay modules alongside the
+  rename — `overlay/questionnaire.rs` (985 lines), `overlay/model_select.rs`,
+  `overlay/resume_select.rs`, `overlay/logout_select.rs` (all three were
+  superseded by the `factories.rs` impls and had zero callers), and the
+  legacy `oxi-agent/src/tools/questionnaire.rs` (681 lines).
+- **Layer 2 wrapper deferred**: the design doc
+  (`2026-06-21-selector-consolidation-refactor.md`) sketches a generic
+  `SelectorOverlay` wrapping `ListSelectorState`. That wrapper was drafted but
+  proved to be unused dead code (`factories.rs` and `AskOverlay` both drive
+  `ListSelectorState` directly), so it is **not** shipped in this release.
+  A future PR may resurrect it if enough call sites benefit.
 
 ### Changed — TUI rendering efficiency (omp parity, Phase 0)
 
@@ -161,6 +212,34 @@ Two small safety / UX features ported from omp.
   `[paste +N lines]` marker shown in the input box. The full text is stored in
   `AppState::pending_paste` and flushed into the message on submit — the user
   can type around the marker and the paste content is prepended when they send.
+
+### Changed — pure-Rust Mermaid renderer (single-binary, no `mmdc`)
+
+The Mermaid → ASCII renderer in `oxi_tui::render::mermaid` is now a
+self-contained pure-Rust implementation. The previous implementation shelled
+out to the `mmdc` (mermaid-cli) Node binary, which violated oxi's single-
+binary / no-runtime-deps design — most users saw diagrams silently fall back
+to a plain code block.
+
+- **Supports** the four most common diagram types — `graph` / `flowchart`
+  (TD/LR/RL/BT, node shapes, labelled edges), `sequenceDiagram`
+  (participants, messages, notes, dashed arrows, self-loops),
+  `stateDiagram`[-v2] (start/end markers, transition labels), and
+  `classDiagram` (class boxes with attrs/methods, UML relations).
+- **Unsupported syntax** (pie, gantt, ER, journey, gitGraph, requirement,
+  etc.) returns `None` so callers fall back to displaying the source as a
+  fenced code block, unchanged from before.
+- **Process-level render cache** preserved (keyed by source + options).
+- **`which` crate removed** from `oxi-tui`'s dependencies (it was only used
+  to locate `mmdc`).
+- **Public API unchanged**: `render_mermaid_ascii`, `render_ascii_diagram`,
+  `clear_mermaid_cache`, `MermaidRenderOptions`, `MermaidColorMode` keep
+  their signatures; `markdown.rs`'s ` ```mermaid ` block hook is untouched.
+
+Known v1 limitations: only forward edges between adjacent BFS ranks are
+rendered as connectors in flowcharts; CJK / wide-character labels misalign
+the char-cell canvas; stylistic directives (`classDef`, `style`,
+`linkStyle`, `click`) are ignored; state composite states are flattened.
 
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state

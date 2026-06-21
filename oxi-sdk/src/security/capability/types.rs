@@ -25,13 +25,25 @@ pub enum Rights {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceRef {
     /// Kernel-service domain (e.g., a tool name or subsystem).
-    KernelDomain { domain: String },
+    KernelDomain {
+        /// The kernel-service domain identifier (e.g. a tool or subsystem name).
+        domain: String,
+    },
     /// Filesystem path pattern.
-    Path { pattern: String },
+    Path {
+        /// Glob pattern matching filesystem paths.
+        pattern: String,
+    },
     /// Network endpoint pattern.
-    Network { pattern: String },
+    Network {
+        /// Glob pattern matching network endpoints (hosts/domains).
+        pattern: String,
+    },
     /// Arbitrary named resource.
-    Named { name: String },
+    Named {
+        /// Free-form resource name.
+        name: String,
+    },
 }
 
 /// A single capability entry: rights over a resource, optionally with metadata.

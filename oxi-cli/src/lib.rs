@@ -166,8 +166,7 @@ pub struct App {
     skills: RwLock<SkillManager>,
     active_skills: RwLock<Vec<String>>,
     wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
-    questionnaire_bridge:
-        Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
+    ask_bridge: Option<std::sync::Arc<oxi_agent::tools::ask::AskBridge>>,
     /// Shared local issue store (`.oxi/issues/`). Cloned cheaply (inner `Arc`).
     /// Used by the agent `issue` tool, the TUI indicator, and the `oxi issue`
     /// CLI subcommand.
@@ -294,24 +293,15 @@ impl App {
             .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
         let agent = Arc::new(agent);
 
-        let questionnaire_timeout = if settings.questionnaire_timeout_secs > 0 {
-            Some(std::time::Duration::from_secs(
-                settings.questionnaire_timeout_secs,
-            ))
+        let ask_timeout = if settings.ask_timeout_secs > 0 {
+            Some(std::time::Duration::from_secs(settings.ask_timeout_secs))
         } else {
             None
         };
-        let bridge = std::sync::Arc::new(
-            oxi_agent::tools::questionnaire::QuestionnaireBridge::with_timeout(
-                questionnaire_timeout,
-            ),
-        );
-        let questionnaire_tool =
-            oxi_agent::tools::questionnaire::QuestionnaireTool::new(bridge.clone());
-        agent
-            .tools()
-            .register_arc(std::sync::Arc::new(questionnaire_tool));
-
+        let bridge =
+            std::sync::Arc::new(oxi_agent::tools::ask::AskBridge::with_timeout(ask_timeout));
+        let ask_tool = oxi_agent::tools::ask::AskTool::new(bridge.clone());
+        agent.tools().register_arc(std::sync::Arc::new(ask_tool));
         // Open the local issue store rooted at the project (`.oxi/issues/`).
         // Best-effort: if the directory cannot be resolved, issues are simply
         // unavailable — the app still works without them. The `/issue` slash
@@ -337,7 +327,7 @@ impl App {
             skills: RwLock::new(skills),
             active_skills: RwLock::new(Vec::new()),
             wasm_ext: None,
-            questionnaire_bridge: Some(bridge),
+            ask_bridge: Some(bridge),
             issue_store,
             ownership_session_id,
             liveness_guard: None, // set below once issue_store is known
@@ -405,11 +395,9 @@ impl App {
         self.agent.tools()
     }
 
-    /// Get the questionnaire bridge, if initialized.
-    pub fn questionnaire_bridge(
-        &self,
-    ) -> Option<&std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>> {
-        self.questionnaire_bridge.as_ref()
+    /// Get the ask bridge, if initialized.
+    pub fn ask_bridge(&self) -> Option<&std::sync::Arc<oxi_agent::tools::ask::AskBridge>> {
+        self.ask_bridge.as_ref()
     }
 
     /// Get a reference to the skill manager

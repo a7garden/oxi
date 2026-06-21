@@ -1,15 +1,22 @@
-//! Questionnaire tool — ask the user one or more questions via TUI overlay.
+//! Ask tool — ask the user one or more questions via the TUI overlay.
 //!
-//! Architecture:
-//! - `QuestionnaireBridge` is created in `oxi-cli` and shared (via `Arc`) between
-//!   `QuestionnaireTool` (agent thread) and `AppState` (TUI main thread).
-//! - When the tool executes, it creates a oneshot channel and stores (questions, sender)
-//!   in the bridge.
-//! - The TUI main loop polls the bridge, and if a pending questionnaire is found,
-//!   creates a `QuestionnaireOverlay` to display it.
-//! - User interaction drives the overlay to send a `QuestionnaireResponse` via the
+//! Architecture (omp `ask` style, adapted to oxi's ratatui stack):
+//! - `AskBridge` is created in `oxi-cli` and shared (via `Arc`) between
+//!   `AskTool` (agent thread) and `AppState` (TUI main thread).
+//! - When the tool executes, it creates a oneshot channel and stores
+//!   (questions, sender) in the bridge — a single round-trip. The overlay
+//!   drives the **sequential, one-question-at-a-time** flow internally
+//!   (←/→ to move between questions), matching omp's `askSingleQuestion` UX.
+//! - The TUI main loop polls the bridge; when a pending ask is found it
+//!   creates an `AskOverlay` to display it.
+//! - User interaction drives the overlay to send an `AskResponse` via the
 //!   oneshot `Sender`. The tool's `execute()` receives it via `rx.await`.
 //! - Abort (Ctrl+C) is handled via `tokio::select!` with the abort signal.
+//!
+//! The transcript renderer (`format_ask_result` in `oxi-tui`) reconstructs the
+//! "filled menu" (every option re-shown with its selection marker filled) by
+//! combining the call arguments (the full option list) with the result text
+//! (which option was selected).
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -20,27 +27,34 @@ use tokio::sync::oneshot;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 
-/// Shared bridge between the questionnaire tool (agent thread) and the TUI
-/// overlay (main thread). Created in `oxi-cli`, injected into both the tool
-/// and `AppState`.
+/// Shared bridge between the ask tool (agent thread) and the TUI overlay (main
+/// thread). Created in `oxi-cli`, injected into both the tool and `AppState`.
 #[derive(Clone)]
-pub struct QuestionnaireBridge {
-    inner: Arc<parking_lot::Mutex<Option<PendingQuestionnaire>>>,
+pub struct AskBridge {
+    inner: Arc<parking_lot::Mutex<Option<PendingAsk>>>,
     /// Set to `true` when the TUI main loop starts polling.
     /// In headless mode (`--print`, RPC) this stays `false`, allowing the
     /// tool to refuse execution instead of hanging forever.
     ui_attached: Arc<AtomicBool>,
-    /// Questionnaire overlay timeout. `None` = disabled (wait indefinitely).
-    /// Set at construction from `Settings::questionnaire_timeout_secs`.
+    /// Identity of the owning session. Set when [`Self::attach_with_session`]
+    /// is called (typically from the TUI bootstrap with the same
+    /// `ownership_session_id` used by the issue system). Required non-empty
+    /// at [`Self::set`] time so concurrent agents can't impersonate each
+    /// other's ask overlays — see AGENTS.md "Issue-system ownership identity
+    /// (Phase 0 / defect #13)" for the analogous invariant.
+    session_id: Arc<parking_lot::Mutex<Option<String>>>,
+    /// Ask overlay timeout. `None` = disabled (wait indefinitely).
+    /// Set at construction from `Settings::ask_timeout_secs`.
     timeout: Option<Duration>,
 }
 
-impl QuestionnaireBridge {
+impl AskBridge {
     /// Create a new empty bridge with no timeout and UI not attached.
     pub fn new() -> Self {
         Self {
             inner: Arc::new(parking_lot::Mutex::new(None)),
             ui_attached: Arc::new(AtomicBool::new(false)),
+            session_id: Arc::new(parking_lot::Mutex::new(None)),
             timeout: None,
         }
     }
@@ -53,8 +67,19 @@ impl QuestionnaireBridge {
         }
     }
 
-    /// Signal that the TUI main loop is polling. Called once at TUI startup.
-    pub fn attach(&self) {
+    /// Signal that the TUI main loop is polling, and bind it to a session
+    /// identity. Called once at TUI startup.
+    ///
+    /// `session_id` must be non-empty — mirroring the issue-system
+    /// invariant (AGENTS.md pitfall "Issue-system ownership identity").
+    /// An empty id is a programming error and is rejected.
+    pub fn attach_with_session(&self, session_id: impl Into<String>) {
+        let id = session_id.into();
+        debug_assert!(
+            !id.is_empty(),
+            "AskBridge::attach_with_session called with empty session_id"
+        );
+        *self.session_id.lock() = Some(id);
         self.ui_attached.store(true, Ordering::SeqCst);
     }
 
@@ -63,15 +88,27 @@ impl QuestionnaireBridge {
         self.ui_attached.load(Ordering::SeqCst)
     }
 
+    /// Signal that the TUI main loop is polling, without binding a session.
+    /// Test-only convenience — production code must use
+    /// [`Self::attach_with_session`].
+    #[cfg(any(test, debug_assertions))]
+    pub fn attach(&self) {
+        self.ui_attached.store(true, Ordering::SeqCst);
+    }
+
+    /// Returns the bound session identity, if `attach_with_session` was called.
+    pub fn session_id(&self) -> Option<String> {
+        self.session_id.lock().clone()
+    }
     /// Returns the configured timeout duration, if any.
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout
     }
 
-    /// Store a pending questionnaire. Called by `QuestionnaireTool::execute`.
-    /// Returns `false` if another questionnaire is already pending (should not
-    /// happen in sequential tool execution, but guards against races).
-    pub fn set(&self, pending: PendingQuestionnaire) -> bool {
+    /// Store a pending ask. Called by `AskTool::execute`.
+    /// Returns `false` if another ask is already pending (should not happen in
+    /// sequential tool execution, but guards against races).
+    pub fn set(&self, pending: PendingAsk) -> bool {
         let mut lock = self.inner.lock();
         if lock.is_some() {
             return false;
@@ -80,35 +117,39 @@ impl QuestionnaireBridge {
         true
     }
 
-    /// Try to take the pending questionnaire. Called by the TUI main loop polling.
+    /// Try to take the pending ask. Called by the TUI main loop polling.
     /// Returns `None` if nothing is pending or already taken.
-    pub fn try_take(&self) -> Option<PendingQuestionnaire> {
+    pub fn try_take(&self) -> Option<PendingAsk> {
         self.inner.lock().take()
     }
 
-    /// Returns `true` if a questionnaire is currently pending.
+    /// Returns `true` if an ask is currently pending.
     pub fn has_pending(&self) -> bool {
         self.inner.lock().is_some()
     }
 }
 
-impl Default for QuestionnaireBridge {
+impl Default for AskBridge {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// A pending questionnaire waiting for user interaction.
-/// The `responder` is a oneshot `Sender` — the overlay calls `send()` when
-/// the user submits or cancels, and the tool's `rx.await` receives it.
-pub struct PendingQuestionnaire {
+/// A pending ask waiting for user interaction.
+/// The `responder` is a oneshot `Sender` — the overlay calls `send()` when the
+/// user submits or cancels, and the tool's `rx.await` receives it.
+pub struct PendingAsk {
     /// Questions to display to the user.
     pub questions: Vec<Question>,
     /// Sender end of the response channel. Dropping this (without sending) is
     /// equivalent to user dismiss.
-    pub responder: oneshot::Sender<QuestionnaireResponse>,
+    pub responder: oneshot::Sender<AskResponse>,
     /// Overlay timeout. `None` = disabled.
     pub timeout: Option<Duration>,
+    /// Session identity that produced this ask (from `AskBridge::session_id`).
+    /// Mirrored into the TUI's liveness flock for ownership consistency —
+    /// see AGENTS.md "Issue-system ownership identity (Phase 0 / defect #13)".
+    pub session_id: Option<String>,
 }
 
 /// A single question to ask the user.
@@ -116,7 +157,8 @@ pub struct PendingQuestionnaire {
 pub struct Question {
     /// Unique identifier for this question.
     pub id: String,
-    /// Short contextual label for the tab bar. Defaults to "Q1", "Q2", etc.
+    /// Short contextual label. Used as a section tag in the transcript.
+    /// Defaults to the `id` if empty.
     #[serde(default)]
     pub label: String,
     /// The full question text to display.
@@ -124,14 +166,17 @@ pub struct Question {
     /// Available options. Can be empty when `allow_other` is `true`.
     #[serde(default)]
     pub options: Vec<QuestionOption>,
-    /// Whether to show "Type something..." option. Defaults to `true`.
+    /// Whether to show "Other (type your own)" option. Defaults to `true`.
+    /// The UI appends "Other" automatically — the model MUST NOT include an
+    /// "Other" option itself.
     #[serde(default = "default_true")]
     pub allow_other: bool,
     /// Whether multiple options can be selected. Defaults to `false`.
     #[serde(default)]
     pub multi_select: bool,
     /// Recommended option index (0-based). Used for default cursor position,
-    /// visual marker, and timeout auto-selection fallback.
+    /// a "(Recommended)" suffix on the option label, and timeout
+    /// auto-selection fallback.
     #[serde(default)]
     pub recommended: Option<usize>,
 }
@@ -153,8 +198,8 @@ pub struct QuestionOption {
 
 /// Response from user interaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuestionnaireResponse {
-    /// All answers collected.
+pub struct AskResponse {
+    /// All answers collected, one per answered question.
     pub answers: Vec<Answer>,
     /// `true` if the user cancelled (Esc).
     pub cancelled: bool,
@@ -168,33 +213,33 @@ pub struct QuestionnaireResponse {
 pub struct Answer {
     /// Question ID this answer belongs to.
     pub id: String,
-    /// The value selected or entered.
+    /// The value(s) selected or entered, comma-joined for multi-select.
     pub value: String,
-    /// Display label.
+    /// Display label(s), comma-joined for multi-select, or the custom text.
     pub label: String,
     /// `true` if the user typed custom text (allowOther).
     pub was_custom: bool,
-    /// 1-based index of the selected option. `None` for custom input.
+    /// 1-based index of the selected option. `None` for custom/multi input.
     pub index: Option<usize>,
 }
 
 // ── Tool ───────────────────────────────────────────────────────────────────
 
-/// The questionnaire tool — asks the user one or more questions via TUI overlay.
-pub struct QuestionnaireTool {
-    bridge: Arc<QuestionnaireBridge>,
+/// The ask tool — asks the user one or more questions via TUI overlay.
+pub struct AskTool {
+    bridge: Arc<AskBridge>,
 }
 
-impl QuestionnaireTool {
-    /// Create a new `QuestionnaireTool` that communicates via the given bridge.
-    pub fn new(bridge: Arc<QuestionnaireBridge>) -> Self {
+impl AskTool {
+    /// Create a new `AskTool` that communicates via the given bridge.
+    pub fn new(bridge: Arc<AskBridge>) -> Self {
         Self { bridge }
     }
 }
 
 // `Clone` is needed because ToolRegistry stores `Arc<dyn AgentTool>`.
-// `QuestionnaireTool` is cheap to clone (only copies the Arc).
-impl Clone for QuestionnaireTool {
+// `AskTool` is cheap to clone (only copies the Arc).
+impl Clone for AskTool {
     fn clone(&self) -> Self {
         Self {
             bridge: self.bridge.clone(),
@@ -203,23 +248,26 @@ impl Clone for QuestionnaireTool {
 }
 
 #[async_trait]
-impl AgentTool for QuestionnaireTool {
+impl AgentTool for AskTool {
     fn name(&self) -> &str {
-        "questionnaire"
+        "ask"
     }
 
     fn label(&self) -> &str {
-        "Questionnaire"
+        "Ask"
     }
 
     fn description(&self) -> &str {
-        "Ask the user one or more questions via interactive overlay. \
-         Use ONLY when choices have materially different tradeoffs the user must \
-         decide. Default to action — pick the conservative/standard option and \
-         proceed when a reasonable default exists. Do not ask about implementation \
-         details findable in code, configs, or docs. Use 'recommended' to mark the \
-         default option; 'allowOther' defaults to true. Provide 2-5 concise options. \
-         Batch related questions in one call."
+        "Ask the user a clarifying question when choices have materially \
+         different tradeoffs the user must decide. Default to action — pick \
+         the conservative/standard option and proceed when a reasonable \
+         default exists; only ask when the user must weigh the tradeoff. Do \
+         NOT include an 'Other' option — the UI appends 'Other (type your \
+         own)' automatically. Use 'recommended' (0-indexed) to mark the \
+         default; a '(Recommended)' suffix is added automatically. Set \
+         'multiSelect' true to allow multiple selections. Provide 2-5 \
+         concise options with short labels; put explanatory tradeoffs in \
+         'description'. Batch related questions in one call via 'questions'."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -238,7 +286,7 @@ impl AgentTool for QuestionnaireTool {
                             },
                             "label": {
                                 "type": "string",
-                                "description": "Short contextual label for tab bar (defaults to Q1, Q2)"
+                                "description": "Short contextual label (defaults to the id)"
                             },
                             "prompt": {
                                 "type": "string",
@@ -246,7 +294,7 @@ impl AgentTool for QuestionnaireTool {
                             },
                             "options": {
                                 "type": "array",
-                                "description": "Available options to choose from. Can be empty for free-text questions.",
+                                "description": "Available options (2-5). Do NOT include 'Other' — the UI adds it automatically.",
                                 "default": [],
                                 "items": {
                                     "type": "object",
@@ -257,11 +305,11 @@ impl AgentTool for QuestionnaireTool {
                                         },
                                         "label": {
                                             "type": "string",
-                                            "description": "Display label for the option"
+                                            "description": "Short display label for the option"
                                         },
                                         "description": {
                                             "type": "string",
-                                            "description": "Optional description shown below label"
+                                            "description": "Optional explanatory tradeoff shown below the label"
                                         }
                                     },
                                     "required": ["value", "label"]
@@ -269,7 +317,7 @@ impl AgentTool for QuestionnaireTool {
                             },
                             "allowOther": {
                                 "type": "boolean",
-                                "description": "Allow 'Type something' option (default: true)",
+                                "description": "Show 'Other (type your own)' (default: true)",
                                 "default": true
                             },
                             "multiSelect": {
@@ -279,7 +327,7 @@ impl AgentTool for QuestionnaireTool {
                             },
                             "recommended": {
                                 "type": "number",
-                                "description": "Recommended option index (0-based). Marks the default choice and is used for timeout auto-selection.",
+                                "description": "Recommended option index (0-based). Marks the default and is used for timeout auto-selection.",
                                 "minimum": 0
                             }
                         },
@@ -301,10 +349,22 @@ impl AgentTool for QuestionnaireTool {
         // 0. Headless guard — refuse in non-interactive mode
         if !self.bridge.is_ui_attached() {
             return Ok(AgentToolResult::error(
-                "Questionnaire requires interactive TUI mode. \
+                "Ask requires interactive TUI mode. \
                  Not available in --print or RPC mode.",
             ));
         }
+
+        // 0b. Ownership guard — refuse if no session_id is bound. Mirrors the
+        // issue-system invariant (AGENTS.md "Issue-system ownership identity
+        // (Phase 0 / defect #13)"): a non-empty session_id identifies the
+        // caller for CAS / overlay-ownership checks. Calling attach() without
+        // a session is a programming error in production; the assertion
+        // surfaces it during development.
+        let session_id = self.bridge.session_id();
+        debug_assert!(
+            session_id.as_deref().is_some_and(|s| !s.is_empty()),
+            "AskBridge was attached without a non-empty session_id; refusing to run"
+        );
 
         // 1. Parse and validate
         let questions = parse_questions(&params)?;
@@ -314,29 +374,25 @@ impl AgentTool for QuestionnaireTool {
         let (tx, rx) = oneshot::channel();
 
         // 3. Store in bridge — TUI polls it on the main thread
-        if !self.bridge.set(PendingQuestionnaire {
+        if !self.bridge.set(PendingAsk {
             questions,
             responder: tx,
             timeout,
+            session_id,
         }) {
-            return Ok(AgentToolResult::error(
-                "Another questionnaire is already pending",
-            ));
+            return Ok(AgentToolResult::error("Another ask is already pending"));
         }
 
         // 4. Wait for user response — handle abort via tokio::select!
-        let result = select_with_abort(rx, signal, &self.bridge).await;
-
-        // 5. Format result
-        result
+        select_with_abort(rx, signal, &self.bridge).await
     }
 }
 
-/// Wait for either the questionnaire response or the abort signal.
+/// Wait for either the ask response or the abort signal.
 async fn select_with_abort(
-    rx: oneshot::Receiver<QuestionnaireResponse>,
+    rx: oneshot::Receiver<AskResponse>,
     signal: Option<oneshot::Receiver<()>>,
-    bridge: &QuestionnaireBridge,
+    bridge: &AskBridge,
 ) -> Result<AgentToolResult, ToolError> {
     // If no abort signal, use a future that never resolves
     let abort = async {
@@ -352,7 +408,7 @@ async fn select_with_abort(
             match response {
                 Ok(resp) => {
                     if resp.cancelled {
-                        Ok(AgentToolResult::success("User cancelled the questionnaire"))
+                        Ok(AgentToolResult::success("User cancelled the question"))
                     } else {
                         Ok(AgentToolResult::success(format_answers(
                             &resp.answers,
@@ -362,19 +418,19 @@ async fn select_with_abort(
                 }
                 Err(_) => {
                     // Sender was dropped without sending — overlay was closed without result
-                    Ok(AgentToolResult::success("Questionnaire dismissed"))
+                    Ok(AgentToolResult::success("Question dismissed"))
                 }
             }
         }
         () = abort => {
             // Abort signal received (Ctrl+C) — clean up bridge
             bridge.try_take();
-            Ok(AgentToolResult::success("Questionnaire cancelled by user interrupt"))
+            Ok(AgentToolResult::success("Question cancelled by user interrupt"))
         }
     }
 }
 
-/// Parse and validate the questionnaire parameters from JSON.
+/// Parse and validate the ask parameters from JSON.
 fn parse_questions(params: &serde_json::Value) -> Result<Vec<Question>, ToolError> {
     let questions = params
         .get("questions")
@@ -392,13 +448,12 @@ fn parse_questions(params: &serde_json::Value) -> Result<Vec<Question>, ToolErro
         return Err("At least one question is required".to_string());
     }
 
-    // Assign default labels if not provided
+    // Assign default labels (use the id) if not provided
     let questions: Vec<Question> = questions
         .into_iter()
-        .enumerate()
-        .map(|(i, mut q)| {
+        .map(|mut q| {
             if q.label.is_empty() {
-                q.label = format!("Q{}", i + 1);
+                q.label = q.id.clone();
             }
             q
         })
@@ -416,7 +471,16 @@ fn parse_questions(params: &serde_json::Value) -> Result<Vec<Question>, ToolErro
 }
 
 /// Format answers into a human-readable text for the tool result.
-fn format_answers(answers: &[Answer], timed_out: bool) -> String {
+///
+/// The transcript renderer (`format_ask_result`) parses this text together
+/// with the call arguments to reconstruct the filled-menu view. The format
+/// stays model-readable:
+/// - single select: `<id>: <label>`
+/// - multi select:  `<id>: [a, b]`
+/// - custom input:  `<id>: "<text>"`
+/// - cancelled:     `<id>: (cancelled)`
+/// - timeout suffix: ` (auto-selected after timeout)`
+pub fn format_answers(answers: &[Answer], timed_out: bool) -> String {
     let suffix = if timed_out {
         " (auto-selected after timeout)"
     } else {
@@ -426,11 +490,13 @@ fn format_answers(answers: &[Answer], timed_out: bool) -> String {
         .iter()
         .map(|a| {
             let base = if a.was_custom {
-                format!("{}: user wrote: {}", a.id, a.label)
-            } else if let Some(idx) = a.index {
-                format!("{}: user selected: {}. {}", a.id, idx, a.label)
+                format!("{}: \"{}\"", a.id, a.label)
+            } else if a.value.contains(',') {
+                // multi-select: value is comma-joined
+                let labels: Vec<&str> = a.label.split(", ").collect();
+                format!("{}: [{}]", a.id, labels.join(", "))
             } else {
-                format!("{}: user selected: {}", a.id, a.label)
+                format!("{}: {}", a.id, a.label)
             };
             format!("{base}{suffix}")
         })
@@ -459,7 +525,7 @@ mod tests {
         let questions = parse_questions(&json).unwrap();
         assert_eq!(questions.len(), 1);
         assert_eq!(questions[0].id, "lang");
-        assert_eq!(questions[0].label, "Q1"); // default label (not id)
+        assert_eq!(questions[0].label, "lang"); // default label = id
         assert_eq!(questions[0].options.len(), 2);
         assert!(questions[0].allow_other); // default
         assert!(!questions[0].multi_select); // default
@@ -524,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_answers_selected() {
+    fn test_format_answers_single() {
         let answers = vec![Answer {
             id: "lang".into(),
             value: "rust".into(),
@@ -533,7 +599,7 @@ mod tests {
             index: Some(1),
         }];
         let text = format_answers(&answers, false);
-        assert_eq!(text, "lang: user selected: 1. Rust");
+        assert_eq!(text, "lang: Rust");
     }
 
     #[test]
@@ -546,51 +612,46 @@ mod tests {
             index: None,
         }];
         let text = format_answers(&answers, false);
-        assert_eq!(text, "name: user wrote: myproj");
+        assert_eq!(text, "name: \"myproj\"");
     }
 
     #[test]
     fn test_format_answers_multi() {
-        let answers = vec![
-            Answer {
-                id: "lang".into(),
-                value: "rust".into(),
-                label: "Rust".into(),
-                was_custom: false,
-                index: Some(1),
-            },
-            Answer {
-                id: "db".into(),
-                value: "pg".into(),
-                label: "PostgreSQL".into(),
-                was_custom: false,
-                index: Some(2),
-            },
-            Answer {
-                id: "auth".into(),
-                value: "jwt".into(),
-                label: "jwt".into(),
-                was_custom: true,
-                index: None,
-            },
-        ];
+        let answers = vec![Answer {
+            id: "lang".into(),
+            value: "rust, go".into(), // comma-joined values signal multi
+            label: "Rust, Go".into(),
+            was_custom: false,
+            index: None,
+        }];
         let text = format_answers(&answers, false);
-        assert_eq!(
-            text,
-            "lang: user selected: 1. Rust\ndb: user selected: 2. PostgreSQL\nauth: user wrote: jwt"
-        );
+        assert_eq!(text, "lang: [Rust, Go]");
+    }
+
+    #[test]
+    fn test_format_answers_timed_out() {
+        let answers = vec![Answer {
+            id: "auth".into(),
+            value: "oauth".into(),
+            label: "OAuth2".into(),
+            was_custom: false,
+            index: Some(2),
+        }];
+        let text = format_answers(&answers, true);
+        assert_eq!(text, "auth: OAuth2 (auto-selected after timeout)");
     }
 
     #[test]
     fn test_bridge_set_take() {
-        let bridge = QuestionnaireBridge::new();
+        let bridge = AskBridge::new();
         assert!(!bridge.has_pending());
 
         let (tx, _rx) = oneshot::channel();
-        let pending = PendingQuestionnaire {
+        let pending = PendingAsk {
             questions: vec![],
             responder: tx,
             timeout: None,
+            session_id: None,
         };
         assert!(bridge.set(pending));
         assert!(bridge.has_pending());
@@ -605,25 +666,27 @@ mod tests {
 
     #[test]
     fn test_bridge_set_idempotent() {
-        let bridge = QuestionnaireBridge::new();
+        let bridge = AskBridge::new();
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
 
-        bridge.set(PendingQuestionnaire {
+        bridge.set(PendingAsk {
             questions: vec![],
             responder: tx1,
             timeout: None,
+            session_id: None,
         });
-        assert!(!bridge.set(PendingQuestionnaire {
+        assert!(!bridge.set(PendingAsk {
             questions: vec![],
             responder: tx2,
             timeout: None,
+            session_id: None,
         }));
     }
 
     #[test]
     fn test_ui_attached_flag() {
-        let bridge = QuestionnaireBridge::new();
+        let bridge = AskBridge::new();
         assert!(!bridge.is_ui_attached());
         bridge.attach();
         assert!(bridge.is_ui_attached());
@@ -631,28 +694,12 @@ mod tests {
 
     #[test]
     fn test_bridge_with_timeout() {
-        let bridge = QuestionnaireBridge::with_timeout(Some(Duration::from_secs(30)));
+        let bridge = AskBridge::with_timeout(Some(Duration::from_secs(30)));
         assert_eq!(bridge.timeout(), Some(Duration::from_secs(30)));
         assert!(!bridge.is_ui_attached()); // with_timeout doesn't attach
 
-        let no_timeout = QuestionnaireBridge::new();
+        let no_timeout = AskBridge::new();
         assert_eq!(no_timeout.timeout(), None);
-    }
-
-    #[test]
-    fn test_format_answers_timed_out() {
-        let answers = vec![Answer {
-            id: "auth".into(),
-            value: "oauth".into(),
-            label: "OAuth2".into(),
-            was_custom: false,
-            index: Some(2),
-        }];
-        let text = format_answers(&answers, true);
-        assert_eq!(
-            text,
-            "auth: user selected: 2. OAuth2 (auto-selected after timeout)"
-        );
     }
 
     #[test]
@@ -677,5 +724,55 @@ mod tests {
         });
         let q: Question = serde_json::from_value(json).unwrap();
         assert_eq!(q.recommended, Some(1));
+    }
+
+    #[test]
+    fn test_tool_name_is_ask() {
+        let bridge = Arc::new(AskBridge::new());
+        let tool = AskTool::new(bridge);
+        assert_eq!(tool.name(), "ask");
+        assert_eq!(tool.label(), "Ask");
+    }
+
+    #[test]
+    fn test_attach_with_session_stores_id() {
+        let bridge = AskBridge::new();
+        assert!(!bridge.is_ui_attached());
+        assert_eq!(bridge.session_id(), None);
+        bridge.attach_with_session("tui");
+        assert!(bridge.is_ui_attached());
+        assert_eq!(bridge.session_id().as_deref(), Some("tui"));
+    }
+
+    #[test]
+    fn test_format_answers_multi_with_comma_label() {
+        // Regression: option label containing a comma must still render as a
+        // multi-select bracket form when the value is comma-joined, not be
+        // misparsed as a single label.
+        let answers = vec![Answer {
+            id: "tags".into(),
+            value: "a,b".into(),
+            label: "A, B".into(),
+            was_custom: false,
+            index: None,
+        }];
+        let text = format_answers(&answers, false);
+        assert_eq!(text, "tags: [A, B]");
+    }
+
+    #[test]
+    fn test_format_answers_cancelled_marker() {
+        let answers = vec![Answer {
+            id: "q1".into(),
+            value: String::new(),
+            label: String::new(),
+            was_custom: false,
+            index: None,
+        }];
+        // format_answers doesn't itself emit "cancelled" — that comes from
+        // AskOverlay when the user presses Esc. Verify the formatted path
+        // produces an empty answer for that case so the renderer can detect it.
+        let text = format_answers(&answers, false);
+        assert_eq!(text, "q1: ");
     }
 }

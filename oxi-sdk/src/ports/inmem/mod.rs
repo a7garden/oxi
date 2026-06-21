@@ -11,11 +11,11 @@ pub mod cron;
 pub mod event;
 pub mod memory;
 pub mod resources;
-pub mod url_router;
 pub mod todo_state;
+pub mod url_router;
 
 pub use cron::InMemoryCronScheduler;
 pub use event::InProcessEventBus;
 pub use memory::InMemoryMemoryStore;
-pub use todo_state::InMemoryTodoState;
 pub use resources::CountingResourceMonitor;
+pub use todo_state::InMemoryTodoState;

@@ -37,15 +37,10 @@ fn parse_github_owner_repo(url: &str) -> Option<String> {
     let url = url.trim();
 
     // Strip leading/trailing whitespace and newlines
-    let stripped = if let Some(path) = url.strip_prefix("https://github.com/") {
-        path
-    } else if let Some(path) = url.strip_prefix("git@github.com:") {
-        path
-    } else if let Some(path) = url.strip_prefix("ssh://git@github.com/") {
-        path
-    } else {
-        return None;
-    };
+    let stripped = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("git@github.com:"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
 
     let stripped = stripped.strip_suffix(".git").unwrap_or(stripped);
     let stripped = stripped.trim_end_matches('/');

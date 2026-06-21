@@ -15,16 +15,22 @@ use crate::{AgentTool, AgentToolResult, ToolContext, ToolError};
 
 // ── Types ─────────────────────────────────────────────────────────────
 
+/// Status of a single todo task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TodoStatus {
+    /// Task has not yet been started.
     Pending,
+    /// Task is currently being worked on (at most one per phase after normalization).
     InProgress,
+    /// Task has been finished.
     Completed,
+    /// Task was cancelled or deemed unnecessary.
     Abandoned,
 }
 
 impl TodoStatus {
+    /// Return a status-specific glyph for display.
     pub fn icon(self) -> &'static str {
         match self {
             Self::Pending => "\u{2610}",    // ☐
@@ -34,6 +40,7 @@ impl TodoStatus {
         }
     }
 
+    /// Return the serialized snake_case name of this status.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -50,76 +57,113 @@ impl fmt::Display for TodoStatus {
     }
 }
 
+/// A single task within a phase.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TodoItem {
+    /// Human-readable description of the task.
     pub content: String,
+    /// Current lifecycle status of the task.
     pub status: TodoStatus,
+    /// Optional free-form notes attached to the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<String>>,
 }
 
+/// A named group of related tasks within a todo list.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TodoPhase {
+    /// Display name of the phase.
     pub name: String,
+    /// Tasks belonging to this phase, in order.
     pub tasks: Vec<TodoItem>,
 }
 
+/// Operations that can be applied to a todo list.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum TodoOp {
+    /// Initialize or replace the todo list.
     Init {
+        /// Optional structured phase definitions.
         #[serde(default)]
         list: Option<Vec<InitListEntry>>,
+        /// Optional flat list of task contents.
         #[serde(default)]
         items: Option<Vec<String>>,
     },
+    /// Mark matching tasks as in progress.
     Start {
+        /// Task content filter.
         #[serde(default)]
         task: Option<String>,
+        /// Phase name filter.
         #[serde(default)]
         phase: Option<String>,
     },
+    /// Mark matching tasks as completed.
     Done {
+        /// Task content filter.
         #[serde(default)]
         task: Option<String>,
+        /// Phase name filter.
         #[serde(default)]
         phase: Option<String>,
     },
+    /// Mark matching tasks as abandoned.
     Drop {
+        /// Task content filter.
         #[serde(default)]
         task: Option<String>,
+        /// Phase name filter.
         #[serde(default)]
         phase: Option<String>,
     },
+    /// Remove matching tasks entirely.
     Rm {
+        /// Task content filter.
         #[serde(default)]
         task: Option<String>,
+        /// Phase name filter.
         #[serde(default)]
         phase: Option<String>,
     },
+    /// Append tasks to a phase, creating it if it does not exist.
     Append {
+        /// Name of the target phase.
         phase: String,
+        /// Task contents to append.
         items: Vec<String>,
     },
+    /// Return the current state without modifying it.
     View,
 }
 
+/// A phase seed supplied to the `init` op.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InitListEntry {
+    /// Display name of the phase.
     pub phase: String,
+    /// Initial task contents for the phase.
     pub items: Vec<String>,
 }
 
+/// Describes a task that newly transitioned to completed.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TodoCompletionTransition {
+    /// Name of the phase containing the task.
     pub phase: String,
+    /// Content of the completed task.
     pub content: String,
 }
 
+/// Result of applying a batch of todo ops.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TodoUpdateResult {
+    /// Full phase list after the ops were applied.
     pub phases: Vec<TodoPhase>,
+    /// Tasks that transitioned to completed during this update.
     pub completed_tasks: Vec<TodoCompletionTransition>,
+    /// Non-fatal errors collected while applying the ops.
     pub errors: Vec<String>,
 }
 
@@ -213,16 +257,12 @@ fn resolve_targets(
 ) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     for (pi, p) in phases.iter().enumerate() {
-        if let Some(phase_name) = phase {
-            if p.name != phase_name {
-                continue;
-            }
+        if phase.is_some_and(|phase_name| p.name != phase_name) {
+            continue;
         }
         for (ti, t) in p.tasks.iter().enumerate() {
-            if let Some(task_content) = task {
-                if t.content != task_content {
-                    continue;
-                }
+            if task.is_some_and(|task_content| t.content != task_content) {
+                continue;
             }
             out.push((pi, ti));
         }
@@ -260,7 +300,10 @@ fn append_items(phases: &mut Vec<TodoPhase>, phase_name: &str, items: &[String])
             name: phase_name.into(),
             tasks: Vec::new(),
         });
-        phases.last_mut().unwrap()
+        match phases.last_mut() {
+            Some(last) => last,
+            None => return,
+        }
     };
     for content in items {
         phase.tasks.push(TodoItem {
@@ -331,7 +374,7 @@ fn get_completion_transitions(
             }
             let was_completed = old_phase
                 .and_then(|p| p.tasks.iter().find(|t| t.content == new_task.content))
-                .map_or(false, |t| t.status == TodoStatus::Completed);
+                .is_some_and(|t| t.status == TodoStatus::Completed);
             if !was_completed {
                 out.push(TodoCompletionTransition {
                     phase: new_phase.name.clone(),
@@ -501,6 +544,7 @@ fn parse_task_line(line: &str) -> Option<(TodoStatus, String)> {
 
 // ── 요약 포맷 ────────────────────────────────────────────────────────
 
+/// Render a human-readable summary of the todo list for display.
 pub fn format_summary(phases: &[TodoPhase], errors: &[String], read_only: bool) -> String {
     let total: usize = phases.iter().map(|p| p.tasks.len()).sum();
     let done: usize = phases
@@ -659,9 +703,6 @@ impl AgentTool for TodoTool {
             serde_json::from_value(ops_value).map_err(|e| format!("Invalid ops format: {}", e))?;
 
         let result = provider.apply_ops(ops).await?;
-
-        let read_only = matches!(result.errors.len(), 0) && result.phases.is_empty() && false; // 단순 view는 ops 마지막이 View일 때
-        let _ = read_only; // 현재 단순화 — 항상 summary
 
         let summary = format_summary(&result.phases, &result.errors, false);
         Ok(AgentToolResult::success(summary))

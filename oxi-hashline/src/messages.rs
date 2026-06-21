@@ -84,8 +84,11 @@ pub const EMPTY_INSERT: &str = "`INS` needs at least one `+TEXT` body row.";
 /// [`block_single_line_message`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockOpKind {
+    /// Block replacement (`SWAP.BLK`).
     Replace,
+    /// Block deletion (`DEL.BLK`).
     Delete,
+    /// Insert immediately after a block (`INS.BLK.POST`).
     InsertAfter,
 }
 

@@ -30,42 +30,62 @@ pub struct WorkflowDefinition {
 pub enum WorkflowStepDef {
     /// Run a single agent with a task.
     Run {
+        /// Name of the agent to run.
         agent: String,
+        /// Task prompt to send to the agent.
         task: String,
+        /// Optional SharedMemory key to store the agent's result under.
         #[serde(default)]
         output: Option<String>,
     },
     /// Run multiple agents in parallel with the same task.
     Parallel {
+        /// Names of the agents to run concurrently.
         agents: Vec<String>,
+        /// Task prompt sent to every agent.
         task: String,
+        /// Maximum number of agents to run at once (defaults to all).
         #[serde(default)]
         concurrency: Option<usize>,
     },
     /// Run agents sequentially, passing results forward.
-    Chain { steps: Vec<WorkflowStepDef> },
+    Chain {
+        /// Ordered sub-steps executed one after another.
+        steps: Vec<WorkflowStepDef>,
+    },
     /// Fan-out: run an agent for each item in a SharedMemory key.
     ForEach {
+        /// SharedMemory key holding the list of items to iterate over.
         items_key: String,
+        /// Optional SharedMemory namespace to read the items from.
         #[serde(default)]
         namespace: Option<String>,
+        /// Name of the agent to run for each item.
         agent: String,
+        /// Task template with `{item}` replaced by each item's value.
         task_template: String,
+        /// Maximum number of agents to run at once (defaults to all).
         #[serde(default)]
         concurrency: Option<usize>,
     },
     /// Vote: ask multiple agents and aggregate by threshold.
     Vote {
+        /// Names of the agents whose responses form the vote.
         agents: Vec<String>,
+        /// Question posed to each agent.
         question: String,
+        /// Fraction of matching responses required to reach consensus (0.0–1.0).
         #[serde(default)]
         threshold: Option<f32>,
     },
     /// Set a value in SharedMemory.
     SetState {
+        /// SharedMemory key to write.
         key: String,
+        /// Optional SharedMemory namespace to write into.
         #[serde(default)]
         namespace: Option<String>,
+        /// JSON value to store at the key.
         value: Value,
     },
 }

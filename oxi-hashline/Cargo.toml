@@ -1,6 +1,6 @@
 [package]
 name = "oxi-hashline"
-version = "0.39.0"
+version = "0.40.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Line-anchored patch format for AI-assisted code editing"
@@ -13,7 +13,7 @@ exclude = ["target/"]
 
 [dependencies]
 xxhash-rust = { version = "0.8", features = ["xxh32"] }
-lru = "0.12"
+lru = "0.18"
 thiserror = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 parking_lot = "0.12"

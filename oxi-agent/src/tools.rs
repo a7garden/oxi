@@ -33,27 +33,32 @@ pub struct MemoryItem {
 /// Memory backend for the `memory_*` tools. The composition root implements
 /// this, bridging to `oxi_sdk::ports::MemoryStore` + `EmbeddingProvider`.
 pub trait MemoryBackend: Send + Sync + std::fmt::Debug {
+    /// Store a memory item, returning its new ID.
     fn put<'a>(
         &'a self,
         content: &'a str,
         kind: &'a str,
         subject: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>>;
+    /// Semantic-search stored memories, returning up to `k` matches.
     fn search<'a>(
         &'a self,
         query: &'a str,
         k: usize,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryItem>, ToolError>> + Send + 'a>>;
+    /// List memory items for the given subject.
     fn list<'a>(
         &'a self,
         subject: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryItem>, ToolError>> + Send + 'a>>;
+    /// Delete the memory item with the given ID.
     fn delete<'a>(
         &'a self,
         id: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), ToolError>> + Send + 'a>>;
 }
 
+/// Content resolved from an internal protocol URL (e.g. `skill://`, `issue://`).
 pub struct ResolvedContent {
     /// The resolved text content.
     pub content: String,
@@ -66,7 +71,9 @@ pub struct ResolvedContent {
 /// URL resolver for internal protocol schemes. The composition root
 /// implements this, bridging to `oxi_sdk::ports::InternalUrlRouter`.
 pub trait UrlResolver: Send + Sync + std::fmt::Debug {
+    /// Whether this resolver handles the given input URI.
     fn can_resolve(&self, input: &str) -> bool;
+    /// Resolve an internal URI to its content, asynchronously.
     fn resolve<'a>(
         &'a self,
         uri: &'a str,
@@ -147,35 +154,57 @@ pub trait AgentPoolProvider: Send + Sync + std::fmt::Debug {
 #[derive(Debug, Clone)]
 pub enum LspAction {
     /// Get diagnostics for a file.
-    Diagnostics { file: String },
+    Diagnostics {
+        /// Path to the file to inspect.
+        file: String,
+    },
     /// Go to definition.
     Definition {
+        /// Path to the file containing the symbol.
         file: String,
+        /// 1-based line number of the symbol.
         line: u32,
+        /// Optional symbol text to resolve (for disambiguation).
         symbol: Option<String>,
     },
     /// Find references.
     References {
+        /// Path to the file containing the symbol.
         file: String,
+        /// 1-based line number of the symbol.
         line: u32,
+        /// Optional symbol text to find references for.
         symbol: Option<String>,
     },
     /// Hover info.
     Hover {
+        /// Path to the file containing the symbol.
         file: String,
+        /// 1-based line number of the symbol.
         line: u32,
+        /// Optional symbol text to hover.
         symbol: Option<String>,
     },
     /// Rename symbol.
     Rename {
+        /// Path to the file containing the symbol.
         file: String,
+        /// 1-based line number of the symbol.
         line: u32,
+        /// Symbol text to rename.
         symbol: String,
+        /// New name for the symbol.
         new_name: String,
+        /// If true, apply the rename; otherwise just preview.
         apply: bool,
     },
     /// Get workspace/document symbols.
-    Symbols { file: String, query: Option<String> },
+    Symbols {
+        /// Path to the file to inspect (workspace symbols if query-only).
+        file: String,
+        /// Optional filter query for symbols.
+        query: Option<String>,
+    },
     /// Get server status.
     Status,
 }
@@ -530,6 +559,8 @@ pub trait AgentTool: Send + Sync {
 }
 
 // Built-in tools
+/// Ask tool — ask the user one or more clarifying questions via the TUI overlay.
+pub mod ask;
 /// Bash shell execution tool.
 pub mod bash;
 /// Browser tools (engine abstraction always compiled).
@@ -574,8 +605,6 @@ pub mod memory_retain;
 pub mod path_security;
 /// Path manipulation utilities.
 pub mod path_utils;
-/// Questionnaire tool — interactive multi-question TUI overlay.
-pub mod questionnaire;
 /// File reading tool.
 pub mod read;
 /// Rendering utilities for tool output.
@@ -605,13 +634,13 @@ pub use read::ReadTool;
 // pub use search_cache;
 
 pub use crate::mcp::McpTool;
+pub use ask::{AskBridge, AskTool};
 pub use commit::CommitTool;
 pub use context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
 pub use memory_edit::MemoryEditTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_reflect::MemoryReflectTool;
 pub use memory_retain::MemoryRetainTool;
-pub use questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 pub use subagent::SubagentTool;
 pub use write::WriteTool;
 

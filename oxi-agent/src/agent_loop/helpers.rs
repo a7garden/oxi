@@ -63,6 +63,55 @@ pub struct FinalizedToolCall {
     pub is_error: bool,
 }
 
+/// Remove orphaned `ToolResult` messages that lack a preceding
+/// `Assistant` message with `tool_calls` content blocks.
+///
+/// Some providers (e.g. OpenAI) reject messages where a `tool` role message
+/// doesn't follow an `assistant` message containing `tool_calls`. This can
+/// happen after compaction or state restoration. Orphaned tool results are
+/// useless anyway — without the tool_calls they reference, the model has no
+/// context for what tool was called.
+///
+/// Returns the number of orphaned tool results removed.
+pub fn sanitize_orphaned_tool_results(messages: &mut Vec<oxi_ai::Message>) -> usize {
+    use oxi_ai::Message;
+
+    let mut removed = 0;
+    let mut seen_tool_calls = false;
+
+    messages.retain(|msg| {
+        match msg {
+            Message::Assistant(a) => {
+                let has_tool_calls = a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, oxi_ai::ContentBlock::ToolCall(_)));
+                seen_tool_calls = has_tool_calls;
+                true
+            }
+            Message::ToolResult(_) => {
+                if seen_tool_calls {
+                    // This tool result is properly preceded — keep it, but reset
+                    // the flag since the result "consumes" the tool_calls context.
+                    seen_tool_calls = false;
+                    true
+                } else {
+                    // Orphaned — no preceding tool_calls.
+                    removed += 1;
+                    false
+                }
+            }
+            // User messages reset the tool_calls context.
+            Message::User(_) => {
+                seen_tool_calls = false;
+                true
+            }
+        }
+    });
+
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,11 +134,8 @@ mod tests {
         let mut messages = vec![
             Message::User(oxi_ai::UserMessage::new("hello")),
             Message::Assistant({
-                let mut m = oxi_ai::AssistantMessage::new(
-                    oxi_ai::Api::OpenAiCompletions,
-                    "agent",
-                    "gpt-4",
-                );
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
                 m.content.push(ContentBlock::ToolCall(ToolCall::new(
                     "call_1",
                     "bash",
@@ -161,11 +207,8 @@ mod tests {
             )),
             // Valid pair: assistant with tool_calls + tool result
             Message::Assistant({
-                let mut m = oxi_ai::AssistantMessage::new(
-                    oxi_ai::Api::OpenAiCompletions,
-                    "agent",
-                    "gpt-4",
-                );
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
                 m.content.push(ContentBlock::ToolCall(ToolCall::new(
                     "call_1",
                     "read",
@@ -193,49 +236,4 @@ mod tests {
         assert!(matches!(messages[0], Message::Assistant(_)));
         assert!(matches!(messages[1], Message::ToolResult(_)));
     }
-}
-/// Remove orphaned `ToolResult` messages that lack a preceding
-/// `Assistant` message with `tool_calls` content blocks.
-///
-/// Some providers (e.g. OpenAI) reject messages where a `tool` role message
-/// doesn't follow an `assistant` message containing `tool_calls`. This can
-/// happen after compaction or state restoration. Orphaned tool results are
-/// useless anyway — without the tool_calls they reference, the model has no
-/// context for what tool was called.
-///
-/// Returns the number of orphaned tool results removed.
-pub fn sanitize_orphaned_tool_results(messages: &mut Vec<oxi_ai::Message>) -> usize {
-    use oxi_ai::Message;
-
-    let mut removed = 0;
-    let mut seen_tool_calls = false;
-
-    messages.retain(|msg| {
-        match msg {
-            Message::Assistant(a) => {
-                let has_tool_calls = a.content.iter().any(|b| matches!(b, oxi_ai::ContentBlock::ToolCall(_)));
-                seen_tool_calls = has_tool_calls;
-                true
-            }
-            Message::ToolResult(_) => {
-                if seen_tool_calls {
-                    // This tool result is properly preceded — keep it, but reset
-                    // the flag since the result "consumes" the tool_calls context.
-                    seen_tool_calls = false;
-                    true
-                } else {
-                    // Orphaned — no preceding tool_calls.
-                    removed += 1;
-                    false
-                }
-            }
-            // User messages reset the tool_calls context.
-            Message::User(_) => {
-                seen_tool_calls = false;
-                true
-            }
-        }
-    });
-
-    removed
 }

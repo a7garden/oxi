@@ -54,6 +54,10 @@ pub struct FileMcpCredentialProvider {
 }
 
 impl FileMcpCredentialProvider {
+    /// Create a new file-backed credential provider.
+    ///
+    /// Loads any cached tokens from `config_dir` (or starts with an empty
+    /// store) and configures a 15-second-timeout HTTP client for refreshes.
     pub fn new(oauth: HashMap<String, OAuthConfig>, config_dir: PathBuf) -> Result<Arc<Self>> {
         let store_path = config_dir.join(TOKEN_FILE);
         let store = if store_path.exists() {

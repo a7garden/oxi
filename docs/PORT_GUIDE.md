@@ -2,6 +2,10 @@
 
 > oxi-sdk가 정의하는 **port trait**과 제품별 구현 가이드.
 
+> ⚠️ **업데이트 (2026-06):** `oxi-fs` 크레이트는 `oxi-sdk/src/ports/fs/`로 흡수되었습니다.
+> 아래 예제의 `oxi_fs::` 경로는 이제 `oxi_sdk::ports::fs::`입니다(타입명은 동일).
+> port 수도 11개에서 15개로 늘었습니다(전체 목록은 `oxi-sdk/src/ports/mod.rs`).
+
 ## 왜 port인가?
 
 oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/멀티에이전트**(자체)를 제공합니다. 하지만 **영속·인증·이벤트버스·스킬·메모리** 같은 "인프라"는 제품마다 다릅니다:
@@ -14,26 +18,26 @@ oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/�
 이 모든 케이스를 **하나의 SDK가** 모두 구현하면 SDK가 무거워지고, 새 시스템의 진입장벽이 높아집니다. 해결책: **port trait**으로 계약을 정의하고, 각 제품이 자기 구현을 꽂습니다.
 
 ```text
-   oxi-sdk  (defines 11 port traits)
+   oxi-sdk  (defines 15 port traits)
       │
       │ implements
       ▼
    Product layer
-   ├── oxi-cli        → oxi-fs           (file-based)
+   ├── oxi-cli        → oxi-sdk::ports::fs  (file-based)
    ├── oxios-kernel   → 자체 StateStore, EventBus, MemoryStore
    ├── oxios-mobile   → in-memory
    └── 새 시스템        → 자유 구현
 ```
 
-## 11개 port 빠른 참조
+## 15개 port 빠른 참조
 
 | port | 책임 | oxi-cli가 사용? | oxios가 사용? |
 |---|---|:-:|:-:|
-| `StateStore` | 영속 key-value / append-only | ✅ (oxi-fs) | ✅ (자체) |
-| `ConfigStore` | 레이어드 설정 | ✅ (oxi-fs) | ✅ (자체) |
-| `AuthProvider` | API key + OAuth | ✅ (oxi-fs) | ✅ (자체) |
+| `StateStore` | 영속 key-value / append-only | ✅ (file-based) | ✅ (자체) |
+| `ConfigStore` | 레이어드 설정 | ✅ (file-based) | ✅ (자체) |
+| `AuthProvider` | API key + OAuth | ✅ (file-based) | ✅ (자체) |
 | `EventBus` | pub/sub | ❌ (noop) | ✅ (자체) |
-| `SkillLoader` | SKILL.md 발견·로드 | ✅ (oxi-fs) | ✅ (자체) |
+| `SkillLoader` | SKILL.md 발견·로드 | ✅ (file-based) | ✅ (자체) |
 | `PersonaProvider` | 시스템 프롬프트 주입 | ❌ (noop) | ✅ (자체) |
 | `AccessGate` | 도구 실행 전 정책 검사 | ❌ (noop) | ✅ (자체) |
 | `CapabilityResolver` | subject → visible tools | ❌ (noop) | ✅ (자체) |
@@ -41,14 +45,14 @@ oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/�
 | `CronScheduler` | 시간 기반 트리거 | ❌ (noop) | ✅ (자체) |
 | `ResourceMonitor` | 사용량 모니터링 | ❌ (noop) | ✅ (자체) |
 
-11개 모두 **optional**. 등록 안 하면 SDK가 noop fallback을 사용합니다.
+15개 모두 **optional**. 등록 안 하면 SDK가 noop fallback을 사용합니다.
 
 ## 기본 사용 패턴 (oxi-cli)
 
 ```rust
 use std::sync::Arc;
 use oxi_sdk::OxiBuilder;
-use oxi_fs::{FileStateStore, FileAuthProvider, FileConfigStore, FileSkillLoader};
+use oxi_sdk::ports::fs::{FileStateStore, FileAuthProvider, FileConfigStore, FileSkillLoader};
 
 let home = std::env::var("OXI_HOME")
     .unwrap_or_else(|_| format!("{}/.oxi", std::env::var("HOME").unwrap()));
@@ -123,7 +127,7 @@ let oxi = OxiBuilder::new()
 
 ## PortRegistry로 한 번에 등록
 
-11개를 일일이 `with_*`로 호출하는 게 번거로우면 `PortRegistry`를 통째로 등록:
+15개를 일일이 `with_*`로 호출하는 게 번거로우면 `PortRegistry`를 통째로 등록:
 
 ```rust
 use oxi_sdk::{OxiBuilder, PortRegistry};
@@ -287,7 +291,7 @@ use oxi_sdk::Message;
 use oxi_sdk::ports::PortValue;  // JSON Value
 ```
 
-## 디렉토리 레이아웃 (oxi-fs 기준)
+## 디렉토리 레이아웃 (oxi-sdk::ports::fs 기준)
 
 ```
 ~/.oxi/
@@ -317,6 +321,6 @@ use oxi_sdk::ports::PortValue;  // JSON Value
 
 - `oxi-sdk/src/ports.rs` — port trait 정의
 - `oxi-sdk/src/builder.rs` — `OxiBuilder::with_port_*` 메서드
-- `oxi-fs/src/` — file-based 구현 4개
+- `oxi-sdk/src/ports/fs/` — file-based 구현
 - `oxi-cli/src/services.rs` — composition root 예제
 - `oxi-sdk/src/error.rs` — `PortNotConfigured` variant

@@ -188,7 +188,7 @@ impl ProtocolHandler for PrProtocolHandler {
         // Optionally fetch diff
         if parsed.diff {
             md.push_str("\n\n## Diff\n\n");
-            match fetch_pr_diff(&client, &parsed, token.as_deref()).await {
+            match fetch_pr_diff(client, &parsed, token.as_deref()).await {
                 Ok(diff) => {
                     md.push_str("```diff\n");
                     md.push_str(&diff);
@@ -272,21 +272,21 @@ fn format_pr_markdown(pr: &GhPr) -> String {
     }
 
     // Branch info
-    if let Some(ref head) = pr.head {
-        if let Some(ref base) = pr.base {
-            md.push_str(&format!(
-                "**Branch:** `{}` → `{}`\n\n",
-                head.ref_name, base.ref_name
-            ));
-        }
+    if let Some(ref head) = pr.head
+        && let Some(ref base) = pr.base
+    {
+        md.push_str(&format!(
+            "**Branch:** `{}` → `{}`\n\n",
+            head.ref_name, base.ref_name
+        ));
     }
 
     // Labels
-    if let Some(ref labels) = pr.labels {
-        if !labels.is_empty() {
-            let label_names: Vec<&str> = labels.iter().map(|l| l.name.as_str()).collect();
-            md.push_str(&format!("**Labels:** {}\n\n", label_names.join(", ")));
-        }
+    if let Some(ref labels) = pr.labels
+        && !labels.is_empty()
+    {
+        let label_names: Vec<&str> = labels.iter().map(|l| l.name.as_str()).collect();
+        md.push_str(&format!("**Labels:** {}\n\n", label_names.join(", ")));
     }
 
     // Mergeable
@@ -310,12 +310,12 @@ fn format_pr_markdown(pr: &GhPr) -> String {
     md.push('\n');
 
     // Body
-    if let Some(ref body) = pr.body {
-        if !body.is_empty() {
-            md.push_str("---\n\n");
-            md.push_str(body);
-            md.push('\n');
-        }
+    if let Some(ref body) = pr.body
+        && !body.is_empty()
+    {
+        md.push_str("---\n\n");
+        md.push_str(body);
+        md.push('\n');
     }
 
     md
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_parse_url_n() {
-        let result = PrProtocolHandler::parse_url("42").unwrap();
+        let _result = PrProtocolHandler::parse_url("42").unwrap();
         // This will fail without a git remote, but parsing succeeds
         // if we're not in a repo — let's just test the non-repo-dependent path
         // We can't test the 1-part case without a git repo, so skip it.

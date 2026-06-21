@@ -253,24 +253,26 @@ fn expand_env_placeholders(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            if let Some(end_rel) = input[i + 2..].find('}') {
-                let inner = &input[i + 2..i + 2 + end_rel];
-                let (name, default) = match inner.split_once(":-") {
-                    Some((n, d)) => (n, Some(d)),
-                    None => (inner, None),
-                };
-                let value = std::env::var(name)
-                    .ok()
-                    .or_else(|| default.map(|d| d.to_string()));
-                if let Some(v) = value {
-                    out.push_str(&v);
-                } else {
-                    out.push_str(&input[i..i + 2 + end_rel + 1]);
-                }
-                i += 2 + end_rel + 1;
-                continue;
+        if bytes[i] == b'$'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'{'
+            && let Some(end_rel) = input[i + 2..].find('}')
+        {
+            let inner = &input[i + 2..i + 2 + end_rel];
+            let (name, default) = match inner.split_once(":-") {
+                Some((n, d)) => (n, Some(d)),
+                None => (inner, None),
+            };
+            let value = std::env::var(name)
+                .ok()
+                .or_else(|| default.map(|d| d.to_string()));
+            if let Some(v) = value {
+                out.push_str(&v);
+            } else {
+                out.push_str(&input[i..i + 2 + end_rel + 1]);
             }
+            i += 2 + end_rel + 1;
+            continue;
         }
         let ch = input[i..].chars().next().expect("valid UTF-8 boundary");
         out.push(ch);

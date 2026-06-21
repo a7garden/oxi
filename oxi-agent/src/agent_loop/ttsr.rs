@@ -61,14 +61,23 @@ pub enum RuleSource {
 /// A single TTSR rule.
 #[derive(Debug, Clone)]
 pub struct Rule {
+    /// Human-readable name identifying this rule.
     pub name: String,
+    /// The rule body — instructions injected as a system reminder on match.
     pub content: String,
+    /// Optional short summary of what the rule governs.
     pub description: Option<String>,
+    /// Regex patterns that, when found in the stream, trigger the rule.
     pub condition: Vec<regex::Regex>,
+    /// Stream sources (and tools) this rule applies to.
     pub scope: Vec<ScopeToken>,
+    /// When the rule is permitted to interrupt the stream.
     pub interrupt_mode: InterruptMode,
+    /// Glob patterns restricting the rule to specific file paths.
     pub globs: Vec<String>,
+    /// If `true`, the rule is always active regardless of conditions.
     pub always_apply: bool,
+    /// Where the rule originated (builtin, project, or user).
     pub source: RuleSource,
 }
 
@@ -77,6 +86,7 @@ pub struct Rule {
 /// This is a simplified version of `oxi_sdk::ports::RuleRegistry` that lives
 /// in oxi-agent to avoid a dependency cycle.
 pub trait RuleRegistry: Send + Sync + 'static {
+    /// Returns a future that resolves to the current set of registered rules.
     fn rules<'a>(&'a self) -> Pin<Box<dyn Future<Output = Vec<Rule>> + Send + 'a>>;
 
     /// Mark that a rule was injected at a given turn.
@@ -293,10 +303,8 @@ impl TtsrEngine {
                     if !matches!(ctx.source, MatchSource::Tool) {
                         continue;
                     }
-                    if let Some(ref tool_name) = ctx.tool_name {
-                        if tool_name != name {
-                            continue;
-                        }
+                    if matches!(ctx.tool_name.as_ref(), Some(tool_name) if tool_name != name) {
+                        continue;
                     }
                     // If globs are specified, at least one must match a file path.
                     if !globs.is_empty() {

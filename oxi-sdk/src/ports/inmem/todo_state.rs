@@ -7,7 +7,8 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use oxi_sdk::{AgentConfig, InMemoryTodoState, TodoStateProvider};
+//! use oxi_sdk::ports::inmem::InMemoryTodoState;
+//! use oxi_sdk::{AgentConfig, TodoStateProvider};
 //!
 //! let todo = Arc::new(InMemoryTodoState::new());
 //! let mut config = AgentConfig {

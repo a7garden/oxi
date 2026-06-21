@@ -7,7 +7,7 @@
 # Workspace crates — each area has a responsible owner
 /oxi-ai/       @a7garden
 /oxi-agent/    @a7garden
-/oxi-store/    @a7garden
+/oxi-hashline/  @a7garden
 /oxi-tui/      @a7garden
 /oxi-sdk/      @a7garden
 /oxi-cli/      @a7garden

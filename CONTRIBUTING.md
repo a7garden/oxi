@@ -231,7 +231,7 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 
 ```
 oxi-ai      ← oxi-agent ← oxi-sdk ← oxi-cli
-oxi-ai      ← oxi-store           ← oxi-cli
+oxi-hashline ← oxi-agent
 oxi-tui     (independent)         ← oxi-cli
 ```
 
@@ -240,7 +240,7 @@ oxi-tui     (independent)         ← oxi-cli
 1. Create `oxi-ai/src/providers/<name>.rs`.
 2. Implement the `Provider` trait.
 3. Register in `oxi-ai/src/providers/register_builtins.rs`.
-4. Add model data to `oxi-ai/src/model_db.rs`.
+4. Add model data to `oxi-ai/data/catalog/` (no Rust changes needed — `build.rs` auto-enumerates; runtime models.dev enrichment fills gaps).
 
 ### Adding a New Tool
 
