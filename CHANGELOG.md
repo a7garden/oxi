@@ -149,6 +149,19 @@ Unicode before rendering, so the model's `$\alpha + \beta = x^2$` renders as
   only bodies that look like math are converted. Escaped `\$` is respected.
 - Wired into `md_lines` so both the table and regular markdown paths benefit.
 
+### Added — render-loop watchdog + bracketed-paste marker (omp parity, Phase 3)
+
+Two small safety / UX features ported from omp.
+
+- **Render-loop watchdog**: after every `tui.draw()` the frame interval and draw
+  duration are measured. Intervals < 1 ms trigger a `[watchdog] render storm`
+  warning; frames taking > 100 ms log a `slow frame` warning, both via
+  `tracing::warn`. Helps spot runaway re-renders or blocking event handlers.
+- **Bracketed-paste marker**: pastes exceeding 10 lines are compacted into a
+  `[paste +N lines]` marker shown in the input box. The full text is stored in
+  `AppState::pending_paste` and flushed into the message on submit — the user
+  can type around the marker and the paste content is prepended when they send.
+
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state
 

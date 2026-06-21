@@ -71,7 +71,16 @@ pub async fn handle_input(
                 // When overlay is active, forward Paste to the overlay handler
                 handle_overlay_paste(&text, state)
             } else {
-                state.input.insert_str(&text);
+                // Large bracketed paste? Show a compact marker so the input
+                // doesn't flood, but preserve the full text for submit.
+                let line_count = text.lines().count();
+                if line_count > 10 {
+                    let marker = format!("[paste +{line_count} lines]");
+                    state.pending_paste = Some((line_count, text));
+                    state.input.insert_str(&marker);
+                } else {
+                    state.input.insert_str(&text);
+                }
                 state.update_slash_completions(session);
                 update_file_completions(state);
                 None
@@ -361,6 +370,11 @@ async fn dispatch_action(
             state.scroll_down(10);
             None
         }
+        // ── Toggle expand (keyboard parity for mouse click-to-expand) ──
+        KAction::ToggleExpand => {
+            handle_toggle_expand(state);
+            None
+        }
 
         // ── App actions ───────────────────────────────────────
         KAction::OpenImage => {
@@ -458,6 +472,17 @@ async fn handle_submit(
     // (so the issue's `sessions:` list accumulates every conversation that
     // touched it). Runs only when the issue store is open.
     let value = expand_issue_refs(&raw, &state.issue_store);
+
+    // Flush any pending bracketed paste: the input holds a compact `[paste +N
+    // lines]` marker; the full text is stored in `pending_paste`. Replace the
+    // marker (if still present) and prepend the paste content so it appears
+    // before any text the user typed around the marker.
+    let value = if let Some((count, paste_text)) = state.pending_paste.take() {
+        let marker = format!("[paste +{count} lines]");
+        format!("{paste_text}\n{}", value.replace(&marker, "").trim())
+    } else {
+        value
+    };
     link_sessions_async(raw.clone(), state.issue_store.clone(), session);
 
     // Slash command popup
@@ -1209,6 +1234,48 @@ fn handle_click(col: u16, row: u16, state: &mut AppState) {
         }
     }
     let _ = (col, row); // unused column
+}
+
+/// Toggle the topmost visible collapsible block (thinking or tool result).
+///
+/// Keyboard parity for [`handle_click`]: finds the first block still visible
+/// at the chat viewport top and expands/collapses it. `viewport_rect` and the
+/// region lists are populated by `ChatView::render`, so this reflects the last
+/// drawn frame. No-op when no collapsible block is in view.
+fn handle_toggle_expand(state: &mut AppState) {
+    let target = state.chat.viewport_rect.y;
+
+    // Topmost visible thinking block (smallest y_start with y_end > target).
+    let think = state
+        .chat
+        .thinking_regions
+        .iter()
+        .filter(|(_, y_end, _)| *y_end > target)
+        .min_by_key(|(y_start, _, _)| *y_start)
+        .map(|(ys, _, k)| (*ys, true, k.clone()));
+    // Topmost visible tool block.
+    let tool = state
+        .chat
+        .tool_regions
+        .iter()
+        .filter(|(_, y_end, _)| *y_end > target)
+        .min_by_key(|(y_start, _, _)| *y_start)
+        .map(|(ys, _, k)| (*ys, false, k.clone()));
+
+    // Prefer the one closer to the viewport top (smaller y_start).
+    let chosen = match (think, tool) {
+        (Some(t), Some(l)) if t.0 <= l.0 => Some(t),
+        (Some(_), Some(l)) => Some(l),
+        (t, None) | (None, t) => t,
+    };
+
+    if let Some((_, is_thinking, key)) = chosen {
+        if is_thinking {
+            state.chat.toggle_thinking(&key);
+        } else {
+            state.chat.toggle_tool(&key);
+        }
+    }
 }
 
 // ── File completion helpers ─────────────────────────────────────────────

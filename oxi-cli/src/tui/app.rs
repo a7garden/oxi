@@ -311,6 +311,9 @@ pub(crate) struct AppState {
     pub active_skills: std::sync::Arc<parking_lot::RwLock<Vec<String>>>,
     /// Session file path for the current session
     pub session_file_path: Option<String>,
+    /// Pending bracketed paste (>10 lines); shown as `[paste +N lines]` in the
+    /// input and flushed into the message on submit. `(line_count, full_text)`.
+    pub pending_paste: Option<(usize, String)>,
     /// Requested session switch action (checked by outer loop)
     pub next_action: Option<TuiNextAction>,
     /// Count of pending steering messages (shown in busy input)
@@ -344,9 +347,8 @@ pub(crate) struct AppState {
     /// — it ensures we always go through the `first_mut` path once the
     /// block exists.
     snapshot_text_block_created: bool,
-    /// Questionnaire bridge — set by run_tui_interactive_impl() from App::questionnaire_bridge().
-    questionnaire_bridge:
-        Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
+    /// Ask bridge — set by run_tui_interactive_impl() from App::ask_bridge().
+    ask_bridge: Option<std::sync::Arc<oxi_agent::tools::ask::AskBridge>>,
     /// Tool execution start times for measuring duration.
     pub(crate) tool_start_times: std::collections::HashMap<String, std::time::Instant>,
     /// Active notifications (toast messages).
@@ -490,6 +492,7 @@ impl AppState {
             )),
             active_skills: std::sync::Arc::new(parking_lot::RwLock::new(Vec::new())),
             session_file_path: None,
+            pending_paste: None,
             next_action: None,
             pending_steering: 0,
             steering_messages_snapshot: Vec::new(),
@@ -500,7 +503,7 @@ impl AppState {
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
-            questionnaire_bridge: None,
+            ask_bridge: None,
             tool_start_times: std::collections::HashMap::new(),
             notifications: Vec::new(),
             issue_store: None,
@@ -900,7 +903,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     let mut model_id = app.model_id();
     let tools = app.agent().tools();
     let wasm_ext = app.wasm_ext().cloned();
-    let questionnaire_bridge = app.questionnaire_bridge().cloned();
+    let ask_bridge = app.ask_bridge().cloned();
     let cwd: String = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
@@ -1323,8 +1326,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             *state.skills.write() = app_skills.clone();
         }
         *state.active_skills.write() = app.active_skills();
-        state.questionnaire_bridge = questionnaire_bridge.clone();
-        if let Some(ref bridge) = questionnaire_bridge {
+        state.ask_bridge = ask_bridge.clone();
+        if let Some(bridge) = &ask_bridge {
             bridge.attach();
         }
 
@@ -1404,6 +1407,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let mut last_spinner_tick = std::time::Instant::now();
         let session_start = std::time::Instant::now();
         let poll_timeout = std::time::Duration::from_millis(50);
+        let mut last_draw = std::time::Instant::now();
 
         while running {
             let now = std::time::Instant::now();
@@ -1442,7 +1446,28 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 }
             }
 
+            // ── Render-loop watchdog ────────────────────────────────────
+            // Measure frame interval and draw duration so we can spot render
+            // storms (many draws/sec) or slow frames (>100 ms). Based on omp's
+            // loop-watchdog. Logged at `tracing::warn` so it appears in the
+            // log file without spamming the TUI status line.
+            let draw_start = std::time::Instant::now();
+            if draw_start.duration_since(last_draw) < std::time::Duration::from_millis(1) {
+                tracing::warn!(
+                    "[watchdog] render storm: {:?} between draws",
+                    draw_start.duration_since(last_draw)
+                );
+            }
+
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
+            let draw_dur = draw_start.elapsed();
+            if draw_dur > std::time::Duration::from_millis(100) {
+                tracing::warn!(
+                    "[watchdog] slow frame: {:.0}ms",
+                    draw_dur.as_secs_f64() * 1000.0
+                );
+            }
+            last_draw = draw_start;
 
             // Post-render: display images via terminal protocol
             // After ratatui draws, output inline images that won't be overwritten
@@ -1538,19 +1563,19 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 }
             }
 
-            // Check for pending questionnaire from bridge (agent thread → TUI thread)
+            // Check for pending ask from bridge (agent thread → TUI thread)
             if state.overlay.is_none()
                 && state.overlay_state.is_none()
-                && let Some(bridge) = &state.questionnaire_bridge
+                && let Some(bridge) = &state.ask_bridge
                 && let Some(pending) = bridge.try_take()
             {
-                use super::overlay::questionnaire::QuestionnaireOverlay;
-                state.overlay_state = Some(Box::new(QuestionnaireOverlay::new(
+                use super::overlay::ask::AskOverlay;
+                state.overlay_state = Some(Box::new(AskOverlay::new(
                     pending.questions,
                     pending.responder,
                     pending.timeout,
                 )));
-                tracing::info!("[TUI] Questionnaire overlay opened");
+                tracing::info!("[TUI] Ask overlay opened");
             }
 
             if state.next_action.is_some() {
