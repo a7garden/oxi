@@ -13,6 +13,8 @@
 //! 5. Wrap output in CSI 2026 synchronized update mode to prevent tearing
 
 pub mod ansi;
+#[allow(missing_docs)]
+mod deccara;
 pub mod diff;
 pub mod image;
 pub mod mermaid;
@@ -251,6 +253,9 @@ pub struct DiffBackend<W: io::Write> {
     /// Detected terminal capabilities. Gates escape-sequence emission
     /// (e.g. CSI 2026 synchronized output) so unsupported features aren't sent.
     caps: terminal::TerminalCapabilities,
+    /// Whether the DECCARA bg-fill optimizer is active: the terminal must
+    /// advertise DECCARA (Kitty/Ghostty) and `OXI_NO_DECCARA` must be unset.
+    deccara_enabled: bool,
 }
 
 impl<W: io::Write> DiffBackend<W> {
@@ -273,6 +278,7 @@ impl<W: io::Write> DiffBackend<W> {
             force_full_redraw: true,
             last_width: 0,
             last_height: 0,
+            deccara_enabled: caps.deccara && std::env::var_os("OXI_NO_DECCARA").is_none(),
             caps,
         }
     }
@@ -347,6 +353,32 @@ impl<W: io::Write> Backend for DiffBackend<W> {
 
         // Find changed rows
         let max_rows = new_rows.len().max(self.prev_rows.len());
+
+        // DECCARA bg-fill optimizer (Kitty/Ghostty): analyze the rows that will
+        // be repainted for a droppable trailing background fill and plan
+        // coalesced rectangles. No-op unless the terminal advertises DECCARA.
+        let deccara_plan = if self.deccara_enabled {
+            let fills: Vec<Option<deccara::BgFill>> = (0..max_rows)
+                .map(|row_idx| {
+                    let new_row = new_rows.get(row_idx);
+                    let prev_row = self.prev_rows.get(row_idx);
+                    let will_write = match (new_row, prev_row) {
+                        (Some(nr), Some(pr)) => nr != pr,
+                        (Some(_), None) => true,
+                        _ => false,
+                    };
+                    if !will_write {
+                        return None;
+                    }
+                    let cells = row_cells.get(row_idx)?;
+                    let pairs: Vec<(u16, &Cell)> = cells.iter().map(|&(x, _y, c)| (x, c)).collect();
+                    deccara::analyze_row(&pairs, term_w)
+                })
+                .collect();
+            deccara::plan_fills(&fills, term_w, 0)
+        } else {
+            deccara::DeccaraPlan::default()
+        };
         for row_idx in 0..max_rows {
             let new_row = new_rows.get(row_idx);
             let prev_row = self.prev_rows.get(row_idx);
@@ -367,12 +399,18 @@ impl<W: io::Write> Backend for DiffBackend<W> {
 
                     // Write cells for this row
                     if let Some(cells) = row_cells.get(row_idx) {
+                        let cutoff = deccara_plan.cutoffs.get(row_idx).copied().flatten();
                         let mut last_x: u16 = 0;
                         let mut last_fg: Option<CColor> = None;
                         let mut last_bg: Option<CColor> = None;
                         let mut last_mod: Option<Modifier> = None;
 
                         for &(x, _y, cell) in cells {
+                            // DECCARA: the trailing fill region is painted by a
+                            // rectangle at frame end — stop writing at the cutoff.
+                            if cutoff.is_some_and(|c| x >= c) {
+                                break;
+                            }
                             // Move cursor if there's a gap
                             if x > last_x {
                                 crossterm::execute!(self.inner, MoveTo(x, row_idx as u16))?;
@@ -410,10 +448,25 @@ impl<W: io::Write> Backend for DiffBackend<W> {
                             crossterm::execute!(self.inner, Print(cell.symbol()))?;
                             last_x = x + 1;
                         }
+                        // DECCARA: erase the previous frame's glyphs from the
+                        // fill region (the rectangle only repaints attributes,
+                        // not glyphs, so stale text must be cleared first).
+                        if let Some(c) = cutoff {
+                            crossterm::execute!(self.inner, MoveTo(c, row_idx as u16))?;
+                            let _ =
+                                crossterm::queue!(self.inner, crossterm::style::Print("\x1b[K"));
+                        }
                     }
                 }
                 (None, None) => unreachable!(),
             }
+        }
+
+        // DECCARA: emit the coalesced background-fill rectangles. They overlay
+        // the cleared trailing regions and must sit inside the synchronized-
+        // update window (before its end marker) so the frame is atomic.
+        if self.deccara_enabled && !deccara_plan.sequence.is_empty() {
+            let _ = crossterm::queue!(self.inner, crossterm::style::Print(&deccara_plan.sequence));
         }
 
         // CSI 2026: End synchronized update — flush all changes atomically.

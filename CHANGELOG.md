@@ -22,15 +22,19 @@ design.
   already takes `&ThemeStyles` gets the glyph set with no signature change.
 - **Hardcoded glyphs migrated**: `tool_renderer` (✓/✗/⚠/→), the chat
   tool-call status icons (○/●/✓/✗ on every call + result box), list
-  highlight cursors (`stateful_list`, `table_list`, `completion`, and 7
-  overlays), health/status dots (`routing`, `dashboard`, todo panel), the
-  chat spinner, todo status markers, and horizontal rules now read from the
-  symbol table.
+  highlight cursors (`stateful_list`, `table_list`, `completion`, and 9
+  overlays), health/status dots (`routing`, `dashboard`, todo panel, MCP,
+  extensions, provider-select), notification toast icons, the chat spinner,
+  todo status markers, and horizontal rules now read from the symbol table.
+  The `/skill` slash-command listing marker and `📋` todo header also resolve
+  through the active glyph set.
 - **New `glyph_set` setting** (`settings.toml`, snake_case): `unicode` |
   `ascii` | `nerd`. Settings version bumped 7 → 8 with migration (defaults to
   Unicode). Selectable live in `/settings` → `glyph` (cycles the three
-  presets) and **applied immediately** — the main loop rebuilds the live
-  theme from freshly-loaded settings on the next draw, no restart needed.
+  presets, each shown with a live sample) and **applied immediately** — the
+  main loop rebuilds the live theme from freshly-loaded settings on the next
+  draw, no restart needed. Also a new step in `oxi setup` (step 4: Glyph Set)
+  with per-preset sample preview.
 
 ### Changed — TUI rendering efficiency (omp parity, Phase 0)
 
@@ -77,6 +81,27 @@ a follow-up. Design: `docs/designs/2026-06-20-oxi-tui-improvement-plan.md`.
   `TerminalCapabilities::detect()`; inject with `DiffBackend::with_capabilities`).
 - **`OXI_NO_SYNC_OUTPUT=1`** manually disables synchronized output for
   terminals that misbehave under it.
+
+### Added — DECCARA background-fill optimizer (omp parity, Phase 2)
+
+For terminals that implement Kitty's DECCARA rectangular-SGR extension (Kitty,
+Ghostty), `DiffBackend` now replaces a solid-background row's trailing
+space-padding with a single rectangle escape, instead of writing every
+background-styled space each frame. Adapted from omp's `deccara.ts`, but
+operating on structured ratatui `Cell`s (simpler and more reliable than omp's
+ANSI-string parser).
+
+- **New `render::deccara` planner** (pure, unit-tested): `analyze_row` proves a
+  row is a full-width trailing background fill; `plan_fills` coalesces adjacent
+  rows into rectangles and emits them only when the dropped space bytes beat the
+  rectangle + per-row EL-clear + DECSACE-wrapper cost — so the plan never
+  exceeds the original byte count.
+- **`DiffBackend` integration**: changed rows write only up to the fill cutoff,
+  EL-clear the previous frame's glyphs from the fill region (DECCARA repaints
+  attributes, not glyphs), and emit the coalesced rectangles inside the
+  synchronized-update window.
+- **Gated on `caps.deccara`** (Kitty/Ghostty only) with an `OXI_NO_DECCARA=1`
+  kill switch. No effect on other terminals.
 
 
 ## [0.39.0] - 2026-06-20
