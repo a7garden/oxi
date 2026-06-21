@@ -638,4 +638,103 @@ mod tests {
         assert!(all.contains(Modifier::REVERSED));
         assert!(all.contains(Modifier::CROSSED_OUT));
     }
+
+    // ── DECCARA integration (wire-format proof) ─────────────────────────
+
+    /// An `io::Write` that records every byte into a shared buffer, so a test
+    /// can read what `DiffBackend` actually emitted without a real terminal.
+    #[derive(Default, Clone)]
+    struct RecordingWriter(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+    impl io::Write for RecordingWriter {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Build a full-width, 3-row frame where every cell is a space under `bg`.
+    fn bg_frame(width: u16, bg: Color) -> Vec<(u16, u16, Cell)> {
+        (0..width)
+            .flat_map(|x| {
+                (0..3u16).map(move |y| {
+                    let mut c = Cell::new(" ");
+                    c.bg = bg;
+                    (x, y, c)
+                })
+            })
+            .collect()
+    }
+
+    fn draw_cells<W: io::Write>(backend: &mut DiffBackend<W>, cells: &[(u16, u16, Cell)]) {
+        backend
+            .draw(cells.iter().map(|&(x, y, ref c)| (x, y, c)))
+            .unwrap();
+    }
+
+    #[test]
+    fn deccara_emits_rectangle_for_full_bg_rows() {
+        // With caps.deccara = true, a changed full-width solid-background
+        // block must be painted by a single DECCARA rectangle, not a run of
+        // background-styled spaces.
+        let recorder = RecordingWriter::default();
+        let caps = terminal::TerminalCapabilities {
+            deccara: true,
+            synchronized_output: false, // isolate DECCARA bytes from CSI 2026
+            ..Default::default()
+        };
+        let mut backend = DiffBackend::with_capabilities(
+            ratatui::backend::CrosstermBackend::new(recorder.clone()),
+            caps,
+        );
+
+        // Frame 1 establishes prev_rows (force-full-redraw path).
+        draw_cells(&mut backend, &bg_frame(20, Color::Rgb(0, 0, 0)));
+        // Frame 2 changes every row's bg → diff path with DECCARA active.
+        draw_cells(&mut backend, &bg_frame(20, Color::Rgb(10, 20, 30)));
+
+        let buf = recorder.0.borrow();
+        let emitted = String::from_utf8_lossy(&buf);
+        assert!(
+            emitted.contains("\x1b[2*x"),
+            "missing DECSACE rect: {emitted:?}"
+        );
+        // One rectangle: 0-based rows 0..=2 → 1-based 1..=3, cols 1..=20,
+        // bg 48;2;10;20;30.
+        assert!(
+            emitted.contains("\x1b[1;1;3;20;48;2;10;20;30$r"),
+            "missing DECCARA rect: {emitted:?}"
+        );
+        assert!(
+            emitted.contains("\x1b[*x"),
+            "missing DECSACE default: {emitted:?}"
+        );
+    }
+
+    #[test]
+    fn deccara_inactive_when_capability_off() {
+        // With caps.deccara = false, no DECCARA escape must leak — the rows
+        // are written as ordinary (space) cells.
+        let recorder = RecordingWriter::default();
+        let caps = terminal::TerminalCapabilities {
+            deccara: false,
+            synchronized_output: false,
+            ..Default::default()
+        };
+        let mut backend = DiffBackend::with_capabilities(
+            ratatui::backend::CrosstermBackend::new(recorder.clone()),
+            caps,
+        );
+        draw_cells(&mut backend, &bg_frame(20, Color::Rgb(0, 0, 0)));
+        draw_cells(&mut backend, &bg_frame(20, Color::Rgb(10, 20, 30)));
+
+        let buf = recorder.0.borrow();
+        let emitted = String::from_utf8_lossy(&buf);
+        assert!(
+            !emitted.contains("\x1b[2*x"),
+            "DECCARA leaked while disabled: {emitted:?}"
+        );
+    }
 }
