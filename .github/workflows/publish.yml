@@ -55,10 +55,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Dry-run packaging check ──────────────────────────────────
+  # ── Dry-run packaging check (leaf crates) ────────────────────
   # Runs for every trigger (even dry_run workflow_dispatch).
+  # Only the leaf crates (no oxi-* dependencies) can be packaged
+  # standalone here — the others depend on oxi-* versions that
+  # aren't on crates.io yet at this point. Their packaging is
+  # validated implicitly by `cargo publish` in the publish job.
   package-check:
-    name: cargo package (dry run)
     needs: tag-check
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -67,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-hashline oxi-ai oxi-tui oxi-agent oxi-sdk oxi-cli; do
+          for crate in oxi-hashline oxi-ai oxi-tui; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done

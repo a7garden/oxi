@@ -5,6 +5,173 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] - 2026-06-21
+
+### Added — TUI widget layer reads from glyph-set table
+
+The widget layer (`footer`, `chat render`, `highlight`, `completion`,
+`routing`, `tool renderer`) now reads every UI glyph from the `Symbols`
+table that ships with each `GlyphSet` preset. The ASCII and Nerd Font
+presets can now fully re-skin the TUI from one setting, completing the
+glyph-set feature whose table shipped in v0.40.0.
+
+- **New symbol fields**: arrows (`arrow_up`, `arrow_down`), thinking
+  levels (off / minimal / low / medium / high), tool icons
+  (`tool_bash`, `tool_edit`, `tool_write`, `tool_read`, `tool_search`,
+  `tool_task`, `tool_web`, `tool_lsp`, `tool_debug`, `tool_mcp`,
+  `tool_ask`, `tool_generic`), and language identifiers
+  (`icon_lang_rust`, `icon_lang_python`, `icon_lang_javascript`,
+  `icon_lang_typescript`, `icon_lang_go`, `icon_lang_ruby`).
+- **Migrated call sites**: footer token arrows, chat header thinking
+  icon, completion/overlay separators, routing health indicators, and
+  the tool renderer status marks all draw from `styles.symbols.*`.
+- **Hard rule reaffirmed** (AGENTS.md): widgets never hardcode glyphs
+  — read from `Symbols` so the `glyph_set` setting re-skins the whole
+  UI. Migrated call sites are the canonical reference for the rule.
+
+### Changed — TUI 언어 정책 default OFF + 자동 적용
+
+기존 TUI 언어 정책(`Settings::output_languages`)은 **사용자 설정이 있어도
+기본적으로 활성화되지 않도록** 변경되었으며, 오버레이 변경이 라이브
+세션에 즉시 반영되도록 개선되었다. `oxi --print` 및 RPC 모드의 비대칭은
+**의도된 설계**이므로 변경되지 않았다 (AGENTS.md pitfalls 참조).
+
+- **Master toggle 신설** (`Settings::language_policy_enabled: bool`,
+  `oxi-cli/src/store/settings.rs`): default `false`. `output_languages`
+  맵에 값이 있어도 이 플래그가 `false`이면 정책이 주입되지 않는다.
+  신규/기존(v5) 사용자 모두 OFF로 시작한다. `/settings` 오버레이에서
+  명시적으로 ON 해야 동작.
+- **자동 적용** (`oxi-cli/src/tui/overlay/settings.rs`,
+  `oxi-cli/src/app/agent_session.rs`): `/settings` 오버레이 Esc 시
+  `changed=true`이면 `persist_changes()` + `AgentSession::rebuild_system_prompt()`
+  를 자동 호출한다. 디스크 저장이 `set_system_prompt()`까지 단일 흐름으로
+  연결된다. `/reload` 슬래시 명령은 백업 경로로 유지.
+- **in-memory 캐시 동기화** (`rebuild_system_prompt`): 호출 직전에
+  디스크에서 fresh load하여 `AgentSession::settings` `Arc<RwLock<Settings>>`
+  를 교체한다. overlay가 `AgentSession` mutable API를 알 필요 없이
+  결정적으로 동기화됨.
+- **OFF 시 채널 설정 보존**: `language_policy_enabled`를 false로 두어도
+  `output_languages` 맵은 디스크에 보존된다. 다시 ON 하면 이전 채널
+  매핑이 그대로 적용됨.
+- **Disabled UI** (`SettingsItem::Choice::disabled: bool`): OFF일 때
+  채널 항목 4개는 회색으로 표시되고 `Enter`/`Space`로 순환되지 않는다.
+  시도 시 "Enable language_policy first." notification 표시.
+- **시그니처 변경** (`oxi-cli/src/prompt/system_prompt.rs`,
+  `oxi-cli/src/app/agent_session_runtime.rs`):
+  `language_directive(enabled: bool, channels: &HashMap<...>)` —
+  마스터 게이트 신규. `build_system_prompt(thinking, enabled, languages)`,
+  `build_compaction_instruction(enabled, languages)` — `enabled` 인자 추가.
+  기존 8개 테스트 시그니처 반영 + 신규 8개 테스트 추가.
+- **마이그레이션** (`Settings::SETTINGS_VERSION: 5 → 6`): 누락 시
+  `#[serde(default = "default_false")]`로 안전하게 false로 떨어진다.
+  별도 데이터 변환 없음 (필드 추가 only).
+- **문서**: `AGENTS.md` pitfalls에 "TUI-only — by design, not oversight"
+  및 채널이 분류기가 아님을 명시. `/settings` 슬래시 description 정정.
+  `docs/designs/2026-06-17-tui-language-policy.md` 신규.
+
+### Changed — Edition upgrade (2024 edition)
+
+- **Rust edition**: upgraded from 2021 to **2024** across all workspace
+  crates (`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`,
+  `scripts`).
+- **MSRV**: bumped from **1.82** to **1.96** (2024 edition requires
+  Rust ≥ 1.85; 1.96 is the MSRV floor going forward).
+- `rust-toolchain.toml` now pins to channel `1.96` (was `stable`).
+- All workspace crates inherit `edition` and `rust-version` from
+  `[workspace.package]` in the root `Cargo.toml`.
+- **Match ergonomics (2024)**: removed redundant `ref`/`ref mut`
+  bindings in patterns matching on references — the compiler now
+  implicitly borrows in these positions.
+- **`set_var`/`remove_var` → unsafe**: wrapped all calls to
+  `std::env::set_var` and `std::env::remove_var` in `unsafe {}`
+  blocks (these functions became `unsafe fn` in the 2024 edition).
+  Affected files: `oxi-cli/src/store/settings.rs`,
+  `oxi-ai/src/providers/vertex.rs`,
+  `oxi-ai/src/providers/register_builtins.rs`,
+  `oxi-ai/src/env_api_keys.rs`,
+  `oxi-ai/src/provider_registry.rs`.
+- **Clippy 1.96**: auto-fixed `collapsible_if` and `let_and_return`
+  lints (new in Rust 1.96 clippy) across the workspace.
+- **CI**: `RUST_VERSION_MSRV` in `.github/workflows/ci.yml` updated
+  to `1.96`.
+- **README**: Rust badge and install instructions updated to reflect
+  the new MSRV (≥ 1.96).
+
+### Documentation
+
+- **Added** `docs/release-process.md` — internal release playbook
+  capturing the workspace release workflow (version bump across all
+  six crates, CHANGELOG update, push, `publish.yml` topological-order
+  publish, rollback) for future maintainers.
+
+### Scope decisions (2026-06-07)
+
+- **Distribution channel:** crates.io only. No Homebrew tap, no Scoop
+  bucket, no apt/yum repos.
+- **Build target:** `aarch64-apple-darwin` (macOS Apple Silicon) only.
+  The maintainer does not have access to Linux or Windows build
+  environments, so cross-OS verification is not part of this pipeline.
+- **Supply chain:** SHA256SUMS generated on every release (unsigned).
+  No GPG signing, no Codecov coverage reporting.
+
+### Added — CI/CD & Supply Chain
+
+- **`release.yml` enhancements**:
+  - New `tag-check` job rejects tags not reachable from `origin/main`
+    (defense against force-pushed stale tags).
+  - Release job now generates `SHA256SUMS` next to binaries.
+  - CycloneDX 1.5 SBOM (`oxi.cdx.json`) attached to the GitHub release.
+  - Matrix simplified to a single target (`aarch64-apple-darwin`).
+- **`publish.yml`** (new) — publishes all 6 workspace crates to
+  `crates.io` in topological order on `release: published`, with a
+  dry-run `cargo package --no-verify` pre-flight. Requires `CARGO_TOKEN`
+  secret. Run `workflow_dispatch` for a manual dry run.
+- **`sbom.yml`** (new) — generates a CycloneDX SBOM on every push to
+  `main`, submits it to GitHub's dependency-graph API (so Dependabot
+  sees transitive crates), and uploads the JSON as a workflow artifact.
+- **`labels.yml`** (new) — single source of truth for issue labels
+  (priority, area, status, type, provider). 30+ labels, including
+  `good first issue` and `help wanted`. Synced to the repo by the
+  `labels.yml` workflow (weekly + on labels.yml change).
+- **`FUNDING.yml`** (new) — surfaces a "Sponsor" button on the repo
+  page (GitHub Sponsors).
+- **`.pre-commit-config.yaml`** (new) — local pre-commit hooks that
+  mirror the ci.yml gate: trailing whitespace, EOF, YAML/TOML lint,
+  merge-conflict, large files, private keys, no-commit-to-main,
+  `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`.
+- **`ci.yml` enhancements**:
+  - `smoke-test` now has a 15-min timeout.
+  - New `msrv` job verifies the workspace builds on Rust 1.82.
+  - New `doc` job builds `cargo doc --no-deps` with
+    `RUSTDOCFLAGS="-D warnings"`.
+- **`test.yml` enhancements**:
+  - Triggered on `pull_request` (was: main-only). Every PR now runs
+    the full nextest matrix.
+  - Matrix simplified to `macos-latest` only.
+- **`build-binaries.yml`** matrix simplified to `aarch64-apple-darwin`
+  only.
+
+### Changed — Repository Hygiene
+
+- **Dependabot groups** — `dependabot.yml` now groups all cargo
+  patches into a single weekly PR (with separate major-bump group),
+  and groups all GitHub Actions updates similarly. Reduces PR
+  noise from 3-5/week to 1-2/week.
+- **Removed `[patch.crates-io]` from `Cargo.toml`** — workspace
+  members are auto-resolved via `members`, and the explicit patches
+  blocked `cargo publish`. This is a prerequisite for `publish.yml`.
+
+### Added — Issue/PR Workflow
+
+- **30+ standardized issue labels** — `priority: critical/high/medium/low`,
+  `area: ai/agent/tui/sdk/cli/ci/docs/extensions/security`,
+  `status: needs-triage/in-progress/review/blocked`,
+  `type: regression/performance/refactor/breaking-change`,
+  `provider: anthropic/openai/google/other`, plus `good first issue`,
+  `help wanted`, `dependencies`, `release`.
+
+
+## [Unreleased]
 ## [0.40.0] - 2026-06-21
 ### Fixed — production-readiness audit remediation
 
@@ -843,141 +1010,6 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - `once_cell` — from oxi-ai (replaced by `std::sync::LazyLock`)
 - `lazy_static` — from oxi-cli (unused)
 - `tokio-test` — from oxi-ai, oxi-agent (unused)
-
-## [Unreleased]
-
-### Changed — TUI 언어 정책 default OFF + 자동 적용
-
-기존 TUI 언어 정책(`Settings::output_languages`)은 **사용자 설정이 있어도
-기본적으로 활성화되지 않도록** 변경되었으며, 오버레이 변경이 라이브
-세션에 즉시 반영되도록 개선되었다. `oxi --print` 및 RPC 모드의 비대칭은
-**의도된 설계**이므로 변경되지 않았다 (AGENTS.md pitfalls 참조).
-
-- **Master toggle 신설** (`Settings::language_policy_enabled: bool`,
-  `oxi-cli/src/store/settings.rs`): default `false`. `output_languages`
-  맵에 값이 있어도 이 플래그가 `false`이면 정책이 주입되지 않는다.
-  신규/기존(v5) 사용자 모두 OFF로 시작한다. `/settings` 오버레이에서
-  명시적으로 ON 해야 동작.
-- **자동 적용** (`oxi-cli/src/tui/overlay/settings.rs`,
-  `oxi-cli/src/app/agent_session.rs`): `/settings` 오버레이 Esc 시
-  `changed=true`이면 `persist_changes()` + `AgentSession::rebuild_system_prompt()`
-  를 자동 호출한다. 디스크 저장이 `set_system_prompt()`까지 단일 흐름으로
-  연결된다. `/reload` 슬래시 명령은 백업 경로로 유지.
-- **in-memory 캐시 동기화** (`rebuild_system_prompt`): 호출 직전에
-  디스크에서 fresh load하여 `AgentSession::settings` `Arc<RwLock<Settings>>`
-  를 교체한다. overlay가 `AgentSession` mutable API를 알 필요 없이
-  결정적으로 동기화됨.
-- **OFF 시 채널 설정 보존**: `language_policy_enabled`를 false로 두어도
-  `output_languages` 맵은 디스크에 보존된다. 다시 ON 하면 이전 채널
-  매핑이 그대로 적용됨.
-- **Disabled UI** (`SettingsItem::Choice::disabled: bool`): OFF일 때
-  채널 항목 4개는 회색으로 표시되고 `Enter`/`Space`로 순환되지 않는다.
-  시도 시 "Enable language_policy first." notification 표시.
-- **시그니처 변경** (`oxi-cli/src/prompt/system_prompt.rs`,
-  `oxi-cli/src/app/agent_session_runtime.rs`):
-  `language_directive(enabled: bool, channels: &HashMap<...>)` —
-  마스터 게이트 신규. `build_system_prompt(thinking, enabled, languages)`,
-  `build_compaction_instruction(enabled, languages)` — `enabled` 인자 추가.
-  기존 8개 테스트 시그니처 반영 + 신규 8개 테스트 추가.
-- **마이그레이션** (`Settings::SETTINGS_VERSION: 5 → 6`): 누락 시
-  `#[serde(default = "default_false")]`로 안전하게 false로 떨어진다.
-  별도 데이터 변환 없음 (필드 추가 only).
-- **문서**: `AGENTS.md` pitfalls에 "TUI-only — by design, not oversight"
-  및 채널이 분류기가 아님을 명시. `/settings` 슬래시 description 정정.
-  `docs/designs/2026-06-17-tui-language-policy.md` 신규.
-
-### Changed — Edition upgrade (2024 edition)
-
-- **Rust edition**: upgraded from 2021 to **2024** across all workspace
-  crates (`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`,
-  `scripts`).
-- **MSRV**: bumped from **1.82** to **1.96** (2024 edition requires
-  Rust ≥ 1.85; 1.96 is the MSRV floor going forward).
-- `rust-toolchain.toml` now pins to channel `1.96` (was `stable`).
-- All workspace crates inherit `edition` and `rust-version` from
-  `[workspace.package]` in the root `Cargo.toml`.
-- **Match ergonomics (2024)**: removed redundant `ref`/`ref mut`
-  bindings in patterns matching on references — the compiler now
-  implicitly borrows in these positions.
-- **`set_var`/`remove_var` → unsafe**: wrapped all calls to
-  `std::env::set_var` and `std::env::remove_var` in `unsafe {}`
-  blocks (these functions became `unsafe fn` in the 2024 edition).
-  Affected files: `oxi-cli/src/store/settings.rs`,
-  `oxi-ai/src/providers/vertex.rs`,
-  `oxi-ai/src/providers/register_builtins.rs`,
-  `oxi-ai/src/env_api_keys.rs`, `oxi-ai/src/provider_registry.rs`.
-- **Clippy 1.96**: auto-fixed `collapsible_if` and `let_and_return`
-  lints (new in Rust 1.96 clippy) across the workspace.
-- **CI**: `RUST_VERSION_MSRV` in `.github/workflows/ci.yml` updated
-  to `1.96`.
-- **README**: Rust badge and install instructions updated to reflect
-  the new MSRV (≥ 1.96).
-
-### Scope decisions (2026-06-07)
-
-- **Distribution channel:** crates.io only. No Homebrew tap, no Scoop
-  bucket, no apt/yum repos.
-- **Build target:** `aarch64-apple-darwin` (macOS Apple Silicon) only.
-  The maintainer does not have access to Linux or Windows build
-  environments, so cross-OS verification is not part of this pipeline.
-- **Supply chain:** SHA256SUMS generated on every release (unsigned).
-  No GPG signing, no Codecov coverage reporting.
-
-### Added — CI/CD & Supply Chain
-
-- **`release.yml` enhancements**:
-  - New `tag-check` job rejects tags not reachable from `origin/main`
-    (defense against force-pushed stale tags).
-  - Release job now generates `SHA256SUMS` next to binaries.
-  - CycloneDX 1.5 SBOM (`oxi.cdx.json`) attached to the GitHub release.
-  - Matrix simplified to a single target (`aarch64-apple-darwin`).
-- **`publish.yml`** (new) — publishes all 6 workspace crates to
-  `crates.io` in topological order on `release: published`, with a
-  dry-run `cargo package --no-verify` pre-flight. Requires `CARGO_TOKEN`
-  secret. Run `workflow_dispatch` for a manual dry run.
-- **`sbom.yml`** (new) — generates a CycloneDX SBOM on every push to
-  `main`, submits it to GitHub's dependency-graph API (so Dependabot
-  sees transitive crates), and uploads the JSON as a workflow artifact.
-- **`labels.yml`** (new) — single source of truth for issue labels
-  (priority, area, status, type, provider). 30+ labels, including
-  `good first issue` and `help wanted`. Synced to the repo by
-  `labels.yml` workflow (weekly + on labels.yml change).
-- **`FUNDING.yml`** (new) — surfaces a "Sponsor" button on the repo
-  page (GitHub Sponsors).
-- **`.pre-commit-config.yaml`** (new) — local pre-commit hooks that
-  mirror the ci.yml gate: trailing whitespace, EOF, YAML/TOML lint,
-  merge-conflict, large files, private keys, no-commit-to-main,
-  `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`.
-- **`ci.yml` enhancements**:
-  - `smoke-test` now has a 15-min timeout.
-  - New `msrv` job verifies the workspace builds on Rust 1.82.
-  - New `doc` job builds `cargo doc --no-deps` with
-    `RUSTDOCFLAGS="-D warnings"`.
-- **`test.yml` enhancements**:
-  - Triggered on `pull_request` (was: main-only). Every PR now runs
-    the full nextest matrix.
-  - Matrix simplified to `macos-latest` only.
-- **`build-binaries.yml`** matrix simplified to `aarch64-apple-darwin`
-  only.
-
-### Changed — Repository Hygiene
-
-- **Dependabot groups** — `dependabot.yml` now groups all cargo
-  patches into a single weekly PR (with separate major-bump group),
-  and groups all GitHub Actions updates similarly. Reduces PR
-  noise from 3-5/week to 1-2/week.
-- **Removed `[patch.crates-io]` from `Cargo.toml`** — workspace
-  members are auto-resolved via `members`, and the explicit patches
-  blocked `cargo publish`. This is a prerequisite for `publish.yml`.
-
-### Added — Issue/PR Workflow
-
-- **30+ standardized issue labels** — `priority: critical/high/medium/low`,
-  `area: ai/agent/tui/sdk/cli/ci/docs/extensions/security`,
-  `status: needs-triage/in-progress/review/blocked`,
-  `type: regression/performance/refactor/breaking-change`,
-  `provider: anthropic/openai/google/other`, plus `good first issue`,
-  `help wanted`, `dependencies`, `release`.
 
 ## [0.30.0] - 2026-06-06
 
