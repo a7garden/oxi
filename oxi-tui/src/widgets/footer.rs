@@ -182,7 +182,10 @@ impl StatefulWidget for Footer<'_> {
 
             let mut left_spans: Vec<Span<'_>> = vec![
                 Span::styled(
-                    format!(" \u{2191}{} \u{2193}{}", in_fmt, out_fmt),
+                    format!(
+                        " {}{} {}{}",
+                        styles.symbols.arrow_up, in_fmt, styles.symbols.arrow_down, out_fmt
+                    ),
                     token_style,
                 ),
                 Span::styled(
@@ -215,7 +218,7 @@ impl StatefulWidget for Footer<'_> {
             // Optional right-aligned extra (e.g., issue counts injected by oxi-cli).
             if !d.extra_right.is_empty() {
                 left_spans.push(Span::styled(
-                    format!("  \u{2502} {}", d.extra_right),
+                    format!("  {} {}", styles.symbols.sep_pipe.trim(), d.extra_right),
                     Style::default().fg(self.theme.colors.accent),
                 ));
             }
@@ -297,7 +300,10 @@ impl StatefulWidget for Footer<'_> {
                 }
                 right_spans.push(Span::styled(model_part.to_string(), model_bold));
                 if let Some(ref level) = d.thinking_level {
-                    right_spans.push(Span::styled(format!(" \u{2022} {}", level), thinking_style));
+                    right_spans.push(Span::styled(
+                        format!("  {}", styles.symbols.thinking_level_icon(level)),
+                        thinking_style,
+                    ));
                 }
             }
 

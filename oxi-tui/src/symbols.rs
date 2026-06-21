@@ -60,10 +60,10 @@ impl GlyphSet {
     /// so the user can see whether their terminal handles the preset.
     pub fn sample(self) -> &'static str {
         match self {
-            GlyphSet::Unicode => "✔ ✖ ⚠ ● ▸ ▾ ╭─╮ │ └─┘ ⠋ ⣾",
+            GlyphSet::Unicode => "✔ ✖ ⚠ ● ▸ ▾ ╭─╮ │ └─┘ ⠋ ⣾ ↑ ↓ ⚙ 🔧",
             GlyphSet::Ascii => "[ok] [x] [!] [*] > + - +-+ | +-+ | \\ -",
             GlyphSet::Nerd => {
-                "\u{f00c} \u{f00d} \u{f071} \u{f111} \u{f0da} \u{f0d7} \u{e0b0} \u{f126}"
+                "\u{f00c} \u{f00d} \u{f071} \u{f111} \u{f0da} \u{f0d7} \u{e0b0} \u{f126} \u{f013} \u{f077} \u{f078} \u{f0ad}"
             }
         }
     }
@@ -167,6 +167,10 @@ pub struct Symbols {
     pub arrow_right: &'static str,
     /// Backward arrow.
     pub arrow_left: &'static str,
+    /// Upward arrow.
+    pub arrow_up: &'static str,
+    /// Downward arrow.
+    pub arrow_down: &'static str,
 
     // ── Tree connectors ──────────────────────────────────────────────
     /// Mid-tree branch connector (e.g. `├─`).
@@ -266,6 +270,58 @@ pub struct Symbols {
     /// Todo / checklist icon.
     pub icon_todo: &'static str,
 
+    // ── Thinking / activity ──────────────────────────────────────────────
+    /// Thinking / processing gear icon.
+    pub icon_thinking: &'static str,
+    /// Thinking level: off / disabled.
+    pub icon_thinking_off: &'static str,
+    /// Thinking level: minimal effort.
+    pub icon_thinking_minimal: &'static str,
+    /// Thinking level: low effort.
+    pub icon_thinking_low: &'static str,
+    /// Thinking level: medium effort.
+    pub icon_thinking_medium: &'static str,
+    /// Thinking level: high effort.
+    pub icon_thinking_high: &'static str,
+    /// Thinking level: extreme / maximum effort.
+    pub icon_thinking_xhigh: &'static str,
+
+    // ── Language icons (code block headers) ─────────────────────────
+    /// Rust language icon.
+    pub icon_lang_rust: &'static str,
+    /// Python language icon.
+    pub icon_lang_python: &'static str,
+    /// JavaScript language icon.
+    pub icon_lang_javascript: &'static str,
+    /// TypeScript language icon.
+    pub icon_lang_typescript: &'static str,
+    /// Go language icon.
+    pub icon_lang_go: &'static str,
+    /// Java language icon.
+    pub icon_lang_java: &'static str,
+    /// C / C++ language icon.
+    pub icon_lang_cpp: &'static str,
+    /// C# language icon.
+    pub icon_lang_csharp: &'static str,
+    /// Swift language icon.
+    pub icon_lang_swift: &'static str,
+    /// Kotlin language icon.
+    pub icon_lang_kotlin: &'static str,
+    /// Shell / Bash language icon.
+    pub icon_lang_shell: &'static str,
+    /// HTML language icon.
+    pub icon_lang_html: &'static str,
+    /// CSS language icon.
+    pub icon_lang_css: &'static str,
+    /// JSON language icon.
+    pub icon_lang_json: &'static str,
+    /// SQL language icon.
+    pub icon_lang_sql: &'static str,
+    /// Docker language icon.
+    pub icon_lang_docker: &'static str,
+    /// Generic / unknown language fallback icon.
+    pub icon_lang_default: &'static str,
+
     // ── Per-tool identity glyphs (success header signature) ──────────
     /// Bash / shell tool glyph.
     pub tool_bash: &'static str,
@@ -289,6 +345,8 @@ pub struct Symbols {
     pub tool_mcp: &'static str,
     /// Ask / questionnaire tool glyph.
     pub tool_ask: &'static str,
+    /// Generic / fallback tool glyph for unknown tools.
+    pub tool_generic: &'static str,
 
     // ── Spinner animation frames ─────────────────────────────────────
     /// "Status" spinner — tight, for inline status indicators.
@@ -318,6 +376,8 @@ impl Symbols {
             nav_back: "⟵",
             arrow_right: "→",
             arrow_left: "←",
+            arrow_up: "↑",
+            arrow_down: "↓",
             tree_branch: "├─",
             tree_last: "└─",
             tree_vertical: "│",
@@ -360,6 +420,13 @@ impl Symbols {
             icon_prompt: "❯",
             icon_warning: "⚠",
             icon_todo: "📋",
+            icon_thinking: "⚙",
+            icon_thinking_off: "○ off",
+            icon_thinking_minimal: "◔ min",
+            icon_thinking_low: "◑ low",
+            icon_thinking_medium: "◒ med",
+            icon_thinking_high: "◕ high",
+            icon_thinking_xhigh: "◉ xhi",
             tool_bash: "❯",
             tool_edit: "✎",
             tool_write: "✎",
@@ -371,6 +438,24 @@ impl Symbols {
             tool_debug: "🐞",
             tool_mcp: "🔌",
             tool_ask: "?",
+            tool_generic: "🔧",
+            icon_lang_rust: "rs",
+            icon_lang_python: "py",
+            icon_lang_javascript: "js",
+            icon_lang_typescript: "ts",
+            icon_lang_go: "go",
+            icon_lang_java: "java",
+            icon_lang_cpp: "c++",
+            icon_lang_csharp: "cs",
+            icon_lang_swift: "sw",
+            icon_lang_kotlin: "kt",
+            icon_lang_shell: "sh",
+            icon_lang_html: "html",
+            icon_lang_css: "css",
+            icon_lang_json: "json",
+            icon_lang_sql: "sql",
+            icon_lang_docker: "docker",
+            icon_lang_default: "?",
             spinner_status: SPINNER_STATUS_UNICODE,
             spinner_activity: SPINNER_ACTIVITY_UNICODE,
         }
@@ -396,6 +481,8 @@ impl Symbols {
             nav_back: "<-",
             arrow_right: "->",
             arrow_left: "<-",
+            arrow_up: "^",
+            arrow_down: "v",
             tree_branch: "|--",
             tree_last: "`--",
             tree_vertical: "|",
@@ -438,6 +525,13 @@ impl Symbols {
             icon_prompt: ">",
             icon_warning: "[!]",
             icon_todo: "[T]",
+            icon_thinking: "[~]",
+            icon_thinking_off: "[off]",
+            icon_thinking_minimal: "[min]",
+            icon_thinking_low: "[low]",
+            icon_thinking_medium: "[med]",
+            icon_thinking_high: "[high]",
+            icon_thinking_xhigh: "[xhi]",
             tool_bash: "$",
             tool_edit: "~",
             tool_write: "+f",
@@ -449,6 +543,24 @@ impl Symbols {
             tool_debug: "dbg",
             tool_mcp: "<>",
             tool_ask: "[?]",
+            tool_generic: "[*]",
+            icon_lang_rust: "[rs]",
+            icon_lang_python: "[py]",
+            icon_lang_javascript: "[js]",
+            icon_lang_typescript: "[ts]",
+            icon_lang_go: "[go]",
+            icon_lang_java: "[java]",
+            icon_lang_cpp: "[c++]",
+            icon_lang_csharp: "[cs]",
+            icon_lang_swift: "[sw]",
+            icon_lang_kotlin: "[kt]",
+            icon_lang_shell: "[sh]",
+            icon_lang_html: "[html]",
+            icon_lang_css: "[css]",
+            icon_lang_json: "[json]",
+            icon_lang_sql: "[sql]",
+            icon_lang_docker: "[docker]",
+            icon_lang_default: "[?]",
             spinner_status: SPINNER_STATUS_ASCII,
             spinner_activity: SPINNER_ACTIVITY_ASCII,
         }
@@ -474,6 +586,8 @@ impl Symbols {
             nav_back: "\u{f060}",       //
             arrow_right: "\u{f054}",    //
             arrow_left: "\u{f053}",     //
+            arrow_up: "\u{f077}",       //
+            arrow_down: "\u{f078}",     //
             tree_branch: "├─",
             tree_last: "└─",
             tree_vertical: "│",
@@ -499,36 +613,109 @@ impl Symbols {
             rule: "─",
             bullet: "\u{f111}", //
             dash: "–",
-            checkbox_on: "\u{f14a}",  //
-            checkbox_off: "\u{f096}", //
-            radio_on: "\u{f192}",     //
-            radio_off: "\u{f10c}",    //
-            icon_folder: "\u{f115}",  //
-            icon_file: "\u{f15b}",    //
-            icon_search: "\u{f002}",  //
-            icon_git: "\u{f1d3}",     //
-            icon_branch: "\u{f126}",  //
-            icon_model: "\u{ec19}",   //
-            icon_cost: "\u{f155}",    //
-            icon_time: "\u{f017}",    //
-            icon_tokens: "\u{e26b}",  //
-            icon_context: "\u{e70f}", //
-            icon_prompt: "\u{f054}",  //
-            icon_warning: "\u{f071}", //
-            icon_todo: "\u{f03a}",    //
-            tool_bash: "\u{ebca}",    //
-            tool_edit: "\u{ea73}",    //
-            tool_write: "\u{ea7f}",   //
-            tool_read: "\u{f02d}",    //
-            tool_search: "\u{f002}",  //
-            tool_task: "\u{f4a0}",    //
-            tool_web: "\u{eaae}",     //
-            tool_lsp: "\u{ea61}",     //
-            tool_debug: "\u{ead8}",   //
-            tool_mcp: "\u{eb2d}",     //
-            tool_ask: "\u{f059}",     //
+            checkbox_on: "\u{f14a}",               //
+            checkbox_off: "\u{f096}",              //
+            radio_on: "\u{f192}",                  //
+            radio_off: "\u{f10c}",                 //
+            icon_folder: "\u{f115}",               //
+            icon_file: "\u{f15b}",                 //
+            icon_search: "\u{f002}",               //
+            icon_git: "\u{f1d3}",                  //
+            icon_branch: "\u{f126}",               //
+            icon_model: "\u{ec19}",                //
+            icon_cost: "\u{f155}",                 //
+            icon_time: "\u{f017}",                 //
+            icon_tokens: "\u{e26b}",               //
+            icon_context: "\u{e70f}",              //
+            icon_prompt: "\u{f054}",               //
+            icon_warning: "\u{f071}",              //
+            icon_todo: "\u{f03a}",                 //
+            icon_thinking: "\u{f013}",             //
+            icon_thinking_off: "\u{f05e} off",     //
+            icon_thinking_minimal: "\u{f0e7} min", //
+            icon_thinking_low: "\u{f10c} low",     //
+            icon_thinking_medium: "\u{f192} med",  //
+            icon_thinking_high: "\u{f111} high",   //
+            icon_thinking_xhigh: "\u{f06d} xhi",   //
+            tool_bash: "\u{ebca}",                 //
+            tool_edit: "\u{ea73}",                 //
+            tool_write: "\u{ea7f}",                //
+            tool_read: "\u{f02d}",                 //
+            tool_search: "\u{f002}",               //
+            tool_task: "\u{f4a0}",                 //
+            tool_web: "\u{eaae}",                  //
+            tool_lsp: "\u{ea61}",                  //
+            tool_debug: "\u{ead8}",                //
+            tool_mcp: "\u{eb2d}",                  //
+            tool_ask: "\u{f059}",                  //
+            tool_generic: "\u{f0ad}",              //
+            icon_lang_rust: "\u{e7a8} rs",
+            icon_lang_python: "\u{e73c} py",
+            icon_lang_javascript: "\u{e781} js",
+            icon_lang_typescript: "\u{e6a6} ts",
+            icon_lang_go: "\u{e724} go",
+            icon_lang_java: "\u{e738} java",
+            icon_lang_cpp: "\u{e61d} c++",
+            icon_lang_csharp: "\u{e64a} cs",
+            icon_lang_swift: "\u{e755} sw",
+            icon_lang_kotlin: "\u{e70c} kt",
+            icon_lang_shell: "\u{e795} sh",
+            icon_lang_html: "\u{e736} html",
+            icon_lang_css: "\u{e749} css",
+            icon_lang_json: "\u{e787} json",
+            icon_lang_sql: "\u{e706} sql",
+            icon_lang_docker: "\u{e7b0} docker",
+            icon_lang_default: "\u{f15c} ?",
             spinner_status: SPINNER_STATUS_NERD,
             spinner_activity: SPINNER_ACTIVITY_UNICODE,
+        }
+    }
+
+    /// Resolve a thinking level name to its icon+label glyph.
+    ///
+    /// The level name is the lowercase thinking level string
+    /// (e.g., "off", "minimal", "low", "medium", "high", "xhigh").
+    /// Returns the pre-combined icon+label from the active glyph set,
+    /// or the "off" icon for unknown levels.
+    pub fn thinking_level_icon(self, level: &str) -> &'static str {
+        match level {
+            "off" => self.icon_thinking_off,
+            "minimal" => self.icon_thinking_minimal,
+            "low" => self.icon_thinking_low,
+            "medium" => self.icon_thinking_medium,
+            "high" => self.icon_thinking_high,
+            "xhigh" => self.icon_thinking_xhigh,
+            _ => self.icon_thinking_off,
+        }
+    }
+
+    /// Resolve a language identifier to its icon+label glyph for code blocks.
+    ///
+    /// Accepts short aliases (e.g., "rs", "py", "ts", "sh") and full names
+    /// (e.g., "rust", "python", "typescript", "bash").
+    pub fn lang_icon(self, lang: &str) -> &'static str {
+        match lang {
+            "rust" | "rs" => self.icon_lang_rust,
+            "python" | "py" => self.icon_lang_python,
+            "javascript" | "js" => self.icon_lang_javascript,
+            "typescript" | "ts" | "tsx" | "jsx" => self.icon_lang_typescript,
+            "go" => self.icon_lang_go,
+            "java" => self.icon_lang_java,
+            "c" | "cpp" | "c++" | "cxx" => self.icon_lang_cpp,
+            "csharp" | "cs" | "c#" => self.icon_lang_csharp,
+            "swift" => self.icon_lang_swift,
+            "kotlin" | "kt" => self.icon_lang_kotlin,
+            "bash" | "sh" | "shell" | "zsh" => self.icon_lang_shell,
+            "html" => self.icon_lang_html,
+            "css" => self.icon_lang_css,
+            "json" => self.icon_lang_json,
+            "sql" => self.icon_lang_sql,
+            "docker" | "dockerfile" => self.icon_lang_docker,
+            "yaml" | "yml" | "toml" | "xml" | "ini" | "conf" => self.icon_lang_json,
+            "ruby" | "rb" | "php" | "lua" | "markdown" | "md" | "text" | "txt" => {
+                self.icon_lang_default
+            }
+            _ => self.icon_lang_default,
         }
     }
 }
@@ -624,6 +811,20 @@ mod tests {
             assert!(!s.rule.is_empty());
             assert!(!s.spinner_status.is_empty());
             assert!(!s.spinner_activity.is_empty());
+            assert!(!s.arrow_up.is_empty());
+            assert!(!s.arrow_down.is_empty());
+            assert!(!s.icon_thinking.is_empty());
+            assert!(!s.tool_generic.is_empty());
+            assert!(!s.icon_thinking_off.is_empty());
+            assert!(!s.icon_thinking_minimal.is_empty());
+            assert!(!s.icon_thinking_low.is_empty());
+            assert!(!s.icon_thinking_medium.is_empty());
+            assert!(!s.icon_thinking_high.is_empty());
+            assert!(!s.icon_thinking_xhigh.is_empty());
+            assert!(!s.icon_lang_rust.is_empty());
+            assert!(!s.icon_lang_python.is_empty());
+            assert!(!s.icon_lang_shell.is_empty());
+            assert!(!s.icon_lang_default.is_empty());
         }
         assert_ne!(Symbols::unicode(), Symbols::ascii());
         assert_ne!(Symbols::unicode(), Symbols::nerd());
@@ -642,6 +843,20 @@ mod tests {
             s.sep_block,
             s.bullet,
             s.tool_bash,
+            s.arrow_up,
+            s.arrow_down,
+            s.icon_thinking,
+            s.tool_generic,
+            s.icon_thinking_off,
+            s.icon_thinking_minimal,
+            s.icon_thinking_low,
+            s.icon_thinking_medium,
+            s.icon_thinking_high,
+            s.icon_thinking_xhigh,
+            s.icon_lang_rust,
+            s.icon_lang_python,
+            s.icon_lang_shell,
+            s.icon_lang_default,
         ] {
             assert!(
                 field.is_ascii(),

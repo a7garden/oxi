@@ -297,6 +297,11 @@ pub(crate) fn highlight_code(
     styles: &ThemeStyles,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    // Header line: language icon + language name
+    lines.push(Line::from(Span::styled(
+        format!("{} {}", styles.symbols.lang_icon(lang), lang),
+        styles.muted,
+    )));
     for line in content.lines() {
         lines.push(highlight_line(line, lang, styles));
     }

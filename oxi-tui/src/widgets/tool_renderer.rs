@@ -198,12 +198,36 @@ pub fn count_diff_stats(diff: &str) -> (u32, u32) {
 
 // ── Call formatters ───────────────────────────────────────────────────────
 
-/// Format a tool call header line.
+/// Resolve a tool name to its icon glyph from the active symbol set.
+fn tool_icon(name: &str, sym: crate::symbols::Symbols) -> &'static str {
+    match name {
+        "edit" => sym.tool_edit,
+        "bash" => sym.tool_bash,
+        "read" => sym.tool_read,
+        "write" => sym.tool_write,
+        "grep" | "find" | "ls" => sym.tool_search,
+        "issue" => sym.icon_search,
+        "ask" => sym.tool_ask,
+        "web_search" | "get_search_results" => sym.tool_web,
+        "subagent" | "task" => sym.tool_task,
+        "mcp" => sym.tool_mcp,
+        "lsp" => sym.tool_lsp,
+        "debug" => sym.tool_debug,
+        "generate_image" => sym.tool_write,
+        "memory_recall" | "memory_reflect" | "memory_retain" | "memory_edit" => sym.tool_task,
+        "context7" => sym.icon_context,
+        "github" => sym.icon_git,
+        _ => sym.tool_generic,
+    }
+}
+
+/// Format a tool call header line with the tool icon prepended.
 fn format_call_header(name: &str, extra: &str, styles: &ThemeStyles) -> Line<'static> {
+    let icon = tool_icon(name, styles.symbols);
     let name_style = styles.accent.add_modifier(Modifier::BOLD);
     let extra_style = styles.muted;
     Line::from(vec![
-        Span::styled(format!("{} ", name), name_style),
+        Span::styled(format!("{icon} {name} "), name_style),
         Span::styled(extra.to_string(), extra_style),
     ])
 }
@@ -294,12 +318,7 @@ pub fn format_write_call(args: &Value, styles: &ThemeStyles) -> Vec<Line<'static
 
 /// Format search tools (grep, find, ls).
 pub fn format_search_call(name: &str, args: &Value, styles: &ThemeStyles) -> Vec<Line<'static>> {
-    let icon = match name {
-        "grep" => "[G]",
-        "find" => "[F]",
-        "ls" => "[D]",
-        _ => styles.symbols.icon_search,
-    };
+    let icon = tool_icon(name, styles.symbols);
 
     let path = get_path(args).unwrap_or_else(|| ".".to_string());
 
@@ -309,10 +328,10 @@ pub fn format_search_call(name: &str, args: &Value, styles: &ThemeStyles) -> Vec
         .map(|p| format!(" \"{}\"", truncate_to_width(p, 30)))
         .unwrap_or_default();
 
-    let extra = format!("{}{} {}", icon, pattern, path);
+    let extra = format!("{}{}", pattern, path);
     vec![Line::from(vec![
         Span::styled(
-            format!("{} ", name),
+            format!("{icon} {name} "),
             styles.accent.add_modifier(Modifier::BOLD),
         ),
         Span::styled(extra, styles.muted),
@@ -622,9 +641,10 @@ pub fn format_generic_call(
     max_width: usize,
     styles: &ThemeStyles,
 ) -> Vec<Line<'static>> {
+    let icon = tool_icon(name, styles.symbols);
     let name_style = styles.accent.add_modifier(Modifier::BOLD);
     let mut lines = vec![Line::from(vec![Span::styled(
-        format!("{} ", name),
+        format!("{icon} {name} "),
         name_style,
     )])];
 
@@ -659,7 +679,7 @@ pub fn format_ask_call(args: &Value, max_width: usize, styles: &ThemeStyles) -> 
         _ => {
             // Missing or malformed arguments — degrade to a single header line.
             return vec![Line::from(Span::styled(
-                "ask".to_string(),
+                format!("{} ask", tool_icon("ask", styles.symbols)),
                 styles.accent.add_modifier(Modifier::BOLD),
             ))];
         }

@@ -369,7 +369,10 @@ impl Widget for EntryWidget<'_> {
 
                 if *collapsed {
                     lines.push(Line::from(vec![
-                        Span::styled("\u{2699} ", header_style),
+                        Span::styled(
+                            format!("{} ", self.styles.symbols.icon_thinking),
+                            header_style,
+                        ),
                         Span::styled("Thinking".to_string(), header_style),
                         Span::styled(count_str, self.styles.muted),
                         Span::styled(" \u{00B7} click to expand".to_string(), self.styles.muted),
@@ -383,7 +386,10 @@ impl Widget for EntryWidget<'_> {
                     }
                 } else {
                     lines.push(Line::from(vec![
-                        Span::styled("\u{2699} ", header_style),
+                        Span::styled(
+                            format!("{} ", self.styles.symbols.icon_thinking),
+                            header_style,
+                        ),
                         Span::styled("Thinking".to_string(), header_style),
                         Span::styled(count_str, self.styles.muted),
                     ]));

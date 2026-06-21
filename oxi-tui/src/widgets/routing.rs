@@ -172,7 +172,7 @@ impl StatefulWidget for RoutingStatus<'_> {
         let d = &state.data;
 
         // Block with title
-        let title = " \u{2699} Routing Status ";
+        let title = format!(" {} Routing Status ", styles.symbols.icon_thinking);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(styles.border)
