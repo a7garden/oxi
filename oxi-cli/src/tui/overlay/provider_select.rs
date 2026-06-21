@@ -555,9 +555,9 @@ impl ProviderSelectOverlay {
                     // with self.selected (also index in self.providers)
                     let is_sel = *global_index == self.selected;
                     let check = if entry.has_key {
-                        "\u{2713}"
+                        theme.symbols.status_success
                     } else {
-                        "\u{25CB}"
+                        theme.symbols.dot_off
                     };
                     let pointer = if is_sel { ">" } else { " " };
 

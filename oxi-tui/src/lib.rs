@@ -19,6 +19,7 @@ pub mod keybindings;
 pub mod markdown_styles;
 pub mod overlay_anchor;
 pub mod render;
+pub mod symbols;
 pub mod table_renderer;
 pub mod text;
 pub mod theme;
@@ -33,5 +34,7 @@ pub use fuzzy::{FuzzyResult, fuzzy_match, fuzzy_rank};
 /// Truncate text to a terminal display width.
 pub use text::truncate_to_width;
 
+/// Glyph set system: pluggable Unicode / ASCII / Nerd-Font symbol presets.
+pub use symbols::{GlyphSet, Symbols, UnknownGlyphSet};
 /// Theme system: color schemes, spacing, style management.
 pub use theme::{ColorScheme, Spacing, Theme, ThemeFile, ThemeManager, ThemeStyles};

@@ -638,7 +638,7 @@ impl QuestionnaireOverlay {
                         "Type something...".to_string(),
                         styles.accent.add_modifier(Modifier::DIM),
                     ),
-                    Span::styled(" ✎".to_string(), styles.accent),
+                    Span::styled(format!(" {}", styles.symbols.tool_edit), styles.accent),
                 ]));
             }
         }
@@ -666,7 +666,7 @@ impl QuestionnaireOverlay {
         if self.all_answered() {
             lines.push(Line::from(vec![
                 Span::styled(
-                    " ✓ ".to_string(),
+                    format!(" {} ", styles.symbols.status_success),
                     styles.success.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -828,9 +828,9 @@ impl QuestionnaireOverlay {
 
         let can_submit = self.all_answered();
         let (submit_char, submit_style) = if can_submit {
-            ("✓", styles.success)
+            (styles.symbols.status_success, styles.success)
         } else {
-            ("·", styles.muted)
+            (styles.symbols.bullet, styles.muted)
         };
         let is_submit_active = self.current_tab == self.submit_tab();
         lines.push(Line::from(vec![Span::styled(

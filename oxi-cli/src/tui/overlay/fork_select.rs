@@ -152,7 +152,7 @@ impl OverlayComponent for ForkSelectOverlay {
                     .bg(theme.colors.primary)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol("→ ");
+            .highlight_symbol(theme.symbols.cursor);
 
         frame.render_stateful_widget(
             list,

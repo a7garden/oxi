@@ -197,7 +197,7 @@ pub fn format_search_call(name: &str, args: &Value, styles: &ThemeStyles) -> Vec
         "grep" => "[G]",
         "find" => "[F]",
         "ls" => "[D]",
-        _ => "○",
+        _ => styles.symbols.icon_search,
     };
 
     let path = get_path(args).unwrap_or_else(|| ".".to_string());
@@ -319,7 +319,7 @@ pub fn format_issue_call(
                 }
                 if !changed.is_empty() {
                     lines.push(Line::from(Span::styled(
-                        format!("  → {}", changed.join(", ")),
+                        format!("  {} {}", styles.symbols.arrow_right, changed.join(", ")),
                         styles.muted,
                     )));
                 }
@@ -367,14 +367,15 @@ pub fn format_issue_result(
         if !kind.is_empty() {
             lines.push(Line::from(Span::styled(
                 format!(
-                    "  ✗ {}",
+                    "  {} {}",
+                    styles.symbols.status_error,
                     truncate_to_width(first_line, max_width.saturating_sub(4))
                 ),
                 styles.error,
             )));
             if !detail.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    format!("    → {detail}"),
+                    format!("    {} {detail}", styles.symbols.arrow_right),
                     styles.muted,
                 )));
             }
@@ -401,7 +402,8 @@ pub fn format_issue_result(
         // "created issue #12: Fix login bug"
         lines.push(Line::from(Span::styled(
             format!(
-                "  ✓ {}",
+                "  {} {}",
+                styles.symbols.status_success,
                 truncate_to_width(first_line, max_width.saturating_sub(4))
             ),
             success_style,
@@ -420,7 +422,8 @@ pub fn format_issue_result(
     } else if first_line.starts_with("closed issue ") {
         lines.push(Line::from(Span::styled(
             format!(
-                "  ✓ {}",
+                "  {} {}",
+                styles.symbols.status_success,
                 truncate_to_width(first_line, max_width.saturating_sub(4))
             ),
             success_style,
@@ -428,7 +431,8 @@ pub fn format_issue_result(
     } else if first_line.starts_with("updated issue ") {
         lines.push(Line::from(Span::styled(
             format!(
-                "  • {}",
+                "  {} {}",
+                styles.symbols.status_done,
                 truncate_to_width(first_line, max_width.saturating_sub(4))
             ),
             neutral_style,
@@ -437,7 +441,8 @@ pub fn format_issue_result(
         // Released is a soft-yellow action — assignment ended.
         lines.push(Line::from(Span::styled(
             format!(
-                "  ◯ {}",
+                "  {} {}",
+                styles.symbols.radio_off,
                 truncate_to_width(first_line, max_width.saturating_sub(4))
             ),
             styles.warning,
@@ -453,7 +458,8 @@ pub fn format_issue_result(
     } else if first_line.starts_with("assigned issue ") {
         lines.push(Line::from(Span::styled(
             format!(
-                "  ✓ {}",
+                "  {} {}",
+                styles.symbols.status_success,
                 truncate_to_width(first_line, max_width.saturating_sub(4))
             ),
             success_style,
@@ -467,7 +473,8 @@ pub fn format_issue_result(
         // Slash command fallback: "issue #N start failed: <reason>"
         lines.push(Line::from(Span::styled(
             format!(
-                "  ✗ {}",
+                "  {} {}",
+                styles.symbols.status_error,
                 truncate_to_width(first_line, max_width.saturating_sub(4))
             ),
             styles.error,
@@ -562,7 +569,8 @@ pub fn format_questionnaire_call(
     let count = questions.len();
     let header = Line::from(Span::styled(
         format!(
-            "❓ Questionnaire ({} question{})",
+            "{} Questionnaire ({} question{})",
+            styles.symbols.tool_ask,
             count,
             if count == 1 { "" } else { "s" }
         ),
@@ -593,9 +601,9 @@ pub fn format_questionnaire_call(
                 let is_recommended =
                     q.get("recommended").and_then(|v| v.as_u64()) == Some(i as u64);
                 let (marker, style) = if is_recommended {
-                    ("★", styles.accent)
+                    (styles.symbols.nav_selected, styles.accent)
                 } else {
-                    ("○", styles.muted)
+                    (styles.symbols.radio_off, styles.muted)
                 };
                 lines.push(Line::from(Span::styled(
                     format!(
@@ -624,17 +632,29 @@ pub fn format_questionnaire_result(
 
     let is_cancelled = result.to_lowercase().contains("cancelled");
     let header = if is_cancelled {
-        Line::from(Span::styled("⚠ Cancelled".to_string(), styles.warning))
+        Line::from(Span::styled(
+            format!("{} Cancelled", styles.symbols.status_warning),
+            styles.warning,
+        ))
     } else {
-        Line::from(Span::styled("✓ Answered".to_string(), styles.success))
+        Line::from(Span::styled(
+            format!("{} Answered", styles.symbols.status_success),
+            styles.success,
+        ))
     };
     lines.push(header);
 
     for raw in result.lines() {
         let timed_out = raw.contains("(auto-selected after timeout)");
-        let marker = if timed_out { " ⏱" } else { "" };
+        let marker = if timed_out {
+            format!(" {}", styles.symbols.icon_time)
+        } else {
+            String::new()
+        };
         let body = match raw.split_once(": ") {
-            Some((id, rest)) => format!("  {} → {}{}", id, rest, marker),
+            Some((id, rest)) => {
+                format!("  {} {} {}{}", id, styles.symbols.arrow_right, rest, marker)
+            }
             None => format!("  {}{}", raw, marker),
         };
         lines.push(Line::from(Span::styled(
@@ -1231,7 +1251,8 @@ mod tests {
     fn test_format_issue_result_success() {
         let result = "created issue #12: Fix login bug";
         let lines = format_issue_result(result, 80, &ThemeStyles::default());
-        assert!(lines[0].to_string().contains("✓"));
+        let sym = ThemeStyles::default().symbols.status_success;
+        assert!(lines[0].to_string().contains(sym));
         assert!(lines[0].to_string().contains("created issue #12"));
     }
 
@@ -1242,7 +1263,11 @@ mod tests {
             80,
             &ThemeStyles::default(),
         );
-        assert!(lines[0].to_string().contains("✓"));
+        assert!(
+            lines[0]
+                .to_string()
+                .contains(ThemeStyles::default().symbols.status_success)
+        );
         assert!(lines[0].to_string().contains("closed"));
     }
 
@@ -1267,7 +1292,11 @@ mod tests {
             &ThemeStyles::default(),
         );
         // Conflict marker must appear.
-        assert!(lines[0].to_string().contains("✗"));
+        assert!(
+            lines[0]
+                .to_string()
+                .contains(ThemeStyles::default().symbols.status_error)
+        );
         assert!(
             lines.iter().any(|l| l.to_string().contains("Conflict"))
                 || lines.iter().any(|l| l.to_string().contains("re-read"))
@@ -1281,7 +1310,11 @@ mod tests {
             80,
             &ThemeStyles::default(),
         );
-        assert!(lines[0].to_string().contains("✗"));
+        assert!(
+            lines[0]
+                .to_string()
+                .contains(ThemeStyles::default().symbols.status_error)
+        );
     }
 
     #[test]

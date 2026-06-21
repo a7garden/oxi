@@ -13,14 +13,17 @@ use crate::context::auto_compaction::CompactionReason;
 use crate::store::session::SessionManager;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
+use oxi_agent::tools::{
+    TodoStateProvider,
+    todo::{TodoPhase, TodoStatus},
+};
 use oxi_tui::theme::Theme;
+use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
     footer::FooterState,
     input::InputState,
 };
-use oxi_agent::tools::{TodoStateProvider, todo::{TodoPhase, TodoStatus}};
-use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use std::io::{self, Write};
 use std::panic;
 use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
@@ -320,6 +323,11 @@ pub(crate) struct AppState {
     pub queue_panel_selected: usize,
     /// Whether TUI chat needs to be rebuilt from agent state (after compaction)
     pub needs_chat_rebuild: bool,
+    /// Whether appearance (theme / glyph set) changed in an overlay and the
+    /// main loop must rebuild the `Theme` from freshly-loaded settings before
+    /// the next draw. Set by `/settings` on Esc; consumed + cleared in the
+    /// render loop.
+    pub appearance_needs_reload: bool,
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
     /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
@@ -488,6 +496,7 @@ impl AppState {
             queue_panel_visible: false,
             queue_panel_selected: 0,
             needs_chat_rebuild: false,
+            appearance_needs_reload: false,
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
@@ -921,7 +930,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
     // ── Enter terminal ONCE ──
     let mut tui = Tui::enter()?;
-    let theme = Theme::dark();
+    let mut theme = Theme::dark().with_glyph_set(settings.glyph_set);
 
     // ── Session switching loop ──
     loop {
@@ -1266,11 +1275,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Inject the todo state provider so the sticky panel syncs from
         // the same `Arc<RwLock<Vec<TodoPhase>>>` the agent's `todo` tool
         // mutates.
-        state.todo_provider = agent_session
-            .agent_ref()
-            .get_config()
-            .todo
-            .clone();
+        state.todo_provider = agent_session.agent_ref().get_config().todo.clone();
 
         // Restore previous messages if resuming
         if is_resuming && let Some(ref path) = session_target {
@@ -1424,6 +1429,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             // Sync todo panel from agent state (cheap: RwLock read + clone)
             if let Some(ref provider) = state.todo_provider {
                 sync_todo_panel(&mut state.todo_panel, &provider.get_phases());
+            }
+
+            // Live-apply appearance changes (glyph set / theme) made in an
+            // overlay. The overlay set `appearance_needs_reload`; rebuild the
+            // theme from freshly-loaded settings so the next draw reflects it
+            // without a restart.
+            if state.appearance_needs_reload {
+                state.appearance_needs_reload = false;
+                if let Ok(fresh) = crate::store::settings::Settings::load() {
+                    theme = Theme::dark().with_glyph_set(fresh.glyph_set);
+                }
             }
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;

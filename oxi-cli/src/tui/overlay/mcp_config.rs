@@ -1170,10 +1170,16 @@ impl McpConfigOverlay {
             let connected = dash.settings.connected_servers;
             for s in &dash.servers {
                 let (label, color) = match &s.status {
-                    McpConnectionStatus::Connected => ("●", theme.colors.success),
-                    McpConnectionStatus::Connecting => ("◌", theme.colors.warning),
-                    McpConnectionStatus::Error(_) => ("✗", theme.colors.error),
-                    McpConnectionStatus::Disconnected => ("○", theme.colors.muted),
+                    McpConnectionStatus::Connected => (theme.symbols.dot_on, theme.colors.success),
+                    McpConnectionStatus::Connecting => {
+                        (theme.symbols.status_running, theme.colors.warning)
+                    }
+                    McpConnectionStatus::Error(_) => {
+                        (theme.symbols.status_error, theme.colors.error)
+                    }
+                    McpConnectionStatus::Disconnected => {
+                        (theme.symbols.dot_off, theme.colors.muted)
+                    }
                 };
                 status_by_name.insert(s.name.clone(), (label, color));
             }
@@ -1252,7 +1258,7 @@ impl McpConfigOverlay {
                     let (dot, dot_color) = status_by_name
                         .get(name)
                         .copied()
-                        .unwrap_or(("○", theme.colors.muted));
+                        .unwrap_or((theme.symbols.dot_off, theme.colors.muted));
                     let mut spans = vec![
                         Span::styled(format!("{dot} "), Style::default().fg(dot_color)),
                         Span::styled(name.clone(), Style::default().add_modifier(Modifier::BOLD)),
@@ -1282,7 +1288,7 @@ impl McpConfigOverlay {
                     .bg(theme.colors.primary)
                     .fg(theme.colors.background),
             )
-            .highlight_symbol("▶ ");
+            .highlight_symbol(theme.symbols.cursor);
         frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
         // Footer: notice + keymap.
@@ -1740,7 +1746,7 @@ impl McpConfigOverlay {
                     .bg(theme.colors.primary)
                     .fg(theme.colors.background),
             )
-            .highlight_symbol("▶ ");
+            .highlight_symbol(theme.symbols.cursor);
         frame.render_stateful_widget(list, list_area, list_state_ref);
 
         // ── Right: detail panel ──────────────────────────────────────

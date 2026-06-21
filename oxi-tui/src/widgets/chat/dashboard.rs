@@ -197,10 +197,11 @@ pub(crate) fn dashboard_lines(
 
     // Tools section header
     if !info.tool_names.is_empty() {
-        let header_text = format!("  \u{2500}\u{2500} Tools ({}) ", info.tool_names.len());
+        let rule = styles.symbols.rule;
+        let header_text = format!("  {rule}{rule} Tools ({}) ", info.tool_names.len());
         let header_w = UnicodeWidthStr::width(header_text.as_str());
         let sep_remain = w.saturating_sub(header_w);
-        let header_full = format!("{}{}", header_text, "\u{2500}".repeat(sep_remain));
+        let header_full = format!("{}{}", header_text, rule.repeat(sep_remain));
         lines.push(Line::from(Span::styled(header_full, styles.border)));
 
         let badges = compute_badge_lines(&info.tool_names, w, styles);
@@ -212,10 +213,11 @@ pub(crate) fn dashboard_lines(
 
     // Skills section
     if !info.skill_names.is_empty() {
-        let header_text = format!("  \u{2500}\u{2500} Skills ({}) ", info.skill_names.len());
+        let rule = styles.symbols.rule;
+        let header_text = format!("  {rule}{rule} Skills ({}) ", info.skill_names.len());
         let header_w = UnicodeWidthStr::width(header_text.as_str());
         let sep_remain = w.saturating_sub(header_w);
-        let header_full = format!("{}{}", header_text, "\u{2500}".repeat(sep_remain));
+        let header_full = format!("{}{}", header_text, rule.repeat(sep_remain));
         lines.push(Line::from(Span::styled(header_full, styles.border)));
 
         let badges = compute_badge_lines(&info.skill_names, w, styles);

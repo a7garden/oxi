@@ -25,6 +25,8 @@ pub struct Theme {
     pub colors: ColorScheme,
     /// Spacing configuration.
     pub spacing: Spacing,
+    /// Active glyph set (Unicode / ASCII / Nerd). Controls every UI symbol.
+    pub symbols: crate::symbols::Symbols,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,9 +97,9 @@ impl ColorScheme {
             error: Color::Rgb(247, 118, 142),          // #f7768e
             warning: Color::Rgb(224, 175, 104),        // #e0af68
             success: Color::Rgb(158, 206, 106),        // #9ece6a
-            muted: Color::Rgb(80, 80, 100),            // #505064
+            muted: Color::Rgb(127, 132, 156),          // #7f849c overlay1 (AA 5.68:1 on black)
             accent: Color::Rgb(187, 154, 247),         // #bb9af7
-            border: Color::Rgb(30, 30, 30),            // #1e1e1e
+            border: Color::Rgb(88, 91, 112),           // #585b70 surface2 (UI 3.15:1 on black)
             user_border: Color::Rgb(122, 162, 247),    // #7aa2f7 (matches primary)
             user_bg: Color::Rgb(18, 22, 38),           // #121626 subtle indigo tint
             cursor_fg: Color::Rgb(0, 0, 0),            // #000000
@@ -122,11 +124,11 @@ impl ColorScheme {
             error: Color::Rgb(210, 15, 57),        // #d20f39
             warning: Color::Rgb(223, 142, 29),     // #df8e1d
             success: Color::Rgb(64, 160, 43),      // #40a02b
-            muted: Color::Indexed(8),
-            accent: Color::Rgb(136, 57, 239), // #8839ef
-            border: Color::Indexed(7),
+            muted: Color::Rgb(92, 95, 119),        // #5c5f77 subtext0 (AA 5.53:1)
+            accent: Color::Rgb(136, 57, 239),      // #8839ef
+            border: Color::Rgb(156, 160, 176), // #9ca0b0 overlay0 (2.30:1; light-neutral AA limit)
             user_border: Color::Rgb(30, 102, 240), // #1e66f0 (matches primary)
-            user_bg: Color::Rgb(225, 236, 255),    // #e1ecff subtle blue tint
+            user_bg: Color::Rgb(225, 236, 255), // #e1ecff subtle blue tint
             cursor_fg: Color::Rgb(239, 241, 245),
             cursor_bg: Color::Rgb(76, 79, 105),
             selection_bg: Color::Rgb(204, 208, 218),
@@ -167,6 +169,9 @@ impl ColorScheme {
             tool_error_bg: Style::default().bg(self.tool_error_bg),
             code_fg: Style::default().fg(self.code_fg),
             code_bg: Style::default().bg(self.code_bg),
+            // ColorScheme has no glyph-set knowledge; default to Unicode.
+            // `Theme::to_styles` overrides this with the theme's real set.
+            symbols: crate::symbols::Symbols::default(),
         }
     }
 }
@@ -226,6 +231,12 @@ pub struct ThemeStyles {
     pub code_fg: Style,
     /// Inline code / code block background style.
     pub code_bg: Style,
+
+    // ── Glyphs ───────────────────────────────────────────────────
+    /// Active symbol table (Unicode / ASCII / Nerd). Carried here so every
+    /// render fn that already takes `&ThemeStyles` gets the glyph set for
+    /// free, with no signature changes.
+    pub symbols: crate::symbols::Symbols,
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +278,7 @@ impl Theme {
             name: "dark".into(),
             colors: ColorScheme::dark(),
             spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
         }
     }
 
@@ -276,7 +288,20 @@ impl Theme {
             name: "light".into(),
             colors: ColorScheme::light(),
             spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
         }
+    }
+
+    /// Set the active glyph set, replacing the symbol table.
+    pub fn with_glyph_set(mut self, set: crate::symbols::GlyphSet) -> Self {
+        self.symbols = set.symbols();
+        self
+    }
+
+    /// Replace the glyph set on an already-built theme (e.g. when the user
+    /// flips the setting at runtime).
+    pub fn set_glyph_set(&mut self, set: crate::symbols::GlyphSet) {
+        self.symbols = set.symbols();
     }
 
     /// Convert theme foreground/background to ratatui Style.
@@ -286,7 +311,9 @@ impl Theme {
 
     /// Get all semantic styles as ThemeStyles.
     pub fn to_styles(&self) -> ThemeStyles {
-        self.colors.to_styles()
+        let mut styles = self.colors.to_styles();
+        styles.symbols = self.symbols;
+        styles
     }
 }
 
@@ -457,6 +484,7 @@ impl ThemeFile {
             },
             colors,
             spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
         }
     }
 }
@@ -756,5 +784,33 @@ mod tests {
         assert!(matches!(theme.colors.foreground, Color::Rgb(_, _, _)));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn theme_defaults_to_unicode_glyphs() {
+        let theme = Theme::dark();
+        assert_eq!(theme.symbols, crate::symbols::Symbols::unicode());
+    }
+
+    #[test]
+    fn with_glyph_set_propagates_to_styles() {
+        // The glyph set chosen on a Theme must reach ThemeStyles.symbols —
+        // that is the field every render function reads.
+        for set in crate::symbols::GlyphSet::ALL {
+            let theme = Theme::dark().with_glyph_set(set);
+            assert_eq!(theme.symbols, set.symbols());
+            assert_eq!(theme.to_styles().symbols, set.symbols());
+        }
+    }
+
+    #[test]
+    fn set_glyph_set_mutates_in_place() {
+        let mut theme = Theme::dark();
+        assert_eq!(
+            theme.symbols.cursor,
+            crate::symbols::Symbols::unicode().cursor
+        );
+        theme.set_glyph_set(crate::symbols::GlyphSet::Ascii);
+        assert_eq!(theme.symbols, crate::symbols::Symbols::ascii());
     }
 }

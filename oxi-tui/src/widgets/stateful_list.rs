@@ -25,7 +25,7 @@ impl Default for ListStyles {
         Self {
             normal: Style::default(),
             selected: Style::default(),
-            highlight_symbol: "→ ",
+            highlight_symbol: crate::symbols::Symbols::default().cursor,
         }
     }
 }
@@ -315,7 +315,11 @@ mod tests {
     #[test]
     fn default_styles() {
         let styles = ListStyles::default();
-        assert_eq!(styles.highlight_symbol, "→ ");
+        // Default glyph set is Unicode → cursor comes from the symbol table.
+        assert_eq!(
+            styles.highlight_symbol,
+            crate::symbols::Symbols::unicode().cursor
+        );
     }
 
     #[test]

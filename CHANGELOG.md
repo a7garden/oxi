@@ -5,6 +5,34 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added — selectable Unicode / ASCII / Nerd Font glyph set (default: Unicode)
+
+Every UI symbol (status markers, list cursors, box drawing, spinners, icons)
+now comes from a pluggable glyph-set table, so the whole UI can switch
+rendering styles from one setting. Based on the omp (oh-my-pi) symbol-preset
+design.
+
+- **New `oxi_tui::symbols` module**: `GlyphSet` enum (`Unicode` / `Ascii` /
+  `Nerd`) + `Symbols` table (`Copy`, all `&'static str`). Three preset
+  constructors; `GlyphSet::default()` is `Unicode`. Symbol codepoints are
+  standards-defined (Unicode box-drawing range + Nerd Fonts PUA).
+- **`Theme` / `ThemeStyles` carry the active `Symbols`**: `with_glyph_set` /
+  `set_glyph_set`; `to_styles()` propagates them, so every render fn that
+  already takes `&ThemeStyles` gets the glyph set with no signature change.
+- **Hardcoded glyphs migrated**: `tool_renderer` (✓/✗/⚠/→), the chat
+  tool-call status icons (○/●/✓/✗ on every call + result box), list
+  highlight cursors (`stateful_list`, `table_list`, `completion`, and 7
+  overlays), health/status dots (`routing`, `dashboard`, todo panel), the
+  chat spinner, todo status markers, and horizontal rules now read from the
+  symbol table.
+- **New `glyph_set` setting** (`settings.toml`, snake_case): `unicode` |
+  `ascii` | `nerd`. Settings version bumped 7 → 8 with migration (defaults to
+  Unicode). Selectable live in `/settings` → `glyph` (cycles the three
+  presets) and **applied immediately** — the main loop rebuilds the live
+  theme from freshly-loaded settings on the next draw, no restart needed.
+
+
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state
 

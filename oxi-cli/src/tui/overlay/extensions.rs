@@ -40,11 +40,11 @@ struct ExtensionEntry {
 }
 
 impl ExtensionEntry {
-    fn status_icon(&self) -> &str {
+    fn status_icon(&self, symbols: &oxi_tui::Symbols) -> &str {
         if !self.toggleable || self.enabled {
-            "●" // active
+            symbols.dot_on
         } else {
-            "○" // disabled
+            symbols.dot_off
         }
     }
 
@@ -566,7 +566,7 @@ impl ExtensionsOverlay {
                 ListRow::Entry { entry_idx } => {
                     let entry = &self.all_entries[*entry_idx];
                     let is_selected = Some(*entry_idx) == self.selected_entry_idx();
-                    let icon = entry.status_icon();
+                    let icon = entry.status_icon(&theme.symbols);
                     let icon_color = entry.status_color(theme);
 
                     let name_style = if is_selected {
@@ -662,7 +662,7 @@ fn render_detail_panel(
     // Header: icon + name + status badge
     let header = Line::from(vec![
         Span::styled(
-            format!(" {} ", entry.status_icon()),
+            format!(" {} ", entry.status_icon(&theme.symbols)),
             Style::default().fg(status_color),
         ),
         Span::styled(&entry.name, title_style),

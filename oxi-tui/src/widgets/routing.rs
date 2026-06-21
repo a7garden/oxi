@@ -34,12 +34,12 @@ pub enum ProviderHealth {
 }
 
 impl ProviderHealth {
-    fn symbol(&self) -> &'static str {
+    fn symbol(&self, symbols: &crate::symbols::Symbols) -> &'static str {
         match self {
-            ProviderHealth::Healthy => "\u{25CF}",     // ● (filled green)
-            ProviderHealth::Degraded => "\u{25CF}",    // ● (filled amber)
-            ProviderHealth::Unavailable => "\u{25CB}", // ○ (hollow)
-            ProviderHealth::Disabled => "\u{25CB}",    // ○ (hollow gray)
+            ProviderHealth::Healthy => symbols.dot_on,
+            ProviderHealth::Degraded => symbols.dot_on,
+            ProviderHealth::Unavailable => symbols.dot_off,
+            ProviderHealth::Disabled => symbols.dot_off,
         }
     }
 }
@@ -190,9 +190,9 @@ impl StatefulWidget for RoutingStatus<'_> {
         // ── Auto-Routing row ──────────────────────────────────────────────
         {
             let enabled_ch = if d.auto_routing_enabled {
-                "\u{25CF}"
+                styles.symbols.dot_on
             } else {
-                "\u{25CB}"
+                styles.symbols.dot_off
             };
             let enabled_style = if d.auto_routing_enabled {
                 styles.success
@@ -202,9 +202,9 @@ impl StatefulWidget for RoutingStatus<'_> {
             let enabled_label = if d.auto_routing_enabled { "ON" } else { "OFF" };
 
             let fallback_ch = if d.fallback_enabled {
-                "\u{25CF}"
+                styles.symbols.dot_on
             } else {
-                "\u{25CB}"
+                styles.symbols.dot_off
             };
             let fallback_style = if d.fallback_enabled {
                 styles.success
@@ -225,7 +225,7 @@ impl StatefulWidget for RoutingStatus<'_> {
 
         // ── Separator ──────────────────────────────────────────────────────
         lines.push(Line::from(Span::styled(
-            "  \u{2500}".repeat(max_w.saturating_sub(2)),
+            format!("  {}", styles.symbols.rule.repeat(max_w.saturating_sub(2))),
             styles.border,
         )));
 
@@ -242,7 +242,7 @@ impl StatefulWidget for RoutingStatus<'_> {
             ]));
         } else {
             for provider in d.fallback_chain.iter() {
-                let health_ch = provider.health.symbol();
+                let health_ch = provider.health.symbol(&styles.symbols);
                 let health_style = match provider.health {
                     ProviderHealth::Healthy => styles.success,
                     ProviderHealth::Degraded => styles.warning,
@@ -251,9 +251,9 @@ impl StatefulWidget for RoutingStatus<'_> {
                 };
 
                 let active_marker = if provider.is_active {
-                    " \u{25B6}"
+                    format!(" {}", styles.symbols.nav_selected)
                 } else {
-                    "  "
+                    "  ".to_string()
                 };
 
                 // Build a single line: "  ● provider_name (n failures)"
@@ -306,10 +306,16 @@ mod tests {
 
     #[test]
     fn provider_health_symbols() {
-        assert_eq!(ProviderHealth::Healthy.symbol(), "\u{25CF}");
-        assert_eq!(ProviderHealth::Degraded.symbol(), "\u{25CF}");
-        assert_eq!(ProviderHealth::Unavailable.symbol(), "\u{25CB}");
-        assert_eq!(ProviderHealth::Disabled.symbol(), "\u{25CB}");
+        let uni = crate::symbols::Symbols::unicode();
+        let asc = crate::symbols::Symbols::ascii();
+        // Healthy/degraded share the "on" dot; unavailable/disabled the "off".
+        assert_eq!(ProviderHealth::Healthy.symbol(&uni), uni.dot_on);
+        assert_eq!(ProviderHealth::Degraded.symbol(&uni), uni.dot_on);
+        assert_eq!(ProviderHealth::Unavailable.symbol(&uni), uni.dot_off);
+        assert_eq!(ProviderHealth::Disabled.symbol(&uni), uni.dot_off);
+        // ASCII preset swaps the dots for 7-bit markers.
+        assert_eq!(ProviderHealth::Healthy.symbol(&asc), asc.dot_on);
+        assert_eq!(ProviderHealth::Unavailable.symbol(&asc), asc.dot_off);
     }
 
     #[test]

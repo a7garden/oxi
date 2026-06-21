@@ -79,7 +79,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     if todo_height > 0 {
         f.render_stateful_widget(
             oxi_tui::widgets::todo_panel::TodoPanel::new(theme),
-            chunks[2],
+            chunks[1],
             &mut state.todo_panel,
         );
     }
@@ -648,25 +648,25 @@ fn render_notifications(f: &mut Frame, area: Rect, state: &AppState, theme: &The
     for notif in &visible {
         let (icon, fg_color, bg_color, border_color) = match notif.kind {
             NotificationKind::Success => (
-                "\u{2713}", // ✓
+                theme.symbols.status_success,
                 theme.colors.success,
                 theme.colors.tool_success_bg,
                 theme.colors.success,
             ),
             NotificationKind::Warning => (
-                "\u{26A0}", // ⚠
+                theme.symbols.status_warning,
                 theme.colors.warning,
                 theme.colors.tool_executing_bg,
                 theme.colors.warning,
             ),
             NotificationKind::Error => (
-                "\u{2717}", // ✗
+                theme.symbols.status_error,
                 theme.colors.error,
                 theme.colors.tool_error_bg,
                 theme.colors.error,
             ),
             NotificationKind::Info => (
-                "\u{2139}", // ℹ
+                theme.symbols.status_info,
                 theme.colors.primary,
                 theme.colors.tool_pending_bg,
                 theme.colors.primary,

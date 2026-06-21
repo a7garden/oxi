@@ -135,6 +135,14 @@ Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 Built on `ratatui` + `crossterm`. **No oxi-* dependencies** — pure widget library.
 
 - Theme system with hot-reload from TOML/JSON files.
+- **Glyph set system** (`symbols.rs`): every UI symbol (status markers, list
+  cursors, box drawing, spinners, icons) comes from a pluggable `GlyphSet`
+  preset — `Unicode` (default), `Ascii`, or `Nerd`. The active `Symbols`
+  table rides on `Theme`/`ThemeStyles`, so `styles.symbols.<field>` is the
+  single source for any glyph. **Never hardcode a symbol in a widget** — read
+  it from the symbol table so the `glyph_set` setting re-skins the whole UI.
+  Adding a glyph: add a field to `Symbols`, populate all three preset
+  constructors (`unicode`/`ascii`/`nerd`), migrate the one call site.
 - Markdown rendering via `pulldown-cmark`. Fuzzy search for file/command completion.
 - `widgets/chat/` is the main conversation widget.
 - The widget layer defines its own domain types (`ChatMessage`,
@@ -142,7 +150,7 @@ Built on `ratatui` + `crossterm`. **No oxi-* dependencies** — pure widget libr
   that wants the chat UX. Products implement the conversion
   (one `From` impl per direction) in their own composition root.
 
-Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`.
+Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`, `GlyphSet`, `Symbols`.
 
 ### oxi-sdk — Multi-Agent SDK + Port Contract
 

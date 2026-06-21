@@ -10,6 +10,7 @@
 //! Migration is handled via a `version` field in the config file.
 
 use anyhow::{Context, Result};
+use oxi_tui::GlyphSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -23,7 +24,8 @@ use std::path::{Path, PathBuf};
 /// - 5: output_languages field (TUI-only language policy)
 /// - 6: language_policy_enabled field (master toggle, default OFF)
 /// - 7: edit_format field (Hashline/StrReplace, default StrReplace)
-const SETTINGS_VERSION: u32 = 7;
+/// - 8: glyph_set field (Unicode/Ascii/Nerd, default Unicode)
+const SETTINGS_VERSION: u32 = 8;
 
 /// Known output channels for the TUI language policy.
 ///
@@ -140,10 +142,18 @@ pub struct Settings {
     /// Thinking level for agent responses
     #[serde(default = "default_thinking_level")]
     pub thinking_level: ThinkingLevel,
-
     /// Color theme (e.g., "default", "monokai", "dracula")
     #[serde(default = "default_theme")]
     pub theme: String,
+
+    /// Terminal glyph set — controls every UI symbol (status markers,
+    /// list cursors, box drawing, spinners, icons).
+    ///
+    /// `unicode` (default): box-drawing + emoji, works on any UTF-8 terminal.
+    /// `ascii`: 7-bit fallback for serial consoles / CI logs.
+    /// `nerd`: Nerd Font private-use codepoints (needs a patched font).
+    #[serde(default)]
+    pub glyph_set: GlyphSet,
 
     /// Deprecated: use `last_used_model` instead. Kept for serde backward compat.
     #[serde(default, skip_serializing)]
@@ -419,6 +429,7 @@ impl Default for Settings {
             version: SETTINGS_VERSION,
             thinking_level: ThinkingLevel::Medium,
             theme: default_theme(),
+            glyph_set: GlyphSet::default(),
             last_used_model: None,
             last_used_provider: None,
             default_model: None,
@@ -1066,6 +1077,15 @@ impl Settings {
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
                     "Migrated settings from version 6 to {} (added edit_format, defaulting to str_replace)",
+                    SETTINGS_VERSION
+                );
+            }
+            7 => {
+                // Version 7 → 8: glyph_set field added.
+                // `#[serde(default)]` fills with GlyphSet::Unicode (default).
+                settings.version = SETTINGS_VERSION;
+                tracing::info!(
+                    "Migrated settings from version 7 to {} (added glyph_set, defaulting to unicode)",
                     SETTINGS_VERSION
                 );
             }
@@ -1775,6 +1795,54 @@ theme = "dracula"
             migrated.output_languages.get("commit_message"),
             Some(&"en".to_string())
         );
+    }
+
+    #[test]
+    fn test_default_glyph_set_is_unicode() {
+        let settings = Settings::default();
+        assert_eq!(
+            settings.glyph_set,
+            GlyphSet::Unicode,
+            "glyph_set must default to Unicode"
+        );
+    }
+
+    #[test]
+    fn test_migration_v7_to_v8_defaults_glyph_set_to_unicode() {
+        // v7 settings (no glyph_set field on disk) deserialize with the serde
+        // default (Unicode) and migrate to v8.
+        let mut settings = Settings::default();
+        settings.version = 7;
+        // Simulate a freshly-loaded v7 file: glyph_set unset → default.
+        settings.glyph_set = GlyphSet::default();
+
+        let migrated = Settings::migrate(settings).unwrap();
+        assert_eq!(migrated.version, SETTINGS_VERSION);
+        assert_eq!(
+            migrated.glyph_set,
+            GlyphSet::Unicode,
+            "v7 → v8 migration must default glyph_set to unicode"
+        );
+    }
+
+    #[test]
+    fn test_glyph_set_persists_through_roundtrip() {
+        // Direct TOML serialize → deserialize exercises the on-disk
+        // snake_case form (`glyph_set = "nerd"`) without depending on
+        // the layered `load_from` directory walk.
+        let mut original = Settings::default();
+        original.glyph_set = GlyphSet::Nerd;
+        let content = toml::to_string_pretty(&original).unwrap();
+        assert!(
+            content.contains("glyph_set = \"nerd\""),
+            "nerd preset must serialize to snake_case; got:\n{content}"
+        );
+        let loaded: Settings = toml::from_str(&content).unwrap();
+        assert_eq!(loaded.glyph_set, GlyphSet::Nerd);
+        // Unicode round-trips too.
+        original.glyph_set = GlyphSet::Unicode;
+        let uni: Settings = toml::from_str(&toml::to_string_pretty(&original).unwrap()).unwrap();
+        assert_eq!(uni.glyph_set, GlyphSet::Unicode);
     }
 
     #[test]

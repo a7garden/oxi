@@ -33,11 +33,11 @@ pub enum ItemStatus {
 }
 
 impl ItemStatus {
-    pub fn symbol(&self) -> &'static str {
+    pub fn symbol(&self, symbols: &crate::symbols::Symbols) -> &'static str {
         match self {
-            ItemStatus::Active => "\u{25CF}",   // ●
-            ItemStatus::Inactive => "\u{25CB}", // ○
-            ItemStatus::Error(_) => "\u{00D7}", // ×
+            ItemStatus::Active => symbols.dot_on,
+            ItemStatus::Inactive => symbols.dot_off,
+            ItemStatus::Error(_) => symbols.status_error,
         }
     }
 
@@ -289,7 +289,10 @@ impl StatefulWidget for DashboardWidget {
         for (sec_idx, section) in self.data.sections.iter().enumerate() {
             all.push(Line::from(Span::styled(
                 format!(
-                    "─── {} ({}) {}",
+                    "{}{}{} {} ({}) {}",
+                    theme.symbols.rule,
+                    theme.symbols.rule,
+                    theme.symbols.rule,
                     section.title,
                     section.items.len(),
                     if section.collapsed { "[+] " } else { "[-] " }
@@ -309,7 +312,7 @@ impl StatefulWidget for DashboardWidget {
                         sec_idx == state.selected_section && item_idx == state.selected_item;
                     let mut spans = vec![
                         Span::styled(
-                            format!("{} ", item.status.symbol()),
+                            format!("{} ", item.status.symbol(&theme.symbols)),
                             item.status.style(&theme),
                         ),
                         Span::styled(

@@ -643,7 +643,7 @@ impl OverlayComponent for TreeNavigatorOverlay {
 
         let list = List::new(items)
             .highlight_style(highlight_style)
-            .highlight_symbol("→ ")
+            .highlight_symbol(theme.symbols.cursor)
             .scroll_padding(3);
 
         frame.render_stateful_widget(list, inner, &mut self.list_state);

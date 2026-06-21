@@ -196,9 +196,9 @@ impl StatefulWidget for TodoPanel<'_> {
         let mut y = area.y;
         let x = area.x + 1; // 1-char left indent
 
-        // Header: "📋 Todos"
+        // Header: "<icon> Todos"
         let header_line = Line::from(vec![
-            Span::styled("\u{1F4CB} ", accent),
+            Span::styled(format!("{} ", styles.symbols.icon_todo), accent),
             Span::styled("Todos", accent),
         ]);
         buf.set_line(x, y, &header_line, area.width);
@@ -212,7 +212,8 @@ impl StatefulWidget for TodoPanel<'_> {
                     y += 1;
                 }
                 for task in &phase.tasks {
-                    let line = render_task_line(task, &dim, &success, &error, &accent);
+                    let line =
+                        render_task_line(task, &styles.symbols, &dim, &success, &error, &accent);
                     buf.set_line(x + 1, y, &line, area.width);
                     y += 1;
                 }
@@ -221,7 +222,8 @@ impl StatefulWidget for TodoPanel<'_> {
             if let Some(phase) = state.active_phase() {
                 let visible_count = phase.tasks.len().min(state.max_visible);
                 for task in phase.tasks.iter().take(visible_count) {
-                    let line = render_task_line(task, &dim, &success, &error, &accent);
+                    let line =
+                        render_task_line(task, &styles.symbols, &dim, &success, &error, &accent);
                     buf.set_line(x + 1, y, &line, area.width);
                     y += 1;
                 }
@@ -237,16 +239,17 @@ impl StatefulWidget for TodoPanel<'_> {
 
 fn render_task_line(
     task: &TodoPanelItem,
+    symbols: &crate::symbols::Symbols,
     dim: &Style,
     success: &Style,
     error: &Style,
     accent: &Style,
 ) -> Line<'static> {
     let (icon, style) = match task.status {
-        TodoPanelStatus::Completed => ("\u{2611}", *success), // ☑
-        TodoPanelStatus::InProgress => ("\u{25B6}", *accent), // ▶
-        TodoPanelStatus::Abandoned => ("\u{2717}", *error),   // ✗
-        TodoPanelStatus::Pending => ("\u{2610}", *dim),       // ☐
+        TodoPanelStatus::Completed => (symbols.checkbox_on, *success),
+        TodoPanelStatus::InProgress => (symbols.status_running, *accent),
+        TodoPanelStatus::Abandoned => (symbols.status_error, *error),
+        TodoPanelStatus::Pending => (symbols.checkbox_off, *dim),
     };
 
     let mut spans = vec![Span::styled(icon.to_string(), style), Span::raw(" ")];

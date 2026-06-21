@@ -195,7 +195,7 @@ impl OverlayComponent for ModelSelectOverlay {
 
         let list = List::new(items)
             .highlight_style(highlight_style)
-            .highlight_symbol("→ ")
+            .highlight_symbol(theme.symbols.cursor)
             .scroll_padding(3);
 
         let mut list_state = ratatui::widgets::ListState::default();
@@ -333,7 +333,7 @@ impl OverlayComponent for LogoutSelectOverlay {
                     .fg(theme.colors.background)
                     .bg(theme.colors.primary),
             )
-            .highlight_symbol("→ ");
+            .highlight_symbol(styles.symbols.cursor);
 
         let mut list_state = ratatui::widgets::ListState::default();
         if let Some(idx) = self.list.selected_index() {

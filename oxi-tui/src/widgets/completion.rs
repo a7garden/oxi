@@ -220,7 +220,7 @@ impl<'a> CompletionPopup<'a> {
                     .fg(self.theme.colors.background)
                     .bg(self.theme.colors.primary),
             )
-            .highlight_symbol("→ ");
+            .highlight_symbol(self.theme.symbols.cursor);
 
         frame.render_stateful_widget(list, popup_area, &mut self.state.list_state);
 

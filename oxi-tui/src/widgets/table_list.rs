@@ -83,7 +83,7 @@ impl Default for TableListStyles {
         Self {
             normal: Style::default(),
             selected: Style::default(),
-            highlight_symbol: "→ ",
+            highlight_symbol: crate::symbols::Symbols::default().cursor,
             header: Style::default(),
         }
     }

@@ -15,6 +15,7 @@ use ratatui::{
 
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::AgentSessionHandle;
+use oxi_tui::GlyphSet;
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
 
@@ -184,6 +185,16 @@ impl SettingsOverlay {
                                 };
                             }
                             "theme" => settings.theme = value.clone(),
+                            "glyph" => {
+                                // Cycle value is the preset label ("Unicode" /
+                                // "ASCII" / "Nerd Font"); resolve via the label
+                                // table so the spaced "Nerd Font" label matches.
+                                settings.glyph_set = GlyphSet::ALL
+                                    .iter()
+                                    .find(|g| g.label() == value)
+                                    .copied()
+                                    .unwrap_or(GlyphSet::Unicode);
+                            }
                             // TUI language policy channels. `label` is
                             // "language.<channel_key>"; the cycle value
                             // is the language code (e.g. "ko", "en", "auto").
@@ -356,6 +367,9 @@ impl OverlayComponent for SettingsOverlay {
                         // The raw pointer is valid for the lock's lifetime.
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
+                                // Appearance (glyph set / theme) changed — flag
+                                // the main loop to rebuild the live theme.
+                                app.appearance_needs_reload = true;
                                 app.add_notification(
                                     "Settings saved and applied.".to_string(),
                                     crate::tui::app::NotificationKind::Success,
@@ -444,7 +458,7 @@ impl OverlayComponent for SettingsOverlay {
 
         let list = List::new(list_items)
             .highlight_style(highlight_style)
-            .highlight_symbol("→ ")
+            .highlight_symbol(theme.symbols.cursor)
             .scroll_padding(2);
 
         let mut list_state = ratatui::widgets::ListState::default();
@@ -516,6 +530,11 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     items.push(SettingsItem::Choice {
         label: "theme".to_string(),
         value: settings.theme.clone(),
+        disabled: false,
+    });
+    items.push(SettingsItem::Choice {
+        label: "glyph".to_string(),
+        value: settings.glyph_set.label().to_string(),
         disabled: false,
     });
 
@@ -674,6 +693,11 @@ fn get_choice_options(label: &str) -> Vec<String> {
             "High".to_string(),
             "XHigh".to_string(),
         ],
+        // Glyph set presets cycle in GlyphSet::ALL order (Unicode first).
+        "glyph" => GlyphSet::ALL
+            .iter()
+            .map(|g| g.label().to_string())
+            .collect(),
         // TUI language policy channel cycles. The cycle order matches
         // `KNOWN_LANGS` (see `store::settings`). "auto" is the default
         // and means "no policy for this channel".

@@ -22,7 +22,7 @@ use ratatui::{
 use unicode_width::UnicodeWidthChar;
 
 impl IssuesPanelOverlay {
-    pub(super) fn render_list(&mut self, frame: &mut Frame, area: Rect, _theme: &Theme) {
+    pub(super) fn render_list(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         // ── Outer block ─────────────────────────────────────────────────
         let title = build_list_title(
             self.items.len(),
@@ -84,7 +84,7 @@ impl IssuesPanelOverlay {
 
         let list = List::new(items)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED).bold())
-            .highlight_symbol("▶ ")
+            .highlight_symbol(theme.symbols.cursor)
             .highlight_spacing(HighlightSpacing::Always);
         frame.render_stateful_widget(list, rows[0], &mut self.list_state);
 
