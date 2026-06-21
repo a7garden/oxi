@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.41.0] - 2026-06-21
+## [0.41.1] - 2026-06-21
+
+### Fixed — `cargo install oxi-cli` failed on v0.41.0 release build
+
+The v0.41.0 release's TUI startup called `AskBridge::attach()`
+directly, which is gated behind
+`#[cfg(any(test, debug_assertions))]` and only exists in debug
+builds. Release builds (`cargo build --release`,
+`cargo install oxi-cli`) failed to compile with
+`no method named 'attach' found for reference '&Arc<AskBridge>'`.
+
+- **Switched the call site** (`oxi-cli/src/tui/app.rs`) from
+  `bridge.attach()` to
+  `bridge.attach_with_session(app.ownership_session_id())`.
+  `attach_with_session` is the production-bound API (matches the
+  ownership-identity invariant from AGENTS.md pitfall
+  "Issue-system ownership identity"); `attach()` is the test-only
+  convenience and was never meant to ship.
+- **Verified** by `cargo build --release -p oxi-cli` and a
+  full `cargo install oxi-cli --version 0.41.1` smoke test.
+
+No source-level behavior change beyond the wire: the session
+identity was already bound by the issue-system invariant, this
+release just removes the dependency on the test-only stub.
+
 
 ### Added — TUI widget layer reads from glyph-set table
 
@@ -169,6 +194,20 @@ glyph-set feature whose table shipped in v0.40.0.
   `type: regression/performance/refactor/breaking-change`,
   `provider: anthropic/openai/google/other`, plus `good first issue`,
   `help wanted`, `dependencies`, `release`.
+
+### Fixed — release-build regression (immediate hotfix in 0.41.1)
+
+The v0.41.0 release was **broken in release builds**. The TUI's
+AskBridge was wired via `bridge.attach()` — a method annotated
+`#[cfg(any(test, debug_assertions))]` (test-only convenience) — which
+exists in `cargo check` / `cargo clippy` / `cargo test` (debug builds)
+but does not compile in `cargo build --release` or `cargo install`.
+`cargo install oxi-cli --version 0.41.0` fails with
+`no method named 'attach' found for reference '&Arc<AskBridge>'`.
+The fix landed the same day as 0.41.1 and switches the call site to
+the production `AskBridge::attach_with_session(session_id)` API with
+`app.ownership_session_id()` (which equals `TUI_OWNERSHIP_ID` in
+TUI mode per AGENTS.md). Upgrade to 0.41.1.
 
 
 ## [Unreleased]

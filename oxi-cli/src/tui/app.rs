@@ -1328,7 +1328,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         *state.active_skills.write() = app.active_skills();
         state.ask_bridge = ask_bridge.clone();
         if let Some(bridge) = &ask_bridge {
-            bridge.attach();
+            bridge.attach_with_session(app.ownership_session_id());
         }
 
         // Push welcome message (only for new sessions, not resumed)
