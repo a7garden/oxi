@@ -248,17 +248,32 @@ pub struct DiffBackend<W: io::Write> {
     last_width: u16,
     /// Terminal height at last draw (for resize detection).
     last_height: u16,
+    /// Detected terminal capabilities. Gates escape-sequence emission
+    /// (e.g. CSI 2026 synchronized output) so unsupported features aren't sent.
+    caps: terminal::TerminalCapabilities,
 }
 
 impl<W: io::Write> DiffBackend<W> {
     /// Create a new DiffBackend wrapping the given crossterm backend.
+    ///
+    /// Terminal capabilities are detected from the environment. To inject
+    /// explicit capabilities (e.g. for tests), use [`Self::with_capabilities`].
     pub fn new(inner: ratatui::backend::CrosstermBackend<W>) -> Self {
+        Self::with_capabilities(inner, terminal::TerminalCapabilities::detect())
+    }
+
+    /// Create a DiffBackend with explicitly provided terminal capabilities.
+    pub fn with_capabilities(
+        inner: ratatui::backend::CrosstermBackend<W>,
+        caps: terminal::TerminalCapabilities,
+    ) -> Self {
         DiffBackend {
             inner,
             prev_rows: Vec::new(),
             force_full_redraw: true,
             last_width: 0,
             last_height: 0,
+            caps,
         }
     }
 
@@ -319,10 +334,13 @@ impl<W: io::Write> Backend for DiffBackend<W> {
         }
 
         // --- Differential rendering with Synchronized Update (CSI 2026) ---
-        // Begin synchronized output to prevent mid-frame tearing.
-        // CSI 2026: Begin synchronized update
-        let _ = crossterm::queue!(self.inner, crossterm::style::Print("\x1b[?2026h"));
-        self.inner.flush()?;
+        // Begin synchronized output (CSI 2026) to prevent mid-frame tearing.
+        // Only emit when the terminal is known to support it (safe-default
+        // on; disable via `OXI_NO_SYNC_OUTPUT=1` or an unsupported terminal).
+        if self.caps.synchronized_output {
+            let _ = crossterm::queue!(self.inner, crossterm::style::Print("\x1b[?2026h"));
+            self.inner.flush()?;
+        }
 
         // Reset any residual attributes
         crossterm::execute!(self.inner, SetAttribute(CAttribute::Reset))?;
@@ -398,8 +416,10 @@ impl<W: io::Write> Backend for DiffBackend<W> {
             }
         }
 
-        // CSI 2026: End synchronized update — flush all changes atomically
-        let _ = crossterm::queue!(self.inner, crossterm::style::Print("\x1b[?2026l"));
+        // CSI 2026: End synchronized update — flush all changes atomically.
+        if self.caps.synchronized_output {
+            let _ = crossterm::queue!(self.inner, crossterm::style::Print("\x1b[?2026l"));
+        }
         ratatui::backend::Backend::flush(self)?;
 
         self.prev_rows = new_rows;

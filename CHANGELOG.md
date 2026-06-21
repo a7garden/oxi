@@ -58,6 +58,26 @@ rendering, closing the bulk of the byte/CPU gap with omp's TUI. Full design in
 
 `ThemeStyles` now derives `PartialEq` to support cache invalidation.
 
+### Added — terminal capability detection table (omp parity, Phase 1)
+
+`TerminalCapabilities` now identifies the host terminal family from its
+environment-variable signature and derives a capability set from a built-in
+knowledge table, replacing the shallow ad-hoc env sniff. This is the safe,
+fully unit-tested baseline; a live device-attributes probe (DA1/XTGETTCAP) is
+a follow-up. Design: `docs/designs/2026-06-20-oxi-tui-improvement-plan.md`.
+
+- **New capability flags**: `synchronized_output`, `deccara`, `sixel`, and
+  `terminal_name`, each with a *safe default* for unknown terminals — sync on
+  (harmless if ignored), deccara/sixel off (harmful if unsupported).
+- **Recognized terminals**: kitty, ghostty, wezterm, iTerm2, foot, contour,
+  alacritty, konsole, blackbox, tabby, Apple Terminal, xterm, tmux, screen.
+  Kitty/Ghostty are the only terminals flagged `deccara` (the Kitty rectangular
+  SGR extension) — the gate Phase 2's DECCARA bg-fill optimizer will require.
+- **`DiffBackend` gates CSI 2026** on `synchronized_output` (constructed via
+  `TerminalCapabilities::detect()`; inject with `DiffBackend::with_capabilities`).
+- **`OXI_NO_SYNC_OUTPUT=1`** manually disables synchronized output for
+  terminals that misbehave under it.
+
 
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state
