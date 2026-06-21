@@ -2,9 +2,9 @@
 
 # oxi-tui
 
-**Terminal UI library for Rust** — component framework, differential rendering, and theme system.
+**ratatui-based widgets, theming, and a differential-rendering backend for oxi.**
 
-[![Version](https://img.shields.io/badge/Version-0.20.0-blue?style=flat-square)](https://crates.io/search?q=oxi)
+[![Version](https://img.shields.io/badge/Version-0.39.0-blue?style=flat-square)](https://crates.io/search?q=oxi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](../LICENSE.md)
 [![Docs](https://img.shields.io/docsrs/oxi-tui/latest?style=flat-square)](https://docs.rs/oxi-tui)
 
@@ -14,14 +14,33 @@
 
 ## Overview
 
-`oxi-tui` provides a lightweight, component-based terminal UI framework designed for building interactive applications. It features:
+`oxi-tui` is a **widget and theming library** built on top of
+[`ratatui`](https://docs.rs/ratatui) 0.30 + [`crossterm`](https://docs.rs/crossterm)
+0.29. It does **not** ship its own event loop or terminal driver — the host
+application owns its `ratatui::Terminal` (typically wrapped in our
+[`DiffBackend`](#differential-rendering)) and renders our widgets into it.
 
-- **Component trait** — composable UI building blocks with focus management
-- **Differential rendering** — only redraws changed lines for flicker-free updates
-- **Theme system** — customizable colors, fonts, and spacing with hot-reload from TOML/JSON
-- **Built-in components** — `Text`, `Input`, `Editor`, `Markdown`, `Completion`
-- **Overlay system** — modal dialogs and popovers
-- **Event abstraction** — unified keyboard, mouse, and resize events
+It provides:
+
+- **A differential-rendering backend** (`DiffBackend`) that wraps
+  `CrosstermBackend`, diffs frame buffers line-by-line, and flushes inside a
+  CSI 2026 synchronized-update window — flicker-free streaming without the
+  per-frame I/O cost of a full repaint.
+- **A typed theme system** (`Theme` / `ThemeManager` / `ThemeStyles`) with
+  hot-reload from TOML or JSON, plus Catppuccin-inspired dark/light presets.
+- **A glyph-set system** (`GlyphSet`: Unicode / ASCII / Nerd Font) so the entire
+  UI degrades cleanly from emoji-rich terminals down to 7-bit serial consoles.
+- **Production widgets**: a streaming `ChatView`, multi-line `Input`, fuzzy
+  `CompletionPopup`, `DashboardWidget`, `Footer`, `RoutingStatus`, `TodoPanel`,
+  and generic `StatefulList` / `TableList`.
+- **Rendering helpers**: terminal capability detection, inline image (Kitty /
+  iTerm2) decoding, ANSI-width text utilities, unified-diff coloring, and
+  Mermaid → ASCII diagram rendering.
+- **CJK-aware line wrapping** and wide-character-safe cell writes
+  (`Buffer::set_line`) — ratatui's built-in `WordWrapper` does not CJK-break.
+
+> oxi-tui has **no `oxi-*` dependencies**. It is a pure widget library any
+> ratatui application can adopt.
 
 ## Quick Start
 
@@ -30,412 +49,203 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 oxi-tui = { path = "path/to/oxi-tui" }
+ratatui = "0.30"
+crossterm = "0.29"
 ```
 
-Basic usage:
+The host owns the terminal; `oxi-tui` contributes the backend, the theme, and
+widgets:
 
 ```rust
-use oxi_tui::{TUI, Text};
+use oxi_tui::{Theme, ThemeManager};
+use oxi_tui::render::DiffBackend;
+use oxi_tui::widgets::chat::{ChatView, ChatViewState};
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::io::stdout;
 
 fn main() -> anyhow::Result<()> {
-    let mut tui = TUI::with_crossterm()?;
+    let backend = DiffBackend::new(CrosstermBackend::new(stdout()));
+    let mut terminal = Terminal::new(backend)?;
 
-    let greeting = Text::new("Hello, terminal!");
-    tui.add_child(greeting);
+    let manager = ThemeManager::dark();   // hot-reloadable theme manager
+    let mut state = ChatViewState::default();
 
-    tui.start()?; // Enters event loop, renders until stop() is called
+    loop {
+        // `manager.theme()` returns an owned `Theme` clone; re-fetch after a
+        // hot-reload (`manager.check_reload()`) to pick up the new colors.
+        let theme = manager.theme();
+        let mut frame = terminal.draw(|f| {
+            f.render_stateful_widget(ChatView::new(&theme), f.area(), &mut state);
+        })?;
+        // … read crossterm events, mutate `state`, break on quit …
+        # break;
+    }
     Ok(())
 }
 ```
 
-## Component Overview
+## Architecture
 
-### The Component Trait
-
-All UI elements implement the `Component` trait:
-
-```rust
-pub trait Component: Send {
-    fn name(&self) -> &str;
-    fn request_render(&mut self);
-    fn is_dirty(&self) -> bool;
-    fn clear_dirty(&mut self);
-    fn handle_event(&mut self, event: &Event) -> bool;
-    fn render(&mut self, surface: &mut Surface, area: Rect);
-    fn min_size(&self) -> Size;
-    fn desired_size(&self) -> Option<Size> { None }
-
-    // Focus management
-    fn on_focus(&mut self) {}
-    fn on_unfocus(&mut self) {}
-    fn is_focused(&self) -> bool { false }
-    fn focus(&mut self) { self.on_focus(); }
-    fn unfocus(&mut self) { self.on_unfocus(); }
-}
+```
+oxi-tui
+├── render/      DiffBackend (line-diff + CSI 2026), capability probe,
+│                inline image, ANSI/diff coloring, Mermaid ASCII
+├── theme.rs     Theme, ColorScheme, Spacing, ThemeStyles, ThemeManager
+├── symbols.rs   GlyphSet (Unicode/ASCII/Nerd) → Symbols table
+├── widgets/     ratatui widgets (chat, input, completion, dashboard, …)
+├── keybindings/ declarative key registry + conflict detection
+└── lib.rs       re-exports the public surface
 ```
 
-Components render into a `Surface` (a grid of `Cell`s), and the `TUI` event loop handles diffing and flushing to the terminal.
+Each widget is a ratatui `StatefulWidget` (or `Widget`) with a sibling
+`*State`. The widget layer defines its own domain types
+(`ChatMessage`, `MessageRole`, `ContentBlock`, `ToolCallStatus`) so it can be
+reused by any product; products implement the conversion in their own
+composition root.
 
-### Built-in Components
+## Differential Rendering
 
-#### Text
+`DiffBackend<W>` implements `ratatui::backend::Backend`. On each `draw()`:
 
-Static text display:
-
-```rust
-use oxi_tui::Text;
-
-let text = Text::new("Hello, world!");
-```
-
-#### Input
-
-Single-line text input with configurable options:
+1. Ratatui builds the frame buffer as usual.
+2. The backend collects cells into per-row byte rows and checksums each.
+3. Only rows whose checksum differs from the previous frame are written.
+4. The whole repaint is wrapped in `\x1b[?2026h … \x1b[?2026l` (synchronized
+   output) to eliminate mid-frame tearing.
 
 ```rust
-use oxi_tui::{Input, InputOptions};
+use oxi_tui::render::DiffBackend;
+use ratatui::{Terminal, backend::CrosstermBackend};
 
-let input = Input::new(InputOptions {
-    placeholder: Some("Type here...".into()),
-    ..Default::default()
-});
+let backend = DiffBackend::new(CrosstermBackend::new(stdout));
+let mut terminal = Terminal::new(backend)?;
+
+// Force a full repaint on the next frame (e.g. after a resize you handled):
+backend_ref.invalidate();
 ```
 
-#### Editor
-
-Multi-line text editor with mention support:
-
-```rust
-use oxi_tui::{Editor, EditorOptions, Mention};
-
-let editor = Editor::new(EditorOptions {
-    placeholder: Some("Write your message...".into()),
-    ..Default::default()
-});
-```
-
-#### Markdown
-
-Renders Markdown content with syntax highlighting:
-
-```rust
-use oxi_tui::{Markdown, MarkdownTheme};
-
-let md = Markdown::new("# Hello\n\nThis is **markdown**.");
-```
-
-#### Completion
-
-Autocomplete popup for file paths and custom suggestions:
-
-```rust
-use oxi_tui::{Completion, FileCompleter};
-
-let completer = FileCompleter::new();
-let popup = Completion::new(completer);
-```
-
-### Custom Components
-
-Implement the `Component` trait:
-
-```rust
-use oxi_tui::{Component, Surface, Rect, Event, Size};
-
-struct Counter {
-    count: u32,
-    dirty: bool,
-}
-
-impl Counter {
-    fn new() -> Self {
-        Self { count: 0, dirty: true }
-    }
-}
-
-impl Component for Counter {
-    fn request_render(&mut self) { self.dirty = true; }
-    fn is_dirty(&self) -> bool { self.dirty }
-    fn clear_dirty(&mut self) { self.dirty = false; }
-
-    fn handle_event(&mut self, event: &Event) -> bool {
-        if let Event::Key(key) = event {
-            if key.code == KeyCode::Char('+') {
-                self.count += 1;
-                self.request_render();
-                return true;
-            }
-        }
-        false
-    }
-
-    fn render(&mut self, surface: &mut Surface, area: Rect) {
-        let text = format!("Count: {}", self.count);
-        for (i, ch) in text.chars().enumerate() {
-            if i as u16 >= area.width { break; }
-            surface.set(area.row, area.col + i as u16, Cell::new(ch));
-        }
-        self.clear_dirty();
-    }
-
-    fn min_size(&self) -> Size {
-        Size { width: 10, height: 1 }
-    }
-}
-```
+This matters most for streaming AI chat, where the overwhelming majority of the
+screen is static between frames. The `ChatView` widget additionally caches its
+computed layout and only recomputes when messages / width / spinner change.
 
 ## Theme System
 
-### Built-in Themes
-
-Two themes are included:
-
 ```rust
-use oxi_tui::Theme;
+use oxi_tui::{Theme, ThemeManager};
 
-let dark = Theme::dark();   // Catppuccin-inspired dark theme
-let light = Theme::light(); // Catppuccin-inspired light theme
-```
+let mut manager = ThemeManager::dark();        // or ::light(), ::new(theme)
 
-### Theme Structure
+// Hot-reload a file: applies it immediately, then polls for changes.
+manager.watch_file("themes/my-theme.toml")?;
 
-A theme consists of three parts:
-
-```rust
-pub struct Theme {
-    pub name: String,
-    pub colors: ColorScheme,   // Semantic color palette
-    pub fonts: FontScheme,     // Text styles (bold, italic, etc.)
-    pub spacing: Spacing,      // Padding, margin, border widths
+// In your event loop:
+if manager.check_reload() {
+    terminal.draw(...)?;                       // theme changed — repaint
 }
+
+manager.set_theme_by_name("light");            // switch programmatically
+let theme = manager.theme();                   // &Theme for widget constructors
 ```
 
-### Color Scheme
+A `Theme` is a typed `ColorScheme` + `Spacing` + active `Symbols`. Widgets
+consume `theme.to_styles()` → `ThemeStyles` (a `Copy` bundle of `ratatui::Style`s),
+so there are zero allocations per frame for styling.
 
-The `ColorScheme` provides semantic colors:
+### Color formats (theme files)
 
-| Field | Purpose |
-|-------|---------|
-| `foreground` | Default text color |
-| `background` | Default background |
-| `primary` | Primary accent |
-| `secondary` | Secondary accent |
-| `error` | Error messages |
-| `warning` | Warning messages |
-| `success` | Success indicators |
-| `muted` | Dimmed/placeholder text |
-| `accent` | Highlight color |
-| `border` | Borders and separators |
-| `cursor_fg` | Cursor text color |
-| `cursor_bg` | Cursor background |
-| `selection_bg` | Selected text background |
+Hex, named, or indexed — accepted in both TOML and JSON:
 
-Colors support multiple formats:
-
-```rust
-use oxi_tui::Color;
-
-Color::Rgb(220, 223, 228)     // True color: #dcdfe4
-Color::Indexed(8)              // 256-color palette index
-Color::Red                     // Named ANSI colors
-Color::Default                 // Terminal default
-```
-
-### Loading Custom Themes
-
-Themes can be loaded from TOML or JSON files:
-
-**TOML** (`my-theme.toml`):
 ```toml
 name = "midnight"
 [colors]
 foreground = "#cdd6f4"
 background = "#1e1e2e"
-primary = "#89b4fa"
-error = "#f38ba8"
-success = "#a6e3a1"
+primary    = "#89b4fa"
+error      = "#f38ba8"
+success    = "#a6e3a1"
 ```
 
-**JSON** (`my-theme.json`):
 ```json
 {
   "name": "midnight",
-  "colors": {
-    "foreground": "#cdd6f4",
-    "background": "#1e1e2e",
-    "primary": "#89b4fa"
-  }
+  "colors": { "foreground": "#cdd6f4", "background": "#1e1e2e" }
 }
 ```
 
-Color values accept: hex (`#rrggbb`, `#rgb`), named (`red`, `bright-black`), or indexed (`i42`).
+`Color` accepts `#rrggbb` / `#rgb`, named ANSI (`red`, `bright-black`), or
+indexed (`i42`).
 
-### Theme Manager with Hot-Reload
+## Glyph Sets
+
+One setting switches every box-drawing, status, and spinner glyph across the
+whole UI, so the app renders correctly from a Nerd-Font terminal down to a
+7-bit serial console:
 
 ```rust
-use oxi_tui::{ThemeManager, Theme};
+use oxi_tui::{GlyphSet, Symbols};
 
-// Start with dark theme
-let mut manager = ThemeManager::dark();
-
-// Watch a file for changes (auto-reloads on modification)
-manager.watch_file("themes/my-theme.toml")?;
-
-// In your event loop, check for reloads:
-if manager.check_reload() {
-    // Theme was reloaded — trigger a re-render
-    tui.request_render();
-}
-
-// Get the current theme
-let theme = manager.theme();
-
-// Switch programmatically
-manager.set_theme_by_name("light");
+let symbols = Symbols::unicode();   // default — works on any UTF-8 terminal
+let symbols = Symbols::ascii();     // 7-bit fallback for CI logs / serial
+let symbols = Symbols::nerd();      // richest icons; needs a patched font
 ```
 
-## Rendering
+`GlyphSet` is stored in `settings.toml` as `glyph_set = "unicode"`. `Symbols`
+is `Copy` and rides inside `ThemeStyles` with no allocation.
 
-### Differential Rendering
+## Widgets
 
-The TUI uses a double-buffered, differential rendering approach:
+| Widget | State type | Notes |
+|--------|------------|-------|
+| `chat::ChatView` | `ChatViewState` | Streaming message list, tool-call boxes, markdown, layout cache |
+| `Input` | `InputState` | Multi-line editor (`ratatui-textarea`), undo/redo, history |
+| `CompletionPopup` | `CompletionState` | Fuzzy file/slash-command autocomplete |
+| `DashboardWidget` | `DashboardState` | Sectioned status dashboard |
+| `Footer` | `FooterState` | Model / provider / context status line |
+| `RoutingStatus` | `RoutingStatusState` | Auto-routing & fallback panel |
+| `TodoPanel` | `TodoPanelState` | Phased todo list |
+| `StatefulList<T>` | — | Generic filterable list with ratatui list state |
+| `TableList<T>` | — | Generic multi-column table with selection |
 
-1. Each component renders into a `Surface` (grid of `Cell`s)
-2. The renderer compares the new surface against the previous frame
-3. Only changed lines are written to the terminal
-4. Synchronized output (`CSI 2026`) prevents flickering
+Plus `tool_renderer` (state-aware formatting of tool calls / results / diffs)
+and `table_renderer` (compact table → line rendering).
 
-```rust
-pub enum RenderStrategy {
-    Full,        // First render or terminal resize
-    Incremental, // Only dirty lines
-}
-```
+## Keybindings
 
-### Surface
-
-A `Surface` is a 2D grid of `Cell`s:
-
-```rust
-use oxi_tui::{Surface, Cell, Rect};
-
-let mut surface = Surface::new(80, 24);
-
-// Set individual cells
-surface.set(0, 0, Cell::new('H'));
-
-// Get cell
-let cell = surface.get(0, 0);
-
-// Track dirty regions
-surface.mark_dirty(0);           // Mark row 0 as dirty
-let first = surface.first_dirty(); // First dirty row
-let last = surface.last_dirty();   // Last dirty row
-```
-
-### Cells
+A declarative layer over crossterm key events, with normalized `KeyId`,
+a default `Action` registry, user rebinding, and conflict detection:
 
 ```rust
-use oxi_tui::{Cell, CellBuilder, Color, Attributes};
+use oxi_tui::keybindings::{KeybindingsManager, keys::KeyId, registry::Action};
 
-let cell = CellBuilder::new()
-    .character('A')
-    .foreground(Color::Rgb(255, 136, 0))
-    .background(Color::Rgb(30, 30, 44))
-    .attributes(Attributes::new().with_bold())
-    .build();
-```
-
-### Overlay System
-
-Overlays render on top of all other components and capture input first:
-
-```rust
-use oxi_tui::{OverlayOptions, OverlayContent};
-
-// Add an overlay
-let id = tui.add_overlay(my_modal, OverlayOptions::default());
-
-// Remove an overlay
-tui.remove_overlay(id);
-
-// Remove all overlays
-tui.clear_overlays();
-
-// Escape key closes the top overlay by default
-```
-
-## Event Handling
-
-### Event Types
-
-```rust
-pub enum Event {
-    Key(KeyEvent),
-    Mouse(MouseEvent),
-    Resize(ResizeEvent),
-    FocusGained,
-    FocusLost,
-    None,
+let mgr = KeybindingsManager::new();
+let key_id = KeyId::from(crossterm_event);
+match mgr.match_action(&key_id) {
+    Some(Action::Submit) => { /* ... */ }
+    Some(Action::Quit)   => { /* ... */ }
+    _ => {}
 }
 ```
 
-### Key Events
+## Rendering Helpers
 
-```rust
-pub struct KeyEvent {
-    pub code: KeyCode,
-    pub modifiers: KeyModifiers,
-}
+- **Terminal capabilities** (`render::terminal`): detects image protocol
+  (Kitty / iTerm2), true color, OSC 8 hyperlinks, Kitty keyboard protocol, and
+  cell size.
+- **Inline images** (`render::image`): PNG / JPEG / GIF / WebP decode and
+  Kitty / iTerm2 inline emission.
+- **ANSI utilities** (`text`, `render::ansi`): display-width-aware truncation,
+  wrapping, and string-width that ignore SGR escapes.
+- **Diffs** (`render::diff`): colored unified-diff rendering with `+`/`-`
+  stat counting.
+- **Mermaid** (`render::mermaid`): Mermaid graph → ASCII box diagram, cached.
 
-pub enum KeyCode {
-    Char(char), Enter, Escape, Tab, Backspace, Delete,
-    Up, Down, Left, Right, Home, End, PageUp, PageDown,
-    Insert, F(u8),
-}
+## Conventions
 
-pub struct KeyModifiers {
-    pub shift: bool,
-    pub ctrl: bool,
-    pub alt: bool,
-    pub meta: bool,
-}
-```
-
-### Mouse Events
-
-```rust
-pub struct MouseEvent {
-    pub kind: MouseEventKind,  // Click, Drag, ScrollDown, ScrollUp
-    pub button: MouseButton,   // Left, Middle, Right
-    pub row: u16,
-    pub col: u16,
-}
-```
-
-### Focus Management
-
-Tab cycles focus between child components. Shift+Tab cycles backwards.
-
-```rust
-// Set focus programmatically
-tui.set_focus(2);
-
-// Get current focus index
-let idx = tui.focus_index();
-```
-
-### Custom Event Handler
-
-```rust
-tui.on_event(|event| {
-    if let Event::Key(key) = event {
-        if key.code == KeyCode::Char('q') && key.modifiers.ctrl {
-            // Handle Ctrl+Q
-        }
-    }
-});
-```
+- `parking_lot::RwLock` over `std::sync::RwLock`; never hold a guard across an
+  `.await`.
+- Atomic file writes use the temp + rename pattern.
+- Shipped (non-test) code `warn`s on `clippy::unwrap_used`; tests relax that one
+  lint via `#![cfg_attr(test, allow(...))]`.
 
 ## License
 
