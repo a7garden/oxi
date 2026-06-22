@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-06-22
+
 ### Added
 
 - **4 new built-in color schemes**: Nord, Catppuccin Mocha, GitHub Dark,
@@ -81,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross-reference confusing. Now consistent.
 - **`oxi config show` now displays glyph set and routing status.** Previously
   absent — the only way to check these was the `/settings` overlay.
+
 ## [0.45.1] - 2026-06-22
 
 ### Fixed
