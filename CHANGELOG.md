@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-06-22
+
 ### Changed — 설정 마법사 모델 단계 재설계
 
 - **모델 목록을 구성된 프로바이더로 제한**: 2단계(기본 모델 선택)가 더 이상
