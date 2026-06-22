@@ -5,7 +5,9 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2026-06-21
+## [Unreleased]
+
+## [0.41.2] - 2026-06-22
 
 ### Security — 코드 감사 보고서 결함 일괄 수정 (audit 2026-06-21)
 
