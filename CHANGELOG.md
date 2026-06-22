@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-06-22
+
 ### Changed — 설정 마법사 프로바이더 단계 재설계
 
 - **프로바이더 단계 fzf 방식 상시 필터 도입**: 기존 `/` 모달 검색 모드를
