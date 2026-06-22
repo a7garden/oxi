@@ -328,12 +328,9 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 /// - Normalizes tool call IDs to 9 characters
 /// - Handles Mistral's streaming format (OpenAI-compatible)
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
+    // F-6 (audit 2026-06-21): length-based estimate replaces 2-pass scan.
+    let mut events = Vec::with_capacity(text.len() / 80);
     let mut partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
-
-    // Pre-estimate capacity
-    let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
-    events.reserve(estimated_events);
 
     let mut accumulated_usage = Usage::default();
 

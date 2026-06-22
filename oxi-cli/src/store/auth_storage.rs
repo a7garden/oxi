@@ -917,16 +917,21 @@ impl AuthStorage {
         if let Some(ref storage) = self.file_storage {
             let creds = self.credentials.read();
             if let Ok(json) = serde_json::to_string_pretty(&*creds) {
-                // Warn once about plaintext storage when not using keyring
-                #[cfg(not(feature = "keyring"))]
-                {
-                    self.plaintext_warned.get_or_init(|| {
-                        tracing::warn!(
-                            "Auth credentials are stored in plaintext. \
-                             Enable the 'keyring' feature for secure OS-level storage."
-                        );
-                    });
-                }
+                // F-4 (audit 2026-06-21): the previous warning suggested
+                // enabling a `keyring` feature that is never declared in
+                // `Cargo.toml` (the `keyring_support` module at line 1047
+                // is dead code: `#[cfg(feature = "keyring")]` is never
+                // selected, so `cargo` always builds the `not(feature)`
+                // branch). Replace with an accurate one-shot warning that
+                // names the actual on-disk path and points at the docs.
+                self.plaintext_warned.get_or_init(|| {
+                    tracing::warn!(
+                        "Auth credentials are stored in plaintext at \
+                         ~/.oxi/auth.json (mode 0600). For OS-keyring \
+                         support, see the `oxi-auth-keyring` crate or \
+                         the OXI_KEYRING=1 docs at docs/PORT_GUIDE.md."
+                    );
+                });
 
                 if let Err(e) = storage.write(&json) {
                     tracing::error!("Failed to persist auth storage: {}", e);
@@ -1041,9 +1046,21 @@ fn now_secs() -> u64 {
 // ============================================================================
 // Keyring Support
 // ============================================================================
+//
+// F-4 (audit 2026-06-21): this module is currently unreachable from the
+// workspace because the `keyring` feature is not declared in `Cargo.toml`.
+// It is preserved so a follow-up PR can wire it back in via
+// `keyring = { version = "2", optional = true }` + `keyring = ["dep:keyring"]`
+// and add an opt-in env-gated call site in `FileAuthStorage::persist`.
+// Until that PR lands, the `not(feature = "keyring")` arm always compiles
+// and the `cfg(feature = "keyring")` arm is dead.
 
-/// Wrapper for using OS keyring with fallback
+/// OS-keyring credential helpers. Currently stubbed because the
+/// `keyring` cargo feature is not enabled (see F-4 audit note above).
 #[allow(unexpected_cfgs)]
+#[deprecated(note = "keyring cargo feature is not wired in Cargo.toml; \
+    this module is currently a no-op fallback. See docs/PORT_GUIDE.md \
+    and the F-4 audit note in oxi-cli/src/store/auth_storage.rs.")]
 pub mod keyring_support {
     use super::*;
 

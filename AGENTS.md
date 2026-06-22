@@ -187,11 +187,25 @@ Key types: `Oxi`, `OxiBuilder`, `AgentBuilder`, `AgentGroup`, `MessageBus`, `Por
 Single binary with three run modes: **TUI** (interactive), **print**
 (plain or JSON), **RPC** (JSON-over-stdin/stdout for IDE integration).
 
-Composition root: `oxi-cli/src/main.rs` is a 12-line dispatcher that
-calls `oxi::bootstrap::run_with_args(args)`. All wiring (settings
-merge, custom-provider registration, router registration, built-in
-tool registration, WASM extension loading) lives in
-`oxi-cli/src/bootstrap.rs`. The run-mode dispatcher
+Composition root: `oxi-cli/src/main.rs` is the binary entry point. The
+top-level `main()` is a thin dispatcher (12 lines) that routes
+to either `handle_subcommand(command)` for non-interactive
+subcommands or `oxi::bootstrap::run_with_args(args)` for the
+default TUI/print/RPC modes. **However**, `handle_subcommand`
+itself is a large match arm (~90 lines) that delegates each
+subcommand to an inline `handle_*` function declared in the same
+file (F-5 audit 2026-06-21). Those `handle_*` functions together
+add ~1,400 LOC to `main.rs` — contradicting the older "12-line
+dispatcher" claim that this paragraph originally made. The
+follow-up refactor (move each `handle_*` to `oxi-cli/src/cli/commands/*.rs`,
+see audit F-5 in `oxi-code-audit-report.html`) is non-trivial because
+clap's `Subcommand`-derived enums can hit generic-bound surprises when
+referenced from a sibling module — a structural split should be done in
+a dedicated PR with explicit testing of every subcommand.
+
+All wiring (settings merge, custom-provider registration, router
+registration, built-in tool registration, WASM extension loading) lives
+in `oxi-cli/src/bootstrap.rs`. The run-mode dispatcher
 (`dispatch_run_mode`) routes to TUI / print / RPC based on flags.
 
 The `App` struct is built via `App::from_oxi(oxi, settings)` from

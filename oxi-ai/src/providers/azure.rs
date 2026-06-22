@@ -347,12 +347,8 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 ///
 /// This is identical to the OpenAI provider's SSE parsing logic.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
+    let mut events = Vec::with_capacity(text.len() / 80);
     let mut partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
-
-    // Pre-estimate capacity: one event per data line is a reasonable upper bound.
-    let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
-    events.reserve(estimated_events);
 
     let mut accumulated_usage = Usage::default();
 

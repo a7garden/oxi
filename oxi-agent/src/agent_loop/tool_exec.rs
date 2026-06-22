@@ -6,6 +6,43 @@ use futures::{FutureExt, StreamExt};
 use oxi_ai::{AssistantMessage, Message, ToolCall, ToolResultMessage, progress_callback};
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::Notify;
+
+/// Build a cancellation [`Notify`] handle for a single tool call, plus a
+/// background tokio task that fires `notify_one()` whenever `cancel_signal`
+/// transitions to `true`. Tools that opt into cancellation await the
+/// returned `Notify` inside a `tokio::select!` against their main work;
+/// when the loop's `cancel_signal` flips, the task wakes the tool within
+/// ~250 ms (the poll cadence) without requiring the tool to know about
+/// the loop's `AtomicBool`.
+///
+/// Why `Notify` instead of `oneshot::Sender`: the `AgentTool` trait already
+/// exposes a `signal: Option<oneshot::Receiver<()>>` parameter, but every
+/// call site was passing `None` (audit finding F-8), defeating the contract.
+/// This helper re-establishes the contract with a primitive that survives
+/// the closure-move semantics of `tokio::spawn` (`oneshot::Sender` cannot
+/// be both moved into the spawned task AND returned to the caller).
+///
+/// `loop_ref` supplies the loop's `cancel_signal` (`Option<Arc<AtomicBool>>`).
+/// When `None` (e.g. tests that don't install a cancel flag) the returned
+/// `Notify` is never fired; the tool simply awaits it until the call ends.
+/// The detached poll task self-terminates when `notify_one` fires.
+fn make_cancellation(loop_ref: &super::AgentLoop) -> Arc<Notify> {
+    let notify = Arc::new(Notify::new());
+    if let Some(flag) = loop_ref.cancel_signal() {
+        let notify_for_task = Arc::clone(&notify);
+        tokio::spawn(async move {
+            loop {
+                if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    notify_for_task.notify_one();
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+        });
+    }
+    notify
+}
 
 use super::config::{AfterToolCallHook, ToolExecutionMode};
 use super::helpers::{FinalizedToolCall, create_tool_result_message, should_terminate_batch};
@@ -415,6 +452,14 @@ async fn execute_tool_calls_parallel(
             let after_hook = loop_ref.after_tool_call.clone();
             let emit_clone = emit.clone();
             let ctx_clone = ctx.clone();
+            // Pre-build the cancellation notify *outside* the async move
+            // closure so `loop_ref` does not need to be `Send + 'static`.
+            // The helper only borrows `loop_ref` for the duration of the
+            // synchronous body of `make_cancellation` (it returns
+            // `Arc<Notify>` plus a detached `tokio::spawn` that owns the
+            // flag clone, so by the time this scope ends `loop_ref` is
+            // no longer referenced).
+            let cancel_notify = make_cancellation(loop_ref);
 
             finalized_calls.push(FinalizedToolCallEntry::Future(Box::pin(async move {
                 let executed = execute_prepared_tool_call_static(
@@ -424,6 +469,7 @@ async fn execute_tool_calls_parallel(
                     after_hook.clone(),
                     emit_clone.clone(),
                     &ctx_clone,
+                    Some(cancel_notify),
                 )
                 .await;
 
@@ -524,6 +570,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
     after_hook: Option<AfterToolCallHook>,
     emit: Arc<dyn Fn(AgentEvent) + Send + Sync>,
     ctx: &ToolExecContext,
+    cancel_notify: Option<Arc<Notify>>,
 ) -> ExecutedToolCallOutcome {
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
@@ -566,8 +613,25 @@ pub(crate) async fn execute_prepared_tool_call_static(
 
         // Browse progress callback — enriches context cell.
         tool.on_browse_progress(make_browse_enrichment_cb(Arc::clone(&context_cell)));
-
-        match tool.execute(&tool_call_id, args, None, ctx).await {
+        // F-8 (audit 2026-06-21): see the matching note in
+        // `execute_prepared_tool_call`. Same `select!`-based cancellation
+        // wrap, same trade-off — additive, no trait change.
+        let exec_fut = tool.execute(&tool_call_id, args, None, ctx);
+        tokio::pin!(exec_fut);
+        let exec_result: Result<AgentToolResult, String> = match cancel_notify {
+            Some(notify) => {
+                let notify_for_select = Arc::clone(&notify);
+                tokio::select! {
+                    r = &mut exec_fut => r,
+                    _ = notify_for_select.notified() => Err(format!(
+                        "tool '{}' cancelled by agent loop",
+                        tool_call_id
+                    )),
+                }
+            }
+            None => exec_fut.await,
+        };
+        match exec_result {
             Ok(r) => result = r,
             Err(e) => {
                 result = AgentToolResult::error(e);
@@ -657,7 +721,7 @@ async fn prepare_tool_call(
 }
 
 async fn execute_prepared_tool_call(
-    _loop_ref: &super::AgentLoop,
+    loop_ref: &super::AgentLoop,
     prepared: &PreparedToolCallOutcome,
     emit: &super::EmitFn,
     ctx: &ToolExecContext,
@@ -714,10 +778,36 @@ async fn execute_prepared_tool_call(
         // Wire up browse progress callback.
         tool.on_browse_progress(make_browse_enrichment_cb(Arc::clone(&context_cell)));
 
-        match tool
-            .execute(&tool_call_id, prepared.args.clone(), None, ctx)
-            .await
-        {
+        // F-8 (audit 2026-06-21): wrap tool execution in a `tokio::select!`
+        // against the loop's cancellation notify. Before this, every call
+        // site passed `None` for the `signal: Option<oneshot::Receiver<()>>`
+        // parameter, defeating the cancellation contract — a long-running
+        // tool (e.g. `bash` with a 30s sleep) would only observe a cancel
+        // flag on the next 500 ms poll cycle, *after* it had already done
+        // most of its work. With `select!`, the tool's `await` is dropped
+        // the instant `cancel_signal` flips, returning control to the loop
+        // within ~250 ms (the poll cadence in `make_cancellation`).
+        //
+        // The tool's own `signal` argument is still `None` here — that
+        // parameter would require a trait signature change. `select!`
+        // cancellation at the call site is the minimal, additive fix
+        // that preserves the existing trait contract while honoring
+        // cancellation at the *outer* await point. Tools that respect
+        // `ctx.cancelled` (most do) still observe the loop's stop flag
+        // through `ctx`; tools that ignore it now at least get their
+        // outer future cancelled promptly.
+        let cancel_notify = make_cancellation(loop_ref);
+        let cancel_for_select = Arc::clone(&cancel_notify);
+        let tool_call_id_for_exec = tool_call_id.clone();
+        let exec_fut = tool.execute(&tool_call_id_for_exec, prepared.args.clone(), None, ctx);
+        tokio::pin!(exec_fut);
+        let cancelled_msg = format!("tool '{}' cancelled by agent loop", tool_call_id_for_exec);
+        let cancelled_msg_for_select = cancelled_msg.clone();
+        let exec_result: Result<AgentToolResult, String> = tokio::select! {
+            r = &mut exec_fut => r,
+            _ = cancel_for_select.notified() => Err(cancelled_msg_for_select),
+        };
+        match exec_result {
             Ok(r) => result = r,
             Err(e) => {
                 result = AgentToolResult::error(e);

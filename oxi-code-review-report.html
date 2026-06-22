@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>oxi 워크스페이스 심층 코드 리뷰 보고서</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-elev: #161b22;
+    --bg-soft: #1c2128;
+    --border: #30363d;
+    --border-soft: #21262d;
+    --text: #e6edf3;
+    --text-dim: #9da7b3;
+    --text-mute: #6e7681;
+    --accent: #58a6ff;
+    --accent-2: #79c0ff;
+    --green: #3fb950;
+    --green-bg: rgba(63, 185, 80, 0.12);
+    --yellow: #d29922;
+    --yellow-bg: rgba(210, 153, 34, 0.12);
+    --red: #f85149;
+    --red-bg: rgba(248, 81, 73, 0.12);
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --code-bg: #010409;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 120px; }
+  header.hero {
+    padding: 64px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(88,166,255,0.1);
+    border: 1px solid rgba(88,166,255,0.3);
+    padding: 4px 10px;
+    border-radius: 4px;
+    margin-bottom: 18px;
+    font-weight: 600;
+  }
+  h1 {
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 0 0 14px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  h1 .accent { color: var(--accent); }
+  .subtitle { color: var(--text-dim); font-size: 16px; margin: 0; max-width: 720px; }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 28px;
+  }
+  .meta-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .meta-card .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-mute);
+    margin-bottom: 4px;
+  }
+  .meta-card .value { font-size: 18px; font-weight: 600; }
+  .meta-card .value.green { color: var(--green); }
+  .meta-card .value.blue { color: var(--accent); }
+  .meta-card .value.purple { color: var(--purple); }
+
+  nav.toc {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 48px;
+  }
+  nav.toc h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-mute); }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  nav.toc li { margin-bottom: 4px; }
+  nav.toc a { color: var(--accent-2); text-decoration: none; font-size: 14px; }
+  nav.toc a:hover { text-decoration: underline; }
+
+  section { margin-bottom: 56px; scroll-margin-top: 20px; }
+  h2 {
+    font-size: 26px;
+    margin: 0 0 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  h2 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    background: rgba(88,166,255,0.15);
+    border: 1px solid rgba(88,166,255,0.35);
+    color: var(--accent);
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  h3 { font-size: 19px; margin: 32px 0 12px; color: var(--text); letter-spacing: -0.01em; }
+  h4 { font-size: 16px; margin: 22px 0 10px; color: var(--accent-2); font-weight: 600; }
+  p { margin: 0 0 14px; color: var(--text); }
+  p.dim { color: var(--text-dim); }
+  ul, ol { padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  strong { color: #fff; font-weight: 600; }
+  em { color: var(--accent-2); font-style: normal; }
+  code {
+    font-family: "SF Mono", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    color: var(--accent-2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border-soft);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 14px 0 18px;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .kw { color: #ff7b72; }
+  .ty { color: #79c0ff; }
+  .st { color: #a5d6ff; }
+  .cm { color: #6e7681; font-style: italic; }
+  .fn { color: #d2a8ff; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 20px; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th { background: var(--bg-elev); color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  td code { font-size: 12px; }
+  tr:hover td { background: rgba(110,118,129,0.06); }
+
+  .callout {
+    border-left: 3px solid;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 18px 0;
+    background: var(--bg-elev);
+  }
+  .callout-title { font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .callout.good { border-color: var(--green); }
+  .callout.good .callout-title { color: var(--green); }
+  .callout.warn { border-color: var(--yellow); background: var(--yellow-bg); }
+  .callout.warn .callout-title { color: var(--yellow); }
+  .callout.bad { border-color: var(--red); background: var(--red-bg); }
+  .callout.bad .callout-title { color: var(--red); }
+  .callout.info { border-color: var(--accent); }
+  .callout.info .callout-title { color: var(--accent); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+  }
+  .badge.crit { background: var(--red-bg); color: var(--red); border: 1px solid rgba(248,81,73,0.4); }
+  .badge.high { background: rgba(251,146,60,0.12); color: #fb923c; border: 1px solid rgba(251,146,60,0.35); }
+  .badge.med { background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(210,153,34,0.35); }
+  .badge.low { background: var(--green-bg); color: var(--green); border: 1px solid rgba(63,185,80,0.35); }
+  .badge.info { background: rgba(88,166,255,0.12); color: var(--accent); border: 1px solid rgba(88,166,255,0.35); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } nav.toc ol { columns: 1; } }
+
+  .stat-row { display: flex; gap: 28px; flex-wrap: wrap; margin: 18px 0; }
+  .stat { }
+  .stat .n { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; }
+  .stat .l { font-size: 12px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
+
+  .findings li { margin-bottom: 18px; padding-left: 4px; }
+  .findings .head { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .findings .file { color: var(--text-mute); font-size: 13px; font-family: "SF Mono", Menlo, monospace; }
+
+  .score-bar {
+    height: 8px; background: var(--bg-elev); border-radius: 4px; overflow: hidden; border: 1px solid var(--border);
+    margin: 8px 0 4px;
+  }
+  .score-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--cyan)); }
+  .score-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 28px;
+    margin-top: 64px;
+    color: var(--text-mute);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent-2); }
+  .toc-arrow::after { content: " ↗"; font-size: 0.8em; color: var(--text-mute); }
+  hr { border: none; border-top: 1px solid var(--border-soft); margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="eyebrow">Depth Code Review · 2026-06-21</span>
+  <h1>oxi 워크스페이스<br><span class="accent">심층 코드 리뷰 보고서</span></h1>
+  <p class="subtitle">
+    터미널 기반 AI 코딩 어시스턴트 <strong>pi</strong>의 Rust 포팅 프로젝트인 <strong>oxi</strong> 6개 크레이트 전체에 대한 실제 코드 기반 심층 분석.
+    아키텍처·보안·동시성·복원력·품질 지표를 세부적으로 검토하고, 14개의 구체적 개선안과 기능 제안을 제시합니다.
+  </p>
+  <div class="meta-grid">
+    <div class="meta-card"><div class="label">분석 대상</div><div class="value">6 크레이트</div></div>
+    <div class="meta-card"><div class="label">코드 규모</div><div class="value blue">~168K LOC</div></div>
+    <div class="meta-card"><div class="label">테스트 수</div><div class="value green">2,774개</div></div>
+    <div class="meta-card"><div class="label">분석 파일</div><div class="value">366 .rs</div></div>
+    <div class="meta-card"><div class="label">언어/에디션</div><div class="value purple">Rust 2024</div></div>
+    <div class="meta-card"><div class="label">MSRV</div><div class="value">1.96</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <h3>목차</h3>
+  <ol>
+    <li><a href="#s1">1. 실행 요약 (Executive Summary)</a></li>
+    <li><a href="#s2">2. 워크스페이스 구조와 의존성 그래프</a></li>
+    <li><a href="#s3">3. oxi-ai — LLM 추상화 계층</a></li>
+    <li><a href="#s4">4. oxi-agent — 에이전트 런타임</a></li>
+    <li><a href="#s5">5. oxi-sdk — 포트 시스템과 빌더</a></li>
+    <li><a href="#s6">6. oxi-tui — 터미널 위젯</a></li>
+    <li><a href="#s7">7. oxi-cli — 컴포지션 루트</a></li>
+    <li><a href="#s8">8. oxi-hashline — 패치 형식</a></li>
+    <li><a href="#s9">9. 횡단 관심사 (Cross-cutting)</a></li>
+    <li><a href="#s10">10. 품질 지표 정량 분석</a></li>
+    <li><a href="#s11">11. 보안 위협 모델링</a></li>
+    <li><a href="#s12">12. 취약점 목록 (심각도순)</a></li>
+    <li><a href="#s13">13. 기능 제안 (우선순위)</a></li>
+    <li><a href="#s14">14. 종합 평가</a></li>
+  </ol>
+</nav>
+
+<!-- ============== SECTION 1 ============== -->
+<section id="s1">
+<h2><span class="num">1</span>실행 요약 (Executive Summary)</h2>
+
+<p>
+oxi는 6개 크레이트·약 168K LOC 규모의 성숙한 Rust 워크스페이스로, <strong>계층화된 아키텍처</strong>·<strong>포트 기반 어댑터 시스템</strong>·<strong>스트리밍 우선 설계</strong>라는 일관된 철학으로 통합되어 있습니다. 단일 작성자(a7garden)가 유지하는 프로젝트 치고는 <strong>이례적으로 높은 문서화 밀도와 테스트 커버리지</strong>(2,774개 테스트)를 보이며, <code>AGENTS.md</code>·<code>ARCHITECTURE.md</code>·<code>docs/designs/</code>에 아키텍처 의사결정의 근거가 상세히 기록되어 있습니다.
+</p>
+
+<div class="callout good">
+  <div class="callout-title">▲ 강점 한눈에 보기</div>
+  <ul style="margin-bottom:0">
+    <li><strong>클린한 의존성 DAG</strong> — <code>oxi-ai</code>는 내부 의존성 0, <code>oxi-cli</code>가 모두 조립. 순환 의존성 불가 구조.</li>
+    <li><strong>4계층 access gate</strong> (Capability → RBAC → Permission → ExecPolicy) — 단일 진입점 <code>Authorizer</code>로 단락 평가.</li>
+    <li><strong>복원력 스택</strong> — CircuitBreaker + FallbackChain + MultiProvider + 자동 재시도 + orphan tool result 자동 정리.</li>
+    <li><strong>TTSR</strong> (Time-Traveling Stream Rules) — 스트리밍 중 규칙 위반을 실시간 차단하고 시스템 리마인더로 정정.</li>
+    <li><strong>Secret&lt;T&gt;</strong> 래퍼로 API 키 Debug/Display 노출 차단, <strong>PathGuard</strong>로 트래버설 방어.</li>
+    <li><strong>3-레이어 카탈로그</strong> + models.dev 라이브 인리치먼트로 5000+ 모델 가격/컨텍스트 데이터 확보.</li>
+  </ul>
+</div>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ 주요 위험 한눈에 보기</div>
+  <ul style="margin-bottom:0">
+    <li><strong>BashTool 위험 명령 감지는 "경고만"</strong> — <code>is_dangerous_command()</code>가 차단이 아닌 문자열 추가. 정책 게이트와 미연동.</li>
+    <li><strong>환경변수 블랙리스트</strong> (<code>LD_PRELOAD</code> 등) — 하드코딩 22개. 화이트리스트 전환이 더 안전.</li>
+    <li><strong>패키지 무결성</strong> — SHA-256을 lockfile에 <em>저장은 하되</em>, 재설치 시 <em>검증 로직 부재</em>.</li>
+    <li><strong>unsafe 환경변수 조작</strong> — vertex.rs·settings.rs·팩토리 등 다수. Rust 2024에서는 data race UB 가능.</li>
+    <li><strong>비테스트 코드 unwrap 1,659회</strong> — 일부는 패닉 경로. (AGENTS.md가 clippy <code>unwrap_used</code> warn을 명시하나 사용처가 많음.)</li>
+  </ul>
+</div>
+
+<h3>핵심 평가</h3>
+<table>
+  <thead><tr><th>영역</th><th>평가</th><th>점수</th></tr></thead>
+  <tbody>
+    <tr><td>아키텍처 일관성</td><td>매우 우수. 포트/계층 분리가 엄격하고 단방향 DAG.</td><td><span class="badge low">9/10</span></td></tr>
+    <tr><td>문서화</td><td>AGENTS.md, ARCHITECTURE.md, RFC가 풍부. 의사결정 근거 추적 가능.</td><td><span class="badge low">9/10</span></td></tr>
+    <tr><td>복원력 설계</td><td>서킷브레이커·폴백·TTSR로 업계 최고 수준.</td><td><span class="badge low">9/10</span></td></tr>
+    <tr><td>보안 모델</td><td>4계층 게이트 설계는 훌륭하나 <em>실행 경로의 실제 적용</em>이 불완전.</td><td><span class="badge med">6/10</span></td></tr>
+    <tr><td>에러 처리</td><td>thiserror typed 오류 사용. 다만 unwrap 잔존.</td><td><span class="badge low">7/10</span></td></tr>
+    <tr><td>동시성 안전</td><td>parking_lot + AtomicBool + tokio 조합. unsafe 일부 주의.</td><td><span class="badge low">7/10</span></td></tr>
+    <tr><td>테스트</td><td>2,774개 단위 + 21개 통합 테스트. 커버리지 양호.</td><td><span class="badge low">8/10</span></td></tr>
+    <tr><td>공급망 보안</td><td>cargo audit + deny + SBOM. 단, 자체 패키지 매니저 검증 약함.</td><td><span class="badge med">6/10</span></td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============== SECTION 2 ============== -->
+<section id="s2">
+<h2><span class="num">2</span>워크스페이스 구조와 의존성 그래프</h2>
+
+<p>워크스페이스 <code>Cargo.toml</code>는 <code>resolver = "2"</code>, edition 2024, MSRV 1.96, 공통 메타데이터를 <code>[workspace.package]</code>로 단일 출처화합니다. <code>[patch.crates-io]</code>가 명시적으로 제거되어 <code>cargo publish</code>가 막히지 않도록 한 점이 눈에 띕니다.</p>
+
+<h3>2.1 크레이트별 규모</h3>
+<table>
+  <thead><tr><th>크레이트</th><th>역할</th><th>LOC</th><th>주요 파일 수</th></tr></thead>
+  <tbody>
+    <tr><td><code>oxi-ai</code></td><td>LLM API 추상화 · 프로바이더 · 카탈로그</td><td>29,049</td><td>47</td></tr>
+    <tr><td><code>oxi-agent</code></td><td>에이전트 루프 · 21개 툴 · MCP</td><td>35,824</td><td>73</td></tr>
+    <tr><td><code>oxi-sdk</code></td><td>15개 포트 · 빌더 · 보안 · 라이프사이클</td><td>20,081</td><td>49</td></tr>
+    <tr><td><code>oxi-tui</code></td><td>ratatui 위젯 · 테마 · 글리프셋</td><td>18,709</td><td>33</td></tr>
+    <tr><td><code>oxi-cli</code></td><td>컴포지션 루트 · 스토어 · TUI 앱</td><td>56,899</td><td>107</td></tr>
+    <tr><td><code>oxi-hashline</code></td><td>라인 앵커드 패치 포맷</td><td>7,458</td><td>13</td></tr>
+  </tbody>
+</table>
+
+<h3>2.2 의존성 방향 (DAG)</h3>
+<pre><code><span class="cm">oxi-hashline  (독립, oxi-* 의존성 0)  →  oxi-agent</span>
+<span class="cm">oxi-ai        (기반 계층, 내부 의존성 0)</span>
+oxi-ai  →  oxi-agent  →  oxi-sdk  →  oxi-cli
+<span class="cm">oxi-tui       (독립, 내부 의존성 0)         →  oxi-cli</span>
+
+<span class="cm"># 핵심 불변량: 순환 의존성이 구조적으로 불가능.</span>
+<span class="cm"># oxi-sdk는 oxi-ai·oxi-agent를 재출력(ream)하므로 "단일 의존성 패턴" 성립</span>
+<span class="cm"># (oxios → oxi-sdk 만 의존, oxi-ai 직접 의존 X).</span></code></pre>
+
+<div class="callout info">
+  <div class="callout-title">ℹ 관찰</div>
+  <p><code>oxi-agent</code>는 <code>oxi-sdk</code>에 의존하지 않음에도 불구하고, SDK 포트 타입(<code>MemoryBackend</code>, <code>UrlResolver</code>, <code>TodoStateProvider</code>, <code>AgentPoolProvider</code>, <code>LspProvider</code>)을 <strong>자체 경량 트레이트로 재정의</strong>합니다 (<code>oxi-agent/src/tools.rs</code> L20-220). 이는 의존성 순환을 피하면서 호스트가 capability를 주입할 수 있게 하는 우아한 패턴이지만, <strong>타입 중복 비용</strong>(SDK 측 trait과 미러)을 지불합니다. 향후 <code>oxi-capabilities</code> 같은 leaf crate로 추출하면 중복 제거 가능합니다.</p>
+</div>
+
+<h3>2.3 가장 거대한 파일 (복잡도 핫스팟)</h3>
+<table>
+  <thead><tr><th>파일</th><th>LOC</th><th>리스크</th></tr></thead>
+  <tbody>
+    <tr><td><code>oxi-cli/src/store/session.rs</code></td><td>3,445</td><td><span class="badge high">단일 책임 과다</span></td></tr>
+    <tr><td><code>oxi-cli/src/storage/packages.rs</code></td><td>2,933</td><td><span class="badge high">공급망·파싱 혼재</span></td></tr>
+    <tr><td><code>oxi-cli/src/store/settings.rs</code></td><td>2,429</td><td><span class="badge med">설정 + env 주입</span></td></tr>
+    <tr><td><code>oxi-cli/src/storage/resource_loader.rs</code></td><td>2,141</td><td><span class="badge med">핫리로드 복잡</span></td></tr>
+    <tr><td><code>oxi-cli/src/store/auth_storage.rs</code></td><td>1,706</td><td><span class="badge high">인증 평문 저장</span></td></tr>
+    <tr><td><code>oxi-hashline/src/parser.rs</code></td><td>1,672</td><td><span class="badge info">상태기계 복잡</span></td></tr>
+    <tr><td><code>oxi-tui/src/render/mermaid.rs</code></td><td>2,607</td><td><span class="badge info">ASCII 렌더러</span></td></tr>
+  </tbody>
+</table>
+<p class="dim"><code>session.rs</code>과 <code>packages.rs</code>는 각각 2,900줄을 넘어 단일 파일 책임이 과도합니다. AGENTS.md는 oxi-cli가 <em>"monorepo monolith by design"</em>라고 명시하지만, 파일 단위 분할은 여전히 유효한 리팩토링 후보입니다.</p>
+</section>
+
+<!-- ============== SECTION 3 ============== -->
+<section id="s3">
+<h2><span class="num">3</span>oxi-ai — LLM 추상화 계층</h2>
+
+<p>oxi-ai는 8개 프로바이더(OpenAI, OpenAI Responses, Anthropic, Azure, Bedrock, Google, Vertex, Mistral)를 단일 <code>Provider</code> 트레이트로 통합하는 기반 계층입니다. 내부 의존성이 0이며 모든 상위 크레이트의 뼈대가 됩니다.</p>
+
+<h3>3.1 Provider 트레이트와 스트리밍</h3>
+<pre><code><span class="cm">// oxi-ai/src/providers/trait_def.rs</span>
+<span class="kw">pub trait</span> <span class="ty">Provider</span>: <span class="ty">Send</span> + <span class="ty">Sync</span> + <span class="kw">'static</span> {
+    <span class="kw">fn</span> <span class="fn">stream</span>&lt;<span class="kw">'a</span>&gt;(
+        &amp;<span class="kw">'a</span> <span class="kw">self</span>,
+        model: &amp;<span class="ty">Model</span>,
+        context: &amp;<span class="ty">Context</span>,
+        options: <span class="ty">Option</span>&lt;<span class="ty">StreamOptions</span>&gt;,
+    ) -&gt; <span class="ty">Pin</span>&lt;<span class="ty">Box</span>&lt;<span class="kw">dyn</span> <span class="ty">Future</span>&lt;Output = <span class="ty">StreamResult</span>&gt; + <span class="ty">Send</span> + <span class="kw">'a</span>&gt;&gt;;
+
+    <span class="kw">fn</span> <span class="fn">name</span>(&amp;<span class="kw">self</span>) -&gt; &amp;<span class="kw">str</span>;
+}</code></pre>
+
+<div class="callout good">
+  <div class="callout-title">▲ 강점</div>
+  <p>스트리밍 우선(<code>ProviderEvent</code> 스트림)으로 모든 프로바이더가 동일한 이벤트 모델을 공유합니다. <code>Box&lt;dyn Future + Send&gt;</code> 반환으로 트레이트 객체 안전(object-safe)하며, GAT 대신 명시적 수명 <code>'a</code>를 사용해 <code>Pin</code> 안전성을 컴파일 타임에 보장합니다. SSE 파서는 부분 UTF-8 라인도 처리한다고 명시되어 있어(<code>AGENTS.md</code> "Pitfalls"), CRLF 불일치 환경에서 견고합니다.</p>
+</div>
+
+<h3>3.2 MultiProvider + CircuitBreaker + FallbackChain</h3>
+<p><code>multi_provider.rs</code>는 1,283줄의 지능형 라우팅 프로바이더입니다. 복잡도 분류 → 후보 모델 리스트 구성 → 서킷 상태 확인 → 폴백 체인 시도의 흐름으로, 문서화된 우선순위 규칙을 정확히 따릅니다.</p>
+
+<pre><code><span class="cm">// multi_provider.rs L14-29 — 우선순위 문서화가 코드와 일치</span>
+<span class="cm">// auto_routing=true일 때:</span>
+<span class="cm">//   1. 라우터의 베스트 모델 (분류된 복잡도 기반)</span>
+<span class="cm">//   2. 들어온 모델 (등록 &amp; healthy한 경우)</span>
+<span class="cm">//   3. 폴백 체인 (설정된 경우)</span>
+
+<span class="cm">// 에러 분류:</span>
+<span class="cm">//   - 재시도 가능 (429, 5xx, 네트워크, 타임아웃): 실패 기록 후 다음 시도</span>
+<span class="cm">//   - 비재시도 (400, 401, 403): 실패 기록 없이 즉시 반환</span></code></pre>
+
+<div class="callout good">
+  <div class="callout-title">▲ 강점</div>
+  <p><code>error_to_fallback_reason()</code>으로 프로바이더 에러를 <code>FallbackReason</code>으로 매핑하고, <code>FallbackStream</code> 래퍼로 스트림 시작점에 <code>FallbackStart</code> 이벤트를 주입합니다. <code>FallbackExhaustedStream</code>은 모든 후보가 소진되면 종료 이벤트를 내보냅니다 — <strong>부분 응답 손실 없이 우아한 강등</strong>이 구현되어 있습니다.</p>
+</div>
+
+<h3>3.3 카탈로그 3.5-레이어 아키텍처</h3>
+<table>
+  <thead><tr><th>레이어</th><th>소스</th><th>목적</th></tr></thead>
+  <tbody>
+    <tr><td>L1</td><td>빌드인 TOML (<code>data/catalog/</code>, <code>include_str!</code>)</td><td>기본 모델 메타데이터</td></tr>
+    <tr><td>L2</td><td><code>~/.oxi/catalog/overrides.toml</code></td><td>사용자 오버라이드</td></tr>
+    <tr><td>L2.5</td><td><strong>models.dev live enrichment</strong> (5분 캐시)</td><td>가격 <code>0.0</code> 갭 채우기</td></tr>
+    <tr><td>L3</td><td>런타임 <code>/v1/models</code> (ollama/lmstudio 등)</td><td>로컬 서버 발견</td></tr>
+  </tbody>
+</table>
+<p><code>catalog/models_dev.rs</code> (820줄)는 <code>OXI_MODELS_DEV</code> 게이트로 제어되며 atomic write로 캐시를 갱신합니다. <code>OXI_MODELS_DEV_DISABLE_FETCH</code>로 오프라인 테스트가 가능한 점이 훌륭합니다.</p>
+
+<h3>3.4 complexity_router의 단순성</h3>
+<p><code>complexity_router.rs</code>는 <strong>키워드 매칭 + 토큰 수</strong> 기반 휴리스틱으로 복잡도를 5단계(<code>Trivial</code>~<code>Research</code>)로 분류합니다.</p>
+
+<pre><code><span class="cm">// complexity_router.rs L73-91</span>
+<span class="kw">let</span> complex_keywords = [<span class="st">"build a"</span>, <span class="st">"microservice"</span>, <span class="st">"distributed system"</span>, ...];
+<span class="kw">let</span> research_keywords = [<span class="st">"research"</span>, <span class="st">"benchmark"</span>, <span class="st">"comprehensive analysis"</span>, ...];</code></pre>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ 개선점: 키워드 기반 분류의 한계</div>
+  <p>영어 키워드 하드코딩으로 <strong>다국어 프롬프트(한국어·일본어 등)에서 분류 정확도가 급락</strong>합니다. 또한 "research the bug" 같은 단순 조사 작업이 Research 등급으로 과대 분류될 수 있습니다. 임베딩 기반 분류 또는 LLM-as-judge 패턴으로 고도화를 권장합니다(제안 S-3 참조).</p>
+</div>
+
+<h3>3.5 컴팩션 전략</h3>
+<p><code>compaction.rs</code>는 긴 대화를 LLM 자체 요약으로 압축합니다. <code>CompactionConfig</code> 기본값(<code>keep_recent=4</code>, <code>max_batch=20</code>, <code>target_ratio=0.5</code>)이 합리적이며, <code>LlmCompactor</code>는 현재 모델을 재사용해 요약 비용을 최소화합니다.</p>
+<div class="callout warn">
+  <div class="callout-title">⚠ 개선점</div>
+  <p><code>generate_branch_summary()</code>가 <em>"created file"</em>, <em>"decided"</em> 같은 <strong>영어 리터럴 매칭</strong>으로 토픽을 추출합니다 (L55-66). 한국어 응답에서는 토픽 추출이 무력화됩니다. 언어 중립적 휴리스틱(구두점/길이/role 가중치) 또는 LLM 추출로 전환을 권합니다.</p>
+</div>
+</section>
+
+<!-- ============== SECTION 4 ============== -->
+<section id="s4">
+<h2><span class="num">4</span>oxi-agent — 에이전트 런타임</h2>
+
+<p>oxi-agent는 LLM 툴호출 루프의 심장입니다. <code>AgentLoop</code>가 스트리밍 응답 → 도구 실행 → 재시도 → 컴팩션 → TTSR 규칙 적용을 조율합니다. 21개 툴과 MCP 클라이언트를 포함합니다.</p>
+
+<h3>4.1 AgentLoop의 run_loop 상태 기계</h3>
+<p><code>agent_loop/mod.rs::run_loop()</code>는 L584-909로 약 325줄짜리 중첩 루프입니다. 내부 while 루프는 <code>has_more_tool_calls || !pending_messages.is_empty()</code> 조건으로 턴을 진행하고, 외부 루프는 지연 steering/follow-up 메시지를 잡아냅니다.</p>
+
+<pre><code><span class="cm">// agent_loop/mod.rs L878-905 — 레이스 윈도우 폐쇄 로직</span>
+<span class="cm">// 내부 while 종료 후 steering 큐 재확인 → drain_steering_queue()와</span>
+<span class="cm">// while-종료 조건 검사 사이의 창을 닫음</span>
+<span class="kw">let</span> late_steering = <span class="kw">self</span>.drain_steering_queue();
+<span class="kw">if</span> !late_steering.is_empty() { pending_messages = late_steering; <span class="kw">continue</span>; }
+<span class="kw">let</span> follow_up_messages = <span class="kw">self</span>.drain_follow_up_queue();
+<span class="kw">if</span> !follow_up_messages.is_empty() { pending_messages = follow_up_messages; <span class="kw">continue</span>; }
+<span class="kw">let</span> final_steering = <span class="kw">self</span>.drain_steering_queue();  <span class="cm">// follow-up drain 창도 폐쇄</span>
+<span class="kw">if</span> !final_steering.is_empty() { pending_messages = final_steering; <span class="kw">continue</span>; }
+<span class="kw">break</span>;</code></pre>
+
+<div class="callout good">
+  <div class="callout-title">▲ 강점: 레이스 윈도우 3중 폐쇄</div>
+  <p>steering/follow-up 메시지가 비동기적으로注入될 때, drain과 조건 검사 사이의 미세한 경쟁 창을 <strong>3번의 연속 drain</strong>으로 폐쇄합니다. 주석이 명시적으로 의도를 서술하여 유지보수성이 높습니다. 단, 완전한 해법은 아니며 고부하에서는 여전히 창이 존재할 수 있습니다 — <code>tokio::sync::Notify</code> 기반 웨이크업으로 보강을 권합니다.</p>
+</div>
+
+<h3>4.2 orphan tool result 자동 정리</h3>
+<pre><code><span class="cm">// L649-672 — provider가 메시지 순서를 거부하면 자동 복구</span>
+<span class="kw">let</span> is_tool_ordering_error = detail.contains(<span class="st">"tool"</span>)
+    &amp;&amp; (detail.contains(<span class="st">"must be a response"</span>)
+        || detail.contains(<span class="st">"preceding"</span>)
+        || detail.contains(<span class="st">"tool_calls"</span>));
+
+<span class="kw">if</span> is_tool_ordering_error {
+    <span class="kw">let</span> removed = sanitize_orphaned_tool_results(&amp;<span class="kw">mut</span> messages);
+    <span class="kw">if</span> removed &gt; 0 { <span class="kw">continue</span>; }  <span class="cm">// 턴 재시도</span>
+}</code></pre>
+<p>흔한 프로바이더 오류(도구 결과가 assistant tool_call 없이 등장)를 자동으로 정정해 재시도합니다. 사용자 경험 측면에서 훌륭한 디자인입니다.</p>
+
+<h3>4.3 BashTool 보안 분석 <span class="badge high">높음</span></h3>
+<p><code>tools/bash.rs</code>는 가장 보안에 민감한 도구입니다. 핵심 메커니즘을 점검했습니다.</p>
+
+<h4>환경변수 블랙리스트</h4>
+<pre><code><span class="cm">// bash.rs L23-43 — 22개 하드코딩된 차단 변수</span>
+<span class="kw">const</span> BLOCKED_ENV_VARS: &amp;[&amp;<span class="kw">str</span>] = &amp;[
+    <span class="st">"LD_PRELOAD"</span>, <span class="st">"LD_LIBRARY_PATH"</span>, <span class="st">"DYLD_INSERT_LIBRARIES"</span>,
+    <span class="st">"PATH"</span>, <span class="st">"HOME"</span>, <span class="st">"IFS"</span>, <span class="st">"SHELL"</span>, <span class="st">"PYTHONPATH"</span>, ...
+];</code></pre>
+
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 ENV-1 (중간): 블랙리스트는 우회 가능</div>
+  <p><code>NLSPATH</code>, <code>PERL5OPT</code>, <code>RUBYOPT</code>, <code>GEM_HOME</code>, <code>CARGO_HOME</code>, <code>RUSTUP_HOME</code>, <code>NPM_CONFIG_PREFIX</code>, <code>NODE_OPTIONS</code>(부분), <code>BASH_ENV</code>, <code>ENV</code>, <code>ZDOTDIR</code>, <code>PERL_HASH_PARAMS</code> 등 <strong>다양한 인젝션 벡터가 누락</strong>되어 있습니다. 셸 시작 파일(<code>~/.bashrc</code>)도 <code>ENV</code>로 로드 가능합니다. <strong>화이트리스트 전환</strong>을 강력히 권장합니다(제안 SEC-1).</p>
+</div>
+
+<h4>위험 명령 감지는 "경고만"</h4>
+<pre><code><span class="cm">// bash.rs L465-467 — 감지 후 출력에 문자열만 추가</span>
+<span class="kw">if let</span> <span class="ty">Some</span>(<span class="kw">ref</span> warning) = security_warning {
+    output.push_str(&amp;<span class="fn">format!</span>(<span class="st">"\n{}"</span>, warning));
+}</code></pre>
+
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 SEC-2 (높음): 감지-차단 분리</div>
+  <p><code>is_dangerous_command()</code>는 fork bomb, <code>sudo</code>, <code>/dev/tcp</code>, <code>/etc/shadow</code> 접근을 <strong>감지는 하되 실행 자체는 허용</strong>합니다. 에이전트가 자율적으로 동작할 때 이 경고는 단순히 토큰을 소비할 뿐 보호를 제공하지 않습니다. oxi-sdk의 <code>Authorizer</code>/<code>ExecPolicy</code>와 통합해 <strong>실행 전 정책 결정</strong>으로 전환해야 합니다(제안 SEC-2).</p>
+</div>
+
+<h4>프로세스 그룹 킬</h4>
+<pre><code><span class="cm">// bash.rs L316-331</span>
+<span class="kw">async fn</span> <span class="fn">kill_process_group</span>(child: &amp;<span class="kw">mut</span> <span class="ty">Child</span>) {
+    <span class="kw">if let</span> <span class="ty">Some</span>(pid) = child.id() {
+        <span class="kw">let</span> pgid = -(pid <span class="kw">as</span> i32);
+        <span class="kw">unsafe</span> { libc::<span class="fn">kill</span>(pgid, libc::SIGKILL); }  <span class="cm">// SAFETY 주석 있음</span>
+    }
+    <span class="kw">let _</span> = child.<span class="fn">kill</span>().await;
+}</code></pre>
+<div class="callout info">
+  <div class="callout-title">ℹ 평가</div>
+  <p><code>process_group(0)</code> 설정 + 음수 PGID 킬로 자식 프로세스 누수를 방지합니다. SAFETY 주석이 근거를 제시하며 적절합니다. 단, SIGKILL은 자식이 clean-up 기회를 못 가지므로 <strong>SIGTERM → 그레이스 → SIGKILL</strong> 단계적 종료가 더 우아합니다.</p>
+</div>
+
+<h3>4.4 EditTool와 Hashline 통합</h3>
+<p><code>edit.rs</code>는 두 모드를 지원합니다: 레거시 <code>old_text/new_text</code>와 새 <code>hashline</code> 패치. <code>prepare_arguments()</code>가 모델이 JSON 문자열로 보내는 <code>edits</code> 배열까지 처리하는 점이 견고합니다 (L58-69). <code>PathGuard::validate_traversal</code>로 트래버설을 막지만 <em>워크스페이스 외부는 허용</em>합니다 — 시스템 설정 읽기 등 합법적 사례를 위한 설계입니다.</p>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ 주의: traversal-only 검증의 양날</div>
+  <p><code>validate_traversal</code>은 <code>..</code>만 막고 절대 경로 외부 접근을 허용합니다. 주석이 의도를 명시하지만, <strong>신뢰할 수 없는 에이전트</strong>에게는 <code>validate()</code>(워크스페이스 강제)가 기본이 되어야 합니다. 현재 edit/read/write 모두 <code>validate_traversal</code>을 사용하므로 정책 게이트와 결합이 필수입니다.</p>
+</div>
+
+<h3>4.5 MCP 클라이언트 <span class="badge med">중간</span></h3>
+<p><code>mcp/mod.rs</code>(1,349줄)는 서버 연결·메타데이터 캐시·consent·라이프사이클을 통합 관리합니다. <code>tokio::sync::Mutex</code>(쓰기) + <code>parking_lot::RwLock</code>(읽기) 혼합으로 AGENTS.md 동시성 가이드라인을 준수합니다.</p>
+
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 MCP-1 (높음): stdio 서버는 임의 코드 실행</div>
+  <p>MCP 서버는 <code>command</code> + <code>args</code>로 프로세스를 spawn합니다 (<code>StdioTransport</code>). 이는 <strong>설정 파일만으로 임의 바이너리 실행</strong>을 의미합니다. <code>ConsentManager</code>가 도구 단위 Allow/Deny를 제공하지만, <code>lifecycle: "lazy"</code> 서버는 최초 도구 호출 시 자동 스폰됩니다. <strong>서버 실행 바이너리 화이트리스트 + 해시 검증 + SHA 기반 known-good 비교</strong>가 필요합니다(제안 SEC-3).</p>
+</div>
+
+<h3>4.6 TTSR (Time-Traveling Stream Rules) <span class="badge low">강점</span></h3>
+<p><code>agent_loop/ttsr.rs</code>는 스트리밍 중 프로젝트 규칙 위반을 실시간 감지해 스트림을 중단시키고 시스템 리마인더로 정정시킵니다.</p>
+<pre><code><span class="cm">// run_loop L695-711 — RuleInterrupt 처리</span>
+<span class="ty">StreamOutcome::RuleInterrupt</span> { partial, rule } =&gt; {
+    <span class="fn">emit</span>(<span class="ty">AgentEvent::TtsrInterrupt</span> { rule_name: rule.name.<span class="fn">clone</span>(), ... });
+    messages.<span class="fn">push</span>(<span class="ty">Message::Assistant</span>(partial));
+    <span class="kw">let</span> interrupt_body = <span class="fn">format!</span>(<span class="st">"&lt;system-interrupt reason=\"rule_violation\"...&gt;{content}&lt;/system-interrupt&gt;"</span>, ...);
+    messages.<span class="fn">push</span>(<span class="ty">Message::user</span>(interrupt_body));
+    <span class="kw">continue</span>;
+}</code></pre>
+<div class="callout good">
+  <div class="callout-title">▲ 혁신적 디자인</div>
+  <p>규칙 위반을 <em>스트림이 완료되기 전에</em> 차단하고, 위반 사실을 다음 턴의 컨텍스트에 주입합니다. <code>InterruptMode</code>(ProseOnly/ToolOnly/Always)로 검사 범위를 제어하고 <code>ScopeToken</code>으로 Text/Thinking/Tool 소스를 구분합니다. <strong>컴팩션 후에도 <code>injected_records()</code>로 주입 이력이 보존</strong>되어 모델이 같은 규칙을 재위반하지 않도록 합니다.</p>
+</div>
+</section>
+
+<!-- ============== SECTION 5 ============== -->
+<section id="s5">
+<h2><span class="num">5</span>oxi-sdk — 포트 시스템과 빌더</h2>
+
+<p>oxi-sdk는 제품(oxi-cli, oxios)과 인프라 사이의 <strong>계약(contract)</strong>을 정의합니다. 15개 포트 트레이트 + noop 폴백으로, 제품은 필요한 포트만 등록합니다.</p>
+
+<h3>5.1 포트 설계 원칙</h3>
+<ol>
+  <li><strong>SDK는 계약만 정의, 제품이 구현</strong> — SDK 내부에 구현체가 없습니다.</li>
+  <li><strong>선택적 등록</strong> — 미등록 포트는 noop 기본값으로 동작.</li>
+  <li><strong>타입 유연 페이로드</strong> — <code>serde_json::Value</code>로 제품별 구체 타입 분리.</li>
+  <li><strong>추가적 버전닝</strong> — 새 메서드는 noop 기본 구현을 가져 기존 제품이 깨지지 않음.</li>
+</ol>
+
+<h3>5.2 4계층 access gate</h3>
+<pre><code><span class="cm">// security/gate.rs L1-10 — 단락 평가 4계층</span>
+<span class="cm">// Layer 0: CSpace (Capability)  — capability 토큰 보유?</span>
+<span class="cm">// Layer 1: RBAC                  — 역할이 액션 허용?</span>
+<span class="cm">// Layer 2: Agent Permissions     — 툴/경로 허용 목록?</span>
+<span class="cm">// Layer 3: ExecPolicy            — 바이너리 허용? 메타문자 없음?</span></code></pre>
+
+<table>
+  <thead><tr><th>CheckRequest 변형</th><th>검사 대상</th></tr></thead>
+  <tbody>
+    <tr><td><code>Tool</code></td><td>툴 이름 호출 권한</td></tr>
+    <tr><td><code>Path { mode: Read/Write }</code></td><td>경로 접근 + 읽기/쓰기 구분</td></tr>
+    <tr><td><code>Exec { binary, args }</code></td><td>실행 바이너리 + 인수 메타문자</td></tr>
+    <tr><td><code>Network</code></td><td>아웃바운드 네트워크</td></tr>
+    <tr><td><code>Fork</code></td><td>자식 에이전트 스폰</td></tr>
+  </tbody>
+</table>
+
+<div class="callout good">
+  <div class="callout-title">▲ 강점</div>
+  <p><code>DenyLayer</code> + <code>AccessDenied</code>에 <strong>거부 계층 + 사유 + 사용자 제안</strong>을 담아 디버깅과 UX가 우수합니다. capability는 seL4 스타일 CSpace(<code>ResourceRef</code>, <code>Rights</code>)로 모델링되어 있어 <strong>형식적 권한 부여 체계</strong>를 갖추었습니다.</p>
+</div>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ 실행 경로의 빈 곳</div>
+  <p>이 강력한 게이트가 <strong>실제 BashTool/EditTool 실행 경로에서 항상 호출되는지</strong> 점검이 필요합니다. <code>oxi-cli</code> 부트스트랩에서 <code>SimpleAccessGate</code>를 등록하지만, <code>BashTool::execute()</code> 내부에 gate 호출이 보이지 않았습니다. 즉 <strong>정책은 정의됐으나 에이전트 툴 실행에 기본 결합되어 있지 않을 수 있습니다</strong>. <code>before_tool_call</code> 훅으로 게이트를 강제 주입하는 패턴을 권장합니다(제안 SEC-4).</p>
+</div>
+
+<h3>5.3 AgentPermissions 기본값</h3>
+<pre><code><span class="cm">// permissions.rs L36-58</span>
+<span class="kw">impl</span> <span class="ty">Default</span> <span class="kw">for</span> <span class="ty">AgentPermissions</span> {
+    <span class="kw">fn</span> <span class="fn">default</span>() -&gt; <span class="ty">Self</span> {
+        <span class="ty">Self</span> {
+            allowed_paths: <span class="fn">vec!</span>[<span class="st">"/workspace/**"</span>],
+            denied_paths: <span class="fn">vec!</span>[<span class="st">"/etc/**"</span>, <span class="st">"/root/**"</span>, <span class="st">"/sys/**"</span>, <span class="st">"/proc/**"</span>, <span class="st">".oxios/**"</span>],
+            network_access: <span class="kw">false</span>,
+            max_execution_time_secs: <span class="st">300</span>,
+            max_memory_mb: <span class="st">512</span>,
+            can_fork: <span class="kw">false</span>,
+            ...
+        }
+    }
+}</code></pre>
+<div class="callout warn">
+  <div class="callout-title">⚠ 개선점</div>
+  <p><code>denied_paths</code>가 Linux/Unix 중심입니다. <strong>macOS</strong>에서는 <code>/etc/**</code>가 <code>/private/etc/**</code> 심볼릭 링크이므로 우회 가능하고, <strong>Windows</strong> 경로(<code>C:\Windows\**</code>)가 없습니다. <code>~/</code>(홈 디렉터리의 <code>.ssh</code>, <code>.aws</code>)도 빠져 있습니다. OS별 기본 거부 목록과 홈 디렉터리 자동 확장이 필요합니다.</p>
+</div>
+
+<h3>5.4 OxiBuilder와 ProviderResolver</h3>
+<p><code>builder.rs</code>의 <code>Oxi</code>는 <code>ProviderResolver</code>를 구현하여 <code>Agent::new_with_resolver()</code>에 직접 전달 가능합니다. 모델/프로바이더 해상 순서가 문서화되어 있습니다: (1) 커스텀 등록 → (2) 팩토리 → (3) 빌트인 + 자격증명 주입. 이 격리 패턴 덕분에 SDK 소비자가 전역 레지스트리 없이 격리된 에이전트를 만들 수 있습니다.</p>
+</section>
+
+<!-- ============== SECTION 6 ============== -->
+<section id="s6">
+<h2><span class="num">6</span>oxi-tui — 터미널 위젯</h2>
+
+<p>oxi-tui는 ratatui + crossterm 기반 순 위젯 라이브러리로, <strong>oxi-* 의존성이 0</strong>입니다. 어떤 제품이든 채팅 UX를 재사용할 수 있도록 자체 도메인 타입(<code>ChatMessage</code>, <code>ContentBlock</code>)을 정의합니다.</p>
+
+<h3>6.1 GlyphSet 시스템 <span class="badge low">강점</span></h3>
+<p><code>symbols.rs</code>는 모든 UI 기호를 <strong>플러그형 프리셋</strong>(Unicode/Ascii/Nerd)으로 제공합니다. AGENTS.md가 명시하듯 <strong>"위젯에 기호를 하드코딩하지 마라"</strong>는 규칙이 코드 수준에서 강제됩니다.</p>
+<pre><code><span class="cm">// symbols.rs L61-69 — 각 프리셋의 샘플 렌더링</span>
+<span class="ty">GlyphSet::Unicode</span>    =&gt; <span class="st">"✔ ✖ ⚠ ● ▸ ▾ ╭─╮ │ └─┘ ⠋ ⣾ ↑ ↓ ⚙ 🔧"</span>,
+<span class="ty">GlyphSet::Ascii</span>      =&gt; <span class="st">"[ok] [x] [!] [*] > + - +-+ | +-+ | \\ -"</span>,
+<span class="ty">GlyphSet::Nerd</span>       =&gt; <span class="st">"\u{f00c} \u{f00d} ..."</span> <span class="cm">// Nerd Font PUA</span></code></pre>
+<div class="callout good">
+  <div class="callout-title">▲ 설계 철학</div>
+  <p><code>Symbols</code>가 <code>Copy</code>이고 모든 필드가 <code>&amp;'static str</code>이므로 <strong>할당 0, 수명 관리 부담 0</strong>으로 <code>ThemeStyles</code> 안에 탑재됩니다. 새 글리프 추가 절차(필드 추가 → 3개 생성자 마이그레이션 → 단일 호출부)가 AGENTS.md에 명시되어 일관성이 보장됩니다.</p>
+</div>
+
+<h3>6.2 ChatView의 가상 렌더링</h3>
+<p><code>widgets/chat/mod.rs::render()</code>는 <strong>직접 버퍼 렌더링</strong>으로 가상 버퍼 오버헤드를 제거합니다. 가시 영역 내 엔트리만 렌더링하고(<code>scroll_offset</code> 기반 스킵), 클릭 영역(<code>thinking_regions</code>, <code>tool_regions</code>)을 매 프레임 재구성합니다.</p>
+<pre><code><span class="cm">// chat/mod.rs L94-117 — 뷰포트 컬링</span>
+<span class="kw">for</span> entry <span class="kw">in</span> &amp;layout {
+    <span class="kw">if</span> entry.y + entry.height &lt;= scroll_offset { <span class="kw">continue</span>; }  <span class="cm">// 위쪽 스킵</span>
+    <span class="kw">if</span> entry.y &gt;= vp_bottom { <span class="kw">break</span>; }              <span class="cm">// 아래쪽 스킵</span>
+    <span class="kw">if</span> entry.height == <span class="st">0</span> { <span class="kw">continue</span>; }
+    <span class="cm">// ... 부분 가시 엔트리는 뷰포트 안에서 클리핑</span>
+}</code></pre>
+<div class="callout good">
+  <div class="callout-title">▲ 성능 디자인</div>
+  <p>긴 대화에서도 가시 줄만 렌더링하므로 <strong>O(visible) 렌더링</strong>을 보장합니다. 레이아웃 캐싱으로 상태 변경 시에만 재계산합니다. 다만 <code>thinking_regions.clear()</code>가 매 프레임 발생하므로 매우 긴 세션에서는 최적화 여지가 있습니다.</p>
+</div>
+
+<h3>6.3 Mermaid ASCII 렌더러</h3>
+<p><code>render/mermaid.rs</code>는 2,607줄로 단일 파일이 가장 큽니다. 터미널에서 Mermaid 다이어그램을 ASCII로 렌더링하는 매우 야심찬 기능입니다. 이 규모는 별도 크레이트(<code>oxi-mermaid-ascii</code>)로 추출을 고려할 만합니다.</p>
+</section>
+
+<!-- ============== SECTION 7 ============== -->
+<section id="s7">
+<h2><span class="num">7</span>oxi-cli — 컴포지션 루트</h2>
+
+<p>oxi-cli는 모든 크레이트를 조립하는 통합 계층입니다. <code>main.rs</code>는 12줄 디스패처이고, <code>bootstrap.rs</code>가 모든 와이어링을 담당합니다 — AGENTS.md가 강조하는 <strong>"컴포지션 루트 단일화"</strong> 원칙의 구현입니다.</p>
+
+<h3>7.1 부트스트랩 파이프라인</h3>
+<pre><code><span class="cm">// bootstrap.rs — 빌드 순서 (문서화된 의존성 순서)</span>
+1. init_logging()              <span class="cm">// ~/.cache/oxi/oxi.log</span>
+2. Settings 로드 (5-레이어 병합)
+3. register_custom_providers() <span class="cm">// [[custom_provider]] 등록 + 모델 fetch</span>
+4. register_router_provider()  <span class="cm">// 모델 자동 라우터</span>
+5. App::from_oxi(oxi, ownership_session_id)  <span class="cm">// flock + 세션 ID</span>
+6. register_builtin_tools()    <span class="cm">// --tools 필터 + disabled_tools</span>
+7. load_wasm_extensions()      <span class="cm">// WASM 확장 로드</span>
+8. dispatch_run_mode()         <span class="cm">// TUI / print / RPC 분기</span></code></pre>
+
+<h3>7.2 이슈 시스템 소유권 ID (Phase 0 / 결함 #13)</h3>
+<p>AGENTS.md가 상세히 서술한 <strong>가장 중요한 보안 인variant</strong>입니다.</p>
+<div class="callout bad">
+  <div class="callout-title">✗ 회귀 위험 지점</div>
+  <p>이슈 <code>start</code>/<code>close</code>의 소유권 검사는 <code>ToolContext.session_id</code>를 호출자 신원으로 사용하고 <code>.oxi/issues/.alive/&lt;session_id&gt;</code>의 flock으로 보호합니다. <strong>이게 작동하려면 (a) ID가 비어있지 않고 (b) 프로세스가 잡고 있는 flock과 일치해야</strong> 합니다. AGENTS.md가 명시적으로 경고합니다:</p>
+  <ul>
+    <li>TUI 모드: <code>liveness::TUI_OWNERSHIP_ID = "tui"</code></li>
+    <li>비TUI: <code>proc-&lt;pid&gt;-&lt;uuid&gt;</code></li>
+    <li><code>App::from_oxi()</code>가 flock 획득 + <code>AgentConfig.session_id</code> 설정</li>
+  </ul>
+  <p><strong>절대 <code>agent.rs</code>의 <code>AgentLoopConfig</code>에 <code>session_id: None</code>을 하드코딩하지 마세요</strong> — 결함 #13이 정확히 이것이었습니다. 회귀 테스트 <code>session_id_wiring_tests</code>와 <code>start_with_distinct_live_owners_collides</code>가 지킵니다.</p>
+</div>
+
+<h3>7.3 패키지 매니저 (packages.rs)</h3>
+<p>2,933줄의 자체 패키지 매니저는 npm/git/URL/로컬 4가지 소스를 지원합니다.</p>
+
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 SUP-1 (높음): 무결성 저장 O, 검증 X</div>
+  <p><code>compute_dir_hash()</code>로 SHA-256을 계산해 <code>LockEntry.integrity</code>에 <em>저장합니다</em>. 그러나 <strong>재설치/업데이트 시 이 값을 다운로드 결과와 비교하는 로직이 보이지 않습니다</strong> (검색 결과 install 경로에 integrity 비교 없음). 즉 lockfile은 감사 로그일 뿐 <strong>서버 측 무결성 보장이 없는 npm tarball이나 git ref</strong>에 대한 공급망 공급망 보호가 부족합니다.</p>
+</div>
+
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 SUP-2 (중간): git clone 자격증명 누출 경로</div>
+  <p><code>git_clone()</code>은 <code>GIT_TERMINAL_PROMPT=0</code>을 설정해 자격증명 프롬프트를 막습니다 (좋은 실천). 그러나 <strong>공개 URL 검증이 없어</strong> 악의적 <code>github:</code> 단축 URL이 SSH 자격증명을 트리거할 수 있고, <code>git+ssh://</code> 스킴이 명시적으로 허용됩니다. 화이트리스트 도메인 또는 HTTPS 강제를 권장합니다.</p>
+</div>
+
+<h3>7.4 인증 저장소 (auth_storage.rs)</h3>
+<p>1,706줄로 API 키, OAuth 토큰, 세션 토큰을 관리합니다. OS 키링 우선 + 파일 폴백 패턴입니다.</p>
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 AUTH-1 (높음): 파일 폴백 암호화 미확인</div>
+  <p>키링 사용 가능 시 안전하지만, <strong>파일 폴백 시 자격증명이 어떻게 보호되는지</strong> 코드 점검에서 평문 여부가 명확하지 않습니다. <code>AuthCredential::validate()</code>는 구조 검증만 하고 암호화는 다루지 않습니다. 폴백 경로는 <strong>OS 사용자 키 파생(AES-GCM) 또는 키링 전용 강제</strong>가 필요합니다.</p>
+</div>
+
+<h3>7.5 설정 5-레이어 병합</h3>
+<p><code>settings.rs</code>는 기본값 → 글로벌 → 프로젝트 → 환경변수 → CLI 인수 순서로 병합합니다. 설정 버전 마이그레이션(<code>SETTINGS_VERSION = 8</code>)이 내장되어 있습니다.</p>
+<div class="callout warn">
+  <div class="callout-title">⚠ 언어 정책의 TUI 전용 제한</div>
+  <p>AGENTS.md가 명시하듯 <code>output_languages</code> 정책은 <strong>TUI 세션 빌드 경로에서만</strong> 주입됩니다. <code>oxi --print</code>와 RPC 모드는 무시합니다. 이 비대칭은 <em>의도적</em>이지만(프로그래밍 인터페이스에서는 호출자가 책임), 사용자가 <code>settings.toml</code>에 써놓고 print 모드에서 안 먹힌다고 혼란을 겪을 수 있습니다. 문서 가시성 강화가 필요합니다.</p>
+</div>
+</section>
+
+<!-- ============== SECTION 8 ============== -->
+<section id="s8">
+<h2><span class="num">8</span>oxi-hashline — 패치 형식</h2>
+
+<p>omp에서 포팅한 라인 앵컠 패치 형식으로, AI가 코드를 편집할 때 <strong>스냅샷 태그 + 행 번호</strong>로 정확한 위치를 지정합니다. 모델 hallucination으로 인한 잘못된 줄 참조를 방지합니다.</p>
+
+<h3>8.1 토크나이저 → 파서 → 어플라이어 파이프라인</h3>
+<pre><code><span class="cm">// oxi-hashline 아키텍처</span>
+입력 텍스트
+   │
+   ▼
+<span class="fn">tokenizer.rs</span> (824줄)   <span class="cm">// 라인 분류 + 토큰화</span>
+   │ Token 스트림
+   ▼
+<span class="fn">parser.rs</span> (1,672줄)    <span class="cm">// 상태기계 → Edit 리스트</span>
+   │ Vec&lt;Edit&gt;
+   ▼
+<span class="fn">apply.rs</span> (1,934줄)     <span class="cm">// 본문에 적용 + 진단</span>
+   │ ApplyResult
+   ▼
+<span class="fn">mismatch.rs</span>           <span class="cm">// HashlineError 변환</span></code></pre>
+
+<h3>8.2 경계 복구와 들여쓰기 정정 <span class="badge low">강점</span></h3>
+<p><code>apply.rs</code>는 모델의 흔한 실수를 자동 정정합니다:</p>
+<ul>
+  <li><strong>구분자 균형</strong> — <code>()</code>, <code>[]</code>, <code>{}</code>의 순 카운트로 누락된 닫기 기호 감지 (문자열/주석/템플릿 리터럴 인식)</li>
+  <li><strong>들여쓰기 정정</strong> — 삽입 본문의 들여쓰기가 앵커 깊이와 다를 때 자동 보정</li>
+  <li><strong>경계 재구성</strong> — 모델이 변경 없는 범위 끝을 반복 서술하는 경우 흡수</li>
+</ul>
+
+<pre><code><span class="cm">// apply.rs L36-108 — 구분자 균형 계산 (주석/문자열 인식)</span>
+<span class="kw">fn</span> <span class="fn">compute_delimiter_balance</span>(lines: &amp;[<span class="ty">String</span>]) -&gt; <span class="ty">DelimiterBalance</span> {
+    <span class="kw">let mut</span> in_block_comment = <span class="kw">false</span>;
+    <span class="kw">let mut</span> quote: <span class="ty">Option</span>&lt;u8&gt; = <span class="ty">None</span>;
+    <span class="kw">for</span> line <span class="kw">in</span> lines {
+        <span class="cm">// 라인 코멘트(//), 블록 코멘트(/* */), 따옴표/백틱 상태 추적</span>
+        <span class="cm">// 백슬래시 이스케이프 건너뜀</span>
+        <span class="cm">// `"` / `'`는 라인을 넘지 못함 (백틱/블록코멘트만 크로스라인)</span>
+    }
+}</code></pre>
+
+<div class="callout good">
+  <div class="callout-title">▲ 강점</div>
+  <p>UTF-8 멀티바이트 연속 바이트(≥0x80)가 ASCII 구분자와 충돌하지 않음을 명시적으로 활용해 <strong>바이트 단위 안전 스캔</strong>을 합니다. 이런 저수준 안전성 명시는 신뢰를 줍니다.</p>
+</div>
+
+<h3>8.3 스냅샷 태그 신뢰 모델</h3>
+<div class="callout warn">
+  <div class="callout-title">⚠ 단일 인증 경로</div>
+  <p>편집 도구의 안내문(<code>read</code> 응답의 <code>[PATH#TAG]</code>)이 유일한 신뢰 출처입니다. <strong>태그가 만료되거나 다른 에이전트가 파일을 수정한 경우</strong>, hashline은 이를 감지하지 못할 수 있습니다. 파일 mtime/hash 기반 추가 검증 계층이 보안을 강화합니다.</p>
+</div>
+</section>
+
+<!-- ============== SECTION 9 ============== -->
+<section id="s9">
+<h2><span class="num">9</span>횡단 관심사 (Cross-cutting)</h2>
+
+<h3>9.1 동시성 모델</h3>
+<table>
+  <thead><tr><th>기법</th><th>사용처</th><th>평가</th></tr></thead>
+  <tbody>
+    <tr><td><code>parking_lot::RwLock</code></td><td>대부분의 읽기 다수/쓰기 소수 경로</td><td><span class="badge low">적절</span></td></tr>
+    <tr><td><code>tokio::sync::Mutex</code></td><td>MCP 매니저 쓰기, <code>.await</code> 횡단 경로</td><td><span class="badge low">적절</span></td></tr>
+    <tr><td><code>Arc&lt;AtomicBool&gt;</code></td><td>취소 신호, <code>is_running</code> 가드</td><td><span class="badge low">적절</span></td></tr>
+    <tr><td><code>tokio::sync::Notify</code></td><td>자동 재시도 슬립 즉시 웨이크업</td><td><span class="badge low">우수</span></td></tr>
+    <tr><td><code>oneshot::Receiver</code></td><td>툴 취소 신호</td><td><span class="badge low">적절</span></td></tr>
+  </tbody>
+</table>
+<div class="callout warn">
+  <div class="callout-title">⚠ parking_lot MutexGuard의 !Send 함정</div>
+  <p>AGENTS.md가 명시하듯 <code>parking_lot::MutexGuard</code>는 <code>!Send</code>이므로 <code>.await</code> 횡단 시 컴파일 에러가 발생합니다. 코드는 이를 피하기 위해 <code>tokio::sync::Mutex</code>로 전환하거나 가드를 스코프합니다 — 일관된 패턴이지만 신규 기여자가 실수하기 쉬운 지점입니다.</p>
+</div>
+
+<h3>9.2 에러 처리</h3>
+<ul>
+  <li><strong>라이브러리 크레이트</strong> (oxi-ai, oxi-agent, oxi-sdk): <code>thiserror::Error</code>로 typed 오류 열거형. <span class="badge low">우수</span></li>
+  <li><strong>애플리케이션 크레이트</strong> (oxi-cli): <code>anyhow::Result</code>. <span class="badge low">적절</span></li>
+  <li><strong>oxi-tui</strong>: <code>anyhow</code> 허용. <span class="badge info">수용 가능</span></li>
+</ul>
+<p>다만 <strong>비테스트 코드에 <code>.unwrap()</code>이 1,659회</strong> 발견됩니다. 대부분은 <code>some().unwrap()</code> 후속 패턴이지만, 일부는 잠재 패닉 경로입니다. AGENTS.md가 clippy <code>unwrap_used</code>를 <code>warn</code>으로 설정했으나 에러가 아닌 점이 이 숫자를 설명합니다.</p>
+
+<h3>9.3 복원력 스택</h3>
+<div class="grid-2">
+<div>
+<h4>계층</h4>
+<ol>
+  <li>CircuitBreaker (per-provider)</li>
+  <li>FallbackChain (ordered)</li>
+  <li>MultiProvider (complexity routing)</li>
+  <li>auto-retry (429/5xx)</li>
+  <li>orphan tool result 자동 정리</li>
+  <li>PartialResponse (스트림 복구)</li>
+  <li>TTSR (규칙 위반 자동 정정)</li>
+</ol>
+</div>
+<div>
+<h4>평가</h4>
+<p>이 7계층 복원력 스택은 <strong>업계 최고 수준</strong>입니다. 각 계층이 명확한 책임을 가지며 문서화되어 있습니다. <code>CircuitOpenError</code>로 폭주하는 프로바이더를 빠르게 격리하고, <code>MultiProviderDiagnostics</code>로 상태를 관찰 가능합니다.</p>
+</div>
+</div>
+</section>
+
+<!-- ============== SECTION 10 ============== -->
+<section id="s10">
+<h2><span class="num">10</span>품질 지표 정량 분석</h2>
+
+<div class="stat-row">
+  <div class="stat"><div class="n">2,774</div><div class="l">테스트 수</div></div>
+  <div class="stat"><div class="n">21</div><div class="l">통합 테스트 파일</div></div>
+  <div class="stat"><div class="n">57</div><div class="l">unsafe 사용</div></div>
+  <div class="stat"><div class="n">1,659</div><div class="l">unwrap (비테스트)</div></div>
+  <div class="stat"><div class="n">167</div><div class="l">panic!/todo! 등</div></div>
+  <div class="stat"><div class="n">16</div><div class="l">TODO/FIXME</div></div>
+</div>
+
+<h3>10.1 테스트 대비 코드 비율</h3>
+<div class="score-row"><span>테스트/코드 밀도</span><span>약 1.65% (2,774 / 168K) — 단위 테스트 밀도 양호</span></div>
+<div class="score-bar"><div class="score-fill" style="width: 78%"></div></div>
+
+<h3>10.2 unsafe 사용 분석</h3>
+<table>
+  <thead><tr><th>위치</th><th>용도</th><th>위험도</th></tr></thead>
+  <tbody>
+    <tr><td><code>bash.rs:324</code></td><td><code>libc::kill(pgid, SIGKILL)</code></td><td><span class="badge med">중간</span> — SAFETY 주석 있음, 적절</td></tr>
+    <tr><td><code>vertex.rs:323</code></td><td><code>env::remove_var("GOOGLE_CLOUD_REGION")</code></td><td><span class="badge high">높음</span> — Rust 2024 data race</td></tr>
+    <tr><td><code>settings.rs</code> (다수)</td><td><code>env::set_var</code> / <code>remove_var</code></td><td><span class="badge high">높음</span> — 동일 이슈</td></tr>
+    <tr><td><code>factories.rs</code>, <code>settings.rs</code></td><td>TUI raw 포인터 역참조</td><td><span class="badge med">중간</span> — 오버레이 상태 접근</td></tr>
+    <tr><td><code>loading.rs</code></td><td><code>libloading</code> 네이티브 확장</td><td><span class="badge high">높음</span> — 임의 코드 실행</td></tr>
+    <tr><td><code>store/issues.rs</code></td><td><code>libc::flock</code> (LOCK_EX/SH/UN)</td><td><span class="badge low">낮음</span> — 표준 패턴</td></tr>
+    <tr><td><code>subagent.rs</code></td><td>시그널 핸들링</td><td><span class="badge med">중간</span></td></tr>
+  </tbody>
+</table>
+<div class="callout bad">
+  <div class="callout-title">✗ 취약점 UNSAFE-1 (높음): Rust 2024 환경변수 data race</div>
+  <p><code>std::env::set_var</code>/<code>remove_var</code>는 Rust 2024에서 <strong>thread-safe하지 않음이 공식적으로 명시</strong>되었으며, 다른 스레드가 동시에 <code>env::var</code>를 호출하면 <strong>undefined behavior</strong>입니다. oxi는 Tokio 멀티스레드 런타임을 사용하므로 이 호출들이 <code>unsafe</code>로 표시된 것은 맞지만, <strong>근본적으로 안전하게 만들 수 없습니다</strong>. 해결책: 환경변수를 부팅 시점(메인 스레드, 런타임 시작 전)에만 조작하거나, in-process 설정 레지스트리로 마이그레이션.</p>
+</div>
+
+<h3>10.3 의존성 공급망</h3>
+<p>CI가 <code>cargo audit</code> + <code>cargo deny</code> + SBOM(CycloneDX 1.5)을 시행합니다. <code>extism = "=1.21.0"</code> 핀이 wasmtime-43 호환성 이슈를 회피하며, 그 근거가 <code>Cargo.toml</code> 주석에 상세히 기록되어 있습니다 — 훌륭한 실천입니다.</p>
+</section>
+
+<!-- ============== SECTION 11 ============== -->
+<section id="s11">
+<h2><span class="num">11</span>보안 위협 모델링</h2>
+
+<h3>11.1 신뢰 경계 (Trust Boundaries)</h3>
+<table>
+  <thead><tr><th>경계</th><th>위협</th><th>현재 방어</th><th>갭</th></tr></thead>
+  <tbody>
+    <tr><td>에이전트 → 셸</td><td>명령어 인젝션, 권한 상승</td><td>위험 명령 경고, 환경변수 블랙리스트</td><td><span class="badge high">차단 미결합</span></td></tr>
+    <tr><td>에이전트 → 파일시스템</td><td>트래버설, 민감 파일 접근</td><td>PathGuard, validate_traversal</td><td><span class="badge med">워크스페이스 외부 허용</span></td></tr>
+    <tr><td>MCP 서버 → 호스트</td><td>임의 코드 실행, 데이터 유출</td><td>ConsentManager, lazy lifecycle</td><td><span class="badge high">바이너리 검증 없음</span></td></tr>
+    <tr><td>패키지 소스 → 호스트</td><td>공급망 공격, 악의적 패키지</td><td>SHA-256 lockfile 기록</td><td><span class="badge high">재설치 검증 없음</span></td></tr>
+    <tr><td>네이티브 확장 → 프로세스</td><td>메모리 손상, 샌드박스 탈출</td><td>WASM 경로는 샌드박스</td><td><span class="badge high">native 경로 무제한</span></td></tr>
+    <tr><td>설정 파일 → 프로세스</td><td>악의적 설정, 환경변수 인젝션</td><td>레이어 병합, 버전 마이그레이션</td><td><span class="badge med">서명 없음</span></td></tr>
+    <tr><td>자격증명 저장소</td><td>평문 노출, 키 유출</td><td>OS 키링 우선, Secret&lt;T&gt; 래퍼</td><td><span class="badge high">파일 폴백 암호화 미확인</span></td></tr>
+  </tbody>
+</table>
+
+<h3>11.2 STRIDE 분석 요약</h3>
+<ul>
+  <li><strong>S(Spoofing):</strong> MCP 서버가 가짜 도구 노출 — consent가 완화.</li>
+  <li><strong>T(Tampering):</strong> 패키지/설정 파일 변조 — 서명 부재.</li>
+  <li><strong>R(Repudiation):</strong> audit_trail 모듈로 강력한 가시성 확보.</li>
+  <li><strong>I(Info Disclosure):</strong> Secret&lt;T&gt; + 키링으로 우수.</li>
+  <li><strong>D(DoS):</strong> CircuitBreaker로 프로바이더 DoS 방어. 로컬 리소스 DoS(fork bomb)는 경고만.</li>
+  <li><strong>E(Elevation):</strong> 네이티브 확장/MCP 서버가 임의 코드 실행 — 최대 위험.</li>
+</ul>
+</section>
+
+<!-- ============== SECTION 12 ============== -->
+<section id="s12">
+<h2><span class="num">12</span>취약점 목록 (심각도순)</h2>
+
+<ol class="findings">
+  <li>
+    <div class="head"><span class="badge crit">심각</span> SEC-2: BashTool 위험 명령 감지-차단 분리</div>
+    <div class="file">oxi-agent/src/tools/bash.rs:465-467 — is_dangerous_command()가 경고만 발생</div>
+    <p>fork bomb, sudo, /dev/tcp, /etc/shadow 접근이 감지되어도 실행이 중단되지 않습니다. 자율 에이전트 시나리오에서 치명적입니다. <code>Authorizer::ExecPolicy</code> 게이트를 <code>before_tool_call</code> 훅으로 강제 주입하고, 위험 패턴 매칭 시 차단하도록 전환.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge crit">심각</span> MCP-1: MCP stdio 서버 임의 코드 실행</div>
+    <div class="file">oxi-agent/src/mcp/transport/stdio.rs — command + args로 프로세스 spawn</div>
+    <p>설정 파일(<code>mcp.json</code>) 하나로 임의 바이너리가 실행됩니다. 허용 바이너리 화이트리스트 + SHA-256 known-good 검증 + 서명된 매니페스트가 필요합니다.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge crit">심각</span> SUP-1: 패키지 무결성 저장 O, 검증 X</div>
+    <div class="file">oxi-cli/src/storage/packages.rs:2246 — compute_dir_hash는 lockfile 저장만</div>
+    <p>install/update 경로에서 integrity 필드를 다운로드 결과와 비교하는 로직이 없습니다. 공급망 공격에 취약. npm tarball의 <code>dist.shasum</code>과 비교 + git ref의 커밋 해시 고정 검증 추가.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge high">높음</span> UNSAFE-1: Rust 2024 환경변수 data race</div>
+    <div class="file">oxi-ai/src/providers/vertex.rs:323, oxi-cli/src/store/settings.rs (다수)</div>
+    <p>Tokio 멀티스레드 런타임에서 <code>env::set_var</code>/<code>remove_var</code>는 UB를 유발합니다. 부팅 시점(런타임 이전)으로 제한하거나 in-process 레지스트리로 마이그레이션.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge high">높음</span> AUTH-1: 파일 폴백 자격증명 암호화 미확인</div>
+    <div class="file">oxi-cli/src/store/auth_storage.rs</div>
+    <p>OS 키링 불가 시 파일 저장의 암호화 보장이 불명확합니다. AES-GCM(사용자 키 파생) 또는 키링 강제 + 명시적 거부 정책 필요.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge high">높음</span> SEC-4: AccessGate가 툴 실행 경로에 미결합</div>
+    <div class="file">oxi-cli/src/bootstrap.rs — SimpleAccessGate 등록은 하되 훅 주입 불명확</div>
+    <p>4계층 게이트가 정의됐으나 BashTool/EditTool의 execute 경로에서 gate 호출이 보이지 않습니다. <code>before_tool_call</code> 훅으로 모든 툴 호출 전 게이트 통과를 강제.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge high">높음</span> SUP-2: git clone 자격증명 누출 경로</div>
+    <div class="file">oxi-cli/src/storage/packages.rs:619 — git_clone</div>
+    <p><code>git+ssh://</code>와 <code>github:</code> 단축이 허용되어 SSH 자격증명 에이전트 트리거 가능. 허용 도메인 화이트리스트 또는 HTTPS 강제.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge med">중간</span> ENV-1: 환경변수 블랙리스트 누락</div>
+    <div class="file">oxi-agent/src/tools/bash.rs:23-43</div>
+    <p>NLSPATH, BASH_ENV, ENV, ZDOTDIR, NODE_OPTIONS(부분), GEM_HOME, CARGO_HOME 등 인젝션 벡터 누락. 화이트리스트로 전환.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge med">중간</span> NATIVE-1: 네이티브 확장 무제한 권한</div>
+    <div class="file">oxi-cli/src/extensions/loading.rs:148 — libloading</div>
+    <p>WASM은 샌드박스이나 네이티브 확장은 프로세스 전체 권한. 매니페스트 기반 권한 선언 + 로드 시 강제를 권장.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge med">중간</span> PATH-1: OS별 denied_paths 부재</div>
+    <div class="file">oxi-sdk/src/security/permissions.rs:45-51</div>
+    <p>Linux 중심(/etc, /root, /sys). macOS(/private/etc 심볼릭), Windows(C:\Windows), 홈의 .ssh/.aws 누락.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge med">중간</span> HASH-1: hashline 스냅샷 신뢰 단일 경로</div>
+    <div class="file">oxi-hashline — mtime/hash 추가 검증 부재</div>
+    <p>태그 만료 또는 타 에이전트 동시 수정 시 감지 불가. 파일 해시 기반 추가 검증 계층.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge low">낮음</span> COMPLEX-1: complexity_router 영어 키워드 의존</div>
+    <div class="file">oxi-ai/src/complexity_router.rs:73-91</div>
+    <p>다국어 프롬프트에서 분류 정확도 저하. 임베딩 기반 분류 또는 LLM-as-judge.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge low">낮음</span> ARCH-1: 거대 파일 단일 책임</div>
+    <div class="file">session.rs(3,445), packages.rs(2,933), settings.rs(2,429)</div>
+    <p>가독성·테스트 용이성 저하. 하위 모듈 분할.</p>
+  </li>
+  <li>
+    <div class="head"><span class="badge low">낮음</span> UNWRAP-1: 비테스트 unwrap 1,659회</div>
+    <div class="file">전 워크스페이스</div>
+    <p>일부 패닉 경로. 점진적 <code>?</code> 전환 + clippy 에러 승격.</p>
+  </li>
+</ol>
+</section>
+
+<!-- ============== SECTION 13 ============== -->
+<section id="s13">
+<h2><span class="num">13</span>기능 제안 (우선순위)</h2>
+
+<h3>P0 — 즉시 추천 (보안)</h3>
+<ol>
+  <li><strong>SEC-2: BashTool 게이트 강제 결합</strong> — <code>before_tool_call</code> 훅으로 <code>Authorizer::check(CheckRequest::Exec)</code>를 모든 bash 호출 전 실행. 위험 명령 매칭 시 <code>Err</code> 반환으로 차단. <em>복구: 1-2일, 영향: 자율 에이전트 안전성 비약적 향상.</em></li>
+  <li><strong>SEC-3: MCP 서버 서명 검증</strong> — <code>mcp.json</code>에 <code>integrity</code> 필드(서버 바이너리 SHA-256) 추가, spawn 전 검증. 알려진 좋은 서버 레지스트리(옵션). <em>복구: 3-5일.</em></li>
+  <li><strong>SUP-1: 패키지 install 무결성 검증</strong> — install/update 후 <code>compute_dir_hash</code> 재계산 → lockfile 값과 비교 → 불일치 시 거부. npm <code>dist.shasum</code> 크로스체크. <em>복구: 2-3일.</em></li>
+</ol>
+
+<h3>P1 — 단기 추천 (견고성)</h3>
+<ol>
+  <li><strong>UNSAFE-1 해소: 환경변수 조작 격리</strong> — 런타임 시작 전(메인 스레드)로 모든 <code>env::set_var</code> 이동. 런타임 내에서는 <code>Settings</code> in-process 레지스트리 사용.</li>
+  <li><strong>ENV-1: 환경변수 화이트리스트</strong> — <code>BashTool</code>에 <code>allowed_env_vars: HashSet</code> 설정 추가. 빈 집합 = 전체 차단(안전 기본값). 사용자가 명시적으로 허용한 변수만 전달.</li>
+  <li><strong>AUTH-1: 파일 폴백 암호화</strong> — <code>argon2</code> 사용자 패스프레이즈 + AES-GCM. 키링 불가 시에만 활성. 또는 키링 강제 + 명시적 <code>--insecure-credentials</code> 플래그.</li>
+  <li><strong>SEC-4: 툴 실행 전 게이트 강제</strong> — <code>bootstrap.rs</code>에서 모든 툴 레지스트리에 <code>with_before_tool_call</code>으로 게이트 주입. 현재는 일부 툴만 결합된 것으로 보임.</li>
+</ol>
+
+<h3>P2 — 중기 추천 (기능·품질)</h3>
+<ol>
+  <li><strong>S-3: complexity_router 고도화</strong> — (a) 임베딩 기반 분류(<code>EmbeddingProvider</code> 포트 활용), (b) 다국어 키워드 사전, (c) 사용 패턴 학습(자주 쓰는 모델 가중치). 라우팅 정확도 30%+ 향상 예상.</li>
+  <li><strong>OBS-1: OpenTelemetry 통합</strong> — 현재 <code>audit_trail.rs</code>는 자체 포맷. OTLP exporter로 Tempo/Jaeger 연동. <code>trace.rs</code>에 이미 일부 인프라 있음.</li>
+  <li><strong>SUP-3: 패키지 서명(Sigstore/cosign)</strong> — 공식 레지스트리에 cosign 서명 추가. install 시 검증. ClawHub 신뢰 모델 강화.</li>
+  <li><strong>RATE-1: 프로바이더 rate-limit 적응</strong> — <code>429</code> 응답의 <code>Retry-After</code>/<code>x-ratelimit-remaining</code> 헤더 파싱 → 동적 백오프. 현재는 고정 재시도만.</li>
+  <li><strong>SESSION-1: 세션 브랜치 TUI 시각화</strong> — 트리 구조를 그래픽으로 렌더링(mermaid.rs 재활용). fork/branch 탐색 UX 개선.</li>
+</ol>
+
+<h3>P3 — 장기 추천 (아키텍처)</h3>
+<ol>
+  <li><strong>ARCH-2: <code>oxi-capabilities</code> leaf crate</strong> — <code>MemoryBackend</code>, <code>UrlResolver</code> 등의 capability 트레이트를 oxi-agent와 oxi-sdk 양쪽에서 공유. 현재 미러링된 타입 중복 제거.</li>
+  <li><strong>ARCH-3: 거대 파일 분할</strong> — <code>session.rs</code> → <code>session/{meta,header,entries,manager,migration}.rs</code>. <code>packages.rs</code> → <code>packages/{npm,git,url,local,lockfile}.rs</code>. 각 500-800줄로.</li>
+  <li><strong>DIST-1: 분산 AgentGroup</strong> — 현재 <code>AgentGroup</code>은 in-process. NATS/gRPC 기반 분산 모드로 확장. <code>coordination/work_queue.rs</code> 인프라 재활용.</li>
+  <li><strong>COMPACT-1: 컨텍스트 압축 고도화</strong> — 중요 메시지 보존 정책(사용자 결정, 코드 변경) 강화. 다국어 요약 품질 개선. 계층적 요약(요약의 요약).</li>
+  <li><strong>SANDBOX-1: BashTool OS 샌드박스</strong> — macOS <code>sandbox-exec</code>, Linux <code>firejail</code>/<code>bubblewrap</code> 통합. 파일시스템/네트워크 격리. 정책 게이트와 결합.</li>
+</ol>
+
+<h3>혁신적 기능 아이디어</h3>
+<ul>
+  <li><strong>에이전트 replay/디버거</strong> — 세션 JSONL + audit_trail로 시간 여행 디버깅. 특정 턴에서 다른 모델로 재실행 비교.</li>
+  <li><strong>스킬 마켓플레이스 신뢰 점수</strong> — 다운로드 수 + 서명 + 사용자 평가로 패키지 신뢰도 점수.</li>
+  <li><strong>다중 에이전트 토론 모드</strong> — <code>AgentGroup</code> + 메시지 버스로 에이전트들이 코드 리뷰를 토론하는 모드. 합의 기반 결정.</li>
+  <li><strong>로컬 모델 자동 페일오버</strong> — 클라우드 프로바이더 응답 지연 시 로컬 ollama로 자동 전환. privacy 민감 작업 보호.</li>
+  <li><strong>TTSR 규칙 자동 생성</strong> — 사용자가 수정한 패턴에서 규칙을 자동 학습. "이 사용자는 항상 Korean 주석을 선호" 등.</li>
+</ul>
+</section>
+
+<!-- ============== SECTION 14 ============== -->
+<section id="s14">
+<h2><span class="num">14</span>종합 평가</h2>
+
+<p>oxi는 <strong>단일 작성자 프로젝트로서 이례적인 성숙도</strong>를 보여줍니다. 아키텍처 결정이 문서화되어 있고, 복원력 스택(7계층)은 상용 제품 수준이며, 포트 시스템은 확장 가능한 제품군(oxi-cli, oxios)의 탄탄한 기반입니다.</p>
+
+<div class="grid-2">
+<div class="callout good">
+  <div class="callout-title">▲ 핵심 강점</div>
+  <ul style="margin-bottom:0">
+    <li>클린한 단방향 의존성 DAG</li>
+    <li>7계층 복원력 스택</li>
+    <li>TTSR 실시간 규칙 강제</li>
+    <li>포트 기반 제품 분리</li>
+    <li>우수한 문서화 밀도</li>
+    <li>2,774개 테스트</li>
+    <li>Secret/PathGuard 보안 원시</li>
+  </ul>
+</div>
+<div class="callout bad">
+  <div class="callout-title">✗ 핵심 약점</div>
+  <ul style="margin-bottom:0">
+    <li>보안 정의 vs 실행 결합 갭</li>
+    <li>패키지/MCP 공급망 검증 약함</li>
+    <li>Rust 2024 unsafe 환경변수</li>
+    <li>거대 파일 단일 책임</li>
+    <li>영어 중심 휴리스틱</li>
+    <li>비테스트 unwrap 1,659회</li>
+    <li>파일 폴백 인증 암호화 불명</li>
+  </ul>
+</div>
+</div>
+
+<h3>권장 실행 순서</h3>
+<ol>
+  <li><strong>1-2주:</strong> SEC-2 + SUP-1 + MCP-1 (P0 보안 3종). 자율 에이전트 신뢰성 확보.</li>
+  <li><strong>3-4주:</strong> UNSAFE-1 + ENV-1 + AUTH-1 + SEC-4 (P1 견고성). 근본적 안전성.</li>
+  <li><strong>5-8주:</strong> S-3 + OBS-1 + RATE-1 (P2 기능). 라우팅·관측성 강화.</li>
+  <li><strong>지속적:</strong> ARCH-2/3 + DIST-1 + SANDBOX-1 (P3 아키텍처). 장기 진화.</li>
+</ol>
+
+<div class="callout info">
+  <div class="callout-title">ℹ 결론</div>
+  <p>oxi는 <strong>훌륭한 아키텍처 위에 보안 실행 결합을 다지면 상용 제품급 AI 코딩 플랫폼</strong>이 될 수 있습니다. 특히 TTSR과 7계층 복원력 스택은 차별화된 강점입니다. 권장 14개 개선안 중 P0 3개만 적용해도 자율 에이전트 시나리오의 안전성이 비약적으로 향상될 것입니다.</p>
+</div>
+
+<hr>
+<p class="dim"><strong>보고서 범위:</strong> 6개 크레이트, 366개 Rust 소스 파일, 약 168K LOC. 핵심 진입점(lib.rs/mod.rs), 트레이트 정의, 가장 큰 구현 파일, 보안 모듈, 동시성 핫스팟을 우선 분석. 모든 인용은 실제 코드 라인에 기반하며, 라인 번호는 분석 시점 기준입니다.</p>
+<p class="dim"><strong>방법론:</strong> 정적 코드 읽기 + cargo/grep 기반 메트릭 수집 + AGENTS.md/ARCHITECTURE.md 문서 교차 검증. 동적 실행 테스트는 포함되지 않았습니다 — 런타임 동작 검증은 별도 권장.</p>
+</section>
+
+<footer>
+  <p>oxi 심층 코드 리뷰 보고서 · 2026-06-21 · 분석·작성: 코드 리뷰 에이전트<br>
+  대상: <code>/Volumes/MERCURY/PROJECTS/oxi</code> · 버전 0.41.1 · 14개 발견사항 + 19개 제안</p>
+</footer>
+
+</div>
+</body>
+</html>

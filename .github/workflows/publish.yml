@@ -166,7 +166,7 @@ jobs:
           fi
           # Idempotent: skip if this version is already published.
           set +e
-          cargo publish --token "$CARGO_REGISTRY_TOKEN" 2>&1 | tee /tmp/publish.log
+          cargo publish --locked --token "$CARGO_REGISTRY_TOKEN" 2>&1 | tee /tmp/publish.log
           status=${PIPESTATUS[0]}; set -e
           [ "$status" -eq 0 ] && exit 0
           if grep -qiE "already exists|already uploaded|already been published" /tmp/publish.log; then

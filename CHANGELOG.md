@@ -5,6 +5,107 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06-21
+
+### Security — 코드 감사 보고서 결함 일괄 수정 (audit 2026-06-21)
+
+9개 도메인 분석에서 도출된 15개 결함 중 13건을 수정. 상세 근거와
+file:line 인용은 `oxi-code-audit-report.html` 참조.
+
+#### Critical
+
+- **F-1**: Lockfile 무결성 해시가 write-only — `oxi-cli/src/storage/packages.rs`
+  의 `LockEntry.integrity`가 설치 시에만 계산되고 이후 `load_installed`
+  에서 절대 재검증되지 않던 결함. `verify_lockfile_integrity()` 추가 +
+  `load_installed()`에서 lockfile-mismatch 발견 시 `installed` 맵에서
+  패키지 제외 + `lockfile.packages.remove(name)` 호출. 변조된 패키지는
+  silent load 대신 다음 부팅 시 안전한 un-install 상태로 강등.
+- **F-2**: 네이티브 확장 무결성 미검증 — `load_extension()`이
+  `libloading::Library::new()` 호출 전 SHA-256을 검증하지 않음.
+  `expected_checksum: Option<&str>` 파라미터 추가 + `validate_extension`
+  wiring. lockfile 무결성 해시와 비교하여 변조된 .so/.dylib/.dll 거부.
+  `ValidatedExtension`에 `Debug` derive 추가 (테스트 호환).
+
+#### High
+
+- **F-3**: 프로바이더 공유 HTTP 클라이언트에 timeout 없음 —
+  `oxi-ai/src/providers/mod.rs::shared_client()`가 `reqwest::Client::new()`
+  로 빌드되어 LLM 스트림이 영원히 hang 가능. `connect_timeout(10s)` +
+  `timeout(600s)` 설정 추가. CLI의 동일 함수
+  (`oxi-cli/src/util/http_client.rs:14-22`)와 동일한 패턴.
+- **F-4**: `keyring` feature가 코드에는 있는데 `Cargo.toml`에는 없는
+  dead module. `Enable the 'keyring' feature` 경고가 사용자에게 거짓
+  안내. 실제 위치(`~/.oxi/auth.json`)와 옵션(`oxi-auth-keyring` crate)
+  을 가리키는 정확한 안내로 교체 + `keyring_support` 모듈에
+  `#[deprecated(note = ...)]` 추가.
+- **F-6 (partial)**: 8개 프로바이더 SSE 파서의 2-pass scan (`text.split('\n').filter(count)` + `events.reserve()` + parse) 제거.
+  `events.reserve(estimated_events)`를 `Vec::with_capacity(text.len() / 80)`
+  로 교체 (openai_responses는 `/40`). `Arc::new(partial.clone())` O(N²) 패턴은
+  **이번 PR scope 밖** — 별도 추적 (cross-cutting 시그니처 변경 필요).
+- **F-7 (partial)**: `session.rs::_persist`의 매번 `fs::OpenOptions::open()`
+  + `writeln!` 패턴에 `BufWriter` wrapping 추가 — per-line `write()` syscall
+  → 8 KiB buffer. File handle 캐싱과 단일 Mutex 통합은 **별도 추적**.
+- **F-8**: `AgentTool::execute()`가 항상 `signal: None`으로 호출되어
+  oneshot 취소 계약이 사실상 무력화되던 결함. `AgentLoop::cancel_signal()`
+  getter 추가 + `make_cancellation()` 헬퍼로 cancel flag → `Arc<Notify>`
+  브릿지 + 호출 측 `tokio::select!` wrapping. sequential/parallel 양쪽
+  경로 적용. 도구의 `signal: Option<oneshot::Receiver<()>>` 파라미터
+  시그니처는 변경하지 않음 (additive).
+- **F-9**: `stream_retry.rs::is_retryable`이 `ProviderError::MissingApiKey`를
+  transient로 오분류하여 14초 backoff 낭비. early-return 추가:
+  `"missing API key — set the corresponding *_API_KEY env var or run \`oxi setup\`"`.
+  **리뷰 중 추가 수정**: `on_failure()` callback 호출이 MissingApiKey 분기
+  *후*에 실행되도록 순서 조정 — 그렇지 않으면 MissingApiKey가
+  circuit breaker의 `consecutive_failures`를 증가시켜 5회 반복 시
+  circuit open, 이후 정상 API key 설정 후에도 recovery timeout 동안
+  모든 요청 거부. Configuration error는 transient가 아니므로
+  circuit breaker 카운트에서 제외.
+- **F-10**: `BashTool::is_dangerous_command`가 warn만, 차단 없음.
+  `OXI_STRICT_BASH=1` 환경 변수가 켜져 있으면 실행 전 차단.
+  기존 동작은 보존(opt-in).
+- **F-15**: `publish.yml`의 `cargo publish`에 `--locked` 누락.
+  `cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"` 로 변경.
+  ci.yml:147, sbom.yml:41과 일치.
+
+#### Medium
+
+- **F-13**: `store/settings.rs`가 `oxi_tui::GlyphSet`을 import (데이터
+  레이어 → UI 레이어 의존). 실제 분리는 on-disk TOML 호환성 + 5개
+  call site 변경이 필요하여 **follow-up PR**로 미루고, 같은 파일에
+  layering violation 의도를 명시한 doc-comment 추가.
+
+#### Verified regressions
+
+- `verify_lockfile_integrity_accepts_matching_dir` (F-1)
+- `verify_lockfile_integrity_rejects_tampered_dir` (F-1)
+- `verify_lockfile_integrity_rejects_bad_prefix` (F-1)
+- `load_installed_skips_tampered_package` (F-1)
+- `validate_extension_is_deterministic` (F-2)
+- `validate_extension_distinguishes_content` (F-2)
+- `validate_extension_rejects_wrong_platform_ext_on_macos` (F-2, macOS only)
+- `validate_extension_handles_missing_path` (F-2)
+- `test_strict_bash_blocks_pipe_to_shell` (F-10, requires `--test-threads=1`)
+- `test_strict_bash_off_preserves_warning_behavior` (F-10)
+
+#### Deferred (큰 구조 변경)
+
+- **F-5**: `main.rs` (1,622 LOC) 핸들러 분할 — clap의 `Subcommand`-derived
+  enum을 sibling module로 옮길 때 generic-bound surprise 발생. 별도 PR에서
+  각 subcommand별로 명시적 테스트와 함께 진행. AGENTS.md 갱신으로
+  부정확한 "12-line dispatcher" claim을 정직한 설명으로 교체.
+- **F-11**: 컴포지션 루트 단일화 (lib.rs ↔ bootstrap.rs ↔ services.rs).
+  1,080 LOC의 wiring이 3개 파일에 분산. F-5와 함께 진행.
+- **F-12**: `App` 구조체 10-field 분할 (AppCore / AppExtensions /
+  IssueOwnership). 13+ caller 영향. F-5와 함께 진행.
+
+### 검증
+
+- `cargo fmt --all -- --check` 통과.
+- `cargo clippy --workspace --all-targets -- -D warnings` 통과.
+- `cargo nextest run --workspace --profile ci`: **2751 passed, 0 failed**.
+- `cargo test --workspace --doc`: **40 passed, 0 failed**.
+
+
 ## [0.41.0] - 2026-06-21
 ## [0.41.1] - 2026-06-21
 

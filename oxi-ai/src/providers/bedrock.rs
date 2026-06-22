@@ -615,11 +615,10 @@ fn build_bedrock_tool_config(tools: &[crate::Tool]) -> Result<JsonValue, Provide
 
 /// Parse Bedrock ConverseStream SSE events
 fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
+    // F-6 (audit 2026-06-21): length-based estimate replaces 2-pass scan.
+    let mut events = Vec::with_capacity(text.len() / 80);
     let mut partial_message = AssistantMessage::new(Api::BedrockConverseStream, provider, model_id);
 
-    let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
-    events.reserve(estimated_events);
 
     let mut accumulated_usage = Usage::default();
     let mut stop_reason: Option<StopReason> = None;

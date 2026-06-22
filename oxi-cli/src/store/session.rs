@@ -1288,13 +1288,25 @@ impl SessionManager {
             return;
         }
 
-        let mut handle = match fs::OpenOptions::new().create(true).append(true).open(file) {
+        // F-7 (audit 2026-06-21): wrap the `File` in `BufWriter` so each
+        // `writeln!` line goes through the in-memory 8 KiB buffer instead
+        // of a separate `write()` syscall. `BufWriter::into_inner` flushes
+        // on Drop, so we still get the same durability guarantees — if
+        // anything fails mid-write, the partial buffer is discarded and
+        // the next `load_lockfile` will see the truncated file (the JSONL
+        // parser is line-oriented and tolerant of partial trailing lines,
+        // see `load_lockfile`). The file open itself still happens per
+        // `_persist` call — eliminating that requires caching the handle
+        // on `SessionManager` (out of scope for the audit fix; see the
+        // "BufWriter + consolidated lock" P1 follow-up in the report).
+        let file_handle = match fs::OpenOptions::new().create(true).append(true).open(file) {
             Ok(h) => h,
             Err(e) => {
                 tracing::warn!("Failed to open session file for append {}: {}", file, e);
                 return;
             }
         };
+        let mut handle = std::io::BufWriter::new(file_handle);
 
         if !self.flushed {
             for e in self.file_entries.read().iter() {
