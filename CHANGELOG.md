@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-06-22
+
 ### Changed — 설정 마법사 첫 실행 경험 개선
 
 - **첫 실행 시 설정 마법사 자동 실행**: 모델이 구성되지 않은 상태에서
