@@ -21,7 +21,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use std::io;
@@ -72,10 +72,11 @@ struct WizardState {
     provider_selected: usize,
     /// List state for ratatui
     provider_list_state: ListState,
-    /// Provider name filter (live while `provider_searching` is true)
+    /// Provider name filter — always active, fzf-style (no separate search mode).
     provider_filter: String,
-    /// Whether the provider list is being filtered by typing (`/`)
-    provider_searching: bool,
+    /// When true, the "+ Add custom provider…" sentinel row at the bottom of
+    /// the provider list is selected instead of a real provider entry.
+    on_sentinel: bool,
     /// Input mode
     input_mode: InputMode,
     /// Model entries for step 2
@@ -194,14 +195,18 @@ fn ensure_model_selected_visible(state: &mut WizardState) {
 }
 
 /// Snap `provider_selected` back into the filtered provider set after the
-/// filter changes. No-op when the filter yields nothing.
+/// filter changes. The sentinel ("+ Add custom") is the only selectable
+/// position when the filter yields no providers; otherwise the first match
+/// wins and the sentinel is cleared so the user is back on real providers.
 fn snap_provider_selection(state: &mut WizardState) {
     let indices = filtered_provider_indices(state);
     if indices.is_empty() {
+        state.on_sentinel = true;
         return;
     }
-    if !indices.contains(&state.provider_selected) {
+    if state.on_sentinel || !indices.contains(&state.provider_selected) {
         state.provider_selected = indices[0];
+        state.on_sentinel = false;
     }
 }
 
@@ -540,21 +545,58 @@ fn draw_wizard(
     Ok(())
 }
 
-/// Render the wizard into a frame. Split out from `draw_wizard` so the layout
-/// (title bar, persistent step indicator, content, footer) can be exercised
-/// against a `TestBackend` buffer in tests — verifying the step indicator is
-/// visible on every step and that step-specific content lands in the right row.
+/// Heuristic: how many lines the footer text wraps into given `cols` width.
+/// Packs words greedily (split on whitespace); returns at least 1 so the
+/// footer is never allocated zero rows.
+fn wrapped_line_count(text: &str, cols: u16) -> u16 {
+    let max_w = if cols < 2 { 80usize } else { cols as usize };
+    let mut lines: u16 = 1;
+    let mut cur = 0usize;
+    for word in text.split_whitespace() {
+        let wlen = word.chars().count();
+        if cur == 0 {
+            cur = wlen;
+        } else if cur + 1 + wlen <= max_w {
+            cur += 1 + wlen;
+        } else {
+            lines = lines.saturating_add(1);
+            cur = wlen;
+        }
+    }
+    lines.max(1)
+}
+
+/// Render the wizard into a frame — title bar, persistent step indicator,
+/// step-specific content, and a width-adaptive footer that wraps instead of
+/// truncating on narrow terminals.
 fn render_wizard(f: &mut ratatui::Frame, state: &mut WizardState) {
     let size = f.area();
 
-    // Create outer layout
+    // Build footer text first so we can compute how many rows it needs.
+    let footer_text = match state.step {
+        0 => match &state.input_mode {
+            InputMode::Normal => {
+                "  Type to filter · ↑/↓ · Enter: act · → next · Esc back".to_string()
+            }
+            InputMode::EditingApiKey { .. } => {
+                "  Enter: save · Ctrl+R: remove (existing) · Esc: cancel".to_string()
+            }
+            InputMode::AddingCustom { .. } => "  Tab: next · Enter: save · Esc: cancel".to_string(),
+        },
+        1 => "  Type to filter · ↑/↓ · Enter: select · Esc: back · ←: prev".to_string(),
+        2 => "  ↑/↓ navigate · Enter: select · Esc/←: back".to_string(),
+        3 => "  Esc or Enter: quit".to_string(),
+        _ => String::new(),
+    };
+    let footer_rows = wrapped_line_count(&footer_text, size.width).min(2);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Title bar
-            Constraint::Length(1), // Step indicator (always visible)
-            Constraint::Min(8),    // Content
-            Constraint::Length(2), // Footer
+            Constraint::Length(3),           // Title bar
+            Constraint::Length(1),           // Step indicator (always visible)
+            Constraint::Min(8),              // Content
+            Constraint::Length(footer_rows), // Footer (adapts to width)
         ])
         .split(size);
 
@@ -588,33 +630,13 @@ fn render_wizard(f: &mut ratatui::Frame, state: &mut WizardState) {
         _ => {}
     }
 
-    // Footer
-    let footer_text = match state.step {
-        0 => match &state.input_mode {
-            InputMode::Normal => {
-                if state.provider_searching {
-                    "  Type: filter · ↑/↓ navigate · Enter: select & edit key · Esc/←: close search"
-                        .to_string()
-                } else {
-                    "  ↑/↓ navigate · /: search · Enter: API key · d: delete · →: next · Esc: quit"
-                        .to_string()
-                }
-            }
-            InputMode::EditingApiKey { .. } => "  Enter: save · Esc: cancel".to_string(),
-            InputMode::AddingCustom { .. } => {
-                "  Tab: next field · Enter: save · Esc: cancel".to_string()
-            }
-        },
-        1 => "  Type: filter · ↑/↓ navigate · Enter: select · Esc: clear/back · ←: previous"
-            .to_string(),
-        2 => "  ↑/↓ navigate · Enter: select · Esc/←: previous".to_string(),
-        3 => "  Esc or Enter: quit".to_string(),
-        _ => String::new(),
-    };
+    // Footer — wraps instead of truncating when the terminal is narrower than
+    // the hint text.
     let footer = Paragraph::new(Line::from(Span::styled(
         footer_text,
         Style::default().fg(Color::DarkGray),
-    )));
+    )))
+    .wrap(Wrap { trim: false });
     f.render_widget(footer, chunks[3]);
 }
 
@@ -624,7 +646,16 @@ fn draw_provider_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
         InputMode::EditingApiKey {
             provider_name,
             field_text,
-        } => draw_api_key_dialog(f, provider_name, field_text, area),
+        } => {
+            // Surface a "remove" hint only when the provider already has a
+            // stored key; there's nothing to remove otherwise.
+            let has_existing_key = state
+                .providers
+                .iter()
+                .find(|p| p.name == *provider_name)
+                .is_some_and(|p| p.has_key);
+            draw_api_key_dialog(f, provider_name, field_text, has_existing_key, area);
+        }
         InputMode::AddingCustom {
             fields,
             active_field,
@@ -632,51 +663,52 @@ fn draw_provider_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
     }
 }
 
+/// Render the provider step: always-on fzf-style filter at the top, a
+/// scrollable list of filtered providers, and a permanent
+/// "+ Add custom provider…" sentinel row pinned below the list so it's
+/// always reachable (never scrolled off-screen). Mirrors the model step's
+/// interaction model — typing filters live, the filter input is always
+/// shown, and Enter acts on the selection.
 fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
-    // When filtering, reserve a one-line search input above the list.
-    let (list_area, search_area) = if state.provider_searching {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area);
-        (chunks[1], Some(chunks[0]))
-    } else {
-        (area, None)
-    };
+    // Three-row layout: filter (1) / list (scrollable) / sentinel (1).
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // filter input
+            Constraint::Min(1),    // provider list
+            Constraint::Length(1), // "+ Add custom provider…" sentinel
+        ])
+        .split(area);
 
-    // Search input. The solid block cursor sits right after the typed text
-    // (and before the placeholder when empty), mirroring a real text cursor.
-    if let Some(search_rect) = search_area {
-        let mut spans = vec![
-            Span::styled(
-                "  Filter: ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                &state.provider_filter,
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" ", Style::default().bg(Color::Yellow)),
-        ];
-        if state.provider_filter.is_empty() {
-            spans.push(Span::styled(
-                " type a provider name to filter...",
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-        f.render_widget(Paragraph::new(Line::from(spans)), search_rect);
+    // Filter input — always visible. The solid block cursor sits right after
+    // the typed text (and before the placeholder when empty), mirroring a
+    // real text cursor.
+    let mut filter_spans = vec![
+        Span::styled(
+            "  Filter: ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            &state.provider_filter,
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ", Style::default().bg(Color::Yellow)),
+    ];
+    if state.provider_filter.is_empty() {
+        filter_spans.push(Span::styled(
+            " type to filter (e.g. 'open', 'anth', 'googl')...",
+            Style::default().fg(Color::DarkGray),
+        ));
     }
+    f.render_widget(Paragraph::new(Line::from(filter_spans)), chunks[0]);
 
-    // Rendered provider indices: filtered while searching, all otherwise.
-    let indices: Vec<usize> = if state.provider_searching {
-        filtered_provider_indices(state)
-    } else {
-        (0..state.providers.len()).collect()
-    };
+    let indices = filtered_provider_indices(state);
 
-    let mut items: Vec<ListItem> = indices
+    // Provider list (filtered). The sentinel is NOT part of the list anymore
+    // — it lives in its own row below so it stays on screen.
+    let items: Vec<ListItem> = indices
         .iter()
         .map(|&i| {
             let p = &state.providers[i];
@@ -687,7 +719,6 @@ fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
                 "No API key".to_string()
             };
             let custom_tag = if p.is_custom { " (custom)" } else { "" };
-
             let line = Line::from(vec![
                 Span::styled(
                     format!(" {} ", check),
@@ -711,14 +742,6 @@ fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
         })
         .collect();
 
-    // "Add custom" sentinel row only in the unfiltered view.
-    if !state.provider_searching {
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled("   + ", Style::default().fg(Color::Cyan)),
-            Span::styled("Add custom provider...", Style::default().fg(Color::Cyan)),
-        ])));
-    }
-
     let list = List::new(items)
         .block(Block::default().borders(Borders::NONE))
         .highlight_style(
@@ -728,21 +751,47 @@ fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
         )
         .highlight_symbol("▶ ");
 
-    // Map the absolute selected index onto its position in the rendered list.
-    let selected_pos = if state.provider_searching {
-        indices.iter().position(|&i| i == state.provider_selected)
+    // Highlight a list item only when the selection is a real provider.
+    let list_selected = if state.on_sentinel {
+        None
     } else {
-        // provider_selected indexes the provider slice directly; the "+ Add
-        // custom" row sits at the end so the absolute index still maps 1:1.
-        Some(state.provider_selected)
+        indices.iter().position(|&i| i == state.provider_selected)
     };
-    state.provider_list_state.select(selected_pos);
-    f.render_stateful_widget(list, list_area, &mut state.provider_list_state);
+    state.provider_list_state.select(list_selected);
+    f.render_stateful_widget(list, chunks[1], &mut state.provider_list_state);
+
+    // Persistent "+ Add custom provider…" sentinel row — always visible
+    // below the list. When selected, the row is highlighted with the same
+    // background as a selected list item so the visual continuity is clear.
+    let sentinel = if state.on_sentinel {
+        Line::from(Span::styled(
+            "▶   + Add custom provider…",
+            Style::default()
+                .fg(Color::Cyan)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        Line::from(Span::styled(
+            "    + Add custom provider…",
+            Style::default().fg(Color::Cyan),
+        ))
+    };
+    f.render_widget(Paragraph::new(sentinel), chunks[2]);
 }
 
-fn draw_api_key_dialog(f: &mut ratatui::Frame, provider_name: &str, field_text: &str, area: Rect) {
+/// `has_existing_key` is used to surface a "Ctrl+R: remove" hint when the
+/// provider already has a stored key — the only place the remove action is
+/// reachable.
+fn draw_api_key_dialog(
+    f: &mut ratatui::Frame,
+    provider_name: &str,
+    field_text: &str,
+    has_existing_key: bool,
+    area: Rect,
+) {
     // Center the dialog
-    let dialog_height = 7u16;
+    let dialog_height = 8u16;
     let dialog_width = std::cmp::min(area.width, 60);
     let x = (area.width.saturating_sub(dialog_width)) / 2;
     let y = (area.height.saturating_sub(dialog_height)) / 2;
@@ -755,7 +804,7 @@ fn draw_api_key_dialog(f: &mut ratatui::Frame, provider_name: &str, field_text: 
         "*".repeat(field_text.len())
     };
 
-    let paragraphs = vec![
+    let mut paragraphs = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled("  API Key: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -770,6 +819,22 @@ fn draw_api_key_dialog(f: &mut ratatui::Frame, provider_name: &str, field_text: 
             },
         ]),
     ];
+    if has_existing_key {
+        paragraphs.push(Line::from(Span::styled(
+            "  (existing key will be replaced)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        paragraphs.push(Line::from(""));
+    }
+    paragraphs.push(Line::from(Span::styled(
+        if has_existing_key {
+            "  Enter: save · Ctrl+R: remove · Esc: cancel"
+        } else {
+            "  Enter: save · Esc: cancel"
+        },
+        Style::default().fg(Color::DarkGray),
+    )));
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1026,91 +1091,71 @@ fn handle_provider_event(
     event: Event,
     auth_store: &crate::store::auth_storage::AuthStorage,
 ) -> Result<bool> {
-    // Provider search mode (only active in Normal input mode). Handled before
-    // the input_mode match so search keys never collide with key-editing.
-    if state.provider_searching && matches!(state.input_mode, InputMode::Normal) {
-        if let Event::Key(key) = event {
-            match key.code {
-                KeyCode::Esc => {
-                    state.provider_searching = false;
-                    state.provider_filter.clear();
-                    snap_provider_selection(state);
-                }
-                KeyCode::Enter => {
-                    // Pick the highlighted filtered provider, exit search, and
-                    // open the API-key dialog for it.
-                    state.provider_searching = false;
-                    state.provider_filter.clear();
-                    if state.provider_selected < state.providers.len() {
-                        let name = state.providers[state.provider_selected].name.clone();
-                        state.input_mode = InputMode::EditingApiKey {
-                            provider_name: name,
-                            field_text: String::new(),
-                        };
-                    }
-                }
-                KeyCode::Up => {
-                    let indices = filtered_provider_indices(state);
-                    if let Some(pos) = indices.iter().position(|&i| i == state.provider_selected)
-                        && pos > 0
-                    {
-                        state.provider_selected = indices[pos - 1];
-                    } else if let Some(&first) = indices.first() {
-                        state.provider_selected = first;
-                    }
-                }
-                KeyCode::Down => {
-                    let indices = filtered_provider_indices(state);
-                    if let Some(pos) = indices.iter().position(|&i| i == state.provider_selected)
-                        && pos + 1 < indices.len()
-                    {
-                        state.provider_selected = indices[pos + 1];
-                    } else if let Some(&first) = indices.first() {
-                        state.provider_selected = first;
-                    }
-                }
-                KeyCode::Backspace => {
-                    state.provider_filter.pop();
-                    snap_provider_selection(state);
-                }
-                KeyCode::Char(c) => {
-                    state.provider_filter.push(c);
-                    snap_provider_selection(state);
-                }
-                KeyCode::Left => {
-                    state.provider_searching = false;
-                    state.provider_filter.clear();
-                    snap_provider_selection(state);
-                }
-                _ => {}
-            }
-        }
-        return Ok(false);
-    }
-
+    // A single match dispatches Normal (always-on filter, navigation, enter,
+    // esc, →) and the two dialog modes. There is no separate search mode —
+    // the filter input is always active, mirroring the model step.
     match &mut state.input_mode {
         InputMode::Normal => {
             if let Event::Key(key) = event {
                 match key.code {
-                    KeyCode::Up if state.provider_selected > 0 => {
-                        state.provider_selected -= 1;
+                    // Filter input
+                    KeyCode::Char(c) => {
+                        state.provider_filter.push(c);
+                        snap_provider_selection(state);
+                    }
+                    KeyCode::Backspace => {
+                        state.provider_filter.pop();
+                        snap_provider_selection(state);
+                    }
+                    // Navigation: the selectable list is
+                    // `filtered_provider_indices` followed by the sentinel at
+                    // the end. Positions never wrap at the edges.
+                    KeyCode::Up => {
+                        let indices = filtered_provider_indices(state);
+                        if state.on_sentinel {
+                            if let Some(&last) = indices.last() {
+                                state.provider_selected = last;
+                                state.on_sentinel = false;
+                            }
+                        } else if let Some(pos) =
+                            indices.iter().position(|&i| i == state.provider_selected)
+                        {
+                            if pos > 0 {
+                                state.provider_selected = indices[pos - 1];
+                            }
+                        } else if let Some(&first) = indices.first() {
+                            state.provider_selected = first;
+                        } else {
+                            state.on_sentinel = true;
+                        }
                     }
                     KeyCode::Down => {
-                        // +1 for "add custom" row
-                        let max = state.providers.len();
-                        if state.provider_selected < max {
-                            state.provider_selected += 1;
+                        let indices = filtered_provider_indices(state);
+                        if state.on_sentinel {
+                            // Already at the bottom; stay.
+                        } else if let Some(pos) =
+                            indices.iter().position(|&i| i == state.provider_selected)
+                        {
+                            if pos + 1 < indices.len() {
+                                state.provider_selected = indices[pos + 1];
+                            } else {
+                                // Last real provider → drop down to sentinel.
+                                state.on_sentinel = true;
+                            }
+                        } else if let Some(&first) = indices.first() {
+                            state.provider_selected = first;
+                        } else {
+                            state.on_sentinel = true;
                         }
                     }
                     KeyCode::Enter => {
-                        if state.provider_selected == state.providers.len() {
-                            // Add custom provider
+                        if state.on_sentinel {
+                            // "+ Add custom provider…"
                             state.input_mode = InputMode::AddingCustom {
                                 fields: [String::new(), String::new(), String::new()],
                                 active_field: 0,
                             };
                         } else {
-                            // Edit API key
                             let name = state.providers[state.provider_selected].name.clone();
                             state.input_mode = InputMode::EditingApiKey {
                                 provider_name: name,
@@ -1118,27 +1163,18 @@ fn handle_provider_event(
                             };
                         }
                     }
-                    KeyCode::Char('d') | KeyCode::Delete
-                        if state.provider_selected < state.providers.len() =>
-                    {
-                        let name = state.providers[state.provider_selected].name.clone();
-                        auth_store.remove(&name);
-                        state.providers[state.provider_selected].has_key = false;
-                        state.providers[state.provider_selected].key_masked = String::new();
-                        state.models_dirty = true;
-                    }
-                    KeyCode::Char('/') => {
-                        state.provider_searching = true;
-                        state.provider_filter.clear();
-                        // Snap off the "+ Add custom" sentinel (index ==
-                        // providers.len()) so a filtered row is highlighted.
-                        snap_provider_selection(state);
+                    KeyCode::Esc => {
+                        // Esc backs out: clear an active filter, otherwise quit
+                        // (we're on the top-level provider step).
+                        if !state.provider_filter.is_empty() {
+                            state.provider_filter.clear();
+                            snap_provider_selection(state);
+                        } else {
+                            return Ok(true);
+                        }
                     }
                     KeyCode::Right => {
                         state.step = 1;
-                    }
-                    KeyCode::Esc => {
-                        return Ok(true); // quit
                     }
                     _ => {}
                 }
@@ -1156,8 +1192,6 @@ fn handle_provider_event(
                     KeyCode::Enter => {
                         if !field_text.is_empty() {
                             auth_store.set_api_key(provider_name, field_text.clone());
-
-                            // Update the provider entry
                             if let Some(entry) = state
                                 .providers
                                 .iter_mut()
@@ -1166,15 +1200,22 @@ fn handle_provider_event(
                                 entry.has_key = true;
                                 entry.key_masked = mask_key(field_text);
                             }
-
-                            // Try to fetch models dynamically from the provider's /models endpoint
                             fetch_and_cache_models(provider_name, &state.providers);
-
-                            // Mark models dirty; the main loop rebuilds the list
-                            // (filtered to configured providers) when the user
-                            // reaches step 1.
                             state.models_dirty = true;
                         }
+                        state.input_mode = InputMode::Normal;
+                    }
+                    // Ctrl+R removes the stored key (destructive; intentionally
+                    // hidden behind a non-printable modifier so accidental
+                    // typing can't trigger it).
+                    KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        let name = provider_name.clone();
+                        auth_store.remove(&name);
+                        if let Some(entry) = state.providers.iter_mut().find(|p| p.name == name) {
+                            entry.has_key = false;
+                            entry.key_masked = String::new();
+                        }
+                        state.models_dirty = true;
                         state.input_mode = InputMode::Normal;
                     }
                     KeyCode::Backspace => {
@@ -1206,20 +1247,15 @@ fn handle_provider_event(
                         let name = fields[0].trim().to_string();
                         let base_url = fields[1].trim().to_string();
                         let api_key = fields[2].trim().to_string();
-
                         if !name.is_empty() && !base_url.is_empty() {
-                            // Save API key
                             if !api_key.is_empty() {
                                 auth_store.set_api_key(&name, api_key.clone());
                             }
-
-                            // Add to provider list
                             let (has_key, key_masked) = if !api_key.is_empty() {
                                 (true, mask_key(&api_key))
                             } else {
                                 (false, String::new())
                             };
-
                             state.providers.push(ProviderEntry {
                                 name: name.clone(),
                                 has_key,
@@ -1227,16 +1263,14 @@ fn handle_provider_event(
                                 is_custom: true,
                                 base_url: Some(base_url),
                             });
-
-                            // Try to fetch models from this custom provider
                             if !api_key.is_empty() {
                                 fetch_and_cache_models(&name, &state.providers);
                             }
-                            // Rebuild the model list on next step-1 entry when
-                            // this provider has a key.
                             state.models_dirty = has_key;
-
-                            // Move back to normal
+                            // Land on the newly-added provider instead of the
+                            // sentinel.
+                            state.provider_selected = state.providers.len() - 1;
+                            state.on_sentinel = false;
                             state.input_mode = InputMode::Normal;
                         }
                     }
@@ -1474,7 +1508,7 @@ pub async fn run() -> Result<()> {
         provider_selected: 0,
         provider_list_state: ListState::default(),
         provider_filter: String::new(),
-        provider_searching: false,
+        on_sentinel: false,
         input_mode: InputMode::Normal,
         models,
         model_selected,
@@ -1542,7 +1576,7 @@ mod tests {
             provider_selected: 0,
             provider_list_state: ListState::default(),
             provider_filter: String::new(),
-            provider_searching: false,
+            on_sentinel: false,
             input_mode: InputMode::Normal,
             models: models
                 .iter()
@@ -1713,7 +1747,7 @@ mod tests {
             provider_selected: 0,
             provider_list_state: ListState::default(),
             provider_filter: String::new(),
-            provider_searching: false,
+            on_sentinel: false,
             input_mode: InputMode::Normal,
             models,
             model_selected: 0,
@@ -1811,15 +1845,17 @@ mod tests {
     }
 
     #[test]
-    fn esc_in_provider_search_closes_search_not_quit() {
+    fn esc_clears_provider_filter_without_quitting() {
+        // In the always-on filter model, Esc backs out: with an active filter
+        // it clears the filter and does NOT quit. Quitting is reserved for
+        // Esc with an empty filter (top-level).
         let mut state = make_state(vec!["openai", "anthropic"], vec![]);
         state.step = 0;
-        state.provider_searching = true;
         state.provider_filter = "anth".to_string();
+        // The Esc handler will clear the filter and call snap_provider_selection.
         let auth = crate::store::auth_storage::shared_auth_storage();
         let quit = handle_provider_event(&mut state, esc_event(), &auth).unwrap();
-        assert!(!quit, "Esc in search must close search, not quit");
-        assert!(!state.provider_searching);
+        assert!(!quit, "Esc with a non-empty filter must clear it, not quit");
         assert!(state.provider_filter.is_empty());
     }
 
@@ -1866,5 +1902,133 @@ mod tests {
             handle_done_event(esc_event()).unwrap(),
             "Esc on the done step should quit"
         );
+    }
+    #[test]
+    fn provider_step_renders_filter_and_sentinel() {
+        // Always-on filter: the "Filter:" input line must be visible, and the
+        // "+ Add custom provider…" sentinel must always be present in the
+        // list — both unfiltered and filtered.
+        // Unfiltered view.
+        let rendered = render_to_buffer(0, vec![]);
+        assert!(
+            rendered.contains("Filter:"),
+            "filter line missing in unfiltered provider step"
+        );
+        assert!(
+            rendered.contains("Add custom provider"),
+            "sentinel missing in unfiltered provider step"
+        );
+        // Filtered view: filter shows the typed text, sentinel remains.
+        let providers = vec![ProviderEntry {
+            name: "openai".to_string(),
+            has_key: true,
+            key_masked: "k".to_string(),
+            is_custom: false,
+            base_url: None,
+        }];
+        let mut s = WizardState {
+            step: 0,
+            providers,
+            provider_selected: 0,
+            provider_list_state: ListState::default(),
+            provider_filter: "open".to_string(),
+            on_sentinel: false,
+            input_mode: InputMode::Normal,
+            models: vec![],
+            model_selected: 0,
+            model_filter: String::new(),
+            model_list_state: ListState::default(),
+            themes: vec![],
+            theme_selected: 0,
+            theme_list_state: ListState::default(),
+            auth_path: PathBuf::new(),
+            settings_path: PathBuf::new(),
+            catalog: None,
+            models_dirty: false,
+        };
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(90, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_wizard(f, &mut s)).unwrap();
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        assert!(out.contains("Filter:"));
+        assert!(
+            out.contains("open"),
+            "typed filter must be shown in the filter line"
+        );
+        assert!(
+            out.contains("Add custom provider"),
+            "sentinel must remain under a filter"
+        );
+    }
+    #[test]
+    fn footer_wraps_on_narrow_terminal() {
+        // On a 50-column terminal the provider-step footer hint (~57 chars)
+        // must wrap to two lines instead of being silently truncated.
+        // We check that the wrapped word is present (could be on row 1 or 2).
+        use ratatui::backend::TestBackend;
+        let providers = vec![ProviderEntry {
+            name: "openai".to_string(),
+            has_key: false,
+            key_masked: String::new(),
+            is_custom: false,
+            base_url: None,
+        }];
+        let mut s = WizardState {
+            step: 0,
+            providers,
+            provider_selected: 0,
+            provider_list_state: ListState::default(),
+            provider_filter: String::new(),
+            on_sentinel: false,
+            input_mode: InputMode::Normal,
+            models: vec![],
+            model_selected: 0,
+            model_filter: String::new(),
+            model_list_state: ListState::default(),
+            themes: vec![],
+            theme_selected: 0,
+            theme_list_state: ListState::default(),
+            auth_path: PathBuf::new(),
+            settings_path: PathBuf::new(),
+            catalog: None,
+            models_dirty: false,
+        };
+        let backend = TestBackend::new(50, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_wizard(f, &mut s)).unwrap();
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        // The footer text "Type to filter..." must not be cut off — every
+        // word in the hint should appear somewhere in the buffer.
+        for word in [
+            "Type",
+            "filter",
+            "\u{2191}/\u{2193}",
+            "act",
+            "next",
+            "Esc",
+            "back",
+        ] {
+            assert!(
+                out.contains(word),
+                "footer word {word:?} missing at 50 cols — footer may be truncated"
+            );
+        }
     }
 }
