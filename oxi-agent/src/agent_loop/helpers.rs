@@ -63,52 +63,144 @@ pub struct FinalizedToolCall {
     pub is_error: bool,
 }
 
-/// Remove orphaned `ToolResult` messages that lack a preceding
-/// `Assistant` message with `tool_calls` content blocks.
+/// Remove orphaned `ToolResult` messages and orphaned `ToolCall` blocks
+/// from `Assistant` messages.
 ///
-/// Some providers (e.g. OpenAI) reject messages where a `tool` role message
-/// doesn't follow an `assistant` message containing `tool_calls`. This can
-/// happen after compaction or state restoration. Orphaned tool results are
-/// useless anyway — without the tool_calls they reference, the model has no
-/// context for what tool was called.
+/// Some providers (e.g. OpenAI) reject messages where:
+/// 1. A `tool` role message doesn't follow an `assistant` message containing
+///    `tool_calls` (orphaned ToolResult).
+/// 2. An assistant message contains `tool_calls` that are not followed by
+///    the corresponding `ToolResult` messages before the next user or
+///    assistant turn (orphaned ToolCall).
 ///
-/// Returns the number of orphaned tool results removed.
+/// Both cases can happen after compaction, state restoration, or partial
+/// tool execution failure. This function restores a valid
+/// tool_call/tool_result adjacency that the provider will accept.
+///
+/// Returns the number of orphaned items removed.
 pub fn sanitize_orphaned_tool_results(messages: &mut Vec<oxi_ai::Message>) -> usize {
-    use oxi_ai::Message;
+    use oxi_ai::{ContentBlock, Message};
+    use std::collections::HashSet;
 
-    let mut removed = 0;
-    let mut seen_tool_calls = false;
+    if messages.is_empty() {
+        return 0;
+    }
 
-    messages.retain(|msg| {
+    // ---- Pass 1: forward scan, collect metadata for assistants and results ----
+    // For each assistant message with tool_calls, record the set of
+    // tool_call_ids it issued. For each tool result, remember its id.
+    //
+    // We use a sliding window: a user message (or the start of a new
+    // assistant turn) closes the current tool-calling "batch" and starts
+    // a fresh one.
+    struct AssistantBatch {
+        /// Index into `messages` of the assistant message.
+        msg_idx: usize,
+        /// tool_call_ids issued by this assistant.
+        issued: HashSet<String>,
+        /// tool_call_ids that have been matched by a ToolResult below.
+        matched: HashSet<String>,
+    }
+
+    let mut batches: Vec<AssistantBatch> = Vec::new();
+    let mut current: Option<AssistantBatch> = None;
+
+    // Track which tool_results are valid (matched to some assistant's id).
+    let mut valid_result: Vec<bool> = vec![false; messages.len()];
+
+    for (i, msg) in messages.iter().enumerate() {
         match msg {
             Message::Assistant(a) => {
-                let has_tool_calls = a
+                // Close any prior batch — a new assistant turn starts a fresh
+                // tool-call window even if its tool_calls haven't completed
+                // (those become orphans to be stripped).
+                if let Some(b) = current.take() {
+                    batches.push(b);
+                }
+                let issued: HashSet<String> = a
                     .content
                     .iter()
-                    .any(|b| matches!(b, oxi_ai::ContentBlock::ToolCall(_)));
-                seen_tool_calls = has_tool_calls;
-                true
-            }
-            Message::ToolResult(_) => {
-                if seen_tool_calls {
-                    // This tool result is properly preceded — keep it, but reset
-                    // the flag since the result "consumes" the tool_calls context.
-                    seen_tool_calls = false;
-                    true
-                } else {
-                    // Orphaned — no preceding tool_calls.
-                    removed += 1;
-                    false
+                    .filter_map(|b| match b {
+                        ContentBlock::ToolCall(tc) => Some(tc.id.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if !issued.is_empty() {
+                    current = Some(AssistantBatch {
+                        msg_idx: i,
+                        issued,
+                        matched: HashSet::new(),
+                    });
                 }
             }
-            // User messages reset the tool_calls context.
+            Message::ToolResult(t) => {
+                if let Some(ref mut b) = current
+                    && b.issued.contains(&t.tool_call_id)
+                {
+                    b.matched.insert(t.tool_call_id.clone());
+                    valid_result[i] = true;
+                }
+                // Else: orphan result (no active batch, or batch doesn't have
+                // this id) — marked invalid, will be removed.
+            }
             Message::User(_) => {
-                seen_tool_calls = false;
-                true
+                if let Some(b) = current.take() {
+                    batches.push(b);
+                }
             }
         }
-    });
+    }
+    if let Some(b) = current {
+        batches.push(b);
+    }
 
+    // ---- Pass 2: build the result vec, stripping orphans ----
+    let mut removed = 0;
+    let mut kept: Vec<Message> = Vec::with_capacity(messages.len());
+
+    // For each batch, compute the set of unmatched tool_call_ids to strip
+    // from the corresponding assistant message.
+    let mut strip_from_assistant: HashSet<usize> = HashSet::new();
+    for b in &batches {
+        if b.matched.len() < b.issued.len() {
+            // Some tool_calls were not answered. We strip the orphan
+            // ToolCall blocks; if that empties the assistant, the whole
+            // message is removed.
+            strip_from_assistant.insert(b.msg_idx);
+        }
+    }
+
+    for (i, msg) in messages.drain(..).enumerate() {
+        match msg {
+            Message::ToolResult(_) => {
+                if valid_result[i] {
+                    kept.push(msg);
+                } else {
+                    removed += 1;
+                }
+            }
+            Message::Assistant(mut a) => {
+                if strip_from_assistant.contains(&i) {
+                    let before = a.content.len();
+                    a.content
+                        .retain(|b| !matches!(b, ContentBlock::ToolCall(_)));
+                    removed += before - a.content.len();
+                    if a.content.is_empty() {
+                        // Drop the assistant entirely — it has no text and
+                        // no tool_calls left, so it would be a no-op.
+                        removed += 1;
+                    } else {
+                        kept.push(Message::Assistant(a));
+                    }
+                } else {
+                    kept.push(Message::Assistant(a));
+                }
+            }
+            other => kept.push(other),
+        }
+    }
+
+    *messages = kept;
     removed
 }
 
@@ -235,5 +327,180 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert!(matches!(messages[0], Message::Assistant(_)));
         assert!(matches!(messages[1], Message::ToolResult(_)));
+    }
+
+    #[test]
+    fn test_sanitize_multi_tool_call_assistant_preserves_all_results() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
+        // Regression test: an assistant with 2+ tool_calls must preserve ALL
+        // corresponding ToolResult messages, not just the first one.
+        let mut messages = vec![
+            Message::User(oxi_ai::UserMessage::new("do two things")),
+            Message::Assistant({
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_1",
+                    "read",
+                    serde_json::json!({"path": "a.txt"}),
+                )));
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_2",
+                    "read",
+                    serde_json::json!({"path": "b.txt"}),
+                )));
+                m
+            }),
+            Message::ToolResult(ToolResultMessage::new(
+                "call_1",
+                "read",
+                vec![ContentBlock::Text(TextContent::new("aaa"))],
+            )),
+            Message::ToolResult(ToolResultMessage::new(
+                "call_2",
+                "read",
+                vec![ContentBlock::Text(TextContent::new("bbb"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        assert_eq!(removed, 0, "no tool results should be orphaned");
+        assert_eq!(messages.len(), 4, "all 4 messages should be kept");
+    }
+
+    #[test]
+    fn test_sanitize_orphan_tool_call_stripped_from_assistant() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
+        // When an assistant's tool_call has no matching result before a
+        // new assistant turn, the orphan tool_call block must be stripped
+        // (or the whole assistant dropped) so the provider doesn't reject
+        // the request.
+        let mut messages = vec![
+            Message::Assistant({
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_1",
+                    "read",
+                    serde_json::json!({"path": "a.txt"}),
+                )));
+                m
+            }),
+            // No ToolResult for call_1 — it's an orphan tool_call.
+            // A new assistant starts a fresh batch:
+            Message::Assistant({
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_2",
+                    "bash",
+                    serde_json::json!({"cmd": "ls"}),
+                )));
+                m
+            }),
+            Message::ToolResult(ToolResultMessage::new(
+                "call_2",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("ok"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        // call_1's tool_call is orphan → stripped from the first assistant.
+        // The first assistant is now empty (no text, no tool_calls) → dropped.
+        // call_2's tool_call + result is valid → kept.
+        assert_eq!(
+            removed, 2,
+            "1 tool_call block stripped + 1 empty assistant dropped"
+        );
+        assert_eq!(messages.len(), 2);
+        // Only the second assistant and its result remain.
+        assert!(matches!(messages[0], Message::Assistant(_)));
+        assert!(matches!(messages[1], Message::ToolResult(_)));
+    }
+
+    #[test]
+    fn test_sanitize_assistant_with_text_and_orphan_tool_call_keeps_text() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolCall};
+        // An assistant that has BOTH text content AND a tool_call whose
+        // result is missing should keep its text but lose the tool_call.
+        let mut messages = vec![
+            Message::Assistant({
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
+                m.content
+                    .push(ContentBlock::Text(TextContent::new("let me check")));
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_1",
+                    "read",
+                    serde_json::json!({"path": "a.txt"}),
+                )));
+                m
+            }),
+            // No ToolResult for call_1.
+            Message::User(oxi_ai::UserMessage::new("hi")),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        // The orphan tool_call is stripped (1 item); the assistant's text
+        // and the user message are kept.
+        assert_eq!(removed, 1);
+        assert_eq!(messages.len(), 2);
+        if let Message::Assistant(a) = &messages[0] {
+            assert_eq!(a.content.len(), 1, "only the text block should remain");
+            if let ContentBlock::Text(t) = &a.content[0] {
+                assert_eq!(t.text, "let me check");
+            } else {
+                panic!("expected text block");
+            }
+        } else {
+            panic!("expected assistant message");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_orphan_tool_result_with_no_assistant_removed() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolResultMessage};
+        // A tool result with no preceding assistant that has tool_calls
+        // is an orphan and should be removed.
+        let mut messages = vec![
+            Message::User(oxi_ai::UserMessage::new("hello")),
+            Message::ToolResult(ToolResultMessage::new(
+                "orphan_1",
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("orphan output"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        assert_eq!(removed, 1);
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn test_sanitize_wrong_tool_call_id_removed() {
+        use oxi_ai::{ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
+        // A ToolResult whose tool_call_id doesn't match any active
+        // assistant's tool_call_id is an orphan.
+        let mut messages = vec![
+            Message::Assistant({
+                let mut m =
+                    oxi_ai::AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "agent", "gpt-4");
+                m.content.push(ContentBlock::ToolCall(ToolCall::new(
+                    "call_1",
+                    "bash",
+                    serde_json::json!({"cmd": "ls"}),
+                )));
+                m
+            }),
+            Message::ToolResult(ToolResultMessage::new(
+                "wrong_id", // doesn't match call_1
+                "bash",
+                vec![ContentBlock::Text(TextContent::new("orphan"))],
+            )),
+        ];
+        let removed = sanitize_orphaned_tool_results(&mut messages);
+        // Breakdown:
+        //   - 1 wrong-id ToolResult removed
+        //   - 1 ToolCall block stripped from the assistant (call_1 had no match)
+        //   - 1 empty assistant dropped (only contained the orphan tool_call)
+        assert_eq!(removed, 3);
+        assert_eq!(messages.len(), 0);
     }
 }

@@ -711,10 +711,18 @@ impl Compactor for LlmCompactor {
                 ));
             }
 
-            // Split into old messages (to compact) and recent messages (to keep)
+            // Split into old messages (to compact) and recent messages (to keep).
+            // The naive `messages.len() - keep_recent` split point can bisect
+            // a tool_call/tool_result pair, leaving orphans on either side.
+            // align_split_boundary walks backward from the naive point to the
+            // nearest "stable" boundary (a user message or a tool_call-free
+            // assistant message) so every tool call is wholly old or wholly
+            // recent.
             let keep_count = self.config.keep_recent.min(messages.len());
-            let old_messages: Vec<Message> = messages[..messages.len() - keep_count].to_vec();
-            let recent_messages: Vec<Message> = messages[messages.len() - keep_count..].to_vec();
+            let raw_split = messages.len() - keep_count;
+            let split = align_split_boundary(messages, raw_split);
+            let old_messages: Vec<Message> = messages[..split].to_vec();
+            let recent_messages: Vec<Message> = messages[split..].to_vec();
 
             if old_messages.is_empty() {
                 return Err(CompactionError::NoMessagesToCompact);
@@ -725,6 +733,48 @@ impl Compactor for LlmCompactor {
                 .await
         })
     }
+}
+
+/// Find a stable split point in `messages` such that no tool_call /
+/// tool_result pair is bisected.
+///
+/// Starting from `raw_split`, walk backward to the nearest index `i` where
+/// `messages[i-1]` is a "boundary" message — either a [`Message::User`] or
+/// an assistant message with no [`ContentBlock::ToolCall`] blocks.
+/// This guarantees the slice `messages[..i]` ends at a stable boundary
+/// and `messages[i..]` starts cleanly.
+///
+/// Returns `raw_split` if it is already at a stable boundary. Returns 0
+/// if no stable boundary is found before it.
+///
+/// Stable boundary rules:
+/// - `[User]` always safe.
+/// - `[Assistant]` without `tool_calls` always safe.
+/// - `[Assistant]` with `tool_calls` → NOT safe (must be kept whole).
+/// - `[ToolResult]` → NOT safe (must stay with its issuing assistant).
+pub(crate) fn align_split_boundary(messages: &[crate::Message], raw_split: usize) -> usize {
+    use crate::{ContentBlock, Message};
+
+    if raw_split == 0 || raw_split >= messages.len() {
+        return raw_split;
+    }
+
+    let is_boundary = |msg: &Message| match msg {
+        Message::User(_) => true,
+        Message::Assistant(a) => !a
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolCall(_))),
+        Message::ToolResult(_) => false,
+    };
+
+    // Walk backward from raw_split until we find a boundary or hit 0.
+    // messages[raw_split - 1] is the last message in the "old" slice.
+    let mut i = raw_split;
+    while i > 0 && !is_boundary(&messages[i - 1]) {
+        i -= 1;
+    }
+    i
 }
 
 /// Additional methods for LlmCompactor (not part of Compactor trait)
@@ -1309,5 +1359,96 @@ mod tests {
         // This should not panic with empty messages
         // (We can't test the async result in a sync test, but compile-time check passes)
         let _future = compactor.summarize_branch(&messages, "empty-branch");
+    }
+
+    // ---- align_split_boundary tests ----
+
+    use crate::{ToolCall, ToolResultMessage};
+    fn make_user_msg(text: &str) -> Message {
+        Message::User(UserMessage::new(text))
+    }
+
+    fn make_asst_text(text: &str) -> Message {
+        let mut m = AssistantMessage::new(Api::AnthropicMessages, "agent", "m");
+        m.content
+            .push(ContentBlock::Text(TextContent::new(text.to_string())));
+        Message::Assistant(m)
+    }
+
+    fn make_asst_with_tool_call(id: &str) -> Message {
+        let mut m = AssistantMessage::new(Api::AnthropicMessages, "agent", "m");
+        m.content.push(ContentBlock::ToolCall(ToolCall::new(
+            id,
+            "bash",
+            serde_json::json!({}),
+        )));
+        Message::Assistant(m)
+    }
+
+    fn make_tool_result(id: &str) -> Message {
+        Message::ToolResult(ToolResultMessage::new(
+            id,
+            "bash",
+            vec![ContentBlock::Text(TextContent::new("ok"))],
+        ))
+    }
+
+    #[test]
+    fn test_align_boundary_already_at_user() {
+        // raw_split lands on a User → no adjustment needed.
+        let msgs = vec![
+            make_user_msg("a"),
+            make_user_msg("b"),
+            make_user_msg("c"),
+            make_user_msg("d"),
+        ];
+        // raw_split = 2 → messages[1] is User → already a boundary.
+        assert_eq!(align_split_boundary(&msgs, 2), 2);
+    }
+
+    #[test]
+    fn test_align_boundary_walks_back_from_tool_result() {
+        // raw_split falls inside a tool_call/tool_result block.
+        // Should walk back to the assistant that issued the tool_call.
+        let msgs = vec![
+            make_user_msg("u1"),
+            make_asst_with_tool_call("call_1"),
+            make_tool_result("call_1"),
+            make_user_msg("u2"),
+            make_asst_text("done"),
+        ];
+        // raw_split = 3 falls between tool_result and user.
+        // Walking back: messages[2] = tool_result (not boundary),
+        // messages[1] = assistant with tool_call (not boundary),
+        // messages[0] = user (boundary). Result: 1.
+        assert_eq!(align_split_boundary(&msgs, 3), 1);
+    }
+
+    #[test]
+    fn test_align_boundary_at_zero() {
+        // Edge case: raw_split = 0.
+        let msgs = vec![make_user_msg("u1")];
+        assert_eq!(align_split_boundary(&msgs, 0), 0);
+    }
+
+    #[test]
+    fn test_align_boundary_past_end() {
+        // Edge case: raw_split >= len → return as-is.
+        let msgs = vec![make_user_msg("u1")];
+        assert_eq!(align_split_boundary(&msgs, 5), 5);
+    }
+
+    #[test]
+    fn test_align_boundary_assistant_text_is_safe() {
+        // An assistant with ONLY text (no tool_calls) IS a safe boundary.
+        let msgs = vec![
+            make_user_msg("u1"),
+            make_asst_with_tool_call("call_1"),
+            make_tool_result("call_1"),
+            make_asst_text("summary"),
+            make_user_msg("u2"),
+        ];
+        // raw_split = 4 → messages[3] = assistant text → boundary.
+        assert_eq!(align_split_boundary(&msgs, 4), 4);
     }
 }
