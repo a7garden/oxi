@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-06-22
+
+### Fixed
+
+- Strip orphan ToolCall blocks from Assistant messages and align compaction
+  split boundary to prevent bisecting tool_call/tool_result pairs
+
 ## [0.45.0] - 2026-06-22
 
 ### Added
