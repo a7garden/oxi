@@ -558,8 +558,7 @@ impl AgentTool for BashTool {
         // F-10 (audit 2026-06-21): collapsed `if` so the two predicates
         // (`OXI_STRICT_BASH=1` AND a dangerous-pattern match) live on a
         // single line — clippy::collapsible_if flagged the original form.
-        if std::env::var_os("OXI_STRICT_BASH").as_deref()
-            == Some(std::ffi::OsStr::new("1"))
+        if std::env::var_os("OXI_STRICT_BASH").as_deref() == Some(std::ffi::OsStr::new("1"))
             && let Some(reason) = is_dangerous_command(command)
         {
             return Err(format!(

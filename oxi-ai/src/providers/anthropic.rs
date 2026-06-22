@@ -697,7 +697,6 @@ fn parse_anthropic_events_stateful(
     // rationale (same heuristic applied uniformly across providers).
     let mut events = Vec::with_capacity(text.len() / 80);
 
-
     for line in text.split('\n') {
         let line = line.trim_end_matches('\r');
         if line.is_empty() {

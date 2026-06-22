@@ -619,7 +619,6 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
     let mut events = Vec::with_capacity(text.len() / 80);
     let mut partial_message = AssistantMessage::new(Api::BedrockConverseStream, provider, model_id);
 
-
     let mut accumulated_usage = Usage::default();
     let mut stop_reason: Option<StopReason> = None;
     let mut seen_start = false;
