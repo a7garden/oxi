@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — 설정 마법사 모델 단계 재설계
+
+- **모델 목록을 구성된 프로바이더로 제한**: 2단계(기본 모델 선택)가 더 이상
+  5000+ 전체 카탈로그를 보여주지 않고, 1단계에서 API key를 등록한
+  프로바이더의 모델만 표시한다. `load_models`가 `allowed` 프로바이더 집합을
+  받아 필터링하고, `keyed_provider_names`가 key가 등록된 프로바이더를
+  수집한다. key 추가/삭제 시 `models_dirty` 플래그를 세팅하면 메인 루프가
+  2단계 진입 전에 목록을 재구축한다. 구성된 프로바이더가 없으면 빈 상태
+  안내("No providers with an API key configured yet. Press Left to go back…")
+  로 1단계로 돌려보낸다 (`oxi-cli/src/setup_wizard.rs`).
+- **단계 인디케이터가 사라지던 버그 수정**: 인디케이터가 각 단계 `List`의
+  `Borders::NONE` 블록 `.title()`로 들어가 첫 번째 리스트 항목과 같은
+  0행을 덮어써 보이지 않았다. 이제 타이틀바 아래 전용 1행(`Length(1)`)
+  레이아웃 영역으로 옮겨 네 단계 모두 항상 표시된다. 검증을 위해 렌더링
+  클로저를 `render_wizard(f, state)`로 분리하고 `TestBackend` 버퍼 테스트를
+  추가했다.
+- **`Esc` 단일 뒤로/종료 키 도입**: 기존 `q` 종료 단축키를 폐지하고 `Esc`를
+  범용 "한 단계 뒤로" 키로 통일했다. 1단계(프로바이더) 최상위에서 `Esc`는
+  종료, 모델 단계에서는 필터가 있으면 지우고 없으면 이전 단계로, 테마·완료
+  단계에서도 각각 뒤로/종료로 동작한다. 서브모드(검색·다이얼로그)의
+  `Esc` 취소 동작은 기존 그대로 유지된다. `←` 키도 명시적 이전 단계로
+  유지된다.
+
 ## [0.42.0] - 2026-06-22
 
 ### Changed — 설정 마법사 첫 실행 경험 개선

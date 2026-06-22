@@ -86,6 +86,10 @@ struct WizardState {
     model_filter: String,
     /// List state for the filtered model list
     model_list_state: ListState,
+    /// Dirty flag: a provider key was added/removed since the last model-list
+    /// rebuild. The main loop rebuilds (filtered to configured providers) before
+    /// drawing step 1.
+    models_dirty: bool,
     /// Theme names for step 3
     themes: Vec<String>,
     /// Currently selected theme index
@@ -273,15 +277,29 @@ fn load_providers(
 // ── Load model list ────────────────────────────────────────────────────────
 
 /// Build the model list from the catalog port + dynamic cache.
+///
+/// When `allowed` is `Some`, only models whose provider is in the set are
+/// returned — the wizard uses this to restrict step 2 to providers the user
+/// actually configured (added an API key to) in step 1. `Some(empty)` yields an
+/// empty list; `None` disables the provider filter entirely.
 fn load_models(
     catalog: Option<&std::sync::Arc<dyn oxi_sdk::ports::catalog::ModelCatalog>>,
+    allowed: Option<&std::collections::HashSet<String>>,
 ) -> Vec<ModelEntry> {
+    let permit = |provider: &str| match allowed {
+        None => true,
+        Some(set) => set.contains(provider),
+    };
+
     let mut models = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     // 1. Dynamic models from settings cache (fetched from /models endpoints)
     if let Ok(settings) = crate::store::settings::Settings::load() {
         for (provider, model_ids) in &settings.dynamic_models {
+            if !permit(provider) {
+                continue;
+            }
             for id in model_ids {
                 let key = format!("{}/{}", provider, id);
                 if seen.insert(key.clone()) {
@@ -304,6 +322,9 @@ fn load_models(
     // 2. Catalog models (sync read) or static model_db fallback
     if let Some(cat) = catalog {
         for entry in cat.search_sync("") {
+            if !permit(&entry.provider) {
+                continue;
+            }
             let key = format!("{}/{}", entry.provider, entry.model_id);
             if seen.insert(key) {
                 models.push(ModelEntry::new(
@@ -315,6 +336,9 @@ fn load_models(
         }
     } else {
         for entry in oxi_sdk::get_all_models() {
+            if !permit(entry.provider) {
+                continue;
+            }
             let key = format!("{}/{}", entry.provider, entry.id);
             if seen.insert(key) {
                 models.push(ModelEntry::new(
@@ -327,6 +351,38 @@ fn load_models(
     }
 
     models
+}
+
+/// Names of providers the user has configured (added an API key to) in step 1.
+/// Step 2's model list is restricted to these so the user only chooses among
+/// models they can actually call.
+fn keyed_provider_names(providers: &[ProviderEntry]) -> std::collections::HashSet<String> {
+    providers
+        .iter()
+        .filter(|p| p.has_key)
+        .map(|p| p.name.clone())
+        .collect()
+}
+
+/// Rebuild `state.models` from the currently-configured providers, keeping the
+/// selection on the same model when it survives the rebuild. Called by the main
+/// loop whenever the provider-key set changes and the user is on step 1.
+fn refresh_models(state: &mut WizardState) {
+    let allowed = keyed_provider_names(&state.providers);
+    let prev = state
+        .models
+        .get(state.model_selected)
+        .map(|m| (m.provider.clone(), m.id.clone()));
+    state.models = load_models(state.catalog.as_ref(), Some(&allowed));
+    state.model_selected = match prev {
+        Some((p, id)) => state
+            .models
+            .iter()
+            .position(|m| m.provider == p && m.id == id)
+            .unwrap_or(0),
+        None => 0,
+    };
+    ensure_model_selected_visible(state);
 }
 
 // ── Fetch and cache dynamic models ─────────────────────────────────────────
@@ -480,72 +536,86 @@ fn draw_wizard(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut WizardState,
 ) -> Result<()> {
-    terminal.draw(|f| {
-        let size = f.area();
-
-        // Create outer layout
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3), // Title bar
-                Constraint::Min(10),   // Content
-                Constraint::Length(2), // Footer
-            ])
-            .split(size);
-
-        // Title bar
-        let title = Paragraph::new(Line::from(vec![
-            Span::styled(
-                " oxi ",
-                Style::default()
-                    .fg(Color::Rgb(255, 165, 0))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "oxi Setup Wizard",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .block(Block::default().borders(Borders::TOP));
-        f.render_widget(title, chunks[0]);
-
-        // Content depends on step
-        match state.step {
-            0 => draw_provider_step(f, state, chunks[1]),
-            1 => draw_model_step(f, state, chunks[1]),
-            2 => draw_theme_step(f, state, chunks[1]),
-            3 => draw_done_step(f, state, chunks[1]),
-            _ => {}
-        }
-
-        // Footer
-        let footer_text = match state.step {
-            0 => match &state.input_mode {
-                InputMode::Normal => {
-                    if state.provider_searching {
-                        "  Type: filter · ↑/↓ navigate · Enter: select & edit key · Esc: close search · ←: previous".to_string()
-                    } else {
-                        "  ↑/↓ navigate · /: search · Enter: API key · d: delete · →: next · q: quit".to_string()
-                    }
-                }
-                InputMode::EditingApiKey { .. } => "  Enter: save · Esc: cancel".to_string(),
-                InputMode::AddingCustom { .. } => {
-                    "  Tab: next field · Enter: save · Esc: cancel".to_string()
-                }
-            },
-            1 => "  Type: filter · ↑/↓ navigate · Enter: select · Esc: clear filter · ←: previous".to_string(),
-            2 => "  ↑/↓ navigate · Enter: select · ←: previous".to_string(),
-            3 => "  Enter: quit".to_string(),
-            _ => String::new(),
-        };
-        let footer = Paragraph::new(Line::from(Span::styled(
-            footer_text,
-            Style::default().fg(Color::DarkGray),
-        )));
-        f.render_widget(footer, chunks[2]);
-    })?;
-
+    terminal.draw(|f| render_wizard(f, state))?;
     Ok(())
+}
+
+/// Render the wizard into a frame. Split out from `draw_wizard` so the layout
+/// (title bar, persistent step indicator, content, footer) can be exercised
+/// against a `TestBackend` buffer in tests — verifying the step indicator is
+/// visible on every step and that step-specific content lands in the right row.
+fn render_wizard(f: &mut ratatui::Frame, state: &mut WizardState) {
+    let size = f.area();
+
+    // Create outer layout
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Title bar
+            Constraint::Length(1), // Step indicator (always visible)
+            Constraint::Min(8),    // Content
+            Constraint::Length(2), // Footer
+        ])
+        .split(size);
+
+    // Title bar
+    let title = Paragraph::new(Line::from(vec![
+        Span::styled(
+            " oxi ",
+            Style::default()
+                .fg(Color::Rgb(255, 165, 0))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "oxi Setup Wizard",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .block(Block::default().borders(Borders::TOP));
+    f.render_widget(title, chunks[0]);
+
+    // Persistent step indicator — its own dedicated line so it never collides
+    // with the first list item (which hid it when it was a borderless block
+    // `.title()` — the title and item share row 0).
+    f.render_widget(Paragraph::new(build_step_indicator(state.step)), chunks[1]);
+
+    // Content depends on step
+    match state.step {
+        0 => draw_provider_step(f, state, chunks[2]),
+        1 => draw_model_step(f, state, chunks[2]),
+        2 => draw_theme_step(f, state, chunks[2]),
+        3 => draw_done_step(f, state, chunks[2]),
+        _ => {}
+    }
+
+    // Footer
+    let footer_text = match state.step {
+        0 => match &state.input_mode {
+            InputMode::Normal => {
+                if state.provider_searching {
+                    "  Type: filter · ↑/↓ navigate · Enter: select & edit key · Esc/←: close search"
+                        .to_string()
+                } else {
+                    "  ↑/↓ navigate · /: search · Enter: API key · d: delete · →: next · Esc: quit"
+                        .to_string()
+                }
+            }
+            InputMode::EditingApiKey { .. } => "  Enter: save · Esc: cancel".to_string(),
+            InputMode::AddingCustom { .. } => {
+                "  Tab: next field · Enter: save · Esc: cancel".to_string()
+            }
+        },
+        1 => "  Type: filter · ↑/↓ navigate · Enter: select · Esc: clear/back · ←: previous"
+            .to_string(),
+        2 => "  ↑/↓ navigate · Enter: select · Esc/←: previous".to_string(),
+        3 => "  Esc or Enter: quit".to_string(),
+        _ => String::new(),
+    };
+    let footer = Paragraph::new(Line::from(Span::styled(
+        footer_text,
+        Style::default().fg(Color::DarkGray),
+    )));
+    f.render_widget(footer, chunks[3]);
 }
 
 fn draw_provider_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
@@ -563,8 +633,6 @@ fn draw_provider_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
 }
 
 fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
-    let step_indicator = build_step_indicator(state.step);
-
     // When filtering, reserve a one-line search input above the list.
     let (list_area, search_area) = if state.provider_searching {
         let chunks = Layout::default()
@@ -652,11 +720,7 @@ fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
     }
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::NONE)
-                .title(step_indicator),
-        )
+        .block(Block::default().borders(Borders::NONE))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -763,7 +827,26 @@ fn draw_custom_provider_dialog(
 }
 
 fn draw_model_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
-    let step_indicator = build_step_indicator(state.step);
+    // No configured providers (none with an API key) → nothing to choose among.
+    // Guide the user back to step 1 instead of rendering an empty list.
+    if state.models.is_empty() {
+        let msg = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No providers with an API key configured yet.",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press Left to go back and add a provider key first.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]);
+        f.render_widget(msg, area);
+        return;
+    }
 
     // Reserve a one-line filter input at the top; the list fills the rest.
     let chunks = Layout::default()
@@ -821,11 +904,7 @@ fn draw_model_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) 
         .collect();
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::NONE)
-                .title(step_indicator),
-        )
+        .block(Block::default().borders(Borders::NONE))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -848,8 +927,6 @@ fn draw_model_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) 
 }
 
 fn draw_theme_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
-    let step_indicator = build_step_indicator(state.step);
-
     let items: Vec<ListItem> = state
         .themes
         .iter()
@@ -857,11 +934,7 @@ fn draw_theme_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) 
         .collect();
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::NONE)
-                .title(step_indicator),
-        )
+        .block(Block::default().borders(Borders::NONE))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -1052,6 +1125,7 @@ fn handle_provider_event(
                         auth_store.remove(&name);
                         state.providers[state.provider_selected].has_key = false;
                         state.providers[state.provider_selected].key_masked = String::new();
+                        state.models_dirty = true;
                     }
                     KeyCode::Char('/') => {
                         state.provider_searching = true;
@@ -1063,7 +1137,7 @@ fn handle_provider_event(
                     KeyCode::Right => {
                         state.step = 1;
                     }
-                    KeyCode::Char('q') => {
+                    KeyCode::Esc => {
                         return Ok(true); // quit
                     }
                     _ => {}
@@ -1096,8 +1170,10 @@ fn handle_provider_event(
                             // Try to fetch models dynamically from the provider's /models endpoint
                             fetch_and_cache_models(provider_name, &state.providers);
 
-                            // Refresh the model list to include newly fetched models
-                            state.models = load_models(state.catalog.as_ref());
+                            // Mark models dirty; the main loop rebuilds the list
+                            // (filtered to configured providers) when the user
+                            // reaches step 1.
+                            state.models_dirty = true;
                         }
                         state.input_mode = InputMode::Normal;
                     }
@@ -1155,8 +1231,10 @@ fn handle_provider_event(
                             // Try to fetch models from this custom provider
                             if !api_key.is_empty() {
                                 fetch_and_cache_models(&name, &state.providers);
-                                state.models = load_models(state.catalog.as_ref());
                             }
+                            // Rebuild the model list on next step-1 entry when
+                            // this provider has a key.
+                            state.models_dirty = has_key;
 
                             // Move back to normal
                             state.input_mode = InputMode::Normal;
@@ -1220,9 +1298,14 @@ fn handle_model_event(state: &mut WizardState, event: Event) -> Result<bool> {
                 }
             }
             KeyCode::Esc => {
-                // Clear the filter (Left handles going back to providers).
-                state.model_filter.clear();
-                ensure_model_selected_visible(state);
+                // Esc backs out one level: clear an active filter, otherwise
+                // return to the provider step.
+                if !state.model_filter.is_empty() {
+                    state.model_filter.clear();
+                    ensure_model_selected_visible(state);
+                } else {
+                    state.step = 0;
+                }
             }
             KeyCode::Left => {
                 state.step = 0;
@@ -1247,7 +1330,7 @@ fn handle_theme_event(state: &mut WizardState, event: Event) -> Result<bool> {
                 finish_setup(state)?;
                 state.step = 3;
             }
-            KeyCode::Left => {
+            KeyCode::Esc | KeyCode::Left => {
                 state.step = 1;
             }
             _ => {}
@@ -1259,7 +1342,7 @@ fn handle_theme_event(state: &mut WizardState, event: Event) -> Result<bool> {
 fn handle_done_event(event: Event) -> Result<bool> {
     if let Event::Key(key) = event {
         match key.code {
-            KeyCode::Enter | KeyCode::Char('q') => {
+            KeyCode::Enter | KeyCode::Esc => {
                 return Ok(true); // quit
             }
             _ => {}
@@ -1346,7 +1429,8 @@ pub async fn run() -> Result<()> {
     // Load data
     let auth_store = crate::store::auth_storage::shared_auth_storage();
     let providers = load_providers(&auth_store, catalog.as_ref());
-    let models = load_models(catalog.as_ref());
+    let allowed = keyed_provider_names(&providers);
+    let models = load_models(catalog.as_ref(), Some(&allowed));
     let themes = load_themes();
 
     let auth_path = crate::store::auth_storage::AuthStorage::default_path().unwrap_or_else(|| {
@@ -1396,6 +1480,7 @@ pub async fn run() -> Result<()> {
         model_selected,
         model_filter: String::new(),
         model_list_state: ListState::default(),
+        models_dirty: false,
         themes,
         theme_selected,
         theme_list_state: ListState::default(),
@@ -1406,6 +1491,13 @@ pub async fn run() -> Result<()> {
 
     // Main loop
     loop {
+        // If a provider key changed, rebuild the model list (restricted to the
+        // now-configured providers) before drawing — so step 1 never shows
+        // stale or unconfigured-provider models.
+        if state.step == 1 && state.models_dirty {
+            refresh_models(&mut state);
+            state.models_dirty = false;
+        }
         draw_wizard(&mut terminal, &mut state)?;
 
         if event::poll(std::time::Duration::from_millis(100))?
@@ -1461,6 +1553,7 @@ mod tests {
             model_selected: 0,
             model_filter: String::new(),
             model_list_state: ListState::default(),
+            models_dirty: false,
             themes: vec![],
             theme_selected: 0,
             theme_list_state: ListState::default(),
@@ -1550,5 +1643,228 @@ mod tests {
         state.provider_filter = String::new();
         snap_provider_selection(&mut state);
         assert_eq!(state.provider_selected, 1); // unchanged
+    }
+    #[test]
+    fn keyed_provider_names_only_includes_configured() {
+        let providers = vec![
+            ProviderEntry {
+                name: "anthropic".to_string(),
+                has_key: true,
+                key_masked: "sk-1...abcd".to_string(),
+                is_custom: false,
+                base_url: None,
+            },
+            ProviderEntry {
+                name: "openai".to_string(),
+                has_key: false,
+                key_masked: String::new(),
+                is_custom: false,
+                base_url: None,
+            },
+            ProviderEntry {
+                name: "local".to_string(),
+                has_key: true,
+                key_masked: "x...y".to_string(),
+                is_custom: true,
+                base_url: Some("http://localhost:11434".to_string()),
+            },
+        ];
+        let set = keyed_provider_names(&providers);
+        assert!(set.contains("anthropic"));
+        assert!(set.contains("local"));
+        assert!(!set.contains("openai"));
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn keyed_provider_names_empty_when_none_configured() {
+        let providers = vec![ProviderEntry {
+            name: "openai".to_string(),
+            has_key: false,
+            key_masked: String::new(),
+            is_custom: false,
+            base_url: None,
+        }];
+        assert!(keyed_provider_names(&providers).is_empty());
+    }
+    /// Render the full wizard into a TestBackend buffer and return the
+    /// concatenated cell text (rows joined with '\n') for substring assertions.
+    fn render_to_buffer(step: usize, models: Vec<ModelEntry>) -> String {
+        use ratatui::backend::TestBackend;
+        let providers = vec![
+            ProviderEntry {
+                name: "openai".to_string(),
+                has_key: true,
+                key_masked: "k...1".to_string(),
+                is_custom: false,
+                base_url: None,
+            },
+            ProviderEntry {
+                name: "anthropic".to_string(),
+                has_key: false,
+                key_masked: String::new(),
+                is_custom: false,
+                base_url: None,
+            },
+        ];
+        let mut state = WizardState {
+            step,
+            providers,
+            provider_selected: 0,
+            provider_list_state: ListState::default(),
+            provider_filter: String::new(),
+            provider_searching: false,
+            input_mode: InputMode::Normal,
+            models,
+            model_selected: 0,
+            model_filter: String::new(),
+            model_list_state: ListState::default(),
+            themes: vec!["oxi_dark".to_string()],
+            theme_selected: 0,
+            theme_list_state: ListState::default(),
+            auth_path: PathBuf::new(),
+            settings_path: PathBuf::new(),
+            catalog: None,
+            models_dirty: false,
+        };
+        let backend = TestBackend::new(90, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_wizard(f, &mut state)).unwrap();
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn step_indicator_visible_on_every_step() {
+        // The step indicator must render on its own dedicated line for every
+        // step — the bug it fixes hid it (borderless-block title collided with
+        // the first list item).
+        for (step, label) in [
+            (0usize, "1. Provider Setup"),
+            (1, "2. Default Model"),
+            (2, "3. Theme"),
+            (3, "4. Done"),
+        ] {
+            let models = vec![ModelEntry::new(
+                "gpt-4o".to_string(),
+                "openai".to_string(),
+                128_000,
+            )];
+            let rendered = render_to_buffer(step, models);
+            assert!(
+                rendered.contains(label),
+                "step {step}: indicator label {label:?} missing from buffer:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_step_shows_empty_state_when_no_provider_keyed() {
+        // With an empty model list (no keyed providers), step 1 must show the
+        // guidance message, not a bare empty filter list.
+        let rendered = render_to_buffer(1, vec![]);
+        assert!(rendered.contains("No providers with an API key configured yet."));
+        assert!(rendered.contains("Press Left to go back"));
+    }
+
+    #[test]
+    fn model_step_shows_configured_provider_model() {
+        // Only models from keyed providers appear. Here the only keyed
+        // provider is "openai", so a claude model (anthropic, not keyed) must
+        // NOT show even if it were somehow in the list — but since we pass the
+        // filtered list directly, we assert the openai model renders.
+        let models = vec![ModelEntry::new(
+            "gpt-4o".to_string(),
+            "openai".to_string(),
+            128_000,
+        )];
+        let rendered = render_to_buffer(1, models);
+        assert!(rendered.contains("gpt-4o"));
+    }
+    // ── Esc-centric key model ──────────────────────────────────────────────
+    // Esc is the universal "back out one level" key: cancel sub-mode → clear
+    // filter → previous step → quit. These exercise the handlers directly
+    // (deterministic, no terminal-timing dependency).
+
+    fn esc_event() -> Event {
+        Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+        ))
+    }
+
+    #[test]
+    fn esc_quits_from_provider_step_normal() {
+        let mut state = make_state(vec!["openai"], vec![]);
+        state.step = 0;
+        let auth = crate::store::auth_storage::shared_auth_storage();
+        let quit = handle_provider_event(&mut state, esc_event(), &auth).unwrap();
+        assert!(quit, "Esc on step 0 Normal should quit");
+    }
+
+    #[test]
+    fn esc_in_provider_search_closes_search_not_quit() {
+        let mut state = make_state(vec!["openai", "anthropic"], vec![]);
+        state.step = 0;
+        state.provider_searching = true;
+        state.provider_filter = "anth".to_string();
+        let auth = crate::store::auth_storage::shared_auth_storage();
+        let quit = handle_provider_event(&mut state, esc_event(), &auth).unwrap();
+        assert!(!quit, "Esc in search must close search, not quit");
+        assert!(!state.provider_searching);
+        assert!(state.provider_filter.is_empty());
+    }
+
+    #[test]
+    fn esc_backs_out_of_model_step_when_filter_empty() {
+        let mut state = make_state(vec!["openai"], vec![("gpt-4o", "openai")]);
+        state.step = 1;
+        state.model_filter = String::new();
+        handle_model_event(&mut state, esc_event()).unwrap();
+        assert_eq!(
+            state.step, 0,
+            "Esc with empty filter should return to the provider step"
+        );
+    }
+
+    #[test]
+    fn esc_clears_model_filter_when_nonempty() {
+        let mut state = make_state(
+            vec!["openai"],
+            vec![("gpt-4o", "openai"), ("gpt-4", "openai")],
+        );
+        state.step = 1;
+        state.model_filter = "gpt".to_string();
+        handle_model_event(&mut state, esc_event()).unwrap();
+        assert_eq!(
+            state.step, 1,
+            "Esc with a non-empty filter should stay on the model step"
+        );
+        assert!(state.model_filter.is_empty(), "Esc should clear the filter");
+    }
+
+    #[test]
+    fn esc_backs_out_of_theme_step() {
+        let mut state = make_state(vec!["openai"], vec![]);
+        state.step = 2;
+        state.themes = vec!["oxi_dark".to_string()];
+        handle_theme_event(&mut state, esc_event()).unwrap();
+        assert_eq!(state.step, 1);
+    }
+
+    #[test]
+    fn esc_quits_from_done_step() {
+        assert!(
+            handle_done_event(esc_event()).unwrap(),
+            "Esc on the done step should quit"
+        );
     }
 }
