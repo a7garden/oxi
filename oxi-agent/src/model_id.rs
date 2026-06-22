@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use oxi_ai::Model;
-use oxi_ai::{get_model, get_model_entry, lookup_model};
 use oxi_ai::register_builtins::get_builtin_provider;
+use oxi_ai::{get_model, get_model_entry, lookup_model};
+use std::collections::HashMap;
 
 /// Parse a model ID in "provider/model" or plain "model" format.
 /// Uses >= 2 segments (handles provider/org/model format).
@@ -40,10 +40,7 @@ pub fn resolve_model_from_id(model_id: &str) -> Option<Model> {
 /// but not in the static `STATIC_MODELS` registry (e.g. `zai-coding-plan/glm-5-turbo`).
 fn model_from_entry(provider: &str, entry: &oxi_ai::model_db::ModelEntry) -> Model {
     let builtin = get_builtin_provider(provider);
-    let base_url = builtin
-        .map(|b| b.base_url)
-        .unwrap_or("")
-        .to_string();
+    let base_url = builtin.map(|b| b.base_url).unwrap_or("").to_string();
     let headers: HashMap<String, String> = builtin
         .map(|b| {
             b.extra_headers

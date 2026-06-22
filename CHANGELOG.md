@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-06-22
+
+### Added
+
+- **Fallback model construction from catalog for providers without built-in trait impls**:
+  When `get_model` returns no match, `resolve_model_from_id` now falls back to
+  constructing a `Model` from the `ModelEntry` catalog (materialized from models.dev
+  snapshot). This handles catalog-only providers (e.g. `zai-coding-plan/glm-5-turbo`)
+  that have model data but no native `Provider` trait implementation
+  (`oxi-agent/src/model_id.rs`).
+
 ## [0.44.0] - 2026-06-22
 
 ### Changed — 설정 마법사 프로바이더 단계 재설계
