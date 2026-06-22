@@ -932,7 +932,17 @@ impl PackageManager {
 
     // ── Loading ───────────────────────────────────────────────────────
 
-    /// Load all installed package manifests from disk
+    /// Load all installed package manifests from disk.
+    ///
+    /// For every installed package whose `LockEntry` records an integrity
+    /// hash, the on-disk SHA-256 is recomputed and compared. Mismatches
+    /// (caused by tampering, partial disk failure, or any non-atomic write
+    /// that survived a crash) remove the package from the in-memory `installed`
+    /// map AND invalidate the matching lockfile entry, so subsequent
+    /// `update_all` re-fetches the package instead of trusting the cached copy.
+    /// A mismatch is logged at `warn` level — the CLI keeps booting (other
+    /// packages remain usable) but the affected package is treated as
+    /// un-installed.
     fn load_installed(&mut self) -> Result<()> {
         if !self.packages_dir.exists() {
             return Ok(());
@@ -943,7 +953,40 @@ impl PackageManager {
             if manifest_path.exists() {
                 match Self::read_manifest(&manifest_path) {
                     Ok(manifest) => {
-                        self.installed.insert(manifest.name.clone(), manifest);
+                        let name = manifest.name.clone();
+                        let install_dir = entry.path();
+
+                        // F-1 (audit 2026-06-21): verify lockfile integrity
+                        // before trusting the installed package. Without this,
+                        // `compute_dir_hash` is only computed at install and
+                        // never re-checked on subsequent loads — a local
+                        // attacker (or a partial-write crash) could swap files
+                        // under `~/.oxi/packages/<name>/` and the next session
+                        // would silently load the tampered manifest.
+                        if let Some(expected) = self
+                            .lockfile
+                            .packages
+                            .get(&name)
+                            .and_then(|e| e.integrity.as_ref())
+                        {
+                            match verify_lockfile_integrity(&install_dir, expected) {
+                                Ok(()) => {}
+                                Err(reason) => {
+                                    tracing::warn!(
+                                        package = %name,
+                                        expected = %expected,
+                                        reason = %reason,
+                                        "package integrity mismatch on load — treating as un-installed; re-install with `oxi pkg install`"
+                                    );
+                                    // Drop the lockfile entry so `update_all`
+                                    // re-resolves from the source.
+                                    self.lockfile.packages.remove(&name);
+                                    continue;
+                                }
+                            }
+                        }
+
+                        self.installed.insert(name, manifest);
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -2259,6 +2302,39 @@ fn compute_dir_hash(dir: &Path) -> Option<String> {
     Some(format!("sha256-{:x}", result))
 }
 
+/// Verify that an installed package directory matches its lockfile integrity hash.
+///
+/// `expected` must be in the `"sha256-<hex>"` format produced by
+/// [`compute_dir_hash`]. Returns `Ok(())` on match, `Err(reason)` on
+/// mismatch, missing directory, or hash format error. Missing files are
+/// skipped silently (same as `compute_dir_hash`) so a partially-installed
+/// package still hashes consistently with its lockfile.
+///
+/// This is the *consumer-side* companion to `compute_dir_hash`: the writer
+/// (install) computes and stores; the reader (load) recomputes and compares.
+/// Before this function existed (audit finding F-1), `integrity` was a
+/// write-only field and a local attacker could swap files under
+/// `~/.oxi/packages/<name>/` without detection.
+fn verify_lockfile_integrity(install_dir: &Path, expected: &str) -> Result<(), String> {
+    let expected_hex = expected.strip_prefix("sha256-").ok_or_else(|| {
+        format!("lockfile integrity value not in `sha256-<hex>` form: {expected}")
+    })?;
+
+    let actual = compute_dir_hash(install_dir)
+        .ok_or_else(|| format!("could not hash install dir {}", install_dir.display()))?;
+    let actual_hex = actual
+        .strip_prefix("sha256-")
+        .ok_or_else(|| format!("recomputed hash not in expected form: {actual}"))?;
+
+    if actual_hex.eq_ignore_ascii_case(expected_hex) {
+        Ok(())
+    } else {
+        Err(format!(
+            "sha256 mismatch: expected sha256-{expected_hex}, got {actual_hex}"
+        ))
+    }
+}
+
 /// Collect all file paths in a directory recursively
 fn collect_file_paths(dir: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -2929,5 +3005,83 @@ mod tests {
         assert_eq!(configured.len(), 1);
         assert!(configured[0].source.contains("source-pkg"));
         // source comes from lockfile, might be the local path
+    }
+
+    // ── F-1 regression: lockfile integrity verify on load ──────────
+
+    /// `verify_lockfile_integrity` returns Ok(()) when the directory
+    /// contents hash to the lockfile-recorded `sha256-<hex>` value.
+    #[test]
+    fn verify_lockfile_integrity_accepts_matching_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pkg_dir = tmp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        fs::write(pkg_dir.join("a.txt"), b"hello").unwrap();
+        fs::write(pkg_dir.join("b.txt"), b"world").unwrap();
+
+        let expected = compute_dir_hash(&pkg_dir).expect("compute_dir_hash must succeed");
+
+        assert!(verify_lockfile_integrity(&pkg_dir, &expected).is_ok());
+    }
+
+    /// A directory that has been mutated after install must fail the
+    /// integrity check. This is the F-1 supply-chain scenario the audit
+    /// flagged: previously `LockEntry.integrity` was computed at install
+    /// and never re-checked, so a tampered package would silently load.
+    #[test]
+    fn verify_lockfile_integrity_rejects_tampered_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pkg_dir = tmp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        fs::write(pkg_dir.join("a.txt"), b"hello").unwrap();
+
+        let expected = compute_dir_hash(&pkg_dir).expect("compute_dir_hash must succeed");
+
+        // Tamper: replace file contents.
+        fs::write(pkg_dir.join("a.txt"), b"tampered").unwrap();
+
+        let err = verify_lockfile_integrity(&pkg_dir, &expected)
+            .expect_err("tampered dir must not verify");
+        assert!(err.contains("sha256 mismatch"), "unexpected error: {err}");
+    }
+
+    /// Missing `sha256-` prefix is a clear lockfile-format error.
+    #[test]
+    fn verify_lockfile_integrity_rejects_bad_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pkg_dir = tmp.path().join("pkg");
+        fs::create_dir_all(&pkg_dir).unwrap();
+
+        let err = verify_lockfile_integrity(&pkg_dir, "abc123")
+            .expect_err("missing sha256- prefix must be rejected");
+        assert!(err.contains("not in `sha256-<hex>` form"));
+    }
+
+    /// `load_installed` must drop a package whose lockfile-recorded
+    /// integrity no longer matches the on-disk directory.
+    #[test]
+    fn load_installed_skips_tampered_package() {
+        let (tmp, packages_dir) = setup_temp_packages_dir();
+        let pkg_dir = create_test_package(tmp.path(), "tamper-pkg", "1.0.0");
+
+        // Install normally — this writes integrity to the lockfile.
+        {
+            let mut mgr = PackageManager::with_dir(packages_dir.clone()).unwrap();
+            mgr.install(pkg_dir.to_str().unwrap()).unwrap();
+        }
+
+        // Tamper with the installed package after install.
+        let installed_name = "tamper-pkg";
+        let installed_safe = installed_name.replace('@', "").replace('/', "-");
+        let on_disk = packages_dir.join(installed_safe);
+        fs::write(on_disk.join(MANIFEST_NAME), "tampered = true\n").unwrap();
+
+        // Re-open the manager — `load_installed` should drop the package.
+        let mgr2 = PackageManager::with_dir(packages_dir).unwrap();
+        let names: Vec<&str> = mgr2.list().iter().map(|m| m.name.as_str()).collect();
+        assert!(
+            !names.contains(&"tamper-pkg"),
+            "tampered package must be excluded from load_installed; loaded names: {names:?}"
+        );
     }
 }

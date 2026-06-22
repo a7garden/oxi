@@ -692,11 +692,11 @@ fn parse_anthropic_events_stateful(
     accumulated_usage: &mut Usage,
     pending_tool_calls: &mut std::collections::HashMap<usize, AnthropicPendingToolCall>,
 ) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
+    // F-6 (audit 2026-06-21): length-based estimate replaces 2-pass
+    // count-then-parse scan. See oxi-ai/src/providers/openai.rs for the
+    // rationale (same heuristic applied uniformly across providers).
+    let mut events = Vec::with_capacity(text.len() / 80);
 
-    // Pre-allocate based on data-line count
-    let estimated = text.split('\n').filter(|l| l.starts_with("data: ")).count();
-    events.reserve(estimated);
 
     for line in text.split('\n') {
         let line = line.trim_end_matches('\r');

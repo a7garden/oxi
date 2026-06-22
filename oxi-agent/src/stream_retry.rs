@@ -57,21 +57,33 @@ pub async fn stream_with_retry_core(
                 return Ok(stream as futures::stream::BoxStream<'static, ProviderEvent>);
             }
             Err(e) => {
-                on_failure();
                 let msg = e.to_string();
                 let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
                 let is_server_error =
                     matches!(e, oxi_ai::ProviderError::HttpError(code, _) if code >= 500);
-
-                // Non-retryable on the first attempt:
-                // Only bail immediately for clear client errors (4xx except 429).
-                // Server errors (5xx) and rate limits (429) should be retried.
-                // Connection-level failures (RequestFailed) are also retried
-                // since they may be transient.
                 let is_retryable = is_rate_limit
                     || is_server_error
-                    || matches!(e, oxi_ai::ProviderError::RequestFailed(_))
-                    || matches!(e, oxi_ai::ProviderError::MissingApiKey);
+                    || matches!(e, oxi_ai::ProviderError::RequestFailed(_));
+
+                // F-9 (audit 2026-06-21, fixed at review time): a
+                // `MissingApiKey` is a *configuration* error, not a
+                // transient upstream failure. It must not be counted
+                // against the circuit breaker — otherwise a user who
+                // happens to run `oxi` five times without an API key
+                // configured would trip the circuit, and even after
+                // setting the key the next request would be rejected
+                // for the full recovery timeout. We therefore do NOT
+                // call `on_failure` for `MissingApiKey` and we
+                // fast-fail before any retry accounting. All other
+                // error paths still go through `on_failure` exactly
+                // as before, so the circuit-breaker semantics for
+                // transient failures are preserved.
+                if matches!(e, oxi_ai::ProviderError::MissingApiKey) {
+                    return Err(AgentError::Stream(format!(
+                        "{msg} — set the corresponding *_API_KEY env var or run `oxi setup`"
+                    )));
+                }
+                on_failure();
 
                 if !is_retryable && attempt == 0 {
                     return Err(AgentError::Stream(msg));

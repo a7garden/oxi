@@ -268,6 +268,14 @@ impl AgentLoop {
         self.cancel_signal = Some(flag);
     }
 
+    /// Returns a clone of the loop's cancel-signal flag, if one has been
+    /// installed via [`Self::set_cancel_signal`]. Used by tool execution
+    /// to bridge the loop's `AtomicBool` cancellation into the per-tool
+    /// `oneshot::Receiver` cancellation channel (audit finding F-8).
+    pub fn cancel_signal(&self) -> Option<Arc<AtomicBool>> {
+        self.cancel_signal.as_ref().map(Arc::clone)
+    }
+
     /// Returns true if cancellation has been requested via either
     /// `external_stop` or the direct `cancel_signal`.
     pub fn is_cancelled(&self) -> bool {

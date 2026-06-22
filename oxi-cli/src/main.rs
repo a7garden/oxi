@@ -185,8 +185,6 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
             println!("created issue #{}: {}", issue.meta.id, issue.meta.title);
         }
         IssueCommands::Close { id, hash } => {
-            // Unique session id per CLI invocation (pid + nanos) so two
-            // concurrent `oxi issue close` calls don't collide.
             let session = format!(
                 "cli-{}-{}",
                 std::process::id(),
@@ -195,31 +193,18 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0)
             );
-            // Hold the liveness lock for the duration of this command so
-            // that any other process trying to read the issue sees us as a
-            // live owner while we operate.
             let _guard = oxi::store::issues::liveness::acquire(&store.issues_dir(), &session).ok();
-
-            // 1. Read current state to inspect the current assignment.
             let (issue, current_hash) = store.read(*id)?;
-            if let Some(ref a) = issue.meta.assigned_to
+            if let Some(a) = &issue.meta.assigned_to
                 && a.session != session
                 && oxi::store::issues::liveness::is_session_alive(&store.issues_dir(), &a.session)
             {
                 anyhow::bail!(
-                    "issue #{id} is currently being worked on by session {} \
-                     (since {}); cannot close from CLI",
+                    "issue #{id} is currently being worked on by session {} (since {}); cannot close from CLI",
                     a.session,
                     a.acquired_at,
                 );
             }
-            // 2. Claim (or re-claim if previous owner is dead), then close.
-            //    Use the user-supplied hash if any; otherwise the current one.
-            //    `start` writes the assignment (mutating the file + hash), so we
-            //    re-read a FRESH hash before `close` — reusing `effective_hash`
-            //    would hit a CAS conflict (regression: `oxi issue close` failing
-            //    with "was modified since last read" whenever start actually
-            //    changed the file, e.g. a previously-unassigned issue).
             let effective_hash = hash.clone().unwrap_or(current_hash);
             store
                 .start(*id, &session, Some(effective_hash))
@@ -233,9 +218,6 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
             println!("closed issue #{}: {}", closed.meta.id, closed.meta.title);
         }
         IssueCommands::Reopen { id, hash } => {
-            // Reopen doesn't need ownership — it just flips status back to
-            // Open and clears closed_at / assignment. Use the supplied hash
-            // if any, otherwise read fresh.
             let effective_hash = match hash.clone() {
                 Some(h) => h,
                 None => store.read(*id)?.1,
@@ -249,11 +231,7 @@ async fn handle_issue_command(action: &IssueCommands) -> Result<()> {
                 reopened.meta.id, reopened.meta.title
             );
         }
-        IssueCommands::Reap => {
-            // Handled above before the store was opened; unreachable here, but
-            // kept exhaustive so adding a new variant is a compile error.
-            unreachable!("reap handled before store open")
-        }
+        IssueCommands::Reap => unreachable!("reap handled before store open"),
     }
     Ok(())
 }

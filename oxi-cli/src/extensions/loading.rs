@@ -110,12 +110,32 @@ fn discover_in_dir(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// Load a single extension from a shared library.
 ///
+/// # Integrity (audit F-2)
+///
+/// `expected_checksum` is the SHA-256 hex digest that the caller (e.g. the
+/// package manager's lockfile reader) has on record for this binary. When
+/// `Some`, the binary is hashed before loading and rejected on mismatch —
+/// this is the supply-chain integrity gate for native extensions, which
+/// otherwise run arbitrary in-process code with no sandbox (libloading +
+/// `unsafe extern "C"` entry). When `None`, the caller is opting out of
+/// verification explicitly; this is reserved for locally-built extensions
+/// the user just compiled and trusts by construction.
+///
+/// The hash comparison is constant-time on the hex string length via
+/// `subtle::ConstantTimeEq` if the `subtle` dep is added; until then
+/// `eq_ignore_ascii_case` is used (timing leak is negligible here since
+/// the hash is not a secret and an attacker who can swap the binary
+/// already controls the comparison outcome).
+///
 /// # Safety
 ///
 /// The loaded library must export `oxi_extension_create` returning a valid
 /// pointer to a `dyn Extension`. The library must have been compiled with
 /// a compatible Rust toolchain version.
-pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
+pub fn load_extension(
+    path: &Path,
+    expected_checksum: Option<&str>,
+) -> anyhow::Result<Arc<dyn Extension>> {
     let path_display = path.display().to_string();
     // Security: native extensions are unsandboxed arbitrary in-process code
     // (loaded via libloading with no sandbox). Require explicit opt-in so
@@ -144,9 +164,44 @@ pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
         );
     }
 
+    // F-2 (audit 2026-06-21): integrity check before mmap.
+    //
+    // `validate_extension` performs pre-load validation (file exists, size
+    // bounds, platform extension, SHA-256). It returns `ValidatedExtension`
+    // with the actual checksum; we compare it to the caller-supplied
+    // expected checksum and bail on mismatch — refusing to load a binary
+    // that has been swapped since the lockfile was written.
+    let validated = validate_extension(path).map_err(|e| {
+        anyhow::anyhow!(
+            "native extension pre-load validation failed for '{}': {}",
+            path_display,
+            e
+        )
+    })?;
+    if let Some(expected) = expected_checksum {
+        if !validated.checksum.eq_ignore_ascii_case(expected) {
+            anyhow::bail!(
+                "native extension checksum mismatch for '{}': expected sha256-{expected}, got sha256-{}",
+                path_display,
+                validated.checksum
+            );
+        }
+        tracing::debug!(
+            path = %path_display,
+            checksum = %validated.checksum,
+            "native extension integrity verified"
+        );
+    } else {
+        tracing::warn!(
+            path = %path_display,
+            "loading native extension WITHOUT integrity verification — caller passed None"
+        );
+    }
+
     // SAFETY: Library::new loads a shared library from the given path.
     // This is unsafe because the loaded code can perform arbitrary operations.
-    // We trust the user-installed extension at the given path.
+    // We trust the user-installed extension at the given path, AND its
+    // integrity has been verified above when `expected_checksum` is Some.
     let library = unsafe { Library::new(path) }
         .map_err(|e| anyhow::anyhow!("Failed to load library '{}': {}", path_display, e))?;
 
@@ -196,12 +251,26 @@ pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
 ///
 /// Returns successfully loaded extensions and any errors encountered.
 /// Does not abort on individual failures — loads as many as possible.
-pub fn load_extensions(paths: &[&Path]) -> (Vec<Arc<dyn Extension>>, Vec<anyhow::Error>) {
+///
+/// `checksums` is parallel to `paths`: `checksums[i]` is the expected
+/// SHA-256 of `paths[i]`. Pass `None` to opt out of integrity verification
+/// for a particular extension (the same semantics as `load_extension`).
+/// A `Some(_)` mismatch is reported as an error but does not stop the
+/// other extensions from loading.
+pub fn load_extensions(
+    paths: &[&Path],
+    checksums: &[Option<&str>],
+) -> (Vec<Arc<dyn Extension>>, Vec<anyhow::Error>) {
+    assert_eq!(
+        paths.len(),
+        checksums.len(),
+        "load_extensions: paths and checksums must be parallel slices"
+    );
     let mut loaded = Vec::new();
     let mut errors = Vec::new();
 
-    for path in paths {
-        match load_extension(path) {
+    for (path, expected) in paths.iter().zip(checksums.iter()) {
+        match load_extension(path, *expected) {
             Ok(ext) => loaded.push(ext),
             Err(e) => {
                 tracing::warn!("Failed to load extension '{}': {}", path.display(), e);
@@ -214,6 +283,7 @@ pub fn load_extensions(paths: &[&Path]) -> (Vec<Arc<dyn Extension>>, Vec<anyhow:
 }
 
 /// Extension binary validation result.
+#[derive(Debug)]
 pub struct ValidatedExtension {
     /// Path to the validated extension binary.
     pub path: PathBuf,
@@ -274,4 +344,75 @@ pub fn validate_extension(path: &Path) -> Result<ValidatedExtension, ExtensionEr
         path: path.to_path_buf(),
         checksum,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    // ── F-2 regression: validate_extension computes deterministic SHA-256 ──
+
+    fn write_fake_ext(path: &Path, payload: &[u8]) {
+        let mut f = std::fs::File::create(path).unwrap();
+        f.write_all(payload).unwrap();
+    }
+
+    /// Two calls to `validate_extension` on the same file yield the same
+    /// SHA-256 hex digest — the function is pure and stable.
+    #[test]
+    fn validate_extension_is_deterministic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ext_path = tmp.path().join(format!("lib.{}", SHARED_LIB_EXTENSION));
+        write_fake_ext(&ext_path, b"deterministic test payload");
+
+        let v1 = validate_extension(&ext_path).expect("validate should succeed");
+        let v2 = validate_extension(&ext_path).expect("validate should succeed");
+        assert_eq!(v1.checksum, v2.checksum);
+        // SHA-256 hex is 64 chars, lowercase.
+        assert_eq!(v1.checksum.len(), 64);
+        assert!(
+            v1.checksum
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
+    }
+
+    /// Distinct file contents produce distinct checksums.
+    #[test]
+    fn validate_extension_distinguishes_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ext_a = tmp.path().join(format!("a.{}", SHARED_LIB_EXTENSION));
+        let ext_b = tmp.path().join(format!("b.{}", SHARED_LIB_EXTENSION));
+        write_fake_ext(&ext_a, b"alpha");
+        write_fake_ext(&ext_b, b"beta");
+
+        let v_a = validate_extension(&ext_a).unwrap();
+        let v_b = validate_extension(&ext_b).unwrap();
+        assert_ne!(v_a.checksum, v_b.checksum);
+    }
+
+    /// `validate_extension` rejects a file with the wrong platform extension
+    /// (e.g. `.so` on macOS). The pre-load gate must catch this before any
+    /// `libloading::Library::new` call.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn validate_extension_rejects_wrong_platform_ext_on_macos() {
+        let tmp = tempfile::tempdir().unwrap();
+        // `.so` is the Linux extension; on macOS a `.dylib` is required.
+        let wrong = tmp.path().join("lib.so");
+        write_fake_ext(&wrong, b"x");
+        let err = validate_extension(&wrong).expect_err("wrong platform ext must fail");
+        let msg = format!("{err}");
+        assert!(msg.contains("Invalid extension"), "unexpected err: {msg}");
+    }
+
+    /// A non-existent path returns `File not found`, not a panic.
+    #[test]
+    fn validate_extension_handles_missing_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist.dylib");
+        let err = validate_extension(&missing).expect_err("missing path must fail");
+        assert!(format!("{err}").contains("File not found"));
+    }
 }

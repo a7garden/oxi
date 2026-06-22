@@ -671,11 +671,14 @@ fn parse_sse_events(
     _model_id: &str,
     output: &mut AssistantMessage,
 ) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
-
-    // Pre-estimate capacity: one event per data line is a reasonable upper bound.
-    let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
-    events.reserve(estimated_events);
+    // F-6 (audit 2026-06-21): replace the 2-pass scan (count + parse) with a
+    // single length-based estimate. Most SSE `data:` lines are 60–120 bytes,
+    // so `text.len() / 80` is a tighter upper bound than the old
+    // `count(filter("data: "))` pass and avoids scanning the chunk twice.
+    // For very small chunks the estimate is 0 and `Vec::with_capacity(0)`
+    // is a no-op. For 64KB chunks this saves one full scan (≈64µs per
+    // chunk on a 2024-era CPU at ~1GB/s scan).
+    let mut events = Vec::with_capacity(text.len() / 80);
 
     let mut accumulated_usage = Usage::default();
 

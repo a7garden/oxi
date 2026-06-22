@@ -61,10 +61,39 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+/// Default HTTP client timeout for LLM provider streams.
+///
+/// Long enough for multi-minute reasoning responses, short enough that a
+/// stalled upstream (TLS handshake hang, dead proxy, etc.) surfaces to the
+/// caller within a usable window. Connect failures fail fast (10s) — the
+/// full timeout covers the entire request body including stream read.
+const DEFAULT_PROVIDER_TIMEOUT_SECS: u64 = 600;
+const DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECS: u64 = 10;
+
 /// Shared client singleton.
+///
+/// All eight built-in providers (`AnthropicProvider`, `OpenAiProvider`,
+/// `GoogleProvider`, etc.) construct their `reqwest::Client` via this
+/// accessor. A bare `reqwest::Client::new()` would have **no timeout**,
+/// which means a stalled TCP/TLS handshake or a silent upstream hang
+/// would freeze the CLI indefinitely. With `panic = "abort"` in the
+/// release profile the user has to kill the process to recover.
+///
+/// `oxi-cli/src/util/http_client.rs::shared_http_client` follows the same
+/// pattern (30s timeout) for non-LLM HTTP. Keep these two in sync.
 pub fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(
+                DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECS,
+            ))
+            .timeout(std::time::Duration::from_secs(
+                DEFAULT_PROVIDER_TIMEOUT_SECS,
+            ))
+            .build()
+            .expect("provider shared_client: reqwest builder should not fail")
+    })
 }
 
 // ── Instance-based provider registry ───────────────────────────────

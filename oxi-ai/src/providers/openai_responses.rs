@@ -362,18 +362,12 @@ fn build_tools(tools: &[crate::Tool]) -> JsonValue {
 /// - `response.function_call_arguments.delta` - Arguments delta for function_call
 /// - `response.completed` - Response completed
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
+    // F-6 (audit 2026-06-21): length-based estimate replaces 2-pass scan.
+    let mut events = Vec::with_capacity(text.len() / 40);
     let mut partial_message = AssistantMessage::new(Api::OpenAiResponses, provider, model_id);
     let mut current_text_index: Option<usize> = None;
     let mut current_tool_call_index: Option<usize> = None;
     let mut accumulated_usage = Usage::default();
-
-    // Pre-estimate capacity
-    let estimated_events = text
-        .split('\n')
-        .filter(|l| l.starts_with("event: ") || l.starts_with("data: "))
-        .count();
-    events.reserve(estimated_events);
 
     for line in text.split('\n') {
         let line = line.trim_end_matches('\r');

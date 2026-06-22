@@ -546,6 +546,27 @@ impl AgentTool for BashTool {
             .and_then(|v: &Value| v.as_str())
             .ok_or_else(|| "Missing required parameter: command".to_string())?;
 
+        // F-10 (audit 2026-06-21): in strict mode (OXI_STRICT_BASH=1) refuse
+        // commands that match `is_dangerous_command` patterns outright
+        // instead of merely appending a warning after the fact. Without
+        // strict mode, the original "warn after execution" behavior is
+        // preserved (so existing users see no change). Strict mode is
+        // opt-in because some legitimate operations match the heuristic
+        // (e.g. `cat /etc/passwd` is sometimes needed to inspect user
+        // identity); making it opt-in preserves backward compatibility
+        // while giving security-conscious deployments a hard block.
+        // F-10 (audit 2026-06-21): collapsed `if` so the two predicates
+        // (`OXI_STRICT_BASH=1` AND a dangerous-pattern match) live on a
+        // single line — clippy::collapsible_if flagged the original form.
+        if std::env::var_os("OXI_STRICT_BASH").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+            && let Some(reason) = is_dangerous_command(command)
+        {
+            return Err(format!(
+                "OXI_STRICT_BASH=1 blocked dangerous command: {reason}"
+            ));
+        }
+
         let cwd = params.get("cwd").and_then(|v: &Value| v.as_str());
         let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
         let env = params.get("env").and_then(|v: &Value| v.as_object());
@@ -917,5 +938,61 @@ mod tests {
             BashTool::format_duration(Duration::from_secs(120)),
             "2m 0.0s"
         );
+    }
+
+    // ── F-10 regression: OXI_STRICT_BASH=1 blocks dangerous commands ─────
+
+    /// With `OXI_STRICT_BASH=1`, a command matching `is_dangerous_command`
+    /// must be refused BEFORE `sh -c` runs (audit finding F-10). Without
+    /// the gate, the agent receives an `AgentToolResult::success` with a
+    /// trailing warning — i.e. the dangerous command ran and only the
+    /// post-hoc warning tried to discourage it.
+    #[tokio::test]
+    async fn test_strict_bash_blocks_pipe_to_shell() {
+        // SAFETY: env mutation under test (Rust 2024 makes this unsafe);
+        // acceptable for a single isolated #[tokio::test].
+        unsafe {
+            std::env::set_var("OXI_STRICT_BASH", "1");
+        }
+        let tool = BashTool::new();
+        let result = tool
+            .execute(
+                "test-strict",
+                make_params("echo hi | sh"),
+                None,
+                &ToolContext::default(),
+            )
+            .await;
+        unsafe {
+            std::env::remove_var("OXI_STRICT_BASH");
+        }
+        // The command should be refused — `Err(...)` with the audit reason.
+        let err = result.expect_err("strict mode must refuse `| sh` commands");
+        assert!(
+            err.contains("OXI_STRICT_BASH") && err.contains("pipe to shell"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Without `OXI_STRICT_BASH`, the legacy "warn after execution"
+    /// behavior is preserved (backward compatible).
+    #[tokio::test]
+    async fn test_strict_bash_off_preserves_warning_behavior() {
+        // Ensure strict mode is off.
+        unsafe {
+            std::env::remove_var("OXI_STRICT_BASH");
+        }
+        let tool = BashTool::new();
+        let result = tool
+            .execute(
+                "test-lenient",
+                make_params("echo hi"),
+                None,
+                &ToolContext::default(),
+            )
+            .await;
+        let r = result.expect("non-dangerous command must succeed when strict is off");
+        assert!(r.success, "echo hi must succeed: {}", r.output);
+        assert!(!r.output.contains("OXI_STRICT_BASH"));
     }
 }
