@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — 설정 마법사 첫 실행 경험 개선
+
+- **첫 실행 시 설정 마법사 자동 실행**: 모델이 구성되지 않은 상태에서
+  `oxi`를 대화형(TUI) 모드로 실행하면 더 이상 `Error: No model
+  configured. Run \`oxi setup\` to configure.`로 종료되지 않고, 즉시
+  설정 마법사가 실행된다. `print` / `json` / RPC / 단일 프롬프트 등
+  비대화형 모드에서는 기존대로 에러로 종료한다 (`oxi-cli/src/bootstrap.rs`).
+  마법사 종료 후 settings를 다시 로드하고 CLI override를 재적용한다.
+- **프로바이더 단계 텍스트 검색 추가**: `/` 키로 검색 모드 진입 후 타이핑으로
+  프로바이더를 필터링한다. 필터된 목록을 ↑/↓로 탐색하고 Enter로 선택하여
+  API key 편집 다이얼로그로 진입한다. 필터 입력창에 실선 블록 커서 표시
+  (`oxi-cli/src/setup_wizard.rs`).
+- **모델 단계 전면 재작성**: 기존 모델 단계는 `Paragraph`로 렌더링되어
+  선택 항목 하이라이트가 없었고, 검색 모드에서 ↑/↓ 탐색이 불가해 첫 번째
+  매치만 선택 가능했으며, fake `_` 커서가 거의 보이지 않는 문제가 있었다.
+  이제 fzf 스타일의 always-on 라이브 필터로 전환: 타이핑 즉시 필터링,
+  stateful `List` 위젯으로 `▶` 하이라이트 + 스크롤 지원(거대한 카탈로그
+  5000+ 모델 처리), 필터된 결과를 ↑/↓로 자유 탐색, 실선 블록 커서로
+  타이핑 위치 명확화.
+- **`is_tui_mode` 버그 수정**: `args.prompt.is_empty()`(Vec)를 검사하던 것을
+  `dispatch_run_mode`와 일치하게 join된 문자열로 검사하도록 수정. clap의
+  `default_value = ""` 때문에 bare `oxi`가 `prompt == vec![""]`(비어있지 않은
+  Vec, 빈 join)이 되어, 대화형 실행을 단일 프롬프트로 오분류하던 잠재
+  결함. 기존에는 liveness identity 선택에만 영향했으나 자동 실행 로직에서
+  의미를 갖는다.
+- **모델 필터링 성능**: `ModelEntry`에 `id_lower`/`provider_lower`를 로드
+  시점에 캐시하여 매 키 입력마다 5000+ 모델에 대해 `to_lowercase()`가
+  할당하지 않도록 개선. 필터는 캐시된 소문자 필드로 비교.
+- **빈 매치 시 Enter 차단**: 모델 단계에서 필터가 하나도 매치하지 않으면
+  Enter로 다음 단계로 넘어가지 않는다 (이전 선택이 조용히 이월되던 문제 방지).
+- **`merge_cli` 중복 제거**: `build_app`에서 CLI override 적용을 클로저로
+  추출하여 초기 적용과 마법사 재실행 후 재적용이 동일 로직을 공유. 새 플래그
+  추가 시 한쪽만 갱신하는 silent miss 방지.
+- **필터 커서 위치 개선**: 블록 커서가 입력된 텍스트 바로 뒤(빈 경우
+  "Filter:" 바로 뒤)에 위치하도록 수정 — 이전에는 placeholder 끝에 있었다.
+
+### Added
+
+- 설정 마법사 필터/탐색 로직 단위 테스트 6개 추가
+  (`setup_wizard::tests`): 프로바이더/모델 필터 매칭, 선택 snap 동작.
+
 ## [0.41.2] - 2026-06-22
 
 ### Security — 코드 감사 보고서 결함 일괄 수정 (audit 2026-06-21)

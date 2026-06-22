@@ -26,30 +26,57 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // Load settings (global + project + env layers).
     let mut settings = Settings::load().unwrap_or_default();
 
-    // Apply CLI overrides.
-    settings.merge_cli(
-        args.model.clone(),
-        args.provider.clone(),
-        Some(args.enable_routing),
-        Some(args.prefer_cost_efficient),
-        if args.fallback_chain.is_empty() {
-            None
-        } else {
-            Some(args.fallback_chain.clone())
-        },
-        Some(args.disable_fallback),
-    );
+    // Apply CLI overrides. Centralized in a closure so the post-wizard reload
+    // re-applies the exact same overrides — adding a new flag can't silently
+    // diverge between the two call sites.
+    let apply_cli_overrides = |s: &mut Settings| {
+        s.merge_cli(
+            args.model.clone(),
+            args.provider.clone(),
+            Some(args.enable_routing),
+            Some(args.prefer_cost_efficient),
+            if args.fallback_chain.is_empty() {
+                None
+            } else {
+                Some(args.fallback_chain.clone())
+            },
+            Some(args.disable_fallback),
+        );
+    };
+    apply_cli_overrides(&mut settings);
 
     if settings
         .effective_model(None)
         .unwrap_or_default()
         .is_empty()
     {
-        eprintln!(
-            "{}",
-            print_mode::format_error("No model configured. Run `oxi setup` to configure.")
-        );
-        std::process::exit(1);
+        // No model configured. In interactive (TUI) mode, drop the user
+        // straight into the setup wizard instead of erroring out — this is
+        // the common first-run experience. In non-interactive modes
+        // (print / JSON / RPC / single-prompt) the caller explicitly wants a
+        // one-shot run, so a hard error with guidance is correct.
+        if is_tui_mode(args) {
+            eprintln!("No model configured. Launching setup wizard...");
+            crate::setup_wizard::run().await?;
+
+            // Reload settings the wizard just persisted and re-apply the
+            // CLI overrides, then re-check. If the user bailed out of the
+            // wizard without selecting a model, fall through to the error.
+            settings = Settings::load().unwrap_or_default();
+            apply_cli_overrides(&mut settings);
+        }
+
+        if settings
+            .effective_model(None)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            eprintln!(
+                "{}",
+                print_mode::format_error("No model configured. Run `oxi setup` to configure.")
+            );
+            std::process::exit(1);
+        }
     }
 
     // Register custom OpenAI-compatible providers from settings.
@@ -479,9 +506,14 @@ fn is_tui_mode(args: &CliArgs) -> bool {
     if args.mode.as_deref() == Some("json") || args.print {
         return false;
     }
-    // prompt-only (no `--interactive` and non-empty prompt) is non-TUI too;
+    // prompt-only (no `--interactive` and a non-empty prompt) is non-TUI too;
     // dispatch_run_mode sends it through main_dispatch::run_single_prompt.
-    if !args.interactive && !args.prompt.is_empty() {
+    // NOTE: must join the prompt Vec — clap's `default_value = ""` on the
+    // positional makes bare `oxi` yield `prompt == vec![""]` (non-empty Vec,
+    // empty join). Comparing the Vec directly would mis-classify the bare
+    // interactive launch as a single-prompt run.
+    let prompt = args.prompt.join(" ");
+    if !args.interactive && !prompt.is_empty() {
         return false;
     }
     true

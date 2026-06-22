@@ -72,16 +72,20 @@ struct WizardState {
     provider_selected: usize,
     /// List state for ratatui
     provider_list_state: ListState,
+    /// Provider name filter (live while `provider_searching` is true)
+    provider_filter: String,
+    /// Whether the provider list is being filtered by typing (`/`)
+    provider_searching: bool,
     /// Input mode
     input_mode: InputMode,
     /// Model entries for step 2
     models: Vec<ModelEntry>,
-    /// Currently selected model index
+    /// Currently selected model index (into `models`)
     model_selected: usize,
-    /// Model search filter
+    /// Model filter — the list is always filtered live (fzf-style)
     model_filter: String,
-    /// Whether we're typing in the model search
-    model_searching: bool,
+    /// List state for the filtered model list
+    model_list_state: ListState,
     /// Theme names for step 3
     themes: Vec<String>,
     /// Currently selected theme index
@@ -102,6 +106,25 @@ struct ModelEntry {
     id: String,
     provider: String,
     context_window: u32,
+    /// Lowercased `id`, cached once at load so per-keystroke filtering of the
+    /// 5000+ model catalog doesn't allocate on every keypress.
+    id_lower: String,
+    /// Lowercased `provider`.
+    provider_lower: String,
+}
+
+impl ModelEntry {
+    fn new(id: String, provider: String, context_window: u32) -> Self {
+        let provider_lower = provider.to_lowercase();
+        let id_lower = id.to_lowercase();
+        Self {
+            id,
+            provider,
+            context_window,
+            id_lower,
+            provider_lower,
+        }
+    }
 }
 
 // ── Masking helper ──────────────────────────────────────────────────────────
@@ -112,6 +135,69 @@ fn mask_key(key: &str) -> String {
         "*".repeat(key.len())
     } else {
         format!("{}...{}", &key[..6], &key[key.len() - 4..])
+    }
+}
+
+// ── Filter helpers ──────────────────────────────────────────────────────────
+
+/// Indices of providers whose name matches the current filter (case-insensitive
+/// substring). Empty filter ⇒ all providers.
+fn filtered_provider_indices(state: &WizardState) -> Vec<usize> {
+    if state.provider_filter.is_empty() {
+        (0..state.providers.len()).collect()
+    } else {
+        let f = state.provider_filter.to_lowercase();
+        state
+            .providers
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.name.to_lowercase().contains(&f))
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+/// Indices of models matching the current filter (matches id OR provider,
+/// case-insensitive substring). Empty filter ⇒ all models. Uses the
+/// pre-lowercased `id_lower`/`provider_lower` cached on each `ModelEntry` so
+/// the per-keystroke filter doesn't allocate per item.
+fn filtered_model_indices(state: &WizardState) -> Vec<usize> {
+    if state.model_filter.is_empty() {
+        (0..state.models.len()).collect()
+    } else {
+        let f = state.model_filter.to_lowercase();
+        state
+            .models
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.id_lower.contains(&f) || m.provider_lower.contains(&f))
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+/// Clamp `model_selected` so it always points at an item present in the
+/// filtered list. If the current selection was filtered out, snap to the
+/// first match. No-op when the filter yields nothing.
+fn ensure_model_selected_visible(state: &mut WizardState) {
+    let filtered = filtered_model_indices(state);
+    if filtered.is_empty() {
+        return;
+    }
+    if !filtered.contains(&state.model_selected) {
+        state.model_selected = filtered[0];
+    }
+}
+
+/// Snap `provider_selected` back into the filtered provider set after the
+/// filter changes. No-op when the filter yields nothing.
+fn snap_provider_selection(state: &mut WizardState) {
+    let indices = filtered_provider_indices(state);
+    if indices.is_empty() {
+        return;
+    }
+    if !indices.contains(&state.provider_selected) {
+        state.provider_selected = indices[0];
     }
 }
 
@@ -209,11 +295,7 @@ fn load_models(
                             .map(|e| e.context_window)
                             .unwrap_or(128_000)
                     };
-                    models.push(ModelEntry {
-                        id: id.clone(),
-                        provider: provider.clone(),
-                        context_window: ctx,
-                    });
+                    models.push(ModelEntry::new(id.clone(), provider.clone(), ctx));
                 }
             }
         }
@@ -224,22 +306,22 @@ fn load_models(
         for entry in cat.search_sync("") {
             let key = format!("{}/{}", entry.provider, entry.model_id);
             if seen.insert(key) {
-                models.push(ModelEntry {
-                    id: entry.model_id,
-                    provider: entry.provider,
-                    context_window: entry.context_window,
-                });
+                models.push(ModelEntry::new(
+                    entry.model_id,
+                    entry.provider,
+                    entry.context_window,
+                ));
             }
         }
     } else {
         for entry in oxi_sdk::get_all_models() {
             let key = format!("{}/{}", entry.provider, entry.id);
             if seen.insert(key) {
-                models.push(ModelEntry {
-                    id: entry.id.to_string(),
-                    provider: entry.provider.to_string(),
-                    context_window: entry.context_window,
-                });
+                models.push(ModelEntry::new(
+                    entry.id.to_string(),
+                    entry.provider.to_string(),
+                    entry.context_window,
+                ));
             }
         }
     }
@@ -440,21 +522,18 @@ fn draw_wizard(
         let footer_text = match state.step {
             0 => match &state.input_mode {
                 InputMode::Normal => {
-                    "  ↑/↓ navigate · Enter: enter/change API key · d: delete · →: next · q: quit"
-                        .to_string()
+                    if state.provider_searching {
+                        "  Type: filter · ↑/↓ navigate · Enter: select & edit key · Esc: close search · ←: previous".to_string()
+                    } else {
+                        "  ↑/↓ navigate · /: search · Enter: API key · d: delete · →: next · q: quit".to_string()
+                    }
                 }
                 InputMode::EditingApiKey { .. } => "  Enter: save · Esc: cancel".to_string(),
                 InputMode::AddingCustom { .. } => {
                     "  Tab: next field · Enter: save · Esc: cancel".to_string()
                 }
             },
-            1 => {
-                if state.model_searching {
-                    "  Type: search · Esc: close search · Enter: select · ←: previous".to_string()
-                } else {
-                    "  ↑/↓ navigate · /: search · Enter: select · ←: previous".to_string()
-                }
-            }
+            1 => "  Type: filter · ↑/↓ navigate · Enter: select · Esc: clear filter · ←: previous".to_string(),
             2 => "  ↑/↓ navigate · Enter: select · ←: previous".to_string(),
             3 => "  Enter: quit".to_string(),
             _ => String::new(),
@@ -486,10 +565,53 @@ fn draw_provider_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
 fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     let step_indicator = build_step_indicator(state.step);
 
-    let items: Vec<ListItem> = state
-        .providers
+    // When filtering, reserve a one-line search input above the list.
+    let (list_area, search_area) = if state.provider_searching {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(area);
+        (chunks[1], Some(chunks[0]))
+    } else {
+        (area, None)
+    };
+
+    // Search input. The solid block cursor sits right after the typed text
+    // (and before the placeholder when empty), mirroring a real text cursor.
+    if let Some(search_rect) = search_area {
+        let mut spans = vec![
+            Span::styled(
+                "  Filter: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                &state.provider_filter,
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ", Style::default().bg(Color::Yellow)),
+        ];
+        if state.provider_filter.is_empty() {
+            spans.push(Span::styled(
+                " type a provider name to filter...",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), search_rect);
+    }
+
+    // Rendered provider indices: filtered while searching, all otherwise.
+    let indices: Vec<usize> = if state.provider_searching {
+        filtered_provider_indices(state)
+    } else {
+        (0..state.providers.len()).collect()
+    };
+
+    let mut items: Vec<ListItem> = indices
         .iter()
-        .map(|p| {
+        .map(|&i| {
+            let p = &state.providers[i];
             let check = if p.has_key { "[x]" } else { "[ ]" };
             let key_info = if p.has_key {
                 format!("API key: {}", p.key_masked)
@@ -521,16 +643,15 @@ fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
         })
         .collect();
 
-    // Add custom provider entry
-    let add_custom = ListItem::new(Line::from(vec![
-        Span::styled("   + ", Style::default().fg(Color::Cyan)),
-        Span::styled("Add custom provider...", Style::default().fg(Color::Cyan)),
-    ]));
+    // "Add custom" sentinel row only in the unfiltered view.
+    if !state.provider_searching {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled("   + ", Style::default().fg(Color::Cyan)),
+            Span::styled("Add custom provider...", Style::default().fg(Color::Cyan)),
+        ])));
+    }
 
-    let mut all_items = items;
-    all_items.push(add_custom);
-
-    let list = List::new(all_items)
+    let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::NONE)
@@ -540,13 +661,19 @@ fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rec
             Style::default()
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
-        );
+        )
+        .highlight_symbol("▶ ");
 
-    // Update list state selection
-    state
-        .provider_list_state
-        .select(Some(state.provider_selected));
-    f.render_stateful_widget(list, area, &mut state.provider_list_state);
+    // Map the absolute selected index onto its position in the rendered list.
+    let selected_pos = if state.provider_searching {
+        indices.iter().position(|&i| i == state.provider_selected)
+    } else {
+        // provider_selected indexes the provider slice directly; the "+ Add
+        // custom" row sits at the end so the absolute index still maps 1:1.
+        Some(state.provider_selected)
+    };
+    state.provider_list_state.select(selected_pos);
+    f.render_stateful_widget(list, list_area, &mut state.provider_list_state);
 }
 
 fn draw_api_key_dialog(f: &mut ratatui::Frame, provider_name: &str, field_text: &str, area: Rect) {
@@ -638,60 +765,86 @@ fn draw_custom_provider_dialog(
 fn draw_model_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     let step_indicator = build_step_indicator(state.step);
 
-    // Filter models
-    let filtered: Vec<&ModelEntry> = if state.model_filter.is_empty() {
-        state.models.iter().collect()
-    } else {
-        let filter = state.model_filter.to_lowercase();
-        state
-            .models
-            .iter()
-            .filter(|m| {
-                m.id.to_lowercase().contains(&filter) || m.provider.to_lowercase().contains(&filter)
-            })
-            .collect()
-    };
+    // Reserve a one-line filter input at the top; the list fills the rest.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
 
-    let mut lines: Vec<Line> = Vec::new();
-
-    if state.model_searching {
-        lines.push(Line::from(vec![
-            Span::styled("  Search: ", Style::default().fg(Color::Yellow)),
-            Span::styled(
-                &state.model_filter,
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("_"),
-        ]));
+    // Filter input — always visible (the list is filtered live, fzf-style).
+    // The solid block cursor sits right after the typed text (and before the
+    // placeholder when empty), mirroring a real text cursor.
+    let mut spans = vec![
+        Span::styled(
+            "  Filter: ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            &state.model_filter,
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ", Style::default().bg(Color::Yellow)),
+    ];
+    if state.model_filter.is_empty() {
+        spans.push(Span::styled(
+            " type to filter (e.g. 'gpt-4', 'claude', 'gemini')...",
+            Style::default().fg(Color::DarkGray),
+        ));
     }
+    f.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
 
-    lines.push(Line::from(""));
+    // Filtered model list with highlight + scrolling (handles the huge catalog).
+    let indices = filtered_model_indices(state);
+    let items: Vec<ListItem> = indices
+        .iter()
+        .map(|&i| {
+            let m = &state.models[i];
+            let ctx_str = if m.context_window >= 1_000_000 {
+                format!("{}M ctx", m.context_window / 1_000_000)
+            } else {
+                format!("{}K ctx", m.context_window / 1_000)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<40}", m.id), Style::default()),
+                Span::styled(
+                    format!("({})", m.provider),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!(", {}", ctx_str),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
+        })
+        .collect();
 
-    for m in &filtered {
-        let ctx_str = if m.context_window >= 1_000_000 {
-            format!("{}M ctx", m.context_window / 1_000_000)
-        } else {
-            format!("{}K ctx", m.context_window / 1_000)
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {:<40}", m.id), Style::default()),
-            Span::styled(
-                format!("({})", m.provider),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(", {}", ctx_str),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::NONE)
+                .title(step_indicator),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    let selected_pos = indices.iter().position(|&i| i == state.model_selected);
+    state.model_list_state.select(selected_pos);
+    f.render_stateful_widget(list, chunks[1], &mut state.model_list_state);
+
+    // Empty-state hint when the filter matches nothing.
+    if indices.is_empty() {
+        let hint = Paragraph::new(Line::from(Span::styled(
+            "  No models match your filter. Press Esc to clear.",
+            Style::default().fg(Color::DarkGray),
+        )));
+        f.render_widget(hint, chunks[1]);
     }
-
-    let block = Block::default()
-        .borders(Borders::NONE)
-        .title(step_indicator);
-
-    let para = Paragraph::new(lines).block(block);
-    f.render_widget(para, area);
 }
 
 fn draw_theme_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
@@ -800,6 +953,68 @@ fn handle_provider_event(
     event: Event,
     auth_store: &crate::store::auth_storage::AuthStorage,
 ) -> Result<bool> {
+    // Provider search mode (only active in Normal input mode). Handled before
+    // the input_mode match so search keys never collide with key-editing.
+    if state.provider_searching && matches!(state.input_mode, InputMode::Normal) {
+        if let Event::Key(key) = event {
+            match key.code {
+                KeyCode::Esc => {
+                    state.provider_searching = false;
+                    state.provider_filter.clear();
+                    snap_provider_selection(state);
+                }
+                KeyCode::Enter => {
+                    // Pick the highlighted filtered provider, exit search, and
+                    // open the API-key dialog for it.
+                    state.provider_searching = false;
+                    state.provider_filter.clear();
+                    if state.provider_selected < state.providers.len() {
+                        let name = state.providers[state.provider_selected].name.clone();
+                        state.input_mode = InputMode::EditingApiKey {
+                            provider_name: name,
+                            field_text: String::new(),
+                        };
+                    }
+                }
+                KeyCode::Up => {
+                    let indices = filtered_provider_indices(state);
+                    if let Some(pos) = indices.iter().position(|&i| i == state.provider_selected)
+                        && pos > 0
+                    {
+                        state.provider_selected = indices[pos - 1];
+                    } else if let Some(&first) = indices.first() {
+                        state.provider_selected = first;
+                    }
+                }
+                KeyCode::Down => {
+                    let indices = filtered_provider_indices(state);
+                    if let Some(pos) = indices.iter().position(|&i| i == state.provider_selected)
+                        && pos + 1 < indices.len()
+                    {
+                        state.provider_selected = indices[pos + 1];
+                    } else if let Some(&first) = indices.first() {
+                        state.provider_selected = first;
+                    }
+                }
+                KeyCode::Backspace => {
+                    state.provider_filter.pop();
+                    snap_provider_selection(state);
+                }
+                KeyCode::Char(c) => {
+                    state.provider_filter.push(c);
+                    snap_provider_selection(state);
+                }
+                KeyCode::Left => {
+                    state.provider_searching = false;
+                    state.provider_filter.clear();
+                    snap_provider_selection(state);
+                }
+                _ => {}
+            }
+        }
+        return Ok(false);
+    }
+
     match &mut state.input_mode {
         InputMode::Normal => {
             if let Event::Key(key) = event {
@@ -837,6 +1052,13 @@ fn handle_provider_event(
                         auth_store.remove(&name);
                         state.providers[state.provider_selected].has_key = false;
                         state.providers[state.provider_selected].key_masked = String::new();
+                    }
+                    KeyCode::Char('/') => {
+                        state.provider_searching = true;
+                        state.provider_filter.clear();
+                        // Snap off the "+ Add custom" sentinel (index ==
+                        // providers.len()) so a filtered row is highlighted.
+                        snap_provider_selection(state);
                     }
                     KeyCode::Right => {
                         state.step = 1;
@@ -956,63 +1178,59 @@ fn handle_provider_event(
 
 fn handle_model_event(state: &mut WizardState, event: Event) -> Result<bool> {
     if let Event::Key(key) = event {
-        if state.model_searching {
-            match key.code {
-                KeyCode::Esc => {
-                    state.model_searching = false;
-                    state.model_filter.clear();
-                }
-                KeyCode::Enter => {
-                    // Select the first filtered model
-                    state.model_searching = false;
-                    select_filtered_model(state);
-                }
-                KeyCode::Backspace => {
-                    state.model_filter.pop();
-                }
-                KeyCode::Char(c) => {
-                    state.model_filter.push(c);
-                }
-                _ => {}
+        // The model list is always filtered live (fzf-style): every printable
+        // char extends the filter, Backspace shrinks it. There is no separate
+        // "search mode" to enter — the filter input is always active.
+        match key.code {
+            KeyCode::Char(c) => {
+                state.model_filter.push(c);
+                ensure_model_selected_visible(state);
             }
-        } else {
-            match key.code {
-                KeyCode::Up if state.model_selected > 0 => {
-                    state.model_selected -= 1;
+            KeyCode::Backspace => {
+                state.model_filter.pop();
+                ensure_model_selected_visible(state);
+            }
+            KeyCode::Up => {
+                let indices = filtered_model_indices(state);
+                if let Some(pos) = indices.iter().position(|&i| i == state.model_selected)
+                    && pos > 0
+                {
+                    state.model_selected = indices[pos - 1];
+                } else if let Some(&first) = indices.first() {
+                    state.model_selected = first;
                 }
-                KeyCode::Down if state.model_selected + 1 < state.models.len() => {
-                    state.model_selected += 1;
+            }
+            KeyCode::Down => {
+                let indices = filtered_model_indices(state);
+                if let Some(pos) = indices.iter().position(|&i| i == state.model_selected)
+                    && pos + 1 < indices.len()
+                {
+                    state.model_selected = indices[pos + 1];
+                } else if let Some(&first) = indices.first() {
+                    state.model_selected = first;
                 }
-                KeyCode::Char('/') => {
-                    state.model_searching = true;
-                    state.model_filter.clear();
-                }
-                KeyCode::Enter => {
-                    // Move to theme step
+            }
+            KeyCode::Enter => {
+                // Only advance when the filter yields a selectable model. A
+                // non-empty filter that matches nothing leaves nothing to
+                // confirm, so stay put rather than silently carrying over a
+                // stale selection into the next step.
+                if !filtered_model_indices(state).is_empty() {
                     state.step = 2;
                 }
-                KeyCode::Left => {
-                    state.step = 0;
-                }
-                _ => {}
             }
+            KeyCode::Esc => {
+                // Clear the filter (Left handles going back to providers).
+                state.model_filter.clear();
+                ensure_model_selected_visible(state);
+            }
+            KeyCode::Left => {
+                state.step = 0;
+            }
+            _ => {}
         }
     }
     Ok(false)
-}
-
-fn select_filtered_model(state: &mut WizardState) {
-    if state.model_filter.is_empty() {
-        state.step = 2;
-        return;
-    }
-    let filter = state.model_filter.to_lowercase();
-    if let Some(idx) = state.models.iter().position(|m| {
-        m.id.to_lowercase().contains(&filter) || m.provider.to_lowercase().contains(&filter)
-    }) {
-        state.model_selected = idx;
-    }
-    state.step = 2;
 }
 
 fn handle_theme_event(state: &mut WizardState, event: Event) -> Result<bool> {
@@ -1171,11 +1389,13 @@ pub async fn run() -> Result<()> {
         providers,
         provider_selected: 0,
         provider_list_state: ListState::default(),
+        provider_filter: String::new(),
+        provider_searching: false,
         input_mode: InputMode::Normal,
         models,
         model_selected,
         model_filter: String::new(),
-        model_searching: false,
+        model_list_state: ListState::default(),
         themes,
         theme_selected,
         theme_list_state: ListState::default(),
@@ -1208,4 +1428,127 @@ pub async fn run() -> Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_state(providers: Vec<&str>, models: Vec<(&str, &str)>) -> WizardState {
+        WizardState {
+            step: 0,
+            providers: providers
+                .iter()
+                .map(|n| ProviderEntry {
+                    name: n.to_string(),
+                    has_key: false,
+                    key_masked: String::new(),
+                    is_custom: false,
+                    base_url: None,
+                })
+                .collect(),
+            provider_selected: 0,
+            provider_list_state: ListState::default(),
+            provider_filter: String::new(),
+            provider_searching: false,
+            input_mode: InputMode::Normal,
+            models: models
+                .iter()
+                .map(|(id, provider)| {
+                    ModelEntry::new(id.to_string(), provider.to_string(), 128_000)
+                })
+                .collect(),
+            model_selected: 0,
+            model_filter: String::new(),
+            model_list_state: ListState::default(),
+            themes: vec![],
+            theme_selected: 0,
+            theme_list_state: ListState::default(),
+            auth_path: PathBuf::new(),
+            settings_path: PathBuf::new(),
+            catalog: None,
+        }
+    }
+
+    #[test]
+    fn provider_filter_matches_name_case_insensitive() {
+        let mut s = make_state(vec!["anthropic", "openai", "google", "mistral"], vec![]);
+        assert_eq!(filtered_provider_indices(&s), vec![0, 1, 2, 3]);
+
+        s.provider_filter = "ANT".to_string();
+        assert_eq!(filtered_provider_indices(&s), vec![0]); // anthropic
+
+        s.provider_filter = "goog".to_string();
+        assert_eq!(filtered_provider_indices(&s), vec![2]); // google
+    }
+
+    #[test]
+    fn model_filter_matches_id_or_provider() {
+        let mut s = make_state(
+            vec![],
+            vec![
+                ("gpt-4o", "openai"),
+                ("gpt-4-turbo", "openai"),
+                ("claude-3-opus", "anthropic"),
+                ("gemini-pro", "google"),
+            ],
+        );
+        assert_eq!(filtered_model_indices(&s), vec![0, 1, 2, 3]);
+
+        s.model_filter = "gpt".to_string();
+        assert_eq!(filtered_model_indices(&s), vec![0, 1]);
+
+        s.model_filter = "anthropic".to_string();
+        assert_eq!(filtered_model_indices(&s), vec![2]); // matched by provider
+
+        s.model_filter = "OPUS".to_string();
+        assert_eq!(filtered_model_indices(&s), vec![2]); // case-insensitive
+    }
+
+    #[test]
+    fn model_filter_empty_result_yields_no_indices() {
+        let mut state = make_state(vec![], vec![("gpt-4o", "openai")]);
+        state.model_filter = "zzz".to_string();
+        assert!(filtered_model_indices(&state).is_empty());
+    }
+
+    #[test]
+    fn ensure_model_selected_snaps_to_first_match() {
+        let mut state = make_state(
+            vec![],
+            vec![
+                ("gpt-4o", "openai"),
+                ("claude-3", "anthropic"),
+                ("gpt-3.5", "openai"),
+            ],
+        );
+        // Selection starts at index 0 (gpt-4o).
+        state.model_filter = "gpt".to_string();
+        ensure_model_selected_visible(&mut state);
+        // gpt-4o is in the filtered set {0, 2}, so it stays.
+        assert_eq!(state.model_selected, 0);
+
+        // Now filter to only claude; selection must snap to it.
+        state.model_filter = "claude".to_string();
+        ensure_model_selected_visible(&mut state);
+        assert_eq!(state.model_selected, 1);
+    }
+
+    #[test]
+    fn snap_provider_selection_into_filtered_set() {
+        let mut state = make_state(vec!["anthropic", "openai", "google"], vec![]);
+        state.provider_selected = 2; // google
+        state.provider_filter = "open".to_string();
+        snap_provider_selection(&mut state);
+        assert_eq!(state.provider_selected, 1); // openai
+    }
+
+    #[test]
+    fn snap_provider_noop_when_filter_empty_matches_all() {
+        let mut state = make_state(vec!["anthropic", "openai"], vec![]);
+        state.provider_selected = 1;
+        state.provider_filter = String::new();
+        snap_provider_selection(&mut state);
+        assert_eq!(state.provider_selected, 1); // unchanged
+    }
 }
