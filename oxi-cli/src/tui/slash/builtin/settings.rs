@@ -19,7 +19,11 @@ impl SlashCommand for ReloadCommand {
         let state = &mut *ctx.state;
         let session = ctx.session;
         let reloaded = crate::store::settings::Settings::load().unwrap_or_default();
-        let _theme_name = reloaded.theme.clone();
+        // Flag the render loop to rebuild the live theme (theme name + glyph
+        // set) from the freshly-loaded settings. The overlay's Esc handler
+        // sets the same flag; `/reload` mirrors it so hand-edited
+        // `settings.toml` theme changes are picked up without a restart.
+        state.appearance_needs_reload = true;
         session.set_thinking_level(reloaded.thinking_level);
         // Rebuild the system prompt to pick up the latest TUI language
         // policy (`output_languages`). The App-side `set_thinking_level`
@@ -54,57 +58,12 @@ impl SlashCommand for ReloadCommand {
             }
         }
 
-        // Reload WASM extensions
-        if reloaded.extensions_enabled {
-            let cwd_path =
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd_path);
-            if !wasm_paths.is_empty() {
-                let mut mgr = crate::extensions::WasmExtensionManager::new();
-                let (loaded, errors) = mgr.load_all(&wasm_paths);
-                let loaded_count = loaded.len();
-                let error_count = errors.len();
-                if !mgr.is_empty() {
-                    // Unregister old WASM tools
-                    let tools = session.agent_ref().tools();
-                    let old_names: Vec<String> = if let Some(ref old_ext) = state.wasm_ext {
-                        old_ext
-                            .all_tool_defs()
-                            .iter()
-                            .map(|d| d.name.clone())
-                            .collect()
-                    } else {
-                        vec![]
-                    };
-                    for name in &old_names {
-                        tools.unregister(name);
-                    }
-
-                    // Register new WASM tools
-                    let arc_mgr = std::sync::Arc::new(mgr);
-                    for tool_def in arc_mgr.all_tool_defs() {
-                        let wasm_tool = crate::extensions::WasmTool::new(
-                            arc_mgr.clone(),
-                            tool_def.name.clone(),
-                            tool_def.description.clone(),
-                            tool_def.schema.clone(),
-                        );
-                        tools.register(wasm_tool);
-                    }
-                    state.wasm_ext = Some(arc_mgr);
-                    state.add_notification(
-                        format!("{} loaded, {} error(s)", loaded_count, error_count),
-                        NotificationKind::Info,
-                    );
-                } else {
-                    state.wasm_ext = None;
-                }
-            } else {
-                state.wasm_ext = None;
-            }
-        } else {
-            state.wasm_ext = None;
-        }
+        // Reload WASM extensions (shared with the /settings overlay).
+        crate::tui::overlay::settings::sync_wasm_extensions(
+            state,
+            session,
+            reloaded.extensions_enabled,
+        );
 
         // Reload skills
         {

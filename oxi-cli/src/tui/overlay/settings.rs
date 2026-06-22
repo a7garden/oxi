@@ -15,7 +15,7 @@ use ratatui::{
 
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::AgentSessionHandle;
-use oxi_tui::GlyphSet;
+use oxi_tui::{GlyphSet, THEME_NAMES, ThemeRegistry};
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
 
@@ -92,7 +92,12 @@ pub fn settings_overlay(
     app_state: &mut crate::tui::app::AppState,
 ) -> Box<dyn OverlayComponent> {
     let session = session.clone_handle();
-    let all_items = build_settings_items(&session);
+    // Snapshot the theme registry from AppState so the overlay can
+    // populate its theme choice list with both built-ins and any
+    // custom themes loaded at startup. Cloning is cheap (it's just
+    // two HashMaps of small Themes).
+    let theme_registry: ThemeRegistry = app_state.theme_registry.clone();
+    let all_items = build_settings_items(&session, &theme_registry);
     let item_count = all_items.len();
     Box::new(SettingsOverlay {
         all_items,
@@ -102,6 +107,8 @@ pub fn settings_overlay(
         session,
         app_state: share_state(app_state),
         changed: false,
+        changed_labels: std::collections::HashSet::new(),
+        theme_registry,
     })
 }
 
@@ -113,6 +120,16 @@ struct SettingsOverlay {
     session: AgentSessionHandle,
     app_state: SharedAppState,
     changed: bool,
+    /// Labels of items the user toggled/cycled in this session. Used to
+    /// guard side-effecting live-apply steps (extensions reload, routing
+    /// model switch) so they only fire when the user actually touched the
+    /// relevant toggle — not on every save.
+    changed_labels: std::collections::HashSet<String>,
+    /// Snapshot of the theme registry at overlay-open time. The
+    /// choice list for the `theme` item is built from this: custom
+    /// themes first (if any), then the canonical [`THEME_NAMES`].
+    /// Re-opening the overlay picks up any new custom themes.
+    theme_registry: ThemeRegistry,
 }
 
 impl std::fmt::Debug for SettingsOverlay {
@@ -152,9 +169,8 @@ impl SettingsOverlay {
             for item in &self.all_items {
                 match item {
                     SettingsItem::Toggle { label, value } => match label.as_str() {
-                        "stream_responses" => settings.stream_responses = *value,
                         "extensions" => settings.extensions_enabled = *value,
-                        "auto_compact" => settings.auto_compaction = *value,
+                        "auto_compaction" => settings.auto_compaction = *value,
                         "routing" => settings.enable_routing = *value,
                         "language_policy" => settings.language_policy_enabled = *value,
                         _ => {}
@@ -164,11 +180,13 @@ impl SettingsOverlay {
                         value,
                         disabled,
                     } => {
-                        // Disabled Choices (gated by language_policy=OFF) are
-                        // accepted but ignored on persist — their in-overlay
-                        // value may have been cycled by the user before they
-                        // realized the gate, so we trust the master toggle
-                        // for whether the channel is honored.
+                        // Gated Choices (disabled — `language_policy` is
+                        // OFF) are skipped on persist. Since the live
+                        // re-gate keeps `disabled` in sync with the master
+                        // toggle, a disabled channel was never editable this
+                        // session, so its in-overlay value equals the disk
+                        // original. Skipping preserves that original rather
+                        // than redundantly rewriting it.
                         if *disabled {
                             continue;
                         }
@@ -258,9 +276,28 @@ impl OverlayComponent for SettingsOverlay {
                 let item_idx = self.filtered_indices[self.selected];
                 let item = &mut self.all_items[item_idx];
                 match item {
-                    SettingsItem::Toggle { value, .. } => {
+                    SettingsItem::Toggle { label, value } => {
                         *value = !*value;
                         self.changed = true;
+                        self.changed_labels.insert(label.clone());
+                        // Live re-gate: flipping `language_policy`
+                        // immediately enables/disables all `language.*`
+                        // channel Choices in the same overlay session.
+                        // Without this the channels stay greyed-out and
+                        // blocked until the overlay is closed and reopened
+                        // (the `disabled` field was a build-time snapshot).
+                        if label == "language_policy" {
+                            let gated = !*value;
+                            for other in &mut self.all_items {
+                                if let SettingsItem::Choice {
+                                    label: l, disabled, ..
+                                } = other
+                                    && l.starts_with("language.")
+                                {
+                                    *disabled = gated;
+                                }
+                            }
+                        }
                     }
                     SettingsItem::Choice {
                         label,
@@ -283,16 +320,18 @@ impl OverlayComponent for SettingsOverlay {
                             }
                             return OverlayAction::None;
                         }
-                        let options = get_choice_options(label);
+                        let options = get_choice_options(label, &self.theme_registry);
                         if let Some(pos) = options.iter().position(|o| o == value) {
                             let next = (pos + 1) % options.len();
                             *value = options[next].clone();
                             self.changed = true;
+                            self.changed_labels.insert(label.clone());
                         }
                     }
                     SettingsItem::Action { id, .. } => {
                         if *id == "reload" {
-                            self.all_items = build_settings_items(&self.session);
+                            self.all_items =
+                                build_settings_items(&self.session, &self.theme_registry);
                             self.apply_filter();
                             if let Ok(ptr) = self.app_state.lock() {
                                 // SAFETY: We hold the Mutex lock, guaranteeing exclusive
@@ -367,9 +406,89 @@ impl OverlayComponent for SettingsOverlay {
                         // The raw pointer is valid for the lock's lifetime.
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
-                                // Appearance (glyph set / theme) changed — flag
-                                // the main loop to rebuild the live theme.
-                                app.appearance_needs_reload = true;
+                                // Appearance (glyph set / theme) — only flag
+                                // for rebuild if the user actually changed a
+                                // relevant item, not on every save.
+                                if self.changed_labels.contains("theme")
+                                    || self.changed_labels.contains("glyph")
+                                {
+                                    app.appearance_needs_reload = true;
+                                }
+                                // Only fire side-effecting live-apply steps
+                                // for toggles the user actually touched in
+                                // this session — not on every save.
+                                if self.changed_labels.contains("extensions") {
+                                    let fresh = crate::store::settings::Settings::load()
+                                        .unwrap_or_default();
+                                    sync_wasm_extensions(
+                                        app,
+                                        &self.session,
+                                        fresh.extensions_enabled,
+                                    );
+                                }
+                                if self.changed_labels.contains("routing") {
+                                    let fresh = crate::store::settings::Settings::load()
+                                        .unwrap_or_default();
+                                    let cur = self.session.model_id();
+                                    let on_router = cur.starts_with("router/");
+                                    if fresh.enable_routing && !on_router {
+                                        if let Err(e) = self.session.set_model("router/auto") {
+                                            app.add_notification(
+                                                format!("Could not enable router: {e}"),
+                                                crate::tui::app::NotificationKind::Warning,
+                                            );
+                                        } else {
+                                            app.footer_state.data.model_name =
+                                                "router/auto".to_string();
+                                        }
+                                    } else if !fresh.enable_routing && on_router {
+                                        let default =
+                                            fresh.effective_model(None).unwrap_or_default();
+                                        let provider =
+                                            fresh.effective_provider(None).unwrap_or_default();
+                                        let full = if default.contains('/') || provider.is_empty() {
+                                            default
+                                        } else {
+                                            format!("{provider}/{default}")
+                                        };
+                                        if !full.is_empty() {
+                                            if let Err(e) = self.session.set_model(&full) {
+                                                app.add_notification(
+                                                    format!("Could not disable router: {e}"),
+                                                    crate::tui::app::NotificationKind::Warning,
+                                                );
+                                            } else {
+                                                app.footer_state.data.model_name = full;
+                                            }
+                                        }
+                                    }
+                                }
+                                // 3b: if the user just touched
+                                // `language_policy` but the directive is
+                                // empty (policy ON yet no channel is set to
+                                // a language), warn so the toggle isn't a
+                                // silent no-op. `language_directive` returns
+                                // None when the map is empty or every
+                                // channel is "auto".
+                                if self.changed_labels.contains("language_policy") {
+                                    let fresh = crate::store::settings::Settings::load()
+                                        .unwrap_or_default();
+                                    if fresh.language_policy_enabled
+                                        && crate::prompt::system_prompt::language_directive(
+                                            true,
+                                            &fresh.output_languages,
+                                        )
+                                        .is_none()
+                                    {
+                                        app.add_notification(
+                                            "Language policy is ON but no channel \
+                                             is set — cycle a language.* entry to a \
+                                             language for it to take effect."
+                                                .to_string(),
+                                            crate::tui::app::NotificationKind::Warning,
+                                        );
+                                    }
+                                }
                                 app.add_notification(
                                     "Settings saved and applied.".to_string(),
                                     crate::tui::app::NotificationKind::Success,
@@ -508,8 +627,70 @@ fn title_line(filter: &str) -> ratatui::text::Line<'static> {
         Style::default().bg(ratatui::style::Color::Rgb(0, 0, 0)),
     )
 }
+/// Reload (or unload) WASM extensions to match `extensions_enabled`.
+///
+/// Shared by the `/settings` overlay Esc handler and the `/reload` slash
+/// command so both converge on the same live behavior.
+pub(crate) fn sync_wasm_extensions(
+    state: &mut crate::tui::app::AppState,
+    session: &crate::app::agent_session::AgentSession,
+    extensions_enabled: bool,
+) {
+    use crate::tui::app::NotificationKind;
+    if extensions_enabled {
+        let cwd_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd_path);
+        if !wasm_paths.is_empty() {
+            let mut mgr = crate::extensions::WasmExtensionManager::new();
+            let (loaded, errors) = mgr.load_all(&wasm_paths);
+            let loaded_count = loaded.len();
+            let error_count = errors.len();
+            if !mgr.is_empty() {
+                // Unregister old WASM tools
+                let tools = session.agent_ref().tools();
+                let old_names: Vec<String> = if let Some(ref old_ext) = state.wasm_ext {
+                    old_ext
+                        .all_tool_defs()
+                        .iter()
+                        .map(|d| d.name.clone())
+                        .collect()
+                } else {
+                    vec![]
+                };
+                for name in &old_names {
+                    tools.unregister(name);
+                }
+                // Register new WASM tools
+                let arc_mgr = std::sync::Arc::new(mgr);
+                for tool_def in arc_mgr.all_tool_defs() {
+                    let wasm_tool = crate::extensions::WasmTool::new(
+                        arc_mgr.clone(),
+                        tool_def.name.clone(),
+                        tool_def.description.clone(),
+                        tool_def.schema.clone(),
+                    );
+                    tools.register(wasm_tool);
+                }
+                state.wasm_ext = Some(arc_mgr);
+                state.add_notification(
+                    format!("{} loaded, {} error(s)", loaded_count, error_count),
+                    NotificationKind::Info,
+                );
+            } else {
+                state.wasm_ext = None;
+            }
+        } else {
+            state.wasm_ext = None;
+        }
+    } else {
+        state.wasm_ext = None;
+    }
+}
 
-fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
+fn build_settings_items(
+    _session: &AgentSessionHandle,
+    _theme_registry: &ThemeRegistry,
+) -> Vec<SettingsItem> {
     let settings = crate::store::settings::Settings::load().unwrap_or_default();
 
     let thinking_str = match settings.thinking_level {
@@ -529,7 +710,7 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
 
     items.push(SettingsItem::Choice {
         label: "theme".to_string(),
-        value: settings.theme.clone(),
+        value: settings.get_theme_name(),
         disabled: false,
     });
     items.push(SettingsItem::Choice {
@@ -538,9 +719,15 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
         disabled: false,
     });
 
-    items.push(SettingsItem::Toggle {
+    // `stream_responses` is persisted but has no consumer yet (the agent
+    // always streams). Shown read-only so users don't expect a live effect.
+    items.push(SettingsItem::ReadOnly {
         label: "stream_responses".to_string(),
-        value: settings.stream_responses,
+        value: if settings.stream_responses {
+            "on (not wired)".to_string()
+        } else {
+            "off (not wired)".to_string()
+        },
     });
 
     items.push(SettingsItem::Toggle {
@@ -549,7 +736,7 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     });
 
     items.push(SettingsItem::Toggle {
-        label: "auto_compact".to_string(),
+        label: "auto_compaction".to_string(),
         value: settings.auto_compaction,
     });
 
@@ -621,7 +808,7 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     });
 
     let max_tokens = settings
-        .max_response_tokens
+        .effective_max_tokens()
         .map(|v| v.to_string())
         .unwrap_or_else(|| "auto".to_string());
     items.push(SettingsItem::ReadOnly {
@@ -683,7 +870,7 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     items
 }
 
-fn get_choice_options(label: &str) -> Vec<String> {
+fn get_choice_options(label: &str, theme_registry: &ThemeRegistry) -> Vec<String> {
     match label {
         "thinking" => vec![
             "Off".to_string(),
@@ -693,18 +880,36 @@ fn get_choice_options(label: &str) -> Vec<String> {
             "High".to_string(),
             "XHigh".to_string(),
         ],
+        // Custom themes first (lower-cased; insertion order is unspecified),
+        // then the canonical [`THEME_NAMES`] (oxi_dark first). If a custom
+        // theme shares a name with a built-in, the custom one wins on
+        // resolution — but we still show the built-in here so the user can
+        // cycle back to it. (When cycling by Enter, both keys are valid;
+        // `ThemeRegistry::resolve` always prefers custom on collision.)
+        "theme" => {
+            let mut opts: Vec<String> = theme_registry.custom_names();
+            opts.extend(THEME_NAMES.iter().map(|n| n.to_string()));
+            opts
+        }
         // Glyph set presets cycle in GlyphSet::ALL order (Unicode first).
         "glyph" => GlyphSet::ALL
             .iter()
             .map(|g| g.label().to_string())
             .collect(),
-        // TUI language policy channel cycles. The cycle order matches
-        // `KNOWN_LANGS` (see `store::settings`). "auto" is the default
-        // and means "no policy for this channel".
-        lbl if lbl.starts_with("language.") => crate::store::settings::KNOWN_LANGS
-            .iter()
-            .map(|(code, _)| code.to_string())
-            .collect(),
+        // TUI language policy channel cycles. Real languages cycle first
+        // (in `KNOWN_LANGS` order), with "auto" (the default = "no policy
+        // for this channel") placed last. Putting a concrete language one
+        // keypress away from the default reduces accidental resets to auto
+        // (which would silently remove the channel from the map).
+        lbl if lbl.starts_with("language.") => {
+            let mut langs: Vec<String> = crate::store::settings::KNOWN_LANGS
+                .iter()
+                .filter(|(code, _)| *code != "auto")
+                .map(|(code, _)| code.to_string())
+                .collect();
+            langs.push("auto".to_string());
+            langs
+        }
         _ => vec![],
     }
 }

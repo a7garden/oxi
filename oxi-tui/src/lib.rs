@@ -37,4 +37,6 @@ pub use text::truncate_to_width;
 /// Glyph set system: pluggable Unicode / ASCII / Nerd-Font symbol presets.
 pub use symbols::{GlyphSet, Symbols, UnknownGlyphSet};
 /// Theme system: color schemes, spacing, style management.
-pub use theme::{ColorScheme, Spacing, Theme, ThemeFile, ThemeManager, ThemeStyles};
+pub use theme::{
+    ColorScheme, Spacing, THEME_NAMES, Theme, ThemeFile, ThemeManager, ThemeRegistry, ThemeStyles,
+};

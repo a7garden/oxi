@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **4 new built-in color schemes**: Nord, Catppuccin Mocha, GitHub Dark,
+  and Monokai (`oxi-tui/src/theme.rs`). Each is a complete 22-field
+  `ColorScheme` with contrast-checked palette values.
+- **`Theme::by_name()` resolver**: maps `settings.theme` names
+  (`oxi_dark`, `oxi_light`, `nord`, `catppuccin`, `github_dark`, `monokai`)
+  to built-in `Theme` constructors. `THEME_NAMES` constant lists all
+  available names for the `/settings` overlay cycle.
+- **`Agent::set_compaction_strategy()`**: updates the compaction strategy
+  in `inner.config` so the next agent run picks it up — the strategy is
+  read fresh at the start of each run (`oxi-agent/src/agent.rs`).
+
+### Fixed
+
+- **Theme system was dead code — `settings.theme` is now actually applied.**
+  The TUI render loop always hardcoded `Theme::dark()`, ignoring the
+  `settings.theme` field entirely. `get_theme_name()` had zero callers,
+  `ThemeManager` was never instantiated in `oxi-cli`, and the `/settings`
+  overlay's `theme` Choice had no cycling options (`get_choice_options`
+  returned `vec![]`). All three are now wired: the render loop
+  (`app.rs`) resolves the theme via `Theme::by_name(&settings.get_theme_name())`
+  at startup and on reload, the overlay cycles through `THEME_NAMES`, and
+  `/reload` sets `appearance_needs_reload` so hand-edited theme changes
+  apply without a restart.
+- **`auto_compact` toggle now applies live.** Previously, toggling
+  `auto_compaction` in the `/settings` overlay persisted to disk but never
+  reached the runtime — the `compaction_config` (`Arc<RwLock<CompactionConfig>>`)
+  and the Agent's `CompactionStrategy` were both set at session construction
+  and never updated. `rebuild_system_prompt()` now syncs both:
+  `compaction_config.enabled` (for `auto_compaction_enabled()` display) and
+  `Agent::set_compaction_strategy()` (for the next agent-loop run).
+- **`extensions` toggle now applies live.** The `/settings` overlay Esc
+  handler did not reload/unload WASM extensions — only the `/reload` slash
+  command did. The reload logic is extracted into `sync_wasm_extensions()`,
+  shared by both paths.
+- **`routing` toggle now switches the session model.** `enable_routing`
+  was a dead setting (never consumed). The overlay Esc handler now switches
+  to `router/auto` when enabled and back to the default model when disabled,
+  mirroring `/router enable|disable`.
+
+### Changed
+
+- **`stream_responses` is now read-only in the `/settings` overlay.** The
+  setting is persisted but has no consumer (the agent always streams).
+  The overlay now displays it as `(not wired)` read-only instead of a
+  functional toggle, preventing users from expecting a live effect.
+
+### Fixed (settings consistency across interfaces)
+
+- **`/settings` overlay `max_response_tokens` now shows `effective_max_tokens()`.**
+  `oxi config set max_tokens 8192` sets the `max_tokens` (u32) field, but the
+  overlay previously displayed only `max_response_tokens` (usize) — a different
+  field. Now merged via `effective_max_tokens()` so CLI and overlay agree.
+- **Setup wizard theme list unified with `THEME_NAMES`.** `load_themes()` in
+  `setup_wizard.rs` was a hardcoded copy of the 6 theme names, bound to drift
+  out of sync with `oxi_tui::THEME_NAMES`. Now reads from the canonical
+  constant.
+- **`oxi config show` displays resolved theme name.** Previously showed the
+  raw `settings.theme` (e.g. `"default"`) instead of the resolved name
+  (`"oxi_dark"`), inconsistent with the `/settings` overlay which shows
+  `get_theme_name()`.
+- **CLI `config set`/`get` gained keys for overlay-editable settings.**
+  `glyph`/`glyph_set`, `enable_routing`/`routing`, and
+  `language_policy_enabled`/`language_policy` were editable in the `/settings`
+  overlay but absent from `oxi config set` — attempting `oxi config set glyph
+  ascii` failed with "Unknown setting". All three are now CLI-settable.
+  `extensions` is also accepted as an alias for `extensions_enabled` in
+  `config set`.
+- **Overlay `auto_compact` label renamed to `auto_compaction`.** The overlay
+  label didn't match the CLI key (`oxi config set auto_compaction`), making
+  cross-reference confusing. Now consistent.
+- **`oxi config show` now displays glyph set and routing status.** Previously
+  absent — the only way to check these was the `/settings` overlay.
 ## [0.45.1] - 2026-06-22
 
 ### Fixed

@@ -390,6 +390,24 @@ impl Agent {
     pub fn compaction_manager(&self) -> &CompactionManager {
         &self.compaction_manager
     }
+    /// Update the compaction strategy for future runs.
+    ///
+    /// The strategy is read fresh from the config at the start of each run
+    /// (see `run_with_channel_inner`), so this takes effect on the next
+    /// agent turn — never mid-run. Pair with `compaction_manager()` for
+    /// manual compaction, which is unaffected by the strategy.
+    pub fn set_compaction_strategy(&self, strategy: oxi_ai::CompactionStrategy) {
+        self.inner.write().config.compaction_strategy = strategy;
+    }
+    /// Get the compaction strategy that will be used on the next run.
+    ///
+    /// This reads from `inner.config` (mutable via `set_compaction_strategy`),
+    /// **not** from the `compaction_manager` field (which retains its
+    /// construction-time strategy). The agent loop reads from config fresh
+    /// each run, so this is the authoritative value.
+    pub fn compaction_strategy(&self) -> oxi_ai::CompactionStrategy {
+        self.inner.read().config.compaction_strategy.clone()
+    }
 
     /// Run the agent with a prompt, collecting all events into a vector.
     ///

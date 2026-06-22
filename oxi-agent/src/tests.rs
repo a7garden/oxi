@@ -1677,3 +1677,38 @@ fn test_agent_state_follow_up_tracking() {
     state.increment_iteration();
     assert_eq!(state.iteration, 1);
 }
+
+#[test]
+fn test_set_compaction_strategy_updates_config() {
+    use oxi_ai::CompactionStrategy;
+
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "ok".to_string(),
+    }]));
+    let mut config = AgentConfig::default();
+    config.compaction_strategy = CompactionStrategy::Threshold(0.8);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
+
+    // Before: strategy is Threshold(0.8) — both the config and the
+    // construction-time compaction_manager agree.
+    assert_eq!(
+        agent.compaction_strategy(),
+        CompactionStrategy::Threshold(0.8)
+    );
+
+    // Update via the live setter (used by the /settings overlay).
+    agent.set_compaction_strategy(CompactionStrategy::Disabled);
+
+    // After: the config-level strategy reflects the change — this is
+    // what the agent loop reads at the start of each run.
+    assert_eq!(agent.compaction_strategy(), CompactionStrategy::Disabled);
+
+    // The construction-time compaction_manager is NOT affected (it retains
+    // its original strategy). This is by design: the manager is used for
+    // manual compact() calls, while the agent loop creates a fresh manager
+    // from config each run.
+    assert_eq!(
+        agent.compaction_manager().strategy(),
+        &CompactionStrategy::Threshold(0.8)
+    );
+}

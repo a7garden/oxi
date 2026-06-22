@@ -606,7 +606,21 @@ impl AgentSession {
         let thinking = fresh.thinking_level;
         let languages = fresh.output_languages.clone();
         let language_policy_enabled = fresh.language_policy_enabled;
+        let auto_compaction = fresh.auto_compaction;
         *self.settings.write() = fresh;
+
+        // Sync auto-compaction to runtime state so the overlay's
+        // `auto_compaction` toggle (and hand-edited `settings.toml`) takes
+        // effect on the next turn — not just the next session. The agent
+        // reads `compaction_strategy` fresh from config at the start of
+        // each run, so updating it here is sufficient for live toggle.
+        self.compaction_config.write().enabled = auto_compaction;
+        let strategy = if auto_compaction {
+            oxi_sdk::CompactionStrategy::Threshold(0.8)
+        } else {
+            oxi_sdk::CompactionStrategy::Disabled
+        };
+        self.agent.set_compaction_strategy(strategy);
 
         let prompt = crate::app::agent_session_runtime::build_system_prompt(
             thinking,

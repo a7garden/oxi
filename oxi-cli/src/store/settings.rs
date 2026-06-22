@@ -151,7 +151,7 @@ pub struct Settings {
     /// Thinking level for agent responses
     #[serde(default = "default_thinking_level")]
     pub thinking_level: ThinkingLevel,
-    /// Color theme (e.g., "default", "monokai", "dracula")
+    /// Color theme — resolved by `Theme::by_name` (e.g. "oxi_dark", "nord").
     #[serde(default = "default_theme")]
     pub theme: String,
 
@@ -620,15 +620,49 @@ impl Settings {
     }
 
     /// Load settings with an explicit working directory for project config discovery.
+    ///
+    /// Always layers the global config from `Self::settings_path()` when it
+    /// exists. Use [`Settings::load_from_with`] to inject a custom global
+    /// path (e.g. for tests or portable mode).
     pub fn load_from(dir: &std::path::Path) -> Result<Self> {
+        Self::load_from_with(dir, None)
+    }
+
+    /// Load settings with an explicit project directory and an optional
+    /// global settings path override.
+    ///
+    /// Layering order:
+    /// 1. Defaults
+    /// 2. Global config from `global_override` if `Some`, else from
+    ///    `Self::settings_path()` if it exists.
+    /// 3. Project config (`<dir>/.oxi/settings.{toml,json}`).
+    /// 4. Environment variable overrides.
+    /// 5. Migration.
+    /// 6. TUI language policy validation.
+    ///
+    /// Passing `global_override = None` keeps the default behavior of
+    /// reading the user's real `~/.oxi/settings.{toml,json}`. Tests pass
+    /// `Some(custom_path)` or rely on the real path being absent to get
+    /// pure defaults. (The test suite uses `Some(specific_path)` semantics
+    /// by passing a temp path; passing `None` is also valid for "skip the
+    /// global layer entirely".)
+    pub fn load_from_with(
+        dir: &std::path::Path,
+        global_override: Option<&std::path::Path>,
+    ) -> Result<Self> {
         // 1. Start from defaults
         let mut settings = Settings::default();
 
-        // 2. Layer global config
-        if let Ok(global_path) = Self::settings_path()
-            && global_path.exists()
+        // 2. Layer global config (override takes precedence; None = use real
+        //    `~/.oxi/settings.*` if present)
+        let resolved_global: Option<std::path::PathBuf> = match global_override {
+            Some(p) => Some(p.to_path_buf()),
+            None => Self::settings_path().ok(),
+        };
+        if let Some(ref gp) = resolved_global
+            && gp.exists()
         {
-            settings = Self::layer_file(&settings, &global_path)?;
+            settings = Self::layer_file(&settings, gp)?;
         }
 
         // 3. Layer project config
@@ -1388,13 +1422,14 @@ theme = "dracula"
             "OXI_EXTENSIONS_ENABLED",
         ]);
         let tmp = tempfile::tempdir().unwrap();
-        let settings = Settings::load_from(tmp.path()).unwrap();
-        // Falls back to defaults (may include global ~/.oxi/settings)
+        // Pass a nonexistent global path so the real `~/.oxi/settings.*`
+        // never leaks into the test. (`Settings::load_from` reads the
+        // real global config when present, which is what made this test
+        // fail when the user's global set `thinking_level = "high"`.)
+        let global = tmp.path().join("nonexistent-settings.json");
+        let settings = Settings::load_from_with(tmp.path(), Some(&global)).unwrap();
         assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
     }
-
-    // ── Environment variables ────────────────────────────────────────
-
     #[test]
     fn test_from_env() {
         // NOTE: Environment variable overrides are disabled.

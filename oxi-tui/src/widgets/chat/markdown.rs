@@ -84,7 +84,7 @@ pub(crate) fn md_lines(content: &str, width: u16, styles: &ThemeStyles) -> Vec<L
     // commands. No-op (returns a clone) when there are no math delimiters.
     let content = crate::render::latex::latex_to_unicode_owned(content);
     // Try table rendering first (pulldown-cmark based)
-    let table_lines = render_markdown_table(&content, width);
+    let table_lines = render_markdown_table(&content, width, &styles.symbols);
     if !table_lines.is_empty() {
         // render_markdown_table handles table cell wrapping internally,
         // but non-table text (before/after the table) comes from

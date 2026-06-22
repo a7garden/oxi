@@ -450,7 +450,16 @@ fn config_show() -> Result<()> {
             .effective_provider(None)
             .unwrap_or_else(|| "(not set)".to_string())
     );
-    println!("  Theme: {}", settings.theme);
+    println!("  Theme: {}", settings.get_theme_name());
+    println!("  Glyph set: {}", settings.glyph_set.label());
+    println!(
+        "  Routing: {}",
+        if settings.enable_routing {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     println!("  Thinking: {:?}", settings.thinking_level);
     println!("  Extensions enabled: {}", settings.extensions_enabled);
     println!("  Stream responses: {}", settings.stream_responses);
@@ -608,7 +617,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
             })?;
             settings.thinking_level = level;
         }
-        "extensions_enabled" => {
+        "extensions_enabled" | "extensions" => {
             settings.extensions_enabled = parse_config_bool(value)?;
         }
         "stream_responses" | "stream" => {
@@ -641,11 +650,23 @@ fn config_set(key: &str, value: &str) -> Result<()> {
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid session_history_size: '{}'", value))?;
         }
+        "glyph" | "glyph_set" => {
+            settings.glyph_set = value
+                .parse()
+                .map_err(|e: oxi_tui::symbols::UnknownGlyphSet| anyhow::anyhow!("{e}"))?;
+        }
+        "enable_routing" | "routing" => {
+            settings.enable_routing = parse_config_bool(value)?;
+        }
+        "language_policy_enabled" | "language_policy" => {
+            settings.language_policy_enabled = parse_config_bool(value)?;
+        }
         _ => {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
                   thinking_level, extensions_enabled, stream_responses, auto_compaction,\
-                  tool_timeout, max_tokens, temperature, session_history_size",
+                  glyph, enable_routing, language_policy_enabled, tool_timeout,\
+                  max_tokens, temperature, session_history_size",
                 key
             );
         }
@@ -702,11 +723,17 @@ fn config_get(key: &str) -> Result<()> {
                 items.join(", ")
             }
         }
+        "glyph" | "glyph_set" => settings.glyph_set.label().to_string(),
+        "enable_routing" | "routing" => settings.enable_routing.to_string(),
+        "language_policy_enabled" | "language_policy" => {
+            settings.language_policy_enabled.to_string()
+        }
         _ => {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
                   thinking_level, extensions_enabled, stream_responses, auto_compaction,\
-                  tool_timeout, max_tokens, temperature, session_history_size,\
+                  glyph, enable_routing, language_policy_enabled, tool_timeout,\
+                  max_tokens, temperature, session_history_size,\
                   extensions, skills, prompts, themes, custom_providers",
                 key
             );

@@ -17,7 +17,7 @@ use oxi_agent::tools::{
     TodoStateProvider,
     todo::{TodoPhase, TodoStatus},
 };
-use oxi_tui::theme::Theme;
+use oxi_tui::theme::{ThemeManager, ThemeRegistry};
 use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
@@ -331,6 +331,12 @@ pub(crate) struct AppState {
     /// the next draw. Set by `/settings` on Esc; consumed + cleared in the
     /// render loop.
     pub appearance_needs_reload: bool,
+    /// Shared theme registry (built-in + custom themes loaded from
+    /// `~/.oxi/themes/*` and `<project>/.oxi/themes/*`). The `/settings`
+    /// overlay reads this to populate its theme choice list. The
+    /// registry is built once in `AppState::new()` and shared by
+    /// reference through the overlay's render path; cloning is cheap.
+    pub theme_registry: oxi_tui::theme::ThemeRegistry,
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
     /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
@@ -500,6 +506,7 @@ impl AppState {
             queue_panel_selected: 0,
             needs_chat_rebuild: false,
             appearance_needs_reload: false,
+            theme_registry: oxi_tui::theme::ThemeRegistry::with_builtins(),
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
@@ -933,7 +940,62 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
     // ── Enter terminal ONCE ──
     let mut tui = Tui::enter()?;
-    let mut theme = Theme::dark().with_glyph_set(settings.glyph_set);
+    // ThemeRegistry layers custom themes (loaded from
+    // `~/.oxi/themes/*.toml`,`*.json` and `<project>/.oxi/themes/*`)
+    // over the six built-ins. Custom themes win when their lowercased
+    // name collides with a built-in — intentional escape hatch.
+    let mut theme_registry = ThemeRegistry::with_builtins();
+    for dir in [
+        crate::store::settings::Settings::settings_dir()
+            .ok()
+            .map(|d| d.join("themes")),
+        Some(cwd_path.join(".oxi").join("themes")),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !dir.exists() {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::warn!("[theme] could not read {:?}: {}", dir, err);
+                continue;
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let ext_ok = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e == "toml" || e == "json");
+            if !ext_ok {
+                continue;
+            }
+            match theme_registry.add_custom_file(&path) {
+                Ok(t) => tracing::info!("[theme] loaded custom theme '{}' from {:?}", t.name, path),
+                Err(err) => tracing::warn!("[theme] skip {:?}: {}", path, err),
+            }
+        }
+    }
+    // ThemeManager drives hot-reload of `settings.toml` via mtime
+    // polling (`check_external`). We do NOT use `ThemeManager::watch_file`
+    // because that path reparses the theme file directly; here the
+    // "theme file" is actually `settings.toml`, which contains a name
+    // we re-resolve through the registry on change.
+    let mut initial_settings_mtime: Option<std::time::SystemTime> =
+        crate::store::settings::Settings::settings_path()
+            .ok()
+            .and_then(|p| std::fs::metadata(&p).ok())
+            .and_then(|m| m.modified().ok());
+    let mut theme_manager = ThemeManager::new(
+        theme_registry
+            .resolve(&settings.get_theme_name())
+            .with_glyph_set(settings.glyph_set),
+    );
+    theme_manager.set_poll_interval(std::time::Duration::from_millis(500));
+    let mut theme = theme_manager.theme();
 
     // ── Session switching loop ──
     loop {
@@ -1439,10 +1501,36 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             // overlay. The overlay set `appearance_needs_reload`; rebuild the
             // theme from freshly-loaded settings so the next draw reflects it
             // without a restart.
-            if state.appearance_needs_reload {
+            //
+            // We also poll the settings file's mtime each tick so hand-edited
+            // `settings.toml` edits (e.g. `theme = "nord"`) are picked up
+            // without a restart. `ThemeManager::check_external` returns
+            // `true` only when the mtime advances past the seeded baseline;
+            // we re-seed the baseline after every reload so we don't fire
+            // repeatedly for the same change.
+            let overlay_triggered = state.appearance_needs_reload;
+            if overlay_triggered {
                 state.appearance_needs_reload = false;
-                if let Ok(fresh) = crate::store::settings::Settings::load() {
-                    theme = Theme::dark().with_glyph_set(fresh.glyph_set);
+            }
+            let settings_path = crate::store::settings::Settings::settings_path().ok();
+            let external_triggered = settings_path
+                .as_deref()
+                .map(|p| theme_manager.check_external(p, initial_settings_mtime))
+                .unwrap_or(false);
+            if (overlay_triggered || external_triggered)
+                && let Ok(fresh) = crate::store::settings::Settings::load()
+            {
+                let resolved = theme_registry
+                    .resolve(&fresh.get_theme_name())
+                    .with_glyph_set(fresh.glyph_set);
+                theme_manager.set_theme(resolved.clone());
+                theme = resolved;
+                // Re-seed the mtime baseline to the post-reload value
+                // so we don't fire again until the file actually
+                // changes again.
+                if let Some(ref p) = settings_path {
+                    initial_settings_mtime =
+                        std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
                 }
             }
 

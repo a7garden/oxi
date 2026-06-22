@@ -1,6 +1,7 @@
 //! Table renderer ported from pi's markdown.ts
 //! Supports cell wrapping, width-aware column sizing, and proper alignment.
 
+use crate::symbols::Symbols;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -103,7 +104,11 @@ fn longest_word_width(text: &str, max_width: usize) -> usize {
 /// If the content contains a table, renders the *entire* content (text before/after
 /// the table is preserved). Returns empty Vec if no table is found (so the caller
 /// can fall back to tui-markdown).
-pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'static>> {
+pub fn render_markdown_table(
+    content: &str,
+    available_width: u16,
+    symbols: &Symbols,
+) -> Vec<Line<'static>> {
     // In practice pulldown-cmark's table parsing can be sensitive to option
     // combinations; enable all extensions so tables are reliably recognized.
     let options = Options::all();
@@ -194,7 +199,7 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                let rendered = render_table_data(&table_state, available_width);
+                let rendered = render_table_data(&table_state, available_width, symbols);
                 lines.extend(rendered);
             }
             Event::SoftBreak | Event::HardBreak => {
@@ -228,7 +233,11 @@ struct TableState {
     in_head: bool,
 }
 
-fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'static>> {
+fn render_table_data(
+    state: &TableState,
+    available_width: u16,
+    symbols: &Symbols,
+) -> Vec<Line<'static>> {
     let num_cols = state.header.len();
     if num_cols == 0 {
         return Vec::new();
@@ -276,18 +285,25 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
     let mut lines = Vec::new();
 
     // Top border
-    lines.push(make_border_line(&column_widths, '┌', '┬', '┐'));
+    lines.push(make_border_line(
+        &column_widths,
+        symbols.sharp_tl,
+        symbols.sharp_tee_up,
+        symbols.sharp_tr,
+        symbols,
+    ));
 
     // Header with wrapping
     let header_lines = wrap_cell_rows(&state.header, &column_widths);
     let header_line_count = header_lines.iter().map(|l| l.len()).max().unwrap_or(1);
 
+    let v = symbols.sharp_v;
     for line_idx in 0..header_line_count {
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::raw("│ ".to_string()));
+        spans.push(Span::raw(format!("{v} ")));
         for (col_idx, cell_lines) in header_lines.iter().enumerate() {
             if col_idx > 0 {
-                spans.push(Span::raw(" │ ".to_string()));
+                spans.push(Span::raw(format!(" {v} ")));
             }
             let text = cell_lines.get(line_idx).map(|s| s.as_str()).unwrap_or("");
             let padded = pad_to_width(text, column_widths[col_idx]);
@@ -296,15 +312,15 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
                 Style::default().add_modifier(Modifier::BOLD),
             ));
         }
-        spans.push(Span::raw(" │".to_string()));
+        spans.push(Span::raw(format!(" {v}")));
         lines.push(Line::from(spans));
     }
 
     // Separator
-    lines.push(make_separator_line(&column_widths));
+    lines.push(make_separator_line(&column_widths, symbols));
 
     // Body rows
-    let separator = make_separator_line(&column_widths);
+    let separator = make_separator_line(&column_widths, symbols);
     for (row_index, row) in state.rows.iter().enumerate() {
         let cell_lines = wrap_cell_rows(row, &column_widths);
         let row_line_count = cell_lines.iter().map(|l| l.len()).max().unwrap_or(1);
@@ -316,7 +332,10 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
                 .enumerate()
                 .map(|(col_idx, text)| pad_to_width(text, column_widths[col_idx]))
                 .collect();
-            lines.push(Line::from(Span::raw(format!("│ {} │", parts.join(" │ ")))));
+            lines.push(Line::from(Span::raw(format!(
+                "{v} {} {v}",
+                parts.join(&format!(" {v} "))
+            ))));
         }
 
         if row_index < state.rows.len() - 1 {
@@ -325,7 +344,13 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
     }
 
     // Bottom border
-    lines.push(make_border_line(&column_widths, '└', '┴', '┘'));
+    lines.push(make_border_line(
+        &column_widths,
+        symbols.sharp_bl,
+        symbols.sharp_tee_down,
+        symbols.sharp_br,
+        symbols,
+    ));
 
     // Trailing blank line for breathing room
     lines.push(Line::from(Span::raw("")));
@@ -469,39 +494,47 @@ fn pad_to_width(text: &str, width: usize) -> String {
     }
 }
 
-fn make_border_line(widths: &[usize], left: char, mid: char, right: char) -> Line<'static> {
+fn make_border_line(
+    widths: &[usize],
+    left: &str,
+    mid: &str,
+    right: &str,
+    symbols: &Symbols,
+) -> Line<'static> {
+    let h = symbols.sharp_h;
     let mut s = String::new();
-    s.push(left);
-    s.push('─');
+    s.push_str(left);
+    s.push_str(h);
     for (i, w) in widths.iter().enumerate() {
-        s.push_str(&"─".repeat(*w));
+        s.push_str(&h.repeat(*w));
         if i + 1 < widths.len() {
-            s.push('─');
-            s.push(mid);
-            s.push('─');
+            s.push_str(h);
+            s.push_str(mid);
+            s.push_str(h);
         } else {
-            s.push('─');
+            s.push_str(h);
         }
     }
-    s.push(right);
+    s.push_str(right);
     Line::from(Span::raw(s))
 }
 
-fn make_separator_line(widths: &[usize]) -> Line<'static> {
+fn make_separator_line(widths: &[usize], symbols: &Symbols) -> Line<'static> {
+    let h = symbols.sharp_h;
     let mut s = String::new();
-    s.push('├');
-    s.push('─');
+    s.push_str(symbols.sharp_tee_right);
+    s.push_str(h);
     for (i, w) in widths.iter().enumerate() {
-        s.push_str(&"─".repeat(*w));
+        s.push_str(&h.repeat(*w));
         if i + 1 < widths.len() {
-            s.push('─');
-            s.push('┼');
-            s.push('─');
+            s.push_str(h);
+            s.push_str(symbols.sharp_cross);
+            s.push_str(h);
         } else {
-            s.push('─');
+            s.push_str(h);
         }
     }
-    s.push('┤');
+    s.push_str(symbols.sharp_tee_left);
     Line::from(Span::raw(s))
 }
 

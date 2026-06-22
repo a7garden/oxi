@@ -215,6 +215,13 @@ pub struct Symbols {
     pub sharp_tee_right: &'static str,
     /// Sharp box: tee pointing left (`┤`) — right junction of a section bar.
     pub sharp_tee_left: &'static str,
+    /// Sharp box: tee pointing up (`┬`) — used as the inter-column
+    /// junction on the **top** row of a table. (`sharp_tee_right` and
+    /// `sharp_tee_left` are horizontal tees for separator rows.)
+    pub sharp_tee_up: &'static str,
+    /// Sharp box: tee pointing down (`┴`) — used as the inter-column
+    /// junction on the **bottom** row of a table.
+    pub sharp_tee_down: &'static str,
 
     // ── Separators ───────────────────────────────────────────────────
     /// Filled block bar (e.g. `▌` / `#`).
@@ -397,6 +404,8 @@ impl Symbols {
             sharp_cross: "┼",
             sharp_tee_right: "├",
             sharp_tee_left: "┤",
+            sharp_tee_up: "┬",
+            sharp_tee_down: "┴",
             sep_block: "▌",
             sep_dot: " · ",
             sep_pipe: " │ ",
@@ -502,6 +511,8 @@ impl Symbols {
             sharp_cross: "+",
             sharp_tee_right: "+",
             sharp_tee_left: "+",
+            sharp_tee_up: "+",
+            sharp_tee_down: "+",
             sep_block: "#",
             sep_dot: " - ",
             sep_pipe: " | ",
@@ -607,6 +618,8 @@ impl Symbols {
             sharp_cross: "┼",
             sharp_tee_right: "├",
             sharp_tee_left: "┤",
+            sharp_tee_up: "┬",
+            sharp_tee_down: "┴",
             sep_block: "\u{e0b0}", //
             sep_dot: " \u{f111} ",
             sep_pipe: " \u{e0b3} ",

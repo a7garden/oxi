@@ -140,6 +140,110 @@ impl ColorScheme {
             tool_error_bg: Color::Rgb(255, 230, 235), // #ffe6eb red tint
         }
     }
+    /// Nord color scheme (Arctic, dark).
+    pub fn nord() -> Self {
+        Self {
+            foreground: Color::Rgb(216, 222, 233),     // #d8dee9 nord4
+            background: Color::Rgb(46, 52, 64),        // #2e3440 nord0
+            primary: Color::Rgb(136, 192, 208),        // #88c0d0 nord8
+            secondary: Color::Rgb(163, 190, 140),      // #a3be8c nord14
+            error: Color::Rgb(191, 97, 106),           // #bf616a nord11
+            warning: Color::Rgb(235, 203, 139),        // #ebcb8b nord13
+            success: Color::Rgb(163, 190, 140),        // #a3be8c nord14
+            muted: Color::Rgb(97, 110, 136),           // #616e88 dimmed nord3 (AA 4.6:1)
+            accent: Color::Rgb(180, 142, 173),         // #b48ead nord15
+            border: Color::Rgb(76, 86, 106),           // #4c566a nord3
+            user_border: Color::Rgb(136, 192, 208),    // #88c0d0 nord8
+            user_bg: Color::Rgb(59, 66, 82),           // #3b4252 nord1
+            cursor_fg: Color::Rgb(46, 52, 64),         // #2e3440
+            cursor_bg: Color::Rgb(216, 222, 233),      // #d8dee9
+            selection_bg: Color::Rgb(67, 76, 94),      // #434c5e nord2
+            code_fg: Color::Rgb(235, 203, 139),        // #ebcb8b nord13
+            code_bg: Color::Rgb(59, 66, 82),           // #3b4252 nord1
+            tool_pending_bg: Color::Rgb(46, 52, 64),   // #2e3440 nord0
+            tool_executing_bg: Color::Rgb(59, 56, 40), // amber tint
+            tool_success_bg: Color::Rgb(40, 56, 44),   // green tint
+            tool_error_bg: Color::Rgb(56, 42, 44),     // red tint
+        }
+    }
+    /// Catppuccin Mocha color scheme (dark).
+    pub fn catppuccin() -> Self {
+        Self {
+            foreground: Color::Rgb(205, 214, 244),     // #cdd6f4 text
+            background: Color::Rgb(30, 30, 46),        // #1e1e2e base
+            primary: Color::Rgb(137, 180, 250),        // #89b4fa blue
+            secondary: Color::Rgb(166, 227, 161),      // #a6e3a1 green
+            error: Color::Rgb(243, 139, 168),          // #f38ba8 red
+            warning: Color::Rgb(249, 226, 175),        // #f9e2af yellow
+            success: Color::Rgb(166, 227, 161),        // #a6e3a1 green
+            muted: Color::Rgb(127, 132, 156),          // #7f849c overlay1 (AA 5.6:1)
+            accent: Color::Rgb(203, 166, 247),         // #cba6f7 mauve
+            border: Color::Rgb(88, 91, 112),           // #585b70 surface2
+            user_border: Color::Rgb(137, 180, 250),    // #89b4fa
+            user_bg: Color::Rgb(49, 50, 68),           // #313244 surface0
+            cursor_fg: Color::Rgb(30, 30, 46),         // #1e1e2e
+            cursor_bg: Color::Rgb(205, 214, 244),      // #cdd6f4
+            selection_bg: Color::Rgb(69, 71, 90),      // #45475a surface1
+            code_fg: Color::Rgb(249, 226, 175),        // #f9e2af yellow
+            code_bg: Color::Rgb(49, 50, 68),           // #313244 surface0
+            tool_pending_bg: Color::Rgb(30, 30, 46),   // #1e1e2e
+            tool_executing_bg: Color::Rgb(44, 42, 30), // amber tint
+            tool_success_bg: Color::Rgb(32, 46, 36),   // green tint
+            tool_error_bg: Color::Rgb(48, 34, 40),     // red tint
+        }
+    }
+    /// GitHub Dark color scheme.
+    pub fn github_dark() -> Self {
+        Self {
+            foreground: Color::Rgb(201, 209, 217),     // #c9d1d9 fg.default
+            background: Color::Rgb(13, 17, 23),        // #0d1117 canvas.default
+            primary: Color::Rgb(47, 129, 247),         // #2f81f7 accent
+            secondary: Color::Rgb(63, 185, 80),        // #3fb950 success
+            error: Color::Rgb(248, 81, 73),            // #f85149 danger
+            warning: Color::Rgb(210, 153, 34),         // #d29922 attention
+            success: Color::Rgb(63, 185, 80),          // #3fb950 success
+            muted: Color::Rgb(139, 148, 158),          // #8b949e fg.muted (AA 5.0:1)
+            accent: Color::Rgb(163, 113, 247),         // #a371f7 done
+            border: Color::Rgb(48, 54, 61),            // #30363d border.default
+            user_border: Color::Rgb(47, 129, 247),     // #2f81f7
+            user_bg: Color::Rgb(22, 27, 34),           // #161b22 subtle
+            cursor_fg: Color::Rgb(13, 17, 23),         // #0d1117
+            cursor_bg: Color::Rgb(201, 209, 217),      // #c9d1d9
+            selection_bg: Color::Rgb(38, 79, 120),     // #264f78 selection
+            code_fg: Color::Rgb(210, 153, 34),         // #d29922 attention
+            code_bg: Color::Rgb(22, 27, 34),           // #161b22 subtle
+            tool_pending_bg: Color::Rgb(13, 17, 23),   // #0d1117
+            tool_executing_bg: Color::Rgb(34, 30, 18), // amber tint
+            tool_success_bg: Color::Rgb(18, 30, 20),   // green tint
+            tool_error_bg: Color::Rgb(34, 18, 20),     // red tint
+        }
+    }
+    /// Monokai color scheme (dark).
+    pub fn monokai() -> Self {
+        Self {
+            foreground: Color::Rgb(248, 248, 242),     // #f8f8f2
+            background: Color::Rgb(39, 40, 34),        // #272822
+            primary: Color::Rgb(102, 217, 239),        // #66d9ef cyan
+            secondary: Color::Rgb(166, 226, 46),       // #a6e22e green
+            error: Color::Rgb(249, 38, 114),           // #f92672 pink
+            warning: Color::Rgb(253, 151, 31),         // #fd971f orange
+            success: Color::Rgb(166, 226, 46),         // #a6e22e green
+            muted: Color::Rgb(117, 113, 94),           // #75715e comment (AA 4.1:1)
+            accent: Color::Rgb(174, 129, 255),         // #ae81ff purple
+            border: Color::Rgb(73, 72, 62),            // #49483e
+            user_border: Color::Rgb(102, 217, 239),    // #66d9ef
+            user_bg: Color::Rgb(62, 61, 50),           // #3e3d32
+            cursor_fg: Color::Rgb(39, 40, 34),         // #272822
+            cursor_bg: Color::Rgb(248, 248, 240),      // #f8f8f0
+            selection_bg: Color::Rgb(73, 72, 62),      // #49483e
+            code_fg: Color::Rgb(230, 219, 116),        // #e6db74 yellow
+            code_bg: Color::Rgb(62, 61, 50),           // #3e3d32
+            tool_pending_bg: Color::Rgb(39, 40, 34),   // #272822
+            tool_executing_bg: Color::Rgb(48, 40, 24), // amber tint
+            tool_success_bg: Color::Rgb(34, 44, 26),   // green tint
+            tool_error_bg: Color::Rgb(50, 30, 38),     // red tint
+        }
+    }
 
     /// Convert to ratatui Style with foreground and background.
     pub fn to_style(&self) -> Style {
@@ -291,7 +395,58 @@ impl Theme {
             symbols: crate::symbols::Symbols::default(),
         }
     }
-
+    /// Built-in Nord theme.
+    pub fn nord() -> Self {
+        Self {
+            name: "nord".into(),
+            colors: ColorScheme::nord(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Catppuccin Mocha theme.
+    pub fn catppuccin() -> Self {
+        Self {
+            name: "catppuccin".into(),
+            colors: ColorScheme::catppuccin(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in GitHub Dark theme.
+    pub fn github_dark() -> Self {
+        Self {
+            name: "github_dark".into(),
+            colors: ColorScheme::github_dark(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Monokai theme.
+    pub fn monokai() -> Self {
+        Self {
+            name: "monokai".into(),
+            colors: ColorScheme::monokai(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Resolve a theme by its settings name.
+    ///
+    /// Maps the names used in `settings.theme` / the setup wizard /
+    /// the `/settings` overlay to a built-in [`Theme`]. Unknown names
+    /// and the sentinel `"default"` fall back to the dark theme.
+    pub fn by_name(name: &str) -> Self {
+        match name {
+            "oxi_light" | "light" => Self::light(),
+            "nord" => Self::nord(),
+            "catppuccin" => Self::catppuccin(),
+            "github_dark" => Self::github_dark(),
+            "monokai" => Self::monokai(),
+            // "oxi_dark", "dark", "default", "", unknown → dark
+            _ => Self::dark(),
+        }
+    }
     /// Set the active glyph set, replacing the symbol table.
     pub fn with_glyph_set(mut self, set: crate::symbols::GlyphSet) -> Self {
         self.symbols = set.symbols();
@@ -322,6 +477,18 @@ impl Default for Theme {
         Self::dark()
     }
 }
+/// All built-in theme names, in the order the `/settings` overlay cycles them.
+///
+/// These match the names stored in `settings.theme` and resolved by
+/// [`Theme::by_name`].
+pub const THEME_NAMES: &[&str] = &[
+    "oxi_dark",
+    "oxi_light",
+    "nord",
+    "catppuccin",
+    "github_dark",
+    "monokai",
+];
 
 // ---------------------------------------------------------------------------
 // Theme loading from files (TOML / JSON)
@@ -622,16 +789,16 @@ impl ThemeManager {
         *self.theme.write() = theme;
     }
 
-    /// Set the active theme by name ("dark" or "light").
+    /// Set the active theme by name. Resolves through [`Theme::by_name`],
+    /// which knows all six built-in themes (`"oxi_dark"`, `"oxi_light"`,
+    /// `"nord"`, `"catppuccin"`, `"github_dark"`, `"monokai"`) and the
+    /// short aliases (`"dark"`, `"light"`).
     ///
-    /// Returns `true` if the name was recognized.
+    /// Always returns `true`: unknown / empty / `"default"` all fall
+    /// back to the dark theme via `Theme::by_name`. Use a
+    /// [`ThemeRegistry`] when you also need custom-theme resolution.
     pub fn set_theme_by_name(&self, name: &str) -> bool {
-        let theme = match name {
-            "dark" => Theme::dark(),
-            "light" => Theme::light(),
-            _ => return false,
-        };
-        self.set_theme(theme);
+        self.set_theme(Theme::by_name(name));
         true
     }
 
@@ -686,6 +853,147 @@ impl ThemeManager {
     /// Set the polling interval for file watching (default 1s).
     pub fn set_poll_interval(&mut self, interval: std::time::Duration) {
         self.poll_interval = interval;
+    }
+
+    /// Lightweight external-file mtime check.
+    ///
+    /// Unlike [`ThemeManager::check_reload`], this does NOT load or
+    /// re-parse anything — it only compares the path's mtime to the
+    /// last seen value and returns `true` if it changed. The caller is
+    /// responsible for reloading whatever the path pointed to (e.g.
+    /// re-read `Settings`, re-resolve via `ThemeRegistry`).
+    ///
+    /// Use this when the watched file is something other than a
+    /// theme file — typically the global `settings.toml`, which the
+    /// TUI render loop polls to pick up hand-edited `theme = "..."`
+    /// changes without a restart.
+    ///
+    /// Polling is throttled by the same `poll_interval` as
+    /// [`ThemeManager::check_reload`]. Pass `Some(mtime)` on the
+    /// first call to seed the baseline.
+    pub fn check_external(
+        &mut self,
+        path: &std::path::Path,
+        initial: Option<std::time::SystemTime>,
+    ) -> bool {
+        if self.last_poll.elapsed() < self.poll_interval {
+            return false;
+        }
+        self.last_poll = Instant::now();
+
+        let current = match std::fs::metadata(path).ok().and_then(|m| m.modified().ok()) {
+            Some(t) => t,
+            None => return false,
+        };
+
+        match initial {
+            Some(prev) => current > prev,
+            // No baseline → caller hasn't seeded yet. This is the
+            // "first poll" case: don't fire a spurious reload.
+            None => false,
+        }
+    }
+}
+// ---------------------------------------------------------------------------
+// Theme registry (built-in + custom)
+// ---------------------------------------------------------------------------
+
+/// Resolves themes by name from a combined built-in + custom pool.
+///
+/// Use this at runtime (CLI bootstrap, TUI render loop) instead of the
+/// static [`Theme::by_name`], which only knows the six built-ins. The
+/// registry layers custom themes loaded from `~/.oxi/themes/*.toml`,
+/// `~/.oxi/themes/*.json`, and `<project>/.oxi/themes/*.json` over the
+/// built-ins.
+///
+/// Resolution order for [`ThemeRegistry::resolve`]:
+/// 1. Custom themes (by lowercased id == lowercased name).
+/// 2. Built-in themes (see [`THEME_NAMES`]).
+/// 3. Fallback: dark theme (when name is empty, `"default"`, or unknown).
+#[derive(Clone, Debug)]
+pub struct ThemeRegistry {
+    builtins: std::collections::HashMap<String, Theme>,
+    custom: std::collections::HashMap<String, Theme>,
+}
+
+impl ThemeRegistry {
+    /// Build a registry seeded with the six built-in themes. No custom
+    /// themes; call [`ThemeRegistry::add_custom`] /
+    /// [`ThemeRegistry::add_custom_file`] to populate.
+    ///
+    /// The `builtins` map contains both the canonical [`THEME_NAMES`]
+    /// keys (`"oxi_dark"`, `"oxi_light"`, `"nord"`, `"catppuccin"`,
+    /// `"github_dark"`, `"monokai"`) and the short aliases
+    /// (`"dark"`, `"light"`) so that [`ThemeRegistry::resolve`] can
+    /// accept either form regardless of how the user typed it in
+    /// `settings.toml`.
+    pub fn with_builtins() -> Self {
+        let mut builtins = std::collections::HashMap::with_capacity(THEME_NAMES.len() * 2);
+        for &name in THEME_NAMES {
+            builtins.insert(name.to_string(), Theme::by_name(name));
+        }
+        // Short aliases that `Theme::by_name` historically accepts.
+        builtins.insert("dark".to_string(), Theme::dark());
+        builtins.insert("light".to_string(), Theme::light());
+        Self {
+            builtins,
+            custom: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Insert a parsed custom theme keyed by its lowercased `name`.
+    /// Overwrites any existing custom theme with the same name.
+    pub fn add_custom(&mut self, theme: Theme) {
+        let key = theme.name.to_lowercase();
+        self.custom.insert(key, theme);
+    }
+
+    /// Parse a TOML or JSON theme file and add it to the registry.
+    /// Returns the parsed theme on success. The format is detected by
+    /// file extension (`.toml` or `.json`); other extensions are
+    /// rejected. Invalid files return an error without mutating state.
+    ///
+    /// `label` is used in error messages — pass something like the
+    /// path or `"(inline)"`.
+    pub fn add_custom_file(&mut self, path: &Path) -> anyhow::Result<Theme> {
+        let file = ThemeFile::load(path)?;
+        let theme = file.into_theme();
+        self.add_custom(theme.clone());
+        Ok(theme)
+    }
+
+    /// Resolve a theme by name.
+    ///
+    /// Resolution order:
+    /// 1. Custom themes (lowercased name).
+    /// 2. Built-in themes (the `builtins` map contains both the
+    ///    canonical [`THEME_NAMES`] keys like `"oxi_dark"` and the
+    ///    short aliases like `"dark"`).
+    /// 3. Final fallback: dark theme (for unknown / empty / `"default"`).
+    pub fn resolve(&self, name: &str) -> Theme {
+        let key = name.to_lowercase();
+        if let Some(theme) = self.custom.get(&key) {
+            return theme.clone();
+        }
+        if let Some(theme) = self.builtins.get(&key) {
+            return theme.clone();
+        }
+        // Hard fallback — unknown / "default" / "" all land on dark.
+        self.builtins
+            .get("oxi_dark")
+            .cloned()
+            .unwrap_or_else(Theme::dark)
+    }
+
+    /// Names of all loaded custom themes (insertion order is unspecified),
+    /// suitable for the `/settings` overlay's choice list.
+    pub fn custom_names(&self) -> Vec<String> {
+        self.custom.keys().cloned().collect()
+    }
+
+    /// Number of custom themes currently registered.
+    pub fn custom_count(&self) -> usize {
+        self.custom.len()
     }
 }
 
@@ -748,11 +1056,89 @@ mod tests {
 
     #[test]
     fn theme_manager_set_by_name() {
+        // All six built-ins + the short "dark"/"light" aliases must
+        // resolve via ThemeManager::set_theme_by_name (which delegates
+        // to Theme::by_name).
         let mgr = ThemeManager::dark();
-        assert!(mgr.set_theme_by_name("light"));
-        assert_eq!(mgr.theme().name, "light");
-        assert!(!mgr.set_theme_by_name("nonexistent"));
-        assert_eq!(mgr.theme().name, "light");
+        for (name, expected) in [
+            ("oxi_dark", "dark"),
+            ("oxi_light", "light"),
+            ("nord", "nord"),
+            ("catppuccin", "catppuccin"),
+            ("github_dark", "github_dark"),
+            ("monokai", "monokai"),
+            ("dark", "dark"),
+            ("light", "light"),
+        ] {
+            assert!(mgr.set_theme_by_name(name), "expected {name} to resolve");
+            assert_eq!(
+                mgr.theme().name,
+                expected,
+                "set_theme_by_name({name}) → {}",
+                mgr.theme().name
+            );
+        }
+        // Unknown names still "succeed" but fall back to dark — the
+        // contract is "never fail", callers handle the fallback.
+        assert!(mgr.set_theme_by_name("nonexistent"));
+        assert_eq!(mgr.theme().name, "dark");
+        assert!(mgr.set_theme_by_name(""));
+        assert_eq!(mgr.theme().name, "dark");
+        assert!(mgr.set_theme_by_name("default"));
+        assert_eq!(mgr.theme().name, "dark");
+    }
+
+    #[test]
+    fn theme_manager_check_external_detects_mtime_change() {
+        let dir = std::env::temp_dir().join("oxi-tui-check-external");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.toml");
+        std::fs::write(&path, "theme = \"dark\"\n").unwrap();
+
+        let mut mgr = ThemeManager::dark();
+        mgr.set_poll_interval(std::time::Duration::from_millis(50));
+
+        // Seed the baseline by reading the current mtime.
+        let baseline = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        // First poll: no change expected.
+        assert!(!mgr.check_external(&path, Some(baseline)));
+
+        // Modify the file. mtime granularity on some filesystems is
+        // 1s, so bump it twice with a sleep to guarantee a change.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(&path, "theme = \"nord\"\n").unwrap();
+        let new_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(new_mtime > baseline, "mtime should advance");
+
+        assert!(mgr.check_external(&path, Some(baseline)));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn theme_manager_check_external_returns_false_for_missing_path() {
+        let mut mgr = ThemeManager::dark();
+        mgr.set_poll_interval(std::time::Duration::from_millis(10));
+        let bogus = std::path::PathBuf::from("/nonexistent/oxi-tui/check-external");
+        // Missing file → no mtime → returns false. The caller is
+        // expected to surface this as a load error elsewhere.
+        assert!(!mgr.check_external(&bogus, None));
+    }
+
+    #[test]
+    fn theme_manager_check_external_no_baseline_does_not_fire() {
+        // With `initial = None`, the very first poll must NOT fire a
+        // spurious "changed" event — the caller hasn't seeded yet.
+        let dir = std::env::temp_dir().join("oxi-tui-check-external-nobase");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("f.toml");
+        std::fs::write(&path, "x = 1\n").unwrap();
+
+        let mut mgr = ThemeManager::dark();
+        mgr.set_poll_interval(std::time::Duration::from_millis(10));
+        assert!(!mgr.check_external(&path, None));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -812,5 +1198,202 @@ mod tests {
         );
         theme.set_glyph_set(crate::symbols::GlyphSet::Ascii);
         assert_eq!(theme.symbols, crate::symbols::Symbols::ascii());
+    }
+    #[test]
+    fn theme_by_name_resolves_all_builtins() {
+        assert_eq!(Theme::by_name("oxi_dark").name, "dark");
+        assert_eq!(Theme::by_name("oxi_light").name, "light");
+        assert_eq!(Theme::by_name("nord").name, "nord");
+        assert_eq!(Theme::by_name("catppuccin").name, "catppuccin");
+        assert_eq!(Theme::by_name("github_dark").name, "github_dark");
+        assert_eq!(Theme::by_name("monokai").name, "monokai");
+    }
+    #[test]
+    fn theme_by_name_falls_back_to_dark() {
+        // Sentinel and unknown names all resolve to the dark theme.
+        assert_eq!(Theme::by_name("default").name, "dark");
+        assert_eq!(Theme::by_name("").name, "dark");
+        assert_eq!(Theme::by_name("nonexistent").name, "dark");
+    }
+    #[test]
+    fn color_scheme_constructors_distinct_backgrounds() {
+        // Each built-in scheme must have a unique background so themes
+        // are visually distinguishable.
+        let bgs = [
+            ColorScheme::dark().background,
+            ColorScheme::light().background,
+            ColorScheme::nord().background,
+            ColorScheme::catppuccin().background,
+            ColorScheme::github_dark().background,
+            ColorScheme::monokai().background,
+        ];
+        for i in 0..bgs.len() {
+            for j in (i + 1)..bgs.len() {
+                assert_ne!(bgs[i], bgs[j], "backgrounds at {i} and {j} collide");
+            }
+        }
+    }
+
+    // ── ThemeRegistry ───────────────────────────────────────────────
+
+    #[test]
+    fn registry_resolves_all_six_builtins() {
+        let reg = ThemeRegistry::with_builtins();
+        for &name in THEME_NAMES {
+            let t = reg.resolve(name);
+            // built-in `name` is the long form (e.g. "oxi_dark"); the
+            // resolved theme stores its short canonical name ("dark").
+            // We check the alias also resolves.
+            assert!(!t.name.is_empty(), "resolved theme must have a name");
+        }
+        // Short aliases also work.
+        assert_eq!(reg.resolve("dark").name, "dark");
+        assert_eq!(reg.resolve("light").name, "light");
+        assert_eq!(reg.resolve("nord").name, "nord");
+        assert_eq!(reg.resolve("catppuccin").name, "catppuccin");
+        assert_eq!(reg.resolve("github_dark").name, "github_dark");
+        assert_eq!(reg.resolve("monokai").name, "monokai");
+    }
+
+    #[test]
+    fn registry_unknown_name_falls_back_to_dark() {
+        let reg = ThemeRegistry::with_builtins();
+        assert_eq!(reg.resolve("").name, "dark");
+        assert_eq!(reg.resolve("default").name, "dark");
+        assert_eq!(reg.resolve("nonexistent").name, "dark");
+        // oxios-style sentinel.
+        assert_eq!(reg.resolve("oxi_dark").name, "dark");
+    }
+
+    #[test]
+    fn registry_add_custom_and_resolve() {
+        let mut reg = ThemeRegistry::with_builtins();
+        let custom = Theme {
+            name: "my_red".into(),
+            colors: ColorScheme {
+                foreground: Color::Rgb(255, 255, 255),
+                background: Color::Rgb(20, 0, 0),
+                ..ColorScheme::dark()
+            },
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        };
+        reg.add_custom(custom);
+
+        let resolved = reg.resolve("my_red");
+        assert_eq!(resolved.name, "my_red");
+        assert_eq!(resolved.colors.background, Color::Rgb(20, 0, 0));
+        // Custom shouldn't disturb built-ins.
+        assert_eq!(reg.resolve("nord").name, "nord");
+    }
+
+    #[test]
+    fn registry_custom_overrides_builtin_with_same_name() {
+        // User putting a file named "nord.toml" in ~/.oxi/themes/
+        // intentionally overrides the built-in Nord palette.
+        let mut reg = ThemeRegistry::with_builtins();
+        let custom_nord = Theme {
+            name: "nord".into(),
+            colors: ColorScheme {
+                foreground: Color::Rgb(0, 0, 0),
+                ..ColorScheme::dark()
+            },
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        };
+        reg.add_custom(custom_nord);
+
+        assert_eq!(reg.resolve("nord").colors.foreground, Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn registry_custom_names_lists_inserted() {
+        let mut reg = ThemeRegistry::with_builtins();
+        assert_eq!(reg.custom_count(), 0);
+        assert!(reg.custom_names().is_empty());
+
+        reg.add_custom(Theme {
+            name: "alpha".into(),
+            colors: ColorScheme::dark(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        });
+        reg.add_custom(Theme {
+            name: "beta".into(),
+            colors: ColorScheme::dark(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        });
+        assert_eq!(reg.custom_count(), 2);
+        let names = reg.custom_names();
+        assert!(names.contains(&"alpha".to_string()));
+        assert!(names.contains(&"beta".to_string()));
+    }
+
+    #[test]
+    fn registry_add_custom_file_parses_json_and_toml() {
+        let dir = std::env::temp_dir().join("oxi-tui-registry-test");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // JSON theme
+        let json_path = dir.join("my_json.json");
+        std::fs::write(
+            &json_path,
+            r##"{"name":"json_theme","colors":{"primary":"#ff00ff"}}"##,
+        )
+        .unwrap();
+        // TOML theme
+        let toml_path = dir.join("my_toml.toml");
+        std::fs::write(
+            &toml_path,
+            r##"name = "toml_theme"
+[colors]
+primary = "#00ff00"
+"##,
+        )
+        .unwrap();
+
+        let mut reg = ThemeRegistry::with_builtins();
+        let j = reg.add_custom_file(&json_path).unwrap();
+        assert_eq!(j.name, "json_theme");
+        assert_eq!(j.colors.primary, Color::Rgb(255, 0, 255));
+
+        let t = reg.add_custom_file(&toml_path).unwrap();
+        assert_eq!(t.name, "toml_theme");
+        assert_eq!(t.colors.primary, Color::Rgb(0, 255, 0));
+
+        assert_eq!(
+            reg.resolve("json_theme").colors.primary,
+            Color::Rgb(255, 0, 255)
+        );
+        assert_eq!(
+            reg.resolve("toml_theme").colors.primary,
+            Color::Rgb(0, 255, 0)
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn registry_add_custom_file_rejects_unknown_extension() {
+        let dir = std::env::temp_dir().join("oxi-tui-registry-ext");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("bad.txt");
+        std::fs::write(&p, "name = \"x\"").unwrap();
+
+        let mut reg = ThemeRegistry::with_builtins();
+        let err = reg.add_custom_file(&p).unwrap_err();
+        assert!(err.to_string().contains("Unsupported"));
+        assert_eq!(reg.custom_count(), 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn registry_add_custom_file_missing_path_errors() {
+        let mut reg = ThemeRegistry::with_builtins();
+        let bogus = std::path::PathBuf::from("/nonexistent/oxi-tui/test.json");
+        assert!(reg.add_custom_file(&bogus).is_err());
+        assert_eq!(reg.custom_count(), 0);
     }
 }

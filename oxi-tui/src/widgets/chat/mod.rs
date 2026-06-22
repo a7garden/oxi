@@ -450,17 +450,17 @@ mod tests {
 
 #[cfg(test)]
 mod table_tests {
-    use super::*;
+    use crate::symbols::Symbols;
     use crate::table_renderer::render_markdown_table;
     use crate::theme::ThemeStyles;
-    use markdown::md_lines;
+    use crate::widgets::chat::markdown::md_lines;
 
     #[test]
     fn render_markdown_table_basic() {
         let md = "| Name | Age |\n|---|---|
 | Alice | 30 |
 | Bob | 25 |";
-        let lines = render_markdown_table(md, 80);
+        let lines = render_markdown_table(md, 80, &Symbols::unicode());
         assert!(!lines.is_empty(), "Expected table lines, got empty");
         let text = lines.iter().map(|l| l.to_string()).collect::<String>();
         assert!(text.contains('┌'), "Expected top border, got: {}", text);
@@ -489,7 +489,7 @@ mod table_tests {
         let md = "| Name | Value | Extra |
 |---|---|---|
 | Alice | | 100 |";
-        let out = render_markdown_table(md, 60);
+        let out = render_markdown_table(md, 60, &Symbols::unicode());
         let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
             "
 ",
@@ -504,7 +504,7 @@ mod table_tests {
 |---|
 | One |
 | Two |";
-        let out = render_markdown_table(md, 30);
+        let out = render_markdown_table(md, 30, &Symbols::unicode());
         let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
             "
 ",
@@ -523,7 +523,7 @@ mod table_tests {
         let md = "| Name | Age | City |
 |---|---|---|
 | Alice | 30 | London |";
-        let out = render_markdown_table(md, 60);
+        let out = render_markdown_table(md, 60, &Symbols::unicode());
         let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
             "
 ",
@@ -537,7 +537,7 @@ mod table_tests {
         let md = "| Name | Desc |
 |---|---|
 | Test | `code` |";
-        let out = render_markdown_table(md, 50);
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
         let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
             "
 ",
@@ -550,7 +550,7 @@ mod table_tests {
         let md = "| A | B |
 |---|---|
 | 1 | 2 |";
-        let out = render_markdown_table(md, 30);
+        let out = render_markdown_table(md, 30, &Symbols::unicode());
         // Should have: top border, header, sep, body, bottom border
         assert!(out.len() >= 5, "Should have at least 5 lines");
     }
@@ -560,7 +560,7 @@ mod table_tests {
         let md = "| A | B |
 |---|---|
 | X | Y |";
-        let out = render_markdown_table(md, 30);
+        let out = render_markdown_table(md, 30, &Symbols::unicode());
         let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
             "
 ",
@@ -580,12 +580,13 @@ mod table_tests {
 
 #[cfg(test)]
 mod complete_table_verification {
+    use crate::symbols::Symbols;
     use crate::table_renderer::render_markdown_table;
 
     #[test]
     fn test_mixed_content_before_table() {
         let md = "Check out this table:\n\n| Name | Value |\n|---|---|\n| Alpha | 100 |";
-        let out = render_markdown_table(md, 50);
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
         let text: String = out
             .iter()
             .map(|l| l.to_string())
@@ -599,7 +600,7 @@ mod complete_table_verification {
     #[test]
     fn test_mixed_content_after_table() {
         let md = "| A | B |\n|---|---|\n| X | Y |\n\nThat was the table.";
-        let out = render_markdown_table(md, 50);
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
         let text: String = out
             .iter()
             .map(|l| l.to_string())
@@ -612,7 +613,7 @@ mod complete_table_verification {
     #[test]
     fn test_mixed_content_both_sides() {
         let md = "Start\n\n| H1 | H2 | H3 |\n|---|---|---|\n| C1 | C2 | C3 |\n\nEnd";
-        let out = render_markdown_table(md, 60);
+        let out = render_markdown_table(md, 60, &Symbols::unicode());
         let text: String = out
             .iter()
             .map(|l| l.to_string())
@@ -626,7 +627,7 @@ mod complete_table_verification {
     #[test]
     fn test_narrow_terminal() {
         let md = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seoul |";
-        let out = render_markdown_table(md, 20);
+        let out = render_markdown_table(md, 20, &Symbols::unicode());
         assert!(!out.is_empty());
         let text: String = out
             .iter()
@@ -639,7 +640,7 @@ mod complete_table_verification {
     #[test]
     fn test_cell_wrapping() {
         let md = "| Short | Very Long Header Text Here |\n|---|---|\n| Data | Another long cell that needs wrapping |";
-        let out = render_markdown_table(md, 50);
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
         let text: String = out
             .iter()
             .map(|l| l.to_string())
@@ -652,7 +653,7 @@ mod complete_table_verification {
     #[test]
     fn test_multiple_rows_separators() {
         let md = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |";
-        let out = render_markdown_table(md, 40);
+        let out = render_markdown_table(md, 40, &Symbols::unicode());
         let text: String = out
             .iter()
             .map(|l| l.to_string())
@@ -674,10 +675,44 @@ mod complete_table_verification {
     #[test]
     fn test_header_bold_styling() {
         let md = "| Name | Value |\n|---|---|\n| X | Y |";
-        let out = render_markdown_table(md, 50);
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
         assert!(
             out.len() >= 4,
             "Should have top border + header + separator + body"
         );
+    }
+
+    #[test]
+    fn table_renders_in_ascii_glyph_set() {
+        // Glyph-set policy: when the user picks ASCII mode, table
+        // borders must use '+', '-', '|' — never the Unicode
+        // box-drawing chars that the renderer hardcoded before.
+        let symbols = crate::symbols::Symbols::ascii();
+        let out = render_markdown_table("| A | B |\n|---|---|\n| 1 | 2 |\n", 30, &symbols);
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains('+'),
+            "ascii table should use '+', got:\n{text}"
+        );
+        assert!(
+            text.contains('-'),
+            "ascii table should use '-', got:\n{text}"
+        );
+        assert!(
+            text.contains('|'),
+            "ascii table should use '|', got:\n{text}"
+        );
+        // And no box-drawing characters should leak through.
+        for forbidden in ['┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼', '─', '│']
+        {
+            assert!(
+                !text.contains(forbidden),
+                "ascii table must not contain {forbidden:?}, got:\n{text}"
+            );
+        }
     }
 }
