@@ -7,6 +7,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — 테마 시스템 전면 재설계 (Phase 1 + 2)
+
+- **7 new background color slots** added to `ColorScheme` (total: 28):
+  `response_bg`, `thinking_bg`, `surface_bg`, `panel_bg`, `diff_add_bg`,
+  `diff_remove_bg`, `diff_hunk_bg`. Each is themeable via TOML/JSON and
+  populated with derived values across all 6 built-in themes
+  (`oxi-tui/src/theme.rs`).
+
+### Fixed — dead theme slots wired to render code
+
+- **`user_bg`**: user message rows now fill the entire row width with
+  `user_bg` (previously only a 1-cell border stripe; the slot was defined
+  but never consumed) (`chat/render.rs`).
+- **`code_bg`**: fenced code blocks now paint `code_bg` via Line-level
+  style in `highlight_code()`; inline `` `code` `` uses theme-aware
+  `OxiStyleSheet` (previously hardcoded to dark-theme amber `#231e14`
+  regardless of active theme) (`highlight.rs`, `markdown_styles.rs`).
+- **`selection_bg`**: dashboard selection now uses explicit
+  `.bg(selection_bg)` instead of `Modifier::REVERSED` (terminal-default
+  swap) (`dashboard.rs`).
+- **Chat viewport, footer, completion popup, routing overlay, settings
+  overlay, thinking blocks**: all now paint their respective background
+  colors (`background`, `surface_bg`, `panel_bg`, `thinking_bg`) instead
+  of relying on terminal default transparency.
+- **Diff rendering**: added/removed/hunk lines now carry semantic
+  background tints (`diff_add_bg`, `diff_remove_bg`, `diff_hunk_bg`)
+  alongside their foreground colors via `Style::patch()` composition
+  (`tool_renderer.rs`).
+- **`DashboardWidget`**: no longer hardcodes `Theme::dark()` — accepts
+  `&Theme` as a parameter, so the MCP dashboard overlay respects the
+  active theme (`dashboard.rs`, `mcp_dashboard.rs`).
+- **`OxiStyleSheet`**: now theme-aware — heading, code, link, and
+  blockquote styles derive from the active `ThemeStyles` instead of
+  hardcoded RGB values. Constructed via `OxiStyleSheet::from_styles()`
+  (`markdown_styles.rs`).
+
+### Docs
+
+- `docs/THEME_GUIDE.md`: new comprehensive theme authoring guide with
+  full 28-slot TOML schema, color format reference, and brightness
+  hierarchy documentation.
+- `docs/designs/2026-06-24-theme-system-redesign.md`: finalized design
+  document (audit → review → implementation).
+- `examples/theme_demo.rs`: updated to print all 28 slots across 6
+  built-in themes.
+
+### Fixed — MCP dashboard completion (`/mcp dashboard`)
+
+- **`Disconnect` (`D`)**: was a "not yet implemented" stub. Implemented
+  `McpManager::disconnect` (public, idempotent — returns whether a live
+  connection was actually closed) and wired the `D` key to it
+  (`handlers.rs`, `mcp/mod.rs`).
+- **Consent keying bug**: the dashboard *displayed* consent via the
+  original (un-prefixed) tool name but *wrote* it via the prefixed name
+  (never read back at enforcement time), so `a`/`x` were silent no-ops.
+  All three paths — badge, `decide`, and `check` — now use the original
+  name. The overlay tracks per-item `ItemMeta { server, is_tool,
+  original_name }` so `a`/`x` only fire on tools (`mcp_dashboard.rs`).
+- **Server targeting from a tool selection**: `r`/`D` previously used the
+  selected item's id verbatim, so reconnect/disconnect on a *tool*
+  targeted the prefixed tool name and failed. They now target the owning
+  server (`meta.server`).
+- **`mark_refresh` never worked**: it was an inherent method, but every
+  call site dispatches through `Box<dyn OverlayComponent>` → the trait
+  vtable → the no-op default, so the dashboard never refreshed after
+  actions. It is now a proper trait override (`mcp_dashboard.rs`).
+- **`SetConsent`** now calls `mark_refresh()` so the ALLOW/DENY badge
+  updates immediately; **`ReconnectAll`** now reports
+  "reconnected X/Y servers" (`handlers.rs`).
+
+### Added
+
+- **`e: Manage`** key in the MCP dashboard: jumps from the read-only
+  runtime view to the interactive management overlay (add/edit/remove
+  servers, persisted to disk). New `McpAction::ManageServers` variant
+  (`mcp_dashboard.rs`, `handlers.rs`).
+
+### Fixed — `/model` selector shows duplicate models for aliased upstreams (#24)
+
+- **Provider alias deduplication**: when multiple providers share one upstream
+  API host (e.g. `zai` and `zai-coding-plan` both hit `api.z.ai`), the `/model`
+  selector and `/router` setup no longer list the same model under every alias.
+  A catalog provider is now shadowed when the user has *explicitly* registered
+  (stored credential or `settings.custom_providers` entry) another provider on
+  the same upstream host. Hosts with no explicit registration are left
+  untouched, so env-keyed builtins keep working without the setup wizard
+  (`oxi-cli/src/tui/slash/builtin/model.rs`, `router.rs`).
+
+### Fixed — session resume loses tool-call history and context (#23)
+
+- **LLM context restored on resume**: resuming a session now seeds the agent's
+  conversation state from the session branch, so the model sees prior user,
+  assistant, tool-call, and tool-result turns instead of a blank slate. The
+  new `resume_messages_from_branch` is the inverse of the persist mapping and
+  preserves `tool_call_id` pairing; compaction summaries are honoured
+  (`oxi-cli/src/app/agent_session.rs`).
+- **TUI chat restored on resume**: the resume and goto-entry reconstruction
+  paths now render tool-call and tool-result blocks (and correct Assistant
+  role) instead of collapsing history to user/assistant text. Shared via the
+  new `render_session_branch_to_chat` helper (`oxi-cli/src/tui/app.rs`).
+- **No double-persist**: the safety-net `persist_session` reconciles against
+  the on-disk entry count, so seeded history is never rewritten to the JSONL.
+
 ## [0.46.0] - 2026-06-22
 
 ### Added
