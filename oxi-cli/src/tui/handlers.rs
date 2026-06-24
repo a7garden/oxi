@@ -1125,18 +1125,43 @@ async fn handle_overlay_key(
                             let config = manager.config();
                             config.mcp_servers.keys().cloned().collect()
                         };
+                        let total = names.len();
+                        let mut ok = 0usize;
                         for srv in &names {
-                            let _ = manager.connect(srv).await;
+                            if manager.connect(srv).await.is_ok() {
+                                ok += 1;
+                            }
                         }
+                        state.add_notification(
+                            format!("MCP: reconnected {}/{} servers", ok, total),
+                            if ok == total {
+                                NotificationKind::Success
+                            } else {
+                                NotificationKind::Warning
+                            },
+                        );
                         if let Some(ref mut o) = state.overlay_state {
                             o.mark_refresh();
                         }
                     }
-                    MA::Disconnect(_server) => {
-                        state.add_notification(
-                            "Disconnect not yet implemented".into(),
-                            NotificationKind::Info,
-                        );
+                    MA::Disconnect(server) => {
+                        match manager.disconnect(&server).await {
+                            Ok(true) => state.add_notification(
+                                format!("MCP: disconnected {}", server),
+                                NotificationKind::Success,
+                            ),
+                            Ok(false) => state.add_notification(
+                                format!("MCP: '{}' was not connected", server),
+                                NotificationKind::Info,
+                            ),
+                            Err(e) => state.add_notification(
+                                format!("MCP disconnect failed: {}", e),
+                                NotificationKind::Error,
+                            ),
+                        }
+                        if let Some(ref mut o) = state.overlay_state {
+                            o.mark_refresh();
+                        }
                     }
                     MA::SetConsent {
                         name,
@@ -1153,7 +1178,22 @@ async fn handle_overlay_key(
                                 format!("MCP consent: {} → {}", name, state_name),
                                 NotificationKind::Success,
                             );
+                            // Reflect the new ALLOW/DENY badge immediately.
+                            if let Some(ref mut o) = state.overlay_state {
+                                o.mark_refresh();
+                            }
                         }
+                    }
+                    MA::ManageServers => {
+                        // Hand off to the interactive management overlay
+                        // (add / edit / remove servers, persisted to disk).
+                        let cwd = std::env::current_dir()
+                            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                        state.overlay_state =
+                            Some(Box::new(super::overlay::mcp_config::McpConfigOverlay::new(
+                                Some(manager.clone()),
+                                cwd,
+                            )));
                     }
                     MA::Refresh => {
                         if let Some(ref mut o) = state.overlay_state {

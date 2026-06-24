@@ -677,21 +677,45 @@ impl McpManager {
         }
     }
 
-    /// Disconnect a single server (used by the lifecycle idle timer).
-    async fn disconnect_server(self: &Arc<Self>, server_name: &str) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        if let Some(mut client) = inner.clients.remove(server_name) {
+    /// Disconnect a single server, regardless of reason. Idempotent:
+    /// returns `Ok(())` even if the server was not connected. Removes
+    /// the live client, clears cached tool metadata and any pending
+    /// "connecting" flag, and emits a [`LifecycleEvent::ServerStopped`].
+    async fn do_disconnect(self: &Arc<Self>, server_name: &str, reason: &str) -> Result<bool> {
+        // Take the client out of the map under the lock, then release
+        // the lock before awaiting transport shutdown (`close()` may
+        // block on the child process / HTTP DELETE).
+        let removed = {
+            let mut inner = self.inner.lock().await;
+            let client = inner.clients.remove(server_name);
+            inner.raw_tool_metadata.remove(server_name);
+            inner.connecting.remove(server_name);
+            client
+        };
+        let was_connected = removed.is_some();
+        if let Some(mut client) = removed {
             let _ = client.close().await;
         }
-        inner.raw_tool_metadata.remove(server_name);
-        inner.connecting.remove(server_name);
-        drop(inner);
 
         let _ = self.lifecycle_tx.send(LifecycleEvent::ServerStopped {
             server: server_name.to_string(),
         });
-        tracing::info!("MCP: disconnected '{}' (idle timeout)", server_name);
+        tracing::info!("MCP: disconnected '{}' ({})", server_name, reason);
+        Ok(was_connected)
+    }
+
+    /// Disconnect a single server (used by the lifecycle idle timer).
+    async fn disconnect_server(self: &Arc<Self>, server_name: &str) -> Result<()> {
+        self.do_disconnect(server_name, "idle timeout").await?;
         Ok(())
+    }
+
+    /// Manually disconnect a single server. Exposed for the MCP
+    /// dashboard's `D` key. Idempotent — returns `Ok(true)` if a live
+    /// connection was actually closed, `Ok(false)` if the server was
+    /// already disconnected.
+    pub async fn disconnect(self: &Arc<Self>, server_name: &str) -> Result<bool> {
+        self.do_disconnect(server_name, "manual").await
     }
 
     /// Health check + reconnect for a keep-alive server (v2.3 G6).
@@ -1345,5 +1369,74 @@ mod tests {
         assert_eq!(direct.len(), 1);
         assert_eq!(direct[0].original_name, "take_screenshot");
         assert_eq!(direct[0].prefixed_name, "chrome_take_screenshot");
+    }
+
+    #[tokio::test]
+    async fn disconnect_is_idempotent_and_clears_state() {
+        // A server that is *configured* and has leftover cached metadata,
+        // but no live client — as if the idle timer had already fired or
+        // the child process had exited. `disconnect` must report
+        // "was not connected" (Ok(false)) while still clearing the cached
+        // metadata and the pending "connecting" flag.
+        let dir = TempDir::new().unwrap();
+        let cache = MetadataCache::with_path(dir.path().join("mcp-cache.json"));
+        let consent = ConsentManager::with_path(dir.path().join("consent.json"));
+
+        let mut cfg = McpConfig::default();
+        cfg.mcp_servers.insert(
+            "chrome".into(),
+            ServerEntry {
+                command: Some("echo".into()),
+                ..Default::default()
+            },
+        );
+
+        let mut raw: HashMap<String, Vec<McpToolDef>> = HashMap::new();
+        raw.insert(
+            "chrome".to_string(),
+            vec![McpToolDef {
+                name: "navigate".into(),
+                description: None,
+                input_schema: None,
+            }],
+        );
+        let mut connecting = HashSet::new();
+        connecting.insert("chrome".to_string());
+
+        let (lifecycle_tx, _rx) = lifecycle_channel();
+        let mgr = Arc::new(McpManager {
+            inner: tokio::sync::Mutex::new(McpManagerInner {
+                clients: HashMap::new(),
+                raw_tool_metadata: raw,
+                failure_tracker: HashMap::new(),
+                connecting,
+            }),
+            config: parking_lot::RwLock::new(cfg),
+            cache,
+            consent,
+            lifecycle_tx,
+            credential_provider: parking_lot::RwLock::new(Arc::new(NoopCredentialProvider)),
+            _lifecycle_handle: Some(tokio::spawn(async {})),
+        });
+
+        // No live client → Ok(false), but metadata + connecting cleared.
+        let closed = mgr.disconnect("chrome").await.unwrap();
+        assert!(!closed, "disconnect should report not-connected");
+        {
+            let inner = mgr.inner.lock().await;
+            assert!(
+                !inner.raw_tool_metadata.contains_key("chrome"),
+                "cached metadata should be cleared"
+            );
+            assert!(
+                !inner.connecting.contains("chrome"),
+                "connecting flag should be cleared"
+            );
+        }
+
+        // Idempotent: a second call is still Ok(false) and never errors.
+        assert!(!mgr.disconnect("chrome").await.unwrap());
+        // An unknown server name is a clean Ok(false), not an error.
+        assert!(!mgr.disconnect("never-configured").await.unwrap());
     }
 }
