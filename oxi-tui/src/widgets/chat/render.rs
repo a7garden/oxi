@@ -55,6 +55,9 @@ impl Widget for EntryWidget<'_> {
             }
             LayoutKind::Text { lines, is_user } => {
                 if *is_user {
+                    // Fill the entire row with user_bg before drawing the
+                    // border + text, so the user message stands out.
+                    buf.set_style(rect, self.styles.user_bg);
                     let block = Block::default()
                         .borders(Borders::LEFT)
                         .border_style(self.styles.user_border);
@@ -76,6 +79,9 @@ impl Widget for EntryWidget<'_> {
                         buf.set_line(inner.x, y, line, inner.width);
                     }
                 } else {
+                    // Fill with response_bg (defaults to background, but
+                    // themeable for subtle assistant-row distinction).
+                    buf.set_style(rect, self.styles.response_bg);
                     // Don't set .style() here — markdown Spans already carry
                     // their own styling (bold, italic, code, headings).
                     // Paragraph::style() would override all per-Span styles.
@@ -351,6 +357,8 @@ impl Widget for EntryWidget<'_> {
                 collapsed,
                 key: _,
             } => {
+                // Fill the thinking block area with thinking_bg.
+                buf.set_style(rect, self.styles.thinking_bg);
                 let filtered = filter_tool_json(content);
                 let line_count = filtered.lines().count();
                 let mut lines: Vec<Line<'static>> = Vec::new();

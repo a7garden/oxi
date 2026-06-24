@@ -167,6 +167,11 @@ impl StatefulWidget for RoutingStatus<'_> {
         if !state.visible || area.width < 10 || area.height < 4 {
             return;
         }
+        // Fill the overlay area with panel_bg before drawing borders.
+        buf.set_style(
+            area,
+            ratatui::style::Style::default().bg(self.theme.colors.panel_bg),
+        );
 
         let styles = self.theme.to_styles();
         let d = &state.data;

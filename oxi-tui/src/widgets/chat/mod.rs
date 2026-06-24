@@ -53,6 +53,12 @@ impl StatefulWidget for ChatView<'_> {
         if area.width < 4 || area.height < 1 {
             return;
         }
+        // Paint the entire viewport with the theme background *first*.
+        // Every entry that doesn't explicitly set its own bg inherits this.
+        buf.set_style(
+            area,
+            ratatui::style::Style::default().bg(self.theme.colors.background),
+        );
         let styles = self.theme.to_styles();
         let width = area.width;
 
@@ -63,6 +69,7 @@ impl StatefulWidget for ChatView<'_> {
         // Clear click regions before recompute
         state.thinking_regions.clear();
         state.tool_regions.clear();
+        state.message_regions.clear();
 
         // Get layout computed with inner_width for correct height measurements
         let layout = state.get_layout(inner_width, &styles);
@@ -129,6 +136,16 @@ impl StatefulWidget for ChatView<'_> {
                 state
                     .tool_regions
                     .push((area.y + rel_y, region_bottom, key.clone()));
+            }
+
+            // Track copyable message regions (skip pure spacers/dividers)
+            if !matches!(
+                entry.kind,
+                LayoutKind::Spacer | LayoutKind::Rule | LayoutKind::ResponseDivider
+            ) {
+                state
+                    .message_regions
+                    .push((area.y + rel_y, region_bottom, entry.msg_idx));
             }
 
             // For entries fully within the viewport, render directly.

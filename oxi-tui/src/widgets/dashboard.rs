@@ -233,13 +233,14 @@ fn item_matches(item: &DashboardItem, filter: &str) -> bool {
 // ── Widget ─────────────────────────────────────────────────────────────
 
 /// The dashboard widget itself.
-pub struct DashboardWidget {
+pub struct DashboardWidget<'a> {
     data: DashboardData,
+    theme: &'a Theme,
 }
 
-impl DashboardWidget {
-    pub fn new(data: DashboardData) -> Self {
-        Self { data }
+impl<'a> DashboardWidget<'a> {
+    pub fn new(data: DashboardData, theme: &'a Theme) -> Self {
+        Self { data, theme }
     }
 
     pub fn data(&self) -> &DashboardData {
@@ -255,11 +256,11 @@ impl DashboardWidget {
     }
 }
 
-impl StatefulWidget for DashboardWidget {
+impl StatefulWidget for DashboardWidget<'_> {
     type State = DashboardState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let theme = Theme::dark();
+        let theme = self.theme;
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.colors.border))
@@ -313,14 +314,15 @@ impl StatefulWidget for DashboardWidget {
                     let mut spans = vec![
                         Span::styled(
                             format!("{} ", item.status.symbol(&theme.symbols)),
-                            item.status.style(&theme),
+                            item.status.style(theme),
                         ),
                         Span::styled(
                             item.label.clone(),
                             if is_selected {
                                 Style::default()
                                     .fg(theme.colors.primary)
-                                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                                    .bg(theme.colors.selection_bg)
+                                    .add_modifier(Modifier::BOLD)
                             } else {
                                 Style::default().fg(theme.colors.foreground)
                             },

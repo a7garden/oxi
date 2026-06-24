@@ -78,6 +78,22 @@ pub struct ColorScheme {
     pub tool_success_bg: Color,
     /// Tool call error background (completed with error).
     pub tool_error_bg: Color,
+
+    // ── Phase-1 background slots (7 new) ────────────────────────────
+    /// Assistant response text background (= background by default).
+    pub response_bg: Color,
+    /// Thinking block background (subtle accent tint).
+    pub thinking_bg: Color,
+    /// Footer / status bar background.
+    pub surface_bg: Color,
+    /// Overlay popup background (most prominent surface).
+    pub panel_bg: Color,
+    /// Diff added-line background (reuses tool_success_bg tint).
+    pub diff_add_bg: Color,
+    /// Diff removed-line background (reuses tool_error_bg tint).
+    pub diff_remove_bg: Color,
+    /// Diff hunk-header background (subtle muted tint).
+    pub diff_hunk_bg: Color,
 }
 
 impl Default for ColorScheme {
@@ -111,6 +127,14 @@ impl ColorScheme {
             tool_executing_bg: Color::Rgb(28, 24, 14), // #1c1810 amber tint
             tool_success_bg: Color::Rgb(16, 26, 14),   // #101a0e green tint
             tool_error_bg: Color::Rgb(32, 16, 18),     // #201012 red tint
+            // ── Phase-1 background slots ──
+            response_bg: Color::Rgb(0, 0, 0),       // = background
+            thinking_bg: Color::Rgb(11, 9, 15),     // #0b090f accent 6% tint
+            surface_bg: Color::Rgb(9, 11, 19),      // #090b13 footer/status
+            panel_bg: Color::Rgb(53, 56, 75),       // #35384b overlay popup
+            diff_add_bg: Color::Rgb(16, 26, 14),    // = tool_success_bg
+            diff_remove_bg: Color::Rgb(32, 16, 18), // = tool_error_bg
+            diff_hunk_bg: Color::Rgb(15, 16, 19),   // #0f1013 muted 12% tint
         }
     }
 
@@ -138,6 +162,14 @@ impl ColorScheme {
             tool_executing_bg: Color::Rgb(255, 248, 230), // #fff8e6 amber tint
             tool_success_bg: Color::Rgb(230, 248, 230), // #e6f8e6 green tint
             tool_error_bg: Color::Rgb(255, 230, 235), // #ffe6eb red tint
+            // ── Phase-1 background slots ──
+            response_bg: Color::Rgb(239, 241, 245), // = background #eff1f5
+            thinking_bg: Color::Rgb(233, 230, 245), // #e9e6f5 accent 6% tint
+            surface_bg: Color::Rgb(232, 238, 250),  // #e8eefa footer/status
+            panel_bg: Color::Rgb(190, 198, 216),    // #bec6d8 overlay popup
+            diff_add_bg: Color::Rgb(230, 248, 230), // = tool_success_bg #e6f8e6
+            diff_remove_bg: Color::Rgb(255, 230, 235), // = tool_error_bg #ffe6eb
+            diff_hunk_bg: Color::Rgb(221, 223, 230), // #dddfe6 muted 12% tint
         }
     }
     /// Nord color scheme (Arctic, dark).
@@ -164,6 +196,14 @@ impl ColorScheme {
             tool_executing_bg: Color::Rgb(59, 56, 40), // amber tint
             tool_success_bg: Color::Rgb(40, 56, 44),   // green tint
             tool_error_bg: Color::Rgb(56, 42, 44),     // red tint
+            // ── Phase-1 background slots ──
+            response_bg: Color::Rgb(46, 52, 64), // = background nord0
+            thinking_bg: Color::Rgb(54, 57, 71), // #363947 accent 6% tint
+            surface_bg: Color::Rgb(52, 59, 73),  // #343b49 footer/status
+            panel_bg: Color::Rgb(68, 76, 94),    // #444c5e overlay (≈nord2)
+            diff_add_bg: Color::Rgb(40, 56, 44), // = tool_success_bg
+            diff_remove_bg: Color::Rgb(56, 42, 44), // = tool_error_bg
+            diff_hunk_bg: Color::Rgb(52, 59, 73), // #343b49 muted 12% tint
         }
     }
     /// Catppuccin Mocha color scheme (dark).
@@ -190,6 +230,14 @@ impl ColorScheme {
             tool_executing_bg: Color::Rgb(44, 42, 30), // amber tint
             tool_success_bg: Color::Rgb(32, 46, 36),   // green tint
             tool_error_bg: Color::Rgb(48, 34, 40),     // red tint
+            // ── Phase-1 background slots ──
+            response_bg: Color::Rgb(30, 30, 46), // = base #1e1e2e
+            thinking_bg: Color::Rgb(40, 38, 58), // #28263a accent 6% tint
+            surface_bg: Color::Rgb(40, 40, 57),  // #282839 footer/status
+            panel_bg: Color::Rgb(68, 70, 90),    // #44465a overlay (≈surface1)
+            diff_add_bg: Color::Rgb(32, 46, 36), // = tool_success_bg
+            diff_remove_bg: Color::Rgb(48, 34, 40), // = tool_error_bg
+            diff_hunk_bg: Color::Rgb(42, 42, 59), // #2a2a3b muted 12% tint
         }
     }
     /// GitHub Dark color scheme.
@@ -216,6 +264,14 @@ impl ColorScheme {
             tool_executing_bg: Color::Rgb(34, 30, 18), // amber tint
             tool_success_bg: Color::Rgb(18, 30, 20),   // green tint
             tool_error_bg: Color::Rgb(34, 18, 20),     // red tint
+            // ── Phase-1 background slots ──
+            response_bg: Color::Rgb(13, 17, 23), // = canvas.default #0d1117
+            thinking_bg: Color::Rgb(22, 23, 36), // #161724 accent 6% tint
+            surface_bg: Color::Rgb(18, 22, 28),  // #12161c footer/status
+            panel_bg: Color::Rgb(35, 40, 48),    // #232830 overlay
+            diff_add_bg: Color::Rgb(18, 30, 20), // = tool_success_bg
+            diff_remove_bg: Color::Rgb(34, 18, 20), // = tool_error_bg
+            diff_hunk_bg: Color::Rgb(28, 33, 39), // #1c2127 muted 12% tint
         }
     }
     /// Monokai color scheme (dark).
@@ -242,6 +298,218 @@ impl ColorScheme {
             tool_executing_bg: Color::Rgb(48, 40, 24), // amber tint
             tool_success_bg: Color::Rgb(34, 44, 26),   // green tint
             tool_error_bg: Color::Rgb(50, 30, 38),     // red tint
+            // ── Phase-1 background slots ──
+            response_bg: Color::Rgb(39, 40, 34), // = background #272822
+            thinking_bg: Color::Rgb(47, 45, 47), // #2f2d2f accent 6% tint
+            surface_bg: Color::Rgb(50, 50, 42),  // #32322a footer/status
+            panel_bg: Color::Rgb(68, 66, 56),    // #444238 overlay
+            diff_add_bg: Color::Rgb(34, 44, 26), // = tool_success_bg
+            diff_remove_bg: Color::Rgb(50, 30, 38), // = tool_error_bg
+            diff_hunk_bg: Color::Rgb(48, 49, 41), // #303129 muted 12% tint
+        }
+    }
+
+    /// Dracula color scheme (dark).
+    pub fn dracula() -> Self {
+        Self {
+            foreground: Color::Rgb(248, 248, 242),
+            background: Color::Rgb(40, 42, 54),
+            primary: Color::Rgb(189, 147, 249),
+            secondary: Color::Rgb(80, 250, 123),
+            error: Color::Rgb(255, 85, 85),
+            warning: Color::Rgb(241, 250, 140),
+            success: Color::Rgb(80, 250, 123),
+            muted: Color::Rgb(98, 114, 164),
+            accent: Color::Rgb(255, 121, 198),
+            border: Color::Rgb(68, 71, 90),
+            user_border: Color::Rgb(189, 147, 249),
+            user_bg: Color::Rgb(68, 71, 90),
+            cursor_fg: Color::Rgb(40, 42, 54),
+            cursor_bg: Color::Rgb(248, 248, 242),
+            selection_bg: Color::Rgb(68, 71, 90),
+            code_fg: Color::Rgb(241, 250, 140),
+            code_bg: Color::Rgb(33, 34, 44),
+            tool_pending_bg: Color::Rgb(40, 42, 54),
+            tool_executing_bg: Color::Rgb(70, 73, 67),
+            tool_success_bg: Color::Rgb(46, 73, 64),
+            tool_error_bg: Color::Rgb(72, 48, 59),
+            response_bg: Color::Rgb(40, 42, 54),
+            thinking_bg: Color::Rgb(53, 47, 63),
+            surface_bg: Color::Rgb(54, 56, 72),
+            panel_bg: Color::Rgb(68, 71, 90),
+            diff_add_bg: Color::Rgb(46, 73, 64),
+            diff_remove_bg: Color::Rgb(72, 48, 59),
+            diff_hunk_bg: Color::Rgb(47, 51, 67),
+        }
+    }
+
+    /// Gruvbox color scheme (dark).
+    pub fn gruvbox() -> Self {
+        Self {
+            foreground: Color::Rgb(235, 219, 178),
+            background: Color::Rgb(40, 40, 40),
+            primary: Color::Rgb(131, 165, 152),
+            secondary: Color::Rgb(184, 187, 38),
+            error: Color::Rgb(251, 73, 52),
+            warning: Color::Rgb(250, 189, 47),
+            success: Color::Rgb(184, 187, 38),
+            muted: Color::Rgb(146, 131, 116),
+            accent: Color::Rgb(211, 134, 155),
+            border: Color::Rgb(60, 56, 54),
+            user_border: Color::Rgb(131, 165, 152),
+            user_bg: Color::Rgb(60, 56, 54),
+            cursor_fg: Color::Rgb(40, 40, 40),
+            cursor_bg: Color::Rgb(235, 219, 178),
+            selection_bg: Color::Rgb(80, 73, 69),
+            code_fg: Color::Rgb(250, 189, 47),
+            code_bg: Color::Rgb(60, 56, 54),
+            tool_pending_bg: Color::Rgb(40, 40, 40),
+            tool_executing_bg: Color::Rgb(72, 62, 41),
+            tool_success_bg: Color::Rgb(62, 62, 40),
+            tool_error_bg: Color::Rgb(72, 45, 42),
+            response_bg: Color::Rgb(40, 40, 40),
+            thinking_bg: Color::Rgb(50, 46, 47),
+            surface_bg: Color::Rgb(50, 48, 47),
+            panel_bg: Color::Rgb(60, 56, 54),
+            diff_add_bg: Color::Rgb(62, 62, 40),
+            diff_remove_bg: Color::Rgb(72, 45, 42),
+            diff_hunk_bg: Color::Rgb(53, 51, 49),
+        }
+    }
+
+    /// Solarized Dark color scheme.
+    pub fn solarized_dark() -> Self {
+        Self {
+            foreground: Color::Rgb(131, 148, 150),
+            background: Color::Rgb(0, 43, 54),
+            primary: Color::Rgb(38, 139, 210),
+            secondary: Color::Rgb(133, 153, 0),
+            error: Color::Rgb(220, 50, 47),
+            warning: Color::Rgb(181, 137, 0),
+            success: Color::Rgb(133, 153, 0),
+            muted: Color::Rgb(88, 110, 117),
+            accent: Color::Rgb(108, 113, 196),
+            border: Color::Rgb(7, 54, 66),
+            user_border: Color::Rgb(38, 139, 210),
+            user_bg: Color::Rgb(7, 54, 66),
+            cursor_fg: Color::Rgb(0, 43, 54),
+            cursor_bg: Color::Rgb(131, 148, 150),
+            selection_bg: Color::Rgb(7, 54, 66),
+            code_fg: Color::Rgb(181, 137, 0),
+            code_bg: Color::Rgb(7, 54, 66),
+            tool_pending_bg: Color::Rgb(0, 43, 54),
+            tool_executing_bg: Color::Rgb(27, 57, 46),
+            tool_success_bg: Color::Rgb(20, 60, 46),
+            tool_error_bg: Color::Rgb(33, 44, 53),
+            response_bg: Color::Rgb(0, 43, 54),
+            thinking_bg: Color::Rgb(6, 47, 63),
+            surface_bg: Color::Rgb(4, 48, 60),
+            panel_bg: Color::Rgb(7, 54, 66),
+            diff_add_bg: Color::Rgb(20, 60, 46),
+            diff_remove_bg: Color::Rgb(33, 44, 53),
+            diff_hunk_bg: Color::Rgb(11, 51, 62),
+        }
+    }
+
+    /// Solarized Light color scheme.
+    pub fn solarized_light() -> Self {
+        Self {
+            foreground: Color::Rgb(101, 123, 131),
+            background: Color::Rgb(253, 246, 227),
+            primary: Color::Rgb(38, 139, 210),
+            secondary: Color::Rgb(133, 153, 0),
+            error: Color::Rgb(220, 50, 47),
+            warning: Color::Rgb(181, 137, 0),
+            success: Color::Rgb(133, 153, 0),
+            muted: Color::Rgb(147, 161, 161),
+            accent: Color::Rgb(108, 113, 196),
+            border: Color::Rgb(238, 232, 213),
+            user_border: Color::Rgb(38, 139, 210),
+            user_bg: Color::Rgb(238, 232, 213),
+            cursor_fg: Color::Rgb(253, 246, 227),
+            cursor_bg: Color::Rgb(101, 123, 131),
+            selection_bg: Color::Rgb(238, 232, 213),
+            code_fg: Color::Rgb(181, 137, 0),
+            code_bg: Color::Rgb(238, 232, 213),
+            tool_pending_bg: Color::Rgb(253, 246, 227),
+            tool_executing_bg: Color::Rgb(242, 230, 193),
+            tool_success_bg: Color::Rgb(235, 232, 193),
+            tool_error_bg: Color::Rgb(248, 217, 200),
+            response_bg: Color::Rgb(253, 246, 227),
+            thinking_bg: Color::Rgb(244, 238, 225),
+            surface_bg: Color::Rgb(246, 239, 220),
+            panel_bg: Color::Rgb(238, 232, 213),
+            diff_add_bg: Color::Rgb(235, 232, 193),
+            diff_remove_bg: Color::Rgb(248, 217, 200),
+            diff_hunk_bg: Color::Rgb(240, 236, 219),
+        }
+    }
+
+    /// Rose Pine color scheme (dark).
+    pub fn rose_pine() -> Self {
+        Self {
+            foreground: Color::Rgb(224, 222, 244),
+            background: Color::Rgb(25, 23, 36),
+            primary: Color::Rgb(49, 116, 143),
+            secondary: Color::Rgb(156, 207, 216),
+            error: Color::Rgb(235, 111, 146),
+            warning: Color::Rgb(246, 193, 119),
+            success: Color::Rgb(156, 207, 216),
+            muted: Color::Rgb(110, 106, 134),
+            accent: Color::Rgb(196, 167, 231),
+            border: Color::Rgb(38, 35, 58),
+            user_border: Color::Rgb(196, 167, 231),
+            user_bg: Color::Rgb(31, 29, 46),
+            cursor_fg: Color::Rgb(25, 23, 36),
+            cursor_bg: Color::Rgb(224, 222, 244),
+            selection_bg: Color::Rgb(64, 61, 82),
+            code_fg: Color::Rgb(246, 193, 119),
+            code_bg: Color::Rgb(31, 29, 46),
+            tool_pending_bg: Color::Rgb(25, 23, 36),
+            tool_executing_bg: Color::Rgb(58, 48, 48),
+            tool_success_bg: Color::Rgb(45, 51, 63),
+            tool_error_bg: Color::Rgb(56, 36, 52),
+            response_bg: Color::Rgb(25, 23, 36),
+            thinking_bg: Color::Rgb(35, 32, 48),
+            surface_bg: Color::Rgb(28, 26, 41),
+            panel_bg: Color::Rgb(34, 32, 52),
+            diff_add_bg: Color::Rgb(45, 51, 63),
+            diff_remove_bg: Color::Rgb(56, 36, 52),
+            diff_hunk_bg: Color::Rgb(35, 33, 48),
+        }
+    }
+
+    /// Kanagawa color scheme (dark).
+    pub fn kanagawa() -> Self {
+        Self {
+            foreground: Color::Rgb(220, 215, 186),
+            background: Color::Rgb(31, 31, 40),
+            primary: Color::Rgb(126, 156, 216),
+            secondary: Color::Rgb(152, 187, 108),
+            error: Color::Rgb(195, 64, 67),
+            warning: Color::Rgb(230, 195, 132),
+            success: Color::Rgb(152, 187, 108),
+            muted: Color::Rgb(114, 113, 105),
+            accent: Color::Rgb(149, 127, 184),
+            border: Color::Rgb(42, 42, 55),
+            user_border: Color::Rgb(126, 156, 216),
+            user_bg: Color::Rgb(42, 42, 55),
+            cursor_fg: Color::Rgb(31, 31, 40),
+            cursor_bg: Color::Rgb(220, 215, 186),
+            selection_bg: Color::Rgb(54, 54, 70),
+            code_fg: Color::Rgb(230, 195, 132),
+            code_bg: Color::Rgb(22, 22, 29),
+            tool_pending_bg: Color::Rgb(31, 31, 40),
+            tool_executing_bg: Color::Rgb(61, 56, 54),
+            tool_success_bg: Color::Rgb(49, 54, 50),
+            tool_error_bg: Color::Rgb(56, 36, 44),
+            response_bg: Color::Rgb(31, 31, 40),
+            thinking_bg: Color::Rgb(38, 37, 49),
+            surface_bg: Color::Rgb(36, 36, 48),
+            panel_bg: Color::Rgb(42, 42, 55),
+            diff_add_bg: Color::Rgb(49, 54, 50),
+            diff_remove_bg: Color::Rgb(56, 36, 44),
+            diff_hunk_bg: Color::Rgb(41, 41, 48),
         }
     }
 
@@ -273,6 +541,14 @@ impl ColorScheme {
             tool_error_bg: Style::default().bg(self.tool_error_bg),
             code_fg: Style::default().fg(self.code_fg),
             code_bg: Style::default().bg(self.code_bg),
+            // ── Phase-1 background slots ──
+            response_bg: Style::default().bg(self.response_bg),
+            thinking_bg: Style::default().bg(self.thinking_bg),
+            surface_bg: Style::default().bg(self.surface_bg),
+            panel_bg: Style::default().bg(self.panel_bg),
+            diff_add_bg: Style::default().bg(self.diff_add_bg),
+            diff_remove_bg: Style::default().bg(self.diff_remove_bg),
+            diff_hunk_bg: Style::default().bg(self.diff_hunk_bg),
             // ColorScheme has no glyph-set knowledge; default to Unicode.
             // `Theme::to_styles` overrides this with the theme's real set.
             symbols: crate::symbols::Symbols::default(),
@@ -335,6 +611,22 @@ pub struct ThemeStyles {
     pub code_fg: Style,
     /// Inline code / code block background style.
     pub code_bg: Style,
+
+    // ── Phase-1 background styles (7 new) ───────────────────────────
+    /// Assistant response text background style.
+    pub response_bg: Style,
+    /// Thinking block background style.
+    pub thinking_bg: Style,
+    /// Footer / status bar background style.
+    pub surface_bg: Style,
+    /// Overlay popup background style.
+    pub panel_bg: Style,
+    /// Diff added-line background style.
+    pub diff_add_bg: Style,
+    /// Diff removed-line background style.
+    pub diff_remove_bg: Style,
+    /// Diff hunk-header background style.
+    pub diff_hunk_bg: Style,
 
     // ── Glyphs ───────────────────────────────────────────────────
     /// Active symbol table (Unicode / ASCII / Nerd). Carried here so every
@@ -431,6 +723,61 @@ impl Theme {
             symbols: crate::symbols::Symbols::default(),
         }
     }
+
+    /// Built-in Dracula theme.
+    pub fn dracula() -> Self {
+        Self {
+            name: "dracula".into(),
+            colors: ColorScheme::dracula(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Gruvbox theme.
+    pub fn gruvbox() -> Self {
+        Self {
+            name: "gruvbox".into(),
+            colors: ColorScheme::gruvbox(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Solarized Dark theme.
+    pub fn solarized_dark() -> Self {
+        Self {
+            name: "solarized_dark".into(),
+            colors: ColorScheme::solarized_dark(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Solarized Light theme.
+    pub fn solarized_light() -> Self {
+        Self {
+            name: "solarized_light".into(),
+            colors: ColorScheme::solarized_light(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Rose Pine theme.
+    pub fn rose_pine() -> Self {
+        Self {
+            name: "rose_pine".into(),
+            colors: ColorScheme::rose_pine(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
+    /// Built-in Kanagawa theme.
+    pub fn kanagawa() -> Self {
+        Self {
+            name: "kanagawa".into(),
+            colors: ColorScheme::kanagawa(),
+            spacing: Spacing::default(),
+            symbols: crate::symbols::Symbols::default(),
+        }
+    }
     /// Resolve a theme by its settings name.
     ///
     /// Maps the names used in `settings.theme` / the setup wizard /
@@ -443,6 +790,12 @@ impl Theme {
             "catppuccin" => Self::catppuccin(),
             "github_dark" => Self::github_dark(),
             "monokai" => Self::monokai(),
+            "dracula" => Self::dracula(),
+            "gruvbox" => Self::gruvbox(),
+            "solarized_dark" => Self::solarized_dark(),
+            "solarized_light" => Self::solarized_light(),
+            "rose_pine" => Self::rose_pine(),
+            "kanagawa" => Self::kanagawa(),
             // "oxi_dark", "dark", "default", "", unknown → dark
             _ => Self::dark(),
         }
@@ -488,6 +841,12 @@ pub const THEME_NAMES: &[&str] = &[
     "catppuccin",
     "github_dark",
     "monokai",
+    "dracula",
+    "gruvbox",
+    "solarized_dark",
+    "solarized_light",
+    "rose_pine",
+    "kanagawa",
 ];
 
 // ---------------------------------------------------------------------------
@@ -550,6 +909,22 @@ pub struct ThemeFileColors {
     pub tool_success_bg: Option<String>,
     /// Tool call error background (completed with error).
     pub tool_error_bg: Option<String>,
+
+    // ── Phase-1 background slots (7 new) ────────────────────────────
+    /// Assistant response text background.
+    pub response_bg: Option<String>,
+    /// Thinking block background.
+    pub thinking_bg: Option<String>,
+    /// Footer / status bar background.
+    pub surface_bg: Option<String>,
+    /// Overlay popup background.
+    pub panel_bg: Option<String>,
+    /// Diff added-line background.
+    pub diff_add_bg: Option<String>,
+    /// Diff removed-line background.
+    pub diff_remove_bg: Option<String>,
+    /// Diff hunk-header background.
+    pub diff_hunk_bg: Option<String>,
 }
 
 impl ThemeFile {
@@ -641,6 +1016,21 @@ impl ThemeFile {
                 self.colors.tool_error_bg,
                 defaults.tool_error_bg,
                 "tool_error_bg",
+            ),
+            response_bg: resolve(self.colors.response_bg, defaults.response_bg, "response_bg"),
+            thinking_bg: resolve(self.colors.thinking_bg, defaults.thinking_bg, "thinking_bg"),
+            surface_bg: resolve(self.colors.surface_bg, defaults.surface_bg, "surface_bg"),
+            panel_bg: resolve(self.colors.panel_bg, defaults.panel_bg, "panel_bg"),
+            diff_add_bg: resolve(self.colors.diff_add_bg, defaults.diff_add_bg, "diff_add_bg"),
+            diff_remove_bg: resolve(
+                self.colors.diff_remove_bg,
+                defaults.diff_remove_bg,
+                "diff_remove_bg",
+            ),
+            diff_hunk_bg: resolve(
+                self.colors.diff_hunk_bg,
+                defaults.diff_hunk_bg,
+                "diff_hunk_bg",
             ),
         };
         Theme {
@@ -1395,5 +1785,122 @@ primary = "#00ff00"
         let bogus = std::path::PathBuf::from("/nonexistent/oxi-tui/test.json");
         assert!(reg.add_custom_file(&bogus).is_err());
         assert_eq!(reg.custom_count(), 0);
+    }
+
+    // ── Phase-1 background slot tests ──────────────────────────────────
+
+    fn rgb_sum(c: Color) -> u32 {
+        match c {
+            Color::Rgb(r, g, b) => r as u32 + g as u32 + b as u32,
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn all_themes_have_28_color_slots() {
+        // Every built-in must populate all 28 ColorScheme fields (no
+        // accidental zero/uninitialized values on the 7 new slots).
+        for &name in THEME_NAMES {
+            let cs = Theme::by_name(name).colors;
+            // New slots must not be default Color::Reset (0,0,0 only
+            // valid for dark which is true black). Check they are Rgb.
+            assert!(
+                matches!(cs.response_bg, Color::Rgb(_, _, _)),
+                "{name} response_bg"
+            );
+            assert!(
+                matches!(cs.thinking_bg, Color::Rgb(_, _, _)),
+                "{name} thinking_bg"
+            );
+            assert!(
+                matches!(cs.surface_bg, Color::Rgb(_, _, _)),
+                "{name} surface_bg"
+            );
+            assert!(
+                matches!(cs.panel_bg, Color::Rgb(_, _, _)),
+                "{name} panel_bg"
+            );
+            assert!(
+                matches!(cs.diff_add_bg, Color::Rgb(_, _, _)),
+                "{name} diff_add_bg"
+            );
+            assert!(
+                matches!(cs.diff_remove_bg, Color::Rgb(_, _, _)),
+                "{name} diff_remove_bg"
+            );
+            assert!(
+                matches!(cs.diff_hunk_bg, Color::Rgb(_, _, _)),
+                "{name} diff_hunk_bg"
+            );
+        }
+    }
+
+    #[test]
+    fn dark_brightness_hierarchy_is_ordered() {
+        // background <= response_bg < thinking_bg < surface_bg < user_bg < panel_bg
+        let cs = ColorScheme::dark();
+        let bg = rgb_sum(cs.background);
+        let resp = rgb_sum(cs.response_bg);
+        let think = rgb_sum(cs.thinking_bg);
+        let surf = rgb_sum(cs.surface_bg);
+        let user = rgb_sum(cs.user_bg);
+        let panel = rgb_sum(cs.panel_bg);
+        assert_eq!(bg, resp, "response_bg should equal background");
+        assert!(
+            bg <= think,
+            "background({bg}) should be <= thinking_bg({think})"
+        );
+        assert!(
+            think <= surf,
+            "thinking_bg({think}) should be <= surface_bg({surf})"
+        );
+        assert!(
+            surf <= user,
+            "surface_bg({surf}) should be <= user_bg({user})"
+        );
+        assert!(
+            user <= panel,
+            "user_bg({user}) should be <= panel_bg({panel})"
+        );
+    }
+
+    #[test]
+    fn diff_bg_reuses_tool_status_bg() {
+        // diff_add_bg should match tool_success_bg, diff_remove_bg tool_error_bg
+        let cs = ColorScheme::dark();
+        assert_eq!(cs.diff_add_bg, cs.tool_success_bg);
+        assert_eq!(cs.diff_remove_bg, cs.tool_error_bg);
+    }
+
+    #[test]
+    fn to_styles_packs_all_28_styles() {
+        // ThemeStyles must carry every ColorScheme slot as a Style.
+        let styles = ColorScheme::dark().to_styles();
+        // Verify the 7 new bg styles have a non-Reset bg color.
+        assert!(
+            styles.response_bg.bg.is_some(),
+            "response_bg style missing bg"
+        );
+        assert!(
+            styles.thinking_bg.bg.is_some(),
+            "thinking_bg style missing bg"
+        );
+        assert!(
+            styles.surface_bg.bg.is_some(),
+            "surface_bg style missing bg"
+        );
+        assert!(styles.panel_bg.bg.is_some(), "panel_bg style missing bg");
+        assert!(
+            styles.diff_add_bg.bg.is_some(),
+            "diff_add_bg style missing bg"
+        );
+        assert!(
+            styles.diff_remove_bg.bg.is_some(),
+            "diff_remove_bg style missing bg"
+        );
+        assert!(
+            styles.diff_hunk_bg.bg.is_some(),
+            "diff_hunk_bg style missing bg"
+        );
     }
 }

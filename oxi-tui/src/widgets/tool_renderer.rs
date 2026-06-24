@@ -1071,28 +1071,28 @@ pub fn format_diff_result(
 
     for raw_line in diff.lines().take(DIFF_PREVIEW_LINES) {
         let line = if raw_line.starts_with("@@") {
-            // Hunk header
+            // Hunk header — muted fg + diff_hunk_bg
             Line::from(Span::styled(
                 truncate_to_width(raw_line, max_width),
-                styles.muted,
+                styles.muted.patch(styles.diff_hunk_bg),
             ))
         } else if raw_line.starts_with('-') && !raw_line.starts_with("--") {
-            // Removed line — red
+            // Removed line — error fg + diff_remove_bg
             Line::from(Span::styled(
                 format!(
                     " {}",
                     truncate_to_width(raw_line, max_width.saturating_sub(1))
                 ),
-                styles.error,
+                styles.error.patch(styles.diff_remove_bg),
             ))
         } else if raw_line.starts_with('+') && !raw_line.starts_with("++") {
-            // Added line — green
+            // Added line — success fg + diff_add_bg
             Line::from(Span::styled(
                 format!(
                     " {}",
                     truncate_to_width(raw_line, max_width.saturating_sub(1))
                 ),
-                styles.success,
+                styles.success.patch(styles.diff_add_bg),
             ))
         } else {
             // Context line

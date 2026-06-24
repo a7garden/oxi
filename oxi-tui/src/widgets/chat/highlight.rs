@@ -296,6 +296,7 @@ pub(crate) fn highlight_code(
     lang: &str,
     styles: &ThemeStyles,
 ) -> Vec<Line<'static>> {
+    let code_bg = styles.code_bg;
     let mut lines = Vec::new();
     // Header line: language icon + language name
     lines.push(Line::from(Span::styled(
@@ -303,7 +304,11 @@ pub(crate) fn highlight_code(
         styles.muted,
     )));
     for line in content.lines() {
-        lines.push(highlight_line(line, lang, styles));
+        let mut highlighted = highlight_line(line, lang, styles);
+        // Apply the theme's code_bg as a line-level style so it
+        // propagates to all spans via patch semantics.
+        highlighted.style = code_bg;
+        lines.push(highlighted);
     }
     lines
 }

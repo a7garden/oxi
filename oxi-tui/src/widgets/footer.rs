@@ -139,6 +139,11 @@ impl StatefulWidget for Footer<'_> {
         if area.height < 2 || area.width < 4 {
             return;
         }
+        // Paint the footer area with surface_bg for a distinct status bar.
+        buf.set_style(
+            area,
+            ratatui::style::Style::default().bg(self.theme.colors.surface_bg),
+        );
 
         let styles = self.theme.to_styles();
         let d = &state.data;

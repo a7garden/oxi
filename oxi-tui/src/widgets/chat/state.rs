@@ -137,6 +137,8 @@ pub struct ChatViewState {
     pub thinking_regions: Vec<(u16, u16, String)>,
     /// Clickable tool result regions: (y_start, y_end, key).
     pub tool_regions: Vec<(u16, u16, String)>,
+    /// Copyable message regions: (y_start, y_end, msg_idx).
+    pub message_regions: Vec<(u16, u16, usize)>,
     /// Last rendered chat viewport rect (absolute screen coords).
     /// Populated each render; read by the keyboard toggle handler to find
     /// which collapsible block is at the viewport top.

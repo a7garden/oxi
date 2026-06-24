@@ -396,7 +396,9 @@ pub fn render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>
             MarkdownSegment::Markdown(md) => {
                 let text: ratatui::text::Text<'_> = tui_markdown::from_str_with_options(
                     md,
-                    &tui_markdown::Options::new(crate::markdown_styles::OxiStyleSheet),
+                    &tui_markdown::Options::new(
+                        crate::markdown_styles::OxiStyleSheet::from_styles(styles),
+                    ),
                 );
                 for l in text.lines {
                     let line_style = l.style;

@@ -180,6 +180,11 @@ impl<'a> CompletionPopup<'a> {
 
         // Clear the area first so previous frame content doesn't bleed through.
         frame.render_widget(Clear, popup_area);
+        // Fill popup area with panel_bg for a distinct overlay surface.
+        frame.buffer_mut().set_style(
+            popup_area,
+            ratatui::style::Style::default().bg(self.theme.colors.panel_bg),
+        );
 
         // Build list items with kind icons.
         let items: Vec<ListItem> = self

@@ -28,6 +28,7 @@ pub(crate) struct LayoutEntry {
     pub y: u16,
     pub height: u16,
     pub kind: LayoutKind,
+    pub msg_idx: usize,
 }
 
 #[derive(Clone)]
@@ -123,6 +124,7 @@ pub(crate) fn compute_layout(
                     y: y as u16,
                     height: 1,
                     kind: LayoutKind::Spacer,
+                    msg_idx,
                 });
             }
             y += 1;
@@ -136,6 +138,7 @@ pub(crate) fn compute_layout(
                     y: y as u16,
                     height: 1,
                     kind: LayoutKind::Rule,
+                    msg_idx,
                 });
             }
             y += 1;
@@ -160,6 +163,7 @@ pub(crate) fn compute_layout(
                         y: y as u16,
                         height: 1,
                         kind: LayoutKind::ResponseDivider,
+                        msg_idx,
                     });
                 }
                 y += 1;
@@ -173,6 +177,7 @@ pub(crate) fn compute_layout(
                         y: y as u16,
                         height: 1,
                         kind: LayoutKind::Spacer,
+                        msg_idx,
                     });
                 }
                 y += 1;
@@ -208,6 +213,7 @@ pub(crate) fn compute_layout(
                 y: y as u16,
                 height: h,
                 kind,
+                msg_idx,
             });
             y += h as u32;
         }
@@ -222,6 +228,7 @@ pub(crate) fn compute_layout(
                     y: y as u16,
                     height: 1,
                     kind: LayoutKind::Spacer,
+                    msg_idx,
                 });
             }
             y += 1;
@@ -246,6 +253,7 @@ pub(crate) fn compute_layout(
                         y: y as u16,
                         height: 1,
                         kind: LayoutKind::ResponseDivider,
+                        msg_idx,
                     });
                 }
                 y += 1;
@@ -259,6 +267,7 @@ pub(crate) fn compute_layout(
                         y: y as u16,
                         height: 1,
                         kind: LayoutKind::Spacer,
+                        msg_idx,
                     });
                 }
                 y += 1;
@@ -291,6 +300,7 @@ pub(crate) fn compute_layout(
                     y: y as u16,
                     height: h,
                     kind,
+                    msg_idx,
                 });
             }
             y += h as u32;

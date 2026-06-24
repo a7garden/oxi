@@ -523,6 +523,9 @@ impl OverlayComponent for SettingsOverlay {
 
         let popup = centered_layout(area, 0.75, 0.8);
         frame.render_widget(Clear, popup);
+        frame
+            .buffer_mut()
+            .set_style(popup, Style::default().bg(theme.colors.panel_bg));
         let border_block = Block::default()
             .title(title_line(&filter_text))
             .borders(Borders::ALL)

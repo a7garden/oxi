@@ -1,57 +1,93 @@
 //! Custom markdown stylesheet for oxi TUI.
 //!
-//! Overrides the default `tui_markdown` styles to use theme-aware colors.
-//! When `ThemeStyles` is available, code and heading styles derive from the
-//! active theme. Otherwise, dark-theme defaults are used.
+//! Implements `tui_markdown::StyleSheet` with **theme-aware** colors.
+//! Construct via [`OxiStyleSheet::from_styles`] so that heading, code, and
+//! link styles all derive from the active `ThemeStyles` — switching themes
+//! (dark ↔ light ↔ nord …) now recolours inline markdown too, not just the
+//! chat viewport background.
+//!
+//! ## What is theme-aware here vs. not
+//!
+//! | Element | Source |
+//! |---|---|
+//! | Inline `` `code` `` | `styles.code_fg` / `styles.code_bg` |
+//! | H1–H3 | `styles.accent` / `styles.primary` |
+//! | H4–H6 | `styles.muted` |
+//! | Links | `styles.primary` (underlined) |
+//! | Blockquotes | `styles.accent` |
+//! | Metadata | `styles.muted` |
+//!
+//! Fenced code blocks (``` ``` ```) are handled separately by
+//! [`highlight_code`](crate::widgets::chat::highlight::highlight_code), which
+//! already receives `&ThemeStyles`.
 
 use ratatui::style::{Color, Modifier, Style};
 use tui_markdown::StyleSheet;
 
-/// oxi-themed markdown stylesheet.
+use crate::theme::ThemeStyles;
+
+/// oxi-themed markdown stylesheet — **theme-aware**.
 ///
-/// All styles are customized for readability:
-/// - Headings: accent purple (theme-aware)
-/// - Code: warm amber on dark background (from theme `code_fg`/`code_bg`)
-/// - Links: visible blue with underline
-#[derive(Clone, Copy, Debug, Default)]
-pub struct OxiStyleSheet;
+/// Holds the semantic colors extracted from `ThemeStyles` at construction
+/// time.  Because `StyleSheet` methods take `&self`, the colours must be
+/// baked in up-front (the trait has no way to receive per-call context).
+#[derive(Clone, Copy, Debug)]
+pub struct OxiStyleSheet {
+    code_fg: Color,
+    code_bg: Color,
+    accent: Color,
+    primary: Color,
+    muted: Color,
+}
+
+impl OxiStyleSheet {
+    /// Build a stylesheet whose colours track the active theme.
+    pub fn from_styles(styles: &ThemeStyles) -> Self {
+        Self {
+            code_fg: styles.code_fg.fg.unwrap_or(Color::Rgb(255, 200, 100)),
+            code_bg: styles.code_bg.bg.unwrap_or(Color::Reset),
+            accent: styles.accent.fg.unwrap_or(Color::Magenta),
+            primary: styles.primary.fg.unwrap_or(Color::Blue),
+            muted: styles.muted.fg.unwrap_or(Color::DarkGray),
+        }
+    }
+}
 
 impl StyleSheet for OxiStyleSheet {
     fn heading(&self, level: u8) -> Style {
         match level {
-            0 | 1 => Style::new()
-                .fg(Color::Rgb(187, 154, 247)) // #bb9af7 accent purple
-                .add_modifier(Modifier::BOLD),
-            2 => Style::new().cyan().bold(),
-            3 => Style::new().cyan().bold().italic(),
-            4..=6 | 7..=u8::MAX => Style::new().light_cyan().italic(),
+            0 | 1 => Style::new().fg(self.accent).add_modifier(Modifier::BOLD),
+            2 => Style::new().fg(self.primary).add_modifier(Modifier::BOLD),
+            3 => Style::new()
+                .fg(self.primary)
+                .add_modifier(Modifier::BOLD | Modifier::ITALIC),
+            _ => Style::new().fg(self.muted).add_modifier(Modifier::ITALIC),
         }
     }
 
     fn code(&self) -> Style {
-        // Warm amber text on subtle dark background.
-        // These match the default dark theme's code_fg/code_bg.
-        // When ThemeStyles is plumbed through tui-markdown's Options,
-        // the theme's actual code_fg/code_bg will override these.
+        // Theme-aware inline code: code_fg on code_bg.
         Style::new()
-            .fg(Color::Rgb(255, 200, 100)) // #ffc864 warm amber
-            .bg(Color::Rgb(35, 30, 20)) // #231e14 warm dark
+            .fg(self.code_fg)
+            .bg(self.code_bg)
             .add_modifier(Modifier::BOLD)
     }
 
     fn link(&self) -> Style {
-        Style::new().blue().underlined()
+        Style::new()
+            .fg(self.primary)
+            .add_modifier(Modifier::UNDERLINED)
     }
 
     fn blockquote(&self) -> Style {
-        Style::new().fg(Color::Rgb(187, 154, 247))
+        Style::new().fg(self.accent)
     }
 
     fn heading_meta(&self) -> Style {
-        Style::new().dim()
+        Style::new().fg(self.muted).add_modifier(Modifier::DIM)
     }
 
     fn metadata_block(&self) -> Style {
-        Style::new().light_yellow()
+        Style::new().fg(self.muted)
     }
 }
