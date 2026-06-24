@@ -217,11 +217,7 @@ impl SlashCommand for RouterCommand {
                     NotificationKind::Info,
                 );
                 let auth = crate::store::auth_storage::shared_auth_storage();
-                let setup_models: Vec<String> = super::model::collect_catalog_models(state)
-                    .into_iter()
-                    .filter(|(provider, _)| auth.get_api_key(provider).is_some())
-                    .map(|(provider, model_id)| format!("{}/{}", provider, model_id))
-                    .collect();
+                let setup_models: Vec<String> = super::model::accessible_models(state, &auth);
                 let initial = overlay::RouterSetupData {
                     profile_name: "auto".to_string(),
                     ..Default::default()
