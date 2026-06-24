@@ -642,14 +642,6 @@ impl AppState {
         self.message_count += 1;
     }
 
-    pub fn add_system_message(&mut self, content: String) {
-        self.chat.add_message(ChatMessage {
-            role: MessageRole::System,
-            content_blocks: vec![ContentBlock::Text { content }],
-            timestamp: now_millis(),
-        });
-    }
-
     /// Add a notification (toast message) instead of a chat message.
     pub fn add_notification(&mut self, message: String, kind: NotificationKind) {
         self.notifications.push(Notification::new(message, kind));
@@ -1346,29 +1338,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         if is_resuming && let Some(ref path) = session_target {
             let sm = crate::store::session::SessionManager::open(path, None, Some(&cwd));
             let branch = sm.get_branch(None);
-            for entry in &branch {
-                match &entry.message {
-                    crate::store::session::AgentMessage::User { content } => {
-                        state.add_user_message(content.as_str().to_string());
-                    }
-                    crate::store::session::AgentMessage::Assistant { content, .. } => {
-                        let text: String = content
-                            .iter()
-                            .filter_map(|b| match b {
-                                crate::store::session::AssistantContentBlock::Text { text } => {
-                                    Some(text.as_str())
-                                }
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("");
-                        if !text.is_empty() {
-                            state.add_system_message(text);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            // Render the resumed conversation, preserving tool calls and
+            // results (issue #23).
+            render_session_branch_to_chat(&mut state, &branch);
         }
 
         // Footer
@@ -1794,32 +1766,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 let sm = crate::store::session::SessionManager::open(path, None, Some(&cwd));
                 sm.set_leaf_from_entry(&entry_id)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
-                // Reload messages from the new leaf position
-                state.chat.clear();
+                // Reload messages from the new leaf position, preserving tool
+                // calls and results (issue #23).
                 let branch = sm.get_branch(Some(&entry_id));
-                for entry in &branch {
-                    match &entry.message {
-                        crate::store::session::AgentMessage::User { content } => {
-                            state.add_user_message(content.as_str().to_string());
-                        }
-                        crate::store::session::AgentMessage::Assistant { content, .. } => {
-                            let text: String = content
-                                .iter()
-                                .filter_map(|b| match b {
-                                    crate::store::session::AssistantContentBlock::Text { text } => {
-                                        Some(text.as_str())
-                                    }
-                                    _ => None,
-                                })
-                                .collect::<Vec<_>>()
-                                .join("");
-                            if !text.is_empty() {
-                                state.add_system_message(text);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                render_session_branch_to_chat(&mut state, &branch);
                 state.add_notification(
                     format!("Jumped to entry {}", &entry_id[..8.min(entry_id.len())]),
                     NotificationKind::Success,
@@ -1929,4 +1879,123 @@ fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::Agent
         }],
         timestamp: now_millis(),
     });
+}
+
+/// Render a session branch (root → leaf) into the TUI chat, preserving tool
+/// calls and their results — not just user/assistant text (issue #23). Shared
+/// by the session-resume and goto-entry reconstruction paths.
+fn render_session_branch_to_chat(
+    state: &mut AppState,
+    branch: &[crate::store::session::SessionEntry],
+) {
+    use crate::store::session::{AgentMessage, AssistantContentBlock};
+    use std::collections::HashMap;
+
+    state.chat.clear();
+    state.message_count = 0;
+
+    // tool_call_id -> tool_name, so a ToolResult bubble shows the tool that ran.
+    let mut tool_names: HashMap<String, String> = HashMap::new();
+
+    for entry in branch {
+        match &entry.message {
+            AgentMessage::User { content } => {
+                state.chat.add_message(ChatMessage {
+                    role: MessageRole::User,
+                    content_blocks: vec![ContentBlock::Text {
+                        content: content.as_str().to_string(),
+                    }],
+                    timestamp: entry.timestamp,
+                });
+                state.message_count += 1;
+            }
+            AgentMessage::Assistant { content, .. } => {
+                let mut blocks = Vec::new();
+                for b in content {
+                    match b {
+                        AssistantContentBlock::Text { text } => {
+                            blocks.push(ContentBlock::Text {
+                                content: text.clone(),
+                            });
+                        }
+                        AssistantContentBlock::Thinking { thinking } => {
+                            blocks.push(ContentBlock::Thinking {
+                                content: thinking.clone(),
+                                collapsed: true,
+                            });
+                        }
+                        AssistantContentBlock::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        } => {
+                            tool_names.insert(id.clone(), name.clone());
+                            blocks.push(ContentBlock::ToolCall {
+                                id: id.clone(),
+                                name: name.clone(),
+                                arguments: arguments.to_string(),
+                                result: None,
+                                status: oxi_tui::widgets::chat::ToolCallStatus::Done,
+                                duration: None,
+                            });
+                        }
+                        AssistantContentBlock::ImageResult { data, media_type } => {
+                            blocks.push(ContentBlock::Image {
+                                mime_type: media_type.clone(),
+                                base64_data: data.clone(),
+                            });
+                        }
+                        AssistantContentBlock::Refusal { content } => {
+                            blocks.push(ContentBlock::Text {
+                                content: format!("[Refused: {content}]"),
+                            });
+                        }
+                        AssistantContentBlock::ToolPlan { .. } => {}
+                    }
+                }
+                if !blocks.is_empty() {
+                    state.chat.add_message(ChatMessage {
+                        role: MessageRole::Assistant,
+                        content_blocks: blocks,
+                        timestamp: entry.timestamp,
+                    });
+                    state.message_count += 1;
+                }
+            }
+            AgentMessage::ToolResult {
+                content,
+                tool_call_id,
+            } => {
+                let tool_name = tool_names
+                    .get(tool_call_id)
+                    .cloned()
+                    .unwrap_or_else(|| tool_call_id.clone());
+                state.chat.add_message(ChatMessage {
+                    role: MessageRole::System,
+                    content_blocks: vec![ContentBlock::ToolResult {
+                        tool_name,
+                        content: content.as_str().to_string(),
+                        is_error: false,
+                    }],
+                    timestamp: entry.timestamp,
+                });
+                state.message_count += 1;
+            }
+            AgentMessage::CompactionSummary { summary, .. } => {
+                state.chat.add_message(ChatMessage {
+                    role: MessageRole::System,
+                    content_blocks: vec![ContentBlock::Text {
+                        content: format!(
+                            "[Context compacted — earlier messages summarized]\n{summary}"
+                        ),
+                    }],
+                    timestamp: entry.timestamp,
+                });
+                state.message_count += 1;
+            }
+            // System / BashExecution / Custom / BranchSummary are metadata,
+            // not rendered as conversation turns.
+            _ => {}
+        }
+    }
 }

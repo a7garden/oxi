@@ -177,6 +177,131 @@ pub struct AgentSession {
     extension_runner: Arc<RwLock<Option<ExtensionRunner>>>,
 }
 
+/// Convert a resumed session's branch (root → leaf, chronological) into the
+/// LLM message stream used to seed the agent's conversation state — the inverse
+/// of [`AgentSession::persist_event_message`].
+///
+/// Restores the conversation context lost on resume (issue #23): user prompts,
+/// assistant responses, tool calls, and their paired tool results. Compaction
+/// is honoured: if a `CompactionSummary` is present, everything before the last
+/// one is dropped (it already replaced that span) and the summary is included.
+///
+/// Trailing/unmatched tool calls are left as-is; the agent loop's
+/// `sanitize_orphaned_tool_results` (run before every provider request) strips
+/// any dangling `tool_use` a provider would reject.
+fn resume_messages_from_branch(
+    entries: &[crate::store::session::SessionEntry],
+) -> Vec<oxi_ai::Message> {
+    use crate::store::session::AssistantContentBlock;
+    use oxi_ai::{
+        AssistantMessage, ContentBlock, ImageContent, Message, TextContent, ThinkingContent,
+        ToolCall,
+    };
+    use std::collections::HashMap;
+
+    // Honour compaction: drop everything before the last summary, then include
+    // the summary itself as the starting context.
+    let last_compaction = entries
+        .iter()
+        .rposition(|e| matches!(e.message, AgentMessage::CompactionSummary { .. }));
+    let relevant = &entries[last_compaction.unwrap_or(0)..];
+
+    // tool_call_id -> tool_name, populated as ToolCall blocks are emitted so a
+    // following ToolResult can carry the right tool name.
+    let mut tool_names: HashMap<String, String> = HashMap::new();
+    let mut out: Vec<Message> = Vec::new();
+
+    for entry in relevant {
+        match &entry.message {
+            AgentMessage::CompactionSummary { summary, .. } => {
+                if !summary.is_empty() {
+                    out.push(Message::user(format!(
+                        "[Summary of earlier conversation]\n{summary}"
+                    )));
+                }
+            }
+            AgentMessage::User { content } => {
+                out.push(Message::user(content.as_str().to_string()));
+            }
+            AgentMessage::Assistant {
+                content,
+                provider,
+                model_id,
+                ..
+            } => {
+                // Record tool names for any tool calls in this message.
+                for b in content {
+                    if let AssistantContentBlock::ToolCall { id, name, .. } = b {
+                        tool_names.insert(id.clone(), name.clone());
+                    }
+                }
+                let blocks: Vec<ContentBlock> = content
+                    .iter()
+                    .filter_map(|b| match b {
+                        AssistantContentBlock::Text { text } => {
+                            Some(ContentBlock::Text(TextContent::new(text.clone())))
+                        }
+                        AssistantContentBlock::Thinking { thinking } => Some(
+                            ContentBlock::Thinking(ThinkingContent::new(thinking.clone())),
+                        ),
+                        AssistantContentBlock::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        } => Some(ContentBlock::ToolCall(ToolCall::new(
+                            id.clone(),
+                            name.clone(),
+                            arguments.clone(),
+                        ))),
+                        AssistantContentBlock::ImageResult { data, media_type } => {
+                            Some(ContentBlock::Image(ImageContent::new(
+                                data.clone(),
+                                media_type.clone(),
+                            )))
+                        }
+                        // Refusal / ToolPlan are not replayed to the model.
+                        _ => None,
+                    })
+                    .collect();
+                if blocks.is_empty() {
+                    continue;
+                }
+                let api = provider
+                    .as_ref()
+                    .and_then(|p| oxi_sdk::get_provider_api(p))
+                    .unwrap_or(oxi_ai::Api::OpenAiCompletions);
+                let mut am = AssistantMessage::new(
+                    api,
+                    provider.clone().unwrap_or_else(|| "assistant".to_string()),
+                    model_id.clone().unwrap_or_else(|| "assistant".to_string()),
+                );
+                am.content = blocks;
+                out.push(Message::Assistant(am));
+            }
+            AgentMessage::ToolResult {
+                content,
+                tool_call_id,
+            } => {
+                let tool_name = tool_names
+                    .get(tool_call_id)
+                    .cloned()
+                    .unwrap_or_else(|| "tool".to_string());
+                out.push(Message::tool_result(
+                    tool_call_id.clone(),
+                    tool_name,
+                    vec![ContentBlock::Text(TextContent::new(
+                        content.as_str().to_string(),
+                    ))],
+                ));
+            }
+            // System / BashExecution / Custom / BranchSummary are metadata, not
+            // part of the LLM message stream.
+            _ => {}
+        }
+    }
+    out
+}
+
 #[allow(dead_code)]
 impl AgentSession {
     /// Create a new session wrapping the given [`Agent`].
@@ -187,6 +312,18 @@ impl AgentSession {
         cwd: String,
     ) -> Self {
         let session_id = session_manager.get_session_id();
+
+        // Seed the agent's conversation state from the resumed session so the
+        // LLM sees prior user/assistant/tool history (issue #23). For a
+        // brand-new (empty) session the branch is empty and this is a no-op.
+        // Safe against re-persisting: `persist_session` reconciles against the
+        // on-disk entry count (`get_entries().len()`), which already includes
+        // these entries, so the seeded messages are never rewritten.
+        let history = resume_messages_from_branch(&session_manager.get_branch(None));
+        if !history.is_empty() {
+            agent.update_state(|s| s.messages = history);
+        }
+
         let compaction_config = CompactionConfig {
             enabled: settings.auto_compaction,
             ..CompactionConfig::default()
@@ -1821,5 +1958,193 @@ mod tests {
         // Guard dropped — the slot is replaced with no-op
         let count_after_drop = received.read().len();
         assert_eq!(count_after_drop, 1); // Only the first event
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Session resume history reconstruction (issue #23)
+    // ══════════════════════════════════════════════════════════════════
+
+    use crate::store::session::{AssistantContentBlock, ContentValue, SessionEntry};
+
+    fn entry(message: AgentMessage) -> SessionEntry {
+        SessionEntry::new(message)
+    }
+
+    /// A resumed conversation with a tool call must reconstruct the full
+    /// user → assistant(tool_call) → tool_result chain so the model and the UI
+    /// see prior context (issue #23).
+    #[test]
+    fn resume_reconstructs_tool_call_and_result() {
+        let branch = vec![
+            entry(AgentMessage::User {
+                content: ContentValue::String("list files".to_string()),
+            }),
+            entry(AgentMessage::Assistant {
+                content: vec![
+                    AssistantContentBlock::Text {
+                        text: "Running ls".to_string(),
+                    },
+                    AssistantContentBlock::ToolCall {
+                        id: "call_1".to_string(),
+                        name: "ls".to_string(),
+                        arguments: serde_json::json!({}),
+                    },
+                ],
+                provider: Some("anthropic".to_string()),
+                model_id: Some("claude-sonnet-4-20250514".to_string()),
+                usage: None,
+                stop_reason: None,
+            }),
+            entry(AgentMessage::ToolResult {
+                content: ContentValue::String("file_a\nfile_b".to_string()),
+                tool_call_id: "call_1".to_string(),
+            }),
+        ];
+
+        let messages = resume_messages_from_branch(&branch);
+        assert_eq!(messages.len(), 3, "all three turns reconstructed");
+
+        // User
+        assert!(matches!(messages[0], oxi_sdk::Message::User(_)));
+        // Assistant carries the tool call
+        let assistant = match &messages[1] {
+            oxi_sdk::Message::Assistant(a) => a,
+            _ => panic!("expected assistant message"),
+        };
+        assert_eq!(assistant.content.len(), 2);
+        assert!(assistant.content.iter().any(
+            |b| matches!(b, oxi_sdk::ContentBlock::ToolCall(tc) if tc.id == "call_1"
+                && tc.name == "ls")
+        ));
+        // Tool result is paired with the right id and resolved tool name.
+        match &messages[2] {
+            oxi_sdk::Message::ToolResult(t) => {
+                assert_eq!(t.tool_call_id, "call_1");
+                assert_eq!(t.tool_name, "ls", "tool name resolved from the call");
+                assert!(t.content.iter().any(|b| matches!(
+                    b,
+                    oxi_sdk::ContentBlock::Text(t) if t.text.contains("file_a")
+                )));
+            }
+            _ => panic!("expected tool result message"),
+        }
+    }
+
+    /// Metadata entries (System / BashExecution / Custom) are NOT replayed to
+    /// the model — only user, assistant, and tool-result turns.
+    #[test]
+    fn resume_skips_non_conversation_entries() {
+        let branch = vec![
+            entry(AgentMessage::System {
+                content: ContentValue::String("sys note".to_string()),
+            }),
+            entry(AgentMessage::User {
+                content: ContentValue::String("hello".to_string()),
+            }),
+            entry(AgentMessage::BashExecution {
+                command: "echo hi".to_string(),
+                output: "hi".to_string(),
+                exit_code: Some(0),
+                cancelled: false,
+                truncated: false,
+                full_output_path: None,
+                exclude_from_context: None,
+                timestamp: 0,
+            }),
+        ];
+
+        let messages = resume_messages_from_branch(&branch);
+        assert_eq!(messages.len(), 1, "only the user turn remains");
+        assert!(matches!(messages[0], oxi_sdk::Message::User(_)));
+    }
+
+    /// Compaction summary replaces earlier history: everything before the last
+    /// summary is dropped, and the summary seeds the context.
+    #[test]
+    fn resume_honours_compaction_summary() {
+        let branch = vec![
+            entry(AgentMessage::User {
+                content: ContentValue::String("old prompt".to_string()),
+            }),
+            entry(AgentMessage::CompactionSummary {
+                summary: "We discussed X.".to_string(),
+                tokens_before: 1000,
+                timestamp: 0,
+            }),
+            entry(AgentMessage::User {
+                content: ContentValue::String("new prompt".to_string()),
+            }),
+        ];
+
+        let messages = resume_messages_from_branch(&branch);
+        // Summary (as a user msg) + new prompt — the pre-compaction user msg
+        // is dropped.
+        assert_eq!(messages.len(), 2);
+        let first_text = match &messages[0] {
+            oxi_sdk::Message::User(u) => match &u.content {
+                oxi_sdk::MessageContent::Text(t) => t.clone(),
+                _ => String::new(),
+            },
+            _ => panic!("expected summary as user message"),
+        };
+        assert!(first_text.contains("We discussed X."));
+    }
+
+    /// An empty branch (brand-new session) yields no messages — seeding is a
+    /// no-op.
+    #[test]
+    fn resume_empty_branch_is_empty() {
+        let messages = resume_messages_from_branch(&[]);
+        assert!(messages.is_empty());
+    }
+
+    /// End-to-end: constructing an `AgentSession` over a session manager that
+    /// already holds history must seed the agent's conversation state (issue
+    /// #23) so the resumed turn sees prior context — and must not duplicate the
+    /// on-disk history when the safety-net `persist_session` runs.
+    #[test]
+    fn new_seeds_agent_state_from_resumed_session() {
+        let mut sm = SessionManager::in_memory("/tmp/test");
+        sm.append_message(AgentMessage::User {
+            content: ContentValue::String("what is 2+2".to_string()),
+        });
+        sm.append_message(AgentMessage::Assistant {
+            content: vec![AssistantContentBlock::Text {
+                text: "4".to_string(),
+            }],
+            provider: Some("anthropic".to_string()),
+            model_id: Some("claude-sonnet-4-20250514".to_string()),
+            usage: None,
+            stop_reason: None,
+        });
+        let before_count = sm.get_entries().len();
+
+        let provider = Arc::new(MockProvider);
+        let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+        let agent = Arc::new(Agent::new(
+            provider,
+            config,
+            Arc::new(oxi_agent::ToolRegistry::new()),
+        ));
+        let session = AgentSession::new(agent, Settings::default(), sm, "/tmp/test".to_string());
+
+        let messages = session.agent_ref().state().messages;
+        assert_eq!(messages.len(), 2, "agent state seeded with prior history");
+        assert!(matches!(messages[0], oxi_sdk::Message::User(_)));
+
+        // Seeding only touched agent state, not the session manager.
+        assert_eq!(
+            session.session_manager.read().get_entries().len(),
+            before_count
+        );
+
+        // The safety-net persist_session reconciles against the on-disk entry
+        // count, so it must NOT re-write the seeded history.
+        session.persist_session();
+        assert_eq!(
+            session.session_manager.read().get_entries().len(),
+            before_count,
+            "persist_session must not duplicate seeded history"
+        );
     }
 }
