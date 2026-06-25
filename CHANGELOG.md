@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-06-24
+
 ### Added — 테마 시스템 전면 재설계 (Phase 1 + 2)
 
 - **7 new background color slots** added to `ColorScheme` (total: 28):
