@@ -1,6 +1,6 @@
 [package]
 name = "oxi-tui"
-version = "0.47.0"
+version = "0.48.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Terminal UI widgets and theme system for oxi, built on ratatui"

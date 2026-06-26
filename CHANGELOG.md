@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-06-26
+
+### Added
+
+- **Model roles system** (ported from omp `model-roles`): named role →
+  model-pattern assignments (`model_roles` settings field) with `pi/<role>`
+  alias expansion and cycle detection. Defaults are empty, so the existing
+  single-model path is unchanged unless a user opts in.
+  - New `oxi-ai` modules: `roles` (registry + resolution), `role_switcher`
+    (signal-based decision engine — explicit override → current tool → long
+    context → thinking → trivial → default), and `role_routing` (a
+    transparent `Provider` wrapper that routes each request to the selected
+    model without changes to `oxi-agent`'s loop).
+  - **`oxi-sdk` re-exports the full surface** (`ModelRole`, `RoleRegistry`,
+    `RoleRoutingProvider`, `decide_role`, `resolve_role_to_model`, …), so
+    products follow the single-dependency pattern (`oxios → oxi-sdk`, no
+    `oxi-ai` direct dep).
+  - **`oxi-cli` wiring**: the TUI session build path wraps every agent with
+    the role router (edits apply live on the next turn); a configured
+    `commit` role upgrades the deterministic `CommitTool` to an LLM-backed
+    one; settings migrated v8 → v9 (`model_roles`, defaults empty); new
+    `/roles` overlay + slash command for live per-role model assignment.
+
+### Security
+
+- Bumped `quinn-proto` 0.11.14 → 0.11.15 ([RUSTSEC-2026-0185](https://rustsec.org/advisories/RUSTSEC-2026-0185),
+  remote memory exhaustion from unbounded out-of-order stream reassembly,
+  transitive via `reqwest`).
+
 ## [0.47.0] - 2026-06-24
 
 ### Added — 테마 시스템 전면 재설계 (Phase 1 + 2)
