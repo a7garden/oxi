@@ -156,7 +156,13 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // Register built-in tools on the agent's tool registry.
     let tools = app.agent_tools();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    register_builtin_tools(&tools, &cwd, args, &app.settings().disabled_tools);
+    register_builtin_tools(
+        &tools,
+        &cwd,
+        args,
+        &app.settings().disabled_tools,
+        &app.settings().model_roles,
+    );
 
     // Discover and load WASM extensions.
     let wasm_ext = load_wasm_extensions(&app, &cwd, &tools);
@@ -352,6 +358,7 @@ fn register_builtin_tools(
     cwd: &std::path::Path,
     args: &CliArgs,
     disabled_tools: &[String],
+    model_roles: &std::collections::HashMap<String, String>,
 ) {
     let builtin_registry = if let Some(ref tools_str) = args.tools {
         let names: Vec<&str> = tools_str.split(',').map(|s| s.trim()).collect();
@@ -368,6 +375,18 @@ fn register_builtin_tools(
     // configs, render live connection status, and so on.
     if let Some(mgr) = builtin_registry.mcp_manager() {
         tools.set_mcp_manager(mgr);
+    }
+
+    // Role-based commit model: if a `commit` role is configured, upgrade the
+    // deterministic (no-LLM) CommitTool to one backed by that model. Tools
+    // register by name, so this overwrites the unconfigured instance safely.
+    let role_registry = oxi_sdk::RoleRegistry::from_map(model_roles.clone());
+    if let Some(model) = oxi_sdk::resolve_role_to_model(oxi_sdk::ModelRole::Commit, &role_registry)
+    {
+        let commit: std::sync::Arc<dyn oxi_agent::AgentTool> =
+            std::sync::Arc::new(oxi_agent::CommitTool::new(model));
+        tools.register_arc(commit);
+        tracing::debug!("CommitTool upgraded to commit-role model");
     }
 }
 

@@ -181,6 +181,37 @@ pub mod fallback_chain;
 /// Ordered fallback chain for model failover on failure.
 pub use fallback_chain::{FallbackChain, FallbackChainError};
 
+// Model roles — named model assignments (ported from omp)
+
+/// Named model roles with `pi/<role>` alias resolution.
+pub mod roles;
+
+/// Re-exports for the roles module.
+pub use roles::{
+    ModelRole, RoleColor, RoleInfo, RoleRegistry, builtin_role_info, builtin_visible_ids,
+};
+
+// Role switching — signal-based role decision on top of the roles registry
+
+/// Role-switching decision engine (signals -> role -> model).
+pub mod role_switcher;
+
+/// Re-exports for the role_switcher module.
+pub use role_switcher::{
+    DEFAULT_LONG_CONTEXT_THRESHOLD, RoleSignals, decide_role, resolve_role_to_model, role_for_tool,
+};
+
+/// Re-exports for the live role registry (UI <-> provider shared state).
+pub use roles::{live_role_registry, set_live_role_registry};
+
+// Role-routing provider — plugs role switching into the live agent loop
+
+/// Provider wrapper that routes each request to the role-selected model.
+pub mod role_routing;
+
+/// Re-export the role-routing provider.
+pub use role_routing::RoleRoutingProvider;
+
 // Partial response for stream recovery
 pub mod partial_response;
 

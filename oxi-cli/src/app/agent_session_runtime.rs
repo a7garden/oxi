@@ -410,8 +410,17 @@ pub async fn create_agent_session_from_services(
         agent_pool: None,
     };
 
+    let base: Arc<dyn oxi_sdk::Provider> = Arc::from(provider);
+    // Always wrap with the role router so UI edits to `model_roles` apply live
+    // (the wrapper passes through unchanged while the registry is empty).
+    let role_registry = std::sync::Arc::new(parking_lot::RwLock::new(
+        oxi_sdk::RoleRegistry::from_map(settings.model_roles.clone()),
+    ));
+    oxi_sdk::set_live_role_registry(std::sync::Arc::clone(&role_registry));
+    let provider: Arc<dyn oxi_sdk::Provider> =
+        Arc::new(oxi_sdk::RoleRoutingProvider::new(base, role_registry));
     let agent = Arc::new(oxi_agent::Agent::new(
-        Arc::from(provider),
+        provider,
         config,
         Arc::new(oxi_agent::ToolRegistry::new()),
     ));

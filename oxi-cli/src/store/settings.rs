@@ -34,7 +34,8 @@ use std::path::{Path, PathBuf};
 /// - 6: language_policy_enabled field (master toggle, default OFF)
 /// - 7: edit_format field (Hashline/StrReplace, default StrReplace)
 /// - 8: glyph_set field (Unicode/Ascii/Nerd, default Unicode)
-const SETTINGS_VERSION: u32 = 8;
+/// - 9: model_roles field (named model roles ported from omp, default empty)
+const SETTINGS_VERSION: u32 = 9;
 
 /// Known output channels for the TUI language policy.
 ///
@@ -394,6 +395,19 @@ pub struct Settings {
     /// TTSR interrupt mode. Default: "prose_only".
     #[serde(default = "default_ttsr_mode")]
     pub ttsr_interrupt_mode: String,
+
+    // ── Model roles (ported from omp) ────────────────────────────────
+    /// Named model-role → model-pattern assignments (e.g. `"commit"` →
+    /// `"anthropic/claude-haiku"`, `"slow"` → `"pi/default"`).
+    ///
+    /// Empty by default. Role names are open-ended: the 10 built-in roles
+    /// (`default`/`smol`/`slow`/`vision`/`plan`/`designer`/`commit`/`title`/
+    /// `task`/`advisor`) plus any user-defined role are accepted.
+    /// Resolution — including `pi/<role>` alias expansion with cycle
+    /// detection — is done by [`oxi_ai::RoleRegistry`]. The role-switching
+    /// layer (which role is active when) is wired separately.
+    #[serde(default)]
+    pub model_roles: HashMap<String, String>,
 }
 
 fn default_theme() -> String {
@@ -478,6 +492,7 @@ impl Default for Settings {
             memory_db_path: None,
             ttsr_enabled: false,
             ttsr_interrupt_mode: default_ttsr_mode(),
+            model_roles: HashMap::new(),
         }
     }
 }
@@ -1046,6 +1061,8 @@ impl Settings {
     ///   value migration, serde default fills with empty map)
     /// - Version 5 → Version 6 (language_policy_enabled field added —
     ///   defaults to false via `#[serde(default = "default_false")]`)
+    /// - Version 8 → Version 9 (model_roles field added — no value
+    ///   migration, `#[serde(default)]` fills with an empty map)
     fn migrate(settings: Settings) -> Result<Settings> {
         let mut settings = settings;
 
@@ -1129,6 +1146,15 @@ impl Settings {
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
                     "Migrated settings from version 7 to {} (added glyph_set, defaulting to unicode)",
+                    SETTINGS_VERSION
+                );
+            }
+            8 => {
+                // Version 8 → 9: model_roles field added (ported from omp).
+                // No value migration — `#[serde(default)]` fills an empty map.
+                settings.version = SETTINGS_VERSION;
+                tracing::info!(
+                    "Migrated settings from version 8 to {} (added model_roles, defaulting to empty)",
                     SETTINGS_VERSION
                 );
             }

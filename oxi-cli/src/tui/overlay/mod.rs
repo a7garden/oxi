@@ -19,6 +19,7 @@ pub mod mcp_dashboard;
 pub mod mcp_presets;
 pub mod model_select_inline;
 pub mod provider_select;
+pub mod roles_config;
 pub mod router_integration;
 pub mod router_setup;
 pub mod settings;
@@ -36,6 +37,8 @@ pub use issues_panel::IssuesPanelOverlay;
 pub use mcp_config::McpConfigOverlay;
 #[allow(unused_imports)]
 pub use mcp_dashboard::{McpAction, McpDashboardOverlay};
+#[allow(unused_imports)]
+pub use roles_config::roles_config_overlay;
 pub use router_setup::{RouterSetupData, router_setup};
 #[allow(unused_imports)]
 pub use settings::settings_overlay;

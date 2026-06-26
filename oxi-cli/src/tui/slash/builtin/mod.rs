@@ -14,6 +14,7 @@ mod model;
 mod overlay_commands;
 mod provider;
 mod quit;
+mod roles;
 mod router;
 mod session_grp;
 mod settings;
@@ -27,6 +28,7 @@ use super::registry::SlashRegistry;
 /// Called by [`SlashRegistry::builtins`](super::registry::SlashRegistry::builtins).
 pub(crate) fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(quit::QuitCommand));
+    registry.register(Box::new(roles::RolesCommand));
     registry.register(Box::new(overlay_commands::HelpCommand));
     registry.register(Box::new(overlay_commands::HotkeysCommand));
     registry.register(Box::new(overlay_commands::ExtensionsCommand));

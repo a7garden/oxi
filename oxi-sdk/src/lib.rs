@@ -124,6 +124,11 @@ pub use oxi_ai::{
     ProviderRegistry, StreamOptions, UserMessage,
 };
 
+// Model roles + role switching (ported from omp)
+pub use oxi_ai::role_routing::RoleRoutingProvider;
+pub use oxi_ai::role_switcher::{RoleSignals, decide_role, resolve_role_to_model, role_for_tool};
+pub use oxi_ai::roles::{ModelRole, RoleRegistry, live_role_registry, set_live_role_registry};
+
 // Credential management (oauth + env key resolution)
 pub use oxi_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key, has_env_key};
 
