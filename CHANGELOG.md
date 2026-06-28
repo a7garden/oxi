@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-06-28
+
 ### Added — omp-parity browser capabilities (pure-Rust, no Chrome)
 
 - **`oxi-cli` opt-in `native-browser` feature**: building with
@@ -34,6 +36,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   approximates geometry). See the `Observation` doc-comment.
 - **`browse_session` `observe` action**: returns the `Observation` as JSON.
 
+### Added — Advisor engine (omp parity)
+
+- **Advisor runtime** (`oxi-agent/src/advisor/`): second, read-only LLM agent
+  that watches the primary agent's transcript turn-by-turn and emits advisory
+  notes (nit/concern/blocker severity) through configurable delivery channels
+  (aside, intercept, post-interrupt).
+- **Advisor delivery channels**: `AdvisorEmissionGuard` deduplicates notes
+  (normalized NFKC, FIFO at 4096 entries); `resolve_delivery_channel` maps
+  severity + immune turn state to `intercept`, `aside`, or `post-interrupt`.
+- **Advisor context injection**: `assemble_advisor_system_prompt` discovers
+  `AGENTS.md`/`CLAUDE.md` for `<project-context>` and `WATCHDOG.md` for
+  `<attention>` blocks from `cwd` → home + `~/.oxi/WATCHDOG.md`.
+- **Wired into oxi-cli**: the advisor is constructed at session start with
+  its own provider/model, receives turn-end events via `AgentEvent::TurnEnd`,
+  and delivers notes through the event bus.
+
+### Added — Mnemopi memory engine (Rust port from omp)
+
+- **New `oxi-mnemopi` crate**: local SQLite vector memory engine with
+  LRU-cached embeddings, semantic search, episodic/semantic memory store,
+  and consolidate/reorganize operations.
+
+### Fixed
+
+- **CI**: added `libssl-dev` to MSRV and smoke-test CI jobs (openssl-sys
+  linker error on ubuntu-latest).
+- **Security**: bumped `lru` 0.12 → 0.16.4 to resolve RUSTSEC-2026-0002
+  (IterMut violates Stacked Borrows).
+- **Format**: auto-applied `cargo fmt` fixes across advisor and session code.
+
 ### Changed
 
 - **`oxibrowser`/`oxibrowser-core` 0.15 → 0.16.0** (`oxi-agent`, `oxi-sdk`).
@@ -43,8 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `wreq` HTTP backend. oxi touches oxibrowser only via `Browser`/`Tab`/
   `BrowserConfig`/`BrowserEvent`/`BrowseResult`, so the upstream
   `HttpClient::request() → FetchOutcome` breaking change has zero impact.
-  `cargo deny check` is clean (advisories/bans/licenses/sources all ok;
-  the `wreq`/`btls`/`brotli` transitive stack introduces no new issues).
 
 ## [0.48.0] - 2026-06-26
 
