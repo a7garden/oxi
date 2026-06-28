@@ -164,6 +164,25 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         &app.settings().model_roles,
     );
 
+    // Native headless browser (opt-in via the `native-browser` cargo feature).
+    // Constructs the pure-Rust `oxibrowser-core` engine and registers the
+    // browse tools (incl. `browse_session` with `observe`/`wait` actions) so
+    // the agent can navigate/observe/extract — omp-parity browsing without a
+    // Chrome dependency.
+    #[cfg(feature = "native-browser")]
+    {
+        match oxi_agent::tools::browse::OxiBrowserEngine::new().await {
+            Ok(engine) => {
+                let browser_registry =
+                    oxi_sdk::tool_factory::browsing_tools_with_session(std::sync::Arc::new(engine));
+                tools.extend_from(&browser_registry);
+            }
+            Err(e) => {
+                tracing::warn!("native browser engine unavailable; browse tools disabled: {e}");
+            }
+        }
+    }
+
     // Discover and load WASM extensions.
     let wasm_ext = load_wasm_extensions(&app, &cwd, &tools);
     app.set_wasm_ext(wasm_ext);

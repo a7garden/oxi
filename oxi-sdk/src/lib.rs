@@ -190,6 +190,18 @@ pub use oxi_agent::{
     StructuredOutputError, ToolCallContext, ToolContext, ToolError, ToolExecutionMode,
     ToolRegistry, VisitReason, WebSearchTool, WriteTool,
 };
+// ── Advisor subsystem (read-only reviewer that shadows the primary agent) ─
+//
+// SDK consumers can construct a full advisor: build a second `Agent` with the
+// advisor model role + read-only tools + an `AdviseTool` (carrying an
+// `EnqueueAdviceFn`), then drive it with `AdvisorRuntime`. The emission guard
+pub use oxi_agent::advisor::{
+    ADVISOR_GUIDANCE, ADVISOR_READONLY_TOOL_NAMES, ADVISOR_SYSTEM_PROMPT, AdviseTool, AdvisorAgent,
+    AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote, AdvisorRuntime, AdvisorRuntimeHost,
+    AdvisorSeverity, AgentAdvisor, DeliveryOpts, EnqueueAdviceFn, format_advisory_batch,
+    is_immune_turn_active, is_interrupting_severity, normalize_advisor_note,
+    resolve_delivery_channel,
+};
 // ── Todo tool types (agent-scoped, observable by SDK consumers) ──────
 pub use oxi_agent::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, TodoUpdateResult};
 pub use oxi_agent::{TodoStateProvider, TodoTool};

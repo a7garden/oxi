@@ -25,6 +25,7 @@ oxi-ai = { version = "0.48.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.48.0", path = "../oxi-agent" }
 oxi-sdk = { version = "0.48.0", path = "../oxi-sdk" }
 oxi-tui = { version = "0.48.0", path = "../oxi-tui" }
+oxi-mnemopi = { version = "0.1.0", path = "../oxi-mnemopi" }
 
 # Async
 async-trait = "0.1"
@@ -111,6 +112,7 @@ libc = "0.2"
 [features]
 default = ["self-update"]
 self-update = ["dep:self_update"]
+native-browser = ["oxi-agent/native-browser", "oxi-sdk/native-browser"]
 
 [dev-dependencies]
 tempfile = "3"

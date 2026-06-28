@@ -5,7 +5,7 @@
 //! a single source of truth for DOM interaction logic.
 
 use crate::tools::ToolError;
-use crate::tools::browse::engine::BrowserTab;
+use crate::tools::browse::engine::{BrowserTab, ObservedElement};
 use serde_json::Value;
 
 // ── Link extraction ───────────────────────────────────────────────
@@ -168,11 +168,125 @@ pub fn js_uncheck(selector: &str) -> String {
     )
 }
 
+// ── Accessibility-surface observation (omp `observe()` parity) ──────────────
+
+/// JS that walks the page's interactive elements, stamps each with a stable
+/// `data-oxi-ref="eN"` attribute, and returns `{ ref_id, role, name, tag,
+/// selector, visible, interactive }[]`.
+///
+/// Visibility/interactivity use pure-CSS checks (`getComputedStyle`) which
+/// are reliable in the boa runtime. **No coordinates** are returned — the
+/// boa layout engine only approximates geometry and rects would mislead.
+/// `setAttribute` persists to the live `DomSnapshot`, so the returned
+/// `[data-oxi-ref="eN"]` selectors resolve on a follow-up `click`/`fill`.
+pub const JS_OBSERVE: &str = r#"(function() {
+    var SEL = 'a[href], button, input, textarea, select, summary, [role], [tabindex], [onclick]';
+    var els = document.querySelectorAll(SEL);
+    var out = [];
+    var n = 0;
+    for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var cs = getComputedStyle(el);
+        if (cs.getPropertyValue('display') === 'none') continue;
+        if (cs.getPropertyValue('visibility') === 'hidden') continue;
+        if (cs.getPropertyValue('opacity') === '0') continue;
+        if (el.getAttribute('hidden') !== null) continue;
+        if (el.getAttribute('aria-hidden') === 'true') continue;
+        if (el.getAttribute('disabled') !== null) continue;
+        if (cs.getPropertyValue('pointer-events') === 'none') continue;
+        var tag = (el.tagName || '').toLowerCase();
+        var role = el.getAttribute('role');
+        if (!role) {
+            var type = (el.getAttribute('type') || '').toLowerCase();
+            if (tag === 'a') role = 'link';
+            else if (tag === 'button' || type === 'button' || type === 'submit' || type === 'reset' || tag === 'summary') role = 'button';
+            else if (tag === 'input' || tag === 'textarea') role = 'textbox';
+            else if (tag === 'select') role = 'combobox';
+            else if (type === 'checkbox') role = 'checkbox';
+            else if (type === 'radio') role = 'radio';
+            else if (tag === 'option') role = 'option';
+            else role = tag;
+        }
+        var name = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+        name = name.trim();
+        if (!name) {
+            name = (el.textContent || '').trim().replace(/\s+/g, ' ');
+        }
+        name = name.slice(0, 80);
+        n++;
+        var ref = 'e' + n;
+        try { el.setAttribute('data-oxi-ref', ref); } catch (e) {}
+        out.push({
+            ref_id: ref,
+            role: role,
+            name: name,
+            tag: tag,
+            selector: '[data-oxi-ref="' + ref + '"]',
+            visible: true,
+            interactive: true
+        });
+    }
+    return out;
+})()"#;
+
+/// Parse the JSON array returned by [`JS_OBSERVE`] into [`ObservedElement`]s.
+///
+/// Only `ref_id` is required; the rest fall back to empty/`true` so a
+/// partial or forward-incompatible entry degrades instead of dropping.
+pub fn parse_observed_elements(value: Value) -> Vec<ObservedElement> {
+    let Some(arr) = value.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|e| {
+            let ref_id = e.get("ref_id")?.as_str()?.to_string();
+            let s = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            Some(ObservedElement {
+                ref_id,
+                role: s("role"),
+                name: s("name"),
+                tag: s("tag"),
+                selector: s("selector"),
+                visible: e.get("visible").and_then(|v| v.as_bool()).unwrap_or(true),
+                interactive: e
+                    .get("interactive")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+            })
+        })
+        .collect()
+}
+
 // ── Tests ─────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_parse_observed_elements() {
+        // null / non-array → empty
+        assert!(parse_observed_elements(Value::Null).is_empty());
+
+        // well-formed array → mapped in order
+        let input = serde_json::json!([
+            { "ref_id": "e1", "role": "link", "name": "Sign in", "tag": "a",
+              "selector": "[data-oxi-ref=\"e1\"]", "visible": true, "interactive": true },
+            { "ref_id": "e2", "role": "textbox", "name": "Email", "tag": "input",
+              "selector": "[data-oxi-ref=\"e2\"]" }
+        ]);
+        let els = parse_observed_elements(input);
+        assert_eq!(els.len(), 2);
+        assert_eq!(els[0].ref_id, "e1");
+        assert_eq!(els[0].selector, "[data-oxi-ref=\"e1\"]");
+        // missing optional fields degrade (defaults), not drop
+        assert_eq!(els[1].name, "Email");
+        assert!(els[1].visible);
+        assert!(els[1].interactive);
+
+        // entry without ref_id is dropped
+        let partial = serde_json::json!([{ "role": "button" }]);
+        assert!(parse_observed_elements(partial).is_empty());
+    }
 
     #[test]
     fn test_parse_link_values_empty() {

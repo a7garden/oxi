@@ -239,14 +239,27 @@ pub fn create_memory_backend(
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    match crate::store::memory_sqlite::SqliteMemoryStore::open(&db_path) {
-        Ok(store) => Some(Arc::new(store)),
-        Err(e) => {
-            tracing::warn!(
-                "Failed to open memory database at {}: {e}",
-                db_path.display()
-            );
-            None
+    if settings.mnemopi_engine {
+        match crate::store::memory_mnemopi::MnemopiMemoryBackend::open(&db_path, "default") {
+            Ok(store) => Some(Arc::new(store)),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to open Mnemopi engine at {}: {e}",
+                    db_path.display()
+                );
+                None
+            }
+        }
+    } else {
+        match crate::store::memory_sqlite::SqliteMemoryStore::open(&db_path) {
+            Ok(store) => Some(Arc::new(store)),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to open memory database at {}: {e}",
+                    db_path.display()
+                );
+                None
+            }
         }
     }
 }

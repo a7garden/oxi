@@ -32,7 +32,7 @@ pub struct MemoryItem {
 
 /// Memory backend for the `memory_*` tools. The composition root implements
 /// this, bridging to `oxi_sdk::ports::MemoryStore` + `EmbeddingProvider`.
-pub trait MemoryBackend: Send + Sync + std::fmt::Debug {
+pub trait MemoryBackend: Send + Sync + std::fmt::Debug + 'static {
     /// Store a memory item, returning its new ID.
     fn put<'a>(
         &'a self,
@@ -56,6 +56,19 @@ pub trait MemoryBackend: Send + Sync + std::fmt::Debug {
         &'a self,
         id: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), ToolError>> + Send + 'a>>;
+
+    /// Human-readable memory status (None if not supported by this backend).
+    fn memory_info(&self) -> Option<String> {
+        None
+    }
+    /// Trigger sleep consolidation, returning a status message.
+    fn trigger_consolidation(&self) -> Option<String> {
+        None
+    }
+    /// Trigger SHMR harmonization, returning a status message.
+    fn trigger_harmonize(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Content resolved from an internal protocol URL (e.g. `skill://`, `issue://`).

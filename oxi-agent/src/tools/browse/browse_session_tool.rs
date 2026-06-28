@@ -178,6 +178,8 @@ impl AgentTool for BrowseSessionTool {
                         "drag",
                         "upload_file",
                         "wait_for",
+                        "wait",
+                        "observe",
                         "content",
                         "query_all",
                         "extract_links",
@@ -223,6 +225,12 @@ impl AgentTool for BrowseSessionTool {
                     "type": "integer",
                     "default": 10000,
                     "description": "Timeout in ms (wait_for action)"
+                },
+                "wait_condition": {
+                    "type": "string",
+                    "enum": ["network_idle", "dom_content_loaded", "load"],
+                    "default": "network_idle",
+                    "description": "Structured wait condition (wait action): network_idle, dom_content_loaded, or load"
                 },
                 "from_selector": {
                     "type": "string",
@@ -478,6 +486,33 @@ impl AgentTool for BrowseSessionTool {
                 tab.wait_for(sel, timeout_ms).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
+            // ── Structured wait (NetworkIdle / lifecycle) ──────────
+            "wait" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let cond = match params["wait_condition"].as_str().unwrap_or("network_idle") {
+                    "dom_content_loaded" => super::engine::BrowseWaitCondition::DomContentLoaded,
+                    "load" => super::engine::BrowseWaitCondition::Load,
+                    // default + "network_idle"
+                    _ => super::engine::BrowseWaitCondition::NetworkIdle,
+                };
+                tab.wait_for_condition(&cond, timeout_ms)
+                    .await
+                    .map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            // ── Observe (omp `observe()` parity) ───────────────────
+            "observe" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let obs = tab.observe().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(
+                    serde_json::to_string_pretty(&obs).unwrap_or_default(),
+                ))
+            }
 
             // ── Read ────────────────────────────────────────────────
             "content" => {
@@ -696,8 +731,8 @@ impl AgentTool for BrowseSessionTool {
                 "Unknown action: '{}'. Valid actions: open, goto, back, forward, reload, \
                      click, fill, type, clear, press, select, check, uncheck, scroll, \
                      scroll_into_view, hover, double_click, right_click, drag, upload_file, \
-                     wait_for, content, query_all, extract_links, evaluate, evaluate_await, \
-                     get_value, screenshot, close",
+                     wait_for, wait, content, observe, query_all, extract_links, evaluate, \
+                     evaluate_await, get_value, screenshot, close",
                 action
             )),
         }
@@ -1262,6 +1297,6 @@ mod tests {
         let tool = make_tool();
         let schema = tool.parameters_schema();
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
-        assert_eq!(actions.len(), 29);
+        assert_eq!(actions.len(), 31);
     }
 }

@@ -15,6 +15,8 @@
 //! Provides the core agent loop, tool execution, state management,
 //! and streaming event pipeline for the oxi coding agent.
 
+/// Advisor subsystem — read-only reviewer that shadows the primary agent.
+pub mod advisor;
 /// Core agent implementation.
 pub mod agent;
 /// Agent definition file parsing and discovery.
@@ -53,6 +55,13 @@ pub use agent_definition::{
 };
 pub use agent_loop::{AgentLoop, AgentLoopConfig};
 
+pub use advisor::{
+    ADVISOR_GUIDANCE, ADVISOR_READONLY_TOOL_NAMES, ADVISOR_SYSTEM_PROMPT, AdviseTool, AdvisorAgent,
+    AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote, AdvisorRuntime, AdvisorRuntimeHost,
+    AdvisorSeverity, AgentAdvisor, DeliveryOpts, EnqueueAdviceFn, format_advisory_batch,
+    is_immune_turn_active, is_interrupting_severity, normalize_advisor_note,
+    resolve_delivery_channel,
+};
 /// Agent configuration, hooks, and tool execution mode.
 pub use config::{
     AfterToolCallContext, AfterToolCallResult, AgentConfig, AgentHooks, BeforeToolCallContext,

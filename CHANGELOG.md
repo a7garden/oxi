@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — omp-parity browser capabilities (pure-Rust, no Chrome)
+
+- **`oxi-cli` opt-in `native-browser` feature**: building with
+  `--features native-browser` now constructs the pure-Rust
+  `oxibrowser-core` headless engine in `build_app` and registers the
+  browse tools (`browse`, `browse_extract`, `browse_script`,
+  `browse_session`). The default build is unchanged — the browser stays
+  dormant unless the feature is enabled. This closes the long-standing
+  "tools exist but ship unreachable" gap.
+- **`BrowserTab::wait_for_condition`** + `BrowseWaitCondition` enum
+  (`Visible`/`NetworkIdle`/`DomContentLoaded`/`Load`): structured waits
+  matching omp's `waitFor*`/network-idle. The native backend maps 1:1 to
+  `oxibrowser-core`'s `WaitCondition` (real in-flight-traffic NetworkIdle
+  with a quiet window); the default impl degrades `Visible` to `wait_for`.
+- **`browse_session` `wait` action**: `wait_condition` ∈
+  `{network_idle, dom_content_loaded, load}` + `timeout_ms`.
+- **`BrowserTab::observe`** + `Observation`/`ObservedElement` types
+  (omp `observe()` parity): the native backend synthesizes the page's
+  visible/interactive surface via a JS walk and returns stable
+  `data-oxi-ref="eN"` selectors the agent can `click`/`fill`/`type` by.
+  **Experimental / best-effort: the synthesis JS is not yet
+  runtime-validated against live boa pages** — the chief risk is
+  over-inclusion if `getComputedStyle` returns empty strings for some
+  properties. No coordinates are returned (the boa layout engine only
+  approximates geometry). See the `Observation` doc-comment.
+- **`browse_session` `observe` action**: returns the `Observation` as JSON.
+
+### Changed
+
+- **`oxibrowser`/`oxibrowser-core` 0.15 → 0.16.0** (`oxi-agent`, `oxi-sdk`).
+  Picks up upstream `ChallengeDetector` (Cloudflare/Turnstile/reCAPTCHA/
+  hCaptcha — auto-retry on `goto`, transparent to callers), the always-on
+  V8-parity stealth bootstrap, the native `extract.rs` engine, and the
+  `wreq` HTTP backend. oxi touches oxibrowser only via `Browser`/`Tab`/
+  `BrowserConfig`/`BrowserEvent`/`BrowseResult`, so the upstream
+  `HttpClient::request() → FetchOutcome` breaking change has zero impact.
+  `cargo deny check` is clean (advisories/bans/licenses/sources all ok;
+  the `wreq`/`btls`/`brotli` transitive stack introduces no new issues).
+
 ## [0.48.0] - 2026-06-26
 
 ### Added

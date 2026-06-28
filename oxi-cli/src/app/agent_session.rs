@@ -34,9 +34,20 @@ use crate::extensions::{
 use crate::store::session::{AgentMessage, SessionManager};
 use crate::store::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
-use oxi_agent::{Agent, AgentEvent, AgentState};
-use oxi_sdk::Message;
-use parking_lot::RwLock;
+use oxi_agent::advisor::{
+    AdviseTool, AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote,
+    AdvisorRuntime, AdvisorRuntimeHost, AgentAdvisor, DeliveryOpts, EnqueueAdviceFn,
+    format_advisory_batch, resolve_delivery_channel,
+};
+use oxi_agent::{
+    Agent, AgentConfig, AgentEvent, AgentState, FindTool, GrepTool, ReadTool, ToolRegistry,
+};
+use oxi_ai::ModelRole;
+use oxi_sdk::{
+    CompactionStrategy, Message, Provider, RoleRegistry, RoleRoutingProvider, get_provider,
+    resolve_role_to_model,
+};
+use parking_lot::{Mutex as PlMutex, RwLock};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -79,6 +90,14 @@ pub enum SessionEvent {
     ThinkingLevelChanged {
         /// New thinking level.
         level: ThinkingLevel,
+    },
+    /// An advisor note was delivered to the primary (aside or preserve
+    /// channel). Rendered as an `<advisory>` card; does not interrupt the run.
+    Advisor {
+        /// How the note was routed.
+        channel: AdvisorDeliveryChannel,
+        /// The rendered `<advisory>` batch (one element per note).
+        body: String,
     },
 }
 
@@ -175,6 +194,52 @@ pub struct AgentSession {
 
     // ── Extensions ───────────────────────────────────────────────────
     extension_runner: Arc<RwLock<Option<ExtensionRunner>>>,
+
+    // ── Advisor (read-only reviewer shadowing the primary) ───────────
+    /// The advisor runtime, if enabled. `None` when `advisor.enabled` is off.
+    advisor: Arc<RwLock<Option<Arc<AdvisorRuntime>>>>,
+    /// Per-session advisor emission guard (dedupe + one-advise-per-update +
+    /// content-free-phrase suppression). Owned here because the session is
+    /// what routes accepted notes back to the primary transcript.
+    advisor_guard: Arc<AdvisorEmissionGuard>,
+    /// Advisor delivery + interrupt-cooldown state.
+    advisor_delivery: Arc<PlMutex<AdvisorDeliveryState>>,
+    /// Count of primary turns completed (for the immune-turn cooldown fence).
+    advisor_primary_turns: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Advisor delivery + interrupt-cooldown state (session-scoped).
+#[derive(Debug, Default, Clone, Copy)]
+struct AdvisorDeliveryState {
+    /// Latched true when the user deliberately interrupted; suppresses
+    /// `concern`/`blocker` auto-resume until the user next resumes.
+    auto_resume_suppressed: bool,
+    /// The primary-turn index at which the post-interrupt immune-turn window
+    /// starts. `None` when no interrupting steer is in flight.
+    interrupt_immune_turn_start: Option<u64>,
+}
+
+/// Minimal [`AdvisorRuntimeHost`] for the session-owned advisor: captures only
+/// what the runtime needs (the primary transcript for deltas, and the emission
+/// guard's per-update reset). Advice routing is handled by the `AdviseTool`'s
+/// enqueue closure (which captures the session's shared steering/listener
+/// queues), NOT by this host — so this host never needs an `Arc<AgentSession>`
+/// (avoiding a self-referential cycle).
+struct AdvisorHost {
+    agent: Arc<Agent>,
+    guard: Arc<AdvisorEmissionGuard>,
+}
+
+impl AdvisorRuntimeHost for AdvisorHost {
+    fn snapshot_messages(&self) -> Vec<Message> {
+        self.agent.state().messages
+    }
+    fn begin_advisor_update(&self) {
+        self.guard.begin_update();
+    }
+    // Routing is handled by the AdviseTool closure; this is unused for the
+    // session-owned advisor but required by the trait (SDK consumers may use it).
+    fn enqueue_advice(&self, _note: AdvisorNote) {}
 }
 
 /// Convert a resumed session's branch (root → leaf, chronological) into the
@@ -345,6 +410,10 @@ impl AgentSession {
             streaming: Arc::new(AtomicBool::new(false)),
             should_stop: Arc::new(AtomicBool::new(false)),
             extension_runner: Arc::new(RwLock::new(None)),
+            advisor: Arc::new(RwLock::new(None)),
+            advisor_guard: Arc::new(AdvisorEmissionGuard::new()),
+            advisor_delivery: Arc::new(PlMutex::new(AdvisorDeliveryState::default())),
+            advisor_primary_turns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -1145,6 +1214,10 @@ impl AgentSession {
             streaming: Arc::clone(&self.streaming),
             should_stop: Arc::clone(&self.should_stop),
             extension_runner: Arc::clone(&self.extension_runner),
+            advisor: Arc::clone(&self.advisor),
+            advisor_guard: Arc::clone(&self.advisor_guard),
+            advisor_delivery: Arc::clone(&self.advisor_delivery),
+            advisor_primary_turns: Arc::clone(&self.advisor_primary_turns),
         }
     }
 
@@ -1232,6 +1305,12 @@ impl AgentSession {
     /// all enabled extensions. The event is *also* emitted as a
     /// [`SessionEvent::Agent`] to regular session listeners.
     pub fn forward_event_to_extensions(&self, event: &AgentEvent) {
+        // Advisor: feed each completed primary turn to the shadowing reviewer.
+        // omp `setOnTurnEnd`. Reads the live primary transcript (TurnEnd only
+        // carries the turn's assistant message; the advisor needs the full list).
+        if let AgentEvent::TurnEnd { .. } = event {
+            self.on_advisor_turn_end();
+        }
         // Always emit to session listeners
         self.emit(SessionEvent::Agent(Box::new(event.clone())));
 
@@ -1335,6 +1414,228 @@ impl AgentSession {
             let settings = self.settings.read().clone();
             runner.registry().emit_settings_changed(&settings);
         }
+    }
+    // ══════════════════════════════════════════════════════════════════
+    // Advisor (read-only reviewer shadowing the primary agent)
+    // ══════════════════════════════════════════════════════════════════
+
+    /// Whether the advisor is currently enabled for this session.
+    #[must_use]
+    pub fn is_advisor_enabled(&self) -> bool {
+        self.advisor.read().is_some()
+    }
+
+    /// Enable or disable the advisor for this session, starting or stopping
+    /// the runtime to match. Returns `true` when the advisor is actively
+    /// running after the call. Mirrors omp `setAdvisorEnabled`.
+    pub fn set_advisor_enabled(&self, enabled: bool) -> Result<bool> {
+        {
+            let mut s = self.settings.write();
+            s.advisor.enabled = enabled;
+        }
+        if enabled {
+            if self.advisor.read().is_none() {
+                let rt = self.build_advisor().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "advisor could not start: no provider/model resolved for the \
+                         advisor role or the primary model"
+                    )
+                })?;
+                *self.advisor.write() = Some(rt);
+            }
+            Ok(true)
+        } else {
+            if let Some(rt) = self.advisor.write().take() {
+                rt.dispose();
+            }
+            Ok(false)
+        }
+    }
+
+    /// Toggle the advisor on/off. Returns the new enabled state.
+    pub fn toggle_advisor(&self) -> Result<bool> {
+        self.set_advisor_enabled(!self.is_advisor_enabled())
+    }
+
+    /// A one-line status string for `/advisor status`.
+    #[must_use]
+    pub fn advisor_status(&self) -> String {
+        let enabled = self.is_advisor_enabled();
+        let backlog = self.advisor.read().as_ref().map_or(0u64, |rt| rt.backlog());
+        let turns = self.advisor_primary_turns.load(Ordering::SeqCst);
+        format!(
+            "advisor: {} | backlog {} turn(s) behind | {} primary turn(s) observed",
+            if enabled { "ON" } else { "OFF" },
+            backlog,
+            turns
+        )
+    }
+
+    /// Re-prime the advisor across a conversation boundary (`/new`, `/branch`,
+    /// resume). Clears interrupt latches + delivery state and resets the
+    /// emission guard so old advice can be re-raised. Mirrors omp
+    /// `#resetAdvisorSessionState`.
+    pub fn reset_advisor_state(&self) {
+        self.advisor_guard.reset();
+        *self.advisor_delivery.lock() = AdvisorDeliveryState::default();
+        self.advisor_primary_turns.store(0, Ordering::SeqCst);
+        if let Some(rt) = self.advisor.read().as_ref() {
+            rt.reset();
+        }
+    }
+
+    /// Feed one completed primary turn to the advisor. Called from
+    /// `forward_event_to_extensions` on `AgentEvent::TurnEnd`.
+    fn on_advisor_turn_end(&self) {
+        self.advisor_primary_turns.fetch_add(1, Ordering::SeqCst);
+        let rt = self.advisor.read().clone();
+        let Some(rt) = rt else {
+            return;
+        };
+        let messages = self.agent_ref().state().messages;
+        rt.on_turn_end(messages);
+        // Best-effort sync-backlog barrier (omp `advisor.syncBacklog`). The
+        // event path is sync, so we can't await; spawn a bounded wait that
+        // lets the advisor catch up before the next user-visible step.
+        let sync = self.settings.read().advisor.sync_backlog.clone();
+        if sync != "off"
+            && let Ok(threshold) = sync.parse::<u64>()
+            && threshold > 0
+        {
+            let rt = Arc::clone(&rt);
+            tokio::spawn(async move {
+                let _ = rt
+                    .wait_for_catchup(std::time::Duration::from_millis(30_000), threshold)
+                    .await;
+            });
+        }
+    }
+
+    /// Construct the advisor: a second `Agent` (advisor role model + read-only
+    /// tools + advisor system prompt) wrapped in `AgentAdvisor`, driven by an
+    /// `AdvisorRuntime`. Returns `None` if no provider/model can be resolved.
+    fn build_advisor(&self) -> Option<Arc<AdvisorRuntime>> {
+        let settings = self.settings.read();
+        let primary_model = self.agent.model_id();
+        // Resolve the advisor model: the `advisor` role if configured, else
+        // fall back to the primary model so the advisor still runs.
+        let advisor_model_id = oxi_ai::roles::live_role_registry()
+            .and_then(|r| {
+                let reg = r.read();
+                resolve_role_to_model(ModelRole::Advisor, &reg)
+            })
+            .map(|m| format!("{}/{}", m.provider, m.id))
+            .unwrap_or_else(|| primary_model.clone());
+        let (provider_name, _model_name) = advisor_model_id.split_once('/')?;
+        let provider_box = get_provider(provider_name)?;
+        let base: Arc<dyn Provider> = Arc::from(provider_box);
+        // Wrap in the role router so live `model_roles` edits apply, mirroring
+        // the primary agent's construction.
+        let registry = oxi_ai::roles::live_role_registry()
+            .map(std::sync::Arc::clone)
+            .unwrap_or_else(|| {
+                std::sync::Arc::new(parking_lot::RwLock::new(RoleRegistry::default()))
+            });
+        let provider: Arc<dyn Provider> = Arc::new(RoleRoutingProvider::new(base, registry));
+
+        let config = AgentConfig {
+            name: "advisor".to_string(),
+            description: Some("oxi read-only advisor".to_string()),
+            model_id: advisor_model_id,
+            system_prompt: Some(crate::app::advisor_context::assemble_advisor_system_prompt(&self.cwd)),
+            timeout_seconds: settings.tool_timeout_seconds,
+            temperature: settings.effective_temperature(),
+            max_tokens: settings.effective_max_tokens(),
+            compaction_strategy: CompactionStrategy::Threshold(0.8),
+            compaction_instruction: None,
+            context_window: 128_000,
+            api_key: None, // advisor reuses the provider's key resolution
+            workspace_dir: Some(std::path::PathBuf::from(&self.cwd)),
+            output_mode: None,
+            session_id: None,
+            provider_options: None,
+            ttsr_engine: None,
+            memory: None,
+            todo: None,
+            agent_pool: None,
+        };
+        let immune_turns = settings.advisor.immune_turns;
+        drop(settings);
+
+        let advisor_agent = Arc::new(Agent::new(provider, config, Arc::new(ToolRegistry::new())));
+        // Read-only investigation tools only.
+        let tools = advisor_agent.tools();
+        tools.register(ReadTool::new());
+        tools.register(GrepTool::new());
+        tools.register(FindTool::new());
+
+        // The advise tool's enqueue closure routes accepted notes to the
+        // primary via the session's shared queues (steering / listeners) +
+        // emission guard + delivery state. Capturing shared `Arc`s avoids a
+        // self-referential `Arc<AgentSession>` cycle.
+        let enqueue: EnqueueAdviceFn = {
+            let steering = Arc::clone(&self.steering_messages);
+            let listeners = Arc::clone(&self.listeners);
+            let guard = Arc::clone(&self.advisor_guard);
+            let delivery = Arc::clone(&self.advisor_delivery);
+            let streaming = Arc::clone(&self.streaming);
+            let primary_turns = Arc::clone(&self.advisor_primary_turns);
+            Arc::new(move |note: AdvisorNote| {
+                if !guard.accept(&note.note) {
+                    return;
+                }
+                let mut d = *delivery.lock();
+                let turns = primary_turns.load(Ordering::SeqCst);
+                let immune = oxi_agent::advisor::is_immune_turn_active(
+                    turns,
+                    d.interrupt_immune_turn_start,
+                    immune_turns,
+                );
+                let channel = resolve_delivery_channel(DeliveryOpts {
+                    severity: note.severity,
+                    auto_resume_suppressed: d.auto_resume_suppressed,
+                    streaming: streaming.load(Ordering::SeqCst),
+                    aborting: false,
+                    interrupt_immune_turn_active: immune,
+                });
+                let body = format_advisory_batch(std::slice::from_ref(&note));
+                match channel {
+                    AdvisorDeliveryChannel::Steer => {
+                        steering.write().push_back(body);
+                        d.interrupt_immune_turn_start = Some(turns + 1);
+                        *delivery.lock() = d;
+                    }
+                    AdvisorDeliveryChannel::Aside | AdvisorDeliveryChannel::Preserve => {
+                        let evt = SessionEvent::Advisor { channel, body };
+                        for f in listeners.read().iter() {
+                            f(&evt);
+                        }
+                    }
+                }
+            })
+        };
+        tools.register(AdviseTool::new(enqueue));
+
+        let host: Arc<dyn AdvisorRuntimeHost> = Arc::new(AdvisorHost {
+            agent: self.agent_ref(), // PRIMARY agent — the transcript being shadowed (not the advisor's own)
+            guard: Arc::clone(&self.advisor_guard),
+        });
+        let recorder = Arc::new(crate::app::advisor_context::AdvisorTranscriptRecorder::new(
+            self.session_manager.read().get_session_file(),
+        ));
+        let advisor_driver = Arc::new(AgentAdvisor::with_post_prompt_hook(
+            advisor_agent,
+            recorder.hook(),
+        ));
+        let rt = Arc::new(AdvisorRuntime::new(
+            advisor_driver,
+            host,
+            std::time::Duration::from_millis(1000),
+        ));
+        rt.install_self(Arc::downgrade(&rt));
+        // Seed the cursor so enabling mid-session doesn't replay all history.
+        rt.seed_to(self.agent_ref().state().messages.len() as u64);
+        Some(rt)
     }
 }
 

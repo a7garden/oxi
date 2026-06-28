@@ -295,6 +295,27 @@ impl BrowserTabTrait for OxiTab {
             .await
             .map_err(|e| BrowserError::Timeout(e.to_string()))
     }
+    /// Native structured-wait override — maps our portable
+    /// [`BrowseWaitCondition`] to `oxibrowser_core::tab::WaitCondition` so
+    /// `NetworkIdle` / `DomContentLoaded` / `Load` honour real in-flight
+    /// traffic semantics (Playwright/Puppeteer "networkidle" parity).
+    async fn wait_for_condition(
+        &self,
+        cond: &super::engine::BrowseWaitCondition,
+        timeout_ms: u64,
+    ) -> Result<(), BrowserError> {
+        use super::engine::BrowseWaitCondition as Bwc;
+        let mapped = match cond {
+            Bwc::Visible(s) => oxibrowser_core::tab::WaitCondition::Visible(s.clone()),
+            Bwc::NetworkIdle => oxibrowser_core::tab::WaitCondition::NetworkIdle,
+            Bwc::DomContentLoaded => oxibrowser_core::tab::WaitCondition::DomContentLoaded,
+            Bwc::Load => oxibrowser_core::tab::WaitCondition::Load,
+        };
+        self.inner
+            .wait_for_condition(mapped, timeout_ms)
+            .await
+            .map_err(|e| BrowserError::Timeout(e.to_string()))
+    }
 
     async fn content(&self) -> Result<PageContent, BrowserError> {
         let page = self
@@ -303,6 +324,28 @@ impl BrowserTabTrait for OxiTab {
             .await
             .map_err(|e| BrowserError::Backend(e.to_string()))?;
         Ok(browse_result_to_page_content(page))
+    }
+    /// omp `observe()` parity — runs the JS accessibility-surface synthesis
+    /// via `evaluate()` and parses the result into an [`Observation`].
+    /// Returns the page's visible, interactive elements with stable
+    /// `data-oxi-ref` selectors (no coordinates — boa only approximates
+    /// layout geometry).
+    async fn observe(&self) -> Result<super::engine::Observation, BrowserError> {
+        let page = self
+            .inner
+            .content()
+            .await
+            .map_err(|e| BrowserError::Backend(e.to_string()))?;
+        let value = self
+            .inner
+            .evaluate(super::helpers::JS_OBSERVE)
+            .await
+            .map_err(|e| BrowserError::Evaluation(e.to_string()))?;
+        Ok(super::engine::Observation {
+            url: page.url,
+            title: page.title,
+            elements: super::helpers::parse_observed_elements(value),
+        })
     }
 
     async fn query_all(&self, selector: &str) -> Result<Vec<String>, BrowserError> {

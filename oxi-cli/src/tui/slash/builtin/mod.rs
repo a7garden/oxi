@@ -7,9 +7,11 @@
 //! During migration (design step 2), ported commands register here while their
 //! legacy `match` arms are deleted from `super::mod.rs`.
 
+mod advisor;
 mod clipboard;
 mod export_grp;
 mod issue;
+mod memory;
 mod model;
 mod overlay_commands;
 mod provider;
@@ -56,4 +58,6 @@ pub(crate) fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(skill::SkillCommand));
     registry.register(Box::new(model::ModelCommand));
     registry.register(Box::new(model::ScopedModelsCommand));
+    registry.register(Box::new(memory::MemoryCommand));
+    registry.register(Box::new(advisor::AdvisorCommand));
 }

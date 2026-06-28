@@ -851,6 +851,15 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
             });
         }
         SessionEvent::SessionInfoChanged => {}
+        // Advisor notes (aside/preserve channel) — surfaced as a system
+        // message toast so the user sees the advice. (A dedicated `<advisory>`
+        // chat card is a future oxi-tui enhancement; this makes aside advice
+        // immediately visible. Steer-channel advice injects into the primary
+        // directly and is not routed through here.)
+        SessionEvent::Advisor { channel, body } => {
+            tracing::debug!(?channel, %body, "advisor note delivered");
+            let _ = ui_tx.send(UiEvent::SystemMessage(format!(" Advisor ({:?}): {body}", channel)));
+        }
         SessionEvent::Agent(agent_event) => match &*agent_event {
             AgentEvent::Fallback { to_model, .. } => {
                 let _ = ui_tx.send(UiEvent::ModelChanged {

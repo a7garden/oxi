@@ -447,6 +447,15 @@ pub async fn create_agent_session_from_services(
         session.set_scoped_models(options.scoped_models);
     }
 
+    // Honor `[advisor] enabled = true` from settings (best-effort: a failure
+    // to resolve the advisor provider/model is logged, not fatal — the primary
+    // session still starts). The user can also toggle via `/advisor`.
+    if settings.advisor.enabled
+        && let Err(e) = session.set_advisor_enabled(true)
+    {
+        tracing::warn!("advisor auto-enable failed: {e}");
+    }
+
     Ok(CreateAgentSessionResult {
         session,
         model_fallback_message: None,

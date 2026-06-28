@@ -93,6 +93,78 @@ pub struct ElementInfo {
     pub attributes: HashMap<String, String>,
 }
 
+/// Structured wait condition for [`BrowserTab::wait_for_condition`].
+///
+/// Mirrors the upstream `oxibrowser-core` `WaitCondition` but defined here
+/// (feature-independent) so the trait stays always-compilable. The native
+/// backend maps it 1:1; the default impl degrades `Visible` to `wait_for`
+/// and resolves the rest immediately on backends that don't model
+/// in-flight traffic (mock/fallback).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowseWaitCondition {
+    /// A CSS selector matches at least one element in the current DOM.
+    Visible(String),
+    /// In-flight HTTP request counter has been zero for a quiet window
+    /// (Playwright/Puppeteer "networkidle"). Matches omp's
+    /// `waitForNavigation({ waitUntil: "networkidle0" })`.
+    NetworkIdle,
+    /// `DOMContentLoaded` boundary crossed for the current page.
+    DomContentLoaded,
+    /// `load` boundary crossed for the current page.
+    Load,
+}
+
+/// One interactive element captured by [`BrowserTab::observe`].
+///
+/// omp-parity `observe()` entry: a stable ref id the agent can act on
+/// (`selector` = `[data-oxi-ref="<ref_id>"]`) plus the trustworthy
+/// role/name/visibility/interactivity fields. **No coordinates** — the
+/// boa layout engine only *approximates* geometry, so rects would
+/// silently mislead agent spatial reasoning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObservedElement {
+    /// Stable id within this snapshot, e.g. `"e7"`.
+    pub ref_id: String,
+    /// ARIA-ish role derived from tag + `role` attr (`button`, `link`, …).
+    pub role: String,
+    /// Accessible name — `aria-label`, else trimmed text content.
+    pub name: String,
+    /// HTML tag name (lowercase).
+    pub tag: String,
+    /// CSS selector that re-selects this element: `[data-oxi-ref="e7"]`.
+    pub selector: String,
+    /// Visible (display/visibility/opacity all pass).
+    pub visible: bool,
+    /// Interactive (not disabled, pointerEvents != none).
+    pub interactive: bool,
+}
+
+/// The page's interactive surface, returned by [`BrowserTab::observe`].
+///
+/// Instead of guessing CSS selectors, the agent reads this list, picks an
+/// element by `ref_id`/`role`/`name`, and acts via its `selector`.
+///
+/// # Best-effort status
+///
+/// The native backend synthesizes this via a JS walk over the boa runtime
+/// (`getComputedStyle` visibility + `setAttribute` ref-stamping). That JS has
+/// **not been runtime-validated against live pages** — until it is, treat
+/// results as best-effort. Known risk: if boa's `getComputedStyle` returns
+/// empty strings for some properties, the visibility filter passes hidden
+/// elements and the output is noisier/inflated. Fields returned are the
+/// trustworthy ones (role/name/visible/interactive); **no coordinates** are
+/// included because the boa layout engine only approximates geometry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Observation {
+    /// Final URL after redirects.
+    pub url: String,
+    /// Page `<title>`.
+    pub title: String,
+    /// Interactive, visible elements in DOM order.
+    pub elements: Vec<ObservedElement>,
+}
+
 // ── BrowserTab trait ──────────────────────────────────────────────────────────
 
 /// Operations available on a single browser tab.
@@ -124,6 +196,41 @@ pub trait BrowserTab: Send + Sync {
 
     /// Wait for an element matching `selector` to appear.
     async fn wait_for(&self, selector: &str, timeout_ms: u64) -> Result<(), BrowserError>;
+    /// Wait until a structured [`BrowseWaitCondition`] is satisfied.
+    ///
+    /// Default: `Visible(selector)` delegates to [`wait_for`](Self::wait_for);
+    /// `NetworkIdle` / `DomContentLoaded` / `Load` resolve immediately on
+    /// backends that don't model in-flight traffic (mock/fallback). The
+    /// native `oxibrowser-core` backend overrides this to honour real
+    /// network-idle semantics with a quiet window, matching omp's
+    /// `waitFor*` helpers.
+    async fn wait_for_condition(
+        &self,
+        cond: &BrowseWaitCondition,
+        timeout_ms: u64,
+    ) -> Result<(), BrowserError> {
+        match cond {
+            BrowseWaitCondition::Visible(selector) => self.wait_for(selector, timeout_ms).await,
+            BrowseWaitCondition::NetworkIdle
+            | BrowseWaitCondition::DomContentLoaded
+            | BrowseWaitCondition::Load => Ok(()),
+        }
+    }
+    /// Snapshot the page's interactive surface (omp `observe()` parity).
+    ///
+    /// Returns visible, interactive elements with stable `ref_id`s and
+    /// `selector`s the agent can `click`/`type`/`fill` by. Default is an
+    /// empty observation — only a JS-capable backend produces real entries.
+    /// The returned `selector`s are `[data-oxi-ref="eN"]`; that attribute is
+    /// stamped on each returned element so the ref→element mapping stays
+    /// exact within the snapshot.
+    async fn observe(&self) -> Result<Observation, BrowserError> {
+        Ok(Observation {
+            url: String::new(),
+            title: String::new(),
+            elements: Vec::new(),
+        })
+    }
 
     /// Get the current page content (markdown + html).
     async fn content(&self) -> Result<PageContent, BrowserError>;
@@ -469,6 +576,25 @@ impl TabCallbackRegistry {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    #[test]
+    fn browse_wait_condition_serde_snake_case() {
+        // Lifecycle variants serialize as snake_case tags so tool params stay
+        // stable across the wire; Visible carries its selector inline.
+        assert_eq!(
+            serde_json::to_string(&BrowseWaitCondition::NetworkIdle).unwrap(),
+            r#""network_idle""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BrowseWaitCondition::DomContentLoaded).unwrap(),
+            r#""dom_content_loaded""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BrowseWaitCondition::Visible("button".into())).unwrap(),
+            r#"{"visible":"button"}"#
+        );
+        let back: BrowseWaitCondition = serde_json::from_str(r#""network_idle""#).unwrap();
+        assert!(matches!(back, BrowseWaitCondition::NetworkIdle));
+    }
 
     #[test]
     fn tab_callback_registry_default_is_empty() {

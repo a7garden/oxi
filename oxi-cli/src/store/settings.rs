@@ -35,6 +35,8 @@ use std::path::{Path, PathBuf};
 /// - 7: edit_format field (Hashline/StrReplace, default StrReplace)
 /// - 8: glyph_set field (Unicode/Ascii/Nerd, default Unicode)
 /// - 9: model_roles field (named model roles ported from omp, default empty)
+/// - serde-default (no version bump): `advisor` field (`AdvisorSettings`,
+///   default OFF) — `#[serde(default)]` fills it for older files, no migration.
 const SETTINGS_VERSION: u32 = 9;
 
 /// Known output channels for the TUI language policy.
@@ -386,6 +388,12 @@ pub struct Settings {
     #[serde(default)]
     pub memory_db_path: Option<PathBuf>,
 
+    /// Use the Mnemopi engine (FTS5 + vector recall) instead of the basic
+    /// SQLite LIKE-search backend. Requires `memory_enabled = true`.
+    /// Default: false (uses basic SqliteMemoryStore).
+    #[serde(default = "default_false")]
+    pub mnemopi_engine: bool,
+
     // ── TTSR (③) ─────────────────────────────────────────────────────
     /// Enable Time-Traveling Stream Rules (stream interrupt on rule violation).
     /// Default: false (opt-in, stable-first).
@@ -408,6 +416,48 @@ pub struct Settings {
     /// layer (which role is active when) is wired separately.
     #[serde(default)]
     pub model_roles: HashMap<String, String>,
+    // ── Advisor (read-only reviewer shadowing the primary agent) ────
+    /// Advisor subsystem settings. Default OFF (opt-in). Drives the
+    /// `oxi_agent::advisor` engine wired into `AgentSession`.
+    #[serde(default)]
+    pub advisor: AdvisorSettings,
+}
+
+/// Advisor subsystem settings — a read-only reviewer that shadows the primary
+/// agent and surfaces advice (`nit`/`concern`/`blocker`). All default OFF;
+/// the advisor is opt-in (set `enabled = true` in `[advisor]`).
+///
+/// Ported from omp's `advisor.*` settings (advisor.enabled /
+/// advisor.syncBacklog / advisor.immuneTurns).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdvisorSettings {
+    /// Master switch. Default OFF.
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    /// Sync-backlog barrier: pause the primary when the advisor falls this many
+    /// turns behind, or `"off"` to never block. omp `advisor.syncBacklog`.
+    /// Default `"off"`.
+    #[serde(default = "default_advisor_sync_backlog")]
+    pub sync_backlog: String,
+    /// Post-interrupt immune-turn cooldown: after a `concern`/`blocker` steers
+    /// in, downgrade further `concern`/`blocker` notes to asides for this many
+    /// turns (prevents advice storms). omp `advisor.immuneTurns`. Default 0.
+    #[serde(default)]
+    pub immune_turns: u64,
+}
+
+impl Default for AdvisorSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sync_backlog: default_advisor_sync_backlog(),
+            immune_turns: 0,
+        }
+    }
+}
+
+fn default_advisor_sync_backlog() -> String {
+    "off".to_string()
 }
 
 fn default_theme() -> String {
@@ -490,9 +540,11 @@ impl Default for Settings {
             edit_format: EditFormat::default(),
             memory_enabled: false,
             memory_db_path: None,
+            mnemopi_engine: false,
             ttsr_enabled: false,
             ttsr_interrupt_mode: default_ttsr_mode(),
             model_roles: HashMap::new(),
+            advisor: AdvisorSettings::default(),
         }
     }
 }
