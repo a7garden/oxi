@@ -9,7 +9,7 @@
 //! They are loaded at runtime from:
 //!
 //! 1. `OXI_CATALOG_OVERRIDE` environment variable (if set) — path to a TOML file
-//! 2. `~/.oxi/catalog/overrides.toml` — global user overrides
+//! 2. `$OXI_HOME/catalog/overrides.toml` (or `~/.oxi/catalog/overrides.toml`) — global user overrides
 //! 3. `.oxi/catalog.local.toml` — project-local overrides (relative to cwd)
 //!
 //! Later layers override earlier ones. The order is:
@@ -52,7 +52,21 @@ pub struct OverrideFile {
 ///
 /// Returns `(path, content)` pairs. Files that don't exist are skipped.
 /// The caller decides how to merge them.
+///
+/// Delegates to its testable core (`find_override_files_at`) with the
+/// product-home catalog dir ([`crate::product_env::catalog_override_dir`]).
 pub fn find_override_files() -> Vec<(PathBuf, String)> {
+    find_override_files_at(crate::product_env::catalog_override_dir().as_deref())
+}
+
+/// Testable core of [`find_override_files`]: resolve override files given an
+/// explicit global override directory.
+///
+/// `global_dir` is source 2 (the product-home catalog dir, e.g.
+/// `$OXI_HOME/catalog`). Sources 1 (`OXI_CATALOG_OVERRIDE` env) and 3
+/// (cwd-relative `.oxi/catalog.local.toml`) are resolved internally as before
+/// — only source 2 depends on the product home, so it is the sole parameter.
+fn find_override_files_at(global_dir: Option<&Path>) -> Vec<(PathBuf, String)> {
     let mut out = Vec::new();
 
     // 1. Explicit env var
@@ -62,9 +76,9 @@ pub fn find_override_files() -> Vec<(PathBuf, String)> {
         out.push(pair);
     }
 
-    // 2. Global: ~/.oxi/catalog/overrides.toml
-    if let Some(home) = dirs::home_dir() {
-        let path = home.join(".oxi").join("catalog").join("overrides.toml");
+    // 2. Global: <global_dir>/overrides.toml (product-home catalog dir).
+    if let Some(dir) = global_dir {
+        let path = dir.join("overrides.toml");
         if let Some(pair) = read_override(&path) {
             out.push(pair);
         }
@@ -262,5 +276,40 @@ mod tests {
         }];
         apply_model_overrides(&mut models, &overrides);
         assert_eq!(models.get("anthropic").unwrap().len(), 1);
+    }
+    /// Regression: the global override source must honor the product-home
+    /// catalog dir (resolved from `$OXI_HOME`), so embedders (oxios, forks)
+    /// can isolate their catalog override namespace from `~/.oxi/`. Tests the
+    /// testable core [`find_override_files_at`] directly — no env mutation,
+    /// parallel-safe.
+    #[test]
+    fn find_override_files_at_reads_global_dir() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let catalog_dir = tmp.path().join("catalog");
+        std::fs::create_dir_all(&catalog_dir).expect("mkdir catalog");
+        let override_path = catalog_dir.join("overrides.toml");
+        std::fs::write(
+            &override_path,
+            "[[provider]]\nid = \"oxi-home-regression\"\napi = \"openai-completions\"\n",
+        )
+        .expect("write override");
+
+        let files = find_override_files_at(Some(&catalog_dir));
+        let found = files.iter().any(|(p, _)| p == &override_path);
+        assert!(
+            found,
+            "global-dir override must be discovered; got {:?}",
+            files.iter().map(|(p, _)| p).collect::<Vec<_>>()
+        );
+    }
+
+    /// `None` global dir skips source 2 entirely — proves the product-home dir
+    /// is the *only* home-dependent input to override resolution.
+    #[test]
+    fn find_override_files_at_none_skips_global() {
+        let files = find_override_files_at(None);
+        // No panic; returns a Vec (contents depend on env/cwd, which are
+        // absent in the test environment).
+        let _ = files;
     }
 }

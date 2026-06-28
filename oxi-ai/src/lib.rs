@@ -24,6 +24,8 @@ mod error;
 mod high_level;
 mod messages;
 pub mod oauth;
+/// Product home-directory resolution (`OXI_HOME` / `~/.oxi`).
+pub mod product_env;
 pub mod provider_pool;
 pub mod provider_registry;
 mod providers;
@@ -229,6 +231,9 @@ pub use messages::AssistantMessage;
 
 /// Utilities for discovering API keys from the environment.
 pub use env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key};
+
+/// Product home-directory resolution (`OXI_HOME` → `~/.oxi`).
+pub use product_env::home_dir as product_home_dir;
 
 // Provider authentication registry
 

@@ -404,19 +404,14 @@ pub fn reset_for_tests() {
 /// Resolve the cache path.
 ///
 /// - `OXI_MODELS_DEV_CACHE_PATH` overrides the location (test/enterprise use)
-/// - otherwise `~/.oxi/cache/models-dev.json`
+/// - otherwise `<product-home>/cache/models-dev.json` (`$OXI_HOME` or `~/.oxi`)
 fn cache_path() -> Option<PathBuf> {
     if let Ok(custom) = std::env::var("OXI_MODELS_DEV_CACHE_PATH")
         && !custom.is_empty()
     {
         return Some(PathBuf::from(custom));
     }
-    Some(
-        dirs::home_dir()?
-            .join(".oxi")
-            .join("cache")
-            .join("models-dev.json"),
-    )
+    crate::product_env::cache_dir().map(|d| d.join("models-dev.json"))
 }
 
 /// Whether enrichment is enabled at all.

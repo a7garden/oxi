@@ -87,11 +87,11 @@ impl<'a> AgentBuilder<'a> {
         self.system_prompt = Some(prompt.into());
         self
     }
-    /// Register a [`TodoStateProvider`] so the agent's `todo` tool works.
+    /// Register a [`TodoStateProvider`](crate::TodoStateProvider) so the agent's `todo` tool works.
     ///
     /// The provider is shared between the agent (writer) and the host
     /// application (reader), so you can observe phase changes in real time
-    /// by calling [`TodoStateProvider::get_phases()`] periodically.
+    /// by calling [`TodoStateProvider::get_phases()`](crate::TodoStateProvider::get_phases) periodically.
     ///
     /// Use [`InMemoryTodoState`](crate::inmem::InMemoryTodoState) for a
     /// ready-to-go in-memory implementation:

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-06-28
+
+### Fixed — product namespace isolation (`OXI_HOME` unification)
+
+- **`oxi-ai` no longer hardcodes `~/.oxi/`** for its catalog-override probe,
+  models.dev cache, and auth store. These three reads now resolve through the
+  `OXI_HOME` environment variable (falling back to `~/.oxi`), matching the
+  convention `oxi-sdk` already used. Previously, every embedder of `oxi-ai`
+  (including `oxios`) involuntarily inherited the `oxi-cli` catalog-override
+  namespace on the provider hot path — a library-layer coupling smell.
+- New module `oxi_ai::product_env` (`home_dir`/`catalog_override_dir`/
+  `cache_dir`/`auth_path`) is the single source of truth; `oxi_sdk::fs::home_dir`
+  now delegates to it, removing a duplicated resolution path.
+- **Backward compatible**: with `OXI_HOME` unset, all paths are identical to
+  prior behavior. Embedders isolate with `OXI_HOME=~/.oxios`.
+- `find_override_files` refactored to a testable `find_override_files_at`
+  core (parameterized global dir) — race-free regression tests, no env
+  mutation.
+- Fixed pre-existing broken intra-doc links in `oxi-sdk/src/agent_builder.rs`
+  (`TodoStateProvider`) that failed the `cargo doc -D warnings` CI job.
+- Design doc: `docs/designs/2026-06-28-product-namespace-isolation.md`.
+
 ## [0.49.0] - 2026-06-28
 
 ### Added — omp-parity browser capabilities (pure-Rust, no Chrome)

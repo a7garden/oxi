@@ -4,20 +4,14 @@ use std::path::PathBuf;
 
 /// Return the conventional `oxi` home directory.
 ///
-/// Resolution order:
+/// Delegates to [`oxi_ai::product_env::home_dir`] so the leaf library and
+/// the SDK share one resolution path. Resolution order:
 /// 1. `$OXI_HOME` environment variable
 /// 2. `$HOME/.oxi` (or platform equivalent via `dirs`)
 ///
 /// Returns an error if neither is available.
 pub fn home_dir() -> std::io::Result<PathBuf> {
-    if let Ok(p) = std::env::var("OXI_HOME")
-        && !p.is_empty()
-    {
-        return Ok(PathBuf::from(p));
-    }
-    let home = dirs::home_dir()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"))?;
-    Ok(home.join(".oxi"))
+    oxi_ai::product_env::home_dir()
 }
 
 /// Ensure a directory exists, creating it (and parents) if missing.

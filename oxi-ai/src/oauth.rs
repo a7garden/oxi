@@ -5,7 +5,7 @@
 //! - OpenAI Codex (authorization code + PKCE)
 //! - GitHub Copilot (device flow)
 //!
-//! Token persistence to `~/.oxi/auth.json` with secure file permissions.
+//! Token persistence to `<product-home>/auth.json` (`$OXI_HOME` or `~/.oxi`) with secure file permissions.
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -120,28 +120,23 @@ pub struct AuthStore {
 // File-based token persistence
 // ---------------------------------------------------------------------------
 
-/// Returns the default path for the auth store: `~/.oxi/auth.json`.
+/// Returns the default path for the auth store.
+///
+/// Resolves to `<product-home>/auth.json`, where the product home is
+/// `$OXI_HOME` or `~/.oxi` (see [`crate::product_env`]). The parent
+/// directory is created on demand.
 pub fn default_auth_path() -> Result<PathBuf> {
-    let home = dirs_home()?;
-    let dir = home.join(".oxi");
-    if !dir.exists() {
-        fs::create_dir_all(&dir)?;
+    let path = crate::product_env::auth_path().ok_or_else(|| {
+        OAuthError::InvalidState(
+            "Cannot determine product home directory (neither OXI_HOME nor HOME is set)".into(),
+        )
+    })?;
+    if let Some(parent) = path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent)?;
     }
-    Ok(dir.join("auth.json"))
-}
-
-fn dirs_home() -> Result<PathBuf> {
-    // Try HOME env var (unix), then fallback.
-    if let Ok(h) = std::env::var("HOME") {
-        return Ok(PathBuf::from(h));
-    }
-    // On Windows try USERPROFILE.
-    if let Ok(h) = std::env::var("USERPROFILE") {
-        return Ok(PathBuf::from(h));
-    }
-    Err(OAuthError::InvalidState(
-        "Cannot determine home directory".into(),
-    ))
+    Ok(path)
 }
 
 /// Load the auth store from disk.
