@@ -90,6 +90,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "smoke-test"
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - uses: taiki-e/install-action@nextest
       - name: Run smoke tests
         # Exclude long-running / network-dependent tests; those run in test.yml
