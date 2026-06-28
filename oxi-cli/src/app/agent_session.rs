@@ -35,9 +35,9 @@ use crate::store::session::{AgentMessage, SessionManager};
 use crate::store::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
 use oxi_agent::advisor::{
-    AdviseTool, AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote,
-    AdvisorRuntime, AdvisorRuntimeHost, AgentAdvisor, DeliveryOpts, EnqueueAdviceFn,
-    format_advisory_batch, resolve_delivery_channel,
+    AdviseTool, AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote, AdvisorRuntime,
+    AdvisorRuntimeHost, AgentAdvisor, DeliveryOpts, EnqueueAdviceFn, format_advisory_batch,
+    resolve_delivery_channel,
 };
 use oxi_agent::{
     Agent, AgentConfig, AgentEvent, AgentState, FindTool, GrepTool, ReadTool, ToolRegistry,
@@ -1542,7 +1542,9 @@ impl AgentSession {
             name: "advisor".to_string(),
             description: Some("oxi read-only advisor".to_string()),
             model_id: advisor_model_id,
-            system_prompt: Some(crate::app::advisor_context::assemble_advisor_system_prompt(&self.cwd)),
+            system_prompt: Some(crate::app::advisor_context::assemble_advisor_system_prompt(
+                &self.cwd,
+            )),
             timeout_seconds: settings.tool_timeout_seconds,
             temperature: settings.effective_temperature(),
             max_tokens: settings.effective_max_tokens(),

@@ -45,10 +45,7 @@ impl AgentAdvisor {
     /// Used by the host to persist advisor turns to `<session>/__advisor.jsonl`
     /// for stats attribution / observability.
     #[must_use]
-    pub fn with_post_prompt_hook(
-        agent: Arc<Agent>,
-        hook: AdvisorPromptHook,
-    ) -> Self {
+    pub fn with_post_prompt_hook(agent: Arc<Agent>, hook: AdvisorPromptHook) -> Self {
         Self {
             agent,
             on_prompted: Some(hook),

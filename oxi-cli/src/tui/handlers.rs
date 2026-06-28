@@ -858,7 +858,10 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
         // directly and is not routed through here.)
         SessionEvent::Advisor { channel, body } => {
             tracing::debug!(?channel, %body, "advisor note delivered");
-            let _ = ui_tx.send(UiEvent::SystemMessage(format!(" Advisor ({:?}): {body}", channel)));
+            let _ = ui_tx.send(UiEvent::SystemMessage(format!(
+                " Advisor ({:?}): {body}",
+                channel
+            )));
         }
         SessionEvent::Agent(agent_event) => match &*agent_event {
             AgentEvent::Fallback { to_model, .. } => {

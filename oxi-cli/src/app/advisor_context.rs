@@ -42,7 +42,10 @@ pub fn assemble_advisor_system_prompt(cwd: &str) -> String {
                 .strip_prefix(cwd)
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|_| f.name.clone());
-            block.push_str(&format!("\n<file path=\"{}\">\n{}\n</file>", display_path, f.content));
+            block.push_str(&format!(
+                "\n<file path=\"{}\">\n{}\n</file>",
+                display_path, f.content
+            ));
         }
         block.push_str("\n</project-context>");
         out.push_str(&block);
@@ -144,9 +147,11 @@ impl AdvisorTranscriptRecorder {
     /// session file (e.g. in-memory test sessions).
     #[must_use]
     pub fn new(session_file: Option<String>) -> Self {
-        let path = session_file
-            .as_ref()
-            .and_then(|f| Path::new(f).parent().map(|dir| dir.join(ADVISOR_TRANSCRIPT_FILENAME)));
+        let path = session_file.as_ref().and_then(|f| {
+            Path::new(f)
+                .parent()
+                .map(|dir| dir.join(ADVISOR_TRANSCRIPT_FILENAME))
+        });
         Self {
             path,
             cursor: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -221,10 +226,17 @@ mod tests {
     #[test]
     fn injects_agents_md_context() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("AGENTS.md"), "# Rules\nNever commit to main").unwrap();
+        std::fs::write(
+            tmp.path().join("AGENTS.md"),
+            "# Rules\nNever commit to main",
+        )
+        .unwrap();
         let cwd = tmp.path().to_str().unwrap();
         let prompt = assemble_advisor_system_prompt(cwd);
-        assert!(prompt.contains("<project-context>"), "must wrap context files");
+        assert!(
+            prompt.contains("<project-context>"),
+            "must wrap context files"
+        );
         assert!(prompt.contains("Never commit to main"));
         assert!(prompt.contains("AGENTS.md"));
     }
@@ -232,7 +244,11 @@ mod tests {
     #[test]
     fn injects_watchdog_attention() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("WATCHDOG.md"), "Block any change to the lockfile").unwrap();
+        std::fs::write(
+            tmp.path().join("WATCHDOG.md"),
+            "Block any change to the lockfile",
+        )
+        .unwrap();
         let prompt = assemble_advisor_system_prompt(tmp.path().to_str().unwrap());
         assert!(prompt.contains("<attention"));
         assert!(prompt.contains("Block any change to the lockfile"));

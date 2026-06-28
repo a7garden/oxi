@@ -138,6 +138,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "msrv"
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - name: Verify workspace builds at MSRV
         # Override RUSTFLAGS so we don't treat legacy-toolchain warnings
         # as build errors. This job's purpose is buildability, not lint.
