@@ -576,8 +576,8 @@ impl Tokenizer {
     }
 
     /// Feed a chunk and return all complete-line tokens. A partial trailing
-    /// line (no trailing `\n`) is buffered until the next [`feed`] or [`end`].
-    /// No-op once [`end`] has been called; call [`reset`] to reuse.
+    /// line (no trailing `\n`) is buffered until the next [`Self::feed`] or [`Self::end`].
+    /// No-op once [`Self::end`] has been called; call [`Self::reset`] to reuse.
     pub fn feed(&mut self, chunk: &str) -> Vec<Token> {
         if self.closed || chunk.is_empty() {
             return Vec::new();

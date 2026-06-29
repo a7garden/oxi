@@ -162,7 +162,7 @@ impl AdvisorEmissionGuard {
     ///
     /// Empty/whitespace-only notes are suppressed (defense-in-depth; the
     /// tool-args contract requires a non-empty string). Content-free filler
-    /// (per [`SUPPRESSED_NORMALIZED_PHRASES`]) and exact normalized duplicates
+    /// (per `SUPPRESSED_NORMALIZED_PHRASES`) and exact normalized duplicates
     /// are suppressed. Over-budget calls (a second accept in the same update)
     /// are suppressed.
     pub fn accept(&self, note: &str) -> bool {

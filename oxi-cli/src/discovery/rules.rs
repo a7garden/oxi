@@ -94,7 +94,7 @@ fn scan_mdc_dir(dir: &Path, source: RuleSource) -> Vec<Rule> {
     rules
 }
 
-/// A simple [`RuleRegistry`] that serves a static list of rules.
+/// A simple `RuleRegistry` that serves a static list of rules.
 ///
 /// Used to feed discovered rules into the TTSR engine without
 /// requiring a full persisted registry.

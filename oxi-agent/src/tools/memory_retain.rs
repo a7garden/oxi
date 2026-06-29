@@ -9,7 +9,7 @@ use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 const VALID_KINDS: [&str; 4] = ["fact", "preference", "context", "summary"];
 
 /// Tool that persists a memory item (content, kind, importance) to the
-/// configured [`MemoryBackend`].
+/// configured `MemoryBackend`.
 ///
 /// Requires `ctx.memory` to be set; otherwise returns an error. The memory
 /// is scoped to the current session (`ctx.session_id`), falling back to

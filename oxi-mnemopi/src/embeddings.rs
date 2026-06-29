@@ -2,9 +2,9 @@
 //!
 //! Defines a synchronous [`EmbeddingProvider`] trait. Implementations:
 //! - [`NoopEmbeddingProvider`] — always unavailable (default).
-//! - [`RemoteEmbeddingProvider`] — OpenAI-compatible `/v1/embeddings` API
+//! - `RemoteEmbeddingProvider` — OpenAI-compatible `/v1/embeddings` API
 //!   (behind `remote-embeddings` feature).
-//! - [`LocalEmbeddingProvider`] — local ONNX via fastembed-rs
+//! - `LocalEmbeddingProvider` — local ONNX via fastembed-rs
 //!   (behind `local-embeddings` feature).
 //!
 //! Callers wrap `embed()` in `spawn_blocking` from async contexts.

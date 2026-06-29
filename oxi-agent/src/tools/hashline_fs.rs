@@ -1,4 +1,4 @@
-//! Concrete [`HashlineFs`] backed by `tokio::fs`, `PathGuard`, and the global
+//! Concrete `HashlineFs` backed by `tokio::fs`, `PathGuard`, and the global
 //! `file_mutation_queue`.
 //!
 //! This is the bridge between the pure-function `oxi-hashline` crate and the
@@ -14,7 +14,7 @@ use tokio::fs;
 use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 
-/// `tokio::fs`-backed [`HashlineFs`] with workspace-bound security and
+/// `tokio::fs`-backed `HashlineFs` with workspace-bound security and
 /// per-file write serialization.
 pub struct TokioHashlineFs {
     root: PathBuf,

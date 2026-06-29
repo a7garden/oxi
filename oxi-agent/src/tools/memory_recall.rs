@@ -10,7 +10,7 @@ const DEFAULT_LIMIT: usize = 5;
 /// Maximum number of results [`MemoryRecallTool`] will return.
 const MAX_LIMIT: usize = 20;
 
-/// Tool that searches the configured [`MemoryBackend`] for memories matching
+/// Tool that searches the configured `MemoryBackend` for memories matching
 /// a query and returns the matches in a compact, model-friendly format.
 ///
 /// Requires `ctx.memory` to be set; otherwise returns an error.

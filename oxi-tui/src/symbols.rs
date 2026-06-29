@@ -124,7 +124,7 @@ impl std::error::Error for UnknownGlyphSet {}
 /// single setting flip re-skins the whole UI.
 ///
 /// **Adding a new glyph:** add the field here, populate it in all three
-/// preset constructors ([`Symbols::unicode`] / [`ascii`] / [`nerd`]), and
+/// preset constructors ([`Symbols::unicode`] / [`Symbols::ascii`] / [`Symbols::nerd`]), and
 /// migrate the one hardcoded call site to read `styles.symbols.<field>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Symbols {

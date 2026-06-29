@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 
 /// Tool that stores a session reflection/summary to the configured
-/// [`MemoryBackend`].
+/// `MemoryBackend`.
 ///
 /// When a `summary` is supplied it is persisted as a `summary` memory scoped
 /// to the current session. Without one the tool returns a placeholder —

@@ -1,4 +1,4 @@
-//! Chat normalization — ported from omp [`core/chat-normalize.ts`].
+//! Chat normalization — ported from omp `core/chat-normalize.ts`.
 //!
 //! Provides [`normalize_chat`], [`normalize_batch`], and [`extraction_rate`].
 //! Strips chat-style filler acronyms (lol, idk, tbh, …), expands contractions
@@ -23,7 +23,7 @@
 //!
 //! The implicit-subject prefix (`"i am "`) is only added for the
 //! 2-word fragment-starter case — the .ts defines "starts with a
-//! subject" implicitly via the [`FRAGMENT_STARTERS`] set (gerund
+//! subject" implicitly via the `FRAGMENT_STARTERS` set (gerund
 //! fragments the caller is implicitly performing).
 //!
 //! MIT — adapted from
@@ -205,7 +205,7 @@ fn replace_non_ascii_runs(value: &str) -> String {
 /// 7. If fewer than 2 words remain, keep only a single word with length
 ///    > 5 (otherwise drop).
 /// 8. If `add_implicit_subjects` and the result is exactly 2 words whose
-///    first word is a [`FRAGMENT_STARTERS`] entry, prepend `"i am "`.
+///    first word is a `FRAGMENT_STARTERS` entry, prepend `"i am ".
 ///
 /// `add_implicit_subjects` is required (matching the spec signature);
 /// pass `false` to disable implicit subject insertion (the .ts default

@@ -1,7 +1,7 @@
 //! Internal URL scheme handlers for `issue://` and `pr://` virtual paths.
 //!
 //! Each handler implements [`oxi_sdk::ports::ProtocolHandler`] and is
-//! registered with the [`InternalUrlRouter`] port so the `read`/`search`
+//! registered with the `InternalUrlRouter` port so the `read`/`search`
 //! tools can resolve scheme URIs to markdown text.
 
 pub mod issue_handler;

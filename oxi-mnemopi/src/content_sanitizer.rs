@@ -1,4 +1,4 @@
-//! Content sanitizer — ported from omp [`core/content-sanitizer.ts`].
+//! Content sanitizer — ported from omp `core/content-sanitizer.ts`.
 //!
 //! Detects and strips data URIs and high-entropy base64-style blobs from
 //! memory content before it is stored, replacing each with a compact

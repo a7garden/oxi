@@ -2,7 +2,7 @@
 //!
 //! Splits text into atomic facts for memory retention. Two strategies:
 //! - [`HeuristicExtractor`] — rule-based sentence splitting (always available).
-//! - [`LlmExtractor`] — LLM-based extraction (host provides the model).
+//! - `LlmExtractor` — LLM-based extraction (host provides the model).
 //!
 //! The host application implements [`FactExtractor`] and injects it into
 //! the Mnemopi engine. When no extractor is provided, the heuristic

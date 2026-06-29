@@ -194,7 +194,7 @@ impl TtsrEngine {
     /// Append a streaming delta to the appropriate buffer and return any
     /// rules whose conditions now match the accumulated text.
     ///
-    /// This is called on every [`ProviderEvent::Delta`] while streaming.
+    /// This is called on every `ProviderEvent::Delta` while streaming.
     pub fn check_delta(&self, delta: &str, ctx: &TtsrMatchContext) -> Vec<Rule> {
         if !self.settings.enabled {
             return vec![];

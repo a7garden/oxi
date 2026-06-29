@@ -2,7 +2,7 @@
 //! section tags to the exact file content that minted them.
 //!
 //! A section tag is a content-derived hash of the *whole file* (see
-//! [`compute_file_hash`](crate::compute_file_hash)). Any read of byte-identical
+//! [`compute_file_hash`]). Any read of byte-identical
 //! content mints the same tag, so reads of one file state fuse onto one anchor,
 //! and a follow-up edit anchored at any line validates whenever the live file
 //! still hashes to it.

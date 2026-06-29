@@ -4,7 +4,7 @@
 //! **newline-delimited JSON** (JSONL) per the MCP stdio transport spec
 //! (modelcontextprotocol.io/specification/2025-03-26/basic/transports).
 //! Each JSON-RPC message is serialized as one line of JSON terminated by
-//! a single `\n`; the transport rejects any line that exceeds [`MAX_LINE_SIZE`].
+//! a single `\n`; the transport rejects any line that exceeds `MAX_LINE_SIZE`.
 //!
 //! The transport is owned by a single [`crate::mcp::client::McpClient`] and
 //! is `&mut`-accessed exclusively by that client. The read loop in

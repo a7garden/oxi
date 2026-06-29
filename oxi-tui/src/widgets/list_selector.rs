@@ -2,8 +2,8 @@
 //! list-selection UX (ask, model-select, resume, etc.).
 //!
 //! Ports omp's `HookSelectorComponent` into a stateful ratatui widget. The
-//! caller owns the [`ListSelectorState`], calls [`handle_key`](Self::handle_key)
-//! to mutate it, and [`render`](Self::render) to produce display lines.
+//! caller owns the [`ListSelectorState`], calls [`ListSelectorState::handle_key`]
+//! to mutate it, and [`ListSelectorState::render`] to produce display lines.
 //!
 //! ## Marker semantics (omp-faithful)
 //!

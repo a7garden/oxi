@@ -249,7 +249,7 @@ pub fn get_context(conn: &Connection, limit: usize) -> Result<Vec<MemoryRow>> {
 
 /// List working memory entries by `source` (subject), newest first.
 ///
-/// Used by the [`MemoryBackend`] bridge to implement `list(subject)`.
+/// Used by the `MemoryBackend` bridge to implement `list(subject)`.
 pub fn list_by_source(conn: &Connection, source: &str, limit: usize) -> Result<Vec<MemoryRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, content, source, timestamp, session_id, importance,

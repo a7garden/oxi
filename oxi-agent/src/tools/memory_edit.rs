@@ -9,8 +9,8 @@ use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 /// is supplied.
 ///
 /// Requires `ctx.memory` to be set; otherwise returns an error. When `content`
-/// is provided the item is updated via [`MemoryBackend::put`]; when `content`
-/// is absent the item is deleted via [`MemoryBackend::delete`].
+/// is provided the item is updated via `MemoryBackend::put`; when `content`
+/// is absent the item is deleted via `MemoryBackend::delete`.
 pub struct MemoryEditTool;
 
 #[async_trait]

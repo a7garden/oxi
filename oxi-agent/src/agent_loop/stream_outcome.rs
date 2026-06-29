@@ -1,6 +1,6 @@
 //! Stream outcome types for TTSR integration.
 //!
-//! Extends the return type of [`super::streaming::stream_assistant_response`]
+//! Extends the return type of `stream_assistant_response`
 //! to signal TTSR rule violations without repurposing the existing cancel /
 //! error mechanisms.
 

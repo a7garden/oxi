@@ -18,7 +18,7 @@
 //! | Metadata | `styles.muted` |
 //!
 //! Fenced code blocks (``` ``` ```) are handled separately by
-//! [`highlight_code`](crate::widgets::chat::highlight::highlight_code), which
+//! `highlight_code`, which
 //! already receives `&ThemeStyles`.
 
 use ratatui::style::{Color, Modifier, Style};

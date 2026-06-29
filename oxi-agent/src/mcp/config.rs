@@ -49,7 +49,7 @@ pub fn load_mcp_config() -> McpConfig {
 ///
 /// oxi's own paths are merged first (later files override earlier).
 /// Then, if `settings.discoverExternalConfigs` is enabled, third-party
-/// tool configs ([`external_paths`]) are merged with **lower priority**:
+/// tool configs (`external_paths`) are merged with **lower priority**:
 /// they only add server entries oxi did not already define and never
 /// override oxi's `settings`. v2.4 / G8.
 pub fn load_mcp_config_from(cwd: &Path) -> McpConfig {
@@ -139,7 +139,7 @@ pub fn load_or_default(path: &Path) -> McpConfig {
     read_config_file(path).unwrap_or_default()
 }
 
-/// Resolve [`ServerEntry`] string fields against the process environment
+/// Resolve `ServerEntry` string fields against the process environment
 /// and (for `!cmd` values) the host shell. Called by [`read_config_file`]
 /// after parsing so that values stored in `mcp.json` are ready to use at
 /// connect time without further substitution.

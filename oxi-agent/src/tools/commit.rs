@@ -4,7 +4,7 @@
 //! tree. The deterministic core (scope extraction, validation, Kahn
 //! topological ordering, message formatting) needs no LLM and is unit-tested;
 //! the [`CommitTool`] wraps it with optional LLM analysis via
-//! [`oxi_ai::high_level::complete`].
+//! `oxi_ai::complete`.
 //!
 //! Ported from omp's `commit/` subsystem (~3,000 lines), keeping the
 //! deterministic heuristics verbatim and replacing the agentic pipeline with a

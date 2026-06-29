@@ -1,6 +1,6 @@
 [package]
 name = "oxi-cli"
-version = "0.50.0"
+version = "0.51.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
@@ -21,10 +21,10 @@ name = "oxi"
 path = "src/lib.rs"
 
 [dependencies]
-oxi-ai = { version = "0.50.0", path = "../oxi-ai" }
-oxi-agent = { version = "0.50.0", path = "../oxi-agent" }
-oxi-sdk = { version = "0.50.0", path = "../oxi-sdk" }
-oxi-tui = { version = "0.50.0", path = "../oxi-tui" }
+oxi-ai = { version = "0.51.0", path = "../oxi-ai" }
+oxi-agent = { version = "0.51.0", path = "../oxi-agent" }
+oxi-sdk = { version = "0.51.0", path = "../oxi-sdk" }
+oxi-tui = { version = "0.51.0", path = "../oxi-tui" }
 oxi-mnemopi = { version = "0.2.0", path = "../oxi-mnemopi" }
 
 # Async
@@ -91,7 +91,7 @@ semver = { version = "1", features = ["serde"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # Self-update (optional)
-self_update = { version = "0.41", features = ["archive-tar", "compression-flate2"], optional = true }
+self_update = { version = "0.41", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"], optional = true }
 serde_yaml = "0.9"
 
 # OAuth support

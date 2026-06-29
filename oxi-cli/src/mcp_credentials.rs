@@ -42,7 +42,7 @@ struct TokenStore {
 }
 
 /// File-backed credential provider. Constructed once in the bootstrap
-/// and shared with [`McpManager`] via `Arc<dyn McpCredentialProvider>`.
+/// and shared with `McpManager` via `Arc<dyn McpCredentialProvider>`.
 pub struct FileMcpCredentialProvider {
     /// Per-server OAuth client config (from `mcp.json`).
     oauth: HashMap<String, OAuthConfig>,

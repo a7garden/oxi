@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-06-29
+
+### Fixed — crates.io publish pipeline (publish blocker since 0.50.0)
+
+- **TLS backend unification**: forced the entire workspace off `native-tls` /
+  OpenSSL onto `rustls`, resolving the OpenSSL/btls-sys linker conflict that
+  failed the `cargo nextest` compile step on `ubuntu-latest` (undefined
+  symbols `SSL_read_ex` / `SSL_write_ex` / `SSL_CTX_ctrl`). `v0.50.0` was
+  tagged but **never published** because of this — it is skipped on the
+  registry and `0.51.0` ships its content too. Changes: `oxi-agent` and
+  `oxi-ai` `reqwest` now use `default-features = false` + `rustls-tls`;
+  `oxi-ai` `jsonschema` drops `resolve-http` (only in-memory
+  `Validator::new` is used — no remote `$ref`); `oxi-cli` `self_update`
+  switches to its `rustls` feature. After the fix `openssl-sys` /
+  `native-tls` / `openssl` are absent from the Linux target dependency tree
+  entirely; `btls-sys` (via `oxibrowser`) is retained. (`oxi-sdk` and
+  `oxi-cli`'s own `reqwest` already used rustls.)
+- **`oxi-ai` Anthropic adapter**: strips a trailing `/v1` from the configured
+  base URL to prevent a double-`/v1` (`/v1/v1/...`) 404 when the base URL
+  already includes the version segment.
+
+### Fixed — `cargo doc -D warnings` CI job
+
+- Resolved 30 broken / private / feature-gated intra-doc links across
+  `oxi-mnemopi`, `oxi-hashline`, `oxi-agent`, `oxi-cli`, and `oxi-tui`
+  (file-path refs, private consts, cfg-gated types, cross-crate port types,
+  and `Self::`-scoped method links). The job had been aborting at `oxi-tui`
+  and hiding a cascade of pre-existing warnings.
+
 ## [0.50.0] - 2026-06-28
 
 ### Fixed — product namespace isolation (`OXI_HOME` unification)
