@@ -129,6 +129,20 @@ impl Default for AnthropicProvider {
     }
 }
 
+/// Build the Anthropic Messages API URL from a base URL.
+///
+/// Normalizes the base URL by trimming any trailing slash and stripping a
+/// trailing `/v1` segment before appending `/v1/messages`. This prevents the
+/// double-`/v1` path (`.../v1/v1/messages`) for Anthropic-compatible providers
+/// (e.g. MiniMax) whose registered base URL already includes `/v1`
+/// (e.g. `https://api.minimax.io/anthropic/v1`). For a base URL without a
+/// trailing `/v1` (e.g. the default `https://api.anthropic.com`), this is a
+/// no-op and yields the standard `.../v1/messages`.
+fn anthropic_messages_url(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    let stripped = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+    format!("{}/v1/messages", stripped)
+}
 impl Provider for AnthropicProvider {
     fn stream<'a>(
         &'a self,
@@ -141,7 +155,7 @@ impl Provider for AnthropicProvider {
 
             // Build the request – use provider base_url override, fall back to model.base_url
             let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
-            let url = format!("{}/v1/messages", effective_base_url);
+            let url = anthropic_messages_url(effective_base_url);
 
             // Get API key
             let api_key = options
@@ -1605,5 +1619,42 @@ mod tests {
             _ => None,
         });
         assert_eq!(done, Some(StopReason::ToolUse));
+    }
+    // ── URL construction (double-/v1 prevention) ─────────────────────
+
+    #[test]
+    fn url_strips_trailing_v1_for_minimax() {
+        // MiniMax registers its base URL with a trailing `/v1`
+        // (https://api.minimax.io/anthropic/v1). The adapter must not
+        // double it into `.../v1/v1/messages`.
+        assert_eq!(
+            anthropic_messages_url("https://api.minimax.io/anthropic/v1"),
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn url_plain_anthropic_base() {
+        assert_eq!(
+            anthropic_messages_url("https://api.anthropic.com"),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn url_handles_trailing_slash_then_v1() {
+        assert_eq!(
+            anthropic_messages_url("https://api.minimax.io/anthropic/v1/"),
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn url_preserves_non_v1_path_suffix() {
+        // `/v1beta` must not be confused with `/v1`.
+        assert_eq!(
+            anthropic_messages_url("https://example.com/v1beta"),
+            "https://example.com/v1beta/v1/messages"
+        );
     }
 }
