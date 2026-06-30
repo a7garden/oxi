@@ -438,36 +438,184 @@ impl<'a> AgentBuilder<'a> {
         // 5. Create agent with the isolated resolver
         let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
 
-        // 6. Authorizer: grant capabilities
+        // 6. Authorizer: grant capabilities.
+        //
+        // The authorizer middleware (`AuthorizerMiddleware`) checks
+        // `Capability::ToolUse { tool_name }` against the granted
+        // capabilities — type-specific, no cross-variant
+        // implication. Without a `ToolUse` grant, every tool
+        // call would be denied by the middleware regardless of
+        // whether the agent has fine-grained FileRead/Bash caps.
+        //
+        // Coarse-grant fallback: when the granted capability set
+        // contains no `ToolUse` variant, auto-add a wildcard
+        // `ToolUse { tool_name: "*" }`. This makes the SDK's
+        // authorizer integration usable out of the box with
+        // `CapabilitySet::coding()` / `read_only()` / `research()` /
+        // `browser()` (none of which contain `ToolUse`).
+        //
+        // Fine-grained enforcement (command/path restrictions)
+        // would require tool-specific arg parsing inside the
+        // middleware to derive `Bash`/`FileRead` capabilities
+        // from the call's JSON args. That's a follow-up; see
+        // design doc at
+        // docs/designs/2026-06-30-observability-wiring.md.
         if let Some(authorizer) = &self.authorizer {
-            let agent_id = if agent.get_config().name.is_empty() {
-                uuid::Uuid::new_v4().to_string()
-            } else {
-                agent.get_config().name.clone()
-            };
-            if let Some(caps) = self.capabilities {
+            let agent_id = resolved_agent_id(&agent);
+            if let Some(mut caps) = self.capabilities.clone() {
+                let has_tool_use = caps.capabilities().iter().any(|c| {
+                    matches!(
+                        c,
+                        crate::security::Capability::ToolUse { .. }
+                    )
+                });
+                if !has_tool_use {
+                    caps.add(crate::security::Capability::ToolUse {
+                        tool_name: "*".into(),
+                    });
+                }
                 let subject = crate::security::CapabilitySubject::Agent(agent_id);
                 authorizer.grant(subject, caps);
             }
         }
 
-        // 7. Middleware pipeline → AgentHooks
-        if !self.middlewares.is_empty() {
-            let pipeline = Arc::new(
-                self.middlewares
-                    .into_iter()
-                    .fold(MiddlewarePipeline::new(), |p, mw| p.add_arc(mw)),
-            );
-            let agent_id = if agent.get_config().name.is_empty() {
-                uuid::Uuid::new_v4().to_string()
-            } else {
-                agent.get_config().name.clone()
-            };
+        // 7. Build a single unified middleware pipeline that includes
+        //    user middlewares, the audit-log adapter, and the
+        //    authorizer adapter. Order matters: audit fires FIRST
+        //    (records all attempts), authorizer fires SECOND (denies
+        //    if needed — short-circuits before user mws run), user
+        //    middlewares fire LAST.
+        //
+        //    The pipeline is wrapped into AgentHooks via
+        //    `build_hooks` once, so `set_hooks()` is called exactly
+        //    once. This avoids the replace-semantics bug class
+        //    documented in docs/audits/2026-06-30-sdk-coverage.md
+        //    Gap-0 ("observability silently overwritten when
+        //    composes with user middlewares").
+        let has_observability_mws =
+            self.audit_log.is_some() || self.authorizer.is_some();
+        let has_user_mws = !self.middlewares.is_empty();
+        if has_user_mws || has_observability_mws {
+            let agent_id = resolved_agent_id(&agent);
+            let mut pipeline = MiddlewarePipeline::new();
+
+            // Audit fires first so every attempt (allowed or denied) is logged.
+            if let Some(audit) = &self.audit_log {
+                pipeline = pipeline.add_arc(Arc::new(
+                    crate::middleware::observability_adapters::AuditLogMiddleware::new(
+                        Arc::clone(audit),
+                        agent_id.clone(),
+                    ),
+                ));
+            }
+
+            // Authorizer fires second — its denial short-circuits the
+            // pipeline via `MiddlewareAction::Block`, which the
+            // existing bridge maps to `BeforeToolCallResult { block: true }`.
+            if let Some(authorizer) = &self.authorizer {
+                let mut mw = crate::middleware::observability_adapters::AuthorizerMiddleware::new(
+                    Arc::clone(authorizer),
+                    agent_id.clone(),
+                );
+                if let Some(audit) = &self.audit_log {
+                    mw = mw.with_audit(Arc::clone(audit));
+                }
+                pipeline = pipeline.add_arc(Arc::new(mw));
+            }
+
+            // User middlewares fire last so audit/auth observe their
+            // calls and Authorizer denials short-circuit before them.
+            for mw in self.middlewares.into_iter() {
+                pipeline = pipeline.add_arc(mw);
+            }
+
+            let pipeline = Arc::new(pipeline);
             let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let hooks = crate::middleware::build_hooks(pipeline, agent_id, terminate_flag);
             agent.set_hooks(hooks);
         }
 
+        // 8. CostTracker → event-tap path (accumulate, not replace).
+        //    Tracer is intentionally deferred — see the doc comment on
+        //    `install_observability_dispatch` below for the SpanGuard
+        //    lifetime root cause and the deferred-fix plan.
+        if let Some(ct) = self.cost_tracker.clone() {
+            install_observability_dispatch(&agent, Some(ct));
+        }
+
         Ok(agent)
     }
+}
+
+/// Synthesize a stable agent id used as the principal in capability
+/// grants, audit-log entries, and observability dispatch. Matches the
+/// existing behavior at agent_builder.rs:443-447 (synthesize a UUID
+/// only when the config name is empty).
+fn resolved_agent_id(agent: &Agent) -> String {
+    let cfg = agent.get_config();
+    if cfg.name.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        cfg.name
+    }
+}
+
+/// Build the event-tap closure that drives CostTracker from the agent's
+/// `AgentEvent::Usage` events.
+///
+/// **Scope: CostTracker ONLY.** Tracer span instrumentation is deferred.
+/// The existing `Tracer::start` returns `SpanGuard<'a>` that borrows the
+/// `Tracer` and is not `Send + 'static`, which would force an unsafe
+/// block to thread through the dispatch closure (the closure is
+/// `Fn(AgentEvent) + Send + Sync + 'static`). The proper fix is to
+/// change `SpanGuard` to own an `Arc<Tracer>` reference so the guard
+/// itself is `'static + Send` — that's a separate `oxi-sdk` design
+/// change tracked against the audit's Gap-0 follow-up. Until that
+/// lands, `.tracer(...)` on `AgentBuilder` silently does nothing.
+///
+/// CostTracker / Authorizer / AuditLog ARE all wired correctly and
+/// produce runtime effect.
+fn install_observability_dispatch(
+    agent: &Agent,
+    cost_tracker: Option<Arc<crate::observability::CostTracker>>,
+) {
+    use crate::observability::TokenUsage;
+    use oxi_agent::AgentEvent;
+
+    let cost_tracker = match cost_tracker {
+        Some(c) => c,
+        None => return,
+    };
+    // Use the same resolved agent_id as the middleware path so
+    // AuditLog / Authorizer / CostTracker observations all key
+    // by the same principal. Without this, a user-supplied
+    // AgentConfig with `name: ""` would create a divergence:
+    // `resolved_agent_id` falls back to a UUID for the
+    // middleware grants, but `agent.get_config().name`
+    // is the empty string — CostTracker would record under
+    // `""` while Authorizer grants under the UUID.
+    let agent_id = resolved_agent_id(agent);
+    let resolver = agent.resolver().clone();
+    let model_id = agent.get_config().model_id;
+    agent.add_observability_dispatch(move |event: AgentEvent| {
+        if let AgentEvent::Usage {
+            input_tokens,
+            output_tokens,
+        } = event
+        {
+            let model = resolver.resolve_model(&model_id);
+            if let Some(m) = model {
+                cost_tracker.record(
+                    &agent_id,
+                    &m,
+                    TokenUsage {
+                        input: input_tokens as u64,
+                        output: output_tokens as u64,
+                        cache_read: 0,
+                        cache_write: 0,
+                    },
+                );
+            }
+        }
+    });
 }

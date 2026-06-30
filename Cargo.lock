@@ -4273,6 +4273,7 @@ name = "oxi-mnemopi"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "dirs 5.0.1",
  "fastembed",
  "lru 0.16.4",
  "parking_lot",

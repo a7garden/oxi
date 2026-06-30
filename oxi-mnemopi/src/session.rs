@@ -119,7 +119,7 @@ impl MnemopiSessionState {
 
     /// Store a new working memory entry.
     pub fn remember(&self, content: &str, opts: &RememberOptions) -> Result<String> {
-        store::remember(&self.conn, content, &self.config.session_id, opts)
+        store::remember(&self.conn, content, &self.config.session_id, opts, None)
     }
 
     /// Recall memories matching a query.

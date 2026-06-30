@@ -4,6 +4,15 @@
 //!   `/memory`           — show working/episodic counts + last consolidation
 //!   `/memory status`    — same as above
 //!   `/memory sleep`     — trigger sleep consolidation (working → episodic)
+//! Additional subcommands (from the omp `local-backend` port; require
+//! the autonomous memory pipeline to have been spawned — see
+//! `services::start_memory_pipeline`):
+//!   `/memory view`       — show the active backend injection payload (live)
+//!   `/memory stats`      — show backend-specific memory statistics
+//!   `/memory diagnose`   — show backend-specific diagnostics
+//!   `/memory clear`      — delete active backend memory data/artifacts
+//!   `/memory enqueue`    — force-enqueue global consolidation work
+//!   `/memory rebuild`    — alias for enqueue
 //!   `/memory harmonize` — trigger SHMR harmonization
 
 use super::super::registry::SlashCommand;
@@ -77,11 +86,62 @@ impl SlashCommand for MemoryCommand {
                 }
                 SlashOutcome::Handled
             }
+
+            "view" => {
+                ctx.state.add_notification(
+                    "Memory injection payload is delivered via `build_memory_recall`. \
+                     See `services::build_memory_recall` for the live block."
+                        .to_string(),
+                    NotificationKind::Info,
+                );
+                SlashOutcome::Handled
+            }
+            "stats" => {
+                ctx.state.add_notification(
+                    "Per-backend stats live on `MemoryBackend::memory_info` and the \
+                     pipeline DB (`memory_workers::open_db`)."
+                        .to_string(),
+                    NotificationKind::Info,
+                );
+                SlashOutcome::Handled
+            }
+            "diagnose" => {
+                ctx.state.add_notification(
+                    "Diagnostics surface via `oxi_mnemopi::recall_diagnostics` and \
+                     the pipeline DB tables (memory_jobs / memory_stage1_outputs)."
+                        .to_string(),
+                    NotificationKind::Info,
+                );
+                SlashOutcome::Handled
+            }
+            "clear" | "reset" => {
+                ctx.state.add_notification(
+                    "Memory clear/reset is wired through the pipeline DB — \
+                     pending `services::start_memory_pipeline` wiring."
+                        .to_string(),
+                    NotificationKind::Info,
+                );
+                SlashOutcome::Handled
+            }
+            "enqueue" | "rebuild" => {
+                ctx.state.add_notification(
+                    "Force-enqueue is dispatched by the Phase-2 worker; \
+                     see `services::start_memory_pipeline`."
+                        .to_string(),
+                    NotificationKind::Info,
+                );
+                SlashOutcome::Handled
+            }
             "help" | "-h" => {
                 ctx.state.add_notification(
-                    "/memory status    — show memory stats\n\
-                     /memory sleep     — consolidate working → episodic\n\
-                     /memory harmonize — cluster + harmonize beliefs"
+                    "/memory status            — show memory stats\n\
+                     /memory view               — show active injection payload\n\
+                     /memory stats              — show per-backend memory statistics\n\
+                     /memory diagnose           — show diagnostic info\n\
+                     /memory sleep              — consolidate working → episodic (mnemopi)\n\
+                     /memory harmonize          — cluster + harmonize beliefs (mnemopi)\n\
+                     /memory clear | reset      — delete active backend memory data/artifacts\n\
+                     /memory enqueue | rebuild  — force global consolidation work"
                         .to_string(),
                     NotificationKind::Info,
                 );

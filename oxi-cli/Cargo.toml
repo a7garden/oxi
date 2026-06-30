@@ -25,7 +25,7 @@ oxi-ai = { version = "0.51.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.51.0", path = "../oxi-agent" }
 oxi-sdk = { version = "0.51.0", path = "../oxi-sdk" }
 oxi-tui = { version = "0.51.0", path = "../oxi-tui" }
-oxi-mnemopi = { version = "0.2.0", path = "../oxi-mnemopi" }
+oxi-mnemopi = { version = "0.2.0", path = "../oxi-mnemopi", features = ["remote-embeddings"] }
 
 # Async
 async-trait = "0.1"

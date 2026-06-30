@@ -5,11 +5,8 @@
 //! tools can resolve scheme URIs to markdown text.
 
 pub mod issue_handler;
+pub mod memory_handler;
 pub mod pr_handler;
-
-pub use issue_handler::IssueProtocolHandler;
-pub use pr_handler::PrProtocolHandler;
-
 /// Detect the current Git repo's `owner/repo` from the `origin` remote.
 ///
 /// Returns `None` when `git remote get-url origin` fails or the URL is

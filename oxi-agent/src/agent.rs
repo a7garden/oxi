@@ -47,23 +47,43 @@ impl ProviderResolver for GlobalProviderResolver {
 }
 
 // ── AgentInner ────────────────────────────────────────────────────
-
 /// Mutable agent internals protected by a read-write lock.
 struct AgentInner {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
+    /// Side-dispatch closures invoked for every `AgentEvent` emitted by
+    /// the agent run methods. Used by `oxi-sdk` to bridge observability
+    /// types (Tracer, CostTracker, ...) into the agent loop without
+    /// leaking SDK types into `oxi-agent`.
+    ///
+    /// Lock-mutex rather than `RwLock`: dispatch lists mutate rarely
+    /// (only on `add_observability_dispatch`), but reads happen on every
+    /// event (high frequency), so a `Mutex` with cheap poison-free
+    /// acquisition is the right shape.
+    observability_dispatch: parking_lot::Mutex<Vec<EventDispatchFn>>,
 }
+
+/// Type alias for an observability dispatch handler. Each entry is a
+/// closure registered via [`Agent::add_observability_dispatch`] and
+/// invoked on every emitted `AgentEvent`. Named to keep the
+/// [`AgentInner`] field readable without an inline `dyn` route.
+type EventDispatchFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
 impl Clone for AgentInner {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),
             provider: Arc::clone(&self.provider),
+            // The dispatch list is *not* cloned: each `Agent` instance has
+            // its own observers. Cloning the AgentInner (rare; happens in
+            // `run_with_channel_inner` when sharing config across loops)
+            // gives the new loop an empty observer set, which is correct:
+            // the *Agent* retains the original dispatch list, and the
+            // temporary inner clone is discarded after the run.
+            observability_dispatch: parking_lot::Mutex::new(Vec::new()),
         }
     }
 }
-
-/// Agent runtime.
 ///
 /// Manages provider, tool registry, state, and compaction, providing an
 /// agentic loop for prompt execution, model switching, tool calls, and fallback.
@@ -136,39 +156,7 @@ impl Agent {
         Self::build_inner(provider, config, tools, resolver)
     }
 
-    /// Internal constructor shared by `new()` and `new_with_resolver()`.
-    fn build_inner(
-        provider: Arc<dyn Provider>,
-        config: AgentConfig,
-        tools: Arc<ToolRegistry>,
-        resolver: Arc<dyn ProviderResolver>,
-    ) -> Self {
-        let mut compaction_manager =
-            CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
-        // Pre-initialize the LLM compactor if compaction is enabled
-        if config.compaction_strategy != CompactionStrategy::Disabled {
-            let model = resolver.resolve_model(&config.model_id);
-
-            if let Some(model) = model {
-                let llm_compactor =
-                    Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
-                compaction_manager.set_compactor(llm_compactor);
-            }
-        }
-
-        Self {
-            inner: RwLock::new(AgentInner { config, provider }),
-            tools,
-            state: SharedState::new(),
-            compaction_manager,
-            hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
-            is_running: Arc::new(AtomicBool::new(false)),
-            resolver,
-            cancel_flag: Arc::new(AtomicBool::new(false)),
-            pending_model_switch: RwLock::new(None),
-        }
-    }
 
     /// Create an agent with an empty tool registry.
     pub fn new_empty(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
@@ -193,6 +181,44 @@ impl Agent {
     /// Get the agent configuration (full clone)
     pub fn get_config(&self) -> AgentConfig {
         self.config().config.clone()
+    }
+
+    /// Internal constructor shared by `new()` and `new_with_resolver()`.
+    fn build_inner(
+        provider: Arc<dyn Provider>,
+        config: AgentConfig,
+        tools: Arc<ToolRegistry>,
+        resolver: Arc<dyn ProviderResolver>,
+    ) -> Self {
+        let mut compaction_manager =
+            CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
+
+        // Pre-initialize the LLM compactor if compaction is enabled
+        if config.compaction_strategy != CompactionStrategy::Disabled {
+            let model = resolver.resolve_model(&config.model_id);
+
+            if let Some(model) = model {
+                let llm_compactor =
+                    Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
+                compaction_manager.set_compactor(llm_compactor);
+            }
+        }
+
+        Self {
+            inner: RwLock::new(AgentInner {
+                config,
+                provider,
+                observability_dispatch: parking_lot::Mutex::new(Vec::new()),
+            }),
+            tools,
+            state: SharedState::new(),
+            compaction_manager,
+            hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
+            is_running: Arc::new(AtomicBool::new(false)),
+            resolver,
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            pending_model_switch: RwLock::new(None),
+        }
     }
 
     /// Get a reference to the provider resolver.
@@ -608,10 +634,19 @@ impl Agent {
         // non-blocking and never drops events (unlike try_send on bounded).
         let tx_emit = tx.clone();
 
-        // Run the agent loop
+        // Snapshot the observability_dispatch list once per run. This avoids
+        // holding an Agent lock on the emit-fn hot path while still letting
+        // SDK consumers register new dispatchers at any time (registers after
+        // this snapshot will fire on the next run).
+        let dispatch_handlers: Vec<EventDispatchFn> = {
+            self.inner
+                .read()
+                .observability_dispatch
+                .lock()
+                .clone()
+        };
         tracing::info!("[AGENT] Starting agent run with channel");
-        let result = al
-            .run(prompt.clone(), move |event: AgentEvent| {
+        let result = al.run(prompt.clone(), move |event: AgentEvent| {
                 // Forward event to channel (std::sync::mpsc — send from sync context)
                 tracing::info!("[AGENT-EMIT] Event: {:?}", std::mem::discriminant(&event));
                 if let Err(e) = tx_emit.send(event.clone()) {
@@ -630,6 +665,13 @@ impl Agent {
                     ext_stop.store(true, Ordering::SeqCst);
                 }
 
+                // Fan out to SDK-side observability handlers (Tracer,
+                // CostTracker, ...). The dispatch list is snapshotted at
+                // run-start so we hold Arc clones, not a lock. This means
+                // handlers added mid-run do not fire until the next run.
+                for handler in dispatch_handlers.iter() {
+                    handler(event.clone());
+                }
                 // Propagate should_stop → external_stop on every event, not
                 // just TurnEnd. The TUI hook only checks should_stop_flag.load(),
                 // so the context contents are irrelevant for non-TurnEnd events.
@@ -711,6 +753,43 @@ impl Agent {
     pub fn set_hooks(&self, hooks: crate::config::AgentHooks) {
         let mut h = self.hooks.write();
         *h = hooks;
+    }
+
+    /// Register a side-dispatch closure called for every `AgentEvent`
+    /// emitted by `run`, `run_with_channel`, `run_streaming`,
+    /// `run_tokio_stream`, and `continue_with`.
+    ///
+    /// Multiple calls stack: every registered closure is invoked on
+    /// every event. Closures run synchronously on the agent-loop emit
+    /// thread, so they must be cheap and non-blocking. Long work
+    /// should be spawned off (e.g. `tokio::spawn`) by the closure
+    /// itself.
+    ///
+    /// Used by `oxi-sdk` to bridge observability types
+    /// (`Tracer`, `CostTracker`, `AuditLog`, `Authorizer` /
+    /// `AccessGate`) into the runtime without leaking those types
+    /// into `oxi-agent`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// agent.add_observability_dispatch(|event| match event {
+    ///     AgentEvent::TurnStart { turn_number } => {
+    ///         // open a span
+    ///     }
+    ///     AgentEvent::Usage { input_tokens, output_tokens } => {
+    ///         // record cost
+    ///     }
+    ///     _ => {}
+    /// });
+    /// ```
+    pub fn add_observability_dispatch(
+        &self,
+        f: impl Fn(AgentEvent) + Send + Sync + 'static,
+    ) {
+        let guard = self.inner.write();
+        let mut slot = guard.observability_dispatch.lock();
+        slot.push(Arc::new(f));
     }
 
     /// Request cancellation of the current agent run.
@@ -913,12 +992,26 @@ impl Agent {
         // Clone the is_running Arc so the spawned task can clear it.
         let is_running_flag = Arc::clone(&self.is_running);
 
+        // Snapshot the observability_dispatch list before the spawned
+        // task. The future is `'static` and cannot borrow `&self`,
+        // so we take the snapshot at run-start on the regular borrow
+        // stack and move the resulting Arc-clones into the task.
+        let dispatch_handlers: Vec<EventDispatchFn> = {
+            let guard = self.inner.read();
+            guard.observability_dispatch.lock().clone()
+        };
+
         let handle = tokio::task::spawn(async move {
             let result = agent_loop
                 .run(prompt, move |event: AgentEvent| {
                     // Forward to tokio channel (non-blocking)
                     let _ = tx.try_send(event.clone());
 
+                    // Fan out to SDK-side observability handlers
+                    // (Tracer, CostTracker, ...).
+                    for handler in dispatch_handlers.iter() {
+                        handler(event.clone());
+                    }
                     // Propagate should_stop → external_stop on every event,
                     // not just TurnEnd. See run_with_channel_inner for rationale.
                     if let Some(ref hook) = maybe_hook {

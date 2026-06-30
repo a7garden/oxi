@@ -217,6 +217,11 @@ pub struct RememberOptions {
     pub timestamp: Option<String>,
     pub extract: bool,
     pub extract_entities: bool,
+    /// Optional dense embedding vector to store alongside this memory.
+    /// When `Some`, the vector is written to the `memory_embeddings`
+    /// table by `store::remember`. When `None`, the memory is stored
+    /// without a vector (FTS5-only recall).
+    pub embedding: Option<Vec<f32>>,
 }
 
 /// Options for `recall()`.
@@ -231,7 +236,14 @@ pub struct RecallOptions {
 }
 
 /// Configuration for the Mnemopi engine.
-#[derive(Debug, Clone)]
+///
+/// When [`embedding_provider`](Self::embedding_provider) is wired, every
+/// `Mnemopi::remember` generates a dense vector for the stored content and
+/// writes it to `memory_embeddings`; every `Mnemopi::recall` embeds the
+/// query and activates the cosine-similarity dense signal in
+/// `crate::recall::recall`. Without a provider, the engine runs in FTS5-only
+/// mode (the dense signal stays at 0).
+#[derive(Clone)]
 pub struct MnemopiConfig {
     /// Session identifier for this Mnemopi instance.
     pub session_id: String,
@@ -249,6 +261,36 @@ pub struct MnemopiConfig {
     pub importance_weight: f32,
     /// Max episode chars for consolidation (default: 100_000).
     pub max_episode_chars: usize,
+    /// Optional embedding provider. When `Some`, vectors are generated for
+    /// both stored content and recall queries, activating the dense signal.
+    pub embedding_provider: Option<std::sync::Arc<dyn crate::embeddings::EmbeddingProvider>>,
+    /// Logical model name recorded alongside the stored embedding (used for
+    /// cache keying, `vector_index::store_embedding` metadata, and
+    /// diagnostics).
+    pub embedding_model: Option<String>,
+}
+
+impl std::fmt::Debug for MnemopiConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MnemopiConfig")
+            .field("session_id", &self.session_id)
+            .field("recency_halflife_hours", &self.recency_halflife_hours)
+            .field("working_memory_limit", &self.working_memory_limit)
+            .field("working_memory_ttl_hours", &self.working_memory_ttl_hours)
+            .field("vec_weight", &self.vec_weight)
+            .field("fts_weight", &self.fts_weight)
+            .field("importance_weight", &self.importance_weight)
+            .field("max_episode_chars", &self.max_episode_chars)
+            .field(
+                "embedding_provider",
+                &self
+                    .embedding_provider
+                    .as_ref()
+                    .map(|_| "<dyn EmbeddingProvider>"),
+            )
+            .field("embedding_model", &self.embedding_model)
+            .finish()
+    }
 }
 
 impl Default for MnemopiConfig {
@@ -262,6 +304,8 @@ impl Default for MnemopiConfig {
             fts_weight: 0.3,
             importance_weight: 0.2,
             max_episode_chars: 100_000,
+            embedding_provider: None,
+            embedding_model: None,
         }
     }
 }

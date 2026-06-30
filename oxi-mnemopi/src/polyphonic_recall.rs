@@ -313,6 +313,7 @@ mod tests {
                 importance: Some(0.8),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         let output = polyphonic_recall(&conn, "dark mode preferences", "session1", 10).unwrap();
@@ -340,6 +341,7 @@ mod tests {
                 importance: Some(0.8),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         // Get the memory id

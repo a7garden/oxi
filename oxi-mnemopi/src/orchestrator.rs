@@ -133,6 +133,9 @@ mod tests {
 
     #[test]
     fn test_orchestrate_linear_by_default() {
+        unsafe {
+            std::env::remove_var("MNEMOPI_POLYPHONIC");
+        }
         let conn = setup_conn();
         crate::store::remember(
             &conn,
@@ -143,6 +146,7 @@ mod tests {
                 importance: Some(0.8),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
 
@@ -174,6 +178,7 @@ mod tests {
                 importance: Some(0.8),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
 
@@ -203,7 +208,14 @@ mod tests {
             std::env::set_var("MNEMOPI_POLYPHONIC", "1");
         }
         let conn = setup_conn();
-        crate::store::remember(&conn, "Test memory", "test", &RememberOptions::default()).unwrap();
+        crate::store::remember(
+            &conn,
+            "Test memory",
+            "test",
+            &RememberOptions::default(),
+            None,
+        )
+        .unwrap();
 
         let results = orchestrate_recall(
             &conn,

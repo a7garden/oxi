@@ -20,6 +20,7 @@ pub mod entities;
 pub mod episodic_graph;
 pub mod error;
 pub mod extraction;
+pub mod mcp;
 pub mod mmr;
 pub mod orchestrator;
 pub mod patterns;
@@ -44,8 +45,10 @@ pub mod weibull;
 
 pub use chat_normalize::{ExtractionRate, extraction_rate, normalize_batch, normalize_chat};
 pub use db::MnemopiDb;
+#[cfg(feature = "remote-embeddings")]
+pub use embeddings::RemoteEmbeddingProvider;
+pub use embeddings::{EmbeddingProvider, NoopEmbeddingProvider};
 pub use error::{MnemopiError, Result};
-pub use recall::recall as recall_query;
 use std::path::Path;
 use std::sync::Arc;
 pub use store::{
@@ -76,6 +79,63 @@ impl std::fmt::Debug for Mnemopi {
 }
 
 impl Mnemopi {
+    /// Attach an embedding provider. Vectors will be generated for every
+    /// stored memory and every recall query, activating the dense signal
+    /// of the hybrid scoring formula.
+    ///
+    /// `model_name` is recorded alongside stored embeddings and surfaced
+    /// in diagnostics — choose a stable identifier (e.g.
+    /// `"text-embedding-3-small"`).
+    pub fn with_embedding_provider(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider>,
+        model_name: impl Into<String>,
+    ) -> Self {
+        self.config.embedding_provider = Some(provider);
+        self.config.embedding_model = Some(model_name.into());
+        self
+    }
+
+    /// Compute the dense embedding for a piece of text using the configured
+    /// provider. Returns `None` when no provider is wired, the provider is
+    /// unavailable, or the embed call fails. Failure is non-fatal — the
+    /// caller proceeds in FTS5-only mode.
+    #[allow(dead_code)] // kept for external callers using blocking Mnemopi APIs
+    fn auto_embed(&self, text: &str) -> Option<Vec<f32>> {
+        let provider = self.config.embedding_provider.as_ref()?;
+        if !provider.available() {
+            return None;
+        }
+        match provider.embed(&[text.to_string()]) {
+            Ok(v) if !v.is_empty() => v.into_iter().next(),
+            Ok(_) => {
+                eprintln!("mnemopi: embedder returned empty result");
+                None
+            }
+            Err(e) => {
+                eprintln!("mnemopi: embedder failed: {e}");
+                None
+            }
+        }
+    }
+    /// Run a synchronous closure against the underlying SQLite connection on
+    /// the blocking pool. Use this for module-level operations (triples,
+    /// episodic graph, scratchpad) that don't involve embeddings — the
+    /// facade's `remember`/`recall` already embed internally; calling those
+    /// via `spawn_blocking` would bypass the embedding step.
+    ///
+    /// The closure receives a `&rusqlite::Connection` and runs on a worker
+    /// thread, so it may block freely.
+    pub async fn spawn_blocking<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || db.with_conn(f))
+            .await
+            .map_err(|e| MnemopiError::Other(format!("join error: {e}")))?
+    }
     /// Open or create a Mnemopi engine at `path`.
     pub fn open(path: &Path, config: MnemopiConfig) -> Result<Self> {
         let db = MnemopiDb::open(path)?;
@@ -104,25 +164,105 @@ impl Mnemopi {
     }
 
     /// Store a new memory. Returns its ID.
+    ///
+    /// When an embedding provider is wired (see
+    /// [`Mnemopi::with_embedding_provider`]), `content` is embedded before
+    /// the SQLite write and the resulting vector is stored in
+    /// `memory_embeddings`. Without a provider, the memory is stored
+    /// without a vector (FTS5-only recall).
     pub async fn remember(&self, content: &str, options: RememberOptions) -> Result<String> {
         let db = self.db.clone();
         let session_id = self.config.session_id.clone();
         let content = content.to_string();
 
+        // Compute embedding INSIDE spawn_blocking — providers use
+        // `reqwest::blocking` (or ONNX), which panics if invoked from
+        // inside a tokio runtime. Cloning the `Arc<dyn EmbeddingProvider>`
+        // is cheap; the embedding I/O runs on the blocking pool.
+        let provider = self.config.embedding_provider.clone();
+        let model_name = self.config.embedding_model.clone();
+
         tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| store::remember(conn, &content, &session_id, &options))
+            let embedding = provider.as_ref().and_then(|p| {
+                if p.available() {
+                    match p.embed(std::slice::from_ref(&content)) {
+                        Ok(v) if !v.is_empty() => v.into_iter().next(),
+                        Ok(_) => {
+                            eprintln!("mnemopi: embedder returned empty result");
+                            None
+                        }
+                        Err(e) => {
+                            eprintln!("mnemopi: embedder failed: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            });
+
+            let mut options = options;
+            options.embedding = embedding;
+            if options.embedding.is_some()
+                && let Some(model) = model_name
+            {
+                let entry = options.metadata.get_or_insert_with(Metadata::new);
+                entry.insert(
+                    "embedding_model".to_string(),
+                    serde_json::Value::String(model),
+                );
+            }
+            db.with_conn(|conn| {
+                store::remember(
+                    conn,
+                    &content,
+                    &session_id,
+                    &options,
+                    options.embedding.as_deref(),
+                )
+            })
         })
         .await
         .map_err(|e| MnemopiError::Other(format!("join error: {e}")))?
     }
 
     /// Recall memories matching `query`.
+    ///
+    /// When an embedding provider is wired, the query is embedded and the
+    /// dense cosine-similarity signal is activated for hybrid scoring.
+    /// Without a provider, recall degenerates to FTS5 + keyword +
+    /// importance + recency + veracity.
     pub async fn recall(&self, query: &str, options: RecallOptions) -> Result<Vec<RecallResult>> {
         let db = self.db.clone();
         let session_id = self.config.session_id.clone();
         let query = query.to_string();
 
+        // Compute query embedding INSIDE spawn_blocking — providers use
+        // `reqwest::blocking` (or ONNX), which panics if invoked from
+        // inside a tokio runtime.
+        let provider = self.config.embedding_provider.clone();
+
         tokio::task::spawn_blocking(move || {
+            let query_embedding = provider.as_ref().and_then(|p| {
+                if p.available() {
+                    match p.embed(std::slice::from_ref(&query)) {
+                        Ok(v) if !v.is_empty() => v.into_iter().next(),
+                        Ok(_) => {
+                            eprintln!("mnemopi: query embedder returned empty result");
+                            None
+                        }
+                        Err(e) => {
+                            eprintln!("mnemopi: query embedder failed: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            });
+
+            let mut options = options;
+            options.query_embedding = query_embedding;
             db.with_conn(|conn| recall::recall(conn, &query, &session_id, &options))
         })
         .await
@@ -211,7 +351,7 @@ impl Mnemopi {
     pub fn blocking_remember(&self, content: &str, options: RememberOptions) -> String {
         let session_id = &self.config.session_id;
         self.db
-            .with_conn(|conn| store::remember(conn, content, session_id, &options))
+            .with_conn(|conn| store::remember(conn, content, session_id, &options, None))
             .expect("blocking_remember failed")
     }
 

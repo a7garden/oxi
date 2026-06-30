@@ -5,13 +5,12 @@
 //! `SqliteMemoryStore` (LIKE search) and `MnemopiStore` (JSON file) when
 //! `mnemopi_engine` is enabled in settings.
 
+use oxi_agent::tools::{MemoryBackend, MemoryItem, ToolError};
+use oxi_mnemopi::{EmbeddingProvider, Mnemopi, MnemopiConfig, RecallOptions, RememberOptions};
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use oxi_agent::tools::{MemoryBackend, MemoryItem, ToolError};
-use oxi_mnemopi::{Mnemopi, MnemopiConfig, RecallOptions, RememberOptions};
-
-/// Mnemopi-backed memory backend.
 ///
 /// Wraps an [`oxi_mnemopi::Mnemopi`] engine and exposes it through the
 /// [`MemoryBackend`] trait used by the `memory_*` agent tools.
@@ -22,11 +21,30 @@ pub struct MnemopiMemoryBackend {
 
 impl MnemopiMemoryBackend {
     /// Open or create a Mnemopi-backed memory store at `path`.
-    pub fn open(path: &Path, session_id: &str) -> Result<Self, String> {
-        let config = MnemopiConfig {
+    ///
+    /// `embedding_provider` is the optional dense-vector model. When
+    /// `Some`, `Mnemopi::remember`/`recall` will auto-embed every stored
+    /// fact and recall query, activating the dense cosine-similarity
+    /// signal of the hybrid scoring formula. When `None`, recall runs in
+    /// FTS5-only mode.
+    ///
+    /// `embedding_model_name` is the logical model identifier recorded
+    /// alongside each stored embedding (used for cache keying and
+    /// diagnostics). Pass an empty string when no provider is wired.
+    pub fn open(
+        path: &Path,
+        session_id: &str,
+        embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+        embedding_model_name: &str,
+    ) -> Result<Self, String> {
+        let mut config = MnemopiConfig {
             session_id: session_id.to_string(),
             ..Default::default()
         };
+        config.embedding_provider = embedding_provider;
+        if !embedding_model_name.is_empty() {
+            config.embedding_model = Some(embedding_model_name.to_string());
+        }
         let engine = Mnemopi::open(path, config).map_err(|e| format!("mnemopi open: {e}"))?;
         Ok(Self { engine })
     }

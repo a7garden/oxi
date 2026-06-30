@@ -258,6 +258,7 @@ pub async fn create_agent_session_from_services(
         // No model — return minimal session, TUI setup wizard will handle configuration
         let memory_block = if settings.memory_enabled {
             let backend = crate::services::create_memory_backend(settings);
+            let backend = backend.map(|b| crate::services::wrap_extracting(b, settings, None));
             if let Some(ref backend) = backend {
                 crate::services::build_memory_recall(backend.as_ref(), &cwd).await
             } else {
@@ -294,6 +295,7 @@ pub async fn create_agent_session_from_services(
                 settings.language_policy_enabled,
                 &settings.output_languages,
                 memory_opt,
+                crate::services::read_path_block(&services.agent_dir, &services.cwd),
             )),
             timeout_seconds: settings.tool_timeout_seconds,
             temperature: settings.effective_temperature(),
@@ -338,7 +340,8 @@ pub async fn create_agent_session_from_services(
     let provider = oxi_sdk::get_provider(&provider_name)
         .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
     let memory_backend: Option<Arc<dyn oxi_agent::tools::MemoryBackend>> =
-        crate::services::create_memory_backend(settings);
+        crate::services::create_memory_backend(settings)
+            .map(|b| crate::services::wrap_extracting(b, settings, None));
     let memory_block = if let Some(ref backend) = memory_backend {
         crate::services::build_memory_recall(backend.as_ref(), &cwd).await
     } else {
@@ -375,13 +378,13 @@ pub async fn create_agent_session_from_services(
         settings.language_policy_enabled,
         &settings.output_languages,
         memory_block_opt,
+        crate::services::read_path_block(&services.agent_dir, &services.cwd),
     );
     let compaction_strategy = if settings.auto_compaction {
         oxi_sdk::CompactionStrategy::Threshold(0.8)
     } else {
         oxi_sdk::CompactionStrategy::Disabled
     };
-
     // Resolve API key from auth storage for the provider
     let api_key = services.auth_storage.get_api_key(&provider_name);
 
@@ -848,7 +851,13 @@ pub(crate) fn build_system_prompt(
     language_policy_enabled: bool,
     languages: &std::collections::HashMap<String, String>,
 ) -> String {
-    build_system_prompt_with_memory(thinking_level, language_policy_enabled, languages, None)
+    build_system_prompt_with_memory(
+        thinking_level,
+        language_policy_enabled,
+        languages,
+        None,
+        None,
+    )
 }
 
 /// Combine memory block with tool usage guidance for system prompt.
@@ -872,15 +881,28 @@ fn append_memory_and_tool_guidance(memory_block: Option<String>) -> Option<Strin
     }
 }
 
-/// Build the system prompt with an optional project-memory recall block.
+/// Build the system prompt with optional project-memory blocks: a
+/// raw project-recall block (`memory_block`) and an autonomous
+/// read-path block (`read_path_block`) generated from
+/// `<memory-root>/memory_summary.md` (omp `read-path.md` port).
+/// Both are appended after the standard system prompt body.
 pub(crate) fn build_system_prompt_with_memory(
     thinking_level: ThinkingLevel,
     language_policy_enabled: bool,
     languages: &std::collections::HashMap<String, String>,
     memory_block: Option<String>,
+    read_path_block: Option<String>,
 ) -> String {
     let directive =
         crate::prompt::system_prompt::language_directive(language_policy_enabled, languages);
+    // Concatenate the two optional blocks in order (raw recall
+    // first, then the autonomous read-path guidance).
+    let combined = match (memory_block, read_path_block) {
+        (Some(m), Some(r)) => Some(format!("{}{}", m, r)),
+        (Some(m), None) => Some(m),
+        (None, Some(r)) => Some(r),
+        (None, None) => None,
+    };
     let options = crate::prompt::system_prompt::BuildSystemPromptOptions {
         custom_prompt: crate::prompt::system_prompt::thinking_level_prompt(thinking_level),
         cwd: std::env::current_dir()
@@ -889,7 +911,7 @@ pub(crate) fn build_system_prompt_with_memory(
         selected_tools: crate::prompt::system_prompt::default_tool_names(),
         tool_snippets: crate::prompt::system_prompt::default_tool_snippets(),
         language_directive: directive,
-        append_system_prompt: append_memory_and_tool_guidance(memory_block),
+        append_system_prompt: append_memory_and_tool_guidance(combined),
         ..Default::default()
     };
 

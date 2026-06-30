@@ -723,34 +723,107 @@ impl SupervisorBuilder {
     }
 
     /// Attach an audit log.
+    ///
+    /// **Limitation**: [`AgentSupervisor`] does not construct
+    /// `Agent` instances itself — agents are spawned through Oxi's
+    /// internal pool, outside the supervisor's direct control. The
+    /// audit log attached here cannot be reached by the
+    /// Before/AfterTool callback chain. For audit-on-tool-call
+    /// semantics, use [`OxiBuilder::agent`](crate::OxiBuilder::agent)::[`.audit_log`](crate::AgentBuilder::audit_log)
+    /// on each agent that should be audited.
+    ///
+    /// `build()` will emit a `tracing::warn!` if this setter is used,
+    /// so the silent-drop behavior does not recur silently. See
+    /// `docs/designs/2026-06-30-observability-wiring.md` for the
+    /// planned follow-up RFC.
     pub fn with_audit(mut self, audit: Arc<AuditLog>) -> Self {
         self.audit = Some(audit);
         self
     }
 
+
     /// Attach an authorizer.
+    ///
+    /// **Limitation**: same as `with_audit` — supervisor-spawned
+    /// agents don't go through this hook chain. Use
+    /// [`OxiBuilder::agent`](crate::OxiBuilder::agent)::[`.authorizer`](crate::AgentBuilder::authorizer)
+    /// for per-agent enforcement. `build()` will emit a
+    /// `tracing::warn!` if this setter is used.
     pub fn with_authorizer(mut self, authorizer: Arc<Authorizer>) -> Self {
         self.authorizer = Some(authorizer);
         self
     }
 
     /// Attach a tracer.
+    ///
+    /// **Limitation**: see `with_audit`. Tracer span instrumentation
+    /// across supervisor-managed agents is even harder than audit
+    /// wiring because Tracer's `SpanGuard` borrows `&Tracer` (not
+    /// `'static`), which forced the deferred-fix plan tracked in
+    /// `docs/designs/2026-06-30-observability-wiring.md`. `build()`
+    /// will emit a `tracing::warn!` if this setter is used.
     pub fn with_tracer(mut self, tracer: Arc<Tracer>) -> Self {
         self.tracer = Some(tracer);
         self
     }
 
     /// Attach a cost tracker.
+    ///
+    /// **Limitation**: see `with_audit`. CostTracker is event-tap
+    /// driven (`AgentEvent::Usage`), which requires reaching the
+    /// agent loop's emit chain. `build()` will emit a
+    /// `tracing::warn!` if this setter is used.
     pub fn with_cost_tracker(mut self, tracker: Arc<CostTracker>) -> Self {
         self.cost_tracker = Some(tracker);
         self
     }
-
     /// Build the supervisor.
     ///
     /// Creates an `Oxi` instance internally and constructs the supervisor
     /// with a file-based snapshot store.
+    ///
+    /// **Note on observability**: supervisors today cannot thread
+    /// audit/auth/cost/tracer into the agents they spawn (those are
+    /// created outside the supervisor in Oxi's internal pool). If
+    /// `with_audit` / `with_authorizer` / `with_tracer` /
+    /// `with_cost_tracker` was called before this `build()`, a
+    /// `tracing::warn!` is emitted and the setters are no-ops until
+    /// the follow-up RFC lands. For per-agent observability that
+    /// actually runs, use
+    /// [`OxiBuilder::agent(...).build()`](crate::OxiBuilder::agent)
+    /// and apply each setter there.
     pub fn build(self) -> anyhow::Result<(Oxi, AgentSupervisor)> {
+        // Surface the silent-drop limitation explicitly so this
+        // doesn't recur in the same shape as the audit Gap-0 bug.
+        if self.audit.is_some() {
+            tracing::warn!(
+                "SupervisorBuilder::with_audit was set but does not currently reach \
+                 supervisor-spawned agents. Use OxiBuilder::agent().audit_log() \
+                 per-agent instead. See docs/designs/2026-06-30-observability-wiring.md."
+            );
+        }
+        if self.authorizer.is_some() {
+            tracing::warn!(
+                "SupervisorBuilder::with_authorizer was set but does not currently reach \
+                 supervisor-spawned agents. Use OxiBuilder::agent().authorizer() \
+                 per-agent instead."
+            );
+        }
+        if self.tracer.is_some() {
+            tracing::warn!(
+                "SupervisorBuilder::with_tracer was set but does not currently reach \
+                 supervisor-spawned agents. Use OxiBuilder::agent().tracer() \
+                 per-agent instead."
+            );
+        }
+        if self.cost_tracker.is_some() {
+            tracing::warn!(
+                "SupervisorBuilder::with_cost_tracker was set but does not currently reach \
+                 supervisor-spawned agents. Use OxiBuilder::agent().cost_tracker() \
+                 per-agent instead."
+            );
+        }
+
         let oxi = self.oxi_builder.build();
         let resolver: Arc<dyn oxi_agent::ProviderResolver> = Arc::new(oxi.clone());
 

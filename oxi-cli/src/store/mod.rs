@@ -18,11 +18,14 @@
 //! - `model_registry` (1,792 lines)     — replaced by `oxi_sdk::ModelRegistry`
 
 pub mod auth_storage;
+pub mod extracting_backend;
 pub mod fs_util;
 #[allow(missing_docs, dead_code)] // surface is large; do a doc pass before stabilizing
 pub mod issues;
 pub mod memory_mnemopi;
 pub mod memory_sqlite;
+pub mod memory_summary;
+pub mod memory_workers;
 pub mod mnemopi;
 pub mod router_config;
 pub mod session;

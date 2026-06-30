@@ -143,6 +143,7 @@ mod tests {
             "test memory",
             "default",
             &crate::types::RememberOptions::default(),
+            None,
         )
         .unwrap();
 

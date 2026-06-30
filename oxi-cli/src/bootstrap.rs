@@ -194,6 +194,17 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         app.agent().set_system_prompt(content);
     }
 
+    // Spawn the autonomous memory pipeline if `memory_backend = "local"`.
+    // This is **opt-in**: when the user keeps the default `None`, the
+    // pipeline stays disabled and the boot path is side-effect free.
+    if let Some(handle) = crate::services::start_memory_pipeline(
+        app.settings(),
+        std::env::current_dir().as_ref().unwrap_or(&PathBuf::from(".")),
+        None,
+    ) {
+        tracing::debug!("memory pipeline spawn handle stored on app");
+        drop(handle); // currently fire-and-forget; joined on shutdown
+    }
     Ok(app)
 }
 

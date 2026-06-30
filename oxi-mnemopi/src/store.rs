@@ -37,6 +37,7 @@ pub fn remember(
     content: &str,
     session_id: &str,
     options: &RememberOptions,
+    embedding: Option<&[f32]>,
 ) -> Result<String> {
     let id = new_id();
     let importance = options.importance.unwrap_or(0.5);
@@ -74,6 +75,18 @@ pub fn remember(
             scope,
         ],
     )?;
+
+    if let Some(vec) = embedding {
+        let model = options
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("embedding_model"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+        if let Err(e) = crate::vector_index::store_embedding(conn, &id, vec, model) {
+            eprintln!("mnemopi: store_embedding failed for {id}: {e}");
+        }
+    }
 
     trim_working_memory(conn, session_id)?;
     Ok(id)
