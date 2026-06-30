@@ -300,6 +300,7 @@ pub(crate) async fn stream_assistant_response(
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
                     *m = (*partial).clone();
                 }
+                emit(super::AgentEvent::Thinking);
             }
 
             ProviderEvent::ThinkingDelta { delta, partial, .. } => {
@@ -310,6 +311,9 @@ pub(crate) async fn stream_assistant_response(
                     }
                 }
                 let last_msg = messages.last().expect("non-empty").clone();
+                emit(super::AgentEvent::ThinkingDelta {
+                    text: delta.clone(),
+                });
                 emit(super::AgentEvent::MessageUpdate {
                     message: last_msg,
                     delta: Some(delta),
