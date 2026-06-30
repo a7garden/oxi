@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-06-30
+
+### Added — Mnemopi memory engine wiring + observability middleware
+
+- **`oxi-mnemopi` crate wired into `oxi-cli` composition root**: the
+  SQLite vector memory engine (ported from omp Mnemopi) is now
+  constructed at boot via `services::start_memory_pipeline`, providing
+  auto-recall on session start, auto-retain on each turn, and
+  consolidate-on-dispose lifecycle hooks.
+- **Observability middleware pipeline**: `AgentBuilder` now wires
+  `AuditLogMiddleware`, `CostTrackerMiddleware`, and
+  `AuthorizerMiddleware` through `build_hooks`, with event dispatch
+  for real-time agent event monitoring.
+- **`publish.yml` now includes `oxi-mnemopi`**: added to the publish
+  matrix, package-check leaf list, and wait-step (CI waits for both
+  `oxi-sdk` and `oxi-mnemopi` before publishing `oxi-cli`).
+
+### Fixed
+
+- **`oxi-sdk/tests/integration.rs`**: fixed unclosed delimiter in
+  `oxi_instance_isolation()` — orphaned test functions now properly
+  top-level.
+- **`oxi-mnemopi-mcp.rs`**: `RemoteEmbeddingProvider::new()` returns
+  `Self` directly (not `Result`) — removed spurious `match`.
+- **`oxi-mnemopi/src/mcp.rs`**: fixed broken intra-doc link
+  (`MnemopiDb::with_conn` → `crate::MnemopiDb::with_conn`).
+- **2x `unused mut` lints**: removed stale `mut` from `let mut agent`
+  in integration tests where `add_tool` uses interior mutability.
+
 ## [0.51.0] - 2026-06-29
 
 ### Fixed — crates.io publish pipeline (publish blocker since 0.50.0)
@@ -1732,7 +1761,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
 [0.39.0]: https://github.com/a7garden/oxi/compare/v0.38.0...v0.39.0
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.52.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 
