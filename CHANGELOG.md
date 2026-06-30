@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.1] - 2026-06-30
+
+### Fixed
+
+- **`oxi-agent/src/agent_loop/streaming.rs`**: `ProviderEvent::ThinkingStart`
+  and `ProviderEvent::ThinkingDelta` now emit the discrete
+  `AgentEvent::Thinking` and `AgentEvent::ThinkingDelta { text }` events
+  in addition to the existing `MessageUpdate`. Previously these variants
+  were defined in `events.rs` but had no emission site, so kernel code
+  subscribed to live reasoning updates saw nothing. Now reasoning text
+  streams live for every provider that emits `ProviderEvent::Thinking*`
+  (Anthropic, Bedrock, Google, DeepSeek, ZAI). The `MessageUpdate` emit
+  on `ThinkingDelta` is preserved with `delta.clone()` so the move into
+  `MessageUpdate { delta: Some(delta) }` still compiles.
+
+
 ## [0.52.0] - 2026-06-30
 
 ### Added — Mnemopi memory engine wiring + observability middleware
