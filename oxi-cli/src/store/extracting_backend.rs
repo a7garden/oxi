@@ -23,8 +23,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use oxi_ai::{Context, ProviderEvent};
 use oxi_agent::tools::{MemoryBackend, MemoryItem, ToolError};
+use oxi_ai::{Context, ProviderEvent};
 use serde::Deserialize;
 
 use super::settings::Settings;
@@ -71,11 +71,7 @@ impl FactExtractor for HeuristicFactExtractor {
                 kind: None,
             })
             .collect();
-        if facts.is_empty() {
-            None
-        } else {
-            Some(facts)
-        }
+        if facts.is_empty() { None } else { Some(facts) }
     }
 }
 
@@ -158,11 +154,7 @@ fn parse_facts(buf: &str) -> Option<Vec<ExtractedFact>> {
         .into_iter()
         .filter(|f| !f.content.trim().is_empty())
         .collect();
-    if facts.is_empty() {
-        None
-    } else {
-        Some(facts)
-    }
+    if facts.is_empty() { None } else { Some(facts) }
 }
 
 /// Wrapper around any [`MemoryBackend`].
@@ -190,7 +182,11 @@ impl ExtractingMemoryBackend {
         heuristic: Arc<dyn FactExtractor>,
         llm: Option<LlmExtractor>,
     ) -> Self {
-        Self { inner, heuristic, llm }
+        Self {
+            inner,
+            heuristic,
+            llm,
+        }
     }
 }
 
@@ -280,10 +276,7 @@ impl LlmExtractorHandle {
 /// Resolve the LLM extractor from the wired `Oxi` engine. Returns
 /// `None` when the user hasn't configured
 /// `memory_llm_extract_model` or the pattern doesn't resolve.
-pub fn try_make_llm_extractor(
-    oxi: &oxi_sdk::Oxi,
-    settings: &Settings,
-) -> Option<LlmExtractor> {
+pub fn try_make_llm_extractor(oxi: &oxi_sdk::Oxi, settings: &Settings) -> Option<LlmExtractor> {
     let pat = settings.memory_llm_extract_model.trim();
     if pat.is_empty() {
         return None;

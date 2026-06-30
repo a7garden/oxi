@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-hashline oxi-ai oxi-tui; do
+          for crate in oxi-hashline oxi-ai oxi-tui oxi-mnemopi; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -103,7 +103,7 @@ jobs:
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces order: oxi-hashline →
-  # oxi-ai → oxi-tui → oxi-agent → oxi-sdk → oxi-cli.
+  # oxi-ai → oxi-tui → oxi-mnemopi → oxi-agent → oxi-sdk → oxi-cli.
   # Each crate waits for its dependency's crates.io index to
   # propagate (~30-60s) before publishing.
   publish:
@@ -120,6 +120,7 @@ jobs:
           - oxi-hashline
           - oxi-ai
           - oxi-tui
+          - oxi-mnemopi
           - oxi-agent
           - oxi-sdk
           - oxi-cli
@@ -132,28 +133,33 @@ jobs:
         # internal dependency published immediately before this crate.
         run: |
           CRATE="${{ matrix.crate }}"
+          # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxi-hashline|oxi-ai|oxi-tui) exit 0 ;;
-            oxi-agent) WAIT="oxi-ai" ;;
-            oxi-sdk) WAIT="oxi-agent" ;;
-            oxi-cli) WAIT="oxi-sdk" ;;
+            oxi-hashline|oxi-ai|oxi-tui|oxi-mnemopi) exit 0 ;;
+            oxi-agent) WAITS="oxi-ai" ;;
+            oxi-sdk) WAITS="oxi-agent" ;;
+            oxi-cli) WAITS="oxi-sdk oxi-mnemopi" ;;
             *) exit 0 ;;
           esac
-          TARGET=$(grep -E "^${WAIT} = \{ version = " "$CRATE/Cargo.toml" \
-            | head -1 | sed -E 's/.*version = "([^"]+)".*/\1/')
-          [ -z "$TARGET" ] && echo "::error::Could not determine required version of $WAIT" && exit 1
-          echo "Waiting for $WAIT $TARGET on crates.io..."
-          for i in $(seq 1 60); do
-            SEEN=$(curl -fsSL -H "User-Agent: oxi-publish-ci/1.0" \
-              "https://crates.io/api/v1/crates/$WAIT" \
-              | grep -oE '"max_stable_version":[[:space:]]*"[^"]+"' \
-              | head -1 | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/')
-            [ "$SEEN" = "$TARGET" ] && echo "$WAIT $TARGET visible" && exit 0
-            echo "  waiting for $WAIT $TARGET (saw $SEEN)... ($i/60)"
-            sleep 10
+          for WAIT in $WAITS; do
+            TARGET=$(grep -E "^${WAIT} = \{ version = " "$CRATE/Cargo.toml" \
+              | head -1 | sed -E 's/.*version = "([^"]+)".*/\1/')
+            [ -z "$TARGET" ] && echo "::error::Could not determine required version of $WAIT" && exit 1
+            echo "Waiting for $WAIT $TARGET on crates.io..."
+            for i in $(seq 1 60); do
+              SEEN=$(curl -fsSL -H "User-Agent: oxi-publish-ci/1.0" \
+                "https://crates.io/api/v1/crates/$WAIT" \
+                | grep -oE '"max_stable_version":[[:space:]]*"[^"]+"' \
+                | head -1 | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/')
+              [ "$SEEN" = "$TARGET" ] && echo "$WAIT $TARGET visible" && break
+              echo "  waiting for $WAIT $TARGET (saw $SEEN)... ($i/60)"
+              sleep 10
+            done
+            if [ "$SEEN" != "$TARGET" ]; then
+              echo "::error::Timeout waiting for $WAIT $TARGET"
+              exit 1
+            fi
           done
-          echo "::error::Timeout waiting for $WAIT $TARGET"
-          exit 1
 
       - name: Publish ${{ matrix.crate }}
         working-directory: ${{ matrix.crate }}

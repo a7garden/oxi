@@ -260,8 +260,7 @@ pub fn redact_secrets(text: &str) -> String {
 ///   `let encoded = "--" + cwd.trim_start_matches(['/','\\']).replace(['/','\\',':'], "-") + "--";`
 #[allow(clippy::manual_pattern_char_comparison)]
 pub fn memory_root(home: &Path, cwd: &str) -> PathBuf {
-    let stripped = cwd
-        .trim_start_matches(|c: char| c == '/' || c == '\\');
+    let stripped = cwd.trim_start_matches(|c: char| c == '/' || c == '\\');
     let encoded = format!("--{}--", stripped.replace(['/', '\\', ':'], "-"));
     home.join("memory").join(encoded)
 }

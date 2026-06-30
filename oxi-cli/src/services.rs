@@ -254,9 +254,9 @@ fn build_remote_embedding_provider(
     } else {
         settings.embedding_model.clone()
     };
-    Some(Arc::new(
-        oxi_mnemopi::RemoteEmbeddingProvider::new(base_url, &api_key, &model),
-    ))
+    Some(Arc::new(oxi_mnemopi::RemoteEmbeddingProvider::new(
+        base_url, &api_key, &model,
+    )))
 }
 
 // ── Memory backend helpers (Hindsight ④) ──────────────────────────────
@@ -351,10 +351,7 @@ pub fn read_path_block(home: &Path, cwd: &Path) -> Option<String> {
     let (_, memory_summary_text) =
         memory_summary::load_consolidated_artifacts(&memory_root).ok()?;
     let summary = memory_summary_text?;
-    Some(memory_summary::render_read_path(
-        Some(&summary),
-        None,
-    ))
+    Some(memory_summary::render_read_path(Some(&summary), None))
 }
 
 /// Store a session summary into the memory backend.
@@ -405,9 +402,7 @@ pub fn start_memory_pipeline(
         let now = chrono::Utc::now().timestamp();
         let _ = conn;
         let _ = now;
-        tracing::info!(
-            "autonomous memory pipeline: workers spawned (no-op until LLM wired)"
-        );
+        tracing::info!("autonomous memory pipeline: workers spawned (no-op until LLM wired)");
     });
     Some(handle)
 }

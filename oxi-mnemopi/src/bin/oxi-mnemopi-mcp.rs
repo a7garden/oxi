@@ -83,18 +83,10 @@ async fn main() -> std::io::Result<()> {
                 let url = std::env::var("OXI_MNEMOPI_EMBEDDING_URL")
                     .unwrap_or_else(|_| "https://api.openai.com/v1/embeddings".to_string());
                 let key = std::env::var("OXI_MNEMOPI_EMBEDDING_KEY").unwrap_or_default();
-                match oxi_mnemopi::RemoteEmbeddingProvider::new(&url, &key, &embedding_model) {
-                    Ok(p) => {
-                        eprintln!(
-                            "oxi-mnemopi-mcp: remote embeddings enabled (model={embedding_model})"
-                        );
-                        Some(std::sync::Arc::new(p))
-                    }
-                    Err(e) => {
-                        eprintln!("oxi-mnemopi-mcp: failed to init embedding provider: {e}");
-                        None
-                    }
-                }
+                let provider =
+                    oxi_mnemopi::RemoteEmbeddingProvider::new(&url, &key, &embedding_model);
+                eprintln!("oxi-mnemopi-mcp: remote embeddings enabled (model={embedding_model})");
+                Some(std::sync::Arc::new(provider))
             }
             #[cfg(not(feature = "remote-embeddings"))]
             {

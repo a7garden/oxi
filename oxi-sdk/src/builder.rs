@@ -741,7 +741,6 @@ impl SupervisorBuilder {
         self
     }
 
-
     /// Attach an authorizer.
     ///
     /// **Limitation**: same as `with_audit` — supervisor-spawned

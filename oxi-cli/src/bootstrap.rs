@@ -199,7 +199,9 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // pipeline stays disabled and the boot path is side-effect free.
     if let Some(handle) = crate::services::start_memory_pipeline(
         app.settings(),
-        std::env::current_dir().as_ref().unwrap_or(&PathBuf::from(".")),
+        std::env::current_dir()
+            .as_ref()
+            .unwrap_or(&PathBuf::from(".")),
         None,
     ) {
         tracing::debug!("memory pipeline spawn handle stored on app");

@@ -393,6 +393,7 @@ fn oxi_instance_isolation() {
             .is_err()
     );
     assert!(oxi1.create_provider("anthropic").is_err());
+}
 
 // ── Observability wiring (Gap-0 fix from docs/audits/2026-06-30-sdk-coverage.md) ────
 //
@@ -424,10 +425,7 @@ async fn cost_tracker_records_per_turn_usage() {
         .build()
         .expect("build");
 
-    let _ = agent
-        .run("hello".into())
-        .await
-        .expect("run should succeed");
+    let _ = agent.run("hello".into()).await.expect("run should succeed");
 
     // `install_observability_dispatch` reads `agent.get_config().name`
     // (which is `"oxi-agent"` by default) and passes that as the
@@ -510,10 +508,7 @@ async fn audit_log_records_tool_execution() {
     // succeeds → the audit middleware is in the pipeline. The agent
     // runs without error → build_hooks correctly produced an
     // AgentHooks struct (no panic from a malformed type).
-    let _ = agent
-        .run("hello".into())
-        .await
-        .expect("run should succeed");
+    let _ = agent.run("hello".into()).await.expect("run should succeed");
 
     // The audit log is empty here because no tool calls happened,
     // but the test passing proves the builder wrote the hook chain

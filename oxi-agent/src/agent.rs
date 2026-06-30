@@ -156,8 +156,6 @@ impl Agent {
         Self::build_inner(provider, config, tools, resolver)
     }
 
-
-
     /// Create an agent with an empty tool registry.
     pub fn new_empty(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
         Self::new(provider, config, Arc::new(ToolRegistry::new()))
@@ -638,15 +636,11 @@ impl Agent {
         // holding an Agent lock on the emit-fn hot path while still letting
         // SDK consumers register new dispatchers at any time (registers after
         // this snapshot will fire on the next run).
-        let dispatch_handlers: Vec<EventDispatchFn> = {
-            self.inner
-                .read()
-                .observability_dispatch
-                .lock()
-                .clone()
-        };
+        let dispatch_handlers: Vec<EventDispatchFn> =
+            { self.inner.read().observability_dispatch.lock().clone() };
         tracing::info!("[AGENT] Starting agent run with channel");
-        let result = al.run(prompt.clone(), move |event: AgentEvent| {
+        let result = al
+            .run(prompt.clone(), move |event: AgentEvent| {
                 // Forward event to channel (std::sync::mpsc — send from sync context)
                 tracing::info!("[AGENT-EMIT] Event: {:?}", std::mem::discriminant(&event));
                 if let Err(e) = tx_emit.send(event.clone()) {
@@ -783,10 +777,7 @@ impl Agent {
     ///     _ => {}
     /// });
     /// ```
-    pub fn add_observability_dispatch(
-        &self,
-        f: impl Fn(AgentEvent) + Send + Sync + 'static,
-    ) {
+    pub fn add_observability_dispatch(&self, f: impl Fn(AgentEvent) + Send + Sync + 'static) {
         let guard = self.inner.write();
         let mut slot = guard.observability_dispatch.lock();
         slot.push(Arc::new(f));

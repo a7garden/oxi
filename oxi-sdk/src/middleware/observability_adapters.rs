@@ -18,7 +18,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-
 use crate::middleware::{
     Middleware, MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewareResult,
 };
@@ -57,7 +56,9 @@ impl AuditLogMiddleware {
 
     fn handle_after(&self, ctx: &MiddlewareContext) -> MiddlewareResult {
         let tool_name = match &ctx.data {
-            MiddlewareData::AfterTool { tool_name, result, .. } => {
+            MiddlewareData::AfterTool {
+                tool_name, result, ..
+            } => {
                 let success = !result.is_empty() && !result.starts_with("error:");
                 (tool_name.clone(), success)
             }
@@ -114,7 +115,6 @@ impl AuthorizerMiddleware {
             agent_id: agent_id.into(),
         }
     }
-
 
     /// Attach an audit log so denials are recorded as `SecurityDecision`
     /// entries. Without this, denials are silent on the audit trail.

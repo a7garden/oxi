@@ -463,12 +463,10 @@ impl<'a> AgentBuilder<'a> {
         if let Some(authorizer) = &self.authorizer {
             let agent_id = resolved_agent_id(&agent);
             if let Some(mut caps) = self.capabilities.clone() {
-                let has_tool_use = caps.capabilities().iter().any(|c| {
-                    matches!(
-                        c,
-                        crate::security::Capability::ToolUse { .. }
-                    )
-                });
+                let has_tool_use = caps
+                    .capabilities()
+                    .iter()
+                    .any(|c| matches!(c, crate::security::Capability::ToolUse { .. }));
                 if !has_tool_use {
                     caps.add(crate::security::Capability::ToolUse {
                         tool_name: "*".into(),
@@ -492,8 +490,7 @@ impl<'a> AgentBuilder<'a> {
         //    documented in docs/audits/2026-06-30-sdk-coverage.md
         //    Gap-0 ("observability silently overwritten when
         //    composes with user middlewares").
-        let has_observability_mws =
-            self.audit_log.is_some() || self.authorizer.is_some();
+        let has_observability_mws = self.audit_log.is_some() || self.authorizer.is_some();
         let has_user_mws = !self.middlewares.is_empty();
         if has_user_mws || has_observability_mws {
             let agent_id = resolved_agent_id(&agent);
