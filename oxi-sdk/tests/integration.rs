@@ -490,7 +490,7 @@ async fn audit_log_records_tool_execution() {
     let oxi = common::mock_oxi();
     let audit = Arc::new(AuditLog::new(64));
 
-    let mut agent = oxi
+    let agent = oxi
         .agent(AgentConfig {
             model_id: "mock/model".into(),
             ..Default::default()
@@ -564,7 +564,7 @@ async fn authorizer_blocks_via_before_tool_hook() {
     // is exercised by the test above, not here.
     let authorizer = Arc::new(Authorizer::new(Arc::new(AuditLog::new(64))));
 
-    let mut agent = oxi
+    let agent = oxi
         .agent(AgentConfig {
             model_id: "mock/model".into(),
             ..Default::default()

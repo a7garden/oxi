@@ -15,7 +15,7 @@
 //!   (auto-embed) and on read (query embed).
 //! - **4 raw-conn classes** (`triples`, `graph`, `scratchpad`,
 //!   `export`/`import`) touch tables that have no embedding column, so
-//!   they call the module functions directly via [`MnemopiDb::with_conn`].
+//!   they call the module functions directly via [`crate::MnemopiDb::with_conn`].
 //!
 //! # Shared-surface bank
 //!
