@@ -351,8 +351,35 @@ pub(crate) async fn stream_assistant_response(
 
                 let (input, output) = (message.usage.input, message.usage.output);
                 if input > 0 || output > 0 {
+                    // Snapshot the heuristic estimate of what was *just
+                    // sent* so we can compare it to the provider's
+                    // reported input_tokens on the same snapshot. This
+                    // is the drift metric referenced by issue #28:
+                    // `bytes/4` can undercount by 3-4× on token-dense
+                    // content (base64, JSON, CJK), and the legacy
+                    // compaction path used that heuristic directly.
+                    //
+                    // The slice we estimate over is the *prompt* the
+                    // provider tokenized, NOT the prompt + the
+                    // assistant turn we just streamed. At
+                    // `ProviderEvent::Done`, `messages` ends with the
+                    // just-completed assistant message (pushed on
+                    // `Start` at the start of the stream, or — in the
+                    // no-partial-Start path — on `Done` after this
+                    // branch; we record before that push). We slice
+                    // off the trailing assistant message so the
+                    // heuristic matches what `usage.input` actually
+                    // covers; otherwise the drift metric would
+                    // *understate* #28's bytes/4 underestimate.
+                    //
+                    // The compaction decision itself is unaffected —
+                    // it reads `Real(last_input_tokens)` =
+                    // `usage.input`, which is correct.
+                    let prompt_len = messages.len().saturating_sub(1);
+                    let estimate_at_report = estimate_tokens_from_messages(&messages[..prompt_len]);
                     loop_ref.state.update(|s| {
                         s.record_usage(input, output);
+                        s.record_provider_turn(input, estimate_at_report);
                     });
                     emit(super::AgentEvent::Usage {
                         input_tokens: input,
@@ -487,4 +514,23 @@ pub(crate) async fn stream_assistant_response(
         message: Message::Assistant(final_message.clone()),
     });
     StreamOutcome::Complete(final_message)
+}
+
+/// Heuristic token estimate for a messages slice, mirroring
+/// `AgentState::estimate_tokens` (serialized JSON length / 4).
+///
+/// Used in [`stream_assistant_response`] at the moment the provider
+/// reports `usage.input_tokens` to record the divergence between
+/// the legacy heuristic and the ground-truth provider count (see
+/// issue #28 gap 2). The result is cached on
+/// `AgentState::last_estimate_at_report` / `last_estimate_divergence`
+/// so the operator can see how badly `bytes/4` is undercounting on
+/// token-dense content.
+///
+/// Kept local (not a method on `AgentState`) so we can call it with
+/// a borrowed slice of the loop's working `messages` buffer without
+/// cloning the whole history.
+fn estimate_tokens_from_messages(messages: &[Message]) -> usize {
+    let json = serde_json::to_string(messages).unwrap_or_default();
+    json.len() / 4
 }

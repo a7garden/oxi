@@ -28,12 +28,13 @@ use crate::agent::ProviderResolver;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
+use crate::state::TokenSource;
 use crate::{state::SharedState, tools::ToolContext, tools::ToolRegistry};
 use anyhow::{Error, Result};
 pub use config::{AfterToolCallHook, AgentLoopConfig, BeforeToolCallHook, ToolExecutionMode};
 use oxi_ai::{
     CompactionManager as OxCompactionManager, CompactionStrategy, ContentBlock, LlmCompactor,
-    Message, Provider, StopReason, TextContent, UserMessage, estimate_tokens,
+    Message, Provider, StopReason, TextContent, UserMessage,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -937,8 +938,45 @@ impl AgentLoop {
     }
 
     async fn maybe_compact(&self, messages: &mut Vec<Message>, iteration: usize, emit: &EmitFn) {
-        let context_text = serde_json::to_string(&*messages).unwrap_or_default();
-        let context_tokens = estimate_tokens(&context_text);
+        // Decide the context-size value to drive compaction with. Prefer
+        // the provider-reported `last_input_tokens` (ground truth) over
+        // the legacy `bytes/4` heuristic. The heuristic can undercount
+        // by 3-4× on token-dense content (base64, JSON, CJK) and is the
+        // reason `CompactionStrategy::Threshold` was effectively a no-op
+        // in issue #28's failure (35k estimated vs 122k actual).
+        //
+        // The provider count lags by exactly one turn: `maybe_compact`
+        // runs at the **top** of a turn, before streaming. So the
+        // `last_input_tokens` we read here reflects the *previous*
+        // turn's `Done` event. The drift is at most the size of the
+        // tool results the model is about to receive, which is small
+        // relative to the failure-mode drift the heuristic suffers.
+        // For turn 1 there is no prior count, so we fall back to the
+        // heuristic on cold start.
+        let snapshot = self.state.get_state();
+        let (context_tokens, source_label) = match snapshot.current_token_source() {
+            TokenSource::Real(n) => (n, "provider-reported"),
+            TokenSource::Heuristic(n) => (n, "bytes/4 heuristic (cold start)"),
+            TokenSource::None => (0, "empty"),
+        };
+        // Surface heuristic drift as a warning when the operator has
+        // observed at least one provider count and it diverges from
+        // the estimate by more than 2×. This is the diagnostic path
+        // from #28's "Proposed fix" option 3.
+        if let Some(div) = snapshot.last_estimate_divergence
+            && div > 2.0
+        {
+            tracing::warn!(
+                session_id = ?self.session_id,
+                divergence = div,
+                reported = snapshot.last_input_tokens.unwrap_or(0),
+                estimate = snapshot.last_estimate_at_report.unwrap_or(0),
+                "Token-count heuristic (bytes/4) diverges from provider-reported usage \
+                 by >2x; CompactionStrategy::Threshold decisions are using the \
+                 provider-reported count (issue #28 gap 2)."
+            );
+        }
+        drop(snapshot);
 
         if !self
             .compaction_manager
@@ -951,6 +989,7 @@ impl AgentLoop {
             event: CompactionEvent::Triggered {
                 context_tokens,
                 iteration,
+                source: source_label.to_string(),
             },
         });
 
