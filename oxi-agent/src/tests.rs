@@ -17,9 +17,39 @@ struct MockProvider {
     call_count: Arc<Mutex<usize>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct MockResponse {
     content: String,
+    /// Token usage reported via `ProviderEvent::Done.message.usage`.
+    /// The real provider is the source of truth, but issue #28
+    /// needs a mock that can simulate provider-reported
+    /// `input_tokens` above the compaction threshold while keeping
+    /// actual message bytes small (the exact production failure).
+    /// When left at the default (all zeros), the existing test
+    /// behavior is preserved — existing call sites can use
+    /// `..Default::default()` to opt in.
+    usage: oxi_ai::Usage,
+}
+
+impl MockResponse {
+    /// Convenience constructor that sets `content` and leaves
+    /// `usage` at its default (all zeros). Mirrors the pattern
+    /// used in every pre-existing test.
+    fn new(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Override the synthetic usage reported on the `Done` event.
+    /// Used by the issue #28 regression test to simulate
+    /// provider-reported `input_tokens` well above the compaction
+    /// threshold while the actual message bytes are tiny.
+    fn with_usage(mut self, input_tokens: usize) -> Self {
+        self.usage.input = input_tokens;
+        self
+    }
 }
 
 impl MockProvider {
@@ -43,9 +73,9 @@ impl Provider for MockProvider {
             *call_count += 1;
             let idx = (*call_count - 1) % self.responses.len();
             let response = self.responses[idx].clone();
-
             let stream = MockStream {
                 text: response.content,
+                usage: response.usage,
                 done: false,
             };
 
@@ -61,8 +91,13 @@ impl Provider for MockProvider {
     }
 }
 
+#[derive(Default)]
 struct MockStream {
     text: String,
+    /// Usage to report on the synthetic `Done` event. Defaults to
+    /// zero so existing tests that don't care about usage see no
+    /// behavior change.
+    usage: oxi_ai::Usage,
     done: bool,
 }
 
@@ -76,10 +111,14 @@ impl Stream for MockStream {
 
         self.done = true;
 
-        // Create assistant message with text content
+        // Create assistant message with text content + the configured
+        // usage. The streaming handler reads `message.usage` to drive
+        // `record_provider_turn` and the `Real` token source — issue
+        // #28.
         let mut assistant =
             oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
         assistant.content = vec![ContentBlock::Text(TextContent::new(self.text.clone()))];
+        assistant.usage = self.usage.clone();
 
         Poll::Ready(Some(ProviderEvent::Done {
             reason: StopReason::Stop,
@@ -162,10 +201,214 @@ fn test_shared_state() {
     assert_eq!(state.messages.len(), 0);
 }
 
+// ── Issue #28 gap 2: provider-reported token accounting ───────────────
+
+#[test]
+fn test_record_provider_turn_overwrites_last_input_tokens() {
+    use crate::state::TokenSource;
+    let mut state = AgentState::new();
+    state.add_user_message("hi".to_string());
+    // Cold start: no provider count, but messages exist → Heuristic.
+    assert!(matches!(
+        state.current_token_source(),
+        TokenSource::Heuristic(_)
+    ));
+    assert_eq!(state.last_input_tokens, None);
+
+    // First provider report — the field becomes Real.
+    state.record_provider_turn(1_000, 500);
+    assert_eq!(state.last_input_tokens, Some(1_000));
+    assert_eq!(state.last_estimate_at_report, Some(500));
+    assert_eq!(state.last_estimate_divergence, Some(2.0));
+    assert!(matches!(
+        state.current_token_source(),
+        TokenSource::Real(1_000)
+    ));
+
+    // Second provider report — overwrites, not cumulative. This is
+    // the behavior gap that would silently over-trigger compaction
+    // if we used `state.input_tokens` instead of a dedicated field.
+    state.record_provider_turn(2_000, 1_000);
+    assert_eq!(state.last_input_tokens, Some(2_000));
+    assert_eq!(state.last_estimate_at_report, Some(1_000));
+    assert_eq!(state.last_estimate_divergence, Some(2.0));
+    // record_provider_turn does NOT touch the cumulative input_tokens.
+    assert_eq!(state.input_tokens, 0);
+    assert!(matches!(
+        state.current_token_source(),
+        TokenSource::Real(2_000)
+    ));
+}
+
+#[test]
+fn test_record_provider_turn_divergence_edge_cases() {
+    // Zero estimate against non-zero report — worst case heuristic
+    // miss. Should record `f64::INFINITY` (preserved through serde as
+    // null? — the in-memory surface here is what the loop checks).
+    let mut state = AgentState::new();
+    state.record_provider_turn(500, 0);
+    assert_eq!(state.last_input_tokens, Some(500));
+    assert_eq!(state.last_estimate_divergence, Some(f64::INFINITY));
+
+    // Both zero — the trivially-equal case, divergence = 1.0.
+    let mut state2 = AgentState::new();
+    state2.record_provider_turn(0, 0);
+    assert_eq!(state2.last_estimate_divergence, Some(1.0));
+
+    // Realistic #28 case: 122_576 reported / 34_955 estimated ≈ 3.5×.
+    let mut state3 = AgentState::new();
+    state3.record_provider_turn(122_576, 34_955);
+    let div = state3.last_estimate_divergence.expect("divergence set");
+    assert!(div > 3.4 && div < 3.6, "divergence {div} not ≈3.5×");
+}
+
+#[test]
+fn test_clear_resets_provider_turn_state() {
+    use crate::state::TokenSource;
+    let mut state = AgentState::new();
+    state.record_provider_turn(1_000, 500);
+    state.clear();
+    assert_eq!(state.last_input_tokens, None);
+    assert_eq!(state.last_estimate_at_report, None);
+    assert_eq!(state.last_estimate_divergence, None);
+    // After clear, with no messages, TokenSource is None (not Heuristic).
+    assert!(matches!(state.current_token_source(), TokenSource::None));
+}
+
+#[test]
+fn test_token_source_prefers_real_over_heuristic() {
+    use crate::state::TokenSource;
+    let mut state = AgentState::new();
+    // Seed a large heuristic: lots of bulky messages.
+    for _ in 0..50 {
+        state.add_user_message("x".repeat(1_000));
+    }
+    // Heuristic should be > 0 (real JSON for those messages is large).
+    let heuristic_size = match state.current_token_source() {
+        TokenSource::Heuristic(n) => n,
+        other => panic!("expected Heuristic, got {other:?}"),
+    };
+    assert!(heuristic_size > 0);
+
+    // Now record a Real value — it must win regardless of size.
+    state.record_provider_turn(42, 100_000);
+    assert!(matches!(
+        state.current_token_source(),
+        TokenSource::Real(42)
+    ));
+}
+
+// ── Issue #28 gap 2 — loop-level regression test ─────────────────────
+//
+// Reproduces the exact failure mode reported in #28: the provider
+// reports a high `usage.input` while the actual message bytes (and
+// therefore the `bytes/4` heuristic) are tiny. With the fix in
+// place, the next `maybe_compact` call sees `TokenSource::Real` and
+// triggers compaction. Without the fix, the heuristic would
+// undercount and `Threshold` would never fire — leaving the
+// context to grow past the window.
+//
+// The mock emits a `Done` with `usage.input = 900` on the first
+// turn, then a follow-up forces a second turn. The second turn's
+// `maybe_compact` (run at the top, before streaming) reads
+// `last_input_tokens = 900` from the previous `Done` and triggers
+// `Compaction::Triggered` with `source = "provider-reported"`.
+// Without the fix, the heuristic on the same conversation
+// (a few hundred bytes total) would be far below the 800-token
+// `Threshold(0.8) * 1000` cutoff, and no event would fire.
+
+#[tokio::test]
+async fn test_provider_reported_usage_drives_compaction_threshold() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::compaction::CompactionEvent;
+    use crate::events::AgentEvent;
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    // Mock returns 2 responses. The first reports `usage.input = 900`
+    // — above the 800-token threshold. The second is the response
+    // to the follow-up message and is irrelevant to the test.
+    let provider = Arc::new(MockProvider::new(vec![
+        MockResponse::new("first turn ok").with_usage(900),
+        MockResponse::new("second turn ok"),
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: Some("You are helpful.".to_string()),
+        temperature: 0.7,
+        max_tokens: 4096,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Threshold(0.8),
+        // 1,000-token context window → Threshold(0.8) fires at 800.
+        context_window: 1_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+        api_key: None,
+        workspace_dir: None,
+        provider_options: None,
+        on_compaction: None,
+        ..Default::default()
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    // Queue a follow-up so the loop runs a second turn. On the
+    // second turn's `maybe_compact` (called at the top, before
+    // streaming), `last_input_tokens = 900` is already set from
+    // the first turn's `Done` event — so the Real path drives
+    // the decision and the threshold fires.
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new("follow-up")));
+
+    let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run("hello".to_string(), move |e| events_clone.lock().push(e))
+        .await;
+    assert!(result.is_ok(), "agent loop run failed: {result:?}");
+
+    let events = events.lock();
+
+    // Collect the source of every Compaction::Triggered event.
+    // At least one must be present and labeled "provider-reported".
+    let triggered: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Compaction {
+                event: CompactionEvent::Triggered { source, .. },
+            } => Some(source.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        !triggered.is_empty(),
+        "expected CompactionEvent::Triggered; got events: {events:#?}"
+    );
+    // Proof the Real path drove the decision. If someone reverts
+    // `maybe_compact` back to `bytes/4`, this assertion fails —
+    // the heuristic on a few-hundred-byte conversation is well
+    // below the 800-token threshold.
+    assert!(
+        triggered.iter().any(|s| s == "provider-reported"),
+        "expected a Triggered event with source=\"provider-reported\", got: {triggered:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_agent_with_mock_provider() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Hello! How can I help you?".to_string(),
+        ..Default::default()
     }]));
 
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
@@ -191,6 +434,7 @@ async fn test_agent_with_mock_provider() {
 async fn test_agent_events_sequence() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Test response".to_string(),
+        ..Default::default()
     }]));
 
     let config = AgentConfig::default();
@@ -337,6 +581,7 @@ fn test_transform_preserves_tool_results() {
 fn test_agent_model_id() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "test".to_string(),
+        ..Default::default()
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
@@ -347,6 +592,7 @@ fn test_agent_model_id() {
 fn test_agent_switch_model_invalid_format() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "test".to_string(),
+        ..Default::default()
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
@@ -360,6 +606,7 @@ fn test_agent_switch_model_invalid_format() {
 fn test_agent_switch_model_unknown_model() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "test".to_string(),
+        ..Default::default()
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
@@ -372,6 +619,7 @@ fn test_agent_switch_model_unknown_model() {
 fn test_agent_switch_model_same_provider() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "test".to_string(),
+        ..Default::default()
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
@@ -417,6 +665,7 @@ impl Provider for ApiAwareMockProvider {
             let stream = MockStream {
                 text: response.content,
                 done: false,
+                ..Default::default()
             };
 
             Ok(Box::pin(stream)
@@ -440,9 +689,11 @@ async fn test_cross_provider_handoff_openai_to_anthropic() {
     let provider = Arc::new(ApiAwareMockProvider::new(vec![
         MockResponse {
             content: "OpenAI response".to_string(),
+            ..Default::default()
         },
         MockResponse {
             content: "Continued response".to_string(),
+            ..Default::default()
         },
     ]));
     let config = AgentConfig::new("openai/gpt-4o");
@@ -485,9 +736,11 @@ async fn test_cross_provider_message_transformation_roundtrip() {
     let provider = Arc::new(MockProvider::new(vec![
         MockResponse {
             content: "First response".to_string(),
+            ..Default::default()
         },
         MockResponse {
             content: "Second response".to_string(),
+            ..Default::default()
         },
     ]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
@@ -698,6 +951,7 @@ impl Provider for RetryableProvider {
             let stream = MockStream {
                 text: self.success_response.clone(),
                 done: false,
+                ..Default::default()
             };
 
             Ok(Box::pin(stream)
@@ -845,6 +1099,7 @@ fn test_compaction_event_triggers_and_completes() {
     let triggered = crate::compaction::CompactionEvent::Triggered {
         context_tokens: 50000,
         iteration: 3,
+        source: "test".to_string(),
     };
     let started = crate::compaction::CompactionEvent::Started { message_count: 20 };
     let completed = crate::compaction::CompactionEvent::Completed {
@@ -1226,6 +1481,7 @@ async fn test_multiple_steering_messages() {
 
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Response".to_string(),
+        ..Default::default()
     }]));
 
     let config = AgentLoopConfig {
@@ -1290,6 +1546,7 @@ fn test_follow_up_queue_api() {
 
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Response".to_string(),
+        ..Default::default()
     }]));
 
     let config = AgentLoopConfig {
@@ -1529,6 +1786,7 @@ async fn test_follow_up_queue_cleared() {
 
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Response".to_string(),
+        ..Default::default()
     }]));
 
     let config = AgentLoopConfig {
@@ -1605,6 +1863,7 @@ fn test_follow_up_and_steering_queue_independent() {
 
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Response".to_string(),
+        ..Default::default()
     }]));
 
     let config = AgentLoopConfig {
@@ -1684,6 +1943,7 @@ fn test_set_compaction_strategy_updates_config() {
 
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "ok".to_string(),
+        ..Default::default()
     }]));
     let mut config = AgentConfig::default();
     config.compaction_strategy = CompactionStrategy::Threshold(0.8);

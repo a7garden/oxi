@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`oxi-agent` — issue #28 gap 2: provider-reported token accounting for
+  compaction** (closes #28 partially — the smallest, highest-leverage fix;
+  gaps 1 and 3 follow in separate PRs).
+
+  The agent loop now drives `CompactionStrategy::Threshold` from the
+  provider-reported `usage.input_tokens` (ground truth) instead of the
+  legacy `serialized_json.len() / 4` heuristic. The heuristic can
+  undercount by 3-4× on token-dense content (base64, JSON, CJK) and was
+  the reason `Threshold` was effectively a no-op in the failure mode
+  reported in #28 (35k estimated vs 122k actual, 139 KB request body
+  growing monotonically across 11 tool rounds). With this fix, compaction
+  fires on turn 2+ using the count the provider actually saw.
+
+  - **`oxi-agent/src/state.rs`**: `AgentState` now carries a
+    non-cumulative `last_input_tokens: Option<usize>`, plus
+    `last_estimate_at_report` and `last_estimate_divergence` for
+    observability. New `current_token_source()` returns
+    `TokenSource::{None, Heuristic(n), Real(n)}` — `Real` once a
+    `ProviderEvent::Done` has been observed, `Heuristic` only on cold
+    start (turn 1). `clear()` resets the new fields alongside the
+    existing cumulative counters. The existing `AgentState::input_tokens`
+    remains cumulative for lifetime accounting.
+
+  - **`oxi-agent/src/agent_loop/streaming.rs`**: the `Done` handler now
+    records the provider-reported `usage.input` via
+    `AgentState::record_provider_turn` alongside the existing
+    `record_usage`. The drift estimate is taken over the **prompt-only
+    prefix** `&messages[..messages.len() - 1]` (the trailing element at
+    `Done` is the just-completed assistant message, which the provider
+    did not tokenize as input).
+
+  - **`oxi-agent/src/agent_loop/mod.rs`** (`maybe_compact`): now reads
+    `current_token_source()` and uses the `Real` value when available;
+    falls back to the heuristic only on cold start. Emits a `tracing::warn!`
+    when the last `last_estimate_divergence` exceeds 2.0 so the operator
+    can see how badly the heuristic is undercounting.
+
+  - **`oxi-agent/src/compaction.rs`**: `CompactionEvent::Triggered` gained
+    a `source: String` field
+    (`"provider-reported"` / `"bytes/4 heuristic (cold start)"` /
+    `"empty"`) so consumers can tell whether a trigger is real-token-based
+    or heuristic. The new test
+    `test_provider_reported_usage_drives_compaction_threshold` asserts
+    this end-to-end through the loop with a 900-token reported usage
+    against a conversation whose `bytes/4` estimate is far below the
+    800-token `Threshold(0.8) * 1000` cutoff.
+
+  - **Test infrastructure**: `MockResponse` gained an optional
+    `usage: oxi_ai::Usage` field (default: zero) and a `with_usage(input)`
+    builder; `MockStream` carries it onto the synthetic `Done` event.
+    Every existing `MockResponse { content: ... }` literal was migrated
+    to `..Default::default()` — no test logic changed.
+
+### Notes
+
+- Gaps 1 (tool-result eviction) and 3 (library-native delegation) from
+  #28 are **not** included in this change. Gap 1 risks regressing
+  batch/transform workloads where the model needs the source live
+  across multiple turns (e.g. the cited "fetch + translate" flow);
+  Gap 3 — per-item isolated sub-agents — is the structural fix for
+  that workload and will ship as a separate PR.
+
 ## [0.52.1] - 2026-06-30
 
 ### Fixed
