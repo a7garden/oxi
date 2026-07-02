@@ -232,6 +232,74 @@ pub trait LspProvider: Send + Sync + std::fmt::Debug {
     ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>>;
 }
 
+// ── Sub-agent delegation (issue #28 gap 3) ─────────────────────────────
+
+/// Result of an in-process isolated sub-agent fork run.
+///
+/// Produced by [`SubagentRunner::run_isolated`]. The sub-agent runs
+/// with a **fresh, empty context** — its conversation history is
+/// completely isolated from the parent agent. Only the final text and
+/// usage statistics are returned, keeping the parent's context small.
+///
+/// This is the library-native alternative to shelling out to the `oxi`
+/// CLI binary. Library consumers (e.g. Oxios) that embed `oxi-agent`
+/// without an `oxi` subprocess implement this trait so the `subagent`
+/// tool works in-process.
+#[derive(Debug, Clone, Default)]
+pub struct ForkResult {
+    /// Final response text from the sub-agent.
+    pub text: String,
+    /// Input tokens consumed (last reported turn).
+    pub input_tokens: usize,
+    /// Output tokens consumed (last reported turn).
+    pub output_tokens: usize,
+    /// Number of agent turns executed.
+    pub turns: u32,
+    /// Model ID used by the sub-agent.
+    pub model: Option<String>,
+    /// Error message if the run failed.
+    pub error: Option<String>,
+}
+
+/// In-process sub-agent runner — the library-native delegation backend.
+///
+/// When wired into [`ToolContext`] via
+/// [`ToolContext::with_subagent_runner`], the `subagent` tool prefers
+/// this in-process path over shelling out to the `oxi` CLI binary.
+/// This is essential for library consumers (Oxios) that embed
+/// `oxi-agent` as a kernel without an `oxi` subprocess.
+///
+/// The SDK provides a ready-made implementation
+/// (`oxi_sdk::SdkSubagentRunner`) that wraps an `Oxi` instance and
+/// creates a fresh `Agent` for each invocation.
+#[async_trait::async_trait]
+#[allow(clippy::too_many_arguments)]
+pub trait SubagentRunner: Send + Sync + std::fmt::Debug {
+    /// Run a single agent task with an isolated (empty) context.
+    ///
+    /// # Arguments
+    /// * `agent_name` — Agent definition name (for logging / display).
+    /// * `task` — The task prompt to execute.
+    /// * `system_prompt` — Optional system prompt override.
+    /// * `model` — Optional model ID override (e.g. `"anthropic/claude-...`).
+    /// * `tools` — Optional tool whitelist (empty = all registered tools).
+    /// * `cwd` — Working directory for file tools.
+    /// * `depth` — Current sub-agent nesting depth. The runner sets
+    ///   the forked agent's `subagent_depth` to `depth + 1` so the
+    ///   fork's own subagent tool can enforce a recursion cap without
+    ///   env vars (issue #28 gap 3 — concurrent `set_var` is UB).
+    async fn run_isolated(
+        &self,
+        agent_name: &str,
+        task: &str,
+        system_prompt: Option<&str>,
+        model: Option<&str>,
+        tools: &[String],
+        cwd: &Path,
+        depth: u8,
+    ) -> anyhow::Result<ForkResult>;
+}
+
 /// Context passed to tools at execution time.
 ///
 /// This allows tools to operate on a specific workspace without being
@@ -262,6 +330,17 @@ pub struct ToolContext {
     pub agent_pool: Option<Arc<dyn AgentPoolProvider>>,
     /// LSP provider for the `lsp` tool.
     pub lsp: Option<Arc<dyn LspProvider>>,
+    /// In-process sub-agent runner (issue #28 gap 3).
+    /// When `Some`, the `subagent` tool prefers an in-process isolated
+    /// run over shelling out to the CLI binary. Library consumers
+    /// (e.g. Oxios) that embed `oxi-agent` without an `oxi` subprocess
+    /// set this so delegation works. When `None`, the CLI backend is
+    /// used (the default for `oxi-cli`).
+    pub subagent_runner: Option<Arc<dyn SubagentRunner>>,
+    /// Current sub-agent nesting depth for the in-process path
+    /// (issue #28 gap 3). The CLI path uses env vars instead.
+    /// Default 0 (top-level agent).
+    pub subagent_depth: u8,
 }
 
 impl fmt::Debug for ToolContext {
@@ -299,6 +378,8 @@ impl ToolContext {
             todo: None,
             agent_pool: None,
             lsp: None,
+            subagent_runner: None,
+            subagent_depth: 0,
         }
     }
 
@@ -343,6 +424,13 @@ impl ToolContext {
         self.todo = Some(todo);
         self
     }
+
+    /// Set the in-process sub-agent runner (enables library-native
+    /// delegation — issue #28 gap 3).
+    pub fn with_subagent_runner(mut self, runner: Arc<dyn SubagentRunner>) -> Self {
+        self.subagent_runner = Some(runner);
+        self
+    }
 }
 
 impl Default for ToolContext {
@@ -357,6 +445,8 @@ impl Default for ToolContext {
             todo: None,
             agent_pool: None,
             lsp: None,
+            subagent_runner: None,
+            subagent_depth: 0,
         }
     }
 }
