@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`oxi-agent` — issue #28 gap 2: provider-reported token accounting for
-  compaction** (closes #28 partially — the smallest, highest-leverage fix;
-  gaps 1 and 3 follow in separate PRs).
+  compaction** (addresses #28 gap 2 — the smallest, highest-leverage fix;
+  gaps 1 and 3 follow in separate PRs). #28 remains open.
 
   The agent loop now drives `CompactionStrategy::Threshold` from the
   provider-reported `usage.input_tokens` (ground truth) instead of the
@@ -62,14 +62,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Every existing `MockResponse { content: ... }` literal was migrated
     to `..Default::default()` — no test logic changed.
 
+### Added — issue #28 gaps 1 + 3
+
+- **Gap 1: tool-result eviction** (`oxi-agent/src/agent_loop/config.rs`,
+  `mod.rs`). `AgentLoopConfig` gains `max_tool_result_bytes: Option<usize>`.
+  When set, tool results whose text content exceeds the limit are
+  truncated before being pushed into the message history, with a marker
+  appended: `"... [truncated: N bytes omitted]"`. Default `None`
+  (unlimited) — opt-in. This prevents a single large tool output (huge
+  file read, verbose bash output) from consuming the context window.
+
+- **Gap 3: library-native delegation** (`oxi-agent/src/tools.rs`,
+  `oxi-agent/src/tools/subagent.rs`, `oxi-sdk/src/delegation.rs`).
+  New `SubagentRunner` trait + `ForkResult` type. When wired into
+  `ToolContext` via `with_subagent_runner`, the `subagent` tool prefers
+  an **in-process** isolated sub-agent run over shelling out to the CLI
+  binary. `oxi-sdk` provides `SdkSubagentRunner` — wraps an `Oxi`
+  instance, builds a fresh `Agent` with an empty context per call, runs
+  it, and returns only the final text + usage. Library consumers (Oxios)
+  that embed `oxi-agent` without an `oxi` subprocess can now use
+  delegation.
+
+  - **Depth safety**: the in-process path uses `ToolContext.subagent_depth`
+    (a `u8` field) instead of env vars (`OXI_SUBAGENT_DEPTH`). Concurrent
+    `std::env::set_var` is UB and state leaks between sequential forks;
+    the config field avoids both. The CLI backend retains its env-var
+    mechanism (safe: each subprocess has its own env).
+  - `AgentLoopConfig` gains `subagent_runner` + `subagent_depth` fields.
+  - `ToolContext` gains matching fields, wired via `build_tool_context`.
+  - The `subagent` tool checks `ctx.subagent_runner` first; if `Some`,
+    calls `execute_in_process` (handles single/parallel/chain modes).
+    If `None`, falls back to the existing CLI spawn path — no behavior
+    change for `oxi-cli`.
+
 ### Notes
 
-- Gaps 1 (tool-result eviction) and 3 (library-native delegation) from
-  #28 are **not** included in this change. Gap 1 risks regressing
-  batch/transform workloads where the model needs the source live
-  across multiple turns (e.g. the cited "fetch + translate" flow);
-  Gap 3 — per-item isolated sub-agents — is the structural fix for
-  that workload and will ship as a separate PR.
+- All three gaps from #28 are now addressed: gap 2 (compaction accuracy,
+  PR #29), gap 1 (tool-result eviction), and gap 3 (library-native
+  delegation). #28 can be closed.
 
 ## [0.52.1] - 2026-06-30
 

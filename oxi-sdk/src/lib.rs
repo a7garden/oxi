@@ -19,6 +19,7 @@ pub mod bridge;
 pub mod builder;
 pub mod closure_tool;
 pub mod coordination;
+pub mod delegation;
 pub mod error;
 pub mod event_bus;
 pub mod kernel_bridge;
@@ -43,6 +44,7 @@ pub mod workflow_dsl;
 pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
+pub use delegation::SdkSubagentRunner;
 
 // Re-export port types — products implement these traits.
 // Note: Some names conflict with existing modules (e.g. `EventBus` is also a

@@ -70,6 +70,34 @@ pub struct AgentLoopConfig {
     pub lsp: Option<Arc<dyn crate::tools::LspProvider>>,
     /// TTSR engine for stream rule checking.
     pub ttsr_engine: Option<Arc<crate::agent_loop::ttsr::TtsrEngine>>,
+    /// In-process sub-agent runner (issue #28 gap 3).
+    /// When `Some`, the `subagent` tool prefers an in-process isolated
+    /// run over shelling out to the CLI. Library consumers set this so
+    /// delegation works without an `oxi` subprocess.
+    pub subagent_runner: Option<Arc<dyn crate::tools::SubagentRunner>>,
+    /// Current sub-agent nesting depth (issue #28 gap 3).
+    ///
+    /// The CLI backend uses env vars (`OXI_SUBAGENT_DEPTH`) for this,
+    /// which is safe because each subprocess has its own env. The
+    /// in-process backend **cannot** use env vars (concurrent
+    /// `set_var` is UB; state leaks between forks), so it reads this
+    /// field instead. Default 0 (top-level). The `subagent` tool
+    /// increments this when creating a forked `AgentLoopConfig`, and
+    /// the fork checks it against the agent definition's
+    /// `max_subagent_depth` to cap recursion.
+    pub subagent_depth: u8,
+    /// Maximum size (in bytes) of a single tool result's text content
+    /// before it is truncated (issue #28 gap 1).
+    ///
+    /// When set, tool results exceeding this limit are truncated to
+    /// the limit and a marker is appended:
+    /// `"... [truncated: N bytes omitted]"`. This prevents a single
+    /// large tool output (e.g. reading a huge file, verbose bash
+    /// output) from consuming the entire context window.
+    ///
+    /// `None` (default) = no limit. Opt-in — existing behavior is
+    /// preserved.
+    pub max_tool_result_bytes: Option<usize>,
 }
 
 impl Default for AgentLoopConfig {
@@ -101,6 +129,9 @@ impl Default for AgentLoopConfig {
             agent_pool: None,
             lsp: None,
             ttsr_engine: None,
+            subagent_runner: None,
+            subagent_depth: 0,
+            max_tool_result_bytes: None,
         }
     }
 }

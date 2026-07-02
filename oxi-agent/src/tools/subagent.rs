@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::oneshot;
 
@@ -639,8 +640,22 @@ impl AgentTool for SubagentTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         // ── Depth check ──
-        let depth = current_subagent_depth();
-        let max = max_subagent_depth();
+        // For the in-process path, depth is tracked via ToolContext
+        // (NOT env vars — concurrent set_var is UB, and env state
+        // leaks between forks). For the CLI path, depth is tracked
+        // via OXI_SUBAGENT_DEPTH env var (safe: each subprocess has
+        // its own env).
+        let runner = ctx.subagent_runner.clone();
+        let depth = if runner.is_some() {
+            ctx.subagent_depth
+        } else {
+            current_subagent_depth()
+        };
+        let max = if runner.is_some() {
+            3 // default; overridden per-agent below
+        } else {
+            max_subagent_depth()
+        };
         if depth >= max {
             return Ok(AgentToolResult::error(format!(
                 "Subagent depth limit reached ({}/{}). \
@@ -658,7 +673,6 @@ impl AgentTool for SubagentTool {
             .unwrap_or(AgentScope::User);
 
         let agents = discover_agents(effective_cwd, scope);
-        let binary = self.get_binary();
         let progress = self.progress_callback.lock().clone();
 
         let has_chain = params["chain"]
@@ -692,6 +706,27 @@ impl AgentTool for SubagentTool {
             )));
         }
 
+        // ── In-process path (library-native delegation) ──
+        // When a SubagentRunner is wired, prefer it over shelling out.
+        // This is the path library consumers (Oxios) use — they have
+        // no `oxi` subprocess. The CLI fallback below is the default
+        // for oxi-cli.
+        if let Some(runner) = &runner {
+            return execute_in_process(
+                effective_cwd,
+                &agents,
+                params,
+                runner,
+                depth,
+                progress,
+                signal,
+            )
+            .await;
+        }
+
+        // ── CLI fallback (existing path) ──
+        let binary = self.get_binary();
+
         // ── Chain mode ──
         if has_chain {
             return execute_chain_mode(effective_cwd, &agents, params, &binary, progress, signal)
@@ -711,6 +746,273 @@ impl AgentTool for SubagentTool {
 
         Ok(AgentToolResult::error("Invalid parameters".to_string()))
     }
+}
+
+// ── In-process execution (issue #28 gap 3) ────────────────────────────
+//
+// When a SubagentRunner is wired into ToolContext, the subagent tool
+// delegates to it instead of spawning CLI subprocesses. This is the
+// library-native path — essential for consumers (Oxios) that embed
+// oxi-agent without an `oxi` binary. Depth tracking uses the
+// ToolContext.subagent_depth field (NOT env vars — concurrent set_var
+// is UB and state leaks between sequential forks).
+
+/// Convert a ForkResult to a SingleResult for output formatting.
+fn fork_to_single(
+    fork: super::ForkResult,
+    agent_name: &str,
+    task: &str,
+    step: Option<usize>,
+) -> SingleResult {
+    let error = fork.error.clone();
+    SingleResult {
+        agent: agent_name.to_string(),
+        agent_source: "in-process".to_string(),
+        task: task.to_string(),
+        exit_code: if error.is_some() { 1 } else { 0 },
+        output: fork.text,
+        stderr: String::new(),
+        usage: UsageStats {
+            input_tokens: fork.input_tokens as u64,
+            output_tokens: fork.output_tokens as u64,
+            turns: fork.turns,
+            ..Default::default()
+        },
+        model: fork.model,
+        stop_reason: if error.is_some() {
+            Some("error".to_string())
+        } else {
+            Some("complete".to_string())
+        },
+        error_message: error,
+        step,
+    }
+}
+
+/// Execute via in-process SubagentRunner — single, parallel, and chain modes.
+#[allow(clippy::too_many_arguments)]
+async fn execute_in_process(
+    cwd: &Path,
+    agents: &[AgentDefinition],
+    params: Value,
+    runner: &Arc<dyn super::SubagentRunner>,
+    depth: u8,
+    progress: Option<ProgressFn>,
+    _signal: Option<oneshot::Receiver<()>>,
+) -> Result<AgentToolResult, ToolError> {
+    let has_chain = params["chain"]
+        .as_array()
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let has_tasks = params["tasks"]
+        .as_array()
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let has_single = params["agent"].is_string() && params["task"].is_string();
+
+    // ── Single mode ──
+    if has_single {
+        let agent_name = params["agent"].as_str().unwrap_or("");
+        let task = params["task"].as_str().unwrap_or("");
+        let agent_def = agents.iter().find(|a| a.name == agent_name);
+
+        if let Some(ref cb) = progress {
+            cb(format!("[{}] running (in-process)...", agent_name));
+        }
+
+        let fork = runner
+            .run_isolated(
+                agent_name,
+                task,
+                agent_def.and_then(|d| d.system_prompt.as_deref()),
+                agent_def.and_then(|d| d.model.as_deref()),
+                agent_def.map(|d| d.tools.as_slice()).unwrap_or(&[]),
+                cwd,
+                depth,
+            )
+            .await
+            .map_err(|e| format!("In-process subagent failed: {e}"))?;
+
+        let result = fork_to_single(fork, agent_name, task, None);
+        let is_error = result.stop_reason.as_deref() == Some("error");
+
+        if is_error {
+            let error_msg = result.error_message.as_deref().unwrap_or("unknown error");
+            return Ok(AgentToolResult::error(format!("Agent failed: {error_msg}")));
+        }
+
+        return Ok(AgentToolResult::success(if result.output.is_empty() {
+            "(no output)".to_string()
+        } else {
+            result.output.clone()
+        })
+        .with_metadata(json!({
+            "mode": "single",
+            "agent": result.agent,
+            "source": result.agent_source,
+            "backend": "in-process",
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+                "turns": result.usage.turns,
+            },
+        })));
+    }
+
+    // ── Parallel mode ──
+    if has_tasks {
+        let tasks: Vec<ParallelTask> = serde_json::from_value(params["tasks"].clone())
+            .map_err(|e| format!("Invalid tasks parameter: {e}"))?;
+        let total = tasks.len();
+        if total == 0 {
+            return Ok(AgentToolResult::error("No tasks provided".to_string()));
+        }
+
+        // Run concurrently — safe because SubagentRunner is Send+Sync
+        // and there are no env-var mutations (unlike the CLI path).
+        let limit = MAX_CONCURRENCY.min(total);
+        let mut all_results: Vec<SingleResult> = Vec::with_capacity(total);
+        let mut all_errors: Vec<String> = Vec::new();
+
+        for chunk in tasks.chunks(limit) {
+            let mut handles = Vec::new();
+            for task in chunk {
+                let agent_def = agents.iter().find(|a| a.name == task.agent);
+                let runner = Arc::clone(runner);
+                let agent_name = task.agent.clone();
+                let task_text = task.task.clone();
+                let system_prompt = agent_def.and_then(|d| d.system_prompt.clone());
+                let model = agent_def.and_then(|d| d.model.clone());
+                let tools: Vec<String> = agent_def.map(|d| d.tools.clone()).unwrap_or_default();
+                let cwd = cwd.to_path_buf();
+
+                handles.push(tokio::spawn(async move {
+                    runner
+                        .run_isolated(
+                            &agent_name,
+                            &task_text,
+                            system_prompt.as_deref(),
+                            model.as_deref(),
+                            &tools,
+                            &cwd,
+                            depth,
+                        )
+                        .await
+                }));
+            }
+
+            for (i, handle) in handles.into_iter().enumerate() {
+                let task = &chunk[i];
+                match handle.await {
+                    Ok(Ok(fork)) => {
+                        all_results.push(fork_to_single(fork, &task.agent, &task.task, None))
+                    }
+                    Ok(Err(e)) => all_errors.push(format!("{}: {e}", task.agent)),
+                    Err(e) => all_errors.push(format!("{}: join error: {e}", task.agent)),
+                }
+            }
+        }
+
+        if !all_errors.is_empty() {
+            return Ok(AgentToolResult::error(format!(
+                "Errors: {}",
+                all_errors.join("; ")
+            )));
+        }
+
+        let success_count = all_results.iter().filter(|r| r.exit_code == 0).count();
+        let summaries: Vec<String> = all_results
+            .iter()
+            .map(|r| format!("[{}] {}", r.agent, r.output))
+            .collect();
+
+        return Ok(AgentToolResult::success(format!(
+            "Parallel: {}/{} succeeded\n\n{}",
+            success_count,
+            all_results.len(),
+            summaries.join("\n\n---\n\n")
+        ))
+        .with_metadata(json!({
+            "mode": "parallel",
+            "backend": "in-process",
+            "results": all_results.iter().map(|r| json!({
+                "agent": r.agent,
+                "exit_code": r.exit_code,
+            })).collect::<Vec<_>>()
+        })));
+    }
+
+    // ── Chain mode ──
+    if has_chain {
+        let steps: Vec<ChainStep> = serde_json::from_value(params["chain"].clone())
+            .map_err(|e| format!("Invalid chain parameter: {e}"))?;
+        let total = steps.len();
+        let mut previous_output = String::new();
+        let mut results: Vec<SingleResult> = Vec::new();
+
+        for (i, step) in steps.into_iter().enumerate() {
+            let task = step.task.replace("{previous}", &previous_output);
+            let agent_def = agents.iter().find(|a| a.name == step.agent);
+
+            if let Some(ref cb) = progress {
+                cb(format!("[{}] chain step {}/{}", step.agent, i + 1, total));
+            }
+
+            let fork = runner
+                .run_isolated(
+                    &step.agent,
+                    &task,
+                    agent_def.and_then(|d| d.system_prompt.as_deref()),
+                    agent_def.and_then(|d| d.model.as_deref()),
+                    agent_def.map(|d| d.tools.as_slice()).unwrap_or(&[]),
+                    cwd,
+                    depth,
+                )
+                .await;
+
+            let fork = match fork {
+                Ok(f) => f,
+                Err(e) => {
+                    return Ok(AgentToolResult::error(format!(
+                        "Chain stopped at step {}/{} ({}): {e}",
+                        i + 1,
+                        total,
+                        step.agent
+                    )));
+                }
+            };
+
+            let is_error = fork.error.is_some();
+            let result = fork_to_single(fork, &step.agent, &task, Some(i + 1));
+
+            if is_error {
+                let error_msg = result.error_message.clone().unwrap_or_default();
+                return Ok(AgentToolResult::error(format!(
+                    "Chain stopped at step {}/{} ({}): {error_msg}",
+                    i + 1,
+                    total,
+                    step.agent
+                )));
+            }
+
+            previous_output = result.output.clone();
+            results.push(result);
+        }
+
+        let output = results.last().map(|r| r.output.clone()).unwrap_or_default();
+        return Ok(AgentToolResult::success(if output.is_empty() {
+            "(no output)".to_string()
+        } else {
+            output
+        })
+        .with_metadata(json!({
+            "mode": "chain",
+            "backend": "in-process",
+            "steps": results.len(),
+        })));
+    }
+
+    Ok(AgentToolResult::error("Invalid parameters".to_string()))
 }
 
 /// Execute chain mode: sequential agents where each step can reference {previous} output.

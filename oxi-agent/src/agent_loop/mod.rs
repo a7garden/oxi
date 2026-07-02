@@ -230,7 +230,40 @@ impl AgentLoop {
             todo: self.config.todo.clone(),
             agent_pool: self.config.agent_pool.clone(),
             lsp: self.config.lsp.clone(),
+            subagent_runner: self.config.subagent_runner.clone(),
+            subagent_depth: self.config.subagent_depth,
         }
+    }
+
+    /// Truncate a tool result's text content if it exceeds
+    /// `config.max_tool_result_bytes` (issue #28 gap 1).
+    ///
+    /// When the limit is `None`, the result is returned unchanged.
+    /// When set, any `ContentBlock::Text` block whose `text` field
+    /// exceeds the limit is truncated to the limit and a marker is
+    /// appended so the model knows content was omitted.
+    fn maybe_truncate_tool_result(
+        &self,
+        mut result: oxi_ai::ToolResultMessage,
+    ) -> oxi_ai::ToolResultMessage {
+        let Some(max_bytes) = self.config.max_tool_result_bytes else {
+            return result;
+        };
+
+        for block in &mut result.content {
+            if let oxi_ai::ContentBlock::Text(tc) = block
+                && tc.text.len() > max_bytes
+            {
+                let omitted = tc.text.len() - max_bytes;
+                tc.text.truncate(max_bytes);
+                tc.text.push_str(&format!(
+                    "\n\n... [truncated: {omitted} bytes omitted, \
+                     use read/grep for full content]"
+                ));
+            }
+        }
+
+        result
     }
 
     fn drain_follow_up_queue(&self) -> Vec<Message> {
@@ -846,8 +879,9 @@ impl AgentLoop {
                     }
 
                     for result in &tool_results {
+                        let result = self.maybe_truncate_tool_result(result.clone());
                         messages.push(Message::ToolResult(result.clone()));
-                        new_messages.push(Message::ToolResult(result.clone()));
+                        new_messages.push(Message::ToolResult(result));
                     }
                 }
 
@@ -1142,6 +1176,9 @@ mod session_id_wiring_tests {
             agent_pool: None,
             lsp: None,
             ttsr_engine: None,
+            subagent_runner: None,
+            subagent_depth: 0,
+            max_tool_result_bytes: None,
         };
         AgentLoop::new_with_resolver(
             Arc::new(NopProvider),
@@ -1176,5 +1213,109 @@ mod session_id_wiring_tests {
             ctx.session_id.is_none(),
             "default ToolContext.session_id should be None"
         );
+    }
+}
+
+// ── Gap 1: tool-result truncation tests (issue #28) ──────────────────
+
+#[cfg(test)]
+mod truncation_tests {
+    use super::*;
+    use crate::agent::ProviderResolver;
+    use oxi_ai::{
+        ContentBlock, Context, Model, Provider, ProviderError, StreamOptions, StreamResult,
+        TextContent, ToolResultMessage,
+    };
+    use std::future::Future;
+    use std::pin::Pin;
+
+    struct NopProvider;
+    impl Provider for NopProvider {
+        fn stream<'a>(
+            &'a self,
+            _model: &'a Model,
+            _context: &'a Context,
+            _options: Option<StreamOptions>,
+        ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+            Box::pin(async {
+                Err(ProviderError::NotImplemented(
+                    "truncation tests never stream".to_string(),
+                ))
+            })
+        }
+        fn name(&self) -> &str {
+            "nop"
+        }
+    }
+
+    struct NullResolver;
+    impl ProviderResolver for NullResolver {
+        fn resolve_provider(&self, _name: &str) -> Option<Arc<dyn Provider>> {
+            None
+        }
+        fn resolve_model(&self, _model_id: &str) -> Option<Model> {
+            None
+        }
+    }
+
+    fn make_result(text: &str) -> ToolResultMessage {
+        ToolResultMessage::new(
+            "tc_test".to_string(),
+            "test_tool",
+            vec![ContentBlock::Text(TextContent::new(text.to_string()))],
+        )
+    }
+
+    fn loop_with_limit(limit: Option<usize>) -> AgentLoop {
+        let config = AgentLoopConfig {
+            model_id: "test/model".to_string(),
+            max_tool_result_bytes: limit,
+            ..Default::default()
+        };
+        AgentLoop::new_with_resolver(
+            Arc::new(NopProvider),
+            config,
+            Arc::new(ToolRegistry::new()),
+            SharedState::new(),
+            Arc::new(NullResolver),
+        )
+    }
+
+    #[test]
+    fn truncate_passthrough_when_none() {
+        let loop_ = loop_with_limit(None);
+        let result = make_result(&"x".repeat(10_000));
+        let truncated = loop_.maybe_truncate_tool_result(result);
+        if let ContentBlock::Text(tc) = &truncated.content[0] {
+            assert_eq!(tc.text.len(), 10_000);
+            assert!(!tc.text.contains("truncated"));
+        }
+    }
+
+    #[test]
+    fn truncate_passthrough_when_under_limit() {
+        let loop_ = loop_with_limit(Some(1000));
+        let result = make_result(&"x".repeat(500));
+        let truncated = loop_.maybe_truncate_tool_result(result);
+        if let ContentBlock::Text(tc) = &truncated.content[0] {
+            assert_eq!(tc.text.len(), 500);
+            assert!(!tc.text.contains("truncated"));
+        }
+    }
+
+    #[test]
+    fn truncate_applies_when_over_limit() {
+        let loop_ = loop_with_limit(Some(100));
+        let result = make_result(&"x".repeat(500));
+        let truncated = loop_.maybe_truncate_tool_result(result);
+        if let ContentBlock::Text(tc) = &truncated.content[0] {
+            assert!(
+                tc.text.len() < 500,
+                "text not truncated: {} bytes",
+                tc.text.len()
+            );
+            assert!(tc.text.contains("truncated"), "missing truncation marker");
+            assert!(tc.text.contains("400 bytes omitted"));
+        }
     }
 }

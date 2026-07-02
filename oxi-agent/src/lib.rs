@@ -102,8 +102,8 @@ pub use tools::subagent::SubagentTool;
 pub use tools::web_search::WebSearchTool;
 /// Built-in tool implementations and registry.
 pub use tools::{
-    AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool, LsTool, ReadTool,
-    ToolContext, ToolError, ToolRegistry, WriteTool,
+    AgentTool, AgentToolResult, BashTool, EditTool, FindTool, ForkResult, GrepTool, LsTool,
+    ReadTool, SubagentRunner, ToolContext, ToolError, ToolRegistry, WriteTool,
 };
 
 pub use tools::TodoStateProvider;
