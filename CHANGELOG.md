@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-07-03
+
 ### Fixed
 
 - **`oxi-agent` — issue #28 gap 2: provider-reported token accounting for
@@ -100,6 +102,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All three gaps from #28 are now addressed: gap 2 (compaction accuracy,
   PR #29), gap 1 (tool-result eviction), and gap 3 (library-native
   delegation). #28 can be closed.
+- **CI / packaging hygiene** (commit ba7886d9): repaired 4 broken
+  intra-doc links in `oxi-sdk` introduced by PR #31's refactor
+  (`cargo doc -D warnings` had been failing on `crate::OxiBuilder::agent`
+  and `crate::builder::AgentBuilder`); allowlisted two `quick-xml` 0.23.1
+  DoS advisories (RUSTSEC-2026-0194/0195) that are unfixable upstream
+  (no `self_update` release pulls `quick-xml` ≥0.41) and sit behind the
+  optional non-default `self-update` feature; bumped `anyhow`
+  1.0.102 → 1.0.103 to clear RUSTSEC-2026-0190.
 
 ## [0.52.1] - 2026-06-30
 
@@ -1871,7 +1881,8 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
 [0.39.0]: https://github.com/a7garden/oxi/compare/v0.38.0...v0.39.0
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.52.0...HEAD
+[0.53.0]: https://github.com/a7garden/oxi/compare/v0.52.1...v0.53.0
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.53.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 
