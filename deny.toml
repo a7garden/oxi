@@ -37,6 +37,14 @@ ignore = [
     # oxibrowser-core is pinned; paste is only used for CSS selector engine internals.
     # Re-evaluate when oxibrowser-core updates.
     "RUSTSEC-2024-0436",
+    # quick-xml 0.23.1 — transitive via self_update → oxi-cli. Both
+    # RUSTSEC-2026-0194 (quadratic DoS) and RUSTSEC-2026-0195 (memory
+    # DoS) need attacker-controlled XML; self_update is behind the
+    # OPTIONAL `self-update` feature and parses only trusted GitHub
+    # release feeds. Unfixable upstream (all self_update incl. 1.0.0-rc.1
+    # pin quick-xml ^0.38 <0.41). Mirror of audit.toml.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]

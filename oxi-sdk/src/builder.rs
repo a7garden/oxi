@@ -729,7 +729,7 @@ impl SupervisorBuilder {
     /// internal pool, outside the supervisor's direct control. The
     /// audit log attached here cannot be reached by the
     /// Before/AfterTool callback chain. For audit-on-tool-call
-    /// semantics, use [`OxiBuilder::agent`](crate::OxiBuilder::agent)::[`.audit_log`](crate::AgentBuilder::audit_log)
+    /// semantics, use [`Oxi::agent`](crate::Oxi::agent)::[`.audit_log`](crate::AgentBuilder::audit_log)
     /// on each agent that should be audited.
     ///
     /// `build()` will emit a `tracing::warn!` if this setter is used,
@@ -745,7 +745,7 @@ impl SupervisorBuilder {
     ///
     /// **Limitation**: same as `with_audit` — supervisor-spawned
     /// agents don't go through this hook chain. Use
-    /// [`OxiBuilder::agent`](crate::OxiBuilder::agent)::[`.authorizer`](crate::AgentBuilder::authorizer)
+    /// [`Oxi::agent`](crate::Oxi::agent)::[`.authorizer`](crate::AgentBuilder::authorizer)
     /// for per-agent enforcement. `build()` will emit a
     /// `tracing::warn!` if this setter is used.
     pub fn with_authorizer(mut self, authorizer: Arc<Authorizer>) -> Self {
@@ -789,7 +789,7 @@ impl SupervisorBuilder {
     /// `tracing::warn!` is emitted and the setters are no-ops until
     /// the follow-up RFC lands. For per-agent observability that
     /// actually runs, use
-    /// [`OxiBuilder::agent(...).build()`](crate::OxiBuilder::agent)
+    /// [`Oxi::agent(...).build()`](crate::Oxi::agent)
     /// and apply each setter there.
     pub fn build(self) -> anyhow::Result<(Oxi, AgentSupervisor)> {
         // Surface the silent-drop limitation explicitly so this

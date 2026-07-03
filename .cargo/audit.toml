@@ -60,4 +60,15 @@ ignore = [
     # paste — unmaintained, transitive via oxibrowser-core → rav1e / boa_engine.
     # oxibrowser-core is pinned; paste is only used for CSS selector engine internals.
     "RUSTSEC-2024-0436",
+
+    # quick-xml 0.23.1 — transitive via self_update → oxi-cli.
+    # RUSTSEC-2026-0194 (quadratic attribute-check DoS) and
+    # RUSTSEC-2026-0195 (unbounded namespace-decl memory DoS).
+    # Both require attacker-controlled XML. self_update is behind the
+    # OPTIONAL non-default `self-update` feature and only parses GitHub's
+    # own release manifests (trusted input). Unfixable upstream: every
+    # self_update release incl. 1.0.0-rc.1 requires quick-xml ^0.38 (<0.41,
+    # where the fix landed). Re-evaluate when self_update ships quick-xml ≥0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]

@@ -2,7 +2,7 @@
 //! [`Middleware`] pipeline so they cooperate with user-added middleware
 //! instead of overwriting it.
 //!
-//! Background: [`crate::builder::AgentBuilder`] stores `AuditLog`,
+//! Background: [`crate::agent_builder::AgentBuilder`] stores `AuditLog`,
 //! `Authorizer`, `Tracer`, and `CostTracker` setters that used to be
 //! silently dropped. The audit report `docs/audits/2026-06-30-sdk-coverage.md`
 //! flagged this as **API theater**. The fix is split into two layers:
