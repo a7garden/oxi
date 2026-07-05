@@ -24,14 +24,14 @@ bytes = "1"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "0.9"
 
 # AWS SigV4 signing
 hmac = "0.12"
 url = "2"
 
 # JSON Schema validation
-jsonschema = { version = "0.26", default-features = false, features = ["resolve-file"] }
+jsonschema = { version = "0.46", default-features = false, features = ["resolve-file"] }
 
 # Logging
 tracing = "0.1"
@@ -43,10 +43,10 @@ thiserror = { workspace = true }
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
-rand = "0.8"
+rand = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
 parking_lot = "0.12"
-dirs = "5"
+dirs = "6"
 
 # File locking (fs2 for cross-platform flock, raii_flock for RAII guards)
 fs2 = "0.4"
@@ -56,7 +56,7 @@ filetime = "0.2"
 base64 = "0.22"
 digest = "0.10"
 sha2 = "0.10"
-signature = "2.2"
+signature = "2"
 pkcs8 = "0.10"
 rsa = { version = "0.9", features = ["pem"] }
 
@@ -64,7 +64,7 @@ rsa = { version = "0.9", features = ["pem"] }
 mockito = "1"
 tempfile = "3"
 flate2 = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "token_estimation"

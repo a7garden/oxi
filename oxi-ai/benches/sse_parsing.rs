@@ -2,7 +2,8 @@
 //!
 //! Measures throughput for both OpenAI and Anthropic event stream formats.
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 
 // We access the internal parsing functions directly via crate-level re-exports.
 // Since the parse functions are private, we replicate the parsing logic here

@@ -20,7 +20,7 @@ parking_lot = "0.12"
 async-trait = "0.1"
 
 [dependencies.similar]
-version = "2"
+version = "3"
 optional = true
 
 [features]
