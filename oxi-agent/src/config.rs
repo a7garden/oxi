@@ -195,6 +195,31 @@ pub struct AgentConfig {
     /// Agent pool for Hub display and sub-agent matching.
     #[serde(skip, default)]
     pub agent_pool: Option<std::sync::Arc<dyn crate::tools::AgentPoolProvider>>,
+
+    /// Maximum bytes of a tool result's text content before truncation
+    /// (#28 gap 1, surfaced as #32). Threaded through to
+    /// [`crate::agent_loop::config::AgentLoopConfig::max_tool_result_bytes`].
+    ///
+    /// When set, tool results exceeding this limit are truncated and a
+    /// `"... [truncated: N bytes omitted]"` marker is appended, preventing a
+    /// single large tool output from consuming the context window.
+    ///
+    /// `None` (default) = no limit. Opt-in.
+    #[serde(skip, default)]
+    pub max_tool_result_bytes: Option<usize>,
+
+    /// In-process sub-agent runner (#28 gap 3, surfaced as #32). When set,
+    /// the `subagent` tool prefers an in-process isolated run over shelling
+    /// out. Threaded through to
+    /// [`crate::agent_loop::config::AgentLoopConfig::subagent_runner`].
+    #[serde(skip, default)]
+    pub subagent_runner: Option<std::sync::Arc<dyn crate::tools::SubagentRunner>>,
+
+    /// Current sub-agent nesting depth (#28 gap 3, surfaced as #32). Default
+    /// `0` (top-level). The `subagent` tool increments this when forking a
+    /// child config to cap recursion.
+    #[serde(skip, default)]
+    pub subagent_depth: u8,
 }
 
 impl Default for AgentConfig {
@@ -219,6 +244,9 @@ impl Default for AgentConfig {
             memory: None,
             todo: None,
             agent_pool: None,
+            max_tool_result_bytes: None,
+            subagent_runner: None,
+            subagent_depth: 0,
         }
     }
 }
@@ -313,5 +341,53 @@ mod tests {
             legacy.session_id.is_none(),
             "payload missing session_id must default to None"
         );
+    }
+
+    #[test]
+    fn loop_passthrough_fields_default() {
+        // issue #32: the three AgentLoopConfig passthrough fields default to
+        // their no-op values, preserving pre-#32 behavior for consumers that
+        // don't set them.
+        let c = AgentConfig::default();
+        assert!(c.max_tool_result_bytes.is_none());
+        assert!(c.subagent_runner.is_none());
+        assert_eq!(c.subagent_depth, 0);
+    }
+
+    #[test]
+    fn loop_passthrough_fields_are_serde_skipped() {
+        // issue #32: the passthrough fields are #[serde(skip, default)].
+        // (1) They must NOT appear in serialized output — this is what lets
+        //     the non-serializable `Arc<dyn SubagentRunner>` coexist with
+        //     `#[derive(Serialize)]` on AgentConfig.
+        // (2) Legacy payloads missing the keys must deserialize to defaults,
+        //     so existing serialized configs are unaffected.
+        let c = AgentConfig::new("m");
+        let json = serde_json::to_string(&c).expect("serializes");
+        assert!(!json.contains("max_tool_result_bytes"));
+        assert!(!json.contains("subagent_runner"));
+        assert!(!json.contains("subagent_depth"));
+
+        let legacy: AgentConfig =
+            serde_json::from_str(r#"{"name":"x","model_id":"m","timeout_seconds":300}"#)
+                .expect("deserializes");
+        assert!(legacy.max_tool_result_bytes.is_none());
+        assert!(legacy.subagent_runner.is_none());
+        assert_eq!(legacy.subagent_depth, 0);
+    }
+
+    #[test]
+    fn loop_passthrough_fields_set_and_clone() {
+        // issue #32 verification: consumers can set the passthrough fields
+        // and they survive Clone (AgentConfig derives Clone).
+        let c = AgentConfig {
+            max_tool_result_bytes: Some(8192),
+            subagent_depth: 3,
+            ..AgentConfig::new("m")
+        };
+        let cloned = c.clone();
+        assert_eq!(cloned.max_tool_result_bytes, Some(8192));
+        assert_eq!(cloned.subagent_depth, 3);
+        assert!(cloned.subagent_runner.is_none());
     }
 }

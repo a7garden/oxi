@@ -550,6 +550,9 @@ impl Agent {
             memory: self.config().config.memory.clone(),
             todo: self.config().config.todo.clone(),
             agent_pool: self.config().config.agent_pool.clone(),
+            max_tool_result_bytes: self.config().config.max_tool_result_bytes,
+            subagent_runner: self.config().config.subagent_runner.clone(),
+            subagent_depth: self.config().config.subagent_depth,
             ..Default::default()
         };
 
@@ -951,6 +954,9 @@ impl Agent {
             provider_options: inner.config.provider_options.clone(),
             on_compaction: None,
             ttsr_engine: inner.config.ttsr_engine.clone(),
+            max_tool_result_bytes: inner.config.max_tool_result_bytes,
+            subagent_runner: inner.config.subagent_runner.clone(),
+            subagent_depth: inner.config.subagent_depth,
             ..Default::default()
         };
 

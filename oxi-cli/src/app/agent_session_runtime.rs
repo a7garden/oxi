@@ -319,6 +319,7 @@ pub async fn create_agent_session_from_services(
             memory: None,
             todo: Some(Arc::new(crate::store::todo_state::TodoState::new())),
             agent_pool: None,
+            ..Default::default()
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_sdk::get_provider("anthropic")
@@ -411,6 +412,7 @@ pub async fn create_agent_session_from_services(
         memory: memory_backend,
         todo: Some(Arc::new(crate::store::todo_state::TodoState::new())),
         agent_pool: None,
+        ..Default::default()
     };
 
     let base: Arc<dyn oxi_sdk::Provider> = Arc::from(provider);
