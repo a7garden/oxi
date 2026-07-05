@@ -20,7 +20,7 @@ jobs:
     name: Apply label set
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Apply labels
         # EndBug/label-sync syncs the repo's label set to a declarative
         # config file. Its `name`/`color`/`description`/`aliases` schema
