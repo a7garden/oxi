@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-07-05
+
+### Added
+
+- **`oxi-agent` — `AgentConfig` passthrough for `AgentLoopConfig` fields (#32, #33)**.
+  `max_tool_result_bytes`, `subagent_runner`, and `subagent_depth` are now
+  exposed on `AgentConfig` as `#[serde(skip, default)]` passthroughs, mirroring
+  the existing `memory`/`todo`/`agent_pool` pattern. This unblocks library
+  consumers (e.g. Oxios) that build agents via `AgentBuilder`/`Agent::new`
+  from configuring issue #28 gaps 1 & 3 — previously the fields existed only
+  on `AgentLoopConfig`, which is constructed internally with no injection point.
+
+### Fixed
+
+- **CI: PR gate shell injection**. PR title and body were interpolated via
+  `${{ github.event.pull_request.* }}` directly into `run:` bash heredocs.
+  PR bodies containing markdown backticks (e.g. `` `AgentConfig` ``) triggered
+  command substitution, and unbalanced parens inside backticks produced
+  syntax errors that falsely failed the gate on otherwise-correct PRs.
+  Fixed via `env:` indirection (`PR_TITLE`/`PR_BODY`).
+
+### Changed
+
+- **Dependency updates — 14 cargo major version bumps** (#25): toml 0.9,
+  jsonschema 0.46, rand 0.9, dirs 6, rusqlite 0.40, notify 8, zip 8,
+  lru 0.18, similar 3, fastembed 5, strum 0.28, criterion 0.8, libloading 0.9.
+  5 RustCrypto bumps (sha2/digest/hmac/signature/pkcs8) reverted — incompatible
+  with stable rsa 0.9.x (depends on digest 0.10; no stable rsa release supports
+  digest 0.11 yet). `self_update` pinned at 0.41 (0.44 has internal compile
+  break; crate is declared but unused in `oxi-cli`).
+- **CI: actions/checkout v5→v7, actions/upload-artifact v4→v7** (#21).
+
 ## [0.53.0] - 2026-07-03
 
 ### Fixed
