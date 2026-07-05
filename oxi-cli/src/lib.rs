@@ -282,6 +282,7 @@ impl App {
             memory: None,
             todo: None,
             agent_pool: None,
+            ..Default::default()
         };
 
         // Build the agent via the SDK's AgentBuilder — no manual wiring.

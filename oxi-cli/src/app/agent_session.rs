@@ -1560,6 +1560,7 @@ impl AgentSession {
             memory: None,
             todo: None,
             agent_pool: None,
+            ..Default::default()
         };
         let immune_turns = settings.advisor.immune_turns;
         drop(settings);
