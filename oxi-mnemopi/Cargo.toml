@@ -20,7 +20,7 @@ lru = "0.18"
 regex = "1"
 thiserror = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
-sha2 = "0.11"
+sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 dirs = "6"
 

@@ -200,7 +200,7 @@ pub fn remove_token(provider: &str) -> Result<()> {
 /// Generate a cryptographically-random code_verifier (43 chars, RFC 7636 §4.1).
 pub fn generate_code_verifier() -> String {
     let mut bytes = [0u8; 32]; // 32 bytes → 43 base64url chars
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -305,7 +305,7 @@ pub fn build_authorization_url(config: &OAuthConfig) -> PkceState {
 /// Generate an opaque state parameter (22 random base64url chars).
 fn generate_state_token() -> String {
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

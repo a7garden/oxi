@@ -36,6 +36,25 @@ updates:
       - dependency-name: "extism"
         # wasmtime advisories are managed in .cargo/audit.toml + deny.toml
         # Track extism 1.22+ to drop RUSTSEC-2026-* ignore list.
+      # self_update 0.44+ has an internal compile break (http_client::get
+      # removed). The crate is declared but never called from oxi-cli src/.
+      # Re-evaluate when self_update ships a working release.
+      - dependency-name: "self_update"
+        versions: [">= 0.44"]
+      # RustCrypto stack (sha2/digest/hmac/signature/pkcs8) must stay
+      # version-aligned with rsa 0.9.x, which depends on digest 0.10.
+      # Bumping these to 0.11/3.0 breaks rsa until rsa 0.10 (digest 0.11)
+      # has a stable release. Track RustCrypto/traits#2400.
+      - dependency-name: "sha2"
+        versions: [">= 0.11"]
+      - dependency-name: "digest"
+        versions: [">= 0.11"]
+      - dependency-name: "hmac"
+        versions: [">= 0.13"]
+      - dependency-name: "signature"
+        versions: [">= 3.0"]
+      - dependency-name: "pkcs8"
+        versions: [">= 0.11"]
 
   - package-ecosystem: github-actions
     directory: /

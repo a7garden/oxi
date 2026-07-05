@@ -1,7 +1,8 @@
 //! Benchmarks for token estimation.
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use oxi_ai::{context_usage, estimate, estimate_words};
+use std::hint::black_box;
 
 /// Generate a realistic English prose sample of approximately `n` bytes.
 fn prose(n: usize) -> String {
