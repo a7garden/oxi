@@ -331,9 +331,12 @@ impl AgentHandle {
     // ── Dynamic configuration ──────────────────────────────
 
     /// Switch model mid-conversation.
-    pub fn switch_model(&self, model_id: &str, api_key: Option<String>) -> anyhow::Result<()> {
+    ///
+    /// The new provider is re-credentialed via the resolver; the old
+    /// `api_key` parameter was removed in 0.55.0 (issues #39/#40).
+    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
         let old = self.config.read().model_id.clone();
-        self.agent.switch_model(model_id, api_key)?;
+        self.agent.switch_model(model_id)?;
         self.config.write().model_id = model_id.to_string();
         self.emit(AgentLifecycleEvent::ModelSwitched {
             agent_id: self.agent_id.clone(),
@@ -905,7 +908,7 @@ mod tests {
         let supervisor = make_supervisor();
         let handle = supervisor.spawn(test_config()).unwrap();
         // Will fail because provider doesn't actually exist, but tests the wiring
-        let result = handle.switch_model("openai/gpt-4o", None);
+        let result = handle.switch_model("openai/gpt-4o");
         // Provider resolution happens at run time via agent, so this should propagate
         // the agent's error. We just check the method exists and compiles.
         let _ = result;

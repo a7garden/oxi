@@ -4,8 +4,51 @@ All notable changes to the oxi project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [Unreleased]
+
+## [0.55.0] - 2026-07-18
+
+### Changed
+
+- **BREAKING — Single credential authority for the agent loop (#40)**.
+  The vestigial `AgentConfig::api_key` field and the `api_key` parameters on
+  `Agent::switch_model` / `Agent::switch_to_model` / `Agent::refresh_api_key`
+  have been removed. The provider instance is now the sole credential holder,
+  populated exclusively through `OxiBuilder::api_key(...)` (explicit override)
+  or the wired `AuthProvider` port via its new sync fast-path
+  (`get_api_key_sync`). This eliminates the leak where a stray per-stream
+  `api_key` could override the resolver-baked credential (`Provider stream
+  error: Failed to resolve model` / cross-provider 401s).
+  `Agent::refresh_credentials()` is the new entry point for picking up
+  auth-store updates — it re-resolves the current provider via the resolver.
+  CLI migration: `services.rs::build_oxi` now registers the
+  `shared_auth_storage()` singleton directly via a new
+  `impl oxi_sdk::ports::AuthProvider for AuthStorage` adapter, eliminating
+  the dual-cache (FileAuthProvider vs AuthStorage) and schema-mismatch
+  issues that previously hid behind the explicit per-stream `api_key`.
+
+- **`oxi-sdk` — `Oxi as ProviderResolver` (#39)**. `AgentBuilder::build()`
+  now uses `self.oxi.clone()` directly as the agent loop's resolver
+  (replacing the hand-rolled `OxiResolver` closure). `Oxi::resolve_model`
+  consults the catalog port first and falls back to the static registry,
+  so catalog-only models (newer Z.AI / OpenCode / models.dev entries) work
+  end-to-end instead of returning `Failed to resolve model` at stream time.
+
+### Added
+
+- **`oxi-sdk` — `AuthProvider::get_api_key_sync` optional fast-path**.
+  Default returns `Ok(None)`; impls with synchronous backing stores override
+  it. `FileAuthProvider` re-reads `path` from disk on every call (so external
+  writers are picked up without restart); `AuthStorage` (oxi-cli) delegates
+  to its existing sync `get_api_key`. Consumed by `Oxi::create_provider`
+  at build / `switch_model` / `refresh_credentials` time.
+
+### Fixed
+
+- **Workspace version skew.** All six crates now share `0.55.0`. The
+  pre-existing broken `oxibrowser` 0.17 bump in `oxi-agent/Cargo.toml`
+  (added a `browser` feature that 0.17 doesn't expose) was reverted to
+  `0.16` so the workspace resolves.
 
 ## [0.54.0] - 2026-07-05
 

@@ -72,11 +72,23 @@ impl MnemopiSessionState {
     }
 
     /// Open a file-backed session.
+    ///
+    /// Uses filesystem-aware journal-mode selection (see
+    /// [`crate::journal::JournalMode`]). On network filesystems (NFS/SMB/
+    /// CIFS/FUSE) the engine falls back to `TRUNCATE` mode to avoid SIGBUS
+    /// from mmap'd `-shm`. The path is NOT rewritten — session state is a
+    /// durable primary store that must stay coherent across hosts.
     pub fn open(path: &str) -> Result<Self> {
+        // Durable primary store: detect journal mode (TRUNCATE on NFS for
+        // SIGBUS safety) but NEVER rewrite the path — session state must
+        // stay coherent across hosts.
+        let path_obj = std::path::Path::new(path);
+        let mode = crate::journal::JournalMode::for_db_path(path_obj);
         let conn = Connection::open(path)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "journal_mode", mode.as_str())?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.pragma_update(None, "busy_timeout", mode.busy_timeout_ms())?;
         init_schema(&conn)?;
         Ok(Self {
             conn,
@@ -85,13 +97,20 @@ impl MnemopiSessionState {
     }
 
     /// Open with custom config.
+    ///
+    /// See [`open`](Self::open) for journal-mode selection semantics.
     pub fn open_with_config(path: Option<&str>, config: SessionConfig) -> Result<Self> {
         let conn = match path {
             Some(p) => {
+                // Durable primary store — keep shared path, only adjust
+                // journal mode for NFS SIGBUS safety.
+                let path_obj = std::path::Path::new(p);
+                let mode = crate::journal::JournalMode::for_db_path(path_obj);
                 let c = Connection::open(p)?;
-                c.pragma_update(None, "journal_mode", "WAL")?;
+                c.pragma_update(None, "journal_mode", mode.as_str())?;
                 c.pragma_update(None, "synchronous", "NORMAL")?;
                 c.pragma_update(None, "foreign_keys", "ON")?;
+                c.pragma_update(None, "busy_timeout", mode.busy_timeout_ms())?;
                 c
             }
             None => Connection::open_in_memory()?,

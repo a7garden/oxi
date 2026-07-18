@@ -415,10 +415,7 @@ struct OneShotStream {
 
 impl Stream for OneShotStream {
     type Item = ProviderEvent;
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        _cx: &mut TaskContext<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
         Poll::Ready(self.event.take())
     }
 }
@@ -469,21 +466,14 @@ impl Provider for LoopingToolCallProvider {
         let force_stop = has_steering;
 
         Box::pin(async move {
-            let mut assistant = oxi_ai::AssistantMessage::new(
-                oxi_ai::Api::AnthropicMessages,
-                "mock",
-                "mock",
-            );
+            let mut assistant =
+                oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock");
             let reason = if force_stop {
-                assistant.content =
-                    vec![ContentBlock::Text(TextContent::new("Done."))];
+                assistant.content = vec![ContentBlock::Text(TextContent::new("Done."))];
                 StopReason::Stop
             } else {
-                let tc = oxi_ai::ToolCall::new(
-                    "call_1",
-                    "echo",
-                    serde_json::json!({"msg":"hello"}),
-                );
+                let tc =
+                    oxi_ai::ToolCall::new("call_1", "echo", serde_json::json!({"msg":"hello"}));
                 assistant.content = vec![ContentBlock::ToolCall(tc)];
                 StopReason::ToolUse
             };
@@ -532,18 +522,15 @@ impl crate::tools::AgentTool for LoopGuardEchoTool {
 
 #[tokio::test]
 async fn loop_guard_injects_steering_on_repeated_tool_call() {
+    use crate::ProviderResolver;
     use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
     use crate::state::SharedState;
     use crate::tools::ToolRegistry;
-    use crate::ProviderResolver;
     use oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions;
 
     struct DummyResolver;
     impl ProviderResolver for DummyResolver {
-        fn resolve_provider(
-            &self,
-            _name: &str,
-        ) -> Option<Arc<dyn oxi_ai::Provider>> {
+        fn resolve_provider(&self, _name: &str) -> Option<Arc<dyn oxi_ai::Provider>> {
             None
         }
         fn resolve_model(&self, _id: &str) -> Option<oxi_ai::Model> {
@@ -564,8 +551,7 @@ async fn loop_guard_injects_steering_on_repeated_tool_call() {
         }
     }
 
-    let received: Arc<Mutex<Vec<Vec<oxi_ai::Message>>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let received: Arc<Mutex<Vec<Vec<oxi_ai::Message>>>> = Arc::new(Mutex::new(Vec::new()));
     let provider = Arc::new(LoopingToolCallProvider::new(received.clone()));
 
     let config = AgentLoopConfig {
@@ -582,13 +568,8 @@ async fn loop_guard_injects_steering_on_repeated_tool_call() {
     tools.register(LoopGuardEchoTool);
 
     let state = SharedState::new();
-    let agent_loop = AgentLoop::new_with_resolver(
-        provider,
-        config,
-        tools,
-        state,
-        Arc::new(DummyResolver),
-    );
+    let agent_loop =
+        AgentLoop::new_with_resolver(provider, config, tools, state, Arc::new(DummyResolver));
 
     let result = agent_loop.run("test".to_string(), |_| {}).await;
     assert!(result.is_ok(), "agent loop failed: {result:?}");

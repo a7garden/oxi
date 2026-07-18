@@ -17,6 +17,7 @@
 pub mod catalog;
 pub mod circuit_breaker;
 mod compaction;
+pub mod compaction_seam;
 mod complexity_router;
 mod context;
 pub mod env_api_keys;

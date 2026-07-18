@@ -96,19 +96,23 @@ impl FileAuthProvider {
     }
 
     /// Resolve an API key with this priority:
-    /// 1. The in-memory `state` (loaded from `path`)
+    /// 1. The given in-memory state (loaded from `path`)
     /// 2. The `OXI_API_KEY_<UPPER>` env var
     /// 3. The provider's standard env var (e.g. `ANTHROPIC_API_KEY`)
-    pub fn resolve_api_key(&self, provider: &str) -> Option<String> {
-        if let Some(k) = self
-            .state
-            .lock()
+    fn resolve_with(state: &AuthFile, provider: &str) -> Option<String> {
+        if let Some(k) = state
             .providers
             .get(provider)
             .and_then(|e| e.api_key.clone())
         {
             return Some(k);
         }
+        Self::env_fallback(provider)
+    }
+
+    /// Environment-variable fallback used after both the in-memory cache
+    /// and (for the sync path) a fresh disk read miss.
+    fn env_fallback(provider: &str) -> Option<String> {
         let upper = provider.to_uppercase();
         if let Ok(k) = std::env::var(format!("OXI_API_KEY_{upper}"))
             && !k.is_empty()
@@ -125,6 +129,17 @@ impl FileAuthProvider {
         };
         std::env::var(conventional).ok().filter(|s| !s.is_empty())
     }
+
+    /// Resolve an API key against the in-memory boot-time cache.
+    ///
+    /// Use [`get_api_key_sync`](AuthProvider::get_api_key_sync) for the
+    /// dynamic path that re-reads `path` from disk — that's the one
+    /// `Oxi::create_provider` consults, so it picks up writes from
+    /// external singletons (e.g. the CLI's `shared_auth_storage()`).
+    pub fn resolve_api_key(&self, provider: &str) -> Option<String> {
+        let state = self.state.lock();
+        Self::resolve_with(&state, provider)
+    }
 }
 
 impl AuthProvider for FileAuthProvider {
@@ -134,6 +149,18 @@ impl AuthProvider for FileAuthProvider {
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, SdkError>> + Send + '_>> {
         let result = self.resolve_api_key(provider);
         Box::pin(async move { Ok(result) })
+    }
+
+    /// Sync fast-path — **re-reads `path` from disk** on every call so
+    /// external writers (e.g. the CLI's `shared_auth_storage()` singleton
+    /// at oxi-cli/src/store/auth_storage.rs:1135, which maintains its own
+    /// independent in-memory cache) are reflected without restart. This is
+    /// the credential source `Oxi::create_provider` consults at build /
+    /// `switch_model` / `refresh_credentials` time; per-call file I/O is
+    /// negligible on those paths. Issue #40.
+    fn get_api_key_sync(&self, provider: &str) -> Result<Option<String>, SdkError> {
+        let fresh = AuthFile::load(&self.path);
+        Ok(Self::resolve_with(&fresh, provider))
     }
 
     fn set_api_key(
@@ -236,5 +263,51 @@ mod tests {
         // No file entry. Check that resolve_api_key returns None for an
         // unrecognised provider.
         assert!(auth.resolve_api_key("nonexistent-xyz").is_none());
+    }
+
+    /// Regression (#40 advisor follow-up): `get_api_key_sync` MUST re-read
+    /// `path` from disk on every call. Without this, an external writer
+    /// updating `auth.json` (e.g. the CLI's `shared_auth_storage()`
+    /// singleton, which owns a separate in-memory cache) would not be
+    /// visible to `Oxi::create_provider`, silently breaking mid-session
+    /// credential refresh from the TUI provider overlay.
+    #[test]
+    fn get_api_key_sync_re_reads_disk_after_external_write() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("auth.json");
+        let auth = FileAuthProvider::new(&p);
+
+        // Initially empty.
+        assert_eq!(
+            auth.get_api_key_sync("anthropic").unwrap().as_deref(),
+            None,
+            "fresh provider should have no key"
+        );
+
+        // External write — simulate `shared_auth_storage().set_api_key(...)`
+        std::fs::write(
+            &p,
+            r#"{"version":1,"providers":{"anthropic":{"api_key":"sk-external"}}}"#,
+        )
+        .unwrap();
+
+        // Sync fast-path must observe the new key WITHOUT re-instantiating
+        // the FileAuthProvider — proves it re-reads `path` from disk.
+        assert_eq!(
+            auth.get_api_key_sync("anthropic").unwrap().as_deref(),
+            Some("sk-external"),
+            "get_api_key_sync must re-read path on every call; \
+             FileAuthProvider's own in-memory cache is still empty here"
+        );
+
+        // Sanity: the cache-only `resolve_api_key` does NOT observe the
+        // external write — proving the test is exercising the new path
+        // (not just the existing cache).
+        assert_eq!(
+            auth.resolve_api_key("anthropic").as_deref(),
+            None,
+            "cache-only resolve_api_key must stay stale; \
+             this assertion locks the dual-cache contract"
+        );
     }
 }

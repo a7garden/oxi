@@ -1,0 +1,34 @@
+[package]
+name = "oxi-lsp"
+version = "0.55.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Thin LSP protocol adapter — JSON-RPC framing, lsp-types wrapper, async-lsp client. Multi-server lifecycle lives in oxi-cli."
+readme = "README.md"
+license = "MIT"
+authors.workspace = true
+repository.workspace = true
+keywords = ["lsp", "language-server", "ide", "diagnostics"]
+categories = ["development-tools", "asynchronous"]
+exclude = ["target/", "benches/"]
+
+[dependencies]
+# LSP stack — thin adapter; manager / restart / folder-trust gate is oxi-cli's job.
+async-lsp = { version = "0.2", default-features = false, features = ["client-monitor", "stdio", "tokio", "omni-trait"] }
+lsp-types = "0.95"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Concurrency primitives
+dashmap = "6"
+parking_lot = "0.12"
+
+# Diagnostics / errors
+tracing = "0.1"
+thiserror = { workspace = true }

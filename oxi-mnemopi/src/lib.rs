@@ -20,9 +20,12 @@ pub mod entities;
 pub mod episodic_graph;
 pub mod error;
 pub mod extraction;
+pub mod journal;
+pub mod llm;
 pub mod mcp;
 pub mod mmr;
 pub mod orchestrator;
+pub mod path_layout;
 pub mod patterns;
 pub mod polyphonic_recall;
 pub mod query_cache;
@@ -41,7 +44,7 @@ pub mod types;
 pub mod vector_index;
 pub mod vector_math;
 pub mod veracity_consolidation;
-pub mod weibull;
+pub mod watcher;
 
 pub use chat_normalize::{ExtractionRate, extraction_rate, normalize_batch, normalize_chat};
 pub use db::MnemopiDb;
@@ -49,6 +52,9 @@ pub use db::MnemopiDb;
 pub use embeddings::RemoteEmbeddingProvider;
 pub use embeddings::{EmbeddingProvider, NoopEmbeddingProvider};
 pub use error::{MnemopiError, Result};
+#[cfg(feature = "remote-llm")]
+pub use llm::RemoteLlmBackend;
+pub use llm::{CompleteOptions, LlmBackend, NoopLlmBackend, StubLlmBackend};
 use std::path::Path;
 use std::sync::Arc;
 pub use store::{
@@ -96,6 +102,66 @@ impl Mnemopi {
         self
     }
 
+    /// Attach an LLM backend. When set, fact extraction at `remember` time
+    /// and consolidation at `sleep` time route through this backend;
+    /// otherwise the heuristic / algorithmic fallbacks run.
+    ///
+    /// The backend is stored as `Arc<dyn LlmBackend>` inside the config
+    /// and cloned cheaply across `spawn_blocking` tasks.
+    pub fn with_llm_backend(mut self, backend: Arc<dyn LlmBackend>) -> Self {
+        self.config.llm_backend = Some(backend);
+        self
+    }
+
+    /// Extract atomic facts from `text` using the configured extractor.
+    ///
+    /// When [`MnemopiConfig::llm_backend`] is set, returns an
+    /// [`crate::extraction::LlmExtractor`] wrapped over that backend;
+    /// otherwise returns the always-available [`HeuristicExtractor`].
+    /// Hosts can call this from a `remember` prelude to split a long
+    /// user message into atomic memories before storing each separately.
+    ///
+    /// The extractor is cheap to construct (no allocations beyond the
+    /// prompt template); callers should not cache it.
+    pub fn extractor(&self) -> Box<dyn extraction::FactExtractor + Send> {
+        use extraction::{HeuristicExtractor, LlmExtractor};
+        match self.config.llm_backend.clone() {
+            Some(backend) => Box::new(LlmExtractor::new(backend, LlmExtractor::default_prompt())),
+            None => Box::new(HeuristicExtractor),
+        }
+    }
+
+    /// Extract atomic facts from `text` and store each as its own working
+    /// memory entry. The original `text` is NOT stored by this method —
+    /// call `remember(text, options)` separately if you need both.
+    ///
+    /// Each extracted fact is stored with the `source` and `subject`
+    /// propagated from `options` (or defaults to `"extracted"` /
+    /// `"unknown"`). Importance and veracity come from the extractor
+    /// output.
+    ///
+    /// Returns the IDs of the newly stored memories. Empty if the
+    /// extractor returned no facts.
+    pub async fn extract_and_remember(
+        &self,
+        text: &str,
+        options: RememberOptions,
+    ) -> Result<Vec<String>> {
+        let extractor = self.extractor();
+        let facts = extractor.extract(text)?;
+        if facts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut ids = Vec::with_capacity(facts.len());
+        for fact in facts {
+            let mut fact_opts = RememberOptions::from(&fact);
+            // Inherit source from the caller's options so extracted facts
+            // land in the same scope as the original.
+            fact_opts.source = options.source.clone();
+            ids.push(self.remember(&fact.content, fact_opts).await?);
+        }
+        Ok(ids)
+    }
     /// Compute the dense embedding for a piece of text using the configured
     /// provider. Returns `None` when no provider is wired, the provider is
     /// unavailable, or the embed call fails. Failure is non-fatal — the
@@ -536,5 +602,73 @@ impl Mnemopi {
     /// Get a reference to the config.
     pub fn config(&self) -> &MnemopiConfig {
         &self.config
+    }
+}
+
+#[cfg(test)]
+mod dream_tests {
+    use super::*;
+    use crate::llm::StubLlmBackend;
+
+    #[tokio::test]
+    async fn extract_and_remember_with_stub_llm_stores_each_fact() {
+        let mnemopi = Mnemopi::open_in_memory().expect("open");
+        let stub = StubLlmBackend {
+            response: "User prefers dark mode | 0.9\nBuild uses cargo\n".into(),
+            name: "stub".into(),
+        };
+        let mnemopi = mnemopi.with_llm_backend(Arc::new(stub));
+
+        let ids = mnemopi
+            .extract_and_remember(
+                "ignored by stub",
+                RememberOptions {
+                    source: Some("test".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("extract_and_remember");
+
+        assert_eq!(ids.len(), 2, "two facts should be stored");
+        // Verify both memories are retrievable.
+        let stats = mnemopi.get_stats().await.expect("stats");
+        assert_eq!(stats.working_count, 2);
+    }
+
+    #[tokio::test]
+    async fn extract_and_remember_without_llm_uses_heuristic() {
+        let mnemopi = Mnemopi::open_in_memory().expect("open");
+        // No llm_backend configured — should fall back to HeuristicExtractor.
+        let ids = mnemopi
+            .extract_and_remember(
+                "The user prefers Vim. This is critically important.",
+                RememberOptions::default(),
+            )
+            .await
+            .expect("extract_and_remember");
+        assert!(
+            !ids.is_empty(),
+            "heuristic should extract at least one fact"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_and_remember_empty_input_returns_empty() {
+        let mnemopi = Mnemopi::open_in_memory().expect("open");
+        let ids = mnemopi
+            .extract_and_remember("", RememberOptions::default())
+            .await
+            .expect("extract_and_remember");
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn extractor_returns_heuristic_when_no_backend() {
+        let mnemopi = Mnemopi::open_in_memory().expect("open");
+        // Just verify it doesn't panic and produces some facts.
+        let ext = mnemopi.extractor();
+        let facts = ext.extract("Rust is a systems language.").expect("extract");
+        assert!(!facts.is_empty());
     }
 }

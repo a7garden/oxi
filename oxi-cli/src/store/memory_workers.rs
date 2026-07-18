@@ -597,14 +597,23 @@ async fn call_llm(
     let mut context = Context::new();
     context.set_system_prompt(system_prompt);
     context.add_message(Message::User(UserMessage::new(user_prompt)));
+    let mut text = String::new();
     let mut stream = provider
         .stream(model, &context, None)
         .await
         .map_err(|e| format!("provider stream error: {e}"))?;
-    let mut text = String::new();
     while let Some(event) = stream.next().await {
-        if let oxi_ai::ProviderEvent::TextDelta { delta, .. } = event {
-            text.push_str(&delta);
+        match event {
+            oxi_ai::ProviderEvent::TextDelta { delta, .. } => text.push_str(&delta),
+            oxi_ai::ProviderEvent::Done { message, .. } if text.is_empty() => {
+                for block in &message.content {
+                    if let oxi_ai::ContentBlock::Text(t) = block {
+                        text = t.text.clone();
+                        break;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Ok(text.trim().to_string())

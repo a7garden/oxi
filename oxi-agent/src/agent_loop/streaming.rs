@@ -74,7 +74,6 @@ pub(crate) async fn stream_assistant_response(
     let stream_options = StreamOptions {
         temperature: Some(loop_ref.config.temperature as f64),
         max_tokens: Some(loop_ref.config.max_tokens as usize),
-        api_key: loop_ref.config.api_key.clone(),
         provider_options: loop_ref.config.provider_options.clone(),
         ..Default::default()
     };
@@ -104,6 +103,14 @@ pub(crate) async fn stream_assistant_response(
     let mut added_partial = false;
     let mut event_count = 0u32;
 
+    // Reset the thinking-loop detector so each stream attempt is guarded
+    // independently. Without this, the detector's `fired` flag stays
+    // sticky after the first hit and retries run unguarded (issue
+    // flagged in advisory review). The retry layer may resample several
+    // times; each attempt deserves a fresh detector.
+    if let Some(detector) = loop_ref.thinking_loop_detector.lock().as_mut() {
+        detector.reset();
+    }
     let mut rx = stream;
     let stream_idle_timeout = std::time::Duration::from_secs(30);
     let cancel_check_interval = std::time::Duration::from_millis(500);
@@ -302,8 +309,31 @@ pub(crate) async fn stream_assistant_response(
                 }
                 emit(super::AgentEvent::Thinking);
             }
-
             ProviderEvent::ThinkingDelta { delta, partial, .. } => {
+                // Feed the thinking-loop detector if enabled. On detection
+                // we surface an error event so the retry layer resamples;
+                // matches omp's "transient stream stall" classification.
+                if let Some(detector) = loop_ref.thinking_loop_detector.lock().as_mut()
+                    && let Some(reason) = detector.push(&delta)
+                {
+                    tracing::warn!(
+                        session_id = ?loop_ref.session_id,
+                        reason = %reason,
+                        "thinking-loop detected; aborting stream"
+                    );
+                    // Reuse the circuit-breaker failure path: emit
+                    // a transient error and stop. The retry layer
+                    // will resample.
+                    loop_ref.circuit_breaker.record_failure();
+                    emit(super::AgentEvent::Error {
+                        message: reason,
+                        session_id: loop_ref.session_id.clone(),
+                    });
+                    // Break out of the stream loop — the upstream
+                    // retry policy treats transient errors as
+                    // resample candidates.
+                    break;
+                }
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {

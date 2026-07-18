@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use oxi_sdk::SdkError;
 use oxi_sdk::ports::{ProtocolHandler, ResolveContext, ResolvedUrl};
+use oxi_sdk::SdkError;
 
 /// Protocol handler for `local://` URLs backed by a session-scoped root.
 pub struct LocalProtocolHandler {
@@ -27,12 +27,9 @@ impl LocalProtocolHandler {
         }
         let target = self.root.join(Path::new(relative));
 
-        let canon_root = self
-            .root
-            .canonicalize()
-            .map_err(|e| SdkError::ExecutionFailed {
-                reason: format!("Failed to canonicalize local root: {e}"),
-            })?;
+        let canon_root = self.root.canonicalize().map_err(|e| SdkError::ExecutionFailed {
+            reason: format!("Failed to canonicalize local root: {e}"),
+        })?;
         let canon_parent = target
             .parent()
             .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
@@ -66,23 +63,29 @@ impl ProtocolHandler for LocalProtocolHandler {
 
         if relative.is_empty() {
             let mut entries = Vec::new();
-            let mut reader =
-                tokio::fs::read_dir(&self.root)
-                    .await
-                    .map_err(|e| SdkError::ExecutionFailed {
-                        reason: format!("Failed to read local root: {e}"),
-                    })?;
-            while let Some(entry) =
-                reader
-                    .next_entry()
-                    .await
-                    .map_err(|e| SdkError::ExecutionFailed {
-                        reason: format!("Failed to read entry: {e}"),
-                    })?
+            let mut reader = tokio::fs::read_dir(&self.root)
+                .await
+                .map_err(|e| SdkError::ExecutionFailed {
+                    reason: format!("Failed to read local root: {e}"),
+                })?;
+            while let Some(entry) = reader
+                .next_entry()
+                .await
+                .map_err(|e| SdkError::ExecutionFailed {
+                    reason: format!("Failed to read entry: {e}"),
+                })?
             {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
-                entries.push(if is_dir { format!("{name}/") } else { name });
+                let is_dir = entry
+                    .file_type()
+                    .await
+                    .map(|t| t.is_dir())
+                    .unwrap_or(false);
+                entries.push(if is_dir {
+                    format!("{name}/")
+                } else {
+                    name
+                });
             }
             entries.sort();
             return Ok(ResolvedUrl {
@@ -101,36 +104,41 @@ impl ProtocolHandler for LocalProtocolHandler {
         }
 
         let target = self.resolve_path(relative)?;
-        let metadata =
-            tokio::fs::metadata(&target)
-                .await
-                .map_err(|e| SdkError::ExecutionFailed {
-                    reason: if e.kind() == std::io::ErrorKind::NotFound {
-                        format!("local://{relative} not found")
-                    } else {
-                        format!("Cannot access local://{relative}: {e}")
-                    },
-                })?;
+        let metadata = tokio::fs::metadata(&target).await.map_err(|e| {
+            SdkError::ExecutionFailed {
+                reason: if e.kind() == std::io::ErrorKind::NotFound {
+                    format!("local://{relative} not found")
+                } else {
+                    format!("Cannot access local://{relative}: {e}")
+                },
+            }
+        })?;
 
         if metadata.is_dir() {
             let mut entries = Vec::new();
-            let mut reader =
-                tokio::fs::read_dir(&target)
-                    .await
-                    .map_err(|e| SdkError::ExecutionFailed {
-                        reason: format!("Failed to read directory: {e}"),
-                    })?;
-            while let Some(entry) =
-                reader
-                    .next_entry()
-                    .await
-                    .map_err(|e| SdkError::ExecutionFailed {
-                        reason: format!("Failed to read entry: {e}"),
-                    })?
+            let mut reader = tokio::fs::read_dir(&target)
+                .await
+                .map_err(|e| SdkError::ExecutionFailed {
+                    reason: format!("Failed to read directory: {e}"),
+                })?;
+            while let Some(entry) = reader
+                .next_entry()
+                .await
+                .map_err(|e| SdkError::ExecutionFailed {
+                    reason: format!("Failed to read entry: {e}"),
+                })?
             {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
-                entries.push(if is_dir { format!("{name}/") } else { name });
+                let is_dir = entry
+                    .file_type()
+                    .await
+                    .map(|t| t.is_dir())
+                    .unwrap_or(false);
+                entries.push(if is_dir {
+                    format!("{name}/")
+                } else {
+                    name
+                });
             }
             entries.sort();
             return Ok(ResolvedUrl {
@@ -144,12 +152,11 @@ impl ProtocolHandler for LocalProtocolHandler {
             });
         }
 
-        let content =
-            tokio::fs::read_to_string(&target)
-                .await
-                .map_err(|e| SdkError::ExecutionFailed {
-                    reason: format!("Failed to read local://{relative}: {e}"),
-                })?;
+        let content = tokio::fs::read_to_string(&target)
+            .await
+            .map_err(|e| SdkError::ExecutionFailed {
+                reason: format!("Failed to read local://{relative}: {e}"),
+            })?;
 
         let size = content.len();
         let content_type = if relative.ends_with(".md") {

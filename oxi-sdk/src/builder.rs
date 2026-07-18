@@ -127,16 +127,41 @@ impl Oxi {
     /// Resolution order:
     /// 1. Custom providers registered via `OxiBuilder::provider()`
     /// 2. Provider factories registered via `OxiBuilder::provider_factory()`
-    /// 3. Built-in providers with credential injection (if `with_builtins()` was called)
+    /// 3. Built-in providers with credential injection (if `with_builtins()` was called):
+    ///    a. Explicit per-provider key from `OxiBuilder::api_key(name, key)`
+    ///    b. The wired `AuthProvider` port (sync fast-path). This is the
+    ///    primary credential source for products like the CLI, which
+    ///    never call `OxiBuilder::api_key()` and instead register
+    ///    `FileAuthProvider` via `.with_auth(...)`. Consulted on every
+    ///    `create_provider` call, so auth-store updates (e.g. a key entered
+    ///    via the TUI overlay) are picked up without rebuilding the engine.
+    ///    c. Provider env var (the `create_builtin_provider_with_options`
+    ///    fallback inside `oxi-ai`).
+    ///
+    /// This is the **single credential authority** for the agent loop: the
+    /// `AgentConfig.api_key` field and the `api_key` params on
+    /// `Agent::switch_model` / `Agent::refresh_api_key` are vestigial after
+    /// this wiring and are removed in a follow-up. See issues #39 and #40.
     pub fn create_provider(&self, name: &str) -> Result<Arc<dyn Provider>> {
         // 1. Check custom providers registered via OxiBuilder::provider()
         if let Some(p) = self.providers.get_custom(name) {
             return Ok(p);
         }
-        // 2. Fall back to built-in providers (with optional credential injection)
+        // 2. Built-in providers with credential injection.
         if self.include_builtins {
-            let api_key = self.api_keys.get(name).map(|s| s.as_str());
             let base_url = self.base_urls.get(name).map(|s| s.as_str());
+            // Credential resolution: explicit OxiBuilder::api_key() override first,
+            // then the AuthProvider port's sync fast-path, then env-var fallback
+            // (handled inside create_builtin_provider_with_options).
+            let explicit_key = self.api_keys.get(name).map(|s| s.as_str());
+            let auth_port_key = self
+                .ports
+                .auth
+                .get_api_key_sync(name)
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty());
+            let api_key = explicit_key.or(auth_port_key.as_deref());
             if let Some(p) = oxi_ai::create_builtin_provider_with_options(name, api_key, base_url) {
                 return Ok(Arc::from(p));
             }

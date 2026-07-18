@@ -9,6 +9,9 @@
 pub mod json_parse;
 pub mod overflow;
 pub mod sanitize_unicode;
+pub mod secret_obfuscator;
+pub mod thinking_loop;
+pub mod tool_call_loop;
 
 /// Normalize a tool call ID for cross-provider compatibility.
 ///

@@ -1,0 +1,18 @@
+[package]
+name = "oxi-snapcompact"
+version = "0.55.0"
+description = "Bitmap-frame context compression for vision-capable LLMs — Rust port of omp snapcompact"
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+
+# Ported from https://github.com/can1357/oh-my-pi (MIT) — packages/snapcompact/
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+serde_json = "1"

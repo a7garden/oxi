@@ -20,6 +20,9 @@ pub enum MnemopiError {
     #[error("embedding error: {0}")]
     Embedding(String),
 
+    #[error("llm error: {0}")]
+    Llm(String),
+
     #[error("config error: {0}")]
     Config(String),
 

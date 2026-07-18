@@ -33,11 +33,6 @@ pub struct AgentLoopConfig {
     pub auto_retry_max_attempts: usize,
     /// Base delay in milliseconds for auto-retry exponential back-off.
     pub auto_retry_base_delay_ms: u64,
-    /// API key override for the provider.
-    ///
-    /// When set, this is injected into [`oxi_ai::StreamOptions`] so the
-    /// provider uses it instead of an environment variable.
-    pub api_key: Option<String>,
     /// Working directory for file tools. Defaults to current directory if None.
     pub workspace_dir: Option<std::path::PathBuf>,
     /// Per-provider options for fine-grained control.
@@ -98,6 +93,20 @@ pub struct AgentLoopConfig {
     /// `None` (default) = no limit. Opt-in — existing behavior is
     /// preserved.
     pub max_tool_result_bytes: Option<usize>,
+    /// Enable thinking-loop detection in the streaming layer. When true,
+    /// each `ThinkingDelta` is fed to a detector that recognises verbatim
+    /// tail repetition, near-duplicate paragraph clusters, and
+    /// progress-lexicon stalls. On detection the stream is aborted with
+    /// a transient error so the retry layer resamples.
+    ///
+    /// Default: `true`. Set to `false` to disable (e.g. for tests that
+    /// exercise specific failure modes).
+    pub thinking_loop_detection: bool,
+    /// Settings for the cross-turn tool-call loop guard. When the same
+    /// single-tool call repeats past the threshold, the agent emits a
+    /// steering message to break the loop. Default: threshold 5, with
+    /// `read`/`ls`/`grep` exempt.
+    pub tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions,
 }
 
 impl Default for AgentLoopConfig {
@@ -118,8 +127,8 @@ impl Default for AgentLoopConfig {
             auto_retry_enabled: false,
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 2000,
-            api_key: None,
             workspace_dir: None,
+            max_tool_result_bytes: None,
             provider_options: None,
             on_compaction: None,
             snapshot_store: None,
@@ -131,7 +140,9 @@ impl Default for AgentLoopConfig {
             ttsr_engine: None,
             subagent_runner: None,
             subagent_depth: 0,
-            max_tool_result_bytes: None,
+            thinking_loop_detection: true,
+            tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions::default(
+            ),
         }
     }
 }

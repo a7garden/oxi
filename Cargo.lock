@@ -192,6 +192,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -246,6 +255,25 @@ dependencies = [
  "predicates-core",
  "predicates-tree",
  "wait-timeout",
+]
+
+[[package]]
+name = "async-lsp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8b8fd1e175c5ee3108095da452e816519de618beccea23aa053c00cf5e344b9"
+dependencies = [
+ "futures",
+ "lsp-types",
+ "pin-project-lite",
+ "rustix 1.1.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower-layer",
+ "tower-service",
+ "waitpid-any",
 ]
 
 [[package]]
@@ -3517,6 +3545,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "lsp-types"
+version = "0.95.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e34d33a8e9b006cd3fc4fe69a921affa097bae4bb65f76271f4644f9a334365"
+dependencies = [
+ "bitflags 1.3.2",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "url",
+]
+
+[[package]]
 name = "lzma-rust2"
 version = "0.15.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4212,7 +4253,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4225,7 +4266,7 @@ dependencies = [
  "oxi-ai",
  "oxi-hashline",
  "oxibrowser",
- "oxibrowser-core",
+ "oxibrowser-core 0.16.0",
  "parking_lot",
  "regex",
  "reqwest",
@@ -4242,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-ai"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4280,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4331,7 +4372,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-hashline"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "async-trait",
  "lru",
@@ -4346,13 +4387,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxi-mnemopi"
-version = "0.54.0"
+name = "oxi-lsp"
+version = "0.55.0"
 dependencies = [
+ "async-lsp",
+ "dashmap",
+ "futures",
+ "lsp-types",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "oxi-mnemopi"
+version = "0.55.0"
+dependencies = [
+ "arc-swap",
  "chrono",
  "dirs",
  "fastembed",
+ "libc",
  "lru",
+ "notify",
  "parking_lot",
  "regex",
  "reqwest",
@@ -4363,12 +4423,13 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "oxi-sdk"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4382,7 +4443,7 @@ dependencies = [
  "glob",
  "oxi-agent",
  "oxi-ai",
- "oxibrowser-core",
+ "oxibrowser-core 0.17.0",
  "parking_lot",
  "regex",
  "reqwest",
@@ -4400,8 +4461,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxi-snapcompact"
+version = "0.55.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oxi-tui"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4433,7 +4502,7 @@ dependencies = [
  "clap",
  "futures",
  "oxibrowser-cdp",
- "oxibrowser-core",
+ "oxibrowser-core 0.16.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -4455,8 +4524,8 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "oxibrowser-core",
- "oxibrowser-webapi",
+ "oxibrowser-core 0.16.0",
+ "oxibrowser-webapi 0.16.0",
  "serde",
  "serde_json",
  "sha1 0.10.6",
@@ -4487,7 +4556,44 @@ dependencies = [
  "html5ever",
  "image",
  "markup5ever",
- "oxibrowser-webapi",
+ "oxibrowser-webapi 0.16.0",
+ "parking_lot",
+ "percent-encoding",
+ "pollster",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "string_cache",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wreq",
+ "wreq-util",
+]
+
+[[package]]
+name = "oxibrowser-core"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdf567eea7dcca326c99bfbd21e8381dc814ef9eed315bcd031bb562a92a7e8a"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "boa_engine",
+ "boa_gc",
+ "bytes",
+ "chrono",
+ "encoding_rs",
+ "futures",
+ "getrandom 0.3.4",
+ "html5ever",
+ "image",
+ "markup5ever",
+ "oxibrowser-webapi 0.17.0",
  "parking_lot",
  "percent-encoding",
  "pollster",
@@ -4510,6 +4616,21 @@ name = "oxibrowser-webapi"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19741b02796602376dbd6036140e0ff8cee3c846a751191d4f7939c6c96952a7"
+dependencies = [
+ "html5ever",
+ "markup5ever",
+ "serde",
+ "serde_json",
+ "string_cache",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "oxibrowser-webapi"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe36c42b886616f0fbabf0131766dd75838741aa37888c9a3d819c91ac53dae5"
 dependencies = [
  "html5ever",
  "markup5ever",
@@ -5995,6 +6116,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_repr"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.0",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6338,6 +6470,17 @@ name = "syn"
 version = "2.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b9ae57f904213ebb649ce6895b8a66c66f0203b9319718f69a5612a065b1422"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2fac314a64dc9a36e61a9eb4261a5e9bbfbc922b27e518af97bc32b926cf967"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7185,6 +7328,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -7297,6 +7441,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "waitpid-any"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18aa3ce681e189f125c4c1e1388c03285e2fd434ef52c7203084012ac29c5e4a"
+dependencies = [
+ "rustix 1.1.4",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -268,6 +268,11 @@ pub struct MnemopiConfig {
     /// cache keying, `vector_index::store_embedding` metadata, and
     /// diagnostics).
     pub embedding_model: Option<String>,
+    /// Optional LLM backend for fact extraction + consolidation prompts.
+    /// When `Some`, [`crate::extraction`] uses an [`crate::llm::LlmBackend`]
+    /// -aware extractor; [`crate::consolidate`] routes the sleep prompt
+    /// through it. When `None`, the heuristic / algorithmic paths run.
+    pub llm_backend: Option<std::sync::Arc<dyn crate::llm::LlmBackend>>,
 }
 
 impl std::fmt::Debug for MnemopiConfig {
@@ -289,6 +294,10 @@ impl std::fmt::Debug for MnemopiConfig {
                     .map(|_| "<dyn EmbeddingProvider>"),
             )
             .field("embedding_model", &self.embedding_model)
+            .field(
+                "llm_backend",
+                &self.llm_backend.as_ref().map(|_| "<dyn LlmBackend>"),
+            )
             .finish()
     }
 }
@@ -306,6 +315,7 @@ impl Default for MnemopiConfig {
             max_episode_chars: 100_000,
             embedding_provider: None,
             embedding_model: None,
+            llm_backend: None,
         }
     }
 }

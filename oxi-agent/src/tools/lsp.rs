@@ -40,9 +40,16 @@ impl AgentTool for LspTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["diagnostics", "definition", "references", "hover", "rename", "symbols", "status"]
+                    "enum": [
+                        "diagnostics", "definition", "references", "hover",
+                        "rename", "symbols", "status",
+                        "code_actions", "type_definition", "implementation",
+                        "file_rename"
+                    ]
                 },
                 "file": {"type": "string", "description": "File path"},
+                "old_path": {"type": "string", "description": "Existing path for file_rename"},
+                "new_path": {"type": "string", "description": "Target path for file_rename"},
                 "line": {"type": "integer", "description": "1-based line number"},
                 "symbol": {"type": "string", "description": "Symbol name (optional, for disambiguation)"},
                 "new_name": {"type": "string", "description": "New name for rename"},
@@ -129,6 +136,30 @@ fn parse_lsp_action(params: &Value) -> Result<LspAction, ToolError> {
             Ok(LspAction::Symbols { file, query })
         }
         "status" => Ok(LspAction::Status),
+        "code_actions" => Ok(LspAction::CodeActions { file, line, symbol }),
+        "type_definition" => Ok(LspAction::TypeDefinition { file, line, symbol }),
+        "implementation" => Ok(LspAction::Implementation { file, line, symbol }),
+        "file_rename" => {
+            let old_path = params
+                .get("old_path")
+                .and_then(|v| v.as_str())
+                .ok_or("file_rename requires 'old_path'")?
+                .to_string();
+            let new_path = params
+                .get("new_path")
+                .and_then(|v| v.as_str())
+                .ok_or("file_rename requires 'new_path'")?
+                .to_string();
+            let apply = params
+                .get("apply")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Ok(LspAction::FileRename {
+                old_path,
+                new_path,
+                apply,
+            })
+        }
         other => Err(format!("Unknown LSP action: '{}'", other)),
     }
 }

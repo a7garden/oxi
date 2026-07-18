@@ -1,6 +1,6 @@
 [package]
 name = "oxi-mnemopi"
-version = "0.54.0"
+version = "0.55.0"
 description = "Local SQLite vector memory engine — Rust port of omp Mnemopi"
 edition = { workspace = true }
 rust-version = { workspace = true }
@@ -23,6 +23,9 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 dirs = "6"
+tracing = "0.1"
+arc-swap = "1"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 
 [[bin]]
 name = "oxi-mnemopi-mcp"
@@ -32,19 +35,27 @@ path = "src/bin/oxi-mnemopi-mcp.rs"
 default = []
 # Local ONNX embeddings via fastembed-rs (adds ~50MB to binary).
 local-embeddings = ["dep:fastembed"]
-# Remote embedding API via reqwest.
+# Remote embedding API via reqwest (OpenAI-compatible /v1/embeddings).
 remote-embeddings = ["dep:reqwest"]
+# Remote LLM API via reqwest (OpenAI-compatible /v1/chat/completions).
+# Shares the same reqwest dep as `remote-embeddings`.
+remote-llm = ["dep:reqwest"]
 
 [dependencies.fastembed]
 version = "5"
 optional = true
 
+# `blocking` feature is required for the LLM/embedding HTTP calls; the
+# crate's API is synchronous and wraps the blocking reqwest client. Both
+# remote features share this single declaration.
 [dependencies.reqwest]
 version = "0.12"
-features = ["json", "rustls-tls"]
+features = ["json", "rustls-tls", "blocking"]
 default-features = false
 optional = true
 
-
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

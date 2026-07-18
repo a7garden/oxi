@@ -38,15 +38,15 @@ pub mod prelude;
 pub mod routing;
 pub mod security;
 pub mod tool_factory;
-pub mod workflow_dsl;
 pub mod url_resolver;
+pub mod workflow_dsl;
 
 // Re-export core SDK types
 pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
-pub use url_resolver::SdkUrlResolver;
 pub use delegation::SdkSubagentRunner;
+pub use url_resolver::SdkUrlResolver;
 
 // Re-export port types — products implement these traits.
 // Note: Some names conflict with existing modules (e.g. `EventBus` is also a

@@ -263,6 +263,21 @@ pub trait AuthProvider: Send + Sync + 'static {
         provider: &str,
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, SdkError>> + Send + '_>>;
 
+    /// Sync fast-path for reading the API key.
+    ///
+    /// Used by [`crate::Oxi::create_provider`] when constructing a built-in
+    /// provider in a sync context (e.g. inside the agent loop's
+    /// `ProviderResolver::resolve_provider`). The default returns `Ok(None)`
+    /// (no sync source available); implementations with synchronous backing
+    /// stores (e.g. [`crate::ports::fs::FileAuthProvider`]) override this to
+    /// expose their already-synchronous read path without forcing callers
+    /// through `block_on`. This is the credential source the agent loop
+    /// consults at provider-construction time, replacing the old
+    /// `AgentConfig.api_key` injection (issue #40).
+    fn get_api_key_sync(&self, _provider: &str) -> Result<Option<String>, SdkError> {
+        Ok(None)
+    }
+
     /// Write the API key for a provider.
     fn set_api_key(
         &self,

@@ -163,7 +163,36 @@ pub trait AgentPoolProvider: Send + Sync + std::fmt::Debug {
 
 // ── LSP capability (⑧) ────────────────────────────────────────────────
 
-/// LSP action enum — the 14 operations the `lsp` tool supports.
+/// Aggregated diagnostics across one or more files (returned by
+/// [`LspProvider::drain_diagnostics`]). Counts severity buckets so callers
+/// can surface a quick "0 errors / 3 warnings" summary without scanning
+/// every diagnostic.
+#[derive(Debug, Clone, Default)]
+pub struct DiagnosticsSummary {
+    /// Total number of fresh diagnostics after filtering.
+    pub count: usize,
+    /// Number of error-severity diagnostics.
+    pub errors: usize,
+    /// Number of warning-severity diagnostics.
+    pub warnings: usize,
+    /// Per-file entries; empty when no diagnostics have arrived yet.
+    pub entries: Vec<FileDiagnosticEntry>,
+}
+
+/// Diagnostics for one file. Path is the LSP document URI as the server
+/// reported it (may be `file://`-prefixed); `diagnostics` is the raw payload
+/// from `textDocument/publishDiagnostics`.
+#[derive(Debug, Clone)]
+pub struct FileDiagnosticEntry {
+    /// Document URI (typically `file://<absolute path>`).
+    pub uri: String,
+    /// Path-relative display of the file (best effort).
+    pub path: String,
+    /// Diagnostics reported by the server for this file.
+    pub diagnostics: serde_json::Value,
+}
+
+/// LSP action enum — the operations the `lsp` tool supports.
 #[derive(Debug, Clone)]
 pub enum LspAction {
     /// Get diagnostics for a file.
@@ -220,11 +249,88 @@ pub enum LspAction {
     },
     /// Get server status.
     Status,
+    /// Available code actions at a position.
+    CodeActions {
+        /// Path to the file containing the position.
+        file: String,
+        /// 1-based line number.
+        line: u32,
+        /// Optional symbol hint for disambiguation.
+        symbol: Option<String>,
+    },
+    /// Go to type definition.
+    TypeDefinition {
+        /// Path to the file containing the symbol.
+        file: String,
+        /// 1-based line number.
+        line: u32,
+        /// Optional symbol hint.
+        symbol: Option<String>,
+    },
+    /// Go to implementation.
+    Implementation {
+        /// Path to the file containing the symbol.
+        file: String,
+        /// 1-based line number.
+        line: u32,
+        /// Optional symbol hint.
+        symbol: Option<String>,
+    },
+    /// Rename a file (workspace/willRenameFiles + applyWorkspaceEdit).
+    FileRename {
+        /// Current path on disk.
+        old_path: String,
+        /// Target path on disk.
+        new_path: String,
+        /// If true, apply the rename; otherwise just preview.
+        apply: bool,
+    },
 }
 
 /// LSP access capability. Implemented by an `oxi-lsp` crate (feature-gated)
 /// or stubbed with `None` when LSP is disabled.
 pub trait LspProvider: Send + Sync + std::fmt::Debug {
+    /// Kick off background initialisation (servers start but `ensure_ready`
+    /// isn't awaited). Idempotent.
+    fn ensure_started_background<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+    /// Block until at least the configured LSP servers have finished their
+    /// `initialize` handshake (or the operation times out per the
+    /// provider's internal budget).
+    fn ensure_ready<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+
+    /// Drain the most recent batch of diagnostics that arrived via
+    /// `textDocument/publishDiagnostics`. Returns `None` when nothing
+    /// fresh has arrived within `timeout`.
+    fn drain_diagnostics<'a>(
+        &'a self,
+        timeout: std::time::Duration,
+    ) -> Pin<Box<dyn Future<Output = Option<DiagnosticsSummary>> + Send + 'a>>;
+
+    /// Read the most recent cached diagnostics for the given file paths
+    /// (zero-copy snapshot — no waiting). Paths that have no fresh
+    /// diagnostics are omitted from the returned vec.
+    fn read_diagnostics<'a>(
+        &'a self,
+        paths: &'a [std::path::PathBuf],
+    ) -> Pin<Box<dyn Future<Output = Vec<FileDiagnosticEntry>> + Send + 'a>>;
+
+    /// Notify the LSP manager that the contents of `path` changed. The
+    /// manager is responsible for forwarding a `workspace/didChange` to
+    /// every server that owns the file. Default implementation is a no-op
+    /// so lightweight providers (e.g. test stubs) don't have to wire it.
+    fn notify_file_changed<'a>(
+        &'a self,
+        _path: &'a std::path::Path,
+        _content: &'a str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
+
     /// Execute an LSP action and return formatted text output.
     fn execute_action<'a>(
         &'a self,

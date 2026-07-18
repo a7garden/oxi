@@ -41,6 +41,133 @@ impl FactExtractor for HeuristicExtractor {
     }
 }
 
+/// LLM-backed fact extractor.
+///
+/// Wraps a [`crate::llm::LlmBackend`] with an extraction prompt template
+/// (containing `{text}` and optional `{lang}` placeholders). The model's
+/// response is parsed as one fact per line; lines may be marked with a
+/// trailing ` | <importance>` to override the default 0.5 importance.
+///
+/// Failures (network, malformed output) fall back to
+/// [`HeuristicExtractor`] so a flaky LLM endpoint cannot disrupt the
+/// synchronous `remember` path.
+pub struct LlmExtractor {
+    backend: std::sync::Arc<dyn crate::llm::LlmBackend>,
+    prompt_template: String,
+    fallback: HeuristicExtractor,
+}
+
+impl std::fmt::Debug for LlmExtractor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmExtractor")
+            .field("backend", &self.backend.backend_name())
+            .field("prompt_template_len", &self.prompt_template.len())
+            .finish()
+    }
+}
+
+impl LlmExtractor {
+    /// Create a new LLM extractor with a custom prompt template.
+    ///
+    /// The template must contain a `{text}` placeholder; an optional
+    /// `{lang}` placeholder receives an ISO-639-1 code (default `"en"`).
+    pub fn new(
+        backend: std::sync::Arc<dyn crate::llm::LlmBackend>,
+        prompt_template: impl Into<String>,
+    ) -> Self {
+        Self {
+            backend,
+            prompt_template: prompt_template.into(),
+            fallback: HeuristicExtractor,
+        }
+    }
+
+    /// Default extraction prompt — compact, instructs the model to emit
+    /// one atomic fact per line. Designed for small / fast models
+    /// (TinyLlama, gpt-4.1-mini, qwen2.5:3b).
+    pub fn default_prompt() -> &'static str {
+        "Extract atomic facts from the text below. Output one fact per \
+         line, no numbering, no bullets, no commentary. If a fact is \
+         especially important, append \" | 0.9\" (range 0.0 to 1.0); \
+         otherwise omit the suffix. Stop after the facts.\n\n\
+         Language: {lang}\n\nText:\n{text}\n"
+    }
+
+    /// Build the prompt for a given text.
+    fn render_prompt(&self, text: &str) -> String {
+        self.prompt_template
+            .replace("{lang}", "en")
+            .replace("{text}", text)
+    }
+}
+
+impl FactExtractor for LlmExtractor {
+    fn extract(&self, text: &str) -> crate::error::Result<Vec<ExtractedFact>> {
+        let prompt = self.render_prompt(text);
+        let opts = crate::llm::CompleteOptions {
+            max_tokens: Some(1024),
+            temperature: Some(0.0),
+            timeout: Some(std::time::Duration::from_secs(15)),
+        };
+        match self.backend.complete(&prompt, &opts) {
+            Ok(raw) => Ok(parse_llm_facts(&raw)),
+            Err(e) => {
+                tracing::warn!(
+                    backend = self.backend.backend_name(),
+                    error = %e,
+                    "LLM fact extraction failed; falling back to heuristic"
+                );
+                self.fallback.extract(text)
+            }
+        }
+    }
+}
+
+/// Parse one fact per non-empty line. Lines may end with ` | <f32>`
+/// to override the default importance of 0.5.
+fn parse_llm_facts(raw: &str) -> Vec<ExtractedFact> {
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Skip bullets / numbering if present.
+        let stripped = trimmed
+            .trim_start_matches(|c: char| c == '-' || c == '*' || c.is_ascii_digit())
+            .trim_start_matches(['.', ')', ' '])
+            .trim();
+        if stripped.is_empty() {
+            continue;
+        }
+        let (content, importance) = match stripped.rsplit_once('|') {
+            Some((head, tail)) => {
+                let parsed = tail
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|f| (0.0..=1.0).contains(f));
+                match parsed {
+                    Some(p) => (head.trim().to_string(), p),
+                    None => (stripped.to_string(), 0.5),
+                }
+            }
+            None => (stripped.to_string(), 0.5),
+        };
+        if content.is_empty() {
+            continue;
+        }
+        let lower = content.to_lowercase();
+        out.push(ExtractedFact {
+            content,
+            importance,
+            veracity: detect_veracity(&lower),
+            memory_type: Some(detect_type(&lower)),
+        });
+    }
+    out
+}
+
 /// Heuristic fact extraction.
 ///
 /// Splits by sentence boundaries (`. `, `! `, `? `, newlines) and filters
@@ -274,5 +401,89 @@ mod tests {
             .extract("Rust is a systems language. What about Go?")
             .unwrap();
         assert!(facts.iter().any(|f| f.content.contains("Rust")));
+    }
+
+    #[test]
+    fn parse_llm_facts_one_per_line() {
+        let raw = "Rust is a systems language\nThe build uses cargo\n";
+        let facts = parse_llm_facts(raw);
+        assert_eq!(facts.len(), 2);
+        assert!(facts[0].content.contains("Rust"));
+        assert!(facts[1].content.contains("cargo"));
+        // Default importance.
+        assert!((facts[0].importance - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_llm_facts_importance_override() {
+        let raw = "Critical fact | 0.95\nNormal fact\nOther | 0.7\n";
+        let facts = parse_llm_facts(raw);
+        assert_eq!(facts.len(), 3);
+        assert!((facts[0].importance - 0.95).abs() < 1e-6);
+        assert!((facts[1].importance - 0.5).abs() < 1e-6);
+        assert!((facts[2].importance - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_llm_facts_skips_empty_and_bullets() {
+        let raw = "\n- bullet one\n2. numbered\n* star\n\n";
+        let facts = parse_llm_facts(raw);
+        assert_eq!(facts.len(), 3);
+        assert!(facts.iter().all(|f| !f.content.is_empty()));
+    }
+
+    #[test]
+    fn parse_llm_facts_rejects_invalid_importance() {
+        // " | abc" is not a valid f64 → keep whole line as content.
+        let facts = parse_llm_facts("The fact | abc\n");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].content, "The fact | abc");
+    }
+
+    #[test]
+    fn parse_llm_facts_clamps_importance_range() {
+        // Out-of-range importance is rejected, line kept as plain content.
+        let facts = parse_llm_facts("Fact | 5.0\n");
+        assert_eq!(facts.len(), 1);
+        assert!((facts[0].importance - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn llm_extractor_falls_back_on_backend_error() {
+        use crate::llm::{CompleteOptions, LlmBackend};
+        use std::sync::Arc;
+
+        struct FailingBackend;
+        impl LlmBackend for FailingBackend {
+            fn complete(&self, _: &str, _: &CompleteOptions) -> crate::error::Result<String> {
+                Err(crate::error::MnemopiError::Llm("simulated failure".into()))
+            }
+            fn backend_name(&self) -> &str {
+                "failing"
+            }
+        }
+
+        let extractor = LlmExtractor::new(Arc::new(FailingBackend), LlmExtractor::default_prompt());
+        // Extraction should succeed via heuristic fallback, not propagate.
+        let facts = extractor
+            .extract("The user prefers Vim. This is critically important.")
+            .unwrap();
+        assert!(!facts.is_empty());
+    }
+
+    #[test]
+    fn llm_extractor_uses_backend_output_when_available() {
+        use crate::llm::StubLlmBackend;
+        use std::sync::Arc;
+
+        let stub = StubLlmBackend {
+            response: "Fact one\nFact two | 0.9\n".into(),
+            name: "stub".into(),
+        };
+        let extractor = LlmExtractor::new(Arc::new(stub), LlmExtractor::default_prompt());
+        let facts = extractor.extract("ignored by stub").unwrap();
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0].content, "Fact one");
+        assert!((facts[1].importance - 0.9).abs() < 1e-6);
     }
 }
