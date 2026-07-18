@@ -722,17 +722,6 @@ fn build_settings_items(
         disabled: false,
     });
 
-    // `stream_responses` is persisted but has no consumer yet (the agent
-    // always streams). Shown read-only so users don't expect a live effect.
-    items.push(SettingsItem::ReadOnly {
-        label: "stream_responses".to_string(),
-        value: if settings.stream_responses {
-            "on (not wired)".to_string()
-        } else {
-            "off (not wired)".to_string()
-        },
-    });
-
     items.push(SettingsItem::Toggle {
         label: "extensions".to_string(),
         value: settings.extensions_enabled,

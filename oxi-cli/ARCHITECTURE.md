@@ -243,7 +243,6 @@ pub struct Settings {
     pub themes: Vec<String>,
     
     // Behavior
-    pub stream_responses: bool,
     pub extensions_enabled: bool,
     pub auto_compaction: bool,
     pub tool_timeout_seconds: u64,
@@ -261,7 +260,6 @@ pub struct Settings {
 | `OXI_MAX_TOKENS` | `max_tokens` |
 | `OXI_TEMPERATURE` | `default_temperature` |
 | `OXI_SESSION_DIR` | `session_dir` |
-| `OXI_STREAM` | `stream_responses` |
 | `OXI_AUTO_COMPACTION` | `auto_compaction` |
 | `OXI_TOOL_TIMEOUT` | `tool_timeout_seconds` |
 

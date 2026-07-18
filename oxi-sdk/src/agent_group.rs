@@ -1,7 +1,6 @@
 //! Agent group — multi-agent orchestration primitives.
 //!
-//! Provides `AgentGroup` for running multiple agents with different
-//! strategies: pipeline (sequential), parallel, or orchestrated.
+//! Provides `AgentGroup` for running multiple agents with pipeline or parallel strategies.
 
 use crate::error::SdkResult;
 use anyhow::Result;
@@ -18,16 +17,6 @@ pub enum GroupStrategy {
     Parallel {
         /// Maximum concurrent agent executions.
         max_concurrency: usize,
-    },
-
-    /// Leader agent distributes work to worker agents.
-    ///
-    /// **Current status**: Stub — only the leader agent is executed.
-    /// Full worker delegation (task decomposition → distribution → collection)
-    /// is planned but not yet implemented.
-    Orchestrated {
-        /// Index of the leader agent in the group.
-        leader: usize,
     },
 }
 
@@ -134,9 +123,6 @@ impl AgentGroup {
             GroupStrategy::Parallel { max_concurrency } => {
                 self.run_parallel(prompt, *max_concurrency).await?
             }
-            GroupStrategy::Orchestrated { leader } => {
-                self.run_orchestrated(prompt, *leader).await?
-            }
         };
 
         Ok(GroupResult {
@@ -240,30 +226,6 @@ impl AgentGroup {
             }
         }
         Ok(results)
-    }
-
-    /// Orchestrated delegation is **not yet implemented**.
-    ///
-    /// Returns an explicit error rather than silently degrading to a
-    /// single-agent run, so callers know orchestration is unavailable. Full
-    /// worker delegation (leader decomposes → workers execute in parallel →
-    /// leader merges) is planned for a future release; until then, use the
-    /// `Parallel` or `Pipeline` strategy.
-    async fn run_orchestrated(
-        &self,
-        _prompt: String,
-        leader_idx: usize,
-    ) -> Result<Vec<AgentGroupOutput>> {
-        if leader_idx >= self.agents.len() {
-            anyhow::bail!(
-                "Leader index {} out of range ({} agents)",
-                leader_idx,
-                self.agents.len()
-            );
-        }
-        anyhow::bail!(
-            "Orchestrated delegation is not yet implemented; use Parallel or Pipeline strategy"
-        );
     }
 }
 

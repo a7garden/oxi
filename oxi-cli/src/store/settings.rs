@@ -205,10 +205,6 @@ pub struct Settings {
     pub session_dir: Option<PathBuf>,
 
     // ── Behaviour flags ──────────────────────────────────────────────
-    /// Whether to stream responses
-    #[serde(default = "default_true")]
-    pub stream_responses: bool,
-
     /// Whether extensions are enabled
     #[serde(default = "default_true")]
     pub extensions_enabled: bool,
@@ -570,7 +566,6 @@ impl Default for Settings {
             max_response_tokens: None,
             session_history_size: default_session_history_size(),
             session_dir: None,
-            stream_responses: true,
             extensions_enabled: true,
             auto_compaction: true,
             disabled_tools: Vec::new(),
@@ -900,7 +895,6 @@ impl Settings {
     /// | `OXI_MAX_TOKENS`          | `max_tokens`           |
     /// | `OXI_TEMPERATURE`         | `default_temperature`  |
     /// | `OXI_SESSION_DIR`         | `session_dir`          |
-    /// | `OXI_STREAM`              | `stream_responses`     |
     /// | `OXI_EXTENSIONS_ENABLED`  | `extensions_enabled`   |
     /// | `OXI_AUTO_COMPACTION`     | `auto_compaction`      |
     /// | `OXI_TOOL_TIMEOUT`        | `tool_timeout_seconds` |
@@ -1445,7 +1439,6 @@ mod tests {
         assert!(settings.extensions_enabled);
         assert!(settings.auto_compaction);
         assert_eq!(settings.tool_timeout_seconds, 120);
-        assert!(settings.stream_responses);
     }
 
     #[test]
@@ -1526,7 +1519,6 @@ theme = "dracula"
             "OXI_TEMPERATURE",
             "OXI_MAX_TOKENS",
             "OXI_SESSION_DIR",
-            "OXI_STREAM",
             "OXI_EXTENSIONS_ENABLED",
         ]);
         let tmp = tempfile::tempdir().unwrap();
@@ -1560,7 +1552,6 @@ theme = "dracula"
             "OXI_TEMPERATURE",
             "OXI_MAX_TOKENS",
             "OXI_SESSION_DIR",
-            "OXI_STREAM",
             "OXI_EXTENSIONS_ENABLED",
         ]);
         let tmp = tempfile::tempdir().unwrap();
@@ -1596,14 +1587,12 @@ theme = "dracula"
     fn test_apply_env_boolish() {
         // NOTE: Environment variable overrides are disabled.
         // apply_env() is a no-op.
-        let _guard = EnvGuard::new(&["OXI_STREAM", "OXI_EXTENSIONS_ENABLED"]);
-        unsafe { env::set_var("OXI_STREAM", "false") };
+        let _guard = EnvGuard::new(&["OXI_EXTENSIONS_ENABLED"]);
         unsafe { env::set_var("OXI_EXTENSIONS_ENABLED", "0") };
 
         let mut settings = Settings::default();
         settings.apply_env();
         // Since env overrides are disabled, values stay at defaults
-        assert!(settings.stream_responses); // default is true
         assert!(settings.extensions_enabled); // default is true
     }
 
@@ -2305,7 +2294,6 @@ tool_timeout_seconds = 45
             "OXI_TEMPERATURE",
             "OXI_MAX_TOKENS",
             "OXI_SESSION_DIR",
-            "OXI_STREAM",
             "OXI_EXTENSIONS_ENABLED",
         ]);
         let tmp = tempfile::tempdir().unwrap();
@@ -2425,14 +2413,12 @@ tool_timeout_seconds = 45
         let toml_content = r#"
 last_used_model = "loaded-via-toml"
 theme = "loaded-theme"
-stream_responses = false
 "#;
         tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
 
         let merged = Settings::layer_file(&Settings::default(), tmp.path()).unwrap();
         assert_eq!(merged.last_used_model, Some("loaded-via-toml".to_string()));
         assert_eq!(merged.theme, "loaded-theme");
-        assert!(!merged.stream_responses);
     }
 
     #[test]

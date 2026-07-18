@@ -200,7 +200,6 @@ default_provider = "anthropic"
 max_tokens = 4096
 temperature = 0.7
 session_history_size = 100
-stream_responses = true
 ```
 
 ## Skills

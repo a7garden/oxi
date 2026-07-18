@@ -13,32 +13,6 @@ use crate::middleware::{Middleware, MiddlewarePipeline};
 use crate::observability::{AuditLog, CostTracker, Tracer};
 use crate::security::{Authorizer, CapabilitySet};
 
-/// Wrapper that makes Arc<Oxi> usable as ProviderResolver.
-/// This is needed because Agent stores Arc<dyn ProviderResolver + 'static>.
-pub(crate) struct OxiResolver {
-    oxi: Arc<OxiCore>,
-}
-
-/// Type-erased Oxi inner for the resolver.
-/// We can't use `Oxi` directly because it's in the same crate.
-/// Instead we use a trait object approach.
-pub(crate) struct OxiCore {
-    #[allow(clippy::type_complexity)]
-    resolve_provider_fn: Box<dyn Fn(&str) -> Option<Arc<dyn oxi_ai::Provider>> + Send + Sync>,
-    #[allow(clippy::type_complexity)]
-    resolve_model_fn: Box<dyn Fn(&str) -> Option<oxi_ai::Model> + Send + Sync>,
-}
-
-impl ProviderResolver for OxiResolver {
-    fn resolve_provider(&self, name: &str) -> Option<Arc<dyn oxi_ai::Provider>> {
-        (self.oxi.resolve_provider_fn)(name)
-    }
-
-    fn resolve_model(&self, model_id: &str) -> Option<oxi_ai::Model> {
-        (self.oxi.resolve_model_fn)(model_id)
-    }
-}
-
 /// Builder for creating an agent with custom configuration.
 #[allow(dead_code)]
 pub struct AgentBuilder<'a> {
@@ -405,35 +379,18 @@ impl<'a> AgentBuilder<'a> {
             config.system_prompt = Some(prompt.clone());
         }
 
-        // 4. Create resolver that captures Oxi's resolution functions
-        let oxi_providers = self.oxi.providers_arc();
-        let oxi_models = self.oxi.models_arc();
-        let include_builtins = self.oxi.has_builtins();
-
-        let resolver: Arc<dyn ProviderResolver> = Arc::new(OxiResolver {
-            oxi: Arc::new(OxiCore {
-                resolve_provider_fn: Box::new(move |name: &str| {
-                    // Custom providers first
-                    if let Some(p) = oxi_providers.get_custom(name) {
-                        return Some(p);
-                    }
-                    // Built-in fallback
-                    if include_builtins && let Some(p) = oxi_ai::create_builtin_provider(name) {
-                        return Some(Arc::from(p));
-                    }
-                    None
-                }),
-                resolve_model_fn: Box::new(move |model_id: &str| {
-                    let parts: Vec<&str> = model_id.splitn(2, '/').collect();
-                    let (provider, model) = if parts.len() == 2 {
-                        (parts[0], parts[1])
-                    } else {
-                        ("anthropic", parts[0])
-                    };
-                    oxi_models.lookup(provider, model)
-                }),
-            }),
-        });
+        // 4. Use Oxi directly as the resolver. Oxi implements ProviderResolver
+        //    with catalog→static model resolution (builder.rs:106-123) and
+        //    credential-aware provider creation (builder.rs:131-148).
+        //
+        //    The previous hand-rolled OxiResolver/OxiCore closure only
+        //    consulted the static ModelRegistry via lookup(), silently
+        //    dropping the catalog port — so catalog-known models (e.g.
+        //    newer Z.AI models from models.dev) resolved at build() time
+        //    via Oxi::resolve_model but failed inside the agent loop's
+        //    own resolve_model(), causing "Failed to resolve model" at
+        //    stream time.
+        let resolver: Arc<dyn ProviderResolver> = Arc::new(self.oxi.clone());
 
         // 5. Create agent with the isolated resolver
         let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
@@ -532,12 +489,9 @@ impl<'a> AgentBuilder<'a> {
             agent.set_hooks(hooks);
         }
 
-        // 8. CostTracker → event-tap path (accumulate, not replace).
-        //    Tracer is intentionally deferred — see the doc comment on
-        //    `install_observability_dispatch` below for the SpanGuard
-        //    lifetime root cause and the deferred-fix plan.
-        if let Some(ct) = self.cost_tracker.clone() {
-            install_observability_dispatch(&agent, Some(ct));
+        // 8. Tracer and CostTracker → event-tap path (accumulate, not replace).
+        if self.tracer.is_some() || self.cost_tracker.is_some() {
+            install_observability_dispatch(&agent, self.tracer.clone(), self.cost_tracker.clone());
         }
 
         Ok(agent)
@@ -557,32 +511,18 @@ fn resolved_agent_id(agent: &Agent) -> String {
     }
 }
 
-/// Build the event-tap closure that drives CostTracker from the agent's
-/// `AgentEvent::Usage` events.
-///
-/// **Scope: CostTracker ONLY.** Tracer span instrumentation is deferred.
-/// The existing `Tracer::start` returns `SpanGuard<'a>` that borrows the
-/// `Tracer` and is not `Send + 'static`, which would force an unsafe
-/// block to thread through the dispatch closure (the closure is
-/// `Fn(AgentEvent) + Send + Sync + 'static`). The proper fix is to
-/// change `SpanGuard` to own an `Arc<Tracer>` reference so the guard
-/// itself is `'static + Send` — that's a separate `oxi-sdk` design
-/// change tracked against the audit's Gap-0 follow-up. Until that
-/// lands, `.tracer(...)` on `AgentBuilder` silently does nothing.
-///
-/// CostTracker / Authorizer / AuditLog ARE all wired correctly and
-/// produce runtime effect.
+/// Build the event-tap closure that records short lifecycle spans and drives
+/// `CostTracker` from the agent's emitted events.
 fn install_observability_dispatch(
     agent: &Agent,
+    tracer: Option<Arc<Tracer>>,
     cost_tracker: Option<Arc<crate::observability::CostTracker>>,
 ) {
-    use crate::observability::TokenUsage;
+    use crate::observability::{SpanKind, TokenUsage};
     use oxi_agent::AgentEvent;
-
-    let cost_tracker = match cost_tracker {
-        Some(c) => c,
-        None => return,
-    };
+    if tracer.is_none() && cost_tracker.is_none() {
+        return;
+    }
     // Use the same resolved agent_id as the middleware path so
     // AuditLog / Authorizer / CostTracker observations all key
     // by the same principal. Without this, a user-supplied
@@ -594,17 +534,76 @@ fn install_observability_dispatch(
     let agent_id = resolved_agent_id(agent);
     let resolver = agent.resolver().clone();
     let model_id = agent.get_config().model_id;
-    agent.add_observability_dispatch(move |event: AgentEvent| {
-        if let AgentEvent::Usage {
+    agent.add_observability_dispatch(move |event: AgentEvent| match event {
+        AgentEvent::AgentStart {
+            prompts,
+            session_id,
+        } => {
+            if let Some(tracer) = &tracer {
+                let mut span = tracer.start("run", SpanKind::Agent);
+                span.set_attribute("agent.id", serde_json::json!(agent_id));
+                span.set_attribute("model.id", serde_json::json!(model_id));
+                span.set_attribute("prompt.count", serde_json::json!(prompts.len()));
+                if let Some(session_id) = session_id {
+                    span.set_attribute("session.id", serde_json::json!(session_id));
+                }
+            }
+        }
+        AgentEvent::TurnStart { turn_number } => {
+            if let Some(tracer) = &tracer {
+                let mut span = tracer.start("turn_start", SpanKind::Agent);
+                span.set_attribute("turn.number", serde_json::json!(turn_number));
+            }
+        }
+        AgentEvent::TurnEnd {
+            turn_number,
+            tool_results,
+            ..
+        } => {
+            if let Some(tracer) = &tracer {
+                let mut span = tracer.start("turn_end", SpanKind::Agent);
+                span.set_attribute("turn.number", serde_json::json!(turn_number));
+                span.set_attribute("tool.result.count", serde_json::json!(tool_results.len()));
+            }
+        }
+        AgentEvent::ToolExecutionStart {
+            tool_call_id,
+            tool_name,
+            ..
+        } => {
+            if let Some(tracer) = &tracer {
+                let mut span = tracer.start("tool_start", SpanKind::Tool);
+                span.set_attribute("tool.call.id", serde_json::json!(tool_call_id));
+                span.set_attribute("tool.name", serde_json::json!(tool_name));
+            }
+        }
+        AgentEvent::ToolExecutionEnd {
+            tool_call_id,
+            tool_name,
+            is_error,
+            ..
+        } => {
+            if let Some(tracer) = &tracer {
+                let mut span = tracer.start("tool_end", SpanKind::Tool);
+                span.set_attribute("tool.call.id", serde_json::json!(tool_call_id));
+                span.set_attribute("tool.name", serde_json::json!(tool_name));
+                span.set_attribute("error", serde_json::json!(is_error));
+                if is_error {
+                    span.set_error("tool execution failed");
+                }
+            }
+        }
+        AgentEvent::Usage {
             input_tokens,
             output_tokens,
-        } = event
-        {
-            let model = resolver.resolve_model(&model_id);
-            if let Some(m) = model {
+        } => {
+            let Some(cost_tracker) = &cost_tracker else {
+                return;
+            };
+            if let Some(model) = resolver.resolve_model(&model_id) {
                 cost_tracker.record(
                     &agent_id,
-                    &m,
+                    &model,
                     TokenUsage {
                         input: input_tokens as u64,
                         output: output_tokens as u64,
@@ -614,5 +613,167 @@ fn install_observability_dispatch(
                 );
             }
         }
+        _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ports::catalog::{
+        CatalogEvent, CatalogModelEntry, CatalogProtocol, CatalogSource, ModelCatalog,
+    };
+    use crate::{OxiBuilder, SdkResult};
+    use std::future::Future;
+    use std::pin::Pin;
+    use tokio::sync::broadcast;
+
+    /// Minimal catalog with a single model that exists ONLY in the catalog
+    /// port — not in the static ModelRegistry. This reproduces the desync
+    /// where `Oxi::resolve_model()` (catalog→static) finds the model but
+    /// the old `OxiResolver`'s `lookup()` (static-only) did not.
+    struct SingleModelCatalog {
+        entry: CatalogModelEntry,
+        tx: broadcast::Sender<CatalogEvent>,
+    }
+
+    impl std::fmt::Debug for SingleModelCatalog {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("SingleModelCatalog").finish_non_exhaustive()
+        }
+    }
+
+    impl ModelCatalog for SingleModelCatalog {
+        fn list_providers(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = SdkResult<Vec<String>>> + Send + '_>> {
+            let p = self.entry.provider.clone();
+            Box::pin(async move { Ok(vec![p]) })
+        }
+        fn get_provider(
+            &self,
+            _: &str,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = SdkResult<Option<crate::ports::catalog::CatalogProviderEntry>>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Ok(None) })
+        }
+        fn list_models(
+            &self,
+            _: &str,
+        ) -> Pin<Box<dyn Future<Output = SdkResult<Vec<CatalogModelEntry>>> + Send + '_>> {
+            let e = self.entry.clone();
+            Box::pin(async move { Ok(vec![e]) })
+        }
+        fn get_model(
+            &self,
+            provider: &str,
+            model_id: &str,
+        ) -> Pin<Box<dyn Future<Output = SdkResult<Option<CatalogModelEntry>>> + Send + '_>>
+        {
+            let hit = self.get_model_sync(provider, model_id);
+            Box::pin(async move { Ok(hit) })
+        }
+        fn search(
+            &self,
+            _: &str,
+        ) -> Pin<Box<dyn Future<Output = SdkResult<Vec<CatalogModelEntry>>> + Send + '_>> {
+            let e = self.entry.clone();
+            Box::pin(async move { Ok(vec![e]) })
+        }
+        fn model_count(&self) -> Pin<Box<dyn Future<Output = SdkResult<usize>> + Send + '_>> {
+            Box::pin(async { Ok(1) })
+        }
+        fn refresh(
+            &self,
+        ) -> Pin<
+            Box<dyn Future<Output = SdkResult<crate::ports::catalog::RefreshOutcome>> + Send + '_>,
+        > {
+            Box::pin(async { Ok(crate::ports::catalog::RefreshOutcome::Unchanged) })
+        }
+        fn subscribe(&self) -> broadcast::Receiver<CatalogEvent> {
+            self.tx.subscribe()
+        }
+
+        // ── Sync overrides ──
+        fn get_model_sync(&self, provider: &str, model_id: &str) -> Option<CatalogModelEntry> {
+            if provider == self.entry.provider && model_id == self.entry.model_id {
+                Some(self.entry.clone())
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Regression: AgentBuilder must wire the catalog-aware `Oxi` as the
+    /// agent loop's resolver, not a static-only closure.
+    ///
+    /// Pre-fix, the resolver consulted only the static `ModelRegistry`
+    /// via `lookup()`, silently dropping the catalog port. Catalog-known
+    /// models (e.g. newer Z.AI models from models.dev) resolved at
+    /// `build()` time via `Oxi::resolve_model` but failed inside the
+    /// agent loop's `resolve_model()` → "Failed to resolve model".
+    #[test]
+    fn agent_builder_resolver_consults_catalog() {
+        const MODEL_ID: &str = "anthropic/test-catalog-only-model";
+
+        let catalog = Arc::new(SingleModelCatalog {
+            entry: CatalogModelEntry {
+                provider: "anthropic".into(),
+                model_id: "test-catalog-only-model".into(),
+                name: "Test Catalog-Only Model".into(),
+                protocol: CatalogProtocol::AnthropicMessages,
+                source: CatalogSource::Embedded,
+                base_url: None,
+                reasoning: false,
+                supports_vision: false,
+                cost_input: 0.0,
+                cost_output: 0.0,
+                cost_cache_read: 0.0,
+                cost_cache_write: 0.0,
+                context_window: 200_000,
+                max_tokens: 8_192,
+                input_modalities: vec!["text".into()],
+                release_date: None,
+                status: Some("ga".into()),
+            },
+            tx: broadcast::channel(16).0,
+        });
+
+        let oxi = OxiBuilder::new()
+            .with_builtins()
+            .with_catalog(catalog)
+            .build();
+
+        // Sanity: model resolves via Oxi (catalog→static).
+        assert!(oxi.resolve_model(MODEL_ID).is_ok());
+
+        // Sanity: model is NOT in the static registry (proves the desync).
+        assert!(
+            oxi.models_arc()
+                .lookup("anthropic", "test-catalog-only-model")
+                .is_none()
+        );
+
+        // Build an agent with the catalog-only model.
+        let config = AgentConfig {
+            model_id: MODEL_ID.to_string(),
+            ..Default::default()
+        };
+        let agent = oxi.agent(config).build().unwrap();
+
+        // THE REGRESSION: the agent's loop resolver must also find the
+        // catalog-only model.
+        //   Pre-fix (OxiResolver): lookup() → None.
+        //   Post-fix (Oxi clone): resolve_model() → catalog hit → Some.
+        assert!(
+            agent.resolver().resolve_model(MODEL_ID).is_some(),
+            "AgentBuilder's resolver must consult the catalog port, \
+             not just the static registry"
+        );
+    }
 }

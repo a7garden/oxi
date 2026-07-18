@@ -181,17 +181,17 @@ impl Tracer {
     }
 
     /// Start a root span.
-    pub fn start(&self, name: &str, kind: SpanKind) -> SpanGuard<'_> {
+    pub fn start(self: &Arc<Self>, name: &str, kind: SpanKind) -> SpanGuard {
         self.start_with_parent(name, kind, None)
     }
 
     /// Start a child span with optional parent context.
     pub fn start_with_parent(
-        &self,
+        self: &Arc<Self>,
         name: &str,
         kind: SpanKind,
         parent: Option<&SpanContext>,
-    ) -> SpanGuard<'_> {
+    ) -> SpanGuard {
         let trace_id = parent.map(|c| c.trace_id).unwrap_or_default();
         let span_id = SpanId::new();
         let context = SpanContext {
@@ -210,7 +210,10 @@ impl Tracer {
             events: Vec::new(),
             links: Vec::new(),
         };
-        SpanGuard { tracer: self, span }
+        SpanGuard {
+            tracer: Arc::clone(self),
+            span,
+        }
     }
 
     fn record(&self, span: Span) {
@@ -252,28 +255,32 @@ impl Default for Tracer {
 // ── SpanGuard ────────────────────────────────────────────────────────────────
 
 /// RAII guard for an in-flight span; finalizes and records the span on drop.
-pub struct SpanGuard<'a> {
-    tracer: &'a Tracer,
+pub struct SpanGuard {
+    tracer: Arc<Tracer>,
     span: Span,
 }
 
-impl<'a> SpanGuard<'a> {
+impl SpanGuard {
     /// Borrowed span context (trace, span, and parent ids).
     pub fn context(&self) -> &SpanContext {
         &self.span.context
     }
+
     /// Trace id this span belongs to.
     pub fn trace_id(&self) -> TraceId {
         self.span.context.trace_id
     }
+
     /// Unique id of this span.
     pub fn span_id(&self) -> SpanId {
         self.span.context.span_id
     }
+
     /// Attach a key/value attribute to the span.
     pub fn set_attribute(&mut self, key: &str, value: serde_json::Value) {
         self.span.attributes.insert(key.to_string(), value);
     }
+
     /// Record a named, timestamped event on the span.
     pub fn add_event(&mut self, name: &str) {
         self.span.events.push(SpanEvent {
@@ -282,6 +289,7 @@ impl<'a> SpanGuard<'a> {
             attributes: vec![],
         });
     }
+
     /// Mark the span as failed with the given error message.
     pub fn set_error(&mut self, message: &str) {
         self.span.status = SpanStatus::Error {
@@ -290,7 +298,7 @@ impl<'a> SpanGuard<'a> {
     }
 }
 
-impl Drop for SpanGuard<'_> {
+impl Drop for SpanGuard {
     fn drop(&mut self) {
         let mut span = self.span.clone();
         span.end_ms = Some(now_ms());
@@ -311,9 +319,16 @@ fn now_ms() -> u64 {
 mod tests {
     use super::*;
 
+    fn assert_send_static<T: Send + 'static>() {}
+
+    #[test]
+    fn span_guard_is_send_and_static() {
+        assert_send_static::<SpanGuard>();
+    }
+
     #[tokio::test]
     async fn smoke() {
-        let tracer = Tracer::new();
+        let tracer = Arc::new(Tracer::new());
         let guard = tracer.start("s", SpanKind::Agent);
         let tid = guard.trace_id();
         drop(guard);
@@ -325,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn child_span() {
-        let tracer = Tracer::new();
+        let tracer = Arc::new(Tracer::new());
         let parent = tracer.start("parent", SpanKind::Agent);
         let parent_ctx = parent.context().clone();
         drop(parent);

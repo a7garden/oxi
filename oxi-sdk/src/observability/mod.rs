@@ -24,7 +24,7 @@ mod tests {
     #[test]
     fn smoke() {
         // Tracer smoke test
-        let tracer = Tracer::new();
+        let tracer = std::sync::Arc::new(Tracer::new());
         let _guard = tracer.start("test", SpanKind::Agent);
         drop(_guard);
         // AuditLog smoke test

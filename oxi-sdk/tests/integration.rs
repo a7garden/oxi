@@ -250,7 +250,7 @@ async fn message_bus_direct_message() {
 
 #[test]
 fn observability_tracer() {
-    let tracer = Tracer::new();
+    let tracer = Arc::new(Tracer::new());
     let mut rx = tracer.subscribe();
 
     {
@@ -445,6 +445,33 @@ async fn cost_tracker_records_per_turn_usage() {
         snap.usage.input > 0 || snap.usage.output > 0,
         "CostTracker snapshot shows zero tokens — Usage event was not consumed"
     );
+}
+
+/// `Tracer` records lifecycle events via AgentBuilder's observability dispatch.
+#[tokio::test]
+async fn tracer_records_agent_turn_lifecycle() {
+    let oxi = common::mock_oxi();
+    let tracer = Arc::new(Tracer::new());
+    let mut rx = tracer.subscribe();
+
+    let agent = oxi
+        .agent(AgentConfig {
+            model_id: "mock/model".into(),
+            ..Default::default()
+        })
+        .tracer(Arc::clone(&tracer))
+        .build()
+        .expect("build");
+
+    let _ = agent.run("hello".into()).await.expect("run should succeed");
+
+    let mut names = Vec::new();
+    while let Ok(span) = rx.try_recv() {
+        names.push(span.name);
+    }
+    assert!(names.iter().any(|name| name == "run"));
+    assert!(names.iter().any(|name| name == "turn_start"));
+    assert!(names.iter().any(|name| name == "turn_end"));
 }
 
 /// `AuditLog` records `ToolExecution` entries via the BeforeTool and

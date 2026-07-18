@@ -462,7 +462,6 @@ fn config_show() -> Result<()> {
     );
     println!("  Thinking: {:?}", settings.thinking_level);
     println!("  Extensions enabled: {}", settings.extensions_enabled);
-    println!("  Stream responses: {}", settings.stream_responses);
     println!("  Auto-compaction: {}", settings.auto_compaction);
     println!("  Tool timeout: {}s", settings.tool_timeout_seconds);
 
@@ -620,9 +619,6 @@ fn config_set(key: &str, value: &str) -> Result<()> {
         "extensions_enabled" | "extensions" => {
             settings.extensions_enabled = parse_config_bool(value)?;
         }
-        "stream_responses" | "stream" => {
-            settings.stream_responses = parse_config_bool(value)?;
-        }
         "auto_compaction" => {
             settings.auto_compaction = parse_config_bool(value)?;
         }
@@ -664,7 +660,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
         _ => {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
-                  thinking_level, extensions_enabled, stream_responses, auto_compaction,\
+                  thinking_level, extensions_enabled, auto_compaction,\
                   glyph, enable_routing, language_policy_enabled, tool_timeout,\
                   max_tokens, temperature, session_history_size",
                 key
@@ -693,7 +689,6 @@ fn config_get(key: &str) -> Result<()> {
             .unwrap_or_else(|| "(not set)".to_string()),
         "thinking_level" | "thinking" => format!("{:?}", settings.thinking_level).to_lowercase(),
         "extensions_enabled" => settings.extensions_enabled.to_string(),
-        "stream_responses" | "stream" => settings.stream_responses.to_string(),
         "auto_compaction" => settings.auto_compaction.to_string(),
         "tool_timeout" | "tool_timeout_seconds" => {
             format!("{}s", settings.tool_timeout_seconds)
@@ -731,7 +726,7 @@ fn config_get(key: &str) -> Result<()> {
         _ => {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
-                  thinking_level, extensions_enabled, stream_responses, auto_compaction,\
+                  thinking_level, extensions_enabled, auto_compaction,\
                   glyph, enable_routing, language_policy_enabled, tool_timeout,\
                   max_tokens, temperature, session_history_size,\
                   extensions, skills, prompts, themes, custom_providers",

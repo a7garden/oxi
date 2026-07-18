@@ -10,7 +10,7 @@ use oxi_sdk::prelude::*;
 
 fn main() {
     // ── Distributed Tracing ──
-    let tracer = Tracer::new();
+    let tracer = std::sync::Arc::new(Tracer::new());
     let mut rx = tracer.subscribe();
     {
         let mut span = tracer.start("agent-run", SpanKind::Agent);
