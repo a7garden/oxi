@@ -58,7 +58,7 @@
   - spinner_frame은 전체 무효화 안 함 (spinner만 별도 recomposite)
 - **LOC**: ~150
 - **리스크**: 중간. 캐시 invariant를 잘못 건드리면 visible 버그. 단위 테스트 필수.
-- **좌표계와의 관계**: A4는 좌표계(u16 vs usize)와 직교하는 invalidation 정책 문제. W1과 독립적으로 진행 가능.
+- **좌표계와의 관계**: A4는 좌표계(u16 vs u32)와 직교하는 invalidation 정책 문제. W1과 독립적으로 진행 가능하되, 둘이 같이 동작할 때의 시너지 테스트 필수.
 
 ---
 
@@ -72,28 +72,30 @@
 
 **구현 (4개 하위 과제)**:
 
-1. **논리 좌표계 (usize)**:
-   - `LayoutEntry.y: usize`, `LayoutEntry.height: usize`
-   - `content_height: usize`, `scroll_offset: usize` → `viewport_base: usize`로 개명 (의미 명확화)
+1. **논리 좌표계 (u32)**:
+   - `LayoutEntry.y: u32`, `LayoutEntry.height: u32` (u16 → u32)
+   - `content_height: u32`, `scroll_offset: u32` → `viewport_base: u32`로 개명 (의미 명확화)
+   - **u32 선택 근거**: u16 cap(65K줄) 탈피 while keeping memory low (u32 = 4 bytes vs usize = 8 bytes on 64-bit). u32 max = 40억 줄로 사실상 무제한. `LayoutEntry`가 Vec로 clone되므로 메모리 절약 중요.
 2. **Draw-time u16 변환**:
    - render 루프에서 각 entry를 `viewport_base` 기준 u16 상대 좌표로 변환
-   - `let rel_y = (entry.y.saturating_sub(viewport_base)).min(u16::MAX as usize) as u16;`
+   - `let rel_y = (entry.y.saturating_sub(viewport_base)).min(u16::MAX as u32) as u16;`
    - viewport 밖 entry는 스킵 (현재와 동일)
 3. **FollowMode 상태 머신** (binary `auto_scroll: bool` 대체):
    ```rust
    pub enum FollowMode {
        Following,                                          // 바닥 추적
        FollowingGrace { until: Instant },                  // 2초 유예
-       Pinned { anchor_msg_idx: usize, anchor_y_in_msg: usize },  // 특정 메시지 고정
+       Pinned { anchor_msg_idx: usize, anchor_y_in_msg: u32 },  // 특정 메시지 고정
    }
    ```
    - 사용자 스크롤 업 → `FollowingGrace { until: now + 2s }`
-   - grace 만료 → `Pinned` (현재 보이는 첫 메시지를 anchor로 — 논리 좌표 추적이 필수)
+   - grace 만료 → `Pinned` (현재 보이는 첫 메시지를 anchor로)
    - 새 내용 + `Following`/`FollowingGrace` → viewport_base를 content_height-vh로 이동
    - 새 내용 + `Pinned` → viewport_base 유지 + **"↓ 새 답변" 배지**
+   - **anchor semantics (R7 정정)**: `anchor_msg_idx`는 stable. 새 assistant 메시지가 맨 아래 추가되어도 기존 msg_idx 불변. 사용자 메시지가 맨 아래 추가되는 경우에도 anchor_msg_idx는 그대로 (새 메시지가 anchor 아래에 위치). anchor가 가리키는 메시지가 삭제되는 경우(drain/clear)에만 Pinned 해제 → Following 복귀.
 4. **Sticky 헤더 (구 B3 흡수)**:
-   - 각 사용자 메시지를 sticky 후보로 등록
-   - `compute_sticky_layout(viewport_base, viewport_height, prompts)` → pinned/pushed 헤더
+   - **Sticky-worthy 기준 (R10 정정)**: 직전 N(=3)개의 사용자 메시지만 sticky 후보. 너무 많으면 sticky가 노이즈. N은 설정 가능.
+   - `compute_sticky_layout(viewport_base, viewport_height, sticky_candidates)` → pinned/pushed 헤더
    - viewport 상단에 overlay 레이어로 렌더 (기존 렌더 순서 변경 최소)
    - 점진적 collapse: scroll 지남에 따라 full_height → min_height
 
@@ -104,22 +106,23 @@
 - 긴 대화 위치 상실 → sticky 헤더로 turn prompt가 상단에 걸침 (구 B3)
 
 **참조 구현** (grok source):
-- `scrollback/state/mod.rs` (3,478 LOC) — usize scroll position 모델 확인
+- `scrollback/state/mod.rs` (3,478 LOC) — usize scroll position 모델 (oxi는 u32로 축소)
 - `scrollback/render.rs` (4,513 LOC) — draw-time 변환 알고리즘
 - `scrollback/sticky.rs` (1,430 LOC) — sticky 헤더 알고리즘
 - `scrollback/entry.rs` (834 LOC) — 다중 레벨 캐싱 전략
 
-**LOC**: ~2,000 (grok 9,400+ LOC에서 oxi 모델로 대폭 축소. 핵심은 좌표계 + 상태 머신 + sticky 알고리즘)
+**LOC**: ~3,500 (R1 정정: 원래 ~2,000 추정했으나, grok sticky.rs 단독 1,430 LOC + 모든 LayoutEntry 소비자 업데이트 + FollowMode 전이 테스트 12+ 케이스 + sticky overlay 렌더링 고려시 하한선 3,000. 안전 마진 포함 3,500)
 
 **외부 의존**: 없음
 
-**리스크**: **HIGH**. 모든 render 경로 건드림. LayoutEntry/LayoutKind 소비자(tool_renderer, dashboard, list_selector 등) 전부 업데이트 필요.
+**리스크**: **HIGH**. 모든 render 경로 건드림. LayoutEntry/LayoutKind 소비자(tool_renderer 1,725 LOC, dashboard 467 LOC, list_selector 920 LOC, table_renderer 597 LOC, chat/render.rs 480 LOC 전부) 업데이트 필요.
 
-**안전 메커니즘** (v3 설계의 "decoupled safety" 패턴 차용):
-- Feature flag `--cfg oxi_legacy_scroll`로 구형 좌표계 롤백
-- Snapshot 테스트: 동일 메시지 시퀀스에서 신/구 렌더러 byte-identical 출력 검증
-- Interleaving unit test: 스트리밍 + 사용자 스크롤 + 새 내용 도착 + todo_panel 토글 시나리오
-- Viewport stability baseline: 100K 토큰 더미 응답에서 viewport 점프 0회 검증
+**안전 메커니즘** (R3 정정: PTY e2e가 W1의 안전망으로 필요):
+- **PTY e2e 선행**: v3 스펙의 후보 5(PTY e2e)가 W1 직전에 도입되어야 함. W1은 렌더 OUTPUT을 바꾸므로(sticky 헤더 추가, viewport 이동) TestBackend snapshot만으로는 flicker/scroll jank를 못 잡음. v3 candidate 2(streaming checkpoint)와 달리 W1은 PTY 없이 self-contained가 아님.
+- Feature flag `--cfg oxi_legacy_scroll`로 구형 좌표계 롤백 (v3의 `oxi_legacy_render`과 별개 — 각 flag가 토글하는 범위 명시: `legacy_render`는 markdown checkpoint on/off, `legacy_scroll`은 가상 좌표계 on/off)
+- Snapshot 테스트: sticky 헤더 없는 영역에서 byte-identical 검증
+- Interleaving unit test: 스트리밍 + 사용자 스크롤 + 새 내용 도착 + todo_panel 토글 시나리오 (FollowMode 전이 12개 케이스)
+- Viewport stability baseline: 100K 토큰 더미 응답에서 viewport 점프 0회 (PTY e2e로 검증)
 
 ---
 
@@ -142,6 +145,7 @@
 - **LOC**: ~1,200 (grok 1,443 LOC를 압축)
 - **외부 의존**: 없음. crossterm 만으로 가능.
 - **리스크**: 중간. EPT 테이블 하드코딩은 유지보수 부담 — `terminal_support.rs` 패턴으로 환경변수 오버라이드 허용.
+- **W1과의 관계 (R5 정정)**: B1은 W1에 의존하지 **않음**. EPT 보정, 가속 밴드, gesture grouping은 scroll_offset 타입(u16이든 u32든)과 무관. InputSlashScout이 "1순위"로 분류한 핵심 증상이므로 Phase 2로 올림.
 
 ### B2. Slash fuzzy dropdown + MRU — "명령어 발견" 치료
 
@@ -243,35 +247,35 @@
 |---|---:|---|---|
 | A4 (layout cache tuning) | ~150 | re-render storm | 중간 |
 
-### Phase 2a: 스크롤/피드백 workstream (v0.57.0, ~3,900 LOC)
+### Phase 2a: 스크롤/피드백 workstream (v0.57.0, ~5,400 LOC)
 
-→ "불안정" 직격 + 피드백. W1이 다른 Phase 2b 후보들과 병렬 진행 가능 (독립 파일).
+→ "불안정" 직격 + 피드백. W1이 다른 Phase 2b 후보들과 병렬 진행 가능 (독립 파일). **사전 조건: v3 스펙 후보 5(PTY e2e)가 v0.56 말~v0.57.0 초에 도입되어 W1 안전망 역할**.
 
 | 후보 | LOC | 증상 | 위험 |
 |---|---:|---|---|
-| W1 (가상 좌표계 + FollowMode + sticky) | ~2,000 | 스크롤 불안정 4개 증상 + 위치 상실 | **HIGH** |
+| W1 (가상 좌표계 + FollowMode + sticky) | ~3,500 | 스크롤 불안정 4개 증상 + 위치 상실 | **HIGH** |
 | B5 (turn status indicator) | ~1,500 | 진행 불투명 | 낮음 |
 | B7 (tips framework) | ~400 | 숨겨진 기능 | 낮음 |
 
-### Phase 2b: 명령어 발견 (v0.57.1, ~3,500 LOC)
+### Phase 2b: 입력/발견 (v0.57.1, ~4,700 LOC)
 
-→ "불편"의 명령 발견 축. W1과 병렬 가능.
+→ "불편"의 입력·명령 발견 축. W1과 병렬 가능 (독립 파일).
 
 | 후보 | LOC | 증상 | 위험 |
 |---|---:|---|---|
+| B1 (scroll normalization) | ~1,200 | jumpy wheel (W1 독립) | 중간 |
 | B2 (slash fuzzy dropdown) | ~1,500 | 명령 발견 | 낮음 |
 | B6 (shortcuts help modal) | ~2,000 | 단축키 발견 | 낮음 |
 
-### Phase 3: W1 의존 이식 (v0.58.0, ~1,900 LOC)
+### Phase 3: W1 의존 이식 (v0.58.0, ~700 LOC)
 
-→ W1의 논리 좌표계를 소비하는 후보들.
+→ W1의 논리 좌표계를 소비. B1은 W1 독립이라 Phase 2b로 이동, B4만 남음.
 
 | 후보 | LOC | 증상 | 위험 |
 |---|---:|---|---|
-| B1 (scroll normalization) | ~1,200 | jumpy wheel | 중간 |
 | B4 (scrollback search) | ~700 | 과거 내용 검색 | 중간 |
 
-**총 LOC**: ~9,450 (A: 150 + W: 2,000 + B: 7,300)
+**총 LOC**: ~10,950 (A: 150 + W: 3,500 + B: 7,300)
 
 ---
 
@@ -344,7 +348,7 @@
 - `scrollback/text_selection.rs` 3,107 LOC — 비목표 (비용 과대)
 - `scrollback/search.rs` 1,025 LOC → B4
 - `scrollback/sticky.rs` 1,430 LOC → W1 (sticky 헤더 알고리즘)
-- `scrollback/state/mod.rs` 3,478 LOC — `scroll position: usize` 확인 → W1 근거 (가상 좌표계 필요성 입증)
+- `scrollback/state/mod.rs` 3,478 LOC — `scroll position: usize` 확인 → W1 근거 (oxi는 u32로 축소 채택)
 - `scrollback/render.rs` 4,513 LOC, `scrollback/block.rs` 1,695 LOC, 기타 — 비목표
 
 **InputSlashScout** (grok `input/` + `slash/`):

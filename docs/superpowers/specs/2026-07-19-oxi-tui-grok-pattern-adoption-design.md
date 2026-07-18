@@ -181,9 +181,9 @@ syntax = ["dep:syntect"]
 
 ---
 
-### 후보 5 — PTY e2e 테스트 하네스 (v0.58, 독립적 회귀 인프라)
+### 후보 5 — PTY e2e 테스트 하네스 (v0.56 말~v0.57.0 초, W1 선행 조건)
 
-**근거**: oxi-tui 테스트는 ratatui의 `TestBackend`로 버퍼 셀 값을 검증. 실제 터미널에 출력되는 ANSI bytes는 검증 안 됨 — crossterm 버전업, OSC8 도입, 이미지 렌더링 도입, 애니메이션 등 **시각적 변경**을 잡을 회귀 인프라가 필요. 단, 후보 2(streaming checkpoint)는 자체 snapshot 테스트로 correctness를 잡으므로 후보 5가 후보 2의 블로커는 아님 — 후보 5는 미래의 시각적 변화를 위한 범용 인프라.
+**근거**: oxi-tui 테스트는 ratatui의 `TestBackend`로 버퍼 셀 값을 검증. 실제 터미널에 출력되는 ANSI bytes는 검증 안 됨 — crossterm 버전업, OSC8 도입, W1(가상 좌표계 + sticky 헤더) 도입 등 **시각적 변경**을 잡을 회귀 인프라가 필요. **R3 정정**: 원래 "v0.58 독립 인프라"로 분류했으나, UX 스펙의 W1 workstream이 렌더 OUTPUT을 바꾸므로(sticky 헤더 추가, viewport 이동) TestBackend snapshot만으로는 flicker/scroll jank를 못 잡음. W1 안전망으로 PTY가 필수. 단, 후보 2(streaming checkpoint)는 렌더 OUTPUT이 아니라 빈도만 바꾸므로 PTY 없이도 self-contained.
 
 **구현**:
 - `oxi-cli/tests/pty_e2e/` 신규 디렉토리
@@ -208,7 +208,7 @@ syntax = ["dep:syntect"]
 
 ---
 
-### 후보 2 — 스트리밍 마크다운 checkpoint 렌더러 (v0.57.1, 자체 안전망)
+### 후보 2 — 스트리밍 마크다운 checkpoint 렌더러 (v0.58, W1 이후로 이동)
 
 **근거**: 현재 매 프레임 전체 응답을 재파싱/재렌더. DiffBackend가 전송은 최적화하지만 **파싱/하이라이트/레이아웃 계산은 매번 발생**. 10K+ 토큰 응답에서 CPU 점유 육안 확인.
 
@@ -248,37 +248,41 @@ syntax = ["dep:syntect"]
 3. 기존 `tool_renderer.rs`와 결합 → **완화**: adapter 패턴으로 래핑, tool_renderer 내부 로직은 그대로
 4. CPU 절감 효과 불충분 → **완화**: baseline 대비 50% 절감 못 시키면 feature flag로 default off, 다음 마일스톤에서 재시도
 
-**후보 5(PTY e2e)와의 관계**: 후보 5는 후보 2의 안전망이 **아니다**. 후보 2는 자체 안전 메커니즘으로 self-contained. 후보 5는 후보 2 이후에 독립적으로 도입되는 **일반 회귀 인프라** — 향후 시각적 변경(이미지 렌더링, 애니메이션 등)을 잡기 위한 기반. 후보 2에 쓰이면 좋지만, 후보 5의 CI 이슈가 후보 2를 블록하면 안 됨.
+**후보 5(PTY e2e)와의 관계**: 후보 5는 후보 2의 안전망이 **아니다** (후보 2는 자체 snapshot 테스트로 self-contained). 단, **UX 스펙의 W1(가상 좌표계 + sticky)은 PTY가 필수** — W1이 렌더 OUTPUT을 바꾸므로. 따라서 후보 5는 W1 직전(v0.56 말)에 도입되며, 후보 2는 W1 이후(v0.58)로 이동하여 렌더 파이프라인 충돌을 회피.
 
 ---
 
-## 마이그레이션 순서 (decoupled safety)
+## 마이그레이션 순서 (decoupled safety + W1 의존성 반영)
 
 ```
 v0.55.0 (현재)
    │
    ▼
 [patch v0.56.0 / v0.56.1]
-   후보 3 (color level)           ← 독립, 낮은 위험, 모든后续 패턴이 소비
+   후보 3 (color level)           ← 독립, 낮은 위험
+   후보 5 (PTY e2e)               ← W1 직전 도입. W1이 렌더 OUTPUT 바꾸므로 PTY가 안전망 필수
    │
    ▼
 [v0.57.0]
    후보 1 (OSC8)                  ← color level 약한 의존
-   후보 4 (tmTheme)               ← color level 시너지 (병렬 진행 가능)
+   후보 4 (tmTheme)               ← color level 시너지 (병렬)
+   (UX 스펙: W1 가상 좌표계 + FollowMode + sticky 헤더, B5, B7 병렬)
    │
    ▼
 [v0.57.1]
-   후보 2 (streaming checkpoint)  ← 자체 안전망(feature flag + CPU baseline + snapshot + interleaving unit test)으로 self-contained
+   (UX 스펙: B1 scroll normalization, B2 slash dropdown, B6 shortcuts help)
    │
    ▼
 [v0.58.0]
-   후보 5 (PTY e2e)               ← 일반 회귀 인프라. 누구의 블로커도 아님
+   후보 2 (streaming checkpoint)  ← W1 이후로 이동. W1이 LayoutEntry를 u32로 바꾸므로 checkpoint와 충돌 회피 위해 순서 조정
+   (UX 스펙: B4 scrollback search — W1 의존)
 ```
 
 **변경 이력**:
 - **v1**: PTY e2e(후보 5)를 v0.58에 두고 후보 2의 안전망으로 삼음 → 안전망이 위험보다 늦게 도착하는 모순
 - **v2**: 후보 5를 후보 2 직전으로 올려 test-first → 그러나 후보 5 자체의 CI 리스크(PTY 할당, 타이밍, 플랫폼 게이트)가 가장 가치 높은 패턴을 블록하는 역설 발생
-- **v3 (현재)**: 후보 2의 안전 메커니즘을 후보 5와 **완전 분리**. 후보 2는 feature flag + CPU baseline + snapshot + interleaving unit test로 self-contained. 후보 5는 v0.58에 독립 도입. 핵심 통찰: 후보 2가 바꾸는 것은 **렌더 빈도**지 **렌더 결과**가 아니므로, snapshot 테스트가 correctness를 잡고 CSI 2026 sync가 flicker를 잡음 — PTY가 없어도 안전망 충분.
+- **v3**: 후보 2의 안전 메커니즘을 후보 5와 **완전 분리**. 후보 2는 feature flag + CPU baseline + snapshot + interleaving unit test로 self-contained. 후보 5는 v0.58에 독립 도입. 핵심 통찰: 후보 2가 바꾸는 것은 **렌더 빈도**지 **렌더 결과**가 아니므로 snapshot + CSI 2026 sync로 충분.
+- **v4 (현재, 리뷰 R2/R3 반영)**: UX 스펙의 W1 workstream이 추가되면서 재조정. W1은 렌더 OUTPUT을 바꾸므로(sticky 헤더, viewport 이동) PTY가 필수 — 후보 5를 v0.56 말로 앞당김. 동시에 W1이 LayoutEntry를 u32로 마이그레이션하므로 후보 2(streaming checkpoint)와의 파이프라인 충돌을 피하기 위해 후보 2를 v0.58로 미룸. 핵심 통찰: "렌더 결과가 안 바뀌면 snapshot으로 충분"은 후보 2에만 해당, W1에는 해당 안 함.
 
 ---
 
@@ -314,7 +318,7 @@ v0.55.0 (현재)
 - **후보 3**: `NO_COLOR=1`로 실행 시 모노크롬. `TERM=linux`에서 16색 폴백. truecolor 터미널에서 기존과 동일.
 - **후보 1**: 지원 터미널에서 URL/파일경로 클릭 시 브라우저/에디터 오픈. 미지원 터미널에서 일반 텍스트.
 - **후보 4**: 기본값(`Preset`)은 기존과 동일. `TmTheme(path)` 로드 시 코드 블록 색상만 변경, UI unaffected.
-- **후보 5**: `cargo nextest run --workspace` + PTY e2e 통과. CI `ubuntu-latest`에서 안정 통과. (다른 후보의 블로커 아님)
+- **후보 5**: `cargo nextest run --workspace` + PTY e2e 통과. CI `ubuntu-latest`에서 안정 통과. **W1의 안전망으로 필수** (W1이 렌더 OUTPUT을 바꾸므로 TestBackend만으로는 flicker/scroll jank 검증 불가). 후보 2(streaming checkpoint)의 블로커는 아님 (후보 2는 렌더 빈도만 바꾸므로 snapshot 테스트로 충분).
 - **후보 2**: 100K 토큰 더미 응답에서 CPU 50%+ 절감 (baseline 대비). snapshot 테스트로 신/구 렌더러 출력 byte-identical 검증. interleaving unit test로 tool_call 블록 atomicity 검증. feature flag로 마이그레이션 중 언제든 legacy 경로 롤백 가능.
 
 워크스페이스 차원:
