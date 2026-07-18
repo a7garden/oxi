@@ -26,6 +26,7 @@ oxi-agent = { version = "0.55.0", path = "../oxi-agent" }
 oxi-sdk = { version = "0.55.0", path = "../oxi-sdk" }
 oxi-tui = { version = "0.55.0", path = "../oxi-tui" }
 oxi-mnemopi = { version = "0.55.0", path = "../oxi-mnemopi", features = ["remote-embeddings"] }
+oxi-lsp = { version = "0.55.0", path = "../oxi-lsp" }
 
 # Async
 async-trait = "0.1"
@@ -118,3 +119,4 @@ native-browser = ["oxi-agent/native-browser", "oxi-sdk/native-browser"]
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
+portable-pty = { workspace = true }

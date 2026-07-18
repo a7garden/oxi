@@ -19,6 +19,7 @@ ratatui-textarea = "0.9"
 crossterm = "0.29"
 tui-markdown = { version = "0.3", default-features = false, features = [] }
 strum = { version = "0.28", features = ["derive"] }
+supports-color = { workspace = true }
 
 
 # Serialization (for theme file loading)

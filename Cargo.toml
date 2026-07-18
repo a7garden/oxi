@@ -19,6 +19,8 @@ repository = "https://github.com/a7garden/oxi"
 
 [workspace.dependencies]
 thiserror = "2"
+supports-color = "3.0"
+portable-pty = "0.9"
 
 [profile.release]
 opt-level = 3
