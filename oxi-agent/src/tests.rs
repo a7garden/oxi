@@ -351,7 +351,6 @@ async fn test_provider_reported_usage_drives_compaction_threshold() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -401,6 +400,223 @@ async fn test_provider_reported_usage_drives_compaction_threshold() {
     assert!(
         triggered.iter().any(|s| s == "provider-reported"),
         "expected a Triggered event with source=\"provider-reported\", got: {triggered:?}"
+    );
+}
+// ── Tool-call loop guard wiring test ─────────────────────────────────
+//
+// Verifies that the tool_call_loop_guard wired into AgentLoop::run_loop
+// fires at threshold and injects a steering user message that the
+// provider sees on its next call.
+
+/// Stream that emits a single ProviderEvent then ends.
+struct OneShotStream {
+    event: Option<ProviderEvent>,
+}
+
+impl Stream for OneShotStream {
+    type Item = ProviderEvent;
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        _cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.event.take())
+    }
+}
+
+/// Provider that returns the same `echo` tool call each invocation.
+/// Returns text-only when it detects a steering message, or after a
+/// safety limit of 20 calls to prevent infinite loops in tests.
+struct LoopingToolCallProvider {
+    received: Arc<Mutex<Vec<Vec<oxi_ai::Message>>>>,
+    call_count: std::sync::atomic::AtomicU32,
+}
+
+impl LoopingToolCallProvider {
+    fn new(received: Arc<Mutex<Vec<Vec<oxi_ai::Message>>>>) -> Self {
+        Self {
+            received,
+            call_count: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+}
+
+impl Provider for LoopingToolCallProvider {
+    fn stream<'a>(
+        &'a self,
+        _model: &'a oxi_ai::Model,
+        context: &'a Context,
+        _options: Option<oxi_ai::StreamOptions>,
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+        let n = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // (debug output removed)
+        self.received
+            .lock()
+            .unwrap()
+            .push(context.messages.to_vec());
+
+        let has_steering = context.messages.iter().any(|m| {
+            matches!(m, oxi_ai::Message::User(u) if u
+                .content
+                .as_str()
+                .map(|s| s.contains("Tool-call loop detected"))
+                .unwrap_or(false))
+        });
+        if n >= 20 {
+            panic!("PROVIDER_SAFETY_LIMIT: provider called 20 times");
+        }
+        let force_stop = has_steering;
+
+        Box::pin(async move {
+            let mut assistant = oxi_ai::AssistantMessage::new(
+                oxi_ai::Api::AnthropicMessages,
+                "mock",
+                "mock",
+            );
+            let reason = if force_stop {
+                assistant.content =
+                    vec![ContentBlock::Text(TextContent::new("Done."))];
+                StopReason::Stop
+            } else {
+                let tc = oxi_ai::ToolCall::new(
+                    "call_1",
+                    "echo",
+                    serde_json::json!({"msg":"hello"}),
+                );
+                assistant.content = vec![ContentBlock::ToolCall(tc)];
+                StopReason::ToolUse
+            };
+            Ok(Box::pin(OneShotStream {
+                event: Some(ProviderEvent::Done {
+                    reason,
+                    message: assistant,
+                }),
+            })
+                as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+        })
+    }
+
+    fn name(&self) -> &str {
+        "looping-tool-call-provider"
+    }
+}
+
+/// Trivial tool that always returns the same result.
+struct LoopGuardEchoTool;
+
+#[async_trait::async_trait]
+impl crate::tools::AgentTool for LoopGuardEchoTool {
+    fn name(&self) -> &str {
+        "echo"
+    }
+    fn label(&self) -> &str {
+        "Echo"
+    }
+    fn description(&self) -> &str {
+        "Echoes back"
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{"msg":{"type":"string"}}})
+    }
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        _params: serde_json::Value,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        _ctx: &crate::tools::ToolContext,
+    ) -> Result<crate::tools::AgentToolResult, crate::tools::ToolError> {
+        Ok(crate::tools::AgentToolResult::success("echo result"))
+    }
+}
+
+#[tokio::test]
+async fn loop_guard_injects_steering_on_repeated_tool_call() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use crate::ProviderResolver;
+    use oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions;
+
+    struct DummyResolver;
+    impl ProviderResolver for DummyResolver {
+        fn resolve_provider(
+            &self,
+            _name: &str,
+        ) -> Option<Arc<dyn oxi_ai::Provider>> {
+            None
+        }
+        fn resolve_model(&self, _id: &str) -> Option<oxi_ai::Model> {
+            Some(oxi_ai::Model {
+                id: "test".into(),
+                name: "Test".into(),
+                api: oxi_ai::Api::AnthropicMessages,
+                provider: "test".into(),
+                base_url: String::new(),
+                reasoning: false,
+                input: vec![oxi_ai::InputModality::Text],
+                cost: oxi_ai::Cost::default(),
+                context_window: 128_000,
+                max_tokens: 4096,
+                headers: std::collections::HashMap::new(),
+                compat: None,
+            })
+        }
+    }
+
+    let received: Arc<Mutex<Vec<Vec<oxi_ai::Message>>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(LoopingToolCallProvider::new(received.clone()));
+
+    let config = AgentLoopConfig {
+        model_id: "test".to_string(),
+        tool_execution: ToolExecutionMode::Sequential,
+        tool_call_loop_guard: ToolCallLoopGuardOptions {
+            threshold: 2,
+            exempt_tools: vec![],
+        },
+        ..Default::default()
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    tools.register(LoopGuardEchoTool);
+
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new_with_resolver(
+        provider,
+        config,
+        tools,
+        state,
+        Arc::new(DummyResolver),
+    );
+
+    let result = agent_loop.run("test".to_string(), |_| {}).await;
+    assert!(result.is_ok(), "agent loop failed: {result:?}");
+
+    let contexts = received.lock().unwrap();
+    let call_count = contexts.len();
+
+    let steering_seen = contexts.iter().any(|msgs| {
+        msgs.iter().any(|m| {
+            matches!(m, oxi_ai::Message::User(u) if u
+                .content
+                .as_str()
+                .map(|s| s.contains("Tool-call loop detected"))
+                .unwrap_or(false))
+        })
+    });
+
+    assert!(
+        steering_seen,
+        "steering message should appear in provider context \
+         after threshold repetitions. Provider was called {} times.",
+        call_count
+    );
+    assert!(
+        call_count <= 5,
+        "guard should have terminated the loop early, but provider \
+         was called {} times",
+        call_count
     );
 }
 
@@ -598,7 +814,7 @@ fn test_agent_switch_model_invalid_format() {
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Invalid format (no provider prefix)
-    let result = agent.switch_model("gpt-4o", None);
+    let result = agent.switch_model("gpt-4o");
     assert!(result.is_err());
 }
 
@@ -611,7 +827,7 @@ fn test_agent_switch_model_unknown_model() {
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
-    let result = agent.switch_model("nonexistent/model", None);
+    let result = agent.switch_model("nonexistent/model");
     assert!(result.is_err());
 }
 
@@ -625,7 +841,7 @@ fn test_agent_switch_model_same_provider() {
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Switch to another Anthropic model (same provider, same API)
-    let result = agent.switch_model("anthropic/claude-3-haiku", None);
+    let result = agent.switch_model("anthropic/claude-3-haiku");
     assert!(result.is_ok());
     assert_eq!(agent.model_id(), "anthropic/claude-3-haiku");
 }
@@ -719,7 +935,7 @@ async fn test_cross_provider_handoff_openai_to_anthropic() {
 
     // 4. Switch model (this fails to create the provider, but the message
     //    transformation logic was verified above)
-    let result = agent.switch_model("anthropic/claude-sonnet-4-20250514", None);
+    let result = agent.switch_model("anthropic/claude-sonnet-4-20250514");
     // The switch itself may fail due to missing API keys for the real provider,
     // but the model_id won't change since we guard the update atomically.
     // The key invariant: if the switch succeeds, messages are transformed.
@@ -1031,7 +1247,6 @@ async fn test_multi_turn_tool_use_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1426,7 +1641,6 @@ async fn test_steering_messages_injected_into_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1500,7 +1714,6 @@ async fn test_multiple_steering_messages() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1565,7 +1778,6 @@ fn test_follow_up_queue_api() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1644,7 +1856,6 @@ async fn test_follow_up_processed_in_tool_use_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1730,7 +1941,6 @@ async fn test_follow_up_via_continue_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1805,7 +2015,6 @@ async fn test_follow_up_queue_cleared() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,
@@ -1882,7 +2091,6 @@ fn test_follow_up_and_steering_queue_independent() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
-        api_key: None,
         workspace_dir: None,
         provider_options: None,
         on_compaction: None,

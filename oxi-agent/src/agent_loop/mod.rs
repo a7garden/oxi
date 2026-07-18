@@ -943,9 +943,13 @@ impl AgentLoop {
                             tool_calls: &call_refs,
                             tool_results: &result_refs,
                         };
-                        if let Some(detection) =
-                            self.tool_call_loop_guard.lock().record_turn(turn)
-                        {
+                        // NOTE: assign to a variable first so the MutexGuard
+                        // from lock() is dropped at the semicolon. The if-let
+                        // pattern would keep the guard alive inside the block,
+                        // and calling reset() inside would deadlock on the
+                        // non-reentrant parking_lot::Mutex.
+                        let detection = self.tool_call_loop_guard.lock().record_turn(turn);
+                        if let Some(detection) = detection {
                             let steering = format!(
                                 "Tool-call loop detected: '{}' called {} consecutive \
                                  times with identical arguments. Result: '{}'. \
