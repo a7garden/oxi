@@ -147,12 +147,6 @@ pub struct AgentConfig {
     /// Model context window size (used for threshold-based compaction)
     #[serde(default = "default_context_window")]
     pub context_window: usize,
-    /// API key override for the provider.
-    ///
-    /// When set, this is injected into [`oxi_ai::StreamOptions`] so the
-    /// provider uses it instead of an environment variable.
-    #[serde(default)]
-    pub api_key: Option<String>,
     /// Working directory for file tools. Defaults to current directory if None.
     #[serde(default)]
     pub workspace_dir: Option<std::path::PathBuf>,
@@ -195,6 +189,16 @@ pub struct AgentConfig {
     /// Agent pool for Hub display and sub-agent matching.
     #[serde(skip, default)]
     pub agent_pool: Option<std::sync::Arc<dyn crate::tools::AgentPoolProvider>>,
+    /// URL resolver for internal protocol schemes (`issue://`, `pr://`, etc.).
+    /// Threaded through to [`crate::agent_loop::config::AgentLoopConfig::url_resolver`].
+    /// When `None`, URL-prefixed paths are treated as regular file paths.
+    #[serde(skip, default)]
+    pub url_resolver: Option<std::sync::Arc<dyn crate::tools::UrlResolver>>,
+    /// LSP provider for the `lsp` tool.
+    /// Threaded through to [`crate::agent_loop::config::AgentLoopConfig::lsp`].
+    /// When `None`, the `lsp` tool returns an error.
+    #[serde(skip, default)]
+    pub lsp: Option<std::sync::Arc<dyn crate::tools::LspProvider>>,
 
     /// Maximum bytes of a tool result's text content before truncation
     /// (#28 gap 1, surfaced as #32). Threaded through to
@@ -235,7 +239,6 @@ impl Default for AgentConfig {
             compaction_strategy: CompactionStrategy::default(),
             compaction_instruction: None,
             context_window: 128_000,
-            api_key: None,
             workspace_dir: None,
             output_mode: None,
             provider_options: None,
@@ -244,6 +247,8 @@ impl Default for AgentConfig {
             memory: None,
             todo: None,
             agent_pool: None,
+            url_resolver: None,
+            lsp: None,
             max_tool_result_bytes: None,
             subagent_runner: None,
             subagent_depth: 0,

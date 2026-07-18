@@ -39,11 +39,13 @@ pub mod routing;
 pub mod security;
 pub mod tool_factory;
 pub mod workflow_dsl;
+pub mod url_resolver;
 
 // Re-export core SDK types
 pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
+pub use url_resolver::SdkUrlResolver;
 pub use delegation::SdkSubagentRunner;
 
 // Re-export port types — products implement these traits.
@@ -502,6 +504,96 @@ mod tests {
         assert!(oxi.create_provider("deepseek").is_ok());
         // Unknown still fails
         assert!(oxi.create_provider("unknown-provider").is_err());
+    }
+
+    /// Regression (#40): `Oxi::create_provider` must consult the wired
+    /// `AuthProvider` port via its sync fast-path when the static
+    /// `OxiBuilder::api_key()` map has no entry for the provider. This is
+    /// the **primary** credential source for products like the CLI, which
+    /// never call `OxiBuilder::api_key()` and instead register
+    /// `FileAuthProvider` via `.with_auth(...)`. Without this wiring, every
+    /// built-in provider would fall through to env vars and the CLI would
+    /// fail with `MissingApiKey` for any provider not in the environment.
+    #[test]
+    fn test_create_provider_consults_auth_port() {
+        use parking_lot::Mutex;
+        use std::pin::Pin;
+
+        /// Recording AuthProvider — captures every `get_api_key_sync` call
+        /// and returns `None`, forcing the wiring to actually consult us
+        /// (rather than short-circuiting on a returned key).
+        struct RecordingAuth {
+            calls: Mutex<Vec<String>>,
+        }
+        impl AuthProvider for RecordingAuth {
+            fn get_api_key(
+                &self,
+                _provider: &str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<String>, SdkError>> + Send + '_>>
+            {
+                Box::pin(async { Ok(None) })
+            }
+            fn get_api_key_sync(&self, provider: &str) -> Result<Option<String>, SdkError> {
+                self.calls.lock().push(provider.to_string());
+                Ok(None)
+            }
+            fn set_api_key(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn delete_api_key(
+                &self,
+                _: &str,
+            ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn get_oauth(
+                &self,
+                _: &str,
+            ) -> Pin<
+                Box<
+                    dyn Future<Output = Result<Option<crate::ports::OAuthToken>, SdkError>>
+                        + Send
+                        + '_,
+                >,
+            > {
+                Box::pin(async { Ok(None) })
+            }
+            fn set_oauth(
+                &self,
+                _: &str,
+                _: crate::ports::OAuthToken,
+            ) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn list_providers(
+                &self,
+            ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SdkError>> + Send + '_>>
+            {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+        }
+
+        let auth = std::sync::Arc::new(RecordingAuth {
+            calls: Mutex::new(Vec::new()),
+        });
+        let oxi = OxiBuilder::new()
+            .with_builtins()
+            .with_auth(auth.clone())
+            .build();
+
+        // create_provider on a built-in must consult the auth port.
+        let _ = oxi.create_provider("anthropic");
+        let calls = auth.calls.lock();
+        assert!(
+            calls.iter().any(|c| c == "anthropic"),
+            "Oxi::create_provider must call AuthProvider::get_api_key_sync \
+             when the static api_keys map has no entry. Got calls: {:?}",
+            *calls
+        );
     }
 
     #[test]

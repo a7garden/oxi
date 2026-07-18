@@ -88,6 +88,17 @@ pub struct AgentLoop {
     follow_up_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
     /// TTSR engine for stream rule checking.
     ttsr_engine: Option<Arc<ttsr::TtsrEngine>>,
+    /// Thinking-loop detector — fed every thinking delta. When a loop
+    /// is recognised the stream is aborted with a transient error so
+    /// the retry layer resamples. Gated by
+    /// [`AgentLoopConfig::thinking_loop_detection`] (default on).
+    thinking_loop_detector:
+        parking_lot::Mutex<Option<oxi_ai::utils::thinking_loop::ThinkingLoopDetector>>,
+    /// Cross-turn tool-call loop guard. Records each completed assistant
+    /// turn; when the same single-tool call repeats past threshold the
+    /// agent injects a steering message to break the loop (omp
+    /// `TERMINAL_TOOL_RESULT_ABORT_REASON` pattern).
+    tool_call_loop_guard: parking_lot::Mutex<oxi_ai::utils::tool_call_loop::ToolCallLoopGuard>,
 }
 
 impl AgentLoop {
@@ -134,6 +145,16 @@ impl AgentLoop {
             steering_hook: None,
             follow_up_hook: None,
             ttsr_engine: config.ttsr_engine.clone(),
+            thinking_loop_detector: parking_lot::Mutex::new(if config.thinking_loop_detection {
+                Some(oxi_ai::utils::thinking_loop::ThinkingLoopDetector::new())
+            } else {
+                None
+            }),
+            tool_call_loop_guard: parking_lot::Mutex::new(
+                oxi_ai::utils::tool_call_loop::ToolCallLoopGuard::new(
+                    config.tool_call_loop_guard.clone(),
+                ),
+            ),
         }
     }
 
@@ -883,6 +904,66 @@ impl AgentLoop {
                         messages.push(Message::ToolResult(result.clone()));
                         new_messages.push(Message::ToolResult(result));
                     }
+                    // Feed completed turn to the tool-call loop guard (omp pattern).
+                    if has_more_tool_calls {
+                        use oxi_ai::utils::tool_call_loop::{
+                            ToolCallLoopTurn, ToolCallRef, ToolResultRef,
+                        };
+                        let call_refs: Vec<ToolCallRef> = assistant_message
+                            .content
+                            .iter()
+                            .filter_map(|block| match block {
+                                oxi_ai::ContentBlock::ToolCall(tc) => Some(ToolCallRef {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    arguments: tc.arguments.clone(),
+                                }),
+                                _ => None,
+                            })
+                            .collect();
+                        let result_refs: Vec<ToolResultRef> = tool_results
+                            .iter()
+                            .map(|tr| {
+                                let text: String = tr
+                                    .content
+                                    .iter()
+                                    .filter_map(|b| match b {
+                                        oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                        _ => None,
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                ToolResultRef {
+                                    tool_call_id: tr.tool_call_id.clone(),
+                                    content: text,
+                                }
+                            })
+                            .collect();
+                        let turn = ToolCallLoopTurn {
+                            tool_calls: &call_refs,
+                            tool_results: &result_refs,
+                        };
+                        if let Some(detection) =
+                            self.tool_call_loop_guard.lock().record_turn(turn)
+                        {
+                            let steering = format!(
+                                "Tool-call loop detected: '{}' called {} consecutive \
+                                 times with identical arguments. Result: '{}'. \
+                                 Try a different approach.",
+                                detection.tool_name, detection.count, detection.result_summary,
+                            );
+                            let msg = Message::User(oxi_ai::UserMessage::new(steering));
+                            messages.push(msg.clone());
+                            new_messages.push(msg);
+                            tracing::warn!(
+                                session_id = ?self.session_id,
+                                tool = %detection.tool_name,
+                                count = detection.count,
+                                "tool-call loop detected; injecting steering message"
+                            );
+                            self.tool_call_loop_guard.lock().reset();
+                        }
+                    }
                 }
 
                 emit(AgentEvent::TurnEnd {
@@ -1165,7 +1246,6 @@ mod session_id_wiring_tests {
             auto_retry_enabled: true,
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 1000,
-            api_key: None,
             workspace_dir: None,
             provider_options: None,
             on_compaction: None,
@@ -1179,6 +1259,8 @@ mod session_id_wiring_tests {
             subagent_runner: None,
             subagent_depth: 0,
             max_tool_result_bytes: None,
+            thinking_loop_detection: false, // disable for unit tests
+            ..Default::default()
         };
         AgentLoop::new_with_resolver(
             Arc::new(NopProvider),

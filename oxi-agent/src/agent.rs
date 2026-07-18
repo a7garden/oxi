@@ -242,11 +242,16 @@ impl Agent {
     ///
     /// # Arguments
     /// * `model_id` - New model ID in `provider/model` format
-    /// * `api_key` - Optional API key for the new provider (will be passed to StreamOptions)
     ///
     /// # Returns
     /// `Ok(())` on success, or an error if the model/provider is unknown
-    pub fn switch_model(&self, model_id: &str, api_key: Option<String>) -> Result<()> {
+    ///
+    /// # Credentials
+    /// The new provider is constructed via [`ProviderResolver::resolve_provider`],
+    /// which is the single credential authority — the wired `AuthProvider`
+    /// port (sync fast-path) supplies the API key. The old `api_key` parameter
+    /// was removed in 0.55.0; see issues #39 and #40.
+    pub fn switch_model(&self, model_id: &str) -> Result<()> {
         let new_model = self
             .resolver
             .resolve_model(model_id)
@@ -287,7 +292,6 @@ impl Agent {
             {
                 let mut inner = self.inner_mut();
                 inner.config.model_id = model_id.to_string();
-                inner.config.api_key = api_key;
             }
             return Ok(());
         }
@@ -301,10 +305,8 @@ impl Agent {
             });
         }
 
-        // Update config and provider atomically
         let mut inner = self.inner_mut();
         inner.config.model_id = model_id.to_string();
-        inner.config.api_key = api_key;
         inner.provider = new_provider;
 
         Ok(())
@@ -318,8 +320,13 @@ impl Agent {
     /// Like [`switch_model`], if the agent is currently running, the switch
     /// is deferred until the current loop completes.
     ///
+    /// # Credentials
+    /// The new provider is constructed via [`ProviderResolver::resolve_provider`],
+    /// the single credential authority (sync `AuthProvider` fast-path).
+    /// The old `api_key` parameter was removed in 0.55.0; see issues #39/#40.
+    ///
     /// [`switch_model`]: Agent::switch_model
-    pub fn switch_to_model(&self, model: &oxi_ai::Model, api_key: Option<String>) -> Result<()> {
+    pub fn switch_to_model(&self, model: &oxi_ai::Model) -> Result<()> {
         let model_id = format!("{}/{}", model.provider, model.id);
         let new_provider = self
             .resolver
@@ -352,7 +359,6 @@ impl Agent {
             });
             let mut inner = self.inner_mut();
             inner.config.model_id = model_id;
-            inner.config.api_key = api_key;
             return Ok(());
         }
 
@@ -367,17 +373,37 @@ impl Agent {
 
         let mut inner = self.inner_mut();
         inner.config.model_id = model_id;
-        inner.config.api_key = api_key;
         inner.provider = new_provider;
 
         Ok(())
     }
 
-    /// Refresh only the API key without changing model or provider.
-    /// Useful when the user stores a key after the session was already created.
-    pub fn refresh_api_key(&self, api_key: Option<String>) {
+    /// Refresh credentials by re-resolving the current provider via the resolver.
+    ///
+    /// After the resolver-centric credential model (0.55.0), the provider
+    /// instance is the single source of truth for API keys. To pick up
+    /// credential changes — e.g. the user updated their auth store via the
+    /// TUI overlay — call this to re-resolve the current provider and swap
+    /// it in. The resolver consults the wired `AuthProvider` port on every
+    /// call, so updates are reflected without rebuilding the engine.
+    ///
+    /// Returns `Ok(())` if a fresh provider was resolved and swapped, or an
+    /// error if the resolver could not produce a provider (the existing
+    /// provider is left untouched on error). Replaces the deprecated
+    /// `refresh_api_key(&self, api_key)` from pre-0.55.0; see issues #39/#40.
+    pub fn refresh_credentials(&self) -> Result<()> {
+        let provider_name = {
+            let inner = self.config();
+            inner.config.model_id.split('/').next().map(str::to_string)
+        };
+        let name = provider_name.as_deref().unwrap_or("anthropic");
+        let new_provider = self
+            .resolver
+            .resolve_provider(name)
+            .ok_or_else(|| Error::msg(format!("Provider '{}' not found", name)))?;
         let mut inner = self.inner_mut();
-        inner.config.api_key = api_key;
+        inner.provider = new_provider;
+        Ok(())
     }
 
     /// Get a handle to the tool registry.
@@ -509,7 +535,6 @@ impl Agent {
             max_tokens,
             compaction_strategy,
             context_window,
-            api_key,
             workspace_dir,
         ) = {
             let inner = self.inner.read();
@@ -520,7 +545,6 @@ impl Agent {
                 inner.config.max_tokens,
                 inner.config.compaction_strategy.clone(),
                 inner.config.context_window,
-                inner.config.api_key.clone(),
                 inner.config.workspace_dir.clone(),
             )
         }; // release read lock
@@ -542,7 +566,6 @@ impl Agent {
             auto_retry_enabled: true,
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 1000,
-            api_key,
             workspace_dir,
             provider_options: self.config().config.provider_options.clone(),
             on_compaction: None,
@@ -550,6 +573,8 @@ impl Agent {
             memory: self.config().config.memory.clone(),
             todo: self.config().config.todo.clone(),
             agent_pool: self.config().config.agent_pool.clone(),
+            url_resolver: self.config().config.url_resolver.clone(),
+            lsp: self.config().config.lsp.clone(),
             max_tool_result_bytes: self.config().config.max_tool_result_bytes,
             subagent_runner: self.config().config.subagent_runner.clone(),
             subagent_depth: self.config().config.subagent_depth,
@@ -949,7 +974,6 @@ impl Agent {
             auto_retry_enabled: true,
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 1000,
-            api_key: inner.config.api_key.clone(),
             workspace_dir: inner.config.workspace_dir.clone(),
             provider_options: inner.config.provider_options.clone(),
             on_compaction: None,
