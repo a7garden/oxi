@@ -58,6 +58,14 @@ oxi-tui는 **단일 크레이트 19,979 LOC**로 동일 도메인(채팅 위젯,
 
 ### D0. "순수 위젯 라이브러리" vs "제품 셸 + 인라인 TUI" — 스케일이 아니라 정체성
 
+**공통 기반 — 둘 다 ratatui + crossterm 위에 구축됨**. 이 점을 먼저 확정해야 아래 발산점들이 "다른 툴킷"이 아니라 **"같은 툴킷 위의 다른 선택"**으로 읽힌다:
+- `ratatui = "0.29"` + `ratatui-core = "0.1"` + `crossterm = "0.28"` (grok workspace `Cargo.toml:200-201,124`)
+- `xai-grok-pager/Cargo.toml:21`이 `ratatui`를 `features = ["crossterm", "unstable-widget-ref"]`로 직접 사용 — `unstable-widget-ref`는 `WidgetRef`/`StatefulWidgetRef` trait 접근용 (grok의 textarea가 씀, `textarea.rs:10-11`)
+- `ansi-to-tui`, `tui-scrollbar` 등 ratatui 생태계 companion crate도 grok이 그대로 사용
+- **하나의 포크**: `xai-ratatui-inline/NOTICE:1-5`가 ratatui derived code를 명시. inline viewport에 필요한 백버퍼/뷰포트 위치/resize 계산 내부 API가 upstream에 없어서 **`Terminal` struct 하나를 포크**. ratatui 전체를 대체한 게 아님.
+
+oxi-tui와 grok는 **ratatui + crossterm이라는 동일한 기반** 위에서, (a) 백엔드 구현(DiffBackend vs pager-render), (b) 커스텀 위젯(chat vs textarea), (c) 마크다운 파이프라인(17KB vs 전용 크레이트)을 다르게 구성한 것. 이 문서의 비교는 모두 **"같은 기반 위의 어떤 계층을 더 얹았는가"**를 다룬다.
+
 이 문서의 다른 모든 발산점(D1–D4)을 해석하기 위한 **메타 프레임**. 읽기 전에 이것부터 숙지할 것.
 
 - **oxi-tui** (AGENTS.md `oxi-tui` 섹션 인용):
@@ -95,6 +103,7 @@ oxi-tui는 **단일 크레이트 19,979 LOC**로 동일 도메인(채팅 위젯,
 - **oxi-tui** (`render/mod.rs:1-13`): 매 프레임 ratatui의 `draw()`를 호출하되, `DiffBackend`가 **라인 단위 u64 체크섬 diff**로 변경된 행만 crossterm으로 전송. CSI 2026 synchronized update로 tearing 방지. 깔끔하고 ratatui API를 그대로 유지. 단점: **ratatui가 매 프레임 전체 버퍼를 계산**해야 하므로 긴 응답(10K+ 토큰)에서 CPU가 올라감.
 - **grok** (`xai-grok-markdown/lib.rs:1-12`): `StreamingMarkdownRenderer`가 checkpoint를 기준으로 **안정화된 앞부분은 재렌더하지 않음**. tail만 다시 파싱/렌더. `open_code_highlighter.rs`(439 LOC)가 닫힌 코드 블록은 캐시된 하이라이트를 재사용하고 열린 tail만 incremental highlight. CPU가 응답 길이에 비례하지 않음.
 - **시사**: oxi의 DiffBackend는 **전송** 최적화이고, grok의 checkpoint는 **연산** 최적화. 1K 토큰 응답은 차이 무의미, 50K 토큰 응답(코드베이스 전체 요약 등)에서 grok 방식이 큰 차이. **이식 가치 높음**. (후보 1)
+- **수렴 (convergence)**: 두 접근 모두 **CSI 2026 synchronized output** (a.k.a. DCS protocol)로 flicker를 잡는다 — oxi-tui `DiffBackend` (`render/mod.rs:13`)와 grok `xai-ratatui-inline` (`README.md:28` "Flicker-free rendering using DCS protocol")이 **독립적으로 같은 anti-flicker 기법에 도달**. 즉 DiffBackend가 flicker 면에서 뒤처진 게 아님 — 같은 프로토콜을 **다른 레이어**에 적용할 뿐: DiffBackend는 full-frame redraw의 변경 라인만 동기화하고, inline viewport는 incremental print 배치를 동기화. D3의 차이는 "flicker 있음 vs 없음"이 아니라 "전송 최적화 vs 연산 최적화" 한 축에서만 발생한다. → 이 수렴은 D0의 "같은 기반, 다른 계층" 프레임을 역으로 뒷받침한다.
 
 ### D4. "semantic 색상 슬롯" vs "tmTheme 생태계"
 
