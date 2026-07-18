@@ -4,9 +4,13 @@
 //! registered with the `InternalUrlRouter` port so the `read`/`search`
 //! tools can resolve scheme URIs to markdown text.
 
+pub mod agent_handler;
 pub mod issue_handler;
+pub mod local_handler;
 pub mod memory_handler;
 pub mod pr_handler;
+pub mod rule_handler;
+pub mod skill_handler;
 /// Detect the current Git repo's `owner/repo` from the `origin` remote.
 ///
 /// Returns `None` when `git remote get-url origin` fails or the URL is

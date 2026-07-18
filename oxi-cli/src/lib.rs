@@ -235,12 +235,8 @@ impl App {
         ownership_session_id: String,
     ) -> Result<Self> {
         let model_id = settings.effective_model(None).unwrap_or_default();
-        let provider_name = settings
-            .effective_provider(None)
-            .unwrap_or_else(|| model_id.split('/').next().unwrap_or("").to_string());
-
-        // Pull the API key from the wired port, not from oxi_store.
-        let api_key = oxi.ports().auth.get_api_key(&provider_name).await?;
+        // Provider-name and api_key lookups removed in 0.55.0 — the SDK
+        // resolver consults the wired AuthProvider port directly.
 
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
             dirs::home_dir()
@@ -271,7 +267,6 @@ impl App {
             compaction_strategy,
             compaction_instruction: None,
             context_window: 128_000,
-            api_key,
             workspace_dir: Some(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             ),
@@ -282,6 +277,9 @@ impl App {
             memory: None,
             todo: None,
             agent_pool: None,
+            url_resolver: Some(Arc::new(oxi_sdk::SdkUrlResolver::new(
+                oxi.ports().url_router.clone(),
+            ))),
             ..Default::default()
         };
 
@@ -484,14 +482,12 @@ impl App {
     }
 
     /// Switch the model used for future LLM calls.
+    ///
+    /// The new provider is re-credentialed by the SDK resolver via the
+    /// wired AuthProvider port; the `api_key` parameter was removed in
+    /// 0.55.0 (issues #39/#40).
     pub async fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
-        let parts: Vec<&str> = model_id.split('/').collect();
-        let provider = parts
-            .first()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "anthropic".to_string());
-        let api_key = self.oxi.ports().auth.get_api_key(&provider).await?;
-        let _ = self.agent.switch_model(model_id, api_key);
+        let _ = self.agent.switch_model(model_id);
         Ok(())
     }
 

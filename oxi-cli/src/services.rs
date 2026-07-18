@@ -16,8 +16,8 @@ use anyhow::{Context, Result};
 
 use oxi_sdk::Oxi;
 use oxi_sdk::fs::{
-    FileAuthProvider, FileConfigStore, FileModelCatalog, FilePersonaProvider, FileSkillLoader,
-    FileStateStore, SimpleAccessGate, TomlCapabilityResolver,
+    FileConfigStore, FileModelCatalog, FilePersonaProvider, FileSkillLoader, FileStateStore,
+    SimpleAccessGate, TomlCapabilityResolver,
 };
 use oxi_sdk::inmem::{
     CountingResourceMonitor, InMemoryCronScheduler, InMemoryMemoryStore, InProcessEventBus,
@@ -27,7 +27,9 @@ use oxi_sdk::ports::catalog::CatalogEvent;
 use oxi_sdk::ports::fs::CatalogConfig;
 use oxi_sdk::ports::inmem::url_router::CompositeUrlRouter;
 
+use crate::internal_urls::issue_handler::IssueProtocolHandler;
 use crate::internal_urls::memory_handler::MemoryProtocolHandler;
+use crate::internal_urls::pr_handler::PrProtocolHandler;
 use crate::store::extracting_backend;
 use crate::store::memory_summary;
 use crate::store::memory_workers;
@@ -99,7 +101,12 @@ pub async fn build_oxi_with_catalog(
     let oxi = oxi_sdk::OxiBuilder::new()
         .with_builtins()
         .with_state(Arc::new(FileStateStore::new(&paths.sessions)))
-        .with_auth(Arc::new(FileAuthProvider::new(&paths.auth)))
+        // Auth port = the CLI's `shared_auth_storage()` singleton, which
+        // every TUI overlay writes to. Registering it directly (rather
+        // than FileAuthProvider) eliminates the dual-cache problem and
+        // the schema mismatch — overlays and the SDK resolver share one
+        // in-memory store. Issue #40.
+        .with_auth(crate::store::auth_storage::shared_auth_storage())
         .with_config(Arc::new(FileConfigStore::new(&paths.config)))
         .with_skills(Arc::new(FileSkillLoader::single(&paths.skills)))
         .with_personas(Arc::new(FilePersonaProvider::new(
@@ -116,7 +123,7 @@ pub async fn build_oxi_with_catalog(
         .with_cron(Arc::new(InMemoryCronScheduler::new()))
         .with_resources(Arc::new(CountingResourceMonitor::new()))
         .with_catalog(catalog)
-        .with_url_router(build_memory_url_router(paths))
+        .with_url_router(build_url_router(paths))
         .build();
 
     Ok(oxi)
@@ -124,12 +131,12 @@ pub async fn build_oxi_with_catalog(
 
 /// Build the `InternalUrlRouter` wired into [`OxiBuilder::with_url_router`].
 ///
-/// Always registers `MemoryProtocolHandler` so `memory://…` URLs are
-/// resolvable regardless of whether the agent is running.
-fn build_memory_url_router(paths: &OxiPaths) -> Arc<dyn InternalUrlRouter> {
+fn build_url_router(paths: &OxiPaths) -> Arc<dyn InternalUrlRouter> {
     let memory_root = paths.home.join("memory");
     let router = CompositeUrlRouter::new();
     router.register(Arc::new(MemoryProtocolHandler::new(memory_root)));
+    router.register(Arc::new(IssueProtocolHandler));
+    router.register(Arc::new(PrProtocolHandler));
     Arc::new(router)
 }
 
