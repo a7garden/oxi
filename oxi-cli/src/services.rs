@@ -98,17 +98,18 @@ pub async fn build_oxi_with_catalog(
             }
         };
 
+    let skill_loader = Arc::new(FileSkillLoader::single(&paths.skills));
+    let rule_registry: Arc<dyn oxi_sdk::ports::RuleRegistry> =
+        Arc::new(oxi_sdk::ports::NoopRuleRegistry);
+    let agent_artifact_store = crate::internal_urls::agent_handler::AgentArtifactStore::new();
+    let local_root = paths.home.join("local-artifacts");
+
     let oxi = oxi_sdk::OxiBuilder::new()
         .with_builtins()
         .with_state(Arc::new(FileStateStore::new(&paths.sessions)))
-        // Auth port = the CLI's `shared_auth_storage()` singleton, which
-        // every TUI overlay writes to. Registering it directly (rather
-        // than FileAuthProvider) eliminates the dual-cache problem and
-        // the schema mismatch — overlays and the SDK resolver share one
-        // in-memory store. Issue #40.
         .with_auth(crate::store::auth_storage::shared_auth_storage())
         .with_config(Arc::new(FileConfigStore::new(&paths.config)))
-        .with_skills(Arc::new(FileSkillLoader::single(&paths.skills)))
+        .with_skills(skill_loader.clone())
         .with_personas(Arc::new(FilePersonaProvider::new(
             paths.home.join("personas"),
         )))
@@ -123,20 +124,41 @@ pub async fn build_oxi_with_catalog(
         .with_cron(Arc::new(InMemoryCronScheduler::new()))
         .with_resources(Arc::new(CountingResourceMonitor::new()))
         .with_catalog(catalog)
-        .with_url_router(build_url_router(paths))
+        .with_url_router(build_url_router(
+            paths,
+            skill_loader,
+            rule_registry,
+            agent_artifact_store,
+            local_root,
+        ))
         .build();
 
     Ok(oxi)
 }
-
-/// Build the `InternalUrlRouter` wired into [`OxiBuilder::with_url_router`].
-///
-fn build_url_router(paths: &OxiPaths) -> Arc<dyn InternalUrlRouter> {
+fn build_url_router(
+    paths: &OxiPaths,
+    skill_loader: Arc<dyn oxi_sdk::ports::SkillLoader>,
+    rule_registry: Arc<dyn oxi_sdk::ports::RuleRegistry>,
+    agent_store: crate::internal_urls::agent_handler::AgentArtifactStore,
+    local_root: PathBuf,
+) -> Arc<dyn InternalUrlRouter> {
     let memory_root = paths.home.join("memory");
     let router = CompositeUrlRouter::new();
     router.register(Arc::new(MemoryProtocolHandler::new(memory_root)));
     router.register(Arc::new(IssueProtocolHandler));
     router.register(Arc::new(PrProtocolHandler));
+    router.register(Arc::new(
+        crate::internal_urls::skill_handler::SkillProtocolHandler::new(skill_loader),
+    ));
+    router.register(Arc::new(
+        crate::internal_urls::rule_handler::RuleProtocolHandler::new(rule_registry),
+    ));
+    router.register(Arc::new(
+        crate::internal_urls::agent_handler::AgentProtocolHandler::new(agent_store),
+    ));
+    router.register(Arc::new(
+        crate::internal_urls::local_handler::LocalProtocolHandler::new(local_root),
+    ));
     Arc::new(router)
 }
 
@@ -409,15 +431,13 @@ pub fn start_memory_pipeline(
             (None, None)
         } else {
             match oxi.resolve_model(&model_id) {
-                Ok(model) => {
-                    match oxi.create_provider(&model.provider) {
-                        Ok(provider) => (Some(provider), Some(model)),
-                        Err(e) => {
-                            tracing::warn!("memory pipeline: provider creation failed: {e}");
-                            (None, None)
-                        }
+                Ok(model) => match oxi.create_provider(&model.provider) {
+                    Ok(provider) => (Some(provider), Some(model)),
+                    Err(e) => {
+                        tracing::warn!("memory pipeline: provider creation failed: {e}");
+                        (None, None)
                     }
-                }
+                },
                 Err(e) => {
                     tracing::warn!("memory pipeline: model resolution failed: {e}");
                     (None, None)
@@ -457,18 +477,30 @@ pub fn start_memory_pipeline(
                 let now = chrono::Utc::now().timestamp();
 
                 match memory_workers::run_stage1_iteration(
-                    &conn, &sessions_dir, &cwd_str, now,
-                    provider.as_ref(), model.as_ref(),
-                ).await {
+                    &conn,
+                    &sessions_dir,
+                    &cwd_str,
+                    now,
+                    provider.as_ref(),
+                    model.as_ref(),
+                )
+                .await
+                {
                     Ok(true) => tracing::debug!("memory pipeline: stage 1 processed a job"),
                     Ok(false) => tracing::trace!("memory pipeline: stage 1 idle"),
                     Err(e) => tracing::warn!("memory pipeline: stage 1 error: {e}"),
                 }
 
                 match memory_workers::run_stage2_iteration(
-                    &conn, &memory_root, &cwd_str, now,
-                    provider.as_ref(), model.as_ref(),
-                ).await {
+                    &conn,
+                    &memory_root,
+                    &cwd_str,
+                    now,
+                    provider.as_ref(),
+                    model.as_ref(),
+                )
+                .await
+                {
                     Ok(true) => tracing::info!("memory pipeline: stage 2 consolidated"),
                     Ok(false) => tracing::trace!("memory pipeline: stage 2 idle"),
                     Err(e) => tracing::warn!("memory pipeline: stage 2 error: {e}"),
