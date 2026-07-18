@@ -375,10 +375,14 @@ pub async fn session_reflect(
 /// Open (or create) the autonomous-memory pipeline DB and spawn the
 /// background Phase-1 / Phase-2 workers. Returns `None` when the
 /// pipeline is disabled (default).
+///
+/// When `oxi` is `Some`, the pipeline resolves a memory extraction
+/// model from settings and creates a provider for actual LLM calls.
+/// Without it, workers run but skip LLM-dependent work.
 pub fn start_memory_pipeline(
     settings: &crate::store::settings::Settings,
     cwd: &Path,
-    _oxi: Option<&oxi_sdk::Oxi>,
+    oxi: Option<&oxi_sdk::Oxi>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let backend = settings.memory_backend.as_deref().unwrap_or("off");
     if backend != "local" {
@@ -388,28 +392,91 @@ pub fn start_memory_pipeline(
 
     let home = crate::store::settings::Settings::settings_dir().ok()?;
     let db_path = memory_workers::pipeline_db_path(&home);
-    let _sessions_dir = home.join("sessions");
+    let sessions_dir = home.join("sessions");
 
     let cwd_str = cwd.to_string_lossy().to_string();
-    let _memory_root = memory_summary::memory_root(&home, &cwd_str);
+    let memory_root = memory_summary::memory_root(&home, &cwd_str);
 
-    // Best-effort spawn. The actual LLM call integration is the
-    // follow-up PR's responsibility.
-    let handle = tokio::spawn(async move {
-        let conn = match memory_workers::open_db(&db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(
-                    "autonomous memory pipeline: open_db({}) failed: {e}",
-                    db_path.display()
-                );
-                return;
-            }
+    // Resolve memory extraction model + provider from the Oxi engine.
+    let (provider, model) = if let Some(oxi) = oxi {
+        let model_id = if settings.memory_llm_extract_model.is_empty() {
+            settings.effective_model(None).unwrap_or_default()
+        } else {
+            settings.memory_llm_extract_model.clone()
         };
-        let now = chrono::Utc::now().timestamp();
-        let _ = conn;
-        let _ = now;
-        tracing::info!("autonomous memory pipeline: workers spawned (no-op until LLM wired)");
+        if model_id.is_empty() {
+            tracing::warn!("memory pipeline: no model configured for extraction");
+            (None, None)
+        } else {
+            match oxi.resolve_model(&model_id) {
+                Ok(model) => {
+                    match oxi.create_provider(&model.provider) {
+                        Ok(provider) => (Some(provider), Some(model)),
+                        Err(e) => {
+                            tracing::warn!("memory pipeline: provider creation failed: {e}");
+                            (None, None)
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("memory pipeline: model resolution failed: {e}");
+                    (None, None)
+                }
+            }
+        }
+    } else {
+        tracing::warn!("memory pipeline: no Oxi engine, LLM calls will be skipped");
+        (None, None)
+    };
+
+    let poll_interval = std::time::Duration::from_secs(60);
+
+    let handle = tokio::task::spawn_blocking(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("memory pipeline runtime");
+        rt.block_on(async move {
+            let conn = match memory_workers::open_db(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        "autonomous memory pipeline: open_db({}) failed: {e}",
+                        db_path.display()
+                    );
+                    return;
+                }
+            };
+
+            tracing::info!(
+                "autonomous memory pipeline: workers started (provider={})",
+                if provider.is_some() { "wired" } else { "none" }
+            );
+
+            loop {
+                let now = chrono::Utc::now().timestamp();
+
+                match memory_workers::run_stage1_iteration(
+                    &conn, &sessions_dir, &cwd_str, now,
+                    provider.as_ref(), model.as_ref(),
+                ).await {
+                    Ok(true) => tracing::debug!("memory pipeline: stage 1 processed a job"),
+                    Ok(false) => tracing::trace!("memory pipeline: stage 1 idle"),
+                    Err(e) => tracing::warn!("memory pipeline: stage 1 error: {e}"),
+                }
+
+                match memory_workers::run_stage2_iteration(
+                    &conn, &memory_root, &cwd_str, now,
+                    provider.as_ref(), model.as_ref(),
+                ).await {
+                    Ok(true) => tracing::info!("memory pipeline: stage 2 consolidated"),
+                    Ok(false) => tracing::trace!("memory pipeline: stage 2 idle"),
+                    Err(e) => tracing::warn!("memory pipeline: stage 2 error: {e}"),
+                }
+
+                tokio::time::sleep(poll_interval).await;
+            }
+        });
     });
     Some(handle)
 }

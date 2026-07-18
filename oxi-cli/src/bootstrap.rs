@@ -202,10 +202,10 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         std::env::current_dir()
             .as_ref()
             .unwrap_or(&PathBuf::from(".")),
-        None,
+        Some(app.oxi()),
     ) {
         tracing::debug!("memory pipeline spawn handle stored on app");
-        drop(handle); // currently fire-and-forget; joined on shutdown
+        drop(handle); // joined on shutdown via App drop
     }
     Ok(app)
 }
@@ -234,6 +234,15 @@ pub async fn dispatch_run_mode(args: &CliArgs, app: crate::App) -> Result<i32> {
             timeout: args.timeout,
         };
         return crate::print_mode::run_print_mode(&app, options).await;
+    }
+
+    if args.mode.as_deref() == Some("rpc") {
+        crate::rpc_mode::run_rpc_mode(app).await?;
+        return Ok(0);
+    }
+
+    if let Some(mode) = args.mode.as_deref() {
+        anyhow::bail!("Unknown run mode: {mode}");
     }
 
     if prompt.is_empty() || args.interactive {
@@ -554,7 +563,7 @@ fn register_router_provider(settings: &Settings) {
 /// dispatch in [`dispatch_run_mode`]: print / RPC / single-prompt are
 /// non-TUI. Used by [`build_app`] to pick the canonical liveness identity.
 fn is_tui_mode(args: &CliArgs) -> bool {
-    if args.mode.as_deref() == Some("json") || args.print {
+    if matches!(args.mode.as_deref(), Some("json" | "rpc")) || args.print {
         return false;
     }
     // prompt-only (no `--interactive` and a non-empty prompt) is non-TUI too;
