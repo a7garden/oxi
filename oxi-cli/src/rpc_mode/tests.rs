@@ -2,7 +2,6 @@
 
 use super::*;
 use serde_json::Value;
-use std::sync::Arc;
 
 // ── JSONL Tests ────────────────────────────────────────────────
 
@@ -161,86 +160,79 @@ fn test_rpc_response_to_jsonrpc_error() {
     assert_eq!(parsed["error"]["message"], "Something failed");
 }
 
-// ── RPC Server tests ─────────────────────────────────────────────
-
 #[test]
-fn test_rpc_server_new() {
-    let server = state::RpcServer::new(8080);
-    assert_eq!(server.port(), 8080);
-    assert!(!server.is_shutdown_requested());
+fn unsupported_command_returns_explicit_error() {
+    let response = handlers::unsupported_response(Some("req-1".to_string()), "export_html");
+    match response {
+        protocol::RpcResponse::Response {
+            id,
+            command,
+            success,
+            data,
+            error,
+        } => {
+            assert_eq!(id.as_deref(), Some("req-1"));
+            assert_eq!(command, "export_html");
+            assert!(!success);
+            assert!(data.is_none());
+            assert_eq!(
+                error.as_deref(),
+                Some("export_html is not yet supported in RPC mode")
+            );
+        }
+        _ => panic!("expected response frame"),
+    }
 }
 
 #[test]
-fn test_rpc_server_shutdown() {
-    let server = Arc::new(state::RpcServer::new(0));
-    assert!(!server.is_shutdown_requested());
-    server.request_shutdown();
-    assert!(server.is_shutdown_requested());
+fn agent_events_map_to_rpc_stream_frames() {
+    assert!(matches!(
+        handlers::agent_event_to_rpc(&oxi_agent::AgentEvent::Thinking),
+        Some(protocol::RpcEvent::Thinking)
+    ));
+    assert!(matches!(
+        handlers::agent_event_to_rpc(&oxi_agent::AgentEvent::TextChunk {
+            text: "hello".to_string(),
+        }),
+        Some(protocol::RpcEvent::TextChunk { text }) if text == "hello"
+    ));
+    assert!(matches!(
+        handlers::agent_event_to_rpc(&oxi_agent::AgentEvent::ToolExecutionStart {
+            tool_call_id: "call-1".to_string(),
+            tool_name: "read".to_string(),
+            args: serde_json::json!({}),
+            context: None,
+        }),
+        Some(protocol::RpcEvent::ToolStart { tool }) if tool == "read"
+    ));
 }
 
 #[test]
-fn test_rpc_server_session_state() {
-    let server = Arc::new(state::RpcServer::new(0));
-    let state_val = server.get_session_state();
-    assert_eq!(state_val.message_count, 0);
-    assert_eq!(state_val.thinking_level, "default");
-    assert!(state_val.auto_compaction_enabled);
-
-    server.update_session_state(|s| {
-        s.message_count = 10;
-        s.thinking_level = "high".to_string();
-    });
-
-    let new_state = server.get_session_state();
-    assert_eq!(new_state.message_count, 10);
-    assert_eq!(new_state.thinking_level, "high");
+fn ready_frame_is_serialized_first_class() {
+    let value = serde_json::to_value(handlers::OutputFrame::Ready).unwrap();
+    assert_eq!(value, serde_json::json!({ "type": "ready" }));
 }
 
 #[test]
-fn test_rpc_server_model_state() {
-    let server = Arc::new(state::RpcServer::new(0));
-    assert!(server.get_session_state().model.is_none());
-
-    server.update_session_state(|s| {
-        s.model = Some(protocol::ModelInfo {
-            provider: "anthropic".to_string(),
-            id: "claude-3-opus".to_string(),
-        });
-    });
-
-    let state_val = server.get_session_state();
-    assert!(state_val.model.is_some());
-    let model = state_val.model.unwrap();
-    assert_eq!(model.provider, "anthropic");
-    assert_eq!(model.id, "claude-3-opus");
+fn native_command_parser_accepts_jsonl_command() {
+    let command = handlers::parse_command_line(r#"{"type":"get_state","id":"state-1"}"#).unwrap();
+    assert!(matches!(
+        command,
+        protocol::RpcCommand::GetState { id } if id.as_deref() == Some("state-1")
+    ));
 }
 
 #[test]
-fn test_parse_images_data_uri() {
-    let images = vec![protocol::ImageData {
-        source: "data:image/png;base64,iVBORw0KGgo=".to_string(),
-        media_type: "image/png".to_string(),
-    }];
-    let parsed = state::RpcServer::parse_images(Some(images));
-    assert_eq!(parsed.len(), 1);
-    assert!(!parsed[0].data.is_empty());
-    assert_eq!(parsed[0].mime_type, "image/png");
-}
-
-#[test]
-fn test_parse_images_empty() {
-    let parsed = state::RpcServer::parse_images(None);
-    assert!(parsed.is_empty());
-}
-
-#[test]
-fn test_parse_images_non_data_uri() {
-    let images = vec![protocol::ImageData {
-        source: "https://example.com/image.png".to_string(),
-        media_type: "image/png".to_string(),
-    }];
-    let parsed = state::RpcServer::parse_images(Some(images));
-    assert!(parsed.is_empty());
+fn jsonrpc_input_gets_explicit_protocol_error() {
+    let response = handlers::parse_command_line(r#"{"jsonrpc":"2.0","id":1,"method":"get_state"}"#)
+        .unwrap_err();
+    match response {
+        protocol::RpcResponse::Response { success, error, .. } => {
+            assert!(!success);
+            assert!(error.unwrap().contains("not supported"));
+        }
+        _ => panic!("expected error response"),
+    }
 }
 
 // ── Session Handoff Tests ─────────────────────────────────────────

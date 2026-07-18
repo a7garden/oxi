@@ -311,31 +311,31 @@ impl RpcClient {
 
     /// Send a prompt to the agent.
     pub fn prompt(&mut self, message: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "prompt",
             "message": message
-        }))
+        }))?)
     }
 
     /// Send a steer message.
     pub fn steer(&mut self, message: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "steer",
             "message": message
-        }))
+        }))?)
     }
 
     /// Send a follow-up message.
     pub fn follow_up(&mut self, message: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "follow_up",
             "message": message
-        }))
+        }))?)
     }
 
     /// Abort current operation.
     pub fn abort(&mut self) -> Result<()> {
-        self.send_command(serde_json::json!({ "type": "abort" }))
+        Self::require_success(self.send_and_wait(serde_json::json!({ "type": "abort" }))?)
     }
 
     /// Start a new session.
@@ -373,10 +373,10 @@ impl RpcClient {
 
     /// Set thinking level.
     pub fn set_thinking_level(&mut self, level: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "set_thinking_level",
             "level": level
-        }))
+        }))?)
     }
 
     /// Cycle thinking level.
@@ -386,18 +386,18 @@ impl RpcClient {
 
     /// Set steering mode.
     pub fn set_steering_mode(&mut self, mode: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "set_steering_mode",
             "mode": mode
-        }))
+        }))?)
     }
 
     /// Set follow-up mode.
     pub fn set_follow_up_mode(&mut self, mode: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "set_follow_up_mode",
             "mode": mode
-        }))
+        }))?)
     }
 
     /// Compact session context.
@@ -411,23 +411,23 @@ impl RpcClient {
 
     /// Set auto-compaction.
     pub fn set_auto_compaction(&mut self, enabled: bool) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "set_auto_compaction",
             "enabled": enabled
-        }))
+        }))?)
     }
 
     /// Set auto-retry.
     pub fn set_auto_retry(&mut self, enabled: bool) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "set_auto_retry",
             "enabled": enabled
-        }))
+        }))?)
     }
 
     /// Abort retry.
     pub fn abort_retry(&mut self) -> Result<()> {
-        self.send_command(serde_json::json!({ "type": "abort_retry" }))
+        Self::require_success(self.send_and_wait(serde_json::json!({ "type": "abort_retry" }))?)
     }
 
     /// Execute a bash command.
@@ -440,7 +440,7 @@ impl RpcClient {
 
     /// Abort bash.
     pub fn abort_bash(&mut self) -> Result<()> {
-        self.send_command(serde_json::json!({ "type": "abort_bash" }))
+        Self::require_success(self.send_and_wait(serde_json::json!({ "type": "abort_bash" }))?)
     }
 
     /// Get session statistics.
@@ -490,10 +490,10 @@ impl RpcClient {
 
     /// Set the session display name.
     pub fn set_session_name(&mut self, name: &str) -> Result<()> {
-        self.send_command(serde_json::json!({
+        Self::require_success(self.send_and_wait(serde_json::json!({
             "type": "set_session_name",
             "name": name
-        }))
+        }))?)
     }
 
     /// Get all messages.
@@ -508,29 +508,23 @@ impl RpcClient {
 
     // ── Internal helpers ─────────────────────────────────────────
 
+    fn require_success(response: RpcResponse) -> Result<()> {
+        match response {
+            RpcResponse::Response { success: true, .. } => Ok(()),
+            RpcResponse::Response { error, command, .. } => anyhow::bail!(
+                "RPC command {command} failed: {}",
+                error.unwrap_or_else(|| "unknown error".to_string())
+            ),
+            RpcResponse::ExtensionUiRequest(_) => {
+                anyhow::bail!("unexpected extension UI request response")
+            }
+        }
+    }
+
     /// Generate the next request ID.
     fn next_request_id(&mut self) -> String {
         self.request_counter += 1;
         format!("req_{}", self.request_counter)
-    }
-
-    /// Send a fire-and-forget command (no response expected).
-    fn send_command(&mut self, mut command: Value) -> Result<()> {
-        let id = self.next_request_id();
-        if let Some(obj) = command.as_object_mut() {
-            obj.insert("id".to_string(), Value::String(id));
-        }
-
-        let line = serialize_json_line(&command);
-        let child = self.child.as_mut().context("Client not started")?;
-        if let Some(ref mut stdin) = child.stdin {
-            stdin
-                .write_all(line.as_bytes())
-                .context("Failed to write to stdin")?;
-            stdin.flush().context("Failed to flush stdin")?;
-        }
-
-        Ok(())
     }
 
     /// Send a command and wait for the response.

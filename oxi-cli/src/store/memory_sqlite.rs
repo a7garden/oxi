@@ -23,17 +23,42 @@ pub struct SqliteMemoryStore {
 impl SqliteMemoryStore {
     /// Open or create a SQLite memory store at `path`.
     ///
-    /// Uses `:memory:` for an in-memory database. For persistent paths, WAL
-    /// journal mode is enabled for better concurrent read performance.
+    /// Uses `:memory:` for an in-memory database. For persistent paths,
+    /// filesystem-aware journal-mode selection is applied (see
+    /// [`oxi_mnemopi::journal::JournalMode`]). On network filesystems the
+    /// engine falls back to `TRUNCATE` mode + per-host DB sibling to avoid
+    /// SIGBUS from mmap'd `-shm`.
     pub fn open(path: &Path) -> Result<Self, rusqlite::Error> {
         let is_memory = path == Path::new(":memory:");
+        // Durable primary store: detect journal mode (TRUNCATE on NFS for
+        // SIGBUS safety) but NEVER rewrite the path — user memories must
+        // stay coherent across hosts. See `JournalMode::effective_db_path`.
+        let mode = if is_memory {
+            oxi_mnemopi::journal::JournalMode::Wal
+        } else {
+            oxi_mnemopi::journal::JournalMode::for_db_path(path)
+        };
         let conn = Connection::open(path)?;
 
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
+        conn.execute_batch(&format!(
+            "PRAGMA busy_timeout = {};",
+            mode.busy_timeout_ms()
+        ))?;
 
         if !is_memory {
-            conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+            // Apply the detected (or env-overridden) journal mode. Failures
+            // fall back to SQLite's default `delete` journal — still safe,
+            // just slower than WAL.
+            if let Err(e) = conn.execute_batch(&format!("PRAGMA journal_mode = {};", mode.as_str()))
+            {
+                tracing::warn!(
+                    mode = mode.as_str(),
+                    path = %path.display(),
+                    error = %e,
+                    "failed to set journal_mode; SQLite default will be used"
+                );
+            }
         }
 
         conn.execute_batch(

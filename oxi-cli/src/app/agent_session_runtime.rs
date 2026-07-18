@@ -94,7 +94,9 @@ pub struct AgentSessionServices {
     /// Agent data directory (typically `~/.oxi`).
     #[allow(dead_code)]
     pub agent_dir: PathBuf,
-    /// Auth storage for API keys / OAuth tokens.
+    /// Auth storage retained for overlay UI reads; provider credential
+    /// resolution now flows through the SDK's wired AuthProvider port.
+    #[allow(dead_code)]
     pub auth_storage: Arc<AuthStorage>,
     /// Settings (layered configuration).
     pub settings: Arc<Settings>,
@@ -310,7 +312,6 @@ pub async fn create_agent_session_from_services(
                 &settings.output_languages,
             ),
             context_window: 128_000,
-            api_key: None,
             workspace_dir: Some(services.cwd.clone()),
             output_mode: None,
             provider_options: None,
@@ -386,8 +387,8 @@ pub async fn create_agent_session_from_services(
     } else {
         oxi_sdk::CompactionStrategy::Disabled
     };
-    // Resolve API key from auth storage for the provider
-    let api_key = services.auth_storage.get_api_key(&provider_name);
+    // API key resolution is handled by the SDK resolver via the wired
+    // AuthProvider port (sync fast-path in `Oxi::create_provider`).
 
     let config = oxi_agent::AgentConfig {
         name: "oxi".to_string(),
@@ -402,8 +403,6 @@ pub async fn create_agent_session_from_services(
             settings.language_policy_enabled,
             &settings.output_languages,
         ),
-        context_window: 128_000,
-        api_key,
         workspace_dir: Some(services.cwd.clone()),
         output_mode: None,
         provider_options: None,

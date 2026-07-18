@@ -1033,6 +1033,127 @@ impl Default for AuthStorage {
 }
 
 // ============================================================================
+// SDK AuthProvider port adapter
+// ============================================================================
+//
+// AuthStorage is the CLI's actual credential store: every TUI overlay
+// (provider_select.rs, slash/builtin/provider.rs, …) writes here via
+// `shared_auth_storage()`. Registering it DIRECTLY as the SDK `AuthProvider`
+// port (replacing FileAuthProvider in `build_oxi`) eliminates both the
+// dual-cache problem (the port IS what overlays write to) and the schema
+// mismatch (FileAuthProvider's `{version,providers:{name:{api_key}}}`
+// format can't deserialize AuthStorage's `#[serde(tag="type")]` enum
+// output — see issue #40 advisor follow-up).
+//
+// The sync fast-path is the load-bearing piece: `Oxi::create_provider`
+// consults it at build / switch_model / refresh_credentials time.
+
+impl oxi_sdk::ports::AuthProvider for AuthStorage {
+    fn get_api_key(
+        &self,
+        provider: &str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<String>, oxi_sdk::SdkError>> + Send + '_,
+        >,
+    > {
+        let result = self.get_api_key(provider);
+        Box::pin(async move { Ok(result) })
+    }
+
+    /// Sync fast-path — delegates directly to AuthStorage's existing sync
+    /// `get_api_key`, which already implements the full lookup chain
+    /// (runtime override → file → OAuth → session → env → fallback).
+    /// This is the credential source `Oxi::create_provider` consults.
+    fn get_api_key_sync(&self, provider: &str) -> Result<Option<String>, oxi_sdk::SdkError> {
+        Ok(self.get_api_key(provider))
+    }
+
+    fn set_api_key(
+        &self,
+        provider: &str,
+        key: &str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), oxi_sdk::SdkError>> + Send + '_>,
+    > {
+        AuthStorage::set_api_key(self, provider, key.to_string());
+        Box::pin(async { Ok(()) })
+    }
+
+    fn delete_api_key(
+        &self,
+        provider: &str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), oxi_sdk::SdkError>> + Send + '_>,
+    > {
+        self.credentials.write().remove(provider);
+        let _ = self.persist();
+        Box::pin(async { Ok(()) })
+    }
+
+    fn get_oauth(
+        &self,
+        provider: &str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<Option<oxi_sdk::ports::OAuthToken>, oxi_sdk::SdkError>,
+                > + Send
+                + '_,
+        >,
+    > {
+        let result = self
+            .get_oauth_credential(provider)
+            .and_then(|cred| match cred {
+                AuthCredential::OAuth {
+                    access_token,
+                    refresh_token,
+                    expires_at,
+                    ..
+                } => Some(oxi_sdk::ports::OAuthToken {
+                    access_token,
+                    refresh_token,
+                    expires_at: chrono::DateTime::from_timestamp(expires_at as i64, 0),
+                    token_type: Some("Bearer".to_string()),
+                    scope: None,
+                }),
+                _ => None,
+            });
+        Box::pin(async move { Ok(result) })
+    }
+
+    fn set_oauth(
+        &self,
+        provider: &str,
+        token: oxi_sdk::ports::OAuthToken,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), oxi_sdk::SdkError>> + Send + '_>,
+    > {
+        let expires_at = token
+            .expires_at
+            .and_then(|dt| dt.timestamp().max(0).try_into().ok())
+            .unwrap_or(0);
+        AuthStorage::set_oauth(
+            self,
+            provider,
+            token.access_token,
+            token.refresh_token,
+            expires_at,
+        );
+        Box::pin(async { Ok(()) })
+    }
+
+    fn list_providers(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<String>, oxi_sdk::SdkError>> + Send + '_>,
+    > {
+        let result = AuthStorage::list_providers(self);
+        Box::pin(async move { Ok(result) })
+    }
+}
+
+// ============================================================================
 // Helper: current unix timestamp
 // ============================================================================
 

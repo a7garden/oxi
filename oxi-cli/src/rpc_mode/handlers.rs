@@ -1,690 +1,575 @@
-//! RPC command handlers and the main event loop.
+//! RPC actor and stdio entry point.
 
 use crate::App;
-use anyhow::Result;
+use crate::app::agent_session::{AgentSession, AgentSessionHandle};
+use crate::store::session::SessionManager;
+use anyhow::{Context, Result};
+use oxi_agent::{AgentEvent, AgentHooks, ToolExecutionMode};
+use serde::Serialize;
 use serde_json::Value;
-use std::io::{BufRead, Write};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc;
 
 use super::protocol::*;
-use super::state::RpcServer;
 
-// ============================================================================
-// RPC Server Entry Point
-// ============================================================================
+type OutputSender = mpsc::UnboundedSender<WriterFrame>;
 
-/// Run the RPC server in stdio mode.
-///
-/// Reads JSONL commands from stdin, processes them, and writes
-/// JSONL responses/events to stdout.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum OutputFrame {
+    Ready,
+}
+
+enum WriterFrame {
+    Response(RpcResponse),
+    Event(RpcEvent),
+    Json(Value),
+}
+
+struct RpcActor {
+    session: AgentSessionHandle,
+    output: mpsc::UnboundedSender<WriterFrame>,
+    active_run: Option<tokio::task::JoinHandle<Result<()>>>,
+}
+
+/// Run the RPC server over JSON Lines on stdin/stdout.
 pub async fn run_rpc_mode(app: App) -> Result<()> {
-    let mut server = Arc::new(RpcServer::new(0)); // 0 = stdio mode
-    let output = RpcOutput::new();
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .into_owned();
+    let session = AgentSession::new(
+        app.agent(),
+        app.settings().clone(),
+        SessionManager::create(&cwd, None),
+        cwd,
+    );
+    install_session_hooks(&session);
+    let session = session.clone_handle();
 
-    // Spawn event forwarding task
-    let output_clone = output.clone();
-    // Take the event receiver - server was just created so Arc hasn't been shared
-    let rx = Arc::get_mut(&mut server)
-        .expect("server Arc must be unique at construction")
-        .take_event_receiver();
-    let mut event_rx = rx.expect("event receiver must be available at construction");
-    let event_handle = tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            let json = serde_json::to_value(&event).unwrap_or_default();
-            output_clone.write_line(&json);
-        }
-    });
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<RpcCommand>();
+    let (output_tx, output_rx) = mpsc::unbounded_channel::<WriterFrame>();
 
-    let stdin = std::io::stdin();
-    let mut input = stdin.lock();
-    let mut line_reader = JsonlLineReader::new();
-    let _raw_buf = [0u8; 4096];
+    let reader = tokio::spawn(read_commands(command_tx, output_tx.clone()));
+    let writer = tokio::spawn(write_frames(output_rx));
 
-    loop {
-        // Check for shutdown
-        if server.is_shutdown_requested() {
-            break;
-        }
+    output_tx
+        .send(WriterFrame::Json(
+            serde_json::to_value(OutputFrame::Ready).expect("ready frame is serializable"),
+        ))
+        .map_err(|_| anyhow::anyhow!("RPC stdout writer stopped during startup"))?;
 
-        // Read from stdin (blocking)
-        let mut read_buf = String::new();
-        match input.read_line(&mut read_buf) {
-            Ok(0) => {
-                // EOF reached — flush any remaining buffered data
-                if let Some(final_line) = line_reader.flush() {
-                    process_line(&final_line, &server, &app, &output).await;
-                }
-                break;
-            }
-            Ok(_) => {
-                let lines = line_reader.feed(&read_buf);
-                for line in lines {
-                    process_line(&line, &server, &app, &output).await;
-                }
-            }
-            Err(e) => {
-                eprintln!("Error reading stdin: {}", e);
-                break;
-            }
-        }
+    let mut actor = RpcActor {
+        session,
+        output: output_tx,
+        active_run: None,
+    };
+
+    while let Some(command) = command_rx.recv().await {
+        actor.handle(command).await;
     }
 
-    // Cleanup
-    event_handle.abort();
+    actor.abort_active_run().await;
+    drop(actor.output);
+    reader.abort();
+    writer.await.context("RPC stdout writer task failed")??;
     Ok(())
 }
 
-/// Process a single JSONL input line.
-async fn process_line(line: &str, server: &Arc<RpcServer>, app: &App, output: &RpcOutput) {
-    let value = match parse_json_line(line) {
-        Ok(v) => v,
-        Err(e) => {
-            let error_response = RpcResponse::Response {
-                id: None,
-                command: "parse".to_string(),
-                success: false,
-                data: None,
-                error: Some(format!("Failed to parse command: {}", e)),
-            };
-            output.write_obj(&error_response);
-            return;
-        }
-    };
-
-    // Check if this is a JSON-RPC 2.0 request
-    if let Some(obj) = value.as_object()
-        && obj.contains_key("jsonrpc")
-    {
-        handle_jsonrpc_request(obj, server, app, output);
-        return;
-    }
-
-    // Handle extension UI responses
-    if let Some(obj) = value.as_object()
-        && obj.get("type").and_then(|v| v.as_str()) == Some("extension_ui_response")
-    {
-        if let Ok(response) = serde_json::from_value::<RpcExtensionUiResponse>(value.clone()) {
-            let id = match &response {
-                RpcExtensionUiResponse::ExtensionUiResponse { id, .. } => id.clone(),
-            };
-            server.resolve_extension_request(&id, response).await;
-        }
-        return;
-    }
-
-    // Handle as native RPC command
-    match serde_json::from_value::<RpcCommand>(value) {
-        Ok(command) => {
-            let response = execute_command(server, app, command);
-            output.write_obj(&response);
-        }
-        Err(e) => {
-            let error_response = RpcResponse::Response {
-                id: None,
-                command: "parse".to_string(),
-                success: false,
-                data: None,
-                error: Some(format!("Parse error: {}", e)),
-            };
-            output.write_obj(&error_response);
-        }
-    }
+fn install_session_hooks(session: &AgentSession) {
+    let steering = session.steering_queue();
+    let follow_up = session.follow_up_queue();
+    let should_stop = session.should_stop_flag();
+    session.agent_ref().set_hooks(AgentHooks {
+        should_stop_after_turn: Some(Arc::new(move |_| should_stop.load(Ordering::SeqCst))),
+        get_steering_messages: Some(Arc::new(move || steering.write().drain(..).collect())),
+        get_follow_up_messages: Some(Arc::new(move || follow_up.write().drain(..).collect())),
+        tool_execution: ToolExecutionMode::Sequential,
+        ..Default::default()
+    });
 }
 
-/// Handle a JSON-RPC 2.0 request.
-fn handle_jsonrpc_request(
-    obj: &serde_json::Map<String, Value>,
-    server: &Arc<RpcServer>,
-    app: &App,
-    output: &RpcOutput,
-) {
-    let jsonrpc = obj.get("jsonrpc").and_then(|v| v.as_str()).unwrap_or("");
-    if jsonrpc != "2.0" {
-        let err = JsonRpcErrorResponse {
-            jsonrpc: "2.0".to_string(),
-            id: Value::Null,
-            error: JsonRpcError {
-                code: JSONRPC_INVALID_REQUEST,
-                message: "Invalid jsonrpc version".to_string(),
-                data: None,
+async fn read_commands(command_tx: mpsc::UnboundedSender<RpcCommand>, output: OutputSender) {
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) if line.trim().is_empty() => continue,
+            Ok(Some(line)) => match parse_command_line(&line) {
+                Ok(command) => {
+                    if command_tx.send(command).is_err() {
+                        break;
+                    }
+                }
+                Err(response) => {
+                    if output.send(WriterFrame::Response(response)).is_err() {
+                        break;
+                    }
+                }
             },
+            Ok(None) => break,
+            Err(error) => {
+                let _ = output.send(WriterFrame::Response(error_response(
+                    None,
+                    "read",
+                    format!("Failed to read stdin: {error}"),
+                )));
+                break;
+            }
+        }
+    }
+}
+
+pub(crate) fn parse_command_line(line: &str) -> std::result::Result<RpcCommand, RpcResponse> {
+    let value = parse_json_line(line).map_err(|error| {
+        error_response(None, "parse", format!("Failed to parse command: {error}"))
+    })?;
+    if value.get("jsonrpc").is_some() {
+        return Err(error_response(
+            value.get("id").map(Value::to_string),
+            "jsonrpc",
+            "JSON-RPC framing is not supported by the actor RPC protocol; send native JSONL commands",
+        ));
+    }
+    if value.get("type").and_then(Value::as_str) == Some("extension_ui_response") {
+        return Err(error_response(
+            None,
+            "extension_ui_response",
+            "extension UI responses are not yet supported in RPC mode",
+        ));
+    }
+    serde_json::from_value(value)
+        .map_err(|error| error_response(None, "parse", format!("Parse error: {error}")))
+}
+
+async fn write_frames(mut rx: mpsc::UnboundedReceiver<WriterFrame>) -> Result<()> {
+    let mut stdout = tokio::io::stdout();
+    while let Some(frame) = rx.recv().await {
+        let line = match frame {
+            WriterFrame::Response(response) => serialize_json_line_obj(&response),
+            WriterFrame::Event(event) => serialize_json_line_obj(&event),
+            WriterFrame::Json(value) => serialize_json_line(&value),
         };
-        output.write_obj(&err);
-        return;
+        stdout.write_all(line.as_bytes()).await?;
+        stdout.flush().await?;
     }
-
-    let id = obj.get("id").cloned().unwrap_or(Value::Null);
-    let method = match obj.get("method").and_then(|v| v.as_str()) {
-        Some(m) => m,
-        None => {
-            let err = JsonRpcErrorResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                error: JsonRpcError {
-                    code: JSONRPC_INVALID_REQUEST,
-                    message: "Missing method".to_string(),
-                    data: None,
-                },
-            };
-            output.write_obj(&err);
-            return;
-        }
-    };
-
-    let params = obj.get("params").cloned();
-
-    // Map to internal command
-    let cmd_value = match jsonrpc_to_command(method, params, Some(id.clone())) {
-        Some(v) => v,
-        None => {
-            let err = JsonRpcErrorResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                error: JsonRpcError {
-                    code: JSONRPC_METHOD_NOT_FOUND,
-                    message: format!("Method not found: {}", method),
-                    data: None,
-                },
-            };
-            output.write_obj(&err);
-            return;
-        }
-    };
-
-    // Parse and execute
-    match serde_json::from_value::<RpcCommand>(cmd_value) {
-        Ok(command) => {
-            let response = execute_command(server, app, command);
-            let jsonrpc_response = rpc_response_to_jsonrpc(&response, id);
-            if !jsonrpc_response.is_empty() {
-                output.write_raw(&format!("{}\n", jsonrpc_response));
-            }
-        }
-        Err(e) => {
-            let err = JsonRpcErrorResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                error: JsonRpcError {
-                    code: JSONRPC_INVALID_PARAMS,
-                    message: format!("Invalid params: {}", e),
-                    data: None,
-                },
-            };
-            output.write_obj(&err);
-        }
-    }
+    Ok(())
 }
 
-/// Execute an RPC command and return the response.
-fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> RpcResponse {
-    match command {
-        // ── Prompting ──────────────────────────────────────────────
-        RpcCommand::Prompt {
-            id,
-            message: _,
-            images,
-            streaming_behavior: _,
-        } => {
-            let _image_sources = RpcServer::parse_images(images);
-
-            server.update_session_state(|s| {
-                s.is_streaming = true;
-                s.pending_message_count += 1;
-            });
-
-            server.emit_event(RpcEvent::AgentStart);
-
-            RpcResponse::Response {
+impl RpcActor {
+    async fn handle(&mut self, command: RpcCommand) {
+        match command {
+            RpcCommand::Prompt {
                 id,
-                command: "prompt".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-
-        RpcCommand::Steer {
-            id,
-            message: _,
-            images: _,
-        } => {
-            server.update_session_state(|s| {
-                s.steering_mode = "one_at_a_time".to_string();
-            });
-
-            RpcResponse::Response {
+                message,
+                images,
+                streaming_behavior: _,
+            } => self.prompt(id, message, images),
+            RpcCommand::Steer {
                 id,
-                command: "steer".to_string(),
-                success: true,
-                data: None,
-                error: None,
+                message,
+                images,
+            } => {
+                if images.as_ref().is_some_and(|images| !images.is_empty()) {
+                    self.respond(unsupported_response(id, "steer with images"));
+                } else {
+                    self.session.steer_sync(message);
+                    self.respond(success_response(id, "steer", None));
+                }
             }
-        }
-
-        RpcCommand::FollowUp {
-            id,
-            message: _,
-            images: _,
-        } => {
-            server.update_session_state(|s| {
-                s.follow_up_mode = "one_at_a_time".to_string();
-            });
-
-            RpcResponse::Response {
+            RpcCommand::FollowUp {
                 id,
-                command: "follow_up".to_string(),
-                success: true,
-                data: None,
-                error: None,
+                message,
+                images,
+            } => {
+                if images.as_ref().is_some_and(|images| !images.is_empty()) {
+                    self.respond(unsupported_response(id, "follow_up with images"));
+                } else {
+                    self.session.follow_up_sync(message);
+                    self.respond(success_response(id, "follow_up", None));
+                }
             }
-        }
-
-        RpcCommand::Abort { id } => {
-            server.update_session_state(|s| {
-                s.is_streaming = false;
-            });
-            server.emit_event(RpcEvent::AgentEnd);
-
-            RpcResponse::Response {
+            RpcCommand::Abort { id } => {
+                self.session.abort().await;
+                self.session.agent_ref().cancel();
+                // The session hook and Agent cancel flag stop the dedicated local runtime.
+                // Keep the join task alive so it can persist final state and clear streaming.
+                self.respond(success_response(id, "abort", None));
+            }
+            RpcCommand::NewSession { id, .. } => {
+                self.respond(unsupported_response(id, "new_session"));
+            }
+            RpcCommand::GetState { id } => self.respond(success_response(
                 id,
-                command: "abort".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-
-        RpcCommand::NewSession {
-            id,
-            parent_session: _,
-        } => {
-            server.update_session_state(|s| {
-                s.session_id = uuid::Uuid::new_v4().to_string();
-                s.message_count = 0;
-                s.pending_message_count = 0;
-            });
-
-            RpcResponse::Response {
+                "get_state",
+                Some(self.session_state_value()),
+            )),
+            RpcCommand::SetModel {
                 id,
-                command: "new_session".to_string(),
-                success: true,
-                data: Some(serde_json::json!({ "cancelled": false })),
-                error: None,
+                provider,
+                model_id,
+            } => {
+                let full_model_id = if model_id.contains('/') {
+                    model_id
+                } else {
+                    format!("{provider}/{model_id}")
+                };
+                match self.session.set_model(&full_model_id) {
+                    Ok(()) => self.respond(success_response(
+                        id,
+                        "set_model",
+                        Some(serde_json::json!({ "model": full_model_id })),
+                    )),
+                    Err(error) => self.respond(error_response(id, "set_model", error.to_string())),
+                }
             }
-        }
-
-        // ── State ──────────────────────────────────────────────────
-        RpcCommand::GetState { id } => {
-            let state = server.get_session_state();
-
-            RpcResponse::Response {
-                id,
-                command: "get_state".to_string(),
-                success: true,
-                data: Some(serde_json::to_value(&state).expect("state should be serializable")),
-                error: None,
-            }
-        }
-
-        // ── Model ──────────────────────────────────────────────────
-        RpcCommand::SetModel {
-            id,
-            provider,
-            model_id,
-        } => {
-            // In a real implementation, this would switch the model
-            server.update_session_state(|s| {
-                s.model = Some(ModelInfo {
-                    provider: provider.clone(),
-                    id: model_id.clone(),
-                });
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "set_model".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "provider": provider,
-                    "id": model_id
-                })),
-                error: None,
-            }
-        }
-
-        RpcCommand::CycleModel { id } => RpcResponse::Response {
-            id,
-            command: "cycle_model".to_string(),
-            success: true,
-            data: Some(serde_json::json!({
-                "model": null,
-                "thinking_level": "default",
-                "is_scoped": false
-            })),
-            error: None,
-        },
-
-        RpcCommand::GetAvailableModels { id } => RpcResponse::Response {
-            id,
-            command: "get_available_models".to_string(),
-            success: true,
-            data: Some(serde_json::json!({
-                "models": []
-            })),
-            error: None,
-        },
-
-        // ── Thinking ───────────────────────────────────────────────
-        RpcCommand::SetThinkingLevel { id, level } => {
-            server.update_session_state(|s| {
-                s.thinking_level = level;
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "set_thinking_level".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-
-        RpcCommand::CycleThinkingLevel { id } => {
-            let current = server.get_session_state().thinking_level;
-            let next = match current.as_str() {
-                "off" => "default",
-                "default" => "medium",
-                "medium" => "high",
-                _ => "off",
-            };
-
-            server.update_session_state(|s| {
-                s.thinking_level = next.to_string();
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "cycle_thinking_level".to_string(),
-                success: true,
-                data: Some(serde_json::json!({ "level": next })),
-                error: None,
-            }
-        }
-
-        // ── Queue modes ────────────────────────────────────────────
-        RpcCommand::SetSteeringMode { id, mode } => {
-            server.update_session_state(|s| {
-                s.steering_mode = mode;
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "set_steering_mode".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-
-        RpcCommand::SetFollowUpMode { id, mode } => {
-            server.update_session_state(|s| {
-                s.follow_up_mode = mode;
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "set_follow_up_mode".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-
-        // ── Compaction ─────────────────────────────────────────────
-        RpcCommand::Compact {
-            id,
-            custom_instructions: _,
-        } => {
-            server.update_session_state(|s| {
-                s.is_compacting = true;
-            });
-
-            // Simulate compaction
-            let state = server.get_session_state();
-            let result = CompactionResult {
-                original_count: state.message_count,
-                compacted_count: (state.message_count as f32 * 0.7) as usize,
-                tokens_saved: Some(1000),
-            };
-
-            server.update_session_state(|s| {
-                s.is_compacting = false;
-                s.message_count = result.compacted_count;
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "compact".to_string(),
-                success: true,
-                data: Some(
-                    serde_json::to_value(&result).expect("compact result should be serializable"),
-                ),
-                error: None,
-            }
-        }
-
-        RpcCommand::SetAutoCompaction { id, enabled } => {
-            server.update_session_state(|s| {
-                s.auto_compaction_enabled = enabled;
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "set_auto_compaction".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-
-        // ── Retry ─────────────────────────────────────────────────
-        RpcCommand::SetAutoRetry { id, enabled: _ } => RpcResponse::Response {
-            id,
-            command: "set_auto_retry".to_string(),
-            success: true,
-            data: None,
-            error: None,
-        },
-
-        RpcCommand::AbortRetry { id } => RpcResponse::Response {
-            id,
-            command: "abort_retry".to_string(),
-            success: true,
-            data: None,
-            error: None,
-        },
-
-        // ── Bash ───────────────────────────────────────────────────
-        RpcCommand::Bash { id, command } => {
-            if is_dangerous_rpc_command(&command) {
-                tracing::warn!("RPC bash command contains dangerous pattern: {:?}", command);
-            }
-            let output_result = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&command)
-                .output();
-
-            match output_result {
-                Ok(output) => RpcResponse::Response {
+            RpcCommand::CycleModel { id } => self.respond(unsupported_response(id, "cycle_model")),
+            RpcCommand::GetAvailableModels { id } => {
+                let models: Vec<_> = oxi_sdk::get_all_models()
+                    .map(|entry| {
+                        serde_json::json!({
+                            "provider": entry.provider,
+                            "id": entry.id,
+                        })
+                    })
+                    .collect();
+                self.respond(success_response(
                     id,
-                    command: "bash".to_string(),
-                    success: true,
-                    data: Some(serde_json::json!({
-                        "stdout": String::from_utf8_lossy(&output.stdout),
-                        "stderr": String::from_utf8_lossy(&output.stderr),
-                        "exit_code": output.status.code()
+                    "get_available_models",
+                    Some(serde_json::json!({ "models": models })),
+                ));
+            }
+            RpcCommand::SetThinkingLevel { id, level } => {
+                match crate::store::settings::parse_thinking_level(&level) {
+                    Some(level) => {
+                        self.session.set_thinking_level(level);
+                        self.respond(success_response(id, "set_thinking_level", None));
+                    }
+                    None => self.respond(error_response(
+                        id,
+                        "set_thinking_level",
+                        format!("invalid thinking level: {level}"),
+                    )),
+                }
+            }
+            RpcCommand::CycleThinkingLevel { id } => match self.session.cycle_thinking_level() {
+                Some(level) => self.respond(success_response(
+                    id,
+                    "cycle_thinking_level",
+                    Some(serde_json::json!({ "level": format_thinking_level(level) })),
+                )),
+                None => self.respond(error_response(
+                    id,
+                    "cycle_thinking_level",
+                    "the active model does not support another thinking level",
+                )),
+            },
+            RpcCommand::SetSteeringMode { id, .. } => {
+                self.respond(unsupported_response(id, "set_steering_mode"));
+            }
+            RpcCommand::SetFollowUpMode { id, .. } => {
+                self.respond(unsupported_response(id, "set_follow_up_mode"));
+            }
+            RpcCommand::Compact {
+                id,
+                custom_instructions,
+            } => match self.session.compact(custom_instructions).await {
+                Ok(result) => self.respond(success_response(
+                    id,
+                    "compact",
+                    Some(serde_json::json!({
+                        "tokens_before": result.tokens_before,
+                        "message_count": self.session.messages().len(),
                     })),
-                    error: None,
-                },
-                Err(e) => RpcResponse::Response {
+                )),
+                Err(error) => self.respond(error_response(id, "compact", error.to_string())),
+            },
+            RpcCommand::SetAutoCompaction { id, .. } => {
+                self.respond(unsupported_response(id, "set_auto_compaction"));
+            }
+            RpcCommand::SetAutoRetry { id, .. } => {
+                self.respond(unsupported_response(id, "set_auto_retry"));
+            }
+            RpcCommand::AbortRetry { id } => {
+                self.respond(unsupported_response(id, "abort_retry"));
+            }
+            RpcCommand::Bash { id, command } => self.run_bash(id, command).await,
+            RpcCommand::AbortBash { id } => {
+                self.respond(unsupported_response(id, "abort_bash"));
+            }
+            RpcCommand::GetSessionStats { id } => {
+                let state = self.session.state();
+                let stats = self.session.session_stats();
+                self.respond(success_response(
                     id,
-                    command: "bash".to_string(),
-                    success: false,
-                    data: None,
-                    error: Some(e.to_string()),
-                },
+                    "get_session_stats",
+                    Some(serde_json::json!({
+                        "session_id": stats.session_id,
+                        "message_count": stats.total_messages,
+                        "user_messages": stats.user_messages,
+                        "assistant_messages": stats.assistant_messages,
+                        "tool_calls": stats.tool_calls,
+                        "tool_results": stats.tool_results,
+                        "token_count": state.estimate_tokens(),
+                    })),
+                ));
+            }
+            RpcCommand::GetLastAssistantText { id } => {
+                let text = self
+                    .session
+                    .state()
+                    .messages
+                    .iter()
+                    .rev()
+                    .find_map(|message| {
+                        if let oxi_sdk::Message::Assistant(message) = message {
+                            Some(message.text_content())
+                        } else {
+                            None
+                        }
+                    });
+                self.respond(success_response(
+                    id,
+                    "get_last_assistant_text",
+                    Some(serde_json::json!({ "text": text })),
+                ));
+            }
+            RpcCommand::SetSessionName { id, name } => {
+                self.session.set_session_name(name);
+                self.respond(success_response(id, "set_session_name", None));
+            }
+            RpcCommand::GetMessages { id } => self.respond(success_response(
+                id,
+                "get_messages",
+                Some(serde_json::json!({ "messages": self.session.messages() })),
+            )),
+            RpcCommand::GetCommands { id } => {
+                self.respond(unsupported_response(id, "get_commands"));
+            }
+            RpcCommand::ExportHtml { id, .. } => {
+                self.respond(unsupported_response(id, "export_html"));
+            }
+            RpcCommand::SwitchSession { id, .. } => {
+                self.respond(unsupported_response(id, "switch_session"));
+            }
+            RpcCommand::Fork { id, .. } => self.respond(unsupported_response(id, "fork")),
+            RpcCommand::Clone { id } => self.respond(unsupported_response(id, "clone")),
+            RpcCommand::GetForkMessages { id } => {
+                self.respond(unsupported_response(id, "get_fork_messages"));
             }
         }
+    }
 
-        RpcCommand::AbortBash { id } => RpcResponse::Response {
-            id,
-            command: "abort_bash".to_string(),
-            success: true,
-            data: None,
-            error: None,
-        },
-
-        // ── Session ────────────────────────────────────────────────
-        RpcCommand::GetSessionStats { id } => {
-            let state = server.get_session_state();
-            let stats = SessionStats {
-                message_count: state.message_count,
-                token_count: None,
-                last_activity: None,
-            };
-
-            RpcResponse::Response {
+    fn prompt(&mut self, id: Option<String>, message: String, images: Option<Vec<ImageData>>) {
+        if images.as_ref().is_some_and(|images| !images.is_empty()) {
+            self.respond(unsupported_response(id, "prompt with images"));
+            return;
+        }
+        if self.session.is_streaming() {
+            self.respond(error_response(
                 id,
-                command: "get_session_stats".to_string(),
-                success: true,
-                data: Some(
-                    serde_json::to_value(&stats).expect("session stats should be serializable"),
-                ),
-                error: None,
-            }
+                "prompt",
+                "an agent run is already active; use steer or follow_up",
+            ));
+            return;
         }
 
-        RpcCommand::ExportHtml { id, output_path: _ } => RpcResponse::Response {
-            id,
-            command: "export_html".to_string(),
-            success: true,
-            data: Some(serde_json::json!({ "path": "session.html" })),
-            error: None,
-        },
+        self.session.reset_should_stop();
+        self.session.agent_ref().reset_cancel();
+        self.session.streaming_flag().store(true, Ordering::SeqCst);
+        self.session.persist_user_message(message.clone());
 
-        RpcCommand::SwitchSession {
-            id,
-            session_path: _,
-        } => {
-            server.update_session_state(|s| {
-                s.session_id = uuid::Uuid::new_v4().to_string();
-                s.message_count = 0;
-            });
-
-            RpcResponse::Response {
-                id,
-                command: "switch_session".to_string(),
-                success: true,
-                data: Some(serde_json::json!({ "cancelled": false })),
-                error: None,
+        let session = self.session.clone_handle();
+        let output = self.output.clone();
+        let agent = session.agent_ref();
+        let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
+        let forwarder = tokio::task::spawn_blocking(move || {
+            while let Ok(event) = event_rx.recv() {
+                session.forward_event_to_extensions(&event);
+                if let AgentEvent::MessageEnd { message } = &event {
+                    session.persist_event_message(message);
+                }
+                if let Some(event) = agent_event_to_rpc(&event)
+                    && output.send(WriterFrame::Event(event)).is_err()
+                {
+                    break;
+                }
             }
+        });
+        let output = self.output.clone();
+        let session = self.session.clone_handle();
+        let agent_run = tokio::task::spawn_blocking(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("failed to build RPC agent runtime")?;
+            runtime.block_on(async {
+                let local = tokio::task::LocalSet::new();
+                local
+                    .run_until(agent.run_with_channel(message, event_tx))
+                    .await
+            })
+        });
+        self.active_run = Some(tokio::spawn(async move {
+            let result = agent_run.await;
+            let _ = forwarder.await;
+            session.persist();
+            session.streaming_flag().store(false, Ordering::SeqCst);
+            match result {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    let _ = output.send(WriterFrame::Event(RpcEvent::Error {
+                        message: error.to_string(),
+                    }));
+                }
+                Err(error) => {
+                    let _ = output.send(WriterFrame::Event(RpcEvent::Error {
+                        message: format!("RPC agent task failed: {error}"),
+                    }));
+                }
+            }
+            Ok(())
+        }));
+
+        self.respond(success_response(
+            id,
+            "prompt",
+            Some(serde_json::json!({ "accepted": true })),
+        ));
+    }
+
+    async fn run_bash(&self, id: Option<String>, command: String) {
+        if is_dangerous_rpc_command(&command) {
+            tracing::warn!("RPC bash command contains dangerous pattern: {:?}", command);
         }
-
-        RpcCommand::Fork { id, entry_id: _ } => RpcResponse::Response {
-            id,
-            command: "fork".to_string(),
-            success: true,
-            data: Some(serde_json::json!({
-                "text": "",
-                "cancelled": false
-            })),
-            error: None,
-        },
-
-        RpcCommand::Clone { id } => RpcResponse::Response {
-            id,
-            command: "clone".to_string(),
-            success: true,
-            data: Some(serde_json::json!({ "cancelled": false })),
-            error: None,
-        },
-
-        RpcCommand::GetForkMessages { id } => RpcResponse::Response {
-            id,
-            command: "get_fork_messages".to_string(),
-            success: true,
-            data: Some(serde_json::json!({
-                "messages": []
-            })),
-            error: None,
-        },
-
-        RpcCommand::GetLastAssistantText { id } => RpcResponse::Response {
-            id,
-            command: "get_last_assistant_text".to_string(),
-            success: true,
-            data: Some(serde_json::json!({
-                "text": null
-            })),
-            error: None,
-        },
-
-        RpcCommand::SetSessionName { id, name } => {
-            server.update_session_state(|s| {
-                s.session_name = if name.is_empty() { None } else { Some(name) };
-            });
-
-            RpcResponse::Response {
+        let result = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(command)
+                .output()
+        })
+        .await;
+        let response = match result {
+            Ok(Ok(output)) => success_response(
                 id,
-                command: "set_session_name".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
+                "bash",
+                Some(serde_json::json!({
+                    "stdout": String::from_utf8_lossy(&output.stdout),
+                    "stderr": String::from_utf8_lossy(&output.stderr),
+                    "exit_code": output.status.code(),
+                })),
+            ),
+            Ok(Err(error)) => error_response(id, "bash", error.to_string()),
+            Err(error) => error_response(id, "bash", format!("bash task failed: {error}")),
+        };
+        self.respond(response);
+    }
 
-        // ── Messages ───────────────────────────────────────────────
-        RpcCommand::GetMessages { id } => RpcResponse::Response {
-            id,
-            command: "get_messages".to_string(),
-            success: true,
-            data: Some(serde_json::json!({
-                "messages": []
-            })),
-            error: None,
-        },
+    fn session_state_value(&self) -> Value {
+        let state = self.session.state();
+        let model_id = self.session.model_id();
+        let (provider, id) = model_id
+            .split_once('/')
+            .map(|(provider, id)| (provider.to_string(), id.to_string()))
+            .unwrap_or_else(|| (String::new(), model_id));
+        serde_json::json!({
+            "model": ModelInfo { provider, id },
+            "thinking_level": format_thinking_level(self.session.thinking_level()),
+            "is_streaming": self.session.is_streaming(),
+            "is_compacting": self.session.is_compacting(),
+            "steering_mode": "all",
+            "follow_up_mode": "all",
+            "session_id": self.session.session_id(),
+            "auto_compaction_enabled": self.session.auto_compaction_enabled(),
+            "message_count": state.messages.len(),
+            "pending_message_count": self.session.pending_message_count(),
+            "iteration": state.iteration,
+            "stop_reason": state.stop_reason,
+        })
+    }
 
-        // ── Commands ────────────────────────────────────────────────
-        RpcCommand::GetCommands { id } => {
-            let commands = vec![
-                CommandInfo {
-                    name: "compact".to_string(),
-                    description: Some("Compact context".to_string()),
-                    source: "builtin".to_string(),
-                    source_info: None,
-                },
-                CommandInfo {
-                    name: "clear".to_string(),
-                    description: Some("Clear conversation".to_string()),
-                    source: "builtin".to_string(),
-                    source_info: None,
-                },
-            ];
+    fn respond(&self, response: RpcResponse) {
+        let _ = self.output.send(WriterFrame::Response(response));
+    }
 
-            RpcResponse::Response {
-                id,
-                command: "get_commands".to_string(),
-                success: true,
-                data: Some(serde_json::json!({ "commands": commands })),
-                error: None,
-            }
+    async fn abort_active_run(&mut self) {
+        self.session.abort().await;
+        self.session.agent_ref().cancel();
+        if let Some(handle) = self.active_run.take() {
+            let _ = handle.await;
         }
     }
 }
 
-/// Check for dangerous patterns in RPC bash commands.
-fn is_dangerous_rpc_command(cmd: &str) -> bool {
-    let lower = cmd.to_lowercase();
+pub(crate) fn agent_event_to_rpc(event: &AgentEvent) -> Option<RpcEvent> {
+    match event {
+        AgentEvent::AgentStart { .. } | AgentEvent::Start { .. } => Some(RpcEvent::AgentStart),
+        AgentEvent::AgentEnd { .. } | AgentEvent::Complete { .. } | AgentEvent::Cancelled => {
+            Some(RpcEvent::AgentEnd)
+        }
+        AgentEvent::Thinking | AgentEvent::ThinkingDelta { .. } => Some(RpcEvent::Thinking),
+        AgentEvent::TextChunk { text } => Some(RpcEvent::TextChunk { text: text.clone() }),
+        AgentEvent::MessageUpdate {
+            delta: Some(text), ..
+        } if !text.is_empty() => Some(RpcEvent::TextChunk { text: text.clone() }),
+        AgentEvent::ToolExecutionStart { tool_name, .. }
+        | AgentEvent::ToolStart { tool_name, .. } => Some(RpcEvent::ToolStart {
+            tool: tool_name.clone(),
+        }),
+        AgentEvent::ToolExecutionEnd { tool_name, .. } => Some(RpcEvent::ToolEnd {
+            tool: tool_name.clone(),
+        }),
+        AgentEvent::Error { message, .. } | AgentEvent::ToolError { error: message, .. } => {
+            Some(RpcEvent::Error {
+                message: message.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn success_response(id: Option<String>, command: &str, data: Option<Value>) -> RpcResponse {
+    RpcResponse::Response {
+        id,
+        command: command.to_string(),
+        success: true,
+        data,
+        error: None,
+    }
+}
+
+fn error_response(id: Option<String>, command: &str, error: impl Into<String>) -> RpcResponse {
+    RpcResponse::Response {
+        id,
+        command: command.to_string(),
+        success: false,
+        data: None,
+        error: Some(error.into()),
+    }
+}
+
+pub(crate) fn unsupported_response(id: Option<String>, command: &str) -> RpcResponse {
+    error_response(
+        id,
+        command,
+        format!("{command} is not yet supported in RPC mode"),
+    )
+}
+
+fn format_thinking_level(level: crate::store::settings::ThinkingLevel) -> &'static str {
+    match level {
+        crate::store::settings::ThinkingLevel::Off => "off",
+        crate::store::settings::ThinkingLevel::Minimal => "minimal",
+        crate::store::settings::ThinkingLevel::Low => "low",
+        crate::store::settings::ThinkingLevel::Medium => "medium",
+        crate::store::settings::ThinkingLevel::High => "high",
+        crate::store::settings::ThinkingLevel::XHigh => "xhigh",
+    }
+}
+
+fn is_dangerous_rpc_command(command: &str) -> bool {
+    let lower = command.to_lowercase();
     lower.contains("/etc/passwd")
         || lower.contains("id_rsa")
         || lower.contains("curl | nc")

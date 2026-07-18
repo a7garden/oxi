@@ -62,6 +62,12 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_mode() {
+        let args = CliArgs::try_parse_from(["oxi", "--mode", "rpc"]).unwrap();
+        assert_eq!(args.mode.as_deref(), Some("rpc"));
+    }
+
+    #[test]
     fn test_no_session() {
         let args = CliArgs::try_parse_from(["oxi", "--no-session"]).unwrap();
         assert!(args.no_session);

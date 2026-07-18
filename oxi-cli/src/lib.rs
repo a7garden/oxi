@@ -33,7 +33,7 @@ pub mod extensions; // public for main.rs
 pub(crate) mod infra;
 pub(crate) mod media;
 pub(crate) mod prompt;
-pub(crate) mod rpc_mode;
+pub mod rpc_mode;
 pub(crate) mod skills;
 pub mod storage; // public for main.rs (packages)
 // Re-exports from storage for main.rs

@@ -578,3 +578,15 @@ fn is_tui_mode(args: &CliArgs) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn rpc_mode_is_headless() {
+        let args = CliArgs::try_parse_from(["oxi", "--mode", "rpc"]).unwrap();
+        assert!(!is_tui_mode(&args));
+    }
+}

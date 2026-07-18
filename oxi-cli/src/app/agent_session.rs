@@ -675,28 +675,24 @@ impl AgentSession {
     // Model management
     // ══════════════════════════════════════════════════════════════════
 
-    /// Refresh the API key from auth storage for the current provider.
+    /// Refresh credentials from the wired AuthProvider port.
     ///
-    /// Call this before sending a prompt to ensure the latest stored key
-    /// is used (e.g. after the user entered a key via the provider overlay).
+    /// Re-resolves the current provider via the SDK resolver, which consults
+    /// the auth port's sync fast-path on every call. Picks up auth-store
+    /// updates (e.g. a key entered via the provider overlay) without
+    /// rebuilding the engine. Replaces the old `refresh_api_key` from
+    /// pre-0.55.0; see issues #39/#40.
     pub fn refresh_api_key(&self) -> Result<()> {
-        let model_id = self.model_id();
-        let parts: Vec<&str> = model_id.split('/').collect();
-        let provider = parts.first().map(|s| s.to_string()).unwrap_or_default();
-        let api_key = crate::store::auth_storage::shared_auth_storage().get_api_key(&provider);
-        self.agent.refresh_api_key(api_key);
+        self.agent.refresh_credentials()?;
         Ok(())
     }
 
     /// Switch model mid-conversation.
+    ///
+    /// The new provider is re-credentialed by the SDK resolver via the
+    /// wired AuthProvider port; no explicit api_key lookup is needed.
     pub fn set_model(&self, model_id: &str) -> Result<()> {
-        let parts: Vec<&str> = model_id.split('/').collect();
-        let provider = parts
-            .first()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "anthropic".to_string());
-        let api_key = crate::store::auth_storage::shared_auth_storage().get_api_key(&provider);
-        self.agent.switch_model(model_id, api_key)?;
+        self.agent.switch_model(model_id)?;
 
         // Persist model change to session
         {
@@ -1551,7 +1547,6 @@ impl AgentSession {
             compaction_strategy: CompactionStrategy::Threshold(0.8),
             compaction_instruction: None,
             context_window: 128_000,
-            api_key: None, // advisor reuses the provider's key resolution
             workspace_dir: Some(std::path::PathBuf::from(&self.cwd)),
             output_mode: None,
             session_id: None,

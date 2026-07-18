@@ -17,6 +17,7 @@
 //! - `model_resolver` (1,430 lines)     — name → metadata, never wired
 //! - `model_registry` (1,792 lines)     — replaced by `oxi_sdk::ModelRegistry`
 
+pub mod access_compat;
 pub mod auth_storage;
 pub mod extracting_backend;
 pub mod fs_util;

@@ -16,12 +16,10 @@
 //!
 //! Strict JSONL (JSON Lines): each record is a single JSON object terminated by `\n` (LF).
 //! Carriage returns inside payloads are preserved; records are split on `\n` only.
-
 #![allow(dead_code, unused_imports)]
 
 pub mod handlers;
 pub mod protocol;
-pub mod state;
 #[cfg(test)]
 mod tests;
 pub mod utils;
@@ -41,9 +39,6 @@ pub use protocol::{
     jsonrpc_to_command, parse_json_line, rpc_response_to_jsonrpc, serialize_json_line,
     serialize_json_line_obj,
 };
-
-// State types
-pub use state::RpcServer;
 
 // Utility types
 pub use utils::{BoxedEventListener, PasteHandler, PasteState, RpcClient, RpcClientConfig};
