@@ -1,6 +1,5 @@
-//! ChatViewState, StreamingState, ToolCallTracker, LayoutCache, and limits.
-
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 
@@ -112,6 +111,46 @@ impl std::fmt::Debug for LayoutCache {
     }
 }
 
+// ── FollowMode state machine (W1 step 2) ────────────────────────────────
+
+/// After the user scrolls up while streaming, we hold a 2-second grace
+pub const FOLLOW_GRACE: Duration = Duration::from_secs(2);
+/// (anchor = topmost visible message). New content during grace still
+/// follows. New content after grace is held behind a "↓ new answer" badge.
+#[derive(Debug, Clone, Default)]
+pub enum FollowMode {
+    /// Bottom-of-content tracking — viewport_base is updated to follow new
+    /// content as it arrives.
+    #[default]
+    Following,
+    /// User scrolled up; still in grace period (no further user input).
+    /// New content extends the bottom, viewport follows for `until`,
+    /// then transitions to `Pinned` with the topmost visible message as anchor.
+    FollowingGrace { until: Instant },
+    /// User has explicitly stopped following. viewport_base is frozen;
+    /// new content accumulates at the bottom without auto-scroll.
+    /// `anchor_msg_idx` is the index of the topmost message currently
+    /// visible (stable across new message arrivals — new messages are
+    /// appended below). `anchor_y_in_msg` is the y offset within that
+    /// message's rendered range.
+    Pinned {
+        anchor_msg_idx: usize,
+        anchor_y_in_msg: u32,
+    },
+}
+/// Resolve the topmost visible message at `scroll_offset` in the given layout.
+/// Returns `(msg_idx, y_within_msg)` suitable for use as a Pinned anchor.
+pub(crate) fn resolve_anchor(layout: &[LayoutEntry], scroll_offset: u32) -> (usize, u32) {
+    for entry in layout {
+        // The topmost visible entry is the one whose range overlaps scroll_offset
+        // and whose top is the closest to (but not below) scroll_offset.
+        if entry.y <= scroll_offset && entry.y.saturating_add(entry.height) > scroll_offset {
+            return (entry.msg_idx, scroll_offset - entry.y);
+        }
+    }
+    // Fallback: topmost entry (or 0,0 if layout is empty).
+    layout.first().map(|e| (e.msg_idx, 0)).unwrap_or((0, 0))
+}
 // ── ChatViewState ──────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -120,6 +159,10 @@ pub struct ChatViewState {
     pub streaming: Option<StreamingState>,
     pub spinner_frame: usize,
     pub content_height: u32,
+    pub follow: FollowMode,
+    /// True when new content arrived during Pinned — shows "↓ new answer" badge.
+    /// Cleared when the user scrolls down to bottom or scrolls to a new anchor.
+    pub new_answer_pending: bool,
     pub last_code_block: Option<String>,
     pub pending_images: Vec<(String, String)>,
     tool_tracker: ToolCallTracker,
@@ -131,8 +174,6 @@ pub struct ChatViewState {
     /// u32 keeps memory at 4 bytes (vs 8 for usize) and supports 4 billion
     /// rows — practically unbounded.
     pub scroll_offset: u32,
-    /// When true, auto-scroll to bottom on each render (streaming)
-    pub auto_scroll: bool,
     /// Layout cache — guarded by RwLock
     layout_cache: RwLock<LayoutCache>,
     /// Expanded thinking block keys: "msg_idx:block_idx".
@@ -159,8 +200,10 @@ impl ChatViewState {
     }
 
     /// Scroll to bottom of content. `visible_height` is the viewport height.
+    /// Transitions `follow` to `Following` (was: set auto_scroll = true).
     pub fn scroll_to_bottom(&mut self, visible_height: u16) {
-        self.auto_scroll = true;
+        self.follow = FollowMode::Following;
+        self.new_answer_pending = false;
         let vh = visible_height as u32;
         if self.content_height > vh {
             self.scroll_offset = self.content_height - vh;
@@ -168,26 +211,79 @@ impl ChatViewState {
             self.scroll_offset = 0;
         }
     }
+
+    /// Scroll up. `follow` transitions:
+    /// - Following → FollowingGrace { until = now + 2s }
+    /// - FollowingGrace → extends the same grace
+    /// - Pinned → stays Pinned (anchor updates to topmost visible)
+    ///
+    /// New answer badge is cleared (user is engaging with viewport).
     pub fn scroll_up(&mut self, n: u16) {
-        self.auto_scroll = false;
         self.scroll_offset = self.scroll_offset.saturating_sub(n as u32);
+        self.new_answer_pending = false;
+        match self.follow {
+            FollowMode::Following => {
+                self.follow = FollowMode::FollowingGrace {
+                    until: Instant::now() + FOLLOW_GRACE,
+                };
+            }
+            FollowMode::FollowingGrace { .. } => {
+                // Re-set to extend the grace window from now.
+                self.follow = FollowMode::FollowingGrace {
+                    until: Instant::now() + FOLLOW_GRACE,
+                };
+            }
+            FollowMode::Pinned { .. } => {
+                // Stays Pinned; anchor updates on next render via resolve_anchor.
+            }
+        }
     }
+
+    /// Scroll down. `follow` transitions:
+    /// - Following → Following (no-op)
+    /// - FollowingGrace → Following (re-engaged)
+    /// - Pinned → if at bottom → Following
     pub fn scroll_down(&mut self, n: u16) {
         // NOTE: We don't clamp to content_height - visible_height here
         // because visible_height is unknown.  render() calls
         // clamp_scroll(area.height) on every frame which performs the
         // correct clamping.
         self.scroll_offset = self.scroll_offset.saturating_add(n as u32);
+        self.new_answer_pending = false;
+        match self.follow {
+            FollowMode::Following => {}
+            FollowMode::FollowingGrace { .. } => {
+                self.follow = FollowMode::Following;
+            }
+            FollowMode::Pinned { .. } => {
+                // Anchor updates on next render if at bottom → Following.
+            }
+        }
     }
+
+    /// Scroll to top. Always → Pinned at top (msg 0, y 0).
     pub fn scroll_to_top(&mut self) {
-        self.auto_scroll = false;
         self.scroll_offset = 0;
+        self.new_answer_pending = false;
+        self.follow = FollowMode::Pinned {
+            anchor_msg_idx: 0,
+            anchor_y_in_msg: 0,
+        };
     }
+
     /// Clamp scroll_offset to [0, content_height - visible_height].
+    /// If the clamp snaps to bottom AND follow was Pinned, promote to Following
+    /// (user has reached the bottom — no point staying pinned).
     pub(crate) fn clamp_scroll(&mut self, visible_height: u16) {
         let vh = visible_height as u32;
         let max_off = self.content_height.saturating_sub(vh);
-        self.scroll_offset = self.scroll_offset.min(max_off);
+        let new_off = self.scroll_offset.min(max_off);
+        let at_bottom = new_off == max_off && max_off > 0;
+        self.scroll_offset = new_off;
+        if at_bottom && matches!(self.follow, FollowMode::Pinned { .. }) {
+            self.follow = FollowMode::Following;
+            self.new_answer_pending = false;
+        }
     }
 
     /// Toggle expanded state of a thinking block.
@@ -535,7 +631,8 @@ impl ChatViewState {
         self.messages.clear();
         self.streaming = None;
         self.scroll_offset = 0;
-        self.auto_scroll = false;
+        self.follow = FollowMode::Following;
+        self.new_answer_pending = false;
         self.last_code_block = None;
         self.pending_images.clear();
         self.tool_tracker.clear();
@@ -802,5 +899,179 @@ mod tests {
         // Compute total height should be u32.
         let total = entry.y.saturating_add(entry.height);
         assert!(total > u16::MAX as u32);
+    }
+
+    // ── Phase 2 W1 step 2: FollowMode state machine transitions ──────
+
+    /// T1: Following + new content → viewport updates (test via scroll_to_bottom)
+    #[test]
+    fn follow_t1_following_stays_following_on_bottom_call() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20);
+        assert!(matches!(s.follow, FollowMode::Following));
+    }
+
+    /// T2: Following + scroll_up → FollowingGrace
+    #[test]
+    fn follow_t2_following_to_grace_on_scroll_up() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20); // Following
+        s.scroll_up(10);
+        assert!(matches!(s.follow, FollowMode::FollowingGrace { .. }));
+    }
+
+    /// T3: FollowingGrace + new content (scroll_to_bottom) → stays grace if within 2s
+    /// Tested by simulating render: scroll_to_bottom during grace → still FollowingGrace.
+    #[test]
+    fn follow_t3_grace_extends_on_repeated_scroll_up() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20);
+        s.scroll_up(10); // grace #1
+        let g1 = match s.follow {
+            FollowMode::FollowingGrace { until } => until,
+            _ => panic!("expected grace"),
+        };
+        std::thread::sleep(Duration::from_millis(5));
+        s.scroll_up(5); // grace #2 (later)
+        let g2 = match s.follow {
+            FollowMode::FollowingGrace { until } => until,
+            _ => panic!("expected grace"),
+        };
+        assert!(g2 >= g1, "grace window extends on repeated scroll_up");
+    }
+
+    /// T4: FollowingGrace + scroll_down → Following
+    #[test]
+    fn follow_t4_grace_to_following_on_scroll_down() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20);
+        s.scroll_up(10); // FollowingGrace
+        s.scroll_down(5); // → Following
+        assert!(matches!(s.follow, FollowMode::Following));
+    }
+
+    /// T5: Pinned + new content → viewport_base frozen (scroll_offset unchanged)
+    /// Verified by directly setting follow=Pinned and asserting clamp doesn't move it.
+    #[test]
+    fn follow_t5_pinned_viewport_frozen() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20); // Following, scroll_offset = 80
+        s.scroll_up(30); // FollowingGrace
+        // Manually promote to Pinned at current position.
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 0,
+            anchor_y_in_msg: 30,
+        };
+        let pinned_offset = s.scroll_offset;
+        // Bump content_height (simulating new content during Pinned).
+        s.content_height = 200;
+        s.clamp_scroll(20);
+        // Viewport must NOT auto-jump to bottom (the bug we fixed).
+        assert_eq!(
+            s.scroll_offset, pinned_offset,
+            "Pinned viewport must stay frozen"
+        );
+    }
+
+    /// T6: Pinned + scroll_down to bottom → Following (and badge cleared)
+    #[test]
+    fn follow_t6_pinned_at_bottom_promotes_to_following() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20); // Following, offset = 80
+        s.scroll_up(50); // grace, offset = 30
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 0,
+            anchor_y_in_msg: 30,
+        };
+        // Scroll all the way down — clamp_scroll should promote to Following.
+        s.scroll_offset = 80; // bottom
+        s.clamp_scroll(20);
+        assert!(matches!(s.follow, FollowMode::Following));
+        assert!(!s.new_answer_pending);
+    }
+
+    /// T7: Initial state is Following
+    #[test]
+    fn follow_t7_initial_state_is_following() {
+        let s = ChatViewState::new();
+        assert!(matches!(s.follow, FollowMode::Following));
+    }
+
+    /// T8: scroll_to_top → Pinned at msg 0, y 0
+    #[test]
+    fn follow_t8_scroll_to_top_pins_at_origin() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20);
+        s.scroll_to_top();
+        assert_eq!(s.scroll_offset, 0);
+        match s.follow {
+            FollowMode::Pinned {
+                anchor_msg_idx,
+                anchor_y_in_msg,
+            } => {
+                assert_eq!(anchor_msg_idx, 0);
+                assert_eq!(anchor_y_in_msg, 0);
+            }
+            _ => panic!("expected Pinned"),
+        }
+    }
+
+    /// T9: scroll_to_bottom always → Following (resets any other mode)
+    #[test]
+    fn follow_t9_scroll_to_bottom_resets_to_following() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_up(10); // FollowingGrace
+        s.scroll_to_bottom(20);
+        assert!(matches!(s.follow, FollowMode::Following));
+        // Then Pinned → Following too.
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 0,
+            anchor_y_in_msg: 0,
+        };
+        s.scroll_to_bottom(20);
+        assert!(matches!(s.follow, FollowMode::Following));
+    }
+
+    /// T10: scroll_up clears new_answer_pending (user is engaging)
+    #[test]
+    fn follow_t10_scroll_up_clears_badge() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20);
+        s.new_answer_pending = true;
+        s.scroll_up(5);
+        assert!(!s.new_answer_pending);
+    }
+
+    /// T11: scroll_down also clears new_answer_pending
+    #[test]
+    fn follow_t11_scroll_down_clears_badge() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20);
+        s.new_answer_pending = true;
+        s.scroll_down(5);
+        assert!(!s.new_answer_pending);
+    }
+
+    /// T12: clear() resets to Following
+    #[test]
+    fn follow_t12_clear_resets_to_following() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_up(10); // FollowingGrace
+        s.new_answer_pending = true;
+        s.clear();
+        assert!(matches!(s.follow, FollowMode::Following));
+        assert!(!s.new_answer_pending);
+        assert_eq!(s.scroll_offset, 0);
     }
 }

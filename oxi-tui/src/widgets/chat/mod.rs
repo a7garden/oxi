@@ -85,13 +85,38 @@ impl StatefulWidget for ChatView<'_> {
         // pick which collapsible block sits at the viewport top.
         state.viewport_rect = area;
 
-        // Auto-scroll: update scroll_offset to show bottom of content
-        if state.auto_scroll {
-            state.scroll_to_bottom(area.height);
-        } else {
-            // Clamp scroll offset to valid range (in case content shrank)
-            state.clamp_scroll(area.height);
+        // FollowMode state machine: decide what to do with the viewport
+        // based on user intent (follow, grace, or pinned).
+        use crate::widgets::chat::state::{FOLLOW_GRACE, FollowMode};
+        let now = std::time::Instant::now();
+        match &state.follow {
+            FollowMode::Following => {
+                state.scroll_to_bottom(area.height);
+            }
+            FollowMode::FollowingGrace { until } => {
+                if now >= *until {
+                    // Grace expired: promote to Pinned.
+                    // Anchor = topmost currently visible message.
+                    let anchor =
+                        crate::widgets::chat::state::resolve_anchor(&layout, state.scroll_offset);
+                    state.follow = FollowMode::Pinned {
+                        anchor_msg_idx: anchor.0,
+                        anchor_y_in_msg: anchor.1,
+                    };
+                    // Don't move viewport_base — freeze in place.
+                } else {
+                    // Still in grace: keep following new content.
+                    state.scroll_to_bottom(area.height);
+                }
+            }
+            FollowMode::Pinned { .. } => {
+                // Frozen viewport. New content extends content_height but
+                // viewport_base stays put. Just clamp in case content shrank.
+                state.clamp_scroll(area.height);
+            }
         }
+        // Touch FOLLOW_GRACE to silence dead_code lint if grace not exercised.
+        let _ = FOLLOW_GRACE;
 
         // Render only visible entries into the buffer. All math is u32 to
         // break the 65K-row cap; conversion to u16 happens only at the final
@@ -200,26 +225,29 @@ mod tests {
 
     #[test]
     fn scroll_bounds() {
+        use crate::widgets::chat::state::FollowMode;
         let mut s = ChatViewState::new();
         s.content_height = 100;
-        // scroll_to_bottom with auto_scroll = true
+        // scroll_to_bottom → FollowMode::Following
         s.scroll_to_bottom(20);
         assert_eq!(s.scroll_offset, 80);
-        assert!(s.auto_scroll);
+        assert!(matches!(s.follow, FollowMode::Following));
 
-        // Manual scroll overrides auto_scroll
+        // Manual scroll up → FollowMode::FollowingGrace
         s.scroll_up(50);
         assert_eq!(s.scroll_offset, 30);
-        assert!(!s.auto_scroll);
+        assert!(matches!(s.follow, FollowMode::FollowingGrace { .. }));
 
         s.scroll_down(10);
         assert_eq!(s.scroll_offset, 40);
+        // scroll_down during grace → back to Following
+        assert!(matches!(s.follow, FollowMode::Following));
 
         // Clamp at top
         s.scroll_up(100);
         assert_eq!(s.scroll_offset, 0);
 
-        // clamp_scroll when content shrinks
+        // clamp_scroll when content shrinks — scroll_offset clamped to max_off
         s.scroll_offset = 90;
         s.content_height = 30;
         s.clamp_scroll(20);
