@@ -272,8 +272,16 @@ impl ChatViewState {
     }
 
     /// Clamp scroll_offset to [0, content_height - visible_height].
-    /// If the clamp snaps to bottom AND follow was Pinned, promote to Following
-    /// (user has reached the bottom — no point staying pinned).
+    ///
+    /// **W1 step 4 (reflow-safe clamp):** If the user is in Pinned mode and
+    /// content shrank (e.g. todo_panel toggle, message drain), do NOT
+    /// auto-jump the viewport to the new bottom — that was the v3 UX bug
+    /// ("clamp_scroll 매 프레임 점프"). Only snap if the current
+    /// scroll_offset is past the new max_off. If the anchor message is
+    /// still within range, the viewport stays put.
+    ///
+    /// Also: if the clamp snaps to bottom AND follow was Pinned, promote
+    /// to Following (user has reached the bottom — no point staying pinned).
     pub(crate) fn clamp_scroll(&mut self, visible_height: u16) {
         let vh = visible_height as u32;
         let max_off = self.content_height.saturating_sub(vh);
@@ -281,9 +289,15 @@ impl ChatViewState {
         let at_bottom = new_off == max_off && max_off > 0;
         self.scroll_offset = new_off;
         if at_bottom && matches!(self.follow, FollowMode::Pinned { .. }) {
+            // Pinned but scrolled to bottom — follow makes more sense.
             self.follow = FollowMode::Following;
             self.new_answer_pending = false;
         }
+        // Note: if user is Pinned and content_height SHRANK below scroll_offset,
+        // we DO clamp (have to — viewport can't show past end). The anchor
+        // may need to be re-resolved on next render via resolve_anchor.
+        // If content_height GREW (e.g. todo_panel hidden), viewport_base
+        // stays put as long as it's still in range — that's the reflow fix.
     }
 
     /// Toggle expanded state of a thinking block.
@@ -1073,5 +1087,76 @@ mod tests {
         assert!(matches!(s.follow, FollowMode::Following));
         assert!(!s.new_answer_pending);
         assert_eq!(s.scroll_offset, 0);
+    }
+
+    // ── Phase 2 W1 step 4: reflow-safe clamp regression tests ────────
+
+    /// Regression: when content_height grows (e.g. todo_panel hidden),
+    /// viewport_base must NOT auto-jump to bottom if user was Pinned.
+    /// Was the v3 UX bug: 'clamp_scroll 매 프레임 점프'.
+    #[test]
+    fn clamp_reflow_growing_content_keeps_pinned_viewport() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20); // Following, offset = 80
+        s.scroll_up(30); // FollowingGrace, offset = 50
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 1,
+            anchor_y_in_msg: 10,
+        };
+        let pinned_offset = s.scroll_offset;
+
+        // Content grows (e.g. todo_panel hidden) — viewport should stay put.
+        s.content_height = 500;
+        s.clamp_scroll(20);
+        assert_eq!(
+            s.scroll_offset, pinned_offset,
+            "Pinned viewport must not jump when content grows"
+        );
+    }
+
+    /// Regression: when content_height shrinks but viewport still in range,
+    /// viewport stays at same offset.
+    #[test]
+    fn clamp_reflow_shrinking_content_keeps_viewport_in_range() {
+        let mut s = ChatViewState::new();
+        s.content_height = 500;
+        s.scroll_to_bottom(20); // offset = 480
+        s.scroll_up(100); // offset = 380
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 5,
+            anchor_y_in_msg: 0,
+        };
+        let pinned_offset = s.scroll_offset;
+
+        // Content shrinks (e.g. todo_panel shown) — viewport still in range.
+        s.content_height = 400;
+        s.clamp_scroll(20);
+        assert_eq!(
+            s.scroll_offset, pinned_offset,
+            "Pinned viewport stays when content shrinks within range"
+        );
+    }
+
+    /// Edge case: when content_height shrinks past scroll_offset,
+    /// we DO clamp (have to). The user is then snapped to new bottom.
+    /// Pinned → Following transition happens automatically.
+    #[test]
+    fn clamp_reflow_shrinking_past_viewport_snaps_to_bottom() {
+        let mut s = ChatViewState::new();
+        s.content_height = 500;
+        s.scroll_to_bottom(20);
+        s.scroll_up(50); // offset = 430
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 5,
+            anchor_y_in_msg: 30,
+        };
+
+        // Content shrinks dramatically — viewport must clamp to new max.
+        s.content_height = 100;
+        s.clamp_scroll(20);
+        assert_eq!(s.scroll_offset, 80); // 100 - 20
+        // Snapped to bottom → Pinned → Following.
+        assert!(matches!(s.follow, FollowMode::Following));
     }
 }
