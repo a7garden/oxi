@@ -17,6 +17,7 @@ pub mod layout;
 pub mod markdown;
 pub mod render;
 pub mod state;
+pub mod sticky;
 pub mod types;
 
 // Re-export all public types from sub-modules
@@ -207,6 +208,11 @@ impl StatefulWidget for ChatView<'_> {
                 }
             }
         }
+
+        // W1 step 5: sticky turn-prompt overlay.
+        // Render AFTER layout entries so the overlay sits on top.
+        let candidates = sticky::compute_sticky_candidates(&layout);
+        sticky::render_sticky_headers(&candidates, area, area.height, scroll_offset, &styles, buf);
     }
 }
 
