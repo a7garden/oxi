@@ -292,16 +292,12 @@ pub enum LspAction {
 pub trait LspProvider: Send + Sync + std::fmt::Debug {
     /// Kick off background initialisation (servers start but `ensure_ready`
     /// isn't awaited). Idempotent.
-    fn ensure_started_background<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn ensure_started_background<'a>(&'a self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
     /// Block until at least the configured LSP servers have finished their
     /// `initialize` handshake (or the operation times out per the
     /// provider's internal budget).
-    fn ensure_ready<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+    fn ensure_ready<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
 
     /// Drain the most recent batch of diagnostics that arrived via
     /// `textDocument/publishDiagnostics`. Returns `None` when nothing
@@ -1047,6 +1043,7 @@ impl ToolRegistry {
         all_tools.push(Box::new(context7::Context7QueryDocsTool::new()));
         all_tools.push(Box::new(generate_image::GenerateImageTool::new()));
         all_tools.push(Box::new(commit::CommitTool::unconfigured()));
+        all_tools.push(Box::new(lsp::LspTool));
 
         for tool in all_tools {
             if tool.essential() || !disabled.contains(tool.name()) {

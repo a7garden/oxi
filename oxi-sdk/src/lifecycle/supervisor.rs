@@ -421,6 +421,14 @@ pub struct AgentSupervisor {
     /// Tracks restart timestamps per agent for window enforcement.
     restart_log: Arc<RwLock<HashMap<String, Vec<u64>>>>,
     resolver: Arc<dyn ProviderResolver>,
+    /// Strong reference to the Oxi engine, used to route spawns
+    /// through [`crate::AgentBuilder`] when an agent decorator is
+    /// configured. `None` when the supervisor was constructed
+    /// without one (legacy / direct callers).
+    oxi: Option<Arc<crate::Oxi>>,
+    /// Cross-cutting decorator applied to every spawned agent when
+    /// `oxi` is `Some`. Ignored on the fast path (no decorator).
+    agent_decorator: Option<Arc<dyn crate::observability::AgentDecorator>>,
 }
 
 impl AgentSupervisor {
@@ -431,7 +439,6 @@ impl AgentSupervisor {
     ) -> Self {
         Self::with_policy(resolver, snapshot_store, SupervisorPolicy::default())
     }
-
     /// Create with a specific restart policy.
     pub fn with_policy(
         resolver: Arc<dyn ProviderResolver>,
@@ -446,7 +453,29 @@ impl AgentSupervisor {
             policy,
             restart_log: Arc::new(RwLock::new(HashMap::new())),
             resolver,
+            oxi: None,
+            agent_decorator: None,
         }
+    }
+
+    /// Attach an [`crate::Oxi`] reference and an [`AgentDecorator`]
+    /// to this supervisor. Subsequent [`Self::spawn`] calls will
+    /// route through `Oxi::agent(config)` + `decorator.decorate()`
+    /// instead of the bare `Agent::new()` fast path, so the
+    /// decorator's audit / authorizer / tracer / cost hooks
+    /// actually run on every spawned agent.
+    ///
+    /// Both must be supplied together — the decorator is only
+    /// effective when the supervisor has an `Oxi` to bind the
+    /// builder against.
+    pub fn with_agent_decorator(
+        mut self,
+        oxi: Arc<crate::Oxi>,
+        decorator: Arc<dyn crate::observability::AgentDecorator>,
+    ) -> Self {
+        self.oxi = Some(oxi);
+        self.agent_decorator = Some(decorator);
+        self
     }
 
     /// Subscribe to lifecycle events from all agents.
@@ -457,22 +486,39 @@ impl AgentSupervisor {
     // ── Agent management ──────────────────────────────────
 
     /// Spawn a new agent.
+    ///
+    /// When the supervisor was configured with both an `Oxi` reference
+    /// and an [`AgentDecorator`] (via
+    /// [`with_agent_decorator`](Self::with_agent_decorator) or
+    /// [`SupervisorBuilder::with_agent_decorator`]), this routes
+    /// through `Oxi::agent(config)` and lets the decorator apply
+    /// audit / authorizer / tracer / cost hooks before `.build()`.
+    /// Otherwise it takes the legacy fast path
+    /// (`Agent::new(provider, config, tools)`), which leaves
+    /// observability unset.
     pub fn spawn(&self, config: AgentConfig) -> anyhow::Result<AgentHandle> {
-        let model = self
-            .resolver
-            .resolve_model(&config.model_id)
-            .ok_or_else(|| SdkError::ModelNotFound {
-                model_id: config.model_id.clone(),
-            })?;
-        let provider = self
-            .resolver
-            .resolve_provider(&model.provider)
-            .ok_or_else(|| SdkError::ProviderNotFound {
-                provider: model.provider.clone(),
-            })?;
-
-        let tools = Arc::new(ToolRegistry::new());
-        let agent = oxi_agent::Agent::new(provider, config.clone(), tools);
+        let agent = if let (Some(oxi), Some(decorator)) =
+            (self.oxi.as_ref(), self.agent_decorator.as_ref())
+        {
+            let builder = oxi.agent(config.clone());
+            let builder = decorator.decorate(builder);
+            builder.build()?
+        } else {
+            let model = self
+                .resolver
+                .resolve_model(&config.model_id)
+                .ok_or_else(|| SdkError::ModelNotFound {
+                    model_id: config.model_id.clone(),
+                })?;
+            let provider = self
+                .resolver
+                .resolve_provider(&model.provider)
+                .ok_or_else(|| SdkError::ProviderNotFound {
+                    provider: model.provider.clone(),
+                })?;
+            let tools = Arc::new(ToolRegistry::new());
+            oxi_agent::Agent::new(provider, config.clone(), tools)
+        };
 
         let handle = AgentHandle::new(agent, config.clone(), None, self.lifecycle_tx.clone());
 

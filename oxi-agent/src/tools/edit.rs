@@ -409,7 +409,6 @@ impl AgentTool for EditTool {
         } else {
             Self::apply_edits(root, &input).await
         };
-
         match output {
             Ok(output) => {
                 let mut result =
@@ -420,6 +419,30 @@ impl AgentTool for EditTool {
                     result = result.with_metadata(json!({
                         "firstChangedLine": line,
                     }));
+                }
+
+                // Notify LSP provider so diagnostics refresh after
+                // the file's contents change. Best-effort: a
+                // transient LSP error must not fail the edit.
+                if let Some(provider) = ctx.lsp.as_ref() {
+                    let notify_path =
+                        std::path::Path::new(&input.path).to_path_buf();
+                    let notify_abs = if notify_path.is_absolute() {
+                        notify_path
+                    } else {
+                        std::path::Path::new(root).join(&notify_path)
+                    };
+                    // Read the file post-edit so the LSP gets the
+                    // freshest content. Fall back to "" if the read
+                    // fails (the LSP will re-fetch later anyway).
+                    let content_owned =
+                        std::fs::read_to_string(&notify_abs).unwrap_or_default();
+                    let provider_clone = provider.clone();
+                    tokio::spawn(async move {
+                        provider_clone
+                            .notify_file_changed(&notify_abs, &content_owned)
+                            .await;
+                    });
                 }
 
                 Ok(result)

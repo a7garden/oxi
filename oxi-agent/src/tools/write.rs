@@ -233,7 +233,34 @@ impl AgentTool for WriteTool {
         // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
-        match Self::write_file_impl(root, path, content, append).await {
+        let write_result = Self::write_file_impl(root, path, content, append).await;
+        // Notify LSP provider so diagnostics refresh after the
+        // file's contents change. Best-effort: a transient LSP
+        // error must not fail the write.
+        // Best-effort: resolve the path for LSP notification. The
+        // `write_file_impl` already does the same PathGuard
+        // validation; this is a read-only normalization for the
+        // background task only.
+        let notify_path = std::path::Path::new(path)
+            .to_path_buf();
+        let notify_abs = if notify_path.is_absolute() {
+            notify_path
+        } else {
+            std::path::Path::new(root).join(&notify_path)
+        };
+        if write_result.is_ok()
+            && let Some(provider) = ctx.lsp.as_ref()
+        {
+            let provider_clone = provider.clone();
+            let abs_path_clone = notify_abs.clone();
+            let content_owned = content.to_string();
+            tokio::spawn(async move {
+                provider_clone
+                    .notify_file_changed(&abs_path_clone, &content_owned)
+                    .await;
+            });
+        }
+        match write_result {
             Ok(msg) => Ok(AgentToolResult::success(msg)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }

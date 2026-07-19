@@ -165,4 +165,66 @@ mod tests {
         rc.exclude_model("model-1");
         assert_eq!(rc.excluded_models().len(), 1);
     }
+
+    /// Mutations through one clone are visible through another —
+    /// this is what makes RoutingControl "live" across the
+    /// supervisor / handle / resolver boundary. The Arc-backed
+    /// inner state means callers can hold a clone and observe
+    /// runtime reconfiguration without re-fetching.
+    #[test]
+    fn routing_control_live_across_clones() {
+        let rc = RoutingControl::new(RoutingConfig::default());
+        let observer = rc.clone();
+
+        // Mutate via the original.
+        rc.set_enabled(false);
+        rc.exclude_model("primary-model");
+        rc.set_fallback_models(vec!["fallback-a".into(), "fallback-b".into()]);
+
+        // Observe via the clone — state is shared, not copied.
+        assert!(
+            !observer.is_enabled(),
+            "set_enabled must propagate to clones"
+        );
+        assert!(
+            observer
+                .excluded_models()
+                .contains(&"primary-model".to_string()),
+            "exclude_model must propagate to clones"
+        );
+        assert_eq!(
+            observer.fallback_models().len(),
+            2,
+            "set_fallback_models must propagate to clones"
+        );
+
+        // Reverse direction works too.
+        observer.unexclude_model("primary-model");
+        assert!(
+            !rc.excluded_models().contains(&"primary-model".to_string()),
+            "unexclude_model via clone must propagate back"
+        );
+    }
+
+    /// The host's resolver can call `config()` at provider-resolution
+    /// time to read the live config snapshot. This test verifies the
+    /// returned `RoutingConfig` is a consistent point-in-time copy
+    /// (snapshot semantics — not a live reference).
+    #[test]
+    fn routing_control_config_snapshot_is_point_in_time() {
+        let rc = RoutingControl::new(RoutingConfig::default());
+        let snap = rc.config();
+        rc.exclude_model("later-exclusion");
+        // snap was taken BEFORE the mutation — must not reflect it.
+        assert!(
+            !snap
+                .excluded_models
+                .contains(&"later-exclusion".to_string())
+        );
+        // A fresh read reflects it.
+        assert!(
+            rc.excluded_models()
+                .contains(&"later-exclusion".to_string())
+        );
+    }
 }

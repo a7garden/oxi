@@ -380,6 +380,43 @@ fn routing_control() {
     assert_eq!(rc.fallback_models().len(), 1);
 }
 
+#[test]
+fn routing_live_excludes_model_at_resolution_time() {
+    // Build a real Oxi with a mock provider, then mutate
+    // `excluded_models` and assert the next `resolve_model` call
+    // reflects the change. This is the design §4.7 deliverable:
+    // "테스트는 내부 bool이 아니라 실제 routing 결과 검증."
+    let oxi = common::mock_oxi();
+    let model_id = "mock/model".to_string();
+
+    // Pre-mutation: resolution succeeds.
+    oxi.resolve_model(&model_id)
+        .expect("resolution should succeed before exclude");
+
+    // Mutate: exclude the mock model.
+    oxi.routing().exclude_model(&model_id);
+    let err = oxi
+        .resolve_model(&model_id)
+        .expect_err("resolution should fail when model is excluded");
+    assert!(
+        err.to_string().contains("excluded_models"),
+        "exclusion error must mention the exclusion list, got: {err}"
+    );
+
+    // Reverse the mutation: resolution succeeds again.
+    oxi.routing().unexclude_model(&model_id);
+    oxi.resolve_model(&model_id)
+        .expect("resolution should succeed after unexclude");
+
+    // `set_enabled(false)` is the explicit opt-out: it skips routing
+    // rules entirely (model resolves normally).
+    oxi.routing().set_enabled(false);
+    oxi.routing().exclude_model(&model_id); // would normally block
+    oxi.resolve_model(&model_id)
+        .expect("set_enabled(false) must skip the exclusion gate");
+    oxi.routing().set_enabled(true);
+}
+
 // ── Isolation ───────────────────────────────────────────────────────
 
 #[test]

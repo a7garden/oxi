@@ -10,9 +10,7 @@ use oxi_ai::{Model, ModelRegistry, Provider, ProviderRegistry};
 use crate::agent_builder::AgentBuilder;
 use crate::lifecycle::{AgentSupervisor, FileSnapshotStore, SupervisorPolicy};
 use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
-use crate::observability::{AuditLog, CostTracker, Tracer};
 use crate::ports::PortRegistry;
-use crate::security::Authorizer;
 
 /// Oxi AI engine instance — holds isolated provider and model registries.
 ///
@@ -26,17 +24,22 @@ pub struct Oxi {
     providers: Arc<ProviderRegistry>,
     models: Arc<ModelRegistry>,
     tools: Arc<ToolRegistry>,
-    /// Whether to include built-in provider resolution (from create_builtin_provider).
+    /// Whether built-in providers are enabled (`OxiBuilder::with_builtins`).
     include_builtins: bool,
-    /// Per-provider API keys (take precedence over environment variables).
+    /// Per-provider API key overrides (`OxiBuilder::api_key`).
     api_keys: Arc<HashMap<String, String>>,
-    /// Per-provider base URL overrides.
+    /// Per-provider base URL overrides (`OxiBuilder::base_url`).
     base_urls: Arc<HashMap<String, String>>,
-    /// Port registry (state, config, auth, event bus, etc.). Default: noop.
-    ports: Arc<PortRegistry>,
+    /// Port registry (None = use noop default).
+    ports: PortRegistry,
     /// MCP manager (Phase 1+). `None` if MCP is disabled or has not been
     /// spawned yet.
     mcp_manager: Option<Arc<oxi_agent::mcp::McpManager>>,
+    /// Live routing state. `Arc` so external holders (the supervisor,
+    /// agent builders, host apps) share the same instance and see
+    /// each other's mutations. Resolution-time exclusion of models
+    /// declared in `excluded_models` consults this field.
+    routing: Arc<crate::routing::RoutingControl>,
 }
 
 impl Oxi {
@@ -103,7 +106,30 @@ impl Oxi {
     /// Resolution order:
     /// 1. The catalog port (if wired) — reads the in-memory snapshot.
     /// 2. The static model registry (`with_builtins`).
+    ///
+    /// The `routing.excluded_models` list is consulted **before** the
+    /// catalog/static lookups — `set_enabled(false)` / `exclude_model`
+    /// / `unexclude_model` on the shared `RoutingControl` instance
+    /// take effect on the next resolution.
     pub fn resolve_model(&self, model_id: &str) -> Result<Model> {
+        // Live routing exclusion: ONLY active when is_enabled().
+        // `set_enabled(false)` is an explicit opt-out — it means
+        // "skip routing rules, resolve normally," NOT "refuse to
+        // resolve." The default Oxi (RoutingControl::default) has
+        // auto_routing=true, so this gate is a no-op unless the
+        // host explicitly disabled routing.
+        if self.routing.is_enabled()
+            && self
+                .routing
+                .excluded_models()
+                .iter()
+                .any(|m| m == model_id)
+        {
+            return Err(anyhow::anyhow!(
+                "Model '{model_id}' is in RoutingControl::excluded_models"
+            ));
+        }
+
         let parts: Vec<&str> = model_id.splitn(2, '/').collect();
         let (provider, model) = if parts.len() == 2 {
             (parts[0], parts[1])
@@ -122,9 +148,6 @@ impl Oxi {
             .ok_or_else(|| anyhow::anyhow!("Model '{}' not found", model_id))
     }
 
-    /// Create a provider instance for a given provider name.
-    ///
-    /// Resolution order:
     /// 1. Custom providers registered via `OxiBuilder::provider()`
     /// 2. Provider factories registered via `OxiBuilder::provider_factory()`
     /// 3. Built-in providers with credential injection (if `with_builtins()` was called):
@@ -186,6 +209,13 @@ impl Oxi {
     /// Check whether built-in providers are enabled.
     pub fn has_builtins(&self) -> bool {
         self.include_builtins
+    }
+
+    /// Borrow the shared [`RoutingControl`] instance. Use this to
+    /// call `set_enabled`, `exclude_model`, `set_fallback_models`, etc.
+    /// Mutations are observed by the next model/provider resolution.
+    pub fn routing(&self) -> &Arc<crate::routing::RoutingControl> {
+        &self.routing
     }
 }
 
@@ -604,21 +634,14 @@ impl OxiBuilder {
             oxi_builder: self,
             policy: SupervisorPolicy::default(),
             snapshot_dir: None,
-            audit: None,
-            authorizer: None,
-            tracer: None,
-            cost_tracker: None,
+            agent_decorator: None,
         }
     }
-
-    /// Build the Oxi engine instance.
+    /// Build the Oxi engine. This consumes the builder.
     pub fn build(self) -> Oxi {
         // Spawn the MCP manager unless explicitly disabled.
         let mcp_manager = if self.mcp_enabled {
             if self.mcp_cache_path.is_some() || self.mcp_consent_path.is_some() {
-                // Custom disk paths supplied — go through `spawn_with_paths`.
-                // If no config was injected, auto-discover from the standard
-                // oxi config file locations (same as `spawn()`).
                 let cfg = match self.mcp_config {
                     Some(cfg) => cfg,
                     None => oxi_agent::mcp::config::load_mcp_config(),
@@ -645,8 +668,11 @@ impl OxiBuilder {
             include_builtins: self.include_builtins,
             api_keys: Arc::new(self.api_keys),
             base_urls: Arc::new(self.base_urls),
-            ports: Arc::new(self.ports.unwrap_or_default()),
+            ports: self.ports.unwrap_or_default(),
             mcp_manager,
+            routing: Arc::new(crate::routing::RoutingControl::new(
+                crate::routing::RoutingConfig::default(),
+            )),
         }
     }
 
@@ -728,10 +754,9 @@ pub struct SupervisorBuilder {
     oxi_builder: OxiBuilder,
     policy: SupervisorPolicy,
     snapshot_dir: Option<std::path::PathBuf>,
-    audit: Option<Arc<AuditLog>>,
-    authorizer: Option<Arc<Authorizer>>,
-    tracer: Option<Arc<Tracer>>,
-    cost_tracker: Option<Arc<CostTracker>>,
+    /// Cross-cutting decorator applied to every supervisor-spawned
+    /// agent. `None` (default) keeps the legacy fast path.
+    agent_decorator: Option<Arc<dyn crate::observability::AgentDecorator>>,
 }
 
 impl SupervisorBuilder {
@@ -747,107 +772,36 @@ impl SupervisorBuilder {
         self
     }
 
-    /// Attach an audit log.
+    /// Attach an [`AgentDecorator`] that wraps every
+    /// supervisor-spawned agent.
     ///
-    /// **Limitation**: [`AgentSupervisor`] does not construct
-    /// `Agent` instances itself — agents are spawned through Oxi's
-    /// internal pool, outside the supervisor's direct control. The
-    /// audit log attached here cannot be reached by the
-    /// Before/AfterTool callback chain. For audit-on-tool-call
-    /// semantics, use [`Oxi::agent`](crate::Oxi::agent)::[`.audit_log`](crate::AgentBuilder::audit_log)
-    /// on each agent that should be audited.
+    /// When set, [`SupervisorBuilder::build`] clones the built `Oxi`
+    /// into the supervisor and configures it to route spawns through
+    /// `Oxi::agent(config)` + `decorator.decorate(builder)` instead
+    /// of the bare `Agent::new(provider, config, tools)` fast path.
+    /// Use [`ObservabilityDecorator`] to bundle audit / authorizer /
+    /// tracer / cost-tracker — those hooks then actually run on
+    /// every spawned agent (no longer silent no-ops).
     ///
-    /// `build()` will emit a `tracing::warn!` if this setter is used,
-    /// so the silent-drop behavior does not recur silently. See
-    /// `docs/designs/2026-06-30-observability-wiring.md` for the
-    /// planned follow-up RFC.
-    pub fn with_audit(mut self, audit: Arc<AuditLog>) -> Self {
-        self.audit = Some(audit);
+    /// Replaces the four deprecated no-op setters `with_audit`,
+    /// `with_authorizer`, `with_tracer`, `with_cost_tracker`, which
+    /// emitted `tracing::warn!` and dropped their arguments.
+    pub fn with_agent_decorator(
+        mut self,
+        decorator: Arc<dyn crate::observability::AgentDecorator>,
+    ) -> Self {
+        self.agent_decorator = Some(decorator);
         self
     }
 
-    /// Attach an authorizer.
-    ///
-    /// **Limitation**: same as `with_audit` — supervisor-spawned
-    /// agents don't go through this hook chain. Use
-    /// [`Oxi::agent`](crate::Oxi::agent)::[`.authorizer`](crate::AgentBuilder::authorizer)
-    /// for per-agent enforcement. `build()` will emit a
-    /// `tracing::warn!` if this setter is used.
-    pub fn with_authorizer(mut self, authorizer: Arc<Authorizer>) -> Self {
-        self.authorizer = Some(authorizer);
-        self
-    }
-
-    /// Attach a tracer.
-    ///
-    /// **Limitation**: see `with_audit`. Tracer span instrumentation
-    /// across supervisor-managed agents is even harder than audit
-    /// wiring because Tracer's `SpanGuard` borrows `&Tracer` (not
-    /// `'static`), which forced the deferred-fix plan tracked in
-    /// `docs/designs/2026-06-30-observability-wiring.md`. `build()`
-    /// will emit a `tracing::warn!` if this setter is used.
-    pub fn with_tracer(mut self, tracer: Arc<Tracer>) -> Self {
-        self.tracer = Some(tracer);
-        self
-    }
-
-    /// Attach a cost tracker.
-    ///
-    /// **Limitation**: see `with_audit`. CostTracker is event-tap
-    /// driven (`AgentEvent::Usage`), which requires reaching the
-    /// agent loop's emit chain. `build()` will emit a
-    /// `tracing::warn!` if this setter is used.
-    pub fn with_cost_tracker(mut self, tracker: Arc<CostTracker>) -> Self {
-        self.cost_tracker = Some(tracker);
-        self
-    }
     /// Build the supervisor.
     ///
-    /// Creates an `Oxi` instance internally and constructs the supervisor
-    /// with a file-based snapshot store.
-    ///
-    /// **Note on observability**: supervisors today cannot thread
-    /// audit/auth/cost/tracer into the agents they spawn (those are
-    /// created outside the supervisor in Oxi's internal pool). If
-    /// `with_audit` / `with_authorizer` / `with_tracer` /
-    /// `with_cost_tracker` was called before this `build()`, a
-    /// `tracing::warn!` is emitted and the setters are no-ops until
-    /// the follow-up RFC lands. For per-agent observability that
-    /// actually runs, use
-    /// [`Oxi::agent(...).build()`](crate::Oxi::agent)
-    /// and apply each setter there.
+    /// Creates an `Oxi` instance internally and constructs the
+    /// supervisor with a file-based snapshot store. When
+    /// [`with_agent_decorator`](Self::with_agent_decorator) was
+    /// called, the built `Oxi` is cloned into the supervisor so
+    /// every spawn routes through the decorator.
     pub fn build(self) -> anyhow::Result<(Oxi, AgentSupervisor)> {
-        // Surface the silent-drop limitation explicitly so this
-        // doesn't recur in the same shape as the audit Gap-0 bug.
-        if self.audit.is_some() {
-            tracing::warn!(
-                "SupervisorBuilder::with_audit was set but does not currently reach \
-                 supervisor-spawned agents. Use OxiBuilder::agent().audit_log() \
-                 per-agent instead. See docs/designs/2026-06-30-observability-wiring.md."
-            );
-        }
-        if self.authorizer.is_some() {
-            tracing::warn!(
-                "SupervisorBuilder::with_authorizer was set but does not currently reach \
-                 supervisor-spawned agents. Use OxiBuilder::agent().authorizer() \
-                 per-agent instead."
-            );
-        }
-        if self.tracer.is_some() {
-            tracing::warn!(
-                "SupervisorBuilder::with_tracer was set but does not currently reach \
-                 supervisor-spawned agents. Use OxiBuilder::agent().tracer() \
-                 per-agent instead."
-            );
-        }
-        if self.cost_tracker.is_some() {
-            tracing::warn!(
-                "SupervisorBuilder::with_cost_tracker was set but does not currently reach \
-                 supervisor-spawned agents. Use OxiBuilder::agent().cost_tracker() \
-                 per-agent instead."
-            );
-        }
-
         let oxi = self.oxi_builder.build();
         let resolver: Arc<dyn oxi_agent::ProviderResolver> = Arc::new(oxi.clone());
 
@@ -859,6 +813,11 @@ impl SupervisorBuilder {
         };
 
         let supervisor = AgentSupervisor::with_policy(resolver, snapshot_store, self.policy);
+        let supervisor = if let Some(decorator) = self.agent_decorator {
+            supervisor.with_agent_decorator(Arc::new(oxi.clone()), decorator)
+        } else {
+            supervisor
+        };
         Ok((oxi, supervisor))
     }
 }

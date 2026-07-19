@@ -392,6 +392,15 @@ impl<'a> AgentBuilder<'a> {
         //    stream time.
         let resolver: Arc<dyn ProviderResolver> = Arc::new(self.oxi.clone());
 
+        // 4b. Capability gate: drop the `lsp` tool when no `LspProvider`
+        //     is configured on the agent config. This avoids the
+        //     "LSP not configured" runtime error path entirely — the
+        //     tool simply isn't visible to the model when LSP is off.
+        //     See docs/designs/2026-07-18-stub-completion.md §4.3.
+        if config.lsp.is_none() {
+            self.tools.unregister("lsp");
+        }
+
         // 5. Create agent with the isolated resolver
         let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
 

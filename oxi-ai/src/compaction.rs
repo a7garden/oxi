@@ -181,7 +181,7 @@ impl Default for CompactionConfig {
 }
 
 /// Metadata about a compaction operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompactionMetadata {
     /// Estimated token count before compaction
     pub original_tokens: usize,
@@ -267,7 +267,7 @@ impl CompactionMetadata {
 }
 
 /// Result of context compaction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CompactedContext {
     /// Summary of the compacted messages
     pub summary: String,
@@ -277,10 +277,18 @@ pub struct CompactedContext {
     pub compacted_count: usize,
     /// Metadata about the compaction operation
     pub metadata: CompactionMetadata,
+    /// Optional rendered PNG frames (snapcompact). `None` for LLM
+    /// compaction. Stored as `(frame_index, png_bytes)` so downstream
+    /// code can attach the bytes as image content to the next
+    /// assistant turn.
+    pub frames: Option<FrameBag>,
 }
 
+/// Rendered snapcompact PNG frames: `(frame_index, png_bytes)`.
+pub type FrameBag = std::sync::Arc<Vec<(u32, Vec<u8>)>>;
+
 impl CompactedContext {
-    /// Create a new compacted context
+    /// Create a new compacted context (no rendered frames).
     pub fn new(
         summary: String,
         kept_messages: Vec<Message>,
@@ -292,6 +300,7 @@ impl CompactedContext {
             kept_messages,
             compacted_count,
             metadata,
+            frames: None,
         }
     }
 
@@ -379,7 +388,12 @@ pub enum CompactionError {
     /// No messages to compact
     NoMessagesToCompact,
     /// Too few messages to compact (need at least keep_recent + 1)
-    TooFewMessages { total: usize, keep_recent: usize },
+    TooFewMessages {
+        /// Total messages available.
+        total: usize,
+        /// Minimum messages needed (`keep_recent + 1`).
+        keep_recent: usize,
+    },
     /// Compaction was disabled
     CompactionDisabled,
     /// Context window not available

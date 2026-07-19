@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 parking_lot = "0.12"
+tokio-util = "0.7"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 fastrand = "2"
@@ -35,6 +36,7 @@ blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
 regex = "1"
+oxi-snapcompact = { version = "0.55.0", path = "../oxi-snapcompact" }
 
 # File-based port impls (fs/ sub-module). Always available in default build.
 toml = "0.9"

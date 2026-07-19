@@ -3,6 +3,7 @@
 mod audit;
 pub mod audit_trail;
 mod cost;
+mod decorator;
 mod event_store;
 mod trace;
 
@@ -14,6 +15,7 @@ pub use audit_trail::{
 pub use cost::{
     CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, GlobalCostSnapshot, TokenUsage,
 };
+pub use decorator::{AgentDecorator, ObservabilityDecorator};
 pub use event_store::{EventQuery, EventStore, EventStoreConfig, StoredEvent};
 pub use trace::{Span, SpanContext, SpanGuard, SpanId, SpanKind, SpanStatus, TraceId, Tracer};
 

@@ -39,7 +39,9 @@ pub mod routing;
 pub mod security;
 pub mod tool_factory;
 pub mod url_resolver;
+pub mod snapcompact_compactor;
 pub mod workflow_dsl;
+pub mod workflow_engine;
 
 // Re-export core SDK types
 pub use agent_builder::AgentBuilder;
@@ -47,6 +49,7 @@ pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
 pub use delegation::SdkSubagentRunner;
 pub use url_resolver::SdkUrlResolver;
+pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
 
 // Re-export port types — products implement these traits.
 // Note: Some names conflict with existing modules (e.g. `EventBus` is also a
