@@ -34,6 +34,9 @@ pub use fuzzy::{FuzzyResult, fuzzy_match, fuzzy_rank};
 /// Truncate text to a terminal display width.
 pub use text::truncate_to_width;
 
+/// Color level detection: terminal capability detection + downgrade conversions.
+pub use render::color_level::{ColorLevel, adapt_color, detect_color_level};
+
 /// Glyph set system: pluggable Unicode / ASCII / Nerd-Font symbol presets.
 pub use symbols::{GlyphSet, Symbols, UnknownGlyphSet};
 /// Theme system: color schemes, spacing, style management.

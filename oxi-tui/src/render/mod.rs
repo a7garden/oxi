@@ -13,6 +13,7 @@
 //! 5. Wrap output in CSI 2026 synchronized update mode to prevent tearing
 
 pub mod ansi;
+pub mod color_level;
 #[allow(missing_docs)]
 mod deccara;
 pub mod diff;
