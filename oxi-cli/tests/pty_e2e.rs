@@ -79,7 +79,7 @@ fn test_pty_harness_spawns_echo() {
         .spawn_command(cmd)
         .expect("spawn echo");
 
-    let mut reader = pty_pair.master.take_reader().expect("take_reader");
+    let mut reader = pty_pair.master.try_clone_reader().expect("try_clone_reader");
     drop(pty_pair.slave);
 
     let mut buf = String::new();

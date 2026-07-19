@@ -22,13 +22,13 @@ use std::process::Command;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, CommandBuilder, Master, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 /// A spawned oxi process in its own PTY.
 pub struct PtySession {
     // Store only master (not the full PtyPair). Dropping the slave fd in
     // spawn() ensures the child gets SIGHUP when we exit.
-    master: Box<dyn Master + Send>,
+    master: Box<dyn MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send>,
     writer: Box<dyn Write + Send>,
     // Background reader thread feeds this channel; read_until polls it.
@@ -64,7 +64,7 @@ impl PtySession {
 
         let reader = pty_pair
             .master
-            .take_reader()
+            .try_clone_reader()
             .map_err(pty_err_to_io)?;
         let writer = pty_pair
             .master
@@ -162,17 +162,18 @@ impl PtySession {
     }
 
     /// Check if the child process has exited. Returns `Some(code)` if exited.
-    pub fn try_wait(&mut self) -> io::Result<Option<i32>> {
+    /// Exit code is `u32` (matches portable_pty::ExitStatus::exit_code).
+    pub fn try_wait(&mut self) -> io::Result<Option<u32>> {
         self.child
             .try_wait()
             .map(|opt| opt.map(|status| status.exit_code()))
-            .map_err(pty_err_to_io)
     }
 
     /// Kill the child process if still running.
     pub fn kill(&mut self) -> io::Result<()> {
-        self.child.kill().map_err(pty_err_to_io)
+        self.child.kill()
     }
+
 }
 
 impl Drop for PtySession {
