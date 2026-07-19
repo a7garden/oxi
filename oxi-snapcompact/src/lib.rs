@@ -13,14 +13,19 @@
 //!
 //! ## Scope of this crate
 //!
-//! This Rust port covers the **shape system, serialization, and shape
-//! selection** — the parts that don't depend on a particular font
-//! rasterizer or PNG encoder. Frame rasterization (the hot text→PNG
-//! path) lives in oxi's `oxibrowser` / `pi-natives` and is called via
-//! the [`FrameRenderer`] trait; callers provide an implementation
-//! backed by whichever bitmap library is appropriate.
-
+//! Shape system, conversation serialization, shape selection, and
+//! the full text→PNG rasterizer (ported from omp's
+//! `pi-natives/src/snapcompact.rs` — see the [`renderer`] submodule).
+//! The renderer uses bundled BDF/HEX bitmap fonts plus the bundled
+//! Silver TrueType font for non-Latin glyphs, all under permissive
+//! licenses (see `NOTICE.md`).
+//!
+//! [`compact()`] always returns real PNG-encoded bytes — there is no
+//! "no-op renderer" path. When a frame fails to render, the error is
+//! logged via `tracing` and that frame's bytes are empty; the caller
+//! can decide whether to drop or surface partial results.
 use serde::{Deserialize, Serialize};
+pub mod renderer;
 
 // ── Shape system ──────────────────────────────────────────────────────
 
@@ -545,34 +550,35 @@ impl CompactResult {
     }
 }
 
-/// Interface for converting bounded source text into image bytes.
-pub trait FrameRenderer: Send + Sync {
-    /// Render `source_text` slice into PNG-equivalent bytes.
-    fn render(&self, source_text: &str, shape: &Shape, frame_index: u32) -> Vec<u8>;
-}
-
-/// No-op renderer — returns empty bytes. Useful in tests and for hosts
-/// that store only the source ranges (no rasterization yet).
-#[derive(Debug, Clone, Default)]
-pub struct NoopRenderer;
-
-impl FrameRenderer for NoopRenderer {
-    fn render(&self, _source_text: &str, _shape: &Shape, _frame_index: u32) -> Vec<u8> {
-        Vec::new()
+/// Convert a [`Shape`] into the renderer's option struct.
+///
+/// The shape's `font` / `cell_width` / `cell_height` / `variant` /
+/// `line_repeat` / `stretch` / `columns` fields map directly onto
+/// [`crate::renderer::SnapcompactRenderOptions`].
+fn shape_to_render_options(shape: &Shape) -> crate::renderer::SnapcompactRenderOptions {
+    crate::renderer::SnapcompactRenderOptions {
+        size: shape.frame_size,
+        font: Some(shape.font.as_str().to_string()),
+        cell_width: Some(shape.cell_width),
+        cell_height: Some(shape.cell_height),
+        variant: Some(shape.variant.as_str().to_string()),
+        line_repeat: Some(shape.line_repeat),
+        stretch: Some(shape.stretch),
+        columns: Some(shape.columns),
     }
 }
 
-/// Run a compaction pass.
+/// Run a compaction pass — render each frame slice through the
+/// pi-natives ported renderer (`render_snapcompact_png`) so the
+/// returned bytes are real PNG-encoded image data.
+///
+/// Errors propagate as `Vec::new()` for the offending frame (so the
+/// caller still gets partial results) and the failure is logged via
+/// `tracing`. This is the only [`compact`] surface — the old
+/// `NoopRenderer` / `FrameRenderer` / `compact_with` indirection has
+/// been removed: there is one renderer, and it always returns real
+/// bytes.
 pub fn compact(prep: &CompactPreparation, options: &CompactOptions) -> CompactResult {
-    compact_with(prep, options, &NoopRenderer)
-}
-
-/// Same as [`compact`] but with an explicit renderer.
-pub fn compact_with<R: FrameRenderer>(
-    prep: &CompactPreparation,
-    options: &CompactOptions,
-    renderer: &R,
-) -> CompactResult {
     let shape: Shape = options
         .shape
         .clone()
@@ -583,17 +589,31 @@ pub fn compact_with<R: FrameRenderer>(
         chars_per_frame,
         options.max_frames as usize,
     );
+    let render_opts = shape_to_render_options(&shape);
     let rendered: Vec<FrameRef> = frames
         .iter()
-        .map(|range| FrameRef {
-            index: range.index,
-            source_start: range.source_start,
-            source_end: range.source_end,
-            bytes: {
-                let slice =
-                    slice_char_range(&prep.bounded_text, range.source_start, range.source_end);
-                renderer.render(&slice, &shape, range.index)
-            },
+        .map(|range| {
+            let slice =
+                slice_char_range(&prep.bounded_text, range.source_start, range.source_end);
+            let bytes = match crate::renderer::render_snapcompact_png(slice, render_opts.clone())
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(
+                        frame = range.index,
+                        shape = %shape.name,
+                        error = %e,
+                        "snapcompact render failed; emitting empty frame"
+                    );
+                    Vec::new()
+                }
+            };
+            FrameRef {
+                index: range.index,
+                source_start: range.source_start,
+                source_end: range.source_end,
+                bytes,
+            }
         })
         .collect();
     CompactResult {
@@ -766,7 +786,12 @@ mod tests {
     }
 
     #[test]
-    fn compact_emits_one_frame_per_chunk_with_noop_renderer() {
+    fn compact_emits_one_frame_per_chunk_with_png_bytes() {
+        // Pre-port this asserted `f.bytes.is_empty()` (the old
+        // NoopRenderer path). compact() now renders real PNGs, so
+        // each frame should carry a non-empty payload with the
+        // PNG magic header. The `frames.len() <= max_frames`
+        // invariant is preserved.
         let long: String = "a".repeat(800);
         let prep = prepare(&long, 2000, 800);
         let opts = CompactOptions {
@@ -777,7 +802,13 @@ mod tests {
         assert!(!result.frames.is_empty());
         assert!(result.frames.len() <= opts.max_frames as usize);
         for f in &result.frames {
-            assert!(f.bytes.is_empty());
+            assert!(!f.bytes.is_empty(), "frame {} should have real PNG bytes", f.index);
+            assert_eq!(
+                &f.bytes[..8],
+                &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+                "frame {} missing PNG magic",
+                f.index
+            );
         }
     }
 
@@ -835,17 +866,11 @@ mod tests {
     }
 
     #[test]
-    fn custom_renderer_is_called_per_frame() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        struct CountingRenderer {
-            count: AtomicUsize,
-        }
-        impl FrameRenderer for CountingRenderer {
-            fn render(&self, source_text: &str, _shape: &Shape, _idx: u32) -> Vec<u8> {
-                self.count.fetch_add(1, Ordering::SeqCst);
-                format!("rendered:{}", source_text.chars().count()).into_bytes()
-            }
-        }
+    fn compact_renders_real_png_bytes_per_frame() {
+        // The compact() path used to go through a NoopRenderer that
+        // emitted empty bytes; this guards against regressions to
+        // that fake-success path by asserting each frame carries a
+        // non-empty PNG payload.
         let long: String = "a".repeat(500);
         let prep = prepare(&long, 2000, 500);
         let opts = CompactOptions {
@@ -853,14 +878,13 @@ mod tests {
             max_frames: 3,
             ..Default::default()
         };
-        let r = CountingRenderer {
-            count: AtomicUsize::new(0),
-        };
-        let result = compact_with(&prep, &opts, &r);
-        assert_eq!(r.count.load(Ordering::SeqCst), result.frames.len());
+        let result = compact(&prep, &opts);
+        assert!(!result.frames.is_empty(), "compact must produce ≥1 frame");
         for f in &result.frames {
-            assert!(!f.bytes.is_empty());
-            assert!(String::from_utf8_lossy(&f.bytes).starts_with("rendered:"));
+            assert!(!f.bytes.is_empty(), "frame {} has empty bytes", f.index);
+            // PNG magic header.
+            assert_eq!(&f.bytes[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+                "frame {} is not a PNG", f.index);
         }
     }
 }
