@@ -19,6 +19,7 @@ pub mod mouse;
 pub mod render;
 pub mod state;
 pub mod sticky;
+pub mod terminal_support;
 pub mod types;
 
 // Re-export all public types from sub-modules
