@@ -53,8 +53,40 @@ pub async fn handle_input(
         }
         CEvent::Mouse(mouse) => {
             match mouse.kind {
-                MouseEventKind::ScrollUp => state.scroll_up(3),
-                MouseEventKind::ScrollDown => state.scroll_down(3),
+                MouseEventKind::ScrollUp => {
+                    // B1: feed event into scroll normalizer for EPT correction,
+                    // gesture grouping, and per-flush cap.
+                    if let Some(scroll) = state
+                        .scroll_normalizer
+                        .push(oxi_tui::widgets::chat::ScrollDirection::Up)
+                    {
+                        let delta = oxi_tui::widgets::chat::ScrollNormalizer::cap_delta(
+                            scroll.delta_lines,
+                            24, // viewport height fallback; will be replaced when wired
+                        );
+                        if delta < 0 {
+                            state.scroll_up((-delta) as u16);
+                        } else {
+                            state.scroll_down(delta as u16);
+                        }
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if let Some(scroll) = state
+                        .scroll_normalizer
+                        .push(oxi_tui::widgets::chat::ScrollDirection::Down)
+                    {
+                        let delta = oxi_tui::widgets::chat::ScrollNormalizer::cap_delta(
+                            scroll.delta_lines,
+                            24,
+                        );
+                        if delta < 0 {
+                            state.scroll_up((-delta) as u16);
+                        } else {
+                            state.scroll_down(delta as u16);
+                        }
+                    }
+                }
                 MouseEventKind::Up(button) => {
                     use crossterm::event::MouseButton;
                     if button == MouseButton::Left {

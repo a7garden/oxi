@@ -20,7 +20,9 @@ use oxi_agent::tools::{
 use oxi_tui::theme::{ThemeManager, ThemeRegistry};
 use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use oxi_tui::widgets::{
-    chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
+    chat::{
+        ChatMessage, ChatViewState, ContentBlock, MessageRole, ScrollDirection, ScrollNormalizer,
+    },
     footer::FooterState,
     input::InputState,
 };
@@ -276,6 +278,7 @@ pub(crate) struct AppState {
     pub footer_state: FooterState,
     pub is_agent_busy: bool,
     pub spinner_frame: usize,
+    pub scroll_normalizer: ScrollNormalizer,
     pub auto_scroll: bool,
     pub input_history: Vec<String>,
     pub history_index: usize,
@@ -474,6 +477,7 @@ impl AppState {
             footer_state: FooterState::default(),
             is_agent_busy: false,
             spinner_frame: 0,
+            scroll_normalizer: ScrollNormalizer::new(),
             auto_scroll: true,
             input_history: Vec::new(),
             history_index: 0,

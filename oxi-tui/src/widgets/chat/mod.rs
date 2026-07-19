@@ -23,6 +23,10 @@ pub mod types;
 
 // Re-export all public types from sub-modules
 pub use dashboard::DashboardInfo;
+pub use mouse::{
+    InputDevice, NormalizedScroll, ScrollDirection, ScrollNormalizer, acceleration_band,
+    detect_terminal,
+};
 pub use state::ChatViewState;
 pub use types::{ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus};
 
