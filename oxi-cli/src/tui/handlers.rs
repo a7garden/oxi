@@ -52,9 +52,18 @@ pub async fn handle_input(
             }
         }
         CEvent::Mouse(mouse) => {
+            // B1: per-flush cap uses the actual chat viewport height so a
+            // 50-row terminal gets cap=25 instead of the hardcoded 12.
+            // Falls back to 24 before the first render has populated
+            // viewport_rect (height=0 → use 24).
+            let viewport_h = if state.chat.viewport_rect.height > 0 {
+                state.chat.viewport_rect.height
+            } else {
+                24
+            };
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
-                    // B1: feed event into scroll normalizer for EPT correction,
+                    // Feed event into scroll normalizer for EPT correction,
                     // gesture grouping, and per-flush cap.
                     if let Some(scroll) = state
                         .scroll_normalizer
@@ -62,7 +71,7 @@ pub async fn handle_input(
                     {
                         let delta = oxi_tui::widgets::chat::ScrollNormalizer::cap_delta(
                             scroll.delta_lines,
-                            24, // viewport height fallback; will be replaced when wired
+                            viewport_h,
                         );
                         if delta < 0 {
                             state.scroll_up((-delta) as u16);
@@ -78,7 +87,7 @@ pub async fn handle_input(
                     {
                         let delta = oxi_tui::widgets::chat::ScrollNormalizer::cap_delta(
                             scroll.delta_lines,
-                            24,
+                            viewport_h,
                         );
                         if delta < 0 {
                             state.scroll_up((-delta) as u16);
