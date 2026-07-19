@@ -18,6 +18,7 @@
 pub mod bootstrap;
 pub mod cli;
 pub mod internal_urls;
+pub mod lsp;
 pub mod main_dispatch;
 pub mod mcp_credentials;
 pub mod print_mode;
@@ -280,6 +281,18 @@ impl App {
             url_resolver: Some(Arc::new(oxi_sdk::SdkUrlResolver::new(
                 oxi.ports().url_router.clone(),
             ))),
+            // LSP: lazy-spawn rust-analyzer (or other configured
+            // servers) on first request. When no servers are
+            // configured for the workspace, the field stays `None`
+            // and AgentBuilder.build() drops the `lsp` tool from
+            // the registry (see agent_builder.rs::build).
+            lsp: if crate::lsp::manager::default_servers().is_empty() {
+                None
+            } else {
+                Some(Arc::new(crate::lsp::CliLspProvider::with_defaults(
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                )))
+            },
             ..Default::default()
         };
 

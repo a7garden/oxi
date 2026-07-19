@@ -74,12 +74,12 @@ fn test_pty_harness_spawns_echo() {
     let mut cmd = portable_pty::CommandBuilder::new("echo");
     cmd.arg("hello-pty");
 
-    let mut child = pty_pair
-        .slave
-        .spawn_command(cmd)
-        .expect("spawn echo");
+    let mut child = pty_pair.slave.spawn_command(cmd).expect("spawn echo");
 
-    let mut reader = pty_pair.master.try_clone_reader().expect("try_clone_reader");
+    let mut reader = pty_pair
+        .master
+        .try_clone_reader()
+        .expect("try_clone_reader");
     drop(pty_pair.slave);
 
     let mut buf = String::new();
@@ -87,10 +87,10 @@ fn test_pty_harness_spawns_echo() {
     let mut byte_buf = [0u8; 1024];
 
     while std::time::Instant::now() < deadline {
-        if let Ok(n) = reader.read(&mut byte_buf) {
-            if n > 0 {
-                buf.push_str(&String::from_utf8_lossy(&byte_buf[..n]));
-            }
+        if let Ok(n) = reader.read(&mut byte_buf)
+            && n > 0
+        {
+            buf.push_str(&String::from_utf8_lossy(&byte_buf[..n]));
         }
         if buf.contains("hello-pty") {
             break;

@@ -27,6 +27,7 @@ oxi-sdk = { version = "0.55.0", path = "../oxi-sdk" }
 oxi-tui = { version = "0.55.0", path = "../oxi-tui" }
 oxi-mnemopi = { version = "0.55.0", path = "../oxi-mnemopi", features = ["remote-embeddings"] }
 oxi-lsp = { version = "0.55.0", path = "../oxi-lsp" }
+lsp-types = "0.95"
 
 # Async
 async-trait = "0.1"

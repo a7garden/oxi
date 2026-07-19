@@ -21,7 +21,7 @@ use oxi_tui::theme::{ThemeManager, ThemeRegistry};
 use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use oxi_tui::widgets::{
     chat::{
-        ChatMessage, ChatViewState, ContentBlock, MessageRole, ScrollDirection, ScrollNormalizer,
+        ChatMessage, ChatViewState, ContentBlock, MessageRole, ScrollNormalizer,
     },
     footer::FooterState,
     input::InputState,

@@ -22,9 +22,11 @@ use std::process::Command;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// A spawned oxi process in its own PTY.
+/// A spawned oxi process in its own PTY.
+#[allow(dead_code)]
 pub struct PtySession {
     // Store only master (not the full PtyPair). Dropping the slave fd in
     // spawn() ensures the child gets SIGHUP when we exit.
@@ -34,6 +36,9 @@ pub struct PtySession {
     // Background reader thread feeds this channel; read_until polls it.
     reader_rx: mpsc::Receiver<Vec<u8>>,
 }
+
+#[allow(dead_code)]
+impl PtySession {}
 
 impl PtySession {
     /// Spawn the `oxi` binary with the given args in a new PTY.
@@ -57,19 +62,10 @@ impl PtySession {
         cmd.env("OXI_NO_USER_CONFIG", "1");
         cmd.cwd(".");
 
-        let child = pty_pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(pty_err_to_io)?;
+        let child = pty_pair.slave.spawn_command(cmd).map_err(pty_err_to_io)?;
 
-        let reader = pty_pair
-            .master
-            .try_clone_reader()
-            .map_err(pty_err_to_io)?;
-        let writer = pty_pair
-            .master
-            .take_writer()
-            .map_err(pty_err_to_io)?;
+        let reader = pty_pair.master.try_clone_reader().map_err(pty_err_to_io)?;
+        let writer = pty_pair.master.take_writer().map_err(pty_err_to_io)?;
 
         // CRITICAL: drop the slave fd so the child receives SIGHUP when
         // the master closes. If we kept the full PtyPair, the slave fd
@@ -137,19 +133,20 @@ impl PtySession {
     }
 
     /// Write text followed by Enter to the PTY.
+    #[allow(dead_code)]
     pub fn send_line(&mut self, text: &str) -> io::Result<()> {
         self.writer.write_all(text.as_bytes())?;
         self.writer.write_all(b"\r")?; // PTY expects \r, not \n
         self.writer.flush()
     }
 
-    /// Write raw bytes (for sending control sequences like Ctrl+C).
+    #[allow(dead_code)]
     pub fn send_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.writer.write_all(bytes)?;
         self.writer.flush()
     }
 
-    /// Resize the PTY (sends SIGWINCH on unix).
+    #[allow(dead_code)]
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
         self.master
             .resize(PtySize {
@@ -173,7 +170,6 @@ impl PtySession {
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
     }
-
 }
 
 impl Drop for PtySession {
@@ -184,7 +180,7 @@ impl Drop for PtySession {
 }
 
 fn pty_err_to_io(e: anyhow::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e)
+    io::Error::other(e)
 }
 
 /// Assert that `haystack` contains `needle`. Panics with both strings on miss.
