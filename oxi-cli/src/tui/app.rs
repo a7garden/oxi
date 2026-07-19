@@ -20,9 +20,7 @@ use oxi_agent::tools::{
 use oxi_tui::theme::{ThemeManager, ThemeRegistry};
 use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
 use oxi_tui::widgets::{
-    chat::{
-        ChatMessage, ChatViewState, ContentBlock, MessageRole, ScrollNormalizer,
-    },
+    chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole, ScrollNormalizer},
     footer::FooterState,
     input::InputState,
 };
@@ -279,7 +277,6 @@ pub(crate) struct AppState {
     pub is_agent_busy: bool,
     pub spinner_frame: usize,
     pub scroll_normalizer: ScrollNormalizer,
-    pub auto_scroll: bool,
     pub input_history: Vec<String>,
     pub history_index: usize,
     pub saved_input: String,
@@ -478,7 +475,6 @@ impl AppState {
             is_agent_busy: false,
             spinner_frame: 0,
             scroll_normalizer: ScrollNormalizer::new(),
-            auto_scroll: true,
             input_history: Vec::new(),
             history_index: 0,
             saved_input: String::new(),
@@ -659,7 +655,10 @@ impl AppState {
     pub fn start_streaming(&mut self) {
         self.chat.start_streaming();
         self.is_agent_busy = true;
-        self.auto_scroll = true;
+        // Re-engage Following so the viewport tracks new streaming content.
+        // scroll_to_bottom(0) sets follow = Following and clears any pending
+        // Pinned/badge state from the previous turn.
+        self.chat.scroll_to_bottom(0);
         self.snapshot_text_rendered = 0;
         self.snapshot_thinking_rendered.clear();
         self.snapshot_text_block_created = false;
@@ -833,17 +832,34 @@ impl AppState {
     }
 
     pub fn scroll_up(&mut self, n: u16) {
+        // Chat's scroll_up sets follow = FollowingGrace and clears
+        // new_answer_pending — exactly what we want here.
         self.chat.scroll_up(n);
-        self.auto_scroll = false;
     }
 
     pub fn scroll_down(&mut self, n: u16) {
+        // Chat's scroll_down promotes FollowingGrace → Following when
+        // re-engaged, and Pinned → Following at bottom. No shim needed.
         self.chat.scroll_down(n);
     }
 
+    /// Ensure the viewport follows new content if the user hasn't pinned.
+    /// Delegates to ChatViewState's FollowMode state machine:
+    /// - Following / FollowingGrace → scroll_to_bottom
+    /// - Pinned → leave viewport alone (user explicitly stopped following)
+    ///
+    /// Call this from the render loop after content_height updates.
     pub fn ensure_auto_scroll(&mut self, visible_height: u16) {
-        if self.auto_scroll {
-            self.chat.scroll_to_bottom(visible_height);
+        use oxi_tui::widgets::chat::FollowMode;
+        match self.chat.follow {
+            FollowMode::Following | FollowMode::FollowingGrace { .. } => {
+                self.chat.scroll_to_bottom(visible_height);
+            }
+            FollowMode::Pinned { .. } => {
+                // User pinned — don't auto-scroll, but still clamp in case
+                // content shrank (reflow-safe via chat.clamp_scroll).
+                self.chat.clamp_scroll(visible_height);
+            }
         }
     }
 

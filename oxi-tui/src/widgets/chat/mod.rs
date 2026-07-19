@@ -22,13 +22,12 @@ pub mod sticky;
 pub mod terminal_support;
 pub mod types;
 
-// Re-export all public types from sub-modules
 pub use dashboard::DashboardInfo;
 pub use mouse::{
     InputDevice, NormalizedScroll, ScrollDirection, ScrollNormalizer, acceleration_band,
     detect_terminal,
 };
-pub use state::ChatViewState;
+pub use state::{ChatViewState, FollowMode};
 pub use types::{ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus};
 
 use ratatui::{
@@ -87,7 +86,11 @@ impl StatefulWidget for ChatView<'_> {
             .last()
             .map(|e| e.y.saturating_add(e.height))
             .unwrap_or(0);
+        // Detect new content arrival during Pinned BEFORE updating
+        // content_height so the helper can compare prev → current.
+        let prev_content_height = state.content_height;
         state.content_height = total_height;
+        state.on_content_grew_during_pinned(prev_content_height);
         // Stash the rendered viewport rect so keyboard-driven toggles can
         // pick which collapsible block sits at the viewport top.
         state.viewport_rect = area;
@@ -214,11 +217,17 @@ impl StatefulWidget for ChatView<'_> {
                 }
             }
         }
-
-        // W1 step 5: sticky turn-prompt overlay.
-        // Render AFTER layout entries so the overlay sits on top.
+        // W1 step 5: sticky turn-prompt overlay + ↓ new answer badge.
         let candidates = sticky::compute_sticky_candidates(&layout);
-        sticky::render_sticky_headers(&candidates, area, area.height, scroll_offset, &styles, buf);
+        sticky::render_sticky_headers(
+            &candidates,
+            area,
+            area.height,
+            scroll_offset,
+            &styles,
+            buf,
+            state.new_answer_pending,
+        );
     }
 }
 

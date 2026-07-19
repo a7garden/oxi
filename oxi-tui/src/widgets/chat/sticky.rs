@@ -67,6 +67,7 @@ pub(crate) fn render_sticky_headers(
     scroll_offset: u32,
     styles: &ThemeStyles,
     buf: &mut Buffer,
+    new_answer_pending: bool,
 ) {
     let sticky_h = STICKY_MAX_HEIGHT.min(viewport_area.height);
     if sticky_h == 0 {
@@ -93,15 +94,25 @@ pub(crate) fn render_sticky_headers(
         lines.push(format!("▸ you (msg {})", msg_idx));
     }
 
-    if lines.is_empty() {
+    // If the user is Pinned and new content arrived, show a "↓ new answer"
+    // badge on the right side of the sticky bar.
+    let badge = if new_answer_pending {
+        " ↓ new answer"
+    } else {
+        ""
+    };
+
+    if lines.is_empty() && !new_answer_pending {
         return;
     }
 
     // Render as a single-line overlay with muted styling.
-    let display = if lines.len() == 1 {
-        lines[0].clone()
+    let display = if lines.is_empty() {
+        badge.trim().to_string()
+    } else if lines.len() == 1 {
+        format!("{}{}", lines[0], badge)
     } else {
-        format!("{} +{} more", lines[0], lines.len() - 1)
+        format!("{} +{} more{}", lines[0], lines.len() - 1, badge)
     };
     let truncated: String = display.chars().take(sticky_rect.width as usize).collect();
     let padded = format!("{:width$}", truncated, width = sticky_rect.width as usize);

@@ -636,8 +636,9 @@ pub fn handle_ui_event(
                 state.chat.refresh_last_code_block();
             }
             state.is_agent_busy = true;
-            state.auto_scroll = true;
-            // Reset snapshot tracking counters for the new message
+            // Re-engage Following on each new message so the viewport
+            // tracks new content unless the user explicitly pinned.
+            state.chat.scroll_to_bottom(0);
             state.reset_snapshot_tracking();
             // Apply initial snapshot (delta = None for first message)
             state.update_streaming_message(&message, None);

@@ -282,7 +282,7 @@ impl ChatViewState {
     ///
     /// Also: if the clamp snaps to bottom AND follow was Pinned, promote
     /// to Following (user has reached the bottom — no point staying pinned).
-    pub(crate) fn clamp_scroll(&mut self, visible_height: u16) {
+    pub fn clamp_scroll(&mut self, visible_height: u16) {
         let vh = visible_height as u32;
         let max_off = self.content_height.saturating_sub(vh);
         let new_off = self.scroll_offset.min(max_off);
@@ -293,13 +293,24 @@ impl ChatViewState {
             self.follow = FollowMode::Following;
             self.new_answer_pending = false;
         }
-        // Note: if user is Pinned and content_height SHRANK below scroll_offset,
-        // we DO clamp (have to — viewport can't show past end). The anchor
-        // may need to be re-resolved on next render via resolve_anchor.
-        // If content_height GREW (e.g. todo_panel hidden), viewport_base
-        // stays put as long as it's still in range — that's the reflow fix.
     }
 
+    /// Called from the render loop after layout is computed.
+    ///
+    /// If the user is currently `Pinned` and new content was appended
+    /// (i.e. `content_height` grew since the last render), set
+    /// `new_answer_pending = true` so a "↓ new answer" badge can render.
+    /// The badge is cleared when the user scrolls down or re-engages.
+    ///
+    /// `prev_content_height` is the value from the previous render frame.
+    /// Pass `u32::MAX` (or any value ≥ current) on the first render to skip.
+    pub fn on_content_grew_during_pinned(&mut self, prev_content_height: u32) {
+        if self.content_height > prev_content_height
+            && matches!(self.follow, FollowMode::Pinned { .. })
+        {
+            self.new_answer_pending = true;
+        }
+    }
     /// Toggle expanded state of a thinking block.
     /// `key` is "msg_idx:block_idx".
     pub fn toggle_thinking(&mut self, key: &str) {
@@ -1158,5 +1169,59 @@ mod tests {
         assert_eq!(s.scroll_offset, 80); // 100 - 20
         // Snapped to bottom → Pinned → Following.
         assert!(matches!(s.follow, FollowMode::Following));
+    }
+
+    // ── Phase 2b: new_answer_pending badge wiring ──────────────────────
+
+    #[test]
+    fn badge_set_when_pinned_and_content_grows() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.scroll_to_bottom(20); // Following, scroll_offset = 80
+        s.scroll_up(30); // FollowingGrace, offset = 50
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 0,
+            anchor_y_in_msg: 0,
+        };
+        s.new_answer_pending = false;
+
+        // Simulate render: content grew (100 → 150), prev was 100.
+        s.content_height = 150;
+        s.on_content_grew_during_pinned(100);
+        assert!(
+            s.new_answer_pending,
+            "badge should appear when content grows during Pinned"
+        );
+    }
+
+    #[test]
+    fn badge_not_set_when_following() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.follow = FollowMode::Following;
+        s.new_answer_pending = false;
+
+        s.content_height = 200;
+        s.on_content_grew_during_pinned(100);
+        assert!(
+            !s.new_answer_pending,
+            "badge should NOT appear during Following"
+        );
+    }
+
+    #[test]
+    fn badge_not_set_when_content_shrank() {
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        s.follow = FollowMode::Pinned {
+            anchor_msg_idx: 0,
+            anchor_y_in_msg: 0,
+        };
+        s.new_answer_pending = false;
+
+        // Content shrank (100 → 50).
+        s.content_height = 50;
+        s.on_content_grew_during_pinned(100);
+        assert!(!s.new_answer_pending);
     }
 }
