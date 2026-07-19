@@ -37,9 +37,9 @@ pub use ports::{fs, inmem};
 pub mod prelude;
 pub mod routing;
 pub mod security;
+pub mod snapcompact_compactor;
 pub mod tool_factory;
 pub mod url_resolver;
-pub mod snapcompact_compactor;
 pub mod workflow_dsl;
 pub mod workflow_engine;
 

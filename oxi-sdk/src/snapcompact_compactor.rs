@@ -13,8 +13,8 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use oxi_ai::compaction::{CompactedContext, CompactionError, CompactionMetadata, Compactor};
 use oxi_ai::Message;
+use oxi_ai::compaction::{CompactedContext, CompactionError, CompactionMetadata, Compactor};
 use oxi_snapcompact::Shape;
 
 /// Bitmap-frame compactor that renders the discarded tail of a
@@ -296,10 +296,7 @@ mod tests {
         let result = rt
             .block_on(async { compactor.compact(&messages, None).await })
             .expect("compaction should succeed");
-        let frames = result
-            .frames
-            .as_ref()
-            .expect("frames should be attached");
+        let frames = result.frames.as_ref().expect("frames should be attached");
         assert!(!frames.is_empty(), "should produce ≥1 frame");
         for (idx, bytes) in frames.iter() {
             assert!(!bytes.is_empty(), "frame {idx} must be non-empty");

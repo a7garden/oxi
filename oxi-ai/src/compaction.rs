@@ -341,6 +341,10 @@ pub enum CompactionStrategy {
     EveryNTurns(usize),
     /// Compact when context exceeds this absolute token count
     AbsoluteTokens(usize),
+    /// Always compact using the snapcompact PNG renderer.
+    /// The compactor must be set to a [`SnapcompactCompactor`]
+    /// (from `oxi-sdk`) for this to produce frames.
+    Snapcompact,
 }
 
 impl CompactionStrategy {
@@ -370,6 +374,7 @@ impl CompactionStrategy {
             }
             CompactionStrategy::EveryNTurns(n) => iteration > 0 && iteration.is_multiple_of(*n),
             CompactionStrategy::AbsoluteTokens(max_tokens) => context_tokens >= *max_tokens,
+            CompactionStrategy::Snapcompact => true,
         }
     }
 }
