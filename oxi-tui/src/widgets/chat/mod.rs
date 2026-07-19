@@ -73,13 +73,12 @@ impl StatefulWidget for ChatView<'_> {
 
         // Get layout computed with inner_width for correct height measurements
         let layout = state.get_layout(inner_width, &styles);
-        let total_height: u16 = layout
+        // Virtual-coordinate total: u32 from LayoutEntry, saturated to u16
+        // for the legacy u16 chat-wide content_height field. The draw loop
+        // uses u32 throughout and only converts to u16 at Rect construction.
+        let total_height: u32 = layout
             .last()
-            .map(|e| {
-                (e.y as u32)
-                    .saturating_add(e.height as u32)
-                    .min(u16::MAX as u32) as u16
-            })
+            .map(|e| e.y.saturating_add(e.height))
             .unwrap_or(0);
         state.content_height = total_height;
         // Stash the rendered viewport rect so keyboard-driven toggles can
@@ -94,13 +93,16 @@ impl StatefulWidget for ChatView<'_> {
             state.clamp_scroll(area.height);
         }
 
-        // Render only visible entries into the buffer.
-        let scroll_offset = state.scroll_offset;
-        let vp_bottom = scroll_offset + area.height;
+        // Render only visible entries into the buffer. All math is u32 to
+        // break the 65K-row cap; conversion to u16 happens only at the final
+        // Rect construction step (ratatui's Buffer/Rect is u16-indexed).
+        let scroll_offset: u32 = state.scroll_offset;
+        let vp_height: u32 = area.height as u32;
+        let vp_bottom: u32 = scroll_offset.saturating_add(vp_height);
 
         for entry in &layout {
-            // Skip entries fully outside the viewport
-            if entry.y + entry.height <= scroll_offset {
+            // Skip entries fully outside the viewport.
+            if entry.y.saturating_add(entry.height) <= scroll_offset {
                 continue;
             }
             if entry.y >= vp_bottom {
@@ -110,32 +112,34 @@ impl StatefulWidget for ChatView<'_> {
                 continue;
             }
 
-            // Compute the entry's vertical range within the viewport
-            // (clamped to viewport bounds). Every entry maps to a
-            // contiguous rect starting at viewport row 0 (for entries
-            // partially above the viewport) or at its natural position.
-            let entry_top = entry.y.max(scroll_offset);
-            let entry_bot = (entry.y + entry.height).min(vp_bottom);
-            let h = entry_bot.saturating_sub(entry_top);
-            if h == 0 {
+            // Compute the entry's vertical range within the viewport.
+            // All in u32; clamp at the final Rect construction.
+            let entry_top: u32 = entry.y.max(scroll_offset);
+            let entry_bot: u32 = entry.y.saturating_add(entry.height).min(vp_bottom);
+            let h_u32: u32 = entry_bot.saturating_sub(entry_top);
+            if h_u32 == 0 {
                 continue;
             }
-            let rel_y = entry_top - scroll_offset;
-            let rect = Rect::new(area.x, area.y + rel_y, inner_width, h);
+            // Clamp h to u16 (impossible to exceed u16::MAX given ratatui's
+            // Buffer limits, but explicit).
+            let h: u16 = h_u32.min(u16::MAX as u32) as u16;
+            let rel_y: u32 = entry_top - scroll_offset;
+            // area.y + rel_y must fit in u16 — area.y is at most u16::MAX - 1
+            // (terminal height) and rel_y is bounded by vp_height = u16::MAX - area.y.
+            let dst_y: u16 = area.y.saturating_add(rel_y.min(u16::MAX as u32) as u16);
+            let rect = Rect::new(area.x, dst_y, inner_width, h);
 
-            // Track click regions
-            let region_bottom = area.y + rel_y + h;
+            // Track click regions (still u16 — absolute screen coords).
+            let region_bottom = dst_y.saturating_add(h);
             if let LayoutKind::Thinking { key, .. } = &entry.kind {
                 state
                     .thinking_regions
-                    .push((area.y + rel_y, region_bottom, key.clone()));
+                    .push((dst_y, region_bottom, key.clone()));
             }
             if let LayoutKind::ToolBox { key, result, .. } = &entry.kind
                 && result.is_some()
             {
-                state
-                    .tool_regions
-                    .push((area.y + rel_y, region_bottom, key.clone()));
+                state.tool_regions.push((dst_y, region_bottom, key.clone()));
             }
 
             // Track copyable message regions (skip pure spacers/dividers)
@@ -145,7 +149,7 @@ impl StatefulWidget for ChatView<'_> {
             ) {
                 state
                     .message_regions
-                    .push((area.y + rel_y, region_bottom, entry.msg_idx));
+                    .push((dst_y, region_bottom, entry.msg_idx));
             }
 
             // For entries fully within the viewport, render directly.
@@ -157,17 +161,20 @@ impl StatefulWidget for ChatView<'_> {
                 EntryWidget::new(&entry.kind, &styles, &mut state.tool_format_cache)
                     .render(rect, buf);
             } else {
-                let hidden = scroll_offset - entry.y;
-                let tmp_rect = Rect::new(0, 0, inner_width, entry.height);
+                // hidden rows above the viewport top (u32 → usize for indexing)
+                let hidden: u32 = scroll_offset - entry.y;
+                // entry.height must fit in u16 for Rect::new; the LayoutEntry
+                // is u32 but ratatui's Buffer is u16 — same assumption as before.
+                let entry_h_u16: u16 = entry.height.min(u16::MAX as u32) as u16;
+                let tmp_rect = Rect::new(0, 0, inner_width, entry_h_u16);
                 let mut tmp = ratatui::buffer::Buffer::empty(tmp_rect);
                 EntryWidget::new(&entry.kind, &styles, &mut state.tool_format_cache)
                     .render(tmp_rect, &mut tmp);
                 // Copy visible rows from the temp buffer to the frame buffer.
                 // Uses row-level clone instead of per-cell iteration for
                 // better performance on wide terminals.
-                let dst_y = area.y + rel_y;
                 for row in 0..h {
-                    let src_base = (hidden + row) as usize * inner_width as usize;
+                    let src_base = (hidden + row as u32) as usize * inner_width as usize;
                     let dst_base = buf.index_of(area.x, dst_y + row);
                     let dst_slice = &mut buf.content[dst_base..dst_base + inner_width as usize];
                     let src_slice = &tmp.content[src_base..src_base + inner_width as usize];

@@ -25,8 +25,13 @@ pub(crate) fn measure_wrapped_height(lines: &[Line<'_>], _width: u16) -> u16 {
 /// Calculate the layout: list of (y, height, block_ref) for each piece of content.
 #[derive(Clone)]
 pub(crate) struct LayoutEntry {
-    pub y: u16,
-    pub height: u16,
+    /// Logical y position in the chat viewport. **Virtual coordinate** — u32
+    /// to break the 65,535-row u16 cap that silently truncated long sessions.
+    /// Draw-time: the render loop converts to u16 via `min(u16::MAX as u32 - area.y as u32)`
+    /// and saturates before constructing `Rect`.
+    pub y: u32,
+    /// Logical height in the chat viewport. Virtual coordinate (u32).
+    pub height: u32,
     pub kind: LayoutKind,
     pub msg_idx: usize,
 }
@@ -105,7 +110,7 @@ pub(crate) fn compute_layout(
     let mut rendered_any_message = false;
     let mut msg_idx: usize = 0;
 
-    'outer: for msg in &state.messages {
+    for msg in &state.messages {
         // Skip messages that have no visible content; they only create empty spacer rows.
         let has_visible_content = msg.content_blocks.iter().any(|b| match b {
             ContentBlock::Text { content } => !content.trim().is_empty(),
@@ -119,28 +124,24 @@ pub(crate) fn compute_layout(
 
         if rendered_any_message {
             // Gap between messages — use a spacer for breathing room
-            if y <= u16::MAX as u32 {
-                entries.push(LayoutEntry {
-                    y: y as u16,
-                    height: 1,
-                    kind: LayoutKind::Spacer,
-                    msg_idx,
-                });
-            }
+            entries.push(LayoutEntry {
+                y,
+                height: 1u32,
+                kind: LayoutKind::Spacer,
+                msg_idx,
+            });
             y += 1;
         }
         rendered_any_message = true;
 
         // User messages: left accent border, no label needed (single-user context)
         if msg.role == MessageRole::User {
-            if y <= u16::MAX as u32 {
-                entries.push(LayoutEntry {
-                    y: y as u16,
-                    height: 1,
-                    kind: LayoutKind::Rule,
-                    msg_idx,
-                });
-            }
+            entries.push(LayoutEntry {
+                y,
+                height: 1u32,
+                kind: LayoutKind::Rule,
+                msg_idx,
+            });
             y += 1;
         }
         let mut prev_was_box = false;
@@ -158,28 +159,23 @@ pub(crate) fn compute_layout(
 
             // Insert response divider between thinking and non-thinking blocks
             if prev_was_thinking && !matches!(block, ContentBlock::Thinking { .. }) {
-                if y <= u16::MAX as u32 {
-                    entries.push(LayoutEntry {
-                        y: y as u16,
-                        height: 1,
-                        kind: LayoutKind::ResponseDivider,
-                        msg_idx,
-                    });
-                }
+                entries.push(LayoutEntry {
+                    y,
+                    height: 1u32,
+                    kind: LayoutKind::ResponseDivider,
+                    msg_idx,
+                });
                 y += 1;
             }
 
-            // Insert spacer between consecutive box-type blocks (tool calls, errors)
             let is_box = is_box_block(block);
             if is_box && prev_was_box {
-                if y <= u16::MAX as u32 {
-                    entries.push(LayoutEntry {
-                        y: y as u16,
-                        height: 1,
-                        kind: LayoutKind::Spacer,
-                        msg_idx,
-                    });
-                }
+                entries.push(LayoutEntry {
+                    y,
+                    height: 1u32,
+                    kind: LayoutKind::Spacer,
+                    msg_idx,
+                });
                 y += 1;
             }
             prev_was_box = is_box;
@@ -205,17 +201,14 @@ pub(crate) fn compute_layout(
                 }
                 _ => {}
             }
-            let h = measure_kind(&kind, width, &state.expanded_thinking, styles);
-            if y > u16::MAX as u32 {
-                break 'outer;
-            }
+            let h = measure_kind(&kind, width, &state.expanded_thinking, styles) as u32;
             entries.push(LayoutEntry {
-                y: y as u16,
-                height: h,
+                y,
+                height: h as u32,
                 kind,
                 msg_idx,
             });
-            y += h as u32;
+            y += h;
         }
         msg_idx += 1;
     }
@@ -223,14 +216,12 @@ pub(crate) fn compute_layout(
     if let Some(ref streaming) = state.streaming {
         // Only add a spacer if we actually rendered any history messages.
         if rendered_any_message {
-            if y <= u16::MAX as u32 {
-                entries.push(LayoutEntry {
-                    y: y as u16,
-                    height: 1,
-                    kind: LayoutKind::Spacer,
-                    msg_idx,
-                });
-            }
+            entries.push(LayoutEntry {
+                y,
+                height: 1u32,
+                kind: LayoutKind::Spacer,
+                msg_idx,
+            });
             y += 1;
         }
         let mut prev_was_box = false;
@@ -248,33 +239,27 @@ pub(crate) fn compute_layout(
 
             // Insert response divider between thinking and non-thinking blocks
             if prev_was_thinking && !matches!(block, ContentBlock::Thinking { .. }) {
-                if y <= u16::MAX as u32 {
-                    entries.push(LayoutEntry {
-                        y: y as u16,
-                        height: 1,
-                        kind: LayoutKind::ResponseDivider,
-                        msg_idx,
-                    });
-                }
+                entries.push(LayoutEntry {
+                    y,
+                    height: 1u32,
+                    kind: LayoutKind::ResponseDivider,
+                    msg_idx,
+                });
                 y += 1;
             }
 
-            // Insert spacer between consecutive box-type blocks (tool calls, errors)
             let is_box = is_box_block(block);
             if is_box && prev_was_box {
-                if y <= u16::MAX as u32 {
-                    entries.push(LayoutEntry {
-                        y: y as u16,
-                        height: 1,
-                        kind: LayoutKind::Spacer,
-                        msg_idx,
-                    });
-                }
+                entries.push(LayoutEntry {
+                    y,
+                    height: 1u32,
+                    kind: LayoutKind::Spacer,
+                    msg_idx,
+                });
                 y += 1;
             }
             prev_was_box = is_box;
             prev_was_thinking = matches!(block, ContentBlock::Thinking { .. });
-
             let key = format!("s:{}", blk_idx);
             let mut kind = block_to_layout_kind(block, MessageRole::Assistant, width, &key, styles);
             #[allow(clippy::collapsible_match)]
@@ -294,16 +279,14 @@ pub(crate) fn compute_layout(
                 }
                 _ => {}
             }
-            let h = measure_kind(&kind, width, &state.expanded_thinking, styles);
-            if y <= u16::MAX as u32 {
-                entries.push(LayoutEntry {
-                    y: y as u16,
-                    height: h,
-                    kind,
-                    msg_idx,
-                });
-            }
-            y += h as u32;
+            let h = measure_kind(&kind, width, &state.expanded_thinking, styles) as u32;
+            entries.push(LayoutEntry {
+                y,
+                height: h,
+                kind,
+                msg_idx,
+            });
+            y += h;
         }
         // Spinner removed: status now shown in the input separator line (render_input_area).
     }

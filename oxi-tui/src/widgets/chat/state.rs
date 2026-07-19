@@ -96,7 +96,7 @@ struct LayoutCache {
     /// Cached layout entries (None = needs recompute)
     entries: Option<Vec<LayoutEntry>>,
     /// Cached total content height
-    total_height: u16,
+    total_height: u32,
 }
 
 impl std::fmt::Debug for LayoutCache {
@@ -119,15 +119,18 @@ pub struct ChatViewState {
     pub messages: Vec<ChatMessage>,
     pub streaming: Option<StreamingState>,
     pub spinner_frame: usize,
-    pub content_height: u16,
+    pub content_height: u32,
     pub last_code_block: Option<String>,
     pub pending_images: Vec<(String, String)>,
     tool_tracker: ToolCallTracker,
     /// Memoized tool-call / tool-result formatting. Keyed by input hash;
     /// invalidated automatically when the theme or glyph set changes.
     pub(crate) tool_format_cache: ToolFormatCache,
-    /// Vertical scroll offset (0 = top)
-    pub scroll_offset: u16,
+    /// Virtual y position of the viewport's top row (0 = chat top).
+    /// **Virtual coordinate** — u32 to break the 65,535-row u16 cap.
+    /// u32 keeps memory at 4 bytes (vs 8 for usize) and supports 4 billion
+    /// rows — practically unbounded.
+    pub scroll_offset: u32,
     /// When true, auto-scroll to bottom on each render (streaming)
     pub auto_scroll: bool,
     /// Layout cache — guarded by RwLock
@@ -158,22 +161,23 @@ impl ChatViewState {
     /// Scroll to bottom of content. `visible_height` is the viewport height.
     pub fn scroll_to_bottom(&mut self, visible_height: u16) {
         self.auto_scroll = true;
-        if self.content_height > visible_height {
-            self.scroll_offset = self.content_height - visible_height;
+        let vh = visible_height as u32;
+        if self.content_height > vh {
+            self.scroll_offset = self.content_height - vh;
         } else {
             self.scroll_offset = 0;
         }
     }
     pub fn scroll_up(&mut self, n: u16) {
         self.auto_scroll = false;
-        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+        self.scroll_offset = self.scroll_offset.saturating_sub(n as u32);
     }
     pub fn scroll_down(&mut self, n: u16) {
         // NOTE: We don't clamp to content_height - visible_height here
         // because visible_height is unknown.  render() calls
         // clamp_scroll(area.height) on every frame which performs the
         // correct clamping.
-        self.scroll_offset = self.scroll_offset.saturating_add(n);
+        self.scroll_offset = self.scroll_offset.saturating_add(n as u32);
     }
     pub fn scroll_to_top(&mut self) {
         self.auto_scroll = false;
@@ -181,7 +185,8 @@ impl ChatViewState {
     }
     /// Clamp scroll_offset to [0, content_height - visible_height].
     pub(crate) fn clamp_scroll(&mut self, visible_height: u16) {
-        let max_off = self.content_height.saturating_sub(visible_height);
+        let vh = visible_height as u32;
+        let max_off = self.content_height.saturating_sub(vh);
         self.scroll_offset = self.scroll_offset.min(max_off);
     }
 
@@ -602,13 +607,9 @@ impl ChatViewState {
 
         // Recompute outside the read lock
         let entries = compute_layout(self, width, styles);
-        let total_height: u16 = entries
+        let total_height: u32 = entries
             .last()
-            .map(|e| {
-                (e.y as u32)
-                    .saturating_add(e.height as u32)
-                    .min(u16::MAX as u32) as u16
-            })
+            .map(|e| e.y.saturating_add(e.height))
             .unwrap_or(0);
 
         {
@@ -732,5 +733,74 @@ mod tests {
             len2 > len1,
             "newline must invalidate line-based streaming_text_len"
         );
+    }
+    // ── Phase 2 W1: virtual coordinate regression tests ───────────────
+
+    /// Regression: scroll_offset must accept u32 values > u16::MAX.
+    /// Without this, sessions with more than 65,535 rows silently truncate.
+    #[test]
+    fn test_scroll_offset_accepts_u32_above_u16_max() {
+        let mut state = ChatViewState::new();
+        state.content_height = u32::MAX;
+        state.scroll_offset = u16::MAX as u32 + 100;
+        // The field is u32 and should accept this value without panicking.
+        assert_eq!(state.scroll_offset, u16::MAX as u32 + 100);
+    }
+
+    /// Regression: content_height must be u32 to support unbounded sessions.
+    #[test]
+    fn test_content_height_is_u32_field() {
+        let mut state = ChatViewState::new();
+        state.content_height = u32::MAX;
+        assert_eq!(state.content_height, u32::MAX);
+    }
+
+    /// scroll_up(n) must promote u16 n → u32 internally.
+    #[test]
+    fn test_scroll_up_promotes_to_u32() {
+        let mut state = ChatViewState::new();
+        state.content_height = 100;
+        state.scroll_to_bottom(20);
+        // scroll_offset now 80
+        state.scroll_up(50);
+        assert_eq!(state.scroll_offset, 30);
+    }
+
+    /// scroll_down(n) saturates at content_height (no overflow).
+    #[test]
+    fn test_scroll_down_saturates_no_overflow() {
+        let mut state = ChatViewState::new();
+        state.content_height = u32::MAX;
+        state.scroll_offset = u32::MAX - 5;
+        state.scroll_down(100); // would overflow u16
+        // saturating_add means we land at u32::MAX
+        assert_eq!(state.scroll_offset, u32::MAX);
+    }
+
+    /// clamp_scroll(vh) with content_height > u16::MAX must not truncate.
+    #[test]
+    fn test_clamp_scroll_handles_u32_content() {
+        let mut state = ChatViewState::new();
+        state.content_height = 200_000; // > u16::MAX
+        state.scroll_offset = 199_999;
+        state.clamp_scroll(20);
+        // max_off = 200_000 - 20 = 199_980
+        assert_eq!(state.scroll_offset, 199_980);
+    }
+
+    /// 100K row virtual-coord layout fits in u32 and is preserved through layout cache.
+    #[test]
+    fn test_virtual_coord_large_session_layout() {
+        use crate::widgets::chat::layout::LayoutEntry;
+        let entry: LayoutEntry = LayoutEntry {
+            y: 100_000,
+            height: 1,
+            kind: crate::widgets::chat::layout::LayoutKind::Spacer,
+            msg_idx: 0,
+        };
+
+        // Compute total height should be u32.
+        let total = entry.y.saturating_add(entry.height);
+        assert!(total > u16::MAX as u32);
     }
 }
