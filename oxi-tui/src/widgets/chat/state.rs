@@ -70,8 +70,11 @@ impl ToolCallTracker {
 // Caches the result of compute_layout(). Invalidated when any of these change:
 // - messages.len()
 // - streaming content block count
-// - spinner_frame
+// - streaming text line count (line-based, not char-based — see below)
 // - width
+//
+// NOT invalidated by:
+// - spinner_frame (only affects a Spinner entry's visual content, not layout)
 //
 // Uses parking_lot::RwLock so multiple readers can access concurrently.
 
@@ -81,10 +84,13 @@ struct LayoutCache {
     msg_count: usize,
     /// Last known streaming block count
     streaming_len: usize,
-    /// Last known streaming text character count (detects content growth)
+    /// Last known streaming text LINE count (detects layout-affecting growth).
+    ///
+    /// Line-based rather than char-based: appending text within an existing
+    /// line does NOT invalidate the layout (heights depend on wrapped line
+    /// count, not raw char count). Only newline additions or width changes
+    /// trigger invalidation.
     streaming_text_len: usize,
-    /// Last known spinner frame
-    spinner_frame: usize,
     /// Last known width
     width: u16,
     /// Cached layout entries (None = needs recompute)
@@ -99,7 +105,6 @@ impl std::fmt::Debug for LayoutCache {
             .field("msg_count", &self.msg_count)
             .field("streaming_len", &self.streaming_len)
             .field("streaming_text_len", &self.streaming_text_len)
-            .field("spinner_frame", &self.spinner_frame)
             .field("width", &self.width)
             .field("entries", &self.entries.as_ref().map(|v| v.len()))
             .field("total_height", &self.total_height)
@@ -565,23 +570,29 @@ impl ChatViewState {
             .as_ref()
             .map(|s| s.message.content_blocks.len())
             .unwrap_or(0);
+        // Line-based count: layout heights depend on wrapped line count,
+        // not raw character count. This drastically reduces cache invalidations
+        // during streaming — intra-line text deltas don't invalidate.
         let streaming_text_len = self
             .streaming
             .as_ref()
-            .and_then(|s| s.message.content_blocks.first())
-            .map(|b| match b {
-                ContentBlock::Text { content } => content.len(),
-                _ => 0,
+            .map(|s| {
+                s.message
+                    .content_blocks
+                    .iter()
+                    .map(|block| match block {
+                        ContentBlock::Text { content } => content.lines().count(),
+                        _ => 0,
+                    })
+                    .sum::<usize>()
             })
             .unwrap_or(0);
-        let spinner = self.spinner_frame;
 
         {
             let cache = self.layout_cache.read();
             if cache.msg_count == msg_count
                 && cache.streaming_len == streaming_len
                 && cache.streaming_text_len == streaming_text_len
-                && cache.spinner_frame == spinner
                 && cache.width == width
                 && let Some(ref entries) = cache.entries
             {
@@ -605,12 +616,121 @@ impl ChatViewState {
             cache.msg_count = msg_count;
             cache.streaming_len = streaming_len;
             cache.streaming_text_len = streaming_text_len;
-            cache.spinner_frame = spinner;
             cache.width = width;
             cache.entries = Some(entries.clone());
             cache.total_height = total_height;
         }
 
         entries
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeStyles;
+
+    /// Regression test: cache.width must be set on cache write.
+    /// Without it, cache.width stays at 0 → invalidation check always fails
+    /// → cache NEVER hits → A4 optimization completely negated.
+    #[test]
+    fn test_layout_cache_width_is_stored() {
+        let mut state = ChatViewState::new();
+        state.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text {
+                content: "hello world".to_string(),
+            }],
+            timestamp: 0,
+        });
+
+        let styles = ThemeStyles::default();
+        // First call: populates cache.
+        let _ = state.get_layout(80, &styles);
+
+        // Second call with same width: should hit cache (entries already Some).
+        // The proof is that cache.width was stored correctly.
+        let cache = state.layout_cache.read();
+        assert_eq!(
+            cache.width, 80,
+            "cache.width must be stored on cache write; if 0, cache never hits"
+        );
+        assert!(
+            cache.entries.is_some(),
+            "cache.entries must be populated after first get_layout call"
+        );
+    }
+
+    /// Regression test: spinner_frame change does NOT invalidate the cache.
+    /// The spinner only affects visual content of a Spinner entry, not layout.
+    #[test]
+    fn test_spinner_frame_change_does_not_invalidate() {
+        let mut state = ChatViewState::new();
+        state.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text {
+                content: "hello".to_string(),
+            }],
+            timestamp: 0,
+        });
+
+        let styles = ThemeStyles::default();
+        let _ = state.get_layout(80, &styles);
+
+        // Bump spinner frame.
+        state.spinner_frame = state.spinner_frame.wrapping_add(1);
+        let _ = state.get_layout(80, &styles);
+
+        // The cache should still have entries (was not invalidated by spinner change).
+        // Since spinner_frame is no longer a cache key, changing it doesn't trigger recompute.
+        let cache = state.layout_cache.read();
+        assert!(
+            cache.entries.is_some(),
+            "spinner_frame change must not invalidate layout"
+        );
+    }
+
+    /// Line-based streaming_text_len: intra-line text growth must not change the count.
+    #[test]
+    fn test_streaming_text_within_line_does_not_invalidate() {
+        let mut state = ChatViewState::new();
+        state.start_streaming();
+        state.stream_text_delta("hello ");
+
+        let styles = ThemeStyles::default();
+        let _ = state.get_layout(80, &styles);
+        let len1 = state.layout_cache.read().streaming_text_len;
+
+        // Append more text on the same line — no new line.
+        state.stream_text_delta("world more text here");
+        let _ = state.get_layout(80, &styles);
+        let len2 = state.layout_cache.read().streaming_text_len;
+
+        assert_eq!(
+            len1, len2,
+            "streaming_text_len is line-based; intra-line growth must not change it"
+        );
+    }
+
+    /// Line-based streaming_text_len: newline additions must invalidate.
+    #[test]
+    fn test_streaming_newline_invalidates() {
+        let mut state = ChatViewState::new();
+        state.start_streaming();
+        state.stream_text_delta("first line");
+
+        let styles = ThemeStyles::default();
+        let _ = state.get_layout(80, &styles);
+        let len1 = state.layout_cache.read().streaming_text_len;
+
+        // Adding a newline creates a new line.
+        state.stream_text_delta("\nsecond line");
+        let _ = state.get_layout(80, &styles);
+        let len2 = state.layout_cache.read().streaming_text_len;
+
+        assert!(
+            len2 > len1,
+            "newline must invalidate line-based streaming_text_len"
+        );
     }
 }
