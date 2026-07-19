@@ -21,6 +21,10 @@ repository = "https://github.com/a7garden/oxi"
 thiserror = "2"
 supports-color = "3.0"
 portable-pty = "0.9"
+nucleo = "0.5"
+linkify = "0.10"
+regex = "1"
+syntect = { version = "5.3", default-features = false, features = ["default-fancy", "regex-onig"] }
 
 [profile.release]
 opt-level = 3

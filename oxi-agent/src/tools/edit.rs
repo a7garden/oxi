@@ -425,8 +425,7 @@ impl AgentTool for EditTool {
                 // the file's contents change. Best-effort: a
                 // transient LSP error must not fail the edit.
                 if let Some(provider) = ctx.lsp.as_ref() {
-                    let notify_path =
-                        std::path::Path::new(&input.path).to_path_buf();
+                    let notify_path = std::path::Path::new(&input.path).to_path_buf();
                     let notify_abs = if notify_path.is_absolute() {
                         notify_path
                     } else {
@@ -435,8 +434,7 @@ impl AgentTool for EditTool {
                     // Read the file post-edit so the LSP gets the
                     // freshest content. Fall back to "" if the read
                     // fails (the LSP will re-fetch later anyway).
-                    let content_owned =
-                        std::fs::read_to_string(&notify_abs).unwrap_or_default();
+                    let content_owned = std::fs::read_to_string(&notify_abs).unwrap_or_default();
                     let provider_clone = provider.clone();
                     tokio::spawn(async move {
                         provider_clone

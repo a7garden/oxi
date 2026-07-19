@@ -593,10 +593,8 @@ pub fn compact(prep: &CompactPreparation, options: &CompactOptions) -> CompactRe
     let rendered: Vec<FrameRef> = frames
         .iter()
         .map(|range| {
-            let slice =
-                slice_char_range(&prep.bounded_text, range.source_start, range.source_end);
-            let bytes = match crate::renderer::render_snapcompact_png(slice, render_opts.clone())
-            {
+            let slice = slice_char_range(&prep.bounded_text, range.source_start, range.source_end);
+            let bytes = match crate::renderer::render_snapcompact_png(slice, render_opts.clone()) {
                 Ok(b) => b,
                 Err(e) => {
                     tracing::warn!(
@@ -802,7 +800,11 @@ mod tests {
         assert!(!result.frames.is_empty());
         assert!(result.frames.len() <= opts.max_frames as usize);
         for f in &result.frames {
-            assert!(!f.bytes.is_empty(), "frame {} should have real PNG bytes", f.index);
+            assert!(
+                !f.bytes.is_empty(),
+                "frame {} should have real PNG bytes",
+                f.index
+            );
             assert_eq!(
                 &f.bytes[..8],
                 &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
@@ -883,8 +885,12 @@ mod tests {
         for f in &result.frames {
             assert!(!f.bytes.is_empty(), "frame {} has empty bytes", f.index);
             // PNG magic header.
-            assert_eq!(&f.bytes[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
-                "frame {} is not a PNG", f.index);
+            assert_eq!(
+                &f.bytes[..8],
+                &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+                "frame {} is not a PNG",
+                f.index
+            );
         }
     }
 }

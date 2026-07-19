@@ -3,5 +3,5 @@
 pub mod snapcompact_render;
 
 pub use snapcompact_render::{
-    render_snapcompact_png, snapcompact_supported_chars, SnapcompactError, SnapcompactRenderOptions,
+    SnapcompactError, SnapcompactRenderOptions, render_snapcompact_png, snapcompact_supported_chars,
 };

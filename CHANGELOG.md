@@ -4,6 +4,72 @@ All notable changes to the oxi project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.56.0] - 2026-07-19
+
+### Added
+
+- **Snapcompact renderer** — `oxi-snapcompact` crate with full fontdue-based
+  text→PNG rasterizer ported from pi-natives. Five bundled fonts (BDF + TTF),
+  real PNG output via the `png` crate. `SnapcompactCompactor` in `oxi-sdk`
+  implements `oxi_ai::Compactor` for vision-capable models.
+- **`CompactionStrategy::Snapcompact`** variant — always compacts using the
+  snapcompact PNG renderer. Wire via `CompactionManager::set_compactor()`.
+- **RPC mode rewrite** — `RpcActor` replaces the legacy stub with a full
+  AgentSession-backed actor: 15 real commands (prompt, steer, follow_up,
+  abort, get_state, set_model, compact, bash, etc.), JSONL framing,
+  TurnOutcome lifecycle, and a programmatic `RpcClient`.
+- **Internal URL bridge** — 7 scheme handlers (issue, pr, memory, skill,
+  rule, agent, local) wired through `SdkUrlResolver` → `AgentConfig` →
+  `ToolContext`. `read`/`grep`/`find` tools resolve internal URLs
+  transparently.
+- **oxi-lsp crate** — thin LSP protocol adapter (`async-lsp` + `lsp-types`).
+  `CliLspProvider` in `oxi-cli` bridges to multi-server `LspManager` with
+  11 action handlers (definition, references, hover, rename, code_actions,
+  file_rename, etc.). Edit/write tools auto-notify LSP after mutations.
+- **WorkflowEngine** — `oxi-sdk` engine that executes `WorkflowDefinition`
+  with 6 step types (Run, Parallel, Chain, ForEach, Vote, SetState).
+  `{previous}` substitution and `SharedMemory` integration.
+- **SubagentCoordinator** — lifecycle tracking for subagents
+  (Pending→Claimed→InProgress→Completed), `CancellationToken` propagation,
+  depth guarding, `resume_from` preamble inheritance.
+- **Observability decorator** — `ObservabilityDecorator` bundles audit,
+  authorizer, tracer, and cost tracker. Replaces the old `SupervisorBuilder`
+  no-op setters. `AgentBuilder::tracer()` now fully functional: `SpanGuard`
+  owns `Arc<Tracer>`, spans recorded for Run/Turn/Tool lifecycle events.
+- **oxi-tui UX improvements** — `FollowMode` state machine, virtual
+  coordinate scroll layer, reflow-safe clamp, sticky turn-prompt header,
+  mouse scroll normalization with wheel/trackpad detection, color level
+  detection + `adapt_color`, terminal support pattern for EPT overrides,
+  A4 layout cache.
+- **oxi-tui slash dropdown widget** — nucleo-based fuzzy command matching
+  with MRU decay (7-day half-life) and inline ghost completion.
+- **Memory pipeline scaffolding** — real Stage 1/Stage 2 worker loops
+  with LLM-backed extraction and consolidation via `Oxi` resolver.
+  `/memory status`, `sleep`, `harmonize` commands operational.
+
+### Changed
+
+- **`GroupStrategy::Orchestrated` removed** — replaced by
+  `WorkflowEngine` + `SubagentCoordinator` for multi-agent coordination.
+- **`stream_responses` setting removed** — always streaming, matching OMP
+  behavior. Existing `settings.toml` entries are silently ignored.
+- **`SupervisorBuilder` no-op setters removed** — `with_audit`,
+  `with_authorizer`, `with_tracer`, `with_cost_tracker` replaced by
+  `with_agent_decorator(Arc<dyn AgentDecorator>)`.
+- **`tool_call_loop_guard` now live** — detects repetitive tool loops and
+  injects a steering message with the `TERMINAL_TOOL_RESULT_ABORT_REASON`
+  pattern (inner loop abort only, not full run termination).
+- **`RoutingControl` live in `Oxi::resolve_model`** — exclusion checks
+  and fallback models are read from the shared `Arc<RoutingControl>`.
+
+### Fixed
+
+- **`syntect` feature fixed** — `default-fallbacks` → `default-fancy`
+  for syntect 5.3 compatibility.
+- **`oxi-tui` module compile fix** — restored `tool_renderer` module
+  declaration.
+- **Workspace version uniformity** — all 9 crates at `0.56.0`.
+
 ## [Unreleased]
 
 ## [0.55.0] - 2026-07-18

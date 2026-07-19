@@ -20,6 +20,8 @@ pub mod list_selector;
 #[allow(missing_docs)]
 pub mod routing;
 #[allow(missing_docs)]
+pub mod slash_dropdown;
+#[allow(missing_docs)]
 pub mod stateful_list;
 #[allow(missing_docs)]
 pub mod table_list;

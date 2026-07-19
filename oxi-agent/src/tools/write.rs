@@ -241,8 +241,7 @@ impl AgentTool for WriteTool {
         // `write_file_impl` already does the same PathGuard
         // validation; this is a read-only normalization for the
         // background task only.
-        let notify_path = std::path::Path::new(path)
-            .to_path_buf();
+        let notify_path = std::path::Path::new(path).to_path_buf();
         let notify_abs = if notify_path.is_absolute() {
             notify_path
         } else {

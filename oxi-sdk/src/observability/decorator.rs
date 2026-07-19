@@ -44,7 +44,7 @@ use crate::security::Authorizer;
 /// let (oxi, supervisor) = OxiBuilder::new()
 ///     .with_builtins()
 ///     .supervisor()
-///     .with_agent_decorator(Arc::new(oxi_sdk::Oxi::clone), Arc::new(decorator))
+///     .with_agent_decorator(Arc::new(decorator))
 ///     .build()
 ///     .unwrap();
 /// # let _ = (oxi, supervisor);
@@ -142,7 +142,11 @@ impl AgentDecorator for ObservabilityDecorator {
         } else {
             b
         };
-        if let Some(c) = self.cost_tracker.as_ref() { b.cost_tracker(c.clone()) } else { b }
+        if let Some(c) = self.cost_tracker.as_ref() {
+            b.cost_tracker(c.clone())
+        } else {
+            b
+        }
     }
 }
 

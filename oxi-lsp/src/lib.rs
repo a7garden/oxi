@@ -248,7 +248,9 @@ impl LspClient {
 
         client.spawn_diagnostics_watcher();
 
-        client.initialize_with_timeout(config.startup_timeout).await?;
+        client
+            .initialize_with_timeout(config.startup_timeout)
+            .await?;
 
         Ok(client)
     }

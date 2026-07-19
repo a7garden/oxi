@@ -118,12 +118,7 @@ impl Oxi {
         // resolve." The default Oxi (RoutingControl::default) has
         // auto_routing=true, so this gate is a no-op unless the
         // host explicitly disabled routing.
-        if self.routing.is_enabled()
-            && self
-                .routing
-                .excluded_models()
-                .iter()
-                .any(|m| m == model_id)
+        if self.routing.is_enabled() && self.routing.excluded_models().iter().any(|m| m == model_id)
         {
             return Err(anyhow::anyhow!(
                 "Model '{model_id}' is in RoutingControl::excluded_models"
