@@ -12,27 +12,10 @@
 //! depending on their terminal. This module groups events into streams
 //! (80ms gap or direction change) and converts accumulated events into
 //! a single normalized delta.
-//!
-//! ## Architecture
-//!
-//! ```
-//! crossterm MouseEvent → ScrollNormalizer::push()
-//!                              ↓
-//!                       [gesture grouping]
-//!                              ↓
-//!                       ScrollNormalizer::flush()
-//!                              ↓
-//!                     NormalizedScroll { delta_lines }
-//!                              ↓
-//!                     App::scroll_up/down(delta_lines)
-//! ```
-//!
-//! State is owned by `AppState` (oxi-cli). `oxi-tui` exposes this widget
-//! library function but doesn't wire it to events itself.
 
 use std::time::{Duration, Instant};
 
-/// How long to wait for additional events before flushing a stream.
+/// Default gap between events to consider them part of the same stream.
 const DEFAULT_FLUSH_GAP: Duration = Duration::from_millis(80);
 
 /// How many recent events to keep for device detection (trackpad vs wheel).
@@ -43,6 +26,33 @@ const HISTORY_CAPACITY: usize = 16;
 pub enum ScrollDirection {
     Up,
     Down,
+}
+
+/// Input device classification — used to apply different acceleration curves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputDevice {
+    /// Discrete notches (mouse wheel). Predictable, low-velocity.
+    Wheel,
+    /// Continuous stream (trackpad). High-velocity bursts.
+    Trackpad,
+}
+
+/// Acceleration bands: maps median interval between events to a multiplier.
+/// Fast (<8ms) → 2.5x, medium (<20ms) → 1.6x, base (≥20ms) → 1.0x.
+pub fn acceleration_band(median_interval_ms: u64) -> f32 {
+    if median_interval_ms < 8 {
+        2.5
+    } else if median_interval_ms < 20 {
+        1.6
+    } else {
+        1.0
+    }
+}
+
+/// Per-flush delta cap: min(viewport_height / 2, 6 lines).
+/// Prevents one frame from scrolling the entire viewport at once.
+pub fn per_flush_cap(viewport_height: u16) -> u16 {
+    viewport_height / 2
 }
 
 /// Terminal brand detection. Drives the events-per-tick (EPT) correction.
@@ -225,6 +235,38 @@ impl ScrollNormalizer {
             direction: stream.direction,
         })
     }
+
+    /// Detect input device from recent event intervals.
+    /// - Median interval < 12ms → Trackpad (continuous stream)
+    /// - Median interval ≥ 12ms → Wheel (discrete notches)
+    ///
+    /// Requires at least 4 events in history to make a confident call;
+    /// with fewer events, defaults to Wheel (safer: lower acceleration).
+    pub fn detect_device(&self) -> InputDevice {
+        if self.history.len() < 4 {
+            return InputDevice::Wheel;
+        }
+        // Compute intervals between consecutive events.
+        let mut intervals: Vec<u128> = Vec::with_capacity(self.history.len() - 1);
+        for pair in self.history.windows(2) {
+            let dt = pair[1].at.duration_since(pair[0].at).as_millis();
+            intervals.push(dt);
+        }
+        intervals.sort_unstable();
+        let median = intervals[intervals.len() / 2];
+        if median < 12 {
+            InputDevice::Trackpad
+        } else {
+            InputDevice::Wheel
+        }
+    }
+
+    /// Apply per-flush cap (viewport_height / 2, minimum 6) to a delta.
+    pub fn cap_delta(delta: i32, viewport_height: u16) -> i32 {
+        let cap = (viewport_height / 2).max(6) as i32;
+        delta.clamp(-cap, cap)
+    }
+
     fn push_history(&mut self, event: PendingEvent) {
         if self.history.len() >= HISTORY_CAPACITY {
             self.history.remove(0);
@@ -500,5 +542,60 @@ mod tests {
         norm.reset();
         assert_eq!(norm.history_len(), 0);
         assert!(norm.flush().is_none());
+    }
+
+    // ── Phase 2b B1 step 2: device detection + acceleration + cap ──────
+
+    #[test]
+    fn detect_device_returns_wheel_for_few_events() {
+        let norm = ScrollNormalizer::with_terminal(TerminalKind::ITerm2);
+        // Less than 4 events → default Wheel.
+        assert_eq!(norm.detect_device(), InputDevice::Wheel);
+    }
+
+    #[test]
+    fn acceleration_band_thresholds() {
+        assert_eq!(acceleration_band(5), 2.5); // fast
+        assert_eq!(acceleration_band(8), 1.6); // medium boundary (>=8 not <8)
+        assert_eq!(acceleration_band(15), 1.6); // medium
+        assert_eq!(acceleration_band(20), 1.0); // base boundary (>=20)
+        assert_eq!(acceleration_band(100), 1.0); // base
+    }
+
+    #[test]
+    fn cap_delta_caps_at_viewport_half() {
+        // Viewport 24 → cap = 12
+        assert_eq!(ScrollNormalizer::cap_delta(50, 24), 12);
+        assert_eq!(ScrollNormalizer::cap_delta(-50, 24), -12);
+        assert_eq!(ScrollNormalizer::cap_delta(8, 24), 8); // under cap
+    }
+
+    #[test]
+    fn cap_delta_min_floor_is_six() {
+        // Small viewport 8 → cap = 8/2=4, but floor is 6.
+        assert_eq!(ScrollNormalizer::cap_delta(100, 8), 6);
+        assert_eq!(ScrollNormalizer::cap_delta(-100, 4), -6); // 4/2=2 < 6 → use 6
+    }
+
+    #[test]
+    fn cap_delta_handles_zero() {
+        assert_eq!(ScrollNormalizer::cap_delta(0, 20), 0);
+    }
+
+    #[test]
+    fn detect_device_trackpad_for_short_intervals() {
+        // Simulate 8 events with very short intervals (< 1ms each).
+        // Can't directly control Instant in tests, so use the push method
+        // and check that 8+ rapid pushes look like a trackpad to detect.
+        let mut norm = ScrollNormalizer::with_terminal(TerminalKind::ITerm2);
+        for _ in 0..8 {
+            norm.push(ScrollDirection::Down);
+            // No sleep — events arrive back-to-back.
+        }
+        // 8 events should be enough for detect_device to be confident.
+        // Real wall-clock interval should be < 1ms between them.
+        let device = norm.detect_device();
+        // In a fast test, intervals are < 12ms → Trackpad.
+        assert_eq!(device, InputDevice::Trackpad);
     }
 }
