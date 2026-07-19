@@ -15,6 +15,7 @@ pub mod dashboard;
 pub mod highlight;
 pub mod layout;
 pub mod markdown;
+pub mod mouse;
 pub mod render;
 pub mod state;
 pub mod sticky;
