@@ -54,6 +54,7 @@ pub mod lifecycle;
 pub mod tool;
 pub mod transport;
 pub mod types;
+pub mod oxi_as_server;
 
 pub use auth::{Credential, McpCredentialProvider, NoopCredentialProvider};
 pub use cache::MetadataCache;
