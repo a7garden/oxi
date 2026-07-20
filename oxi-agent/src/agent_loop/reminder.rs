@@ -8,7 +8,7 @@
 use crate::tools::todo::{TodoPhase, TodoStateProvider, TodoStatus};
 
 /// 컴팩션 시점에 활성 상태를 조회하기 위한 입력 묶음.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct ActiveReminderInputs<'a> {
     pub todos: Option<&'a dyn TodoStateProvider>,
     #[allow(dead_code)]
