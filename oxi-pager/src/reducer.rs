@@ -1,9 +1,9 @@
 // reduce — pure state-update function.
 
-use std::time::Duration;
-use oxi_agent::events::AgentEvent;
 use crate::emitter::PagerEvent;
 use crate::state::{ModalKind, PagerState};
+use oxi_agent::events::AgentEvent;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub enum PagerAction {
@@ -26,13 +26,23 @@ pub enum AgentCmd {
 }
 
 #[derive(Debug, Clone)]
-pub enum TermCmd { Stub }
+pub enum TermCmd {
+    Stub,
+}
 #[derive(Debug, Clone)]
-pub enum Sound { Stub }
+pub enum Sound {
+    Stub,
+}
 #[derive(Debug, Default)]
-pub struct ModalCtx { pub payload: Option<Box<dyn std::any::Any + Send + Sync>> }
+pub struct ModalCtx {
+    pub payload: Option<Box<dyn std::any::Any + Send + Sync>>,
+}
 #[derive(Debug)]
-pub enum ExitReason { UserQuit, AgentDone, Error(String) }
+pub enum ExitReason {
+    UserQuit,
+    AgentDone,
+    Error(String),
+}
 
 const QUIT_CONFIRM_MS: u64 = 2000;
 
@@ -57,17 +67,35 @@ fn reduce_agent(state: &mut PagerState, event: AgentEvent) -> Vec<PagerAction> {
     use AgentEvent::*;
     match event {
         MessageUpdate { delta, .. } => {
-            if let Some(text) = delta { state.scrollback.append_token(&text); }
+            if let Some(text) = delta {
+                state.scrollback.append_token(&text);
+            }
             vec![PagerAction::Render]
         }
-        MessageStart { .. } => { state.scrollback.begin_assistant(); vec![PagerAction::Render] }
-        MessageEnd { .. } => { state.scrollback.end_assistant(); vec![PagerAction::Render] }
-        ToolExecutionStart { tool_name, tool_call_id, .. } => {
+        MessageStart { .. } => {
+            state.scrollback.begin_assistant();
+            vec![PagerAction::Render]
+        }
+        MessageEnd { .. } => {
+            state.scrollback.end_assistant();
+            vec![PagerAction::Render]
+        }
+        ToolExecutionStart {
+            tool_name,
+            tool_call_id,
+            ..
+        } => {
             state.scrollback.begin_tool_call(&tool_name, &tool_call_id);
             vec![PagerAction::Render]
         }
-        ToolExecutionEnd { .. } => { state.scrollback.end_tool_call(""); vec![PagerAction::Render] }
-        ToolError { error, .. } => { state.status.set_error(error); vec![PagerAction::Render] }
+        ToolExecutionEnd { .. } => {
+            state.scrollback.end_tool_call("");
+            vec![PagerAction::Render]
+        }
+        ToolError { error, .. } => {
+            state.status.set_error(error);
+            vec![PagerAction::Render]
+        }
         Error { .. } => vec![PagerAction::Render],
         AgentStart { .. } | AgentEnd { .. } => vec![PagerAction::Render],
         _ => Vec::new(),
@@ -89,9 +117,13 @@ mod tests {
     #[test]
     fn reduce_agent_start_triggers_render() {
         let mut state = PagerState::default();
-        let actions = reduce(&mut state, PagerEvent::Agent(Box::new(
-            AgentEvent::AgentStart { prompts: vec![], session_id: None },
-        )));
+        let actions = reduce(
+            &mut state,
+            PagerEvent::Agent(Box::new(AgentEvent::AgentStart {
+                prompts: vec![],
+                session_id: None,
+            })),
+        );
         assert!(actions.iter().any(|a| matches!(a, PagerAction::Render)));
     }
 }

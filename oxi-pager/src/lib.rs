@@ -21,11 +21,11 @@ pub use emitter::{BackgroundEvent, PagerEvent, ResolvedKey};
 pub use keymap::{FocusTarget, KeyRouter, ModalInput};
 pub use main_loop::run;
 pub use prompt::PromptState;
-pub use reducer::{
-    reduce, AgentCmd, ExitReason, ModalCtx, PagerAction, Sound, TermCmd,
-};
+pub use reducer::{AgentCmd, ExitReason, ModalCtx, PagerAction, Sound, TermCmd, reduce};
 pub use scrollback::ScrollbackState;
 pub use state::{ModalKind, PagerState, SharedState, StickyPanelState};
 pub use status::StatusState;
 
-pub fn version() -> &'static str { env!("CARGO_PKG_VERSION") }
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}

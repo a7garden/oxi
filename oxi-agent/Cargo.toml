@@ -39,10 +39,6 @@ serde_yaml = "0.9"
 [features]
 default = []
 native-browser = ["oxibrowser-core"]
-# Compaction-reminder system (applied-design.md PR-C). Off by default —
-# the in-progress reminder module is gated by this feature in
-# agent_loop/mod.rs. Re-enable when PR-C work is properly scoped.
-compaction-reminder = []
 
 [dev-dependencies]
 async-stream = "0.3"

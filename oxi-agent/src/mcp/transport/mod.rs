@@ -17,6 +17,8 @@
 
 pub mod http;
 pub mod stdio;
+/// PR-B1: WebSocket MCP transport 스켈레톤.
+pub mod ws_transport;
 
 use crate::mcp::types::RawJsonRpcMessage;
 use anyhow::Result;

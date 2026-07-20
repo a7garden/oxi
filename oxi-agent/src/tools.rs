@@ -824,6 +824,8 @@ pub mod todo;
 pub mod tool_definition_wrapper;
 /// Output truncation helpers.
 pub mod truncate;
+/// Typed 도구 트레이트 + 어댑터 (PR-A1).
+pub mod typed;
 /// Multi-engine web search tool (oxibrowser search module).
 pub mod web_search;
 /// File writing tool.

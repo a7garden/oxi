@@ -434,10 +434,11 @@ registry.register(ReadTool::new(...));
 - `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` pass (sanity check — PR-1은 oxi-sdk에 영향 없음, gate 깨지지 않음 확인).
 ## 7. PR 분할 (Section 4)
 
-| # | 범위 | 변경 파일 | 위험 | 회귀 테스트 |
+| **PR-0** | `oxi-pager` 크레이트 scaffold (no-op) | `Cargo.toml` (workspace), `oxi-pager/Cargo.toml`, `oxi-pager/src/lib.rs` | 무 | `cargo build -p oxi-pager` |
+| **PR-1** | typed tool trait (6장) | `oxi-agent/src/tools/typed.rs` (신규), `oxi-agent/src/error.rs` (`ToolError` enum화), `oxi-agent/src/tools/*.rs` (에러 변환 hand-roll) | 낮음 | `cargo nextest run -p oxi-agent` + 신규 `typed_tool_tests` |
 | **PR-2** | `PagerState` + `PagerEvent` + `reduce` skeleton (빈 reducer) | `oxi-pager/src/{state,emitter,reducer}.rs` | 무 | reducer unit tests + `cargo nextest run -p oxi-pager` |
 | **PR-3** | `KeyRouter` + modal router + `Action` enum 4 variants (5.6) | `oxi-pager/src/keymap.rs`, `oxi-tui/src/keybindings/registry.rs` (4 variants) | 낮음 | `cargo nextest run -p oxi-tui -p oxi-pager` |
-| **PR-1** | typed tool trait (6장) | `oxi-agent/src/tools/typed.rs` (신규), `oxi-agent/src/error.rs` (`ToolError` enum화), `oxi-agent/src/tools/*.rs` (에러 변환 hand-roll) | 낮음 | `cargo nextest run -p oxi-agent` + 신규 `typed_tool_tests` |
+| **PR-4** | `Pager::run` select! loop + `dispatch.rs` + `bootstrap` redirect | `oxi-pager/src/{main_loop,dispatch}.rs`, `oxi-cli/src/tui/app.rs` (1줄 위임) | 중간 | TUI smoke: greeting + 1 tool call |
 | **PR-5** | reducer 본체 + `PromptState` / `StatusState` / `ScrollbackState` | `oxi-pager/src/{reducer,prompt,status,scrollback}.rs` | 중-상 | TUI smoke: prompt + history + completion + submit + tool progress + status spinner |
 | **PR-6** | 모달 + slash + sticky panels | `oxi-pager/src/{modal,slash}.rs` | 중 | TUI smoke: `/model`, `/issue`, `ask` tool overlay |
 | **PR-7** | UX polish — `Ctrl+D` 2-tap, `MarkdownStreaming`, `TokenBar`, footer, ESC cancel | `oxi-pager/src/render/*`, `oxi-pager/src/widgets/*` | 낮음 | TUI smoke + 시각 회귀 3장 + full CI gate |
@@ -458,8 +459,7 @@ description = "Pager state machine + emitter + reducer for the oxi-cli TUI"
 [dependencies]
 oxi-tui = { path = "../oxi-tui" }
 oxi-agent = { path = "../oxi-agent" }
-schemars = { workspace = true }
-```
+
 
 ```rust
 // oxi-pager/src/lib.rs

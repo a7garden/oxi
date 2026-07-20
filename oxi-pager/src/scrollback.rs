@@ -26,7 +26,11 @@ pub struct ScrollbackState {
 #[allow(clippy::derivable_impls)]
 impl Default for ScrollbackState {
     fn default() -> Self {
-        Self { blocks: Vec::new(), next_id: 1, follow_tail: true }
+        Self {
+            blocks: Vec::new(),
+            next_id: 1,
+            follow_tail: true,
+        }
     }
 }
 
@@ -39,12 +43,20 @@ impl ScrollbackState {
 
     pub fn begin_assistant(&mut self) -> u64 {
         let id = self.alloc_id();
-        self.blocks.push(RenderedBlock { id, kind: BlockKind::Assistant, text: String::new() });
+        self.blocks.push(RenderedBlock {
+            id,
+            kind: BlockKind::Assistant,
+            text: String::new(),
+        });
         id
     }
 
     pub fn append_token(&mut self, chunk: &str) {
-        if let Some(block) = self.blocks.last_mut().filter(|b| b.kind == BlockKind::Assistant) {
+        if let Some(block) = self
+            .blocks
+            .last_mut()
+            .filter(|b| b.kind == BlockKind::Assistant)
+        {
             block.text.push_str(chunk);
         }
     }
@@ -55,7 +67,10 @@ impl ScrollbackState {
         let id = self.alloc_id();
         self.blocks.push(RenderedBlock {
             id,
-            kind: BlockKind::ToolCall { name: name.to_string(), call_id: call_id.to_string() },
+            kind: BlockKind::ToolCall {
+                name: name.to_string(),
+                call_id: call_id.to_string(),
+            },
             text: String::new(),
         });
         id

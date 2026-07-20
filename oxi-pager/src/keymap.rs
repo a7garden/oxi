@@ -48,7 +48,10 @@ pub struct KeyRouter {
 
 impl KeyRouter {
     pub fn new(inner: KeybindingsManager) -> Self {
-        Self { inner, focused: FocusTarget::default() }
+        Self {
+            inner,
+            focused: FocusTarget::default(),
+        }
     }
 
     pub fn with_focus(mut self, focused: FocusTarget) -> Self {
