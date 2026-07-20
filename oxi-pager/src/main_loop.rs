@@ -10,14 +10,12 @@ use crossterm::event::{Event as CrosstermEvent, EventStream, KeyCode, KeyEventKi
 use futures::StreamExt;
 use parking_lot::RwLock;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use std::io;
 
-pub async fn run<S: Send + 'static>(
-    _session: S,
-    mut background_rx: mpsc::UnboundedReceiver<BackgroundEvent>,
+pub async fn run(
+    user_tx: std::sync::mpsc::Sender<String>,
+    mut background_rx: tokio::sync::mpsc::UnboundedReceiver<BackgroundEvent>,
 ) -> anyhow::Result<()> {
-    // ── Terminal init ────────────────────────────────────────────────
     let mut stdout = io::stdout();
     crossterm::execute!(
         stdout,
@@ -44,7 +42,7 @@ pub async fn run<S: Send + 'static>(
             Some(Ok(event)) = reader.next() => {
                 match event {
                     CrosstermEvent::Key(key) if key.kind != KeyEventKind::Release => {
-                        if handle_key(key.code, key.modifiers, &state) {
+                        if handle_key(key.code, key.modifiers, &state, &user_tx) {
                             break Ok(());
                         }
                     }
@@ -76,6 +74,7 @@ fn handle_key(
     code: KeyCode,
     modifiers: crossterm::event::KeyModifiers,
     state: &SharedState,
+    user_tx: &std::sync::mpsc::Sender<String>,
 ) -> bool {
     let mut s = state.write();
     match code {
@@ -92,10 +91,12 @@ fn handle_key(
                 s.scrollback.blocks.push(crate::scrollback::RenderedBlock {
                     id,
                     kind: crate::scrollback::BlockKind::User,
-                    text,
+                    text: text.clone(),
                     lines: Vec::new(),
                 });
                 s.prompt.cursor = 0;
+                // Send to agent via channel (drop if no listener)
+                let _ = user_tx.send(text);
             }
         }
 

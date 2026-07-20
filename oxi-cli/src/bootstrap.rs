@@ -246,8 +246,8 @@ pub async fn dispatch_run_mode(args: &CliArgs, app: crate::App) -> Result<i32> {
     }
 
     if prompt.is_empty() || args.interactive {
-        // TODO: full pager integration — wire AgentSession to oxi-pager
-        eprintln!("TUI mode: grok-quality render ready. Full integration pending.");
+        let agent = app.agent();
+        crate::pager_bridge::run_pager_with_agent(agent).await?;
         return Ok(0);
     }
 

@@ -1,31 +1,15 @@
-//! Standalone pager binary — tests the grok-quality TUI render.
-//!
-//! Run with: cargo run -p oxi-pager
+//! Standalone pager demo — tests grok-quality TUI render without an agent.
 
-use oxi_pager::{BackgroundEvent, run};
-use tokio::sync::mpsc;
+use oxi_pager::run;
+use std::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (user_tx, _user_rx) = mpsc::channel::<String>();
+    let (bg_tx, bg_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // Simulate agent events for demo
-    let demo_tx = tx.clone();
-    tokio::spawn(async move {
-        // Simulate some streaming text
-        let _ = demo_tx.send(BackgroundEvent::AssistantDelta("Hello! ".into()));
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-        let _ = demo_tx.send(BackgroundEvent::AssistantDelta(
-            "I'm the grok-quality TUI running on oxi. ".into(),
-        ));
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-        let _ = demo_tx.send(BackgroundEvent::AssistantDelta(
-            "You can type messages and see them rendered with TokyoNight theme.".into(),
-        ));
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        let _ = demo_tx.send(BackgroundEvent::StreamDone);
-    });
+    // Demo: no agent, just interactive prompt
+    drop(bg_tx); // close background channel
 
-    // Need to provide a session type. Use () for demo.
-    run((), rx).await
+    run(user_tx, bg_rx).await
 }
