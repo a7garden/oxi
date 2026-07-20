@@ -279,6 +279,13 @@ pub struct GitHubSearchTool {
     cache: Arc<SearchCache>,
 }
 
+impl GitHubSearchTool {
+    /// Create a new GitHubSearchTool with the given cache.
+    pub fn new(cache: Arc<SearchCache>) -> Self {
+        Self { cache }
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct GitHubSearchArgs {
     query: String,
