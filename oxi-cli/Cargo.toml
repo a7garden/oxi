@@ -3,9 +3,12 @@ name = "oxi-cli"
 version = "0.57.0"
 edition = "2024"
 license = "MIT"
+description = "oxi — grok-build TUI with oxi backend"
+authors = ["a7garden <a7garden@icloud.com>"]
+
+[[bin]]
+name = "oxi"
+path = "src/main.rs"
 
 [dependencies]
-oxi-ai = { path = "../oxi-ai" }
-oxi-agent = { path = "../oxi-agent" }
 anyhow = "1"
-tokio = { version = "1", features = ["full"] }

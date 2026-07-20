@@ -3,6 +3,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "oxi-sandbox",
+    "oxi-lsp",
+    "oxi-hashline",
+    "oxi-mnemopi",
+    "oxi-sdk",
     "oxi-vendor-grok-markdown-core",
     "oxi-vendor-grok-markdown",
     "oxi-vendor-ratatui-textarea",
