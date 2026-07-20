@@ -17,12 +17,28 @@ use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use oxi_hashline::parser::split_patch_input;
 use oxi_hashline::patcher::Patcher;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::oneshot;
+use crate::tools::typed::TypedTool;
+
+/// Typed arguments for [`EditTool`].
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EditArgs {
+    path: String,
+    #[serde(default)]
+    edits: Vec<EditEntry>,
+    old_text: Option<String>,
+    new_text: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+    expected_hash: Option<String>,
+    patch: Option<String>,
+}
 
 /// EditTool.
 pub struct EditTool {
@@ -300,7 +316,7 @@ struct EditInput {
 }
 
 /// A single edit entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 struct EditEntry {
     #[serde(rename = "oldText", alias = "old_text")]
     old_text: String,
@@ -398,12 +414,27 @@ impl AgentTool for EditTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        let args: EditArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for EditTool {
+    type Args = EditArgs;
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let params = serde_json::to_value(&args)
+            .map_err(|e| format!("serialization error: {e}"))?;
         let input = Self::prepare_arguments(&params);
 
-        // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-
-        // Dispatch: hashline mode if `patch` field is present, else str_replace.
         let output = if let Some(ref patch_text) = input.patch {
             Self::apply_hashline(root, patch_text, input.dry_run, ctx).await
         } else {
@@ -411,38 +442,20 @@ impl AgentTool for EditTool {
         };
         match output {
             Ok(output) => {
-                let mut result =
-                    AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
-
-                // Add metadata with first changed line for editor navigation
+                let mut result = AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
                 if let Some(line) = output.first_changed_line {
-                    result = result.with_metadata(json!({
-                        "firstChangedLine": line,
-                    }));
+                    result = result.with_metadata(json!({ "firstChangedLine": line }));
                 }
-
-                // Notify LSP provider so diagnostics refresh after
-                // the file's contents change. Best-effort: a
-                // transient LSP error must not fail the edit.
                 if let Some(provider) = ctx.lsp.as_ref() {
                     let notify_path = std::path::Path::new(&input.path).to_path_buf();
-                    let notify_abs = if notify_path.is_absolute() {
-                        notify_path
-                    } else {
-                        std::path::Path::new(root).join(&notify_path)
-                    };
-                    // Read the file post-edit so the LSP gets the
-                    // freshest content. Fall back to "" if the read
-                    // fails (the LSP will re-fetch later anyway).
+                    let notify_abs = if notify_path.is_absolute() { notify_path }
+                        else { std::path::Path::new(root).join(&notify_path) };
                     let content_owned = std::fs::read_to_string(&notify_abs).unwrap_or_default();
                     let provider_clone = provider.clone();
                     tokio::spawn(async move {
-                        provider_clone
-                            .notify_file_changed(&notify_abs, &content_owned)
-                            .await;
+                        provider_clone.notify_file_changed(&notify_abs, &content_owned).await;
                     });
                 }
-
                 Ok(result)
             }
             Err(e) => Ok(AgentToolResult::error(e)),

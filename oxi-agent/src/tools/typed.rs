@@ -47,33 +47,10 @@ use super::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMod
 /// [`TypedToolAdapter`] 가 [`AgentTool`]을 구현해 `Arc<dyn AgentTool>` 로
 #[async_trait]
 pub trait TypedTool: Send + Sync + 'static {
-    /// LLM 이 보내는 JSON 인자의 타입.
-    /// `DeserializeOwned + JsonSchema` 둘 다 bound — deserialize 와
-    /// JSON Schema 생성을 같은 타입으로.
+    /// LLM 에서 넘어오는 JSON 인자의 타입.
     type Args: DeserializeOwned + JsonSchema + Send + 'static;
 
-    /// 도구 식별자. `AgentTool::name` 으로 그대로 노출.
-    fn name(&self) -> &str;
-
-    /// 사람용 라벨. 기본은 `name`.
-    fn label(&self) -> &str {
-        self.name()
-    }
-
-    /// 모델에 노출되는 설명.
-    fn description(&self) -> &str;
-
-    /// essential 표시 (CLI 가 끄지 못하게 할지). 기본 false.
-    fn essential(&self) -> bool {
-        false
-    }
-
-    /// 실행 모드 (병렬 안전성). 기본 parallel-safe.
-    fn execution_mode(&self) -> ToolExecutionMode {
-        ToolExecutionMode::ParallelSafe
-    }
-
-    /// Typed 실행 진입점. 인자는 이미 `Self::Args` 로 deserialize 끝난 상태.
+    /// Typed 실행 진입점. 인자는 이미 deserialize 되어 전달됨.
     async fn execute_typed(
         &self,
         tool_call_id: &str,
@@ -83,50 +60,28 @@ pub trait TypedTool: Send + Sync + 'static {
     ) -> Result<AgentToolResult, ToolError>;
 }
 
+
 /// [`TypedTool`] 을 [`AgentTool`] 로 소거하는 어댑터.
 ///
 /// [`super::tool_definition_wrapper::DefinitionWrapper`] 와 같은 모양이지만
 /// 인자 deserialize 지점이 `Value → <T as TypedTool>::Args` 로 강타입화.
 pub struct TypedToolAdapter<T: TypedTool + ?Sized>(Arc<T>);
 
-impl<T: TypedTool + ?Sized> std::fmt::Debug for TypedToolAdapter<T> {
+impl<T: TypedTool + AgentTool + ?Sized> std::fmt::Debug for TypedToolAdapter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TypedToolAdapter")
             .field("name", &self.0.name())
             .finish()
     }
 }
-
 #[async_trait]
-impl<T: TypedTool + ?Sized> AgentTool for TypedToolAdapter<T> {
-    fn name(&self) -> &str {
-        self.0.name()
-    }
-
-    fn label(&self) -> &str {
-        self.0.label()
-    }
-
-    fn description(&self) -> &str {
-        self.0.description()
-    }
-
-    fn essential(&self) -> bool {
-        self.0.essential()
-    }
-
-    fn execution_mode(&self) -> ToolExecutionMode {
-        self.0.execution_mode()
-    }
-
-    /// `schemars::schema_for!(<T as TypedTool>::Args)` 결과를 JSON Value 로 직렬화.
-    ///
-    /// 직렬화 실패 시 `{"type": "object"}` fallback — 스키마 생성 실패는
-    /// 도구 자체 동작과 분리되므로 graceful degrade.
-    fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(<T as TypedTool>::Args))
-            .unwrap_or_else(|_| serde_json::json!({"type": "object"}))
-    }
+impl<T: TypedTool + AgentTool + ?Sized> AgentTool for TypedToolAdapter<T> {
+    fn name(&self) -> &str { self.0.name() }
+    fn label(&self) -> &str { self.0.label() }
+    fn description(&self) -> &str { self.0.description() }
+    fn essential(&self) -> bool { self.0.essential() }
+    fn execution_mode(&self) -> ToolExecutionMode { self.0.execution_mode() }
+    fn parameters_schema(&self) -> serde_json::Value { self.0.parameters_schema() }
 
     async fn execute(
         &self,
@@ -142,9 +97,12 @@ impl<T: TypedTool + ?Sized> AgentTool for TypedToolAdapter<T> {
     }
 }
 
-/// 등록 헬퍼. `Arc<dyn AgentTool>` 반환 — 기존 [`super::ToolRegistry`]
-/// 경로 (`register_arc`) 와 호환.
-pub fn wrap_typed<T: TypedTool + ?Sized>(tool: Arc<T>) -> Arc<dyn AgentTool> {
+/// Wrap a [`TypedTool`] (which must also implement [`AgentTool`]) into an
+/// `Arc<dyn AgentTool>` — the adapter delegates `name`/`description`/etc. to
+/// the `AgentTool` impl and uses `TypedTool::Args` for typed deserialization.
+///
+/// The returned `Arc<dyn AgentTool>` is compatible with `ToolRegistry::register_arc`.
+pub fn wrap_typed<T: TypedTool + AgentTool + ?Sized>(tool: Arc<T>) -> Arc<dyn AgentTool> {
     Arc::new(TypedToolAdapter(tool))
 }
 
@@ -164,13 +122,6 @@ mod tests {
     #[async_trait]
     impl TypedTool for EchoTool {
         type Args = EchoArgs;
-
-        fn name(&self) -> &str {
-            "echo"
-        }
-        fn description(&self) -> &str {
-            "echo back the message"
-        }
         async fn execute_typed(
             &self,
             _id: &str,
@@ -179,6 +130,26 @@ mod tests {
             _ctx: &ToolContext,
         ) -> Result<AgentToolResult, ToolError> {
             Ok(AgentToolResult::success(args.message))
+        }
+    }
+
+    #[async_trait]
+    impl AgentTool for EchoTool {
+        fn name(&self) -> &str { "echo" }
+        fn label(&self) -> &str { "echo" }
+        fn description(&self) -> &str { "echo back the message" }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]})
+        }
+        async fn execute(
+            &self,
+            _tool_call_id: &str,
+            params: serde_json::Value,
+            _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+            _ctx: &ToolContext,
+        ) -> Result<AgentToolResult, ToolError> {
+            let msg = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(AgentToolResult::success(msg.to_string()))
         }
     }
 

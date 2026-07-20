@@ -3,10 +3,26 @@ use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::tools::truncate::{TruncationOptions, format_bytes, truncate_head};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
+use crate::tools::typed::TypedTool;
+
+/// Typed arguments for [`LsTool`].
+#[derive(Deserialize, JsonSchema)]
+pub struct LsArgs {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    all: bool,
+    #[serde(default, rename = "long")]
+    long_format: bool,
+    #[serde(rename = "limit")]
+    entry_limit: Option<usize>,
+}
 
 /// Default max entries to show (use truncate for more)
 const DEFAULT_ENTRY_LIMIT: usize = 100;
@@ -256,30 +272,25 @@ impl AgentTool for LsTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let path = params
-            .get("path")
-            .and_then(|v: &Value| v.as_str())
-            .unwrap_or(".");
+        let args: LsArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
 
-        let all = params
-            .get("all")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
-
-        let long_format = params
-            .get("long")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
-
-        let entry_limit = params
-            .get("limit")
-            .and_then(|v: &Value| v.as_u64())
-            .map(|l| l as usize);
-
-        // Use root_dir if set, else ctx.root()
+#[async_trait]
+impl TypedTool for LsTool {
+    type Args = LsArgs;
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let path = if args.path.is_empty() { "." } else { &args.path };
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-
-        match Self::ls_impl(root, path, all, long_format, entry_limit).await {
+        match Self::ls_impl(root, path, args.all, args.long_format, args.entry_limit).await {
             Ok(output) => Ok(AgentToolResult::success(output)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }

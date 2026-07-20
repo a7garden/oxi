@@ -10,6 +10,8 @@
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,6 +19,7 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::oneshot;
+use crate::tools::typed::TypedTool;
 
 /// Environment variables that are blocked from injection via the LLM.
 /// These can be used for privilege escalation, library injection, or path manipulation.
@@ -163,6 +166,21 @@ fn validate_cwd(dir: &str, workspace: Option<&Path>) -> Result<PathBuf, String> 
 
 /// Default timeout in seconds
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+
+/// Typed arguments for [`BashTool`].
+///
+/// Deserialized from JSON tool call params; `timeout` defaults to 120s.
+/// `env` maps variable names to string values.
+#[derive(Deserialize, JsonSchema)]
+pub struct BashArgs {
+    command: String,
+    #[serde(default = "default_bash_timeout")]
+    timeout: u64,
+    cwd: Option<String>,
+    env: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+fn default_bash_timeout() -> u64 { 120 }
 
 /// BashTool.
 pub struct BashTool {
@@ -541,51 +559,41 @@ impl AgentTool for BashTool {
         signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let command = params
-            .get("command")
-            .and_then(|v: &Value| v.as_str())
-            .ok_or_else(|| "Missing required parameter: command".to_string())?;
-
-        // F-10 (audit 2026-06-21): in strict mode (OXI_STRICT_BASH=1) refuse
-        // commands that match `is_dangerous_command` patterns outright
-        // instead of merely appending a warning after the fact. Without
-        // strict mode, the original "warn after execution" behavior is
-        // preserved (so existing users see no change). Strict mode is
-        // opt-in because some legitimate operations match the heuristic
-        // (e.g. `cat /etc/passwd` is sometimes needed to inspect user
-        // identity); making it opt-in preserves backward compatibility
-        // while giving security-conscious deployments a hard block.
-        // F-10 (audit 2026-06-21): collapsed `if` so the two predicates
-        // (`OXI_STRICT_BASH=1` AND a dangerous-pattern match) live on a
-        // single line — clippy::collapsible_if flagged the original form.
-        if std::env::var_os("OXI_STRICT_BASH").as_deref() == Some(std::ffi::OsStr::new("1"))
-            && let Some(reason) = is_dangerous_command(command)
-        {
-            return Err(format!(
-                "OXI_STRICT_BASH=1 blocked dangerous command: {reason}"
-            ));
-        }
-
-        let cwd = params.get("cwd").and_then(|v: &Value| v.as_str());
-        let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
-        let env = params.get("env").and_then(|v: &Value| v.as_object());
-
-        let progress_cb = self
-            .progress_callback
-            .lock()
-            .expect("progress callback lock poisoned")
-            .clone();
-
-        // Use root_dir if set, else ctx.root()
-        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-
-        Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
+        let args: BashArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, signal, ctx).await
     }
 
     fn on_progress(&self, callback: ProgressCallback) {
         let cb = self.progress_callback.clone();
         let mut guard = cb.lock().expect("progress callback lock poisoned");
         *guard = Some(callback);
+    }
+}
+
+#[async_trait]
+impl TypedTool for BashTool {
+    type Args = BashArgs;
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        if std::env::var_os("OXI_STRICT_BASH").as_deref() == Some(std::ffi::OsStr::new("1"))
+            && let Some(reason) = is_dangerous_command(&args.command)
+        {
+            return Err(format!("OXI_STRICT_BASH=1 blocked dangerous command: {reason}"));
+        }
+
+        let cwd = args.cwd.as_deref();
+        let timeout = Some(args.timeout);
+        let env = args.env.as_ref();
+        let progress_cb = self.progress_callback
+            .lock().expect("progress callback lock poisoned").clone();
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        Self::run_command(root, &args.command, cwd, env, timeout, &progress_cb, signal).await
     }
 }
 
@@ -667,7 +675,7 @@ mod tests {
         assert!(
             result
                 .unwrap_err()
-                .contains("Missing required parameter: command")
+                .contains("command")
         );
     }
 

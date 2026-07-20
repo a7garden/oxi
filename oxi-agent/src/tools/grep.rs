@@ -7,6 +7,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use crate::tools::typed::TypedTool;
 
 /// Maximum characters per line in grep output
 const GREP_MAX_LINE_LENGTH: usize = 500;
@@ -21,6 +24,29 @@ fn truncate_line(line: &str) -> (String, bool) {
             true,
         )
     }
+}
+
+/// Typed arguments for [`GrepTool`].
+///
+/// Deserialized from the LLM's JSON tool call parameters.
+#[derive(Deserialize, JsonSchema)]
+pub struct GrepArgs {
+    pattern: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    case_insensitive: bool,
+    #[serde(default)]
+    literal: bool,
+    #[serde(default)]
+    context: usize,
+    include: Option<String>,
+    #[serde(default = "default_grep_results")]
+    max_results: usize,
+}
+
+fn default_grep_results() -> usize {
+    100
 }
 
 /// GrepTool.
@@ -385,47 +411,35 @@ impl AgentTool for GrepTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let pattern = params
-            .get("pattern")
-            .and_then(|v: &Value| v.as_str())
-            .ok_or_else(|| "Missing required parameter: pattern".to_string())?;
+        let args: GrepArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
 
-        let path = params
-            .get("path")
-            .and_then(|v: &Value| v.as_str())
-            .unwrap_or(".");
-
-        let case_insensitive = params
-            .get("case_insensitive")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
-
-        let literal = params
-            .get("literal")
-            .and_then(|v: &Value| v.as_bool())
-            .unwrap_or(false);
-
-        let context = params
-            .get("context")
-            .and_then(|v: &Value| v.as_u64())
-            .unwrap_or(0) as usize;
-
-        let include = params.get("include").and_then(|v: &Value| v.as_str());
-
-        let max_results = params
-            .get("max_results")
-            .and_then(|v: &Value| v.as_u64())
-            .unwrap_or(100) as usize;
+#[async_trait]
+impl TypedTool for GrepTool {
+    type Args = GrepArgs;
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let path = if args.path.is_empty() { "." } else { &args.path };
+        let pattern = &args.pattern;
+        let case_insensitive = args.case_insensitive;
+        let literal = args.literal;
+        let context = args.context;
+        let include = args.include.as_deref();
+        let max_results = args.max_results;
 
         // ── Internal URL dispatch ──
-        // If the input looks like an internal URL (scheme://…), resolve
-        // content and search in-memory instead of touching the filesystem.
         if let Some(ref resolver) = ctx.url_resolver
             && resolver.can_resolve(path)
         {
             let resolved = resolver.resolve(path).await?;
-
-            // Build the regex (same as grep_impl)
             let pattern_str = if literal {
                 regex::escape(pattern)
             } else {
@@ -445,49 +459,33 @@ impl AgentTool for GrepTool {
                     break;
                 }
                 if re.is_match(line) {
-                    // Context before
                     if context > 0 && i > 0 {
                         let start = i.saturating_sub(context);
                         for (j, ctx_line) in lines.iter().enumerate().take(i).skip(start) {
                             let (truncated, was_trunc) = truncate_line(ctx_line);
-                            if was_trunc {
-                                lines_truncated = true;
-                            }
+                            if was_trunc { lines_truncated = true; }
                             matches.push(format!("{}-{}- {}", path, j + 1, truncated));
                         }
                     }
-
-                    // The match line
                     let (truncated, was_trunc) = truncate_line(line);
-                    if was_trunc {
-                        lines_truncated = true;
-                    }
+                    if was_trunc { lines_truncated = true; }
                     matches.push(format!("{}:{}: {}", path, i + 1, truncated));
-
-                    // Context after
                     if context > 0 {
                         let end = std::cmp::min(lines.len(), i + context + 1);
                         for (j, ctx_line) in lines.iter().enumerate().take(end).skip(i + 1) {
                             let (truncated, was_trunc) = truncate_line(ctx_line);
-                            if was_trunc {
-                                lines_truncated = true;
-                            }
+                            if was_trunc { lines_truncated = true; }
                             matches.push(format!("{}-{}- {}", path, j + 1, truncated));
                         }
                     }
-
-                    if matches.len() >= max_results {
-                        break;
-                    }
+                    if matches.len() >= max_results { break; }
                 }
             }
-
             let output = if matches.is_empty() {
                 "No matches found".to_string()
             } else {
                 format!("Found {} matches:\n{}", matches.len(), matches.join("\n"))
             };
-
             let mut result = AgentToolResult::success(output);
             if lines_truncated {
                 result.metadata = Some(json!({
@@ -498,22 +496,8 @@ impl AgentTool for GrepTool {
             return Ok(result);
         }
 
-        // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-
-        match Self::grep_impl(
-            root,
-            pattern,
-            path,
-            case_insensitive,
-            literal,
-            context,
-            context,
-            include,
-            max_results,
-        )
-        .await
-        {
+        match Self::grep_impl(root, pattern, path, case_insensitive, literal, context, context, include, max_results).await {
             Ok((output, lines_truncated)) => {
                 let mut result = AgentToolResult::success(output);
                 if lines_truncated {

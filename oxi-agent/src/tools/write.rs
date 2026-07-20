@@ -11,13 +11,26 @@ use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
+use crate::tools::typed::TypedTool;
 
-/// Maximum number of lines to show in the diff-style output preview
+
+/// Typed arguments for [`WriteTool`].
+#[derive(Deserialize, JsonSchema)]
+pub struct WriteArgs {
+    path: String,
+    content: String,
+    #[serde(default)]
+    append: bool,
+}
+
 const PREVIEW_HEAD_LINES: usize = 5;
+
 const PREVIEW_TAIL_LINES: usize = 5;
 /// Threshold above which we switch from full-content to head/tail preview display
 const PREVIEW_THRESHOLD_LINES: usize = 20;
@@ -215,33 +228,26 @@ impl AgentTool for WriteTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let path = params
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing required parameter: path".to_string())?;
+        let args: WriteArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
 
-        let content = params
-            .get("content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing required parameter: content".to_string())?;
-
-        let append = params
-            .get("append")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        // Use root_dir if set, else ctx.root()
+#[async_trait]
+impl TypedTool for WriteTool {
+    type Args = WriteArgs;
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        let write_result = Self::write_file_impl(root, &args.path, &args.content, args.append).await;
 
-        let write_result = Self::write_file_impl(root, path, content, append).await;
-        // Notify LSP provider so diagnostics refresh after the
-        // file's contents change. Best-effort: a transient LSP
-        // error must not fail the write.
-        // Best-effort: resolve the path for LSP notification. The
-        // `write_file_impl` already does the same PathGuard
-        // validation; this is a read-only normalization for the
-        // background task only.
-        let notify_path = std::path::Path::new(path).to_path_buf();
+        let notify_path = std::path::Path::new(&args.path).to_path_buf();
         let notify_abs = if notify_path.is_absolute() {
             notify_path
         } else {
@@ -252,7 +258,7 @@ impl AgentTool for WriteTool {
         {
             let provider_clone = provider.clone();
             let abs_path_clone = notify_abs.clone();
-            let content_owned = content.to_string();
+            let content_owned = args.content.clone();
             tokio::spawn(async move {
                 provider_clone
                     .notify_file_changed(&abs_path_clone, &content_owned)

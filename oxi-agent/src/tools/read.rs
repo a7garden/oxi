@@ -1,9 +1,3 @@
-/// Read file tool
-/// Reads file contents with support for:
-/// - Text files with line numbers, offset/limit, and truncation
-/// - Image files (jpg/png/gif/webp) returned as base64-encoded content blocks
-/// - Binary file detection
-/// - Snapshot tag emission for hashline editing
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
@@ -13,22 +7,34 @@ use oxi_ai::{ContentBlock, ImageContent, TextContent};
 use oxi_hashline::format::{compute_file_hash, format_hashline_header};
 use oxi_hashline::normalize::{normalize_to_lf, strip_bom};
 use oxi_hashline::snapshots::SnapshotStore;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
+use crate::tools::typed::TypedTool;
 /// Maximum bytes to read for binary detection
 const BINARY_DETECT_BYTES: usize = 8192;
 
 /// Supported image extensions and their MIME types
 const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
     ("jpg", "image/jpeg"),
+
     ("jpeg", "image/jpeg"),
     ("png", "image/png"),
     ("gif", "image/gif"),
     ("webp", "image/webp"),
 ];
+
+/// Typed arguments for [`ReadTool`].
+#[derive(Deserialize, JsonSchema)]
+pub struct ReadArgs {
+    path: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
 
 /// ReadTool.
 pub struct ReadTool {
@@ -336,40 +342,44 @@ impl AgentTool for ReadTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let path_str = params
-            .get("path")
-            .and_then(|v: &Value| v.as_str())
-            .ok_or_else(|| "Missing required parameter: path".to_string())?;
+        let args: ReadArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
 
-        let offset = params
-            .get("offset")
-            .and_then(|v| v.as_u64())
-            .map(|n| n as usize);
+    fn on_progress(&self, callback: ProgressCallback) {
+        let cb = self.progress_callback.clone();
+        let mut guard = cb.lock().expect("progress callback lock poisoned");
+        *guard = Some(callback);
+    }
+}
 
-        let limit = params
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|n| n as usize);
-
+#[async_trait]
+impl TypedTool for ReadTool {
+    type Args = ReadArgs;
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         // ── Internal URL dispatch ──
-        // If the input looks like an internal URL (scheme://…), try the
-        // configured resolver before falling through to file-system read.
         if let Some(ref resolver) = ctx.url_resolver
-            && resolver.can_resolve(path_str)
+            && resolver.can_resolve(&args.path)
         {
-            let resolved = resolver.resolve(path_str).await?;
+            let resolved = resolver.resolve(&args.path).await?;
             return Ok(AgentToolResult::success(resolved.content));
         }
 
-        // Security: validate path with PathGuard (use root_dir if set, else ctx)
+        // Security: validate path with PathGuard
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
         let guard = PathGuard::new(root);
         let validated = guard
-            .validate_traversal(Path::new(path_str))
+            .validate_traversal(Path::new(&args.path))
             .map_err(|e| e.to_string())?;
         let path = validated.as_path();
 
-        // Check if path exists and is a directory
         match fs::metadata(path).await {
             Ok(meta) if meta.is_dir() => {
                 return Err("Cannot read a directory, use read_dir instead".to_string());
@@ -389,23 +399,15 @@ impl AgentTool for ReadTool {
             .expect("progress callback lock poisoned")
             .clone();
 
-        // Check if it's an image file
         if Self::image_mime_type(path).is_some() {
             return Self::read_image(path, &progress_cb).await;
         }
 
-        // Otherwise, read as text (with snapshot if available for hashline)
         let snap = ctx.snapshot_store.as_ref().map(|s| {
             let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
             (s.clone(), canonical)
         });
-        Self::read_text(path, offset, limit, &progress_cb, snap).await
-    }
-
-    fn on_progress(&self, callback: ProgressCallback) {
-        let cb = self.progress_callback.clone();
-        let mut guard = cb.lock().expect("progress callback lock poisoned");
-        *guard = Some(callback);
+        Self::read_text(path, args.offset, args.limit, &progress_cb, snap).await
     }
 }
 
