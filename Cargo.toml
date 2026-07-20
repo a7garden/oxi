@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-pager", "oxi-sandbox"]
+members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-pager", "oxi-sandbox", "oxi-vendor-grok-markdown-core", "oxi-vendor-grok-markdown", "oxi-vendor-ratatui-textarea", "oxi-vendor-ratatui-inline"]
 exclude = ["scripts"]
 
 # Shared defaults inherited by every workspace member. Members can override
@@ -26,6 +26,37 @@ linkify = "0.10"
 regex = "1"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy", "regex-onig"] }
 serde = { version = "1", features = ["derive"] }
+
+# ── Vendored from grok-build (Apache-2.0, © 2023-2026 SpaceXAI) ────────────
+# See NOTICE-vendored.md. Path-dep workspace refs so all member crates share
+# one version pinned to the vendored source.
+anstyle = "1"
+anstyle-lossy = "1.1"
+anstyle-syntect = "1"
+anstyle-parse = "0.2"
+html-escape = "0.2"
+pulldown-cmark = { version = "0.13", default-features = false }
+two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
+url = "2"
+vte = "0.15"
+dark-light = "2"
+tui-scrollbar = "0.2"
+documented = "0.9"
+strum = { version = "0.27", features = ["derive"] }
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+textwrap = "0.16"
+ratatui = { version = "0.30", features = ["crossterm", "unstable-widget-ref", "unstable-rendered-line-info", "unstable-backend-writer"] }
+ratatui-core = "0.1"
+anyhow = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["sync", "rt", "macros", "rt-multi-thread", "signal", "io-util", "io-std"] }
+crossterm = { version = "0.29", features = ["event-stream", "bracketed-paste"] }
+parking_lot = "0.12"
+oxi-vendor-grok-markdown-core = { version = "0.1.0", path = "oxi-vendor-grok-markdown-core" }
+oxi-vendor-grok-markdown = { version = "0.1.0", path = "oxi-vendor-grok-markdown" }
+oxi-vendor-ratatui-textarea = { version = "0.1.0", path = "oxi-vendor-ratatui-textarea" }
+oxi-vendor-ratatui-inline = { version = "0.1.0", path = "oxi-vendor-ratatui-inline" }
 
 [profile.release]
 opt-level = 3

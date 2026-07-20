@@ -1,0 +1,21 @@
+[package]
+# Vendored from grok-build (Apache-2.0, © 2023-2026 SpaceXAI).
+# Source: https://github.com/xai-org/grok-build commit ba69d70c2f7d70a130a323b2becdf137af784c7f
+# Upstream crate: xai-ratatui-textarea. See NOTICE-vendored.md.
+name = "oxi-vendor-ratatui-textarea"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+authors = ["xAI"]
+repository = "https://github.com/xai-org/grok-build"
+description = "Vendored: ratatui textarea widget with IME/paste/undo"
+
+[dependencies]
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+ratatui-core = { workspace = true }
+textwrap = { workspace = true }
+tui-scrollbar = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
