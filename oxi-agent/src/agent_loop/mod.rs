@@ -10,7 +10,9 @@
 pub mod config;
 /// Miscellaneous helper functions.
 pub mod helpers;
-/// Compaction reminder system (PR-C1).
+/// Compaction reminder system (PR-C1) — disabled in oxi-pager redesign scope.
+/// Re-enable when PR-C work is properly scoped (applied-design.md:147-180).
+#[cfg(feature = "compaction-reminder")]
 pub mod reminder;
 /// Internal message/event queues.
 pub mod queues;
