@@ -32,7 +32,9 @@ use crate::mcp::types::RawJsonRpcMessage;
 /// WebSocket connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
+    /// Transport is not connected; calls trigger reconnect.
     Disconnected,
+    /// Transport has an active WebSocket connection.
     Connected,
 }
 
@@ -120,7 +122,7 @@ impl WebSocketTransport {
             loop {
                 tokio::select! {
                     Some(msg) = rx.recv() => {
-                        if let Err(e) = write.send(Message::Text(msg.into())).await {
+                        if let Err(e) = write.send(Message::Text(msg)).await {
                             tracing::warn!("ws write error: {e}");
                             break;
                         }
