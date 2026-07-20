@@ -2,14 +2,9 @@
 // Thin wrapper around the existing oxi-tui markdown renderer.
 
 /// A line-cached markdown streaming renderer.
+#[derive(Default)]
 pub struct MarkdownStreaming {
     buffer: String,
-}
-
-impl Default for MarkdownStreaming {
-    fn default() -> Self {
-        Self { buffer: String::new() }
-    }
 }
 
 impl MarkdownStreaming {

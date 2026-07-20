@@ -1,16 +1,18 @@
 // PagerState — single source of truth for the pager.
 
-use parking_lot::RwLock;
-use std::sync::Arc;
-
 use crate::prompt::PromptState;
 use crate::scrollback::ScrollbackState;
 use crate::status::StatusState;
+use parking_lot::RwLock;
+use ratatui::widgets::ListState;
+use std::sync::Arc;
 
 /// Top-level pager state.
 #[derive(Default)]
 pub struct PagerState {
     pub scrollback: ScrollbackState,
+    /// Scroll state for the chat list.
+    pub list_state: ListState,
     pub prompt: PromptState,
     pub status: StatusState,
     pub sticky_panels: StickyPanelState,
