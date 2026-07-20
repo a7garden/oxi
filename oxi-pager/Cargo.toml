@@ -12,9 +12,42 @@ description = "Pager state machine + emitter + reducer for the oxi-cli TUI"
 oxi-tui = { version = "0.57.0", path = "../oxi-tui" }
 oxi-agent = { version = "0.57.0", path = "../oxi-agent" }
 oxi-ai = { version = "0.57.0", path = "../oxi-ai" }
-parking_lot = "0.12"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
-crossterm = "0.29"
-ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
-tracing = "0.1"
-anyhow = "1"
+
+# Vendored from grok-build (Apache-2.0, © 2023-2026 SpaceXAI). See NOTICE-vendored.md.
+oxi-vendor-grok-markdown = { workspace = true }
+oxi-vendor-grok-markdown-core = { workspace = true }
+oxi-vendor-ratatui-inline = { workspace = true }
+oxi-vendor-ratatui-textarea = { workspace = true }
+
+# Workspace-pinned crates shared with the vendor crates.
+parking_lot = { workspace = true }
+tokio = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+ratatui-core = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+# Crates pulled in by the vendored render/theme/glyphs/syntax/terminal/host code.
+textwrap = { workspace = true }
+unicode-width = { workspace = true }
+unicode-segmentation = { workspace = true }
+linkify = { workspace = true }
+url = { workspace = true }
+vte = { workspace = true }
+anstyle = { workspace = true }
+anstyle-parse = { workspace = true }
+anstyle-lossy = { workspace = true }
+anstyle-syntect = { workspace = true }
+html-escape = { workspace = true }
+supports-color = { workspace = true }
+syntect = { workspace = true }
+two-face = { workspace = true }
+pulldown-cmark = { workspace = true }
+tui-scrollbar = { workspace = true }
+documented = { workspace = true }
+dark-light = { workspace = true }
+regex = { workspace = true }
+strum = { workspace = true }
+dirs = "5"
+libc = "0.2"
