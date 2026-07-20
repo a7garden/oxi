@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-pager", "oxi-sandbox", "oxi-vendor-grok-markdown-core", "oxi-vendor-grok-markdown", "oxi-vendor-ratatui-textarea", "oxi-vendor-ratatui-inline", "oxi-vendor-grok-pager-render", "oxi-vendor-grok-mermaid", "oxi-vendor-grok-paths", "oxi-vendor-tty-utils", "oxi-vendor-dagre_rust", "oxi-vendor-graphlib_rust", "oxi-vendor-mermaid-to-svg", "oxi-vendor-ordered_hashmap"]
+members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-pager", "oxi-sandbox", "oxi-vendor-grok-markdown-core", "oxi-vendor-grok-markdown", "oxi-vendor-ratatui-textarea", "oxi-vendor-ratatui-inline"]
 exclude = ["scripts"]
 
 # Shared defaults inherited by every workspace member. Members can override

@@ -41,7 +41,6 @@ pub mod storage; // public for main.rs (packages)
 pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
 pub mod tools;
-pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
 
