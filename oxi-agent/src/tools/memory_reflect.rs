@@ -1,6 +1,9 @@
 //! `memory_reflect` tool — persist a session summary to memory.
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use crate::tools::typed::TypedTool;
 use serde_json::{Value, json};
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -13,6 +16,11 @@ use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 /// automatic LLM summarisation is a future enhancement.
 ///
 /// Requires `ctx.memory` to be set; otherwise returns an error.
+#[derive(Deserialize, JsonSchema)]
+pub struct MemoryReflectArgs {
+    summary: String,
+}
+
 pub struct MemoryReflectTool;
 
 #[async_trait]
@@ -54,18 +62,29 @@ impl AgentTool for MemoryReflectTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        let args: MemoryReflectArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for MemoryReflectTool {
+    type Args = MemoryReflectArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         let backend = ctx.memory.as_ref().ok_or("Memory not configured")?;
-
         let subject = ctx.session_id.as_deref().unwrap_or("default");
-
-        let summary = params
-            .get("summary")
-            .and_then(|v| v.as_str())
-            .ok_or("missing required parameter: summary")?;
-        if summary.trim().is_empty() {
+        if args.summary.trim().is_empty() {
             return Err("summary must not be empty".into());
         }
-        backend.put(summary, "summary", subject).await?;
+        backend.put(&args.summary, "summary", subject).await?;
         Ok(AgentToolResult::success(format!(
             "Reflected session summary to memory (subject: {}).",
             subject

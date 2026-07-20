@@ -12,9 +12,12 @@ use super::search_cache::{SearchCache, SearchResult};
 /// - Zero-config: no API keys, no external binary needed
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use crate::tools::typed::TypedTool;
 
 /// Maximum number of results to return by default.
 const DEFAULT_MAX_RESULTS: usize = 10;
@@ -27,6 +30,18 @@ const DEFAULT_ENGINES: &str = "ddg,wiki";
 
 /// Search timeout in seconds.
 const SEARCH_TIMEOUT_SECS: u64 = 15;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WebSearchArgs {
+    query: String,
+    #[serde(default = "default_web_engines")]
+    engines: String,
+    #[serde(default = "default_web_limit")]
+    limit: u64,
+}
+
+fn default_web_engines() -> String { "ddg,wiki".to_string() }
+fn default_web_limit() -> u64 { 10 }
 
 // ── WebSearchTool ─────────────────────────────────────────────────
 
@@ -133,48 +148,35 @@ impl AgentTool for WebSearchTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let query = params["query"]
-            .as_str()
-            .ok_or_else(|| "Missing required parameter: query".to_string())?;
+        let args: WebSearchArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
+    }
+}
 
-        let engines = params["engines"].as_str().unwrap_or(DEFAULT_ENGINES);
+#[async_trait]
+impl TypedTool for WebSearchTool {
+    type Args = WebSearchArgs;
 
-        let limit = params["limit"]
-            .as_u64()
-            .unwrap_or(DEFAULT_MAX_RESULTS as u64)
-            .min(MAX_RESULTS as u64) as usize;
-
-        let results = self.do_search(query, engines, limit).await?;
-
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let limit = args.limit.min(MAX_RESULTS as u64) as usize;
+        let results = self.do_search(&args.query, &args.engines, limit).await?;
         if results.is_empty() {
-            return Ok(AgentToolResult::success(format!(
-                "No results found for: {}",
-                query
-            )));
+            return Ok(AgentToolResult::success(format!("No results found for: {}", args.query)));
         }
-
-        // Cache results and generate a search ID
-        let search_id = self.cache.insert(query, results.clone());
-
+        let search_id = self.cache.insert(&args.query, results.clone());
         let output = format_results(&results);
-
-        let results_json: Vec<Value> = results
-            .iter()
-            .map(|r| {
-                json!({
-                    "title": r.title,
-                    "url": r.url,
-                    "snippet": r.snippet,
-                    "source": r.source,
-                })
-            })
-            .collect();
-
+        let results_json: Vec<Value> = results.iter().map(|r| {
+            json!({"title": r.title, "url": r.url, "snippet": r.snippet, "source": r.source})
+        }).collect();
         Ok(AgentToolResult::success(output).with_metadata(json!({
-            "results": results_json,
-            "query": query,
-            "searchId": search_id,
-            "resultCount": results.len()
+            "searchId": search_id, "results": results_json, "query": args.query
         })))
     }
 }

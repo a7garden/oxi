@@ -1,8 +1,10 @@
 //! `memory_recall` tool — search the memory backend for relevant items.
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
-
+use crate::tools::typed::TypedTool;
 use super::{AgentTool, AgentToolResult, MemoryItem, ToolContext, ToolError};
 
 /// Default number of results returned by [`MemoryRecallTool`] when `limit` is omitted.
@@ -12,6 +14,15 @@ const MAX_LIMIT: usize = 20;
 
 /// Tool that searches the configured `MemoryBackend` for memories matching
 /// a query and returns the matches in a compact, model-friendly format.
+#[derive(Deserialize, JsonSchema)]
+pub struct MemoryRecallArgs {
+    query: String,
+    #[serde(default = "default_mem_limit")]
+    limit: u64,
+}
+
+fn default_mem_limit() -> u64 { 5 }
+
 ///
 /// Requires `ctx.memory` to be set; otherwise returns an error.
 pub struct MemoryRecallTool;
@@ -63,21 +74,26 @@ impl AgentTool for MemoryRecallTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        let args: MemoryRecallArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for MemoryRecallTool {
+    type Args = MemoryRecallArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         let backend = ctx.memory.as_ref().ok_or("Memory not configured")?;
-
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: query")?;
-
-        let limit = params
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|l| (l as usize).clamp(1, MAX_LIMIT))
-            .unwrap_or(DEFAULT_LIMIT);
-
-        let results = backend.search(query, limit).await?;
-
+        let limit = (args.limit as usize).clamp(1, MAX_LIMIT);
+        let results = backend.search(&args.query, limit).await?;
         Ok(AgentToolResult::success(format_results(&results)))
     }
 }

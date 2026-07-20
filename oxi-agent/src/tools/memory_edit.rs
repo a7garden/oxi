@@ -1,6 +1,9 @@
 //! `memory_edit` tool — update or delete a memory item.
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use crate::tools::typed::TypedTool;
 use serde_json::{Value, json};
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -11,6 +14,14 @@ use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 /// Requires `ctx.memory` to be set; otherwise returns an error. When `content`
 /// is provided the item is updated via `MemoryBackend::put`; when `content`
 /// is absent the item is deleted via `MemoryBackend::delete`.
+#[derive(Deserialize, JsonSchema)]
+pub struct MemoryEditArgs {
+    id: String,
+    content: Option<String>,
+    kind: Option<String>,
+    subject: Option<String>,
+}
+
 pub struct MemoryEditTool;
 
 #[async_trait]
@@ -64,37 +75,32 @@ impl AgentTool for MemoryEditTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        let args: MemoryEditArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for MemoryEditTool {
+    type Args = MemoryEditArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         let backend = ctx.memory.as_ref().ok_or("Memory not configured")?;
-
-        let id = params
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: id")?;
-
-        if let Some(content) = params.get("content").and_then(|v| v.as_str()) {
-            // Update path: persist the new content.
-            let kind = params
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .unwrap_or("fact");
-            let subject = params
-                .get("subject")
-                .and_then(|v| v.as_str())
-                .or(ctx.session_id.as_deref())
-                .unwrap_or("default");
-
-            let new_id = backend.put(content, kind, subject).await?;
-            Ok(AgentToolResult::success(format!(
-                "Updated memory item (old id: {}, new id: {}).",
-                id, new_id
-            )))
+        if let Some(content) = &args.content {
+            let kind = args.kind.as_deref().unwrap_or("fact");
+            let subject = args.subject.as_deref().or(ctx.session_id.as_deref()).unwrap_or("default");
+            backend.put(content, kind, subject).await?;
+            Ok(AgentToolResult::success(format!("Updated memory {} (kind: {}).", args.id, kind)))
         } else {
-            // Delete path: content is absent.
-            backend.delete(id).await?;
-            Ok(AgentToolResult::success(format!(
-                "Deleted memory item (id: {}).",
-                id
-            )))
+            backend.delete(&args.id).await?;
+            Ok(AgentToolResult::success(format!("Deleted memory {}.", args.id)))
         }
     }
 }
