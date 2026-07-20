@@ -3,15 +3,15 @@
 //! Uses `oxi-vendor-ratatui-inline` for flicker-free terminal output and
 //! the grok-quality `render` module for TokyoNight-themed TUI output.
 
-use crate::emitter::{BackgroundEvent, ResolvedKey};
+use crate::emitter::BackgroundEvent;
 use crate::render;
 use crate::state::{PagerState, SharedState};
 use crossterm::event::{Event as CrosstermEvent, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
 use parking_lot::RwLock;
-use std::io::{self, Write};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use std::io::{self, Write};
 
 pub async fn run<S: Send + 'static>(
     _session: S,

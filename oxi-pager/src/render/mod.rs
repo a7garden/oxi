@@ -25,6 +25,7 @@ const OUTER_VPAD: u16 = 1;
 const ACCENT_WIDTH: u16 = 1;
 const BLOCK_PAD_LEFT: u16 = 2;
 const BLOCK_PAD_RIGHT: u16 = 1;
+#[allow(dead_code)]
 const PROMPT_CHROME_LEFT: u16 = 2;
 const MIN_SCROLLBACK: u16 = 5;
 const STATUS_HEIGHT: u16 = 1;
@@ -186,7 +187,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &PagerState, theme: &Them
 
     let tokens = state.status.tokens_in + state.status.tokens_out;
     if tokens > 0 {
-        let token_text = format!("⇣{}", format_tokens(tokens));
+        let _token_text = format!("⇣{}", format_tokens(tokens));
         // Right-aligned token count rendered separately
         let line = Line::from(spans);
         frame.render_widget(
