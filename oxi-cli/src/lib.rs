@@ -7,7 +7,7 @@
 //     x.f = ..;` test-setup pattern.
 #![warn(clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::field_reassign_with_default))]
-#![allow(unknown_lints)]
+#![allow(unknown_lints, dead_code)]
 
 //! oxi: CLI coding harness
 //!
