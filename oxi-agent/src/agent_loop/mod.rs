@@ -10,6 +10,8 @@
 pub mod config;
 /// Miscellaneous helper functions.
 pub mod helpers;
+/// Compaction reminder system (PR-C1).
+pub mod reminder;
 /// Internal message/event queues.
 pub mod queues;
 /// Retry logic for the agent loop.

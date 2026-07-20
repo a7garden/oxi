@@ -32,12 +32,17 @@ unicode-normalization = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 oxibrowser = { version = "0.16", default-features = false }
 async-trait = "0.1"
+schemars = { version = "0.8", features = ["derive"] }
 oxibrowser-core = { version = "0.16", optional = true }
 serde_yaml = "0.9"
 
 [features]
 default = []
 native-browser = ["oxibrowser-core"]
+# Compaction-reminder system (applied-design.md PR-C). Off by default —
+# the in-progress reminder module is gated by this feature in
+# agent_loop/mod.rs. Re-enable when PR-C work is properly scoped.
+compaction-reminder = []
 
 [dev-dependencies]
 async-stream = "0.3"
