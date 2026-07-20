@@ -896,12 +896,18 @@ fn get_agent_runtime() -> &'static tokio::runtime::Runtime {
 
 /// Run the TUI interactive mode.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
-    run_tui_interactive_impl(app, false).await
+    oxi_pager::run(
+        app,
+        |a| async move { run_tui_interactive_impl(a, false).await },
+    )
+    .await
 }
-
 /// Run TUI interactive mode, optionally resuming the most recent session.
 pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: bool) -> Result<()> {
-    run_tui_interactive_impl(app, resume_last).await
+    oxi_pager::run(app, move |a| async move {
+        run_tui_interactive_impl(a, resume_last).await
+    })
+    .await
 }
 
 async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
