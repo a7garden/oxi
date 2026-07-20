@@ -493,7 +493,11 @@ async fn dispatch_action(
         | KAction::CompletionNext
         | KAction::CompletionPrev
         | KAction::CompletionDismiss
-        | KAction::CompletionAccept => None,
+        | KAction::CompletionAccept
+        | KAction::ToggleTodo
+        | KAction::ToggleIssues
+        | KAction::ToggleHub
+        | KAction::ToggleLsp => None,
     }
 }
 
