@@ -1,36 +1,57 @@
-// PagerEvent — normalized input from agent / user / tick / background.
-//
-// Only `AgentEvent` crosses the oxi-agent boundary; crossterm events,
-// ticks, and background-job notifications are wrapped locally. The
-// `emitter` module owns the type definitions; `main_loop` (PR-4) wires
-// the actual sources.
+//! PagerEvent — normalized input from agent / user / tick / background.
+//!
+//! BackgroundEvent bridges oxi-agent's `AgentEvent` into pager domain types.
 
-use oxi_agent::events::AgentEvent;
+use crate::status::StatusState;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-/// All inputs to the reducer go through this enum.
+/// Events sent from the background agent worker to the TUI.
+#[derive(Debug, Clone)]
+pub enum BackgroundEvent {
+    /// Streaming text delta from assistant.
+    AssistantDelta(String),
+    /// Assistant finished current message.
+    AssistantDone,
+    /// Tool call initiated.
+    ToolCall {
+        id: String,
+        name: String,
+        params: String,
+    },
+    /// Tool call result.
+    ToolResult {
+        id: String,
+        content: String,
+    },
+    /// User message from agent loop.
+    UserMessage(String),
+    /// Status bar update.
+    StatusUpdate(StatusState),
+    /// Agent finished streaming.
+    StreamDone,
+}
+
+/// Resolved keyboard input.
+#[derive(Debug, Clone)]
+pub struct ResolvedKey {
+    pub code: KeyCode,
+    pub modifiers: KeyModifiers,
+}
+
+impl From<KeyEvent> for ResolvedKey {
+    fn from(k: KeyEvent) -> Self {
+        Self {
+            code: k.code,
+            modifiers: k.modifiers,
+        }
+    }
+}
+
+/// Top-level events routed to the reducer.
 #[derive(Debug, Clone)]
 pub enum PagerEvent {
-    Agent(Box<AgentEvent>),
+    Agent(Box<oxi_agent::events::AgentEvent>),
     Input(ResolvedKey),
     Tick,
     Background(BackgroundEvent),
-}
-
-/// Resolved key — populated by the KeyRouter (PR-3). For now a stub
-/// carrying the raw event; PR-3 will replace with the modal/global
-/// dispatch enum.
-#[derive(Debug, Clone)]
-pub enum ResolvedKey {
-    /// Pass-through to the focused widget (used in PR-2 before the
-    /// KeyRouter is introduced).
-    PassThrough(crossterm::event::KeyEvent),
-    /// Ignored (no binding, no modal).
-    Ignored,
-}
-
-/// Placeholder for subagent / MCP completions arriving after the owning
-/// turn has ended. Filled out in PR-5.
-#[derive(Debug, Clone)]
-pub enum BackgroundEvent {
-    Stub,
 }
