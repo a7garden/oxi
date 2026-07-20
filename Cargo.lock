@@ -4823,6 +4823,7 @@ dependencies = [
  "oxi-ai",
  "oxi-tui",
  "parking_lot",
+ "ratatui",
  "tokio",
  "tracing",
 ]
