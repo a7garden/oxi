@@ -11,7 +11,7 @@ use futures::StreamExt;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use std::io::{self, Write};
+use std::io;
 
 pub async fn run<S: Send + 'static>(
     _session: S,
