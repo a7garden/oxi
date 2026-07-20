@@ -7,17 +7,15 @@ use std::sync::Arc;
 
 /// Run the pager main loop.
 ///
-/// `_app` is the oxi-cli `App` (generic to avoid circular deps).
-/// `inner` is an async callback that runs the real TUI (e.g. `run_tui_interactive_impl`).
-/// In this pass-through phase the pager initializes its state then
-/// delegates to the inner TUI. Future PRs will migrate logic from
-/// `inner` into the pager's reducer + render path.
-pub async fn run<A, F, Fut>(_app: A, inner: F) -> anyhow::Result<()>
+/// Creates a `SharedState` and passes it to the inner TUI closure so the
+/// old TUI can populate pager state from agent events and call the pager's
+/// render function. Future PRs will migrate the event loop into this module.
+pub async fn run<A, F, Fut>(app: A, inner: F) -> anyhow::Result<()>
 where
     A: Send + 'static,
-    F: FnOnce(A) -> Fut,
+    F: FnOnce(SharedState, A) -> Fut,
     Fut: Future<Output = anyhow::Result<()>>,
 {
-    let _state: SharedState = Arc::new(RwLock::new(PagerState::default()));
-    inner(_app).await
+    let state: SharedState = Arc::new(RwLock::new(PagerState::default()));
+    inner(state, app).await
 }

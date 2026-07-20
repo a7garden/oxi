@@ -15,5 +15,6 @@ oxi-ai = { version = "0.57.0", path = "../oxi-ai" }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 crossterm = "0.29"
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 tracing = "0.1"
 anyhow = "1"

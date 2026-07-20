@@ -36,6 +36,14 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         render_overlay(f, size, state, theme);
         return;
     }
+    // ── Legacy TUI render (full frame) ──────────────────────────────
+    let size = f.area();
+
+    // Overlay takes over the entire screen
+    if state.overlay.is_some() || state.overlay_state.is_some() {
+        render_overlay(f, size, state, theme);
+        return;
+    }
 
     // Horizontal: 1 col left, 1 col right. Vertical: 0 top/bottom.
     let inner = size.inner(Margin::new(1, 0));
@@ -136,6 +144,13 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     // Notifications (toasts) — rendered on top of everything
     render_notifications(f, size, state, theme);
+
+    // ── Pager overlay (on top of legacy TUI) ──────────────────────
+    // Renders the token bar when the pager has status data.
+    if let Some(ref pager_state) = state.pager_state {
+        let ps = pager_state.read();
+        oxi_pager::render::render_overlay(f, &ps);
+    }
 }
 
 // ── Input area ──────────────────────────────────────────────────────────

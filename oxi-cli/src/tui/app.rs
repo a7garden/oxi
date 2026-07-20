@@ -337,6 +337,9 @@ pub(crate) struct AppState {
     /// registry is built once in `AppState::new()` and shared by
     /// reference through the overlay's render path; cloning is cheap.
     pub theme_registry: oxi_tui::theme::ThemeRegistry,
+    /// Pager state holder (populated by the forwarder thread from AgentEvents).
+    /// Used by the render path to draw the pager overlay (token bar, spinner, etc.).
+    pub pager_state: Option<oxi_pager::SharedState>,
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
     /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
@@ -507,6 +510,7 @@ impl AppState {
             needs_chat_rebuild: false,
             appearance_needs_reload: false,
             theme_registry: oxi_tui::theme::ThemeRegistry::with_builtins(),
+            pager_state: None,
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
@@ -896,21 +900,24 @@ fn get_agent_runtime() -> &'static tokio::runtime::Runtime {
 
 /// Run the TUI interactive mode.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
-    oxi_pager::run(
-        app,
-        |a| async move { run_tui_interactive_impl(a, false).await },
-    )
+    oxi_pager::run(app, |state, a| async move {
+        run_tui_interactive_impl(state, a, false).await
+    })
     .await
 }
 /// Run TUI interactive mode, optionally resuming the most recent session.
 pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: bool) -> Result<()> {
-    oxi_pager::run(app, move |a| async move {
-        run_tui_interactive_impl(a, resume_last).await
+    oxi_pager::run(app, move |state, a| async move {
+        run_tui_interactive_impl(state, a, resume_last).await
     })
     .await
 }
 
-async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
+async fn run_tui_interactive_impl(
+    pager_state: oxi_pager::SharedState,
+    app: crate::App,
+    resume_last: bool,
+) -> Result<()> {
     // ── Liveness lock is held by `App` itself (see App::from_oxi) ──────
     // `App::ownership_session_id` equals [`liveness::TUI_OWNERSHIP_ID`] in
     // TUI mode, so `is_session_alive` checks made from the agent tool,
@@ -1017,6 +1024,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
     // ── Session switching loop ──
     loop {
+        let ps_for_agent = pager_state.clone();
         let is_resuming = session_target.is_some();
 
         let session_manager = match &session_target {
@@ -1083,6 +1091,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let session_h = session_handle.clone_handle();
                             // Forward events on a dedicated thread so it's never starved
                             // by the agent's synchronous emit callbacks.
+                            let pager_fwd = ps_for_agent.clone();
                             let forwarder_handle = std::thread::spawn(move || {
                                 let mut event_count = 0u32;
                                 tracing::info!("[FORWARDER] Thread started, waiting for events");
@@ -1093,6 +1102,22 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         event_count,
                                         std::mem::discriminant(&event)
                                     );
+                                    // Populate pager state (before the match so all
+                                    // events — including skipped ones — are tracked).
+                                    {
+                                        let mut ps = pager_fwd.write();
+                                        let actions = oxi_pager::reducer::reduce(
+                                            &mut ps,
+                                            oxi_pager::PagerEvent::Agent(Box::new(event.clone())),
+                                        );
+                                        drop(ps);
+                                        if actions
+                                            .iter()
+                                            .any(|a| matches!(a, oxi_pager::PagerAction::Quit(_)))
+                                        {
+                                            break;
+                                        }
+                                    }
                                     let ui_event = match event {
                                         // ── Agent lifecycle ─────────────────────────
                                         AgentEvent::AgentStart { .. } => UiEvent::AgentStart,
@@ -1356,6 +1381,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // models without going through legacy global state.
         state.catalog = Some(std::sync::Arc::clone(app.oxi().catalog()));
         // Inject the todo state provider so the sticky panel syncs from
+        state.pager_state = Some(pager_state.clone());
         // the same `Arc<RwLock<Vec<TodoPhase>>>` the agent's `todo` tool
         // mutates.
         state.todo_provider = agent_session.agent_ref().get_config().todo.clone();
