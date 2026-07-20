@@ -31,14 +31,16 @@ dirs = "6"
 unicode-normalization = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 oxibrowser = { version = "0.16", default-features = false }
+url = "2"
+tokio-tungstenite = { version = "0.24", features = ["connect"], optional = true }
 async-trait = "0.1"
 schemars = { version = "0.8", features = ["derive"] }
 oxibrowser-core = { version = "0.16", optional = true }
 serde_yaml = "0.9"
-
 [features]
 default = []
 native-browser = ["oxibrowser-core"]
+ws-transport = ["tokio-tungstenite"]
 
 [dev-dependencies]
 async-stream = "0.3"

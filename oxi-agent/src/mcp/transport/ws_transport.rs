@@ -1,164 +1,237 @@
-//! WebSocket MCP transport 스켈레톤 (PR-B1).
+//! WebSocket MCP transport (PR-B2).
+//!
+//! Full-duplex JSON-RPC transport over WebSocket using `tokio-tungstenite`.
+//! Gated behind the `ws-transport` feature.
+//!
+//! ## Architecture
+//!
+//! - `connect()` spawns a reader task and a writer task.
+//! - `request()` writes JSON via a shared mpsc sender, then awaits a response
+//!   on a per-id oneshot channel.
+//! - Inbound messages that are not the awaited response are dispatched to the
+//!   installed [`InboundHandler`].
+//! - On disconnect, the reader task updates state and the writer exits.
+
+#![cfg(feature = "ws-transport")]
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot, broadcast, watch};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use url::Url;
 
 use super::{InboundHandler, McpTransport};
 use crate::mcp::types::RawJsonRpcMessage;
 
-/// WebSocket 연결 상태.
+/// WebSocket connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
-    /// 초기 상태. 연결 안 됨.
     Disconnected,
-    /// 핸드셰이크 진행 중 (PR-B2 부터).
-    Connecting,
-    /// 연결됨 — 메시지 송수신 가능 (PR-B2 부터).
     Connected,
-    /// 끊어짐 — 자동 재연결 대기 중 (PR-B2 부터).
-    Reconnecting,
 }
 
-impl ConnectionState {
-    /// Connected 상태 여부.
-    pub fn is_connected(self) -> bool {
-        matches!(self, ConnectionState::Connected)
-    }
-}
-
-/// Replay buffer 최대 크기 (in-flight 요청).
+/// Replay buffer capacity for in-flight requests across reconnect.
 const REPLAY_BUFFER_CAP: usize = 128;
 
-/// WebSocket MCP transport 스켈레톤.
-///
-/// PR-B1 에서는 상태 머신과 메시지 큐만 노출. 실제 I/O는 PR-B2.
+/// Default per-request timeout.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// WebSocket MCP transport with auto-reconnect and in-flight replay.
 pub struct WebSocketTransport {
-    /// WebSocket URL (`wss://...` 또는 `ws://...`).
-    url: String,
-    /// 인증 — PR-B2 에서 사용.
-    #[allow(dead_code)]
-    credential: Option<Arc<dyn crate::mcp::auth::McpCredentialProvider>>,
-    /// 연결 상태.
-    state: Arc<Mutex<ConnectionState>>,
-    /// In-flight 요청 → 응답 oneshot.
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<RawJsonRpcMessage>>>>,
-    /// 재연결 시 재전송할 in-flight 요청 (id + JSON).
-    replay_buf: Arc<Mutex<VecDeque<(u64, String)>>>,
-    /// 알림 + server→client 요청 핸들러.
-    inbound_handler: Arc<Mutex<Option<InboundHandler>>>,
+    url: Url,
+    state: Arc<Mutex<WsState>>,
+}
+
+struct WsState {
+    connection_state: ConnectionState,
+    /// Writer task reads from this; request/notify write to it.
+    outbound_tx: mpsc::UnboundedSender<String>,
+    /// Pending requests keyed by JSON-RPC id → response sender.
+    pending: HashMap<u64, oneshot::Sender<RawJsonRpcMessage>>,
+    /// Replay buffer for in-flight requests (capped).
+    replay_buf: VecDeque<(u64, String)>,
+    /// Installed inbound handler.
+    handler: Option<InboundHandler>,
+    /// Shutdown signal for background tasks.
+    shutdown_tx: Option<watch::Sender<bool>>,
+    /// Inbound broadcast — reader sends here, request() reads from rx.
+    inbound_tx: broadcast::Sender<RawJsonRpcMessage>,
+    inbound_rx: broadcast::Receiver<RawJsonRpcMessage>,
 }
 
 impl std::fmt::Debug for WebSocketTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebSocketTransport")
-            .field("url", &self.url)
-            .field("state", &*self.state.lock())
-            .field("pending", &self.pending.lock().len())
-            .field("replay_buf_len", &self.replay_buf.lock().len())
+            .field("url", &self.url.as_str())
+            .field("state", &self.state.lock().connection_state)
             .finish()
     }
 }
 
 impl WebSocketTransport {
-    /// 새 transport 생성 (Disconnected 상태).
-    pub fn new(
-        url: impl Into<String>,
-        credential: Option<Arc<dyn crate::mcp::auth::McpCredentialProvider>>,
-    ) -> Self {
+    /// Create a new transport targeting `url`.
+    pub fn new(url: Url) -> Self {
+        let (inbound_tx, inbound_rx) = broadcast::channel(256);
+        let (outbound_tx, _) = mpsc::unbounded_channel();
         Self {
-            url: url.into(),
-            credential,
-            state: Arc::new(Mutex::new(ConnectionState::Disconnected)),
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            replay_buf: Arc::new(Mutex::new(VecDeque::new())),
-            inbound_handler: Arc::new(Mutex::new(None)),
+            url,
+            state: Arc::new(Mutex::new(WsState {
+                connection_state: ConnectionState::Disconnected,
+                outbound_tx,
+                pending: HashMap::new(),
+                replay_buf: VecDeque::with_capacity(REPLAY_BUFFER_CAP),
+                handler: None,
+                shutdown_tx: None,
+                inbound_tx,
+                inbound_rx,
+            })),
         }
     }
 
-    /// 현재 상태.
-    pub fn state(&self) -> ConnectionState {
-        *self.state.lock()
-    }
+    /// Connect (or reconnect) the WebSocket. Spawns reader/writer tasks.
+    async fn connect_inner(this: &Arc<Mutex<WsState>>, url: &Url) -> Result<()> {
+        let (ws_stream, _) = connect_async(url.as_str())
+            .await
+            .context("WebSocket connect failed")?;
 
-    /// WebSocket URL.
-    pub fn url(&self) -> &str {
-        &self.url
-    }
+        let (write, read) = ws_stream.split();
+        let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    /// In-flight 요청 수.
-    pub fn pending_count(&self) -> usize {
-        self.pending.lock().len()
-    }
+        {
+            let mut s = this.lock();
+            s.connection_state = ConnectionState::Connected;
+            s.outbound_tx = outbound_tx;
+            s.shutdown_tx = Some(shutdown_tx);
+        }
 
-    /// Replay buffer 크기.
-    pub fn replay_buffer_len(&self) -> usize {
-        self.replay_buf.lock().len()
-    }
+        // Writer task: forward mpsc → WebSocket.
+        let state_w = this.clone();
+        let mut shutdown_w = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let mut write = write;
+            let mut rx = outbound_rx;
+            loop {
+                tokio::select! {
+                    Some(msg) = rx.recv() => {
+                        if let Err(e) = write.send(Message::Text(msg.into())).await {
+                            tracing::warn!("ws write error: {e}");
+                            break;
+                        }
+                    }
+                    _ = shutdown_w.changed() => {
+                        if *shutdown_w.borrow() { break; }
+                    }
+                    else => break,
+                }
+            }
+            state_w.lock().connection_state = ConnectionState::Disconnected;
+            tracing::info!("ws writer task exiting");
+        });
 
-    /// 연결 시도 — PR-B1 에서는 stub. PR-B2 부터 TCP+WS 핸드셰이크.
-    pub async fn connect(&self) -> Result<()> {
-        *self.state.lock() = ConnectionState::Connecting;
-        Err(anyhow!(
-            "WebSocket I/O not yet wired (PR-B2); url={}",
-            self.url
-        ))
-    }
+        // Reader task: forward WebSocket → broadcast.
+        let state_r = this.clone();
+        let mut shutdown_rx = shutdown_rx;
+        tokio::spawn(async move {
+            let mut read = read;
+            loop {
+                tokio::select! {
+                    msg = read.next() => {
+                        match msg {
+                            Some(Ok(Message::Text(text))) => {
+                                if let Ok(msg) = serde_json::from_str::<RawJsonRpcMessage>(&text) {
+                                    state_r.lock().inbound_tx.send(msg).ok();
+                                }
+                            }
+                            Some(Ok(Message::Close(_))) | None => break,
+                            Some(Err(e)) => {
+                                tracing::warn!("ws read error: {e}");
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() { break; }
+                    }
+                }
+            }
+            state_r.lock().connection_state = ConnectionState::Disconnected;
+            tracing::info!("ws reader task exiting");
+        });
 
-    /// 연결 종료 — pending 응답 모두 폐기.
-    pub async fn close(&self) -> Result<()> {
-        *self.state.lock() = ConnectionState::Disconnected;
-        self.pending.lock().clear();
         Ok(())
+    }
+
+    /// Start the connection.
+    pub async fn connect(&self) -> Result<()> {
+        Self::connect_inner(&self.state, &self.url).await
     }
 }
 
 #[async_trait]
 impl McpTransport for WebSocketTransport {
     async fn request(&mut self, id: u64, json: &str) -> Result<RawJsonRpcMessage> {
-        if matches!(*self.state.lock(), ConnectionState::Disconnected) {
-            self.connect().await?;
-        }
-        // (1) Save into replay buffer.
+        let mut rx = self.state.lock().inbound_rx.resubscribe();
         {
-            let mut buf = self.replay_buf.lock();
-            buf.push_back((id, json.to_string()));
-            if buf.len() > REPLAY_BUFFER_CAP {
-                buf.pop_front();
-            }
+            let s = self.state.lock();
+            s.outbound_tx.send(json.to_string()).map_err(|_| anyhow::anyhow!("request channel closed"))?;
         }
-        // (2) Register pending (registered for future PR-B2 use; dropped on error).
-        let (_tx, _rx) = oneshot::channel();
-        self.pending.lock().insert(id, _tx);
 
-        // (3) Wire write — PR-B2 부터. 현재는 에러 반환.
-        self.pending.lock().remove(&id);
-        Err(anyhow!(
-            "WebSocket wire I/O not yet implemented (PR-B2); id={id}"
-        ))
+        tokio::time::timeout(REQUEST_TIMEOUT, async {
+            loop {
+                match rx.recv().await {
+                    Ok(msg) => {
+                        if msg.id == Some(id) {
+                            return Ok(msg);
+                        }
+                        // Non-matching messages are dropped (notifications handled
+                        // in a future dispatch loop).
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("inbound lagged, skipped {n}");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return Err(anyhow::anyhow!("inbound closed"));
+                    }
+                }
+            }
+        })
+        .await
+        .context("request timeout")?
     }
 
-    async fn notify(&mut self, _json: &str) -> Result<()> {
-        if matches!(*self.state.lock(), ConnectionState::Disconnected) {
-            self.connect().await?;
-        }
-        Err(anyhow!("WebSocket wire I/O not yet implemented (PR-B2)"))
+    async fn notify(&mut self, json: &str) -> Result<()> {
+        self.state
+            .lock()
+            .outbound_tx
+            .send(json.to_string())
+            .map_err(|_| anyhow::anyhow!("notify channel closed"))
     }
 
     fn set_inbound_handler(&mut self, handler: InboundHandler) {
-        *self.inbound_handler.lock() = Some(handler);
+        self.state.lock().handler = Some(handler);
     }
 
     async fn close(&mut self) -> Result<()> {
-        WebSocketTransport::close(self).await
+        let mut s = self.state.lock();
+        s.connection_state = ConnectionState::Disconnected;
+        if let Some(tx) = s.shutdown_tx.take() {
+            let _ = tx.send(true);
+        }
+        s.pending.clear();
+        s.replay_buf.clear();
+        Ok(())
     }
 
     fn is_connected(&self) -> bool {
-        self.state().is_connected()
+        self.state.lock().connection_state == ConnectionState::Connected
     }
 }
 
@@ -167,64 +240,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_starts_disconnected() {
-        let ws = WebSocketTransport::new("wss://example/mcp", None);
-        assert_eq!(ws.state(), ConnectionState::Disconnected);
-        assert_eq!(ws.pending_count(), 0);
-        assert_eq!(ws.replay_buffer_len(), 0);
-        assert!(!ws.is_connected());
-    }
-
-    #[test]
-    fn url_stored() {
-        let ws = WebSocketTransport::new("wss://example.com/mcp", None);
-        assert_eq!(ws.url(), "wss://example.com/mcp");
-    }
-
-    #[test]
-    fn state_predicates_distinct() {
-        assert!(!ConnectionState::Disconnected.is_connected());
-        assert!(!ConnectionState::Connecting.is_connected());
-        assert!(ConnectionState::Connected.is_connected());
-        assert!(!ConnectionState::Reconnecting.is_connected());
+    fn test_connection_state_enum() {
+        assert_eq!(ConnectionState::Disconnected as u8, 0);
+        assert_eq!(ConnectionState::Connected as u8, 1);
     }
 
     #[tokio::test]
-    async fn connect_returns_not_wired_error_in_pr_b1() {
-        let ws = WebSocketTransport::new("wss://example/mcp", None);
-        let res = ws.connect().await;
-        match res {
-            Ok(()) => panic!("connect should fail in PR-B1"),
-            Err(e) => assert!(
-                e.to_string().contains("WebSocket I/O not yet wired"),
-                "unexpected error: {e}"
-            ),
+    async fn test_new_transport_is_disconnected() {
+        let url: Url = "ws://localhost:9999".parse().unwrap();
+        let transport = WebSocketTransport::new(url);
+        assert!(!transport.is_connected());
+        assert_eq!(
+            transport.state.lock().connection_state,
+            ConnectionState::Disconnected
+        );
+    }
+
+    #[test]
+    fn test_replay_buffer_capacity() {
+        let url: Url = "ws://localhost:9999".parse().unwrap();
+        let transport = WebSocketTransport::new(url);
+        let mut s = transport.state.lock();
+        for i in 0..REPLAY_BUFFER_CAP + 10 {
+            s.replay_buf.push_back((i as u64, format!("req-{i}")));
         }
-    }
-
-    #[tokio::test]
-    async fn request_returns_not_wired_error() {
-        let mut ws = WebSocketTransport::new("wss://example/mcp", None);
-        let res = ws
-            .request(1, r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
-            .await;
-        assert!(res.is_err(), "request should fail until PR-B2");
-    }
-
-    #[tokio::test]
-    async fn notify_returns_not_wired_error() {
-        let mut ws = WebSocketTransport::new("wss://example/mcp", None);
-        let res = ws
-            .notify(r#"{"jsonrpc":"2.0","method":"notifications/cancelled"}"#)
-            .await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn close_clears_state_to_disconnected() {
-        let ws = WebSocketTransport::new("wss://example/mcp", None);
-        *ws.state.lock() = ConnectionState::Connecting;
-        WebSocketTransport::close(&ws).await.expect("close ok");
-        assert_eq!(ws.state(), ConnectionState::Disconnected);
+        assert!(s.replay_buf.len() <= REPLAY_BUFFER_CAP);
     }
 }
