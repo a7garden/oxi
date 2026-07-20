@@ -14,12 +14,14 @@
 //! Anonymous access works without a key but has lower rate limits.
 
 use crate::tools::http_client::shared_http_client;
-use crate::tools::{AgentTool, AgentToolResult, ToolContext};
+use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
+use crate::tools::typed::TypedTool;
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -108,6 +110,13 @@ struct LibraryResult {
     trust_score: Option<f64>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct Context7ResolveLibraryIdArgs {
+    query: String,
+    #[serde(rename = "libraryName")]
+    library_name: String,
+}
+
 // ── Tool 1: resolve-library-id ───────────────────────────────────────
 
 /// Resolve a library name to a Context7-compatible library ID.
@@ -183,56 +192,65 @@ impl AgentTool for Context7ResolveLibraryIdTool {
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, String> {
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: query")?;
-        let library_name = params
-            .get("libraryName")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: libraryName")?;
+    ) -> Result<AgentToolResult, ToolError> {
+        let args: Context7ResolveLibraryIdArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
+}
+}
 
+#[async_trait]
+impl TypedTool for Context7ResolveLibraryIdTool {
+    type Args = Context7ResolveLibraryIdArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         let mut request = client()
             .get(format!("{}/v2/libs/search", api_base_url()))
-            .query(&[("query", query), ("libraryName", library_name)]);
-
+            .query(&[("query", args.query.as_str()), ("libraryName", args.library_name.as_str())]);
         if let Some(ref key) = *api_key() {
             request = request.bearer_auth(key);
         }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| format!("Context7 API request failed: {}", e))?;
-
+        let response = request.send().await.map_err(|e| format!("Context7 API request failed: {}", e))?;
         if !response.status().is_success() {
             return Ok(map_error(response).await);
         }
-
-        let search: SearchResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse Context7 response: {}", e))?;
-
-        if let Some(error) = search.error {
-            return Ok(AgentToolResult::error(error));
+        let body: SearchResponse = response.json().await.map_err(|e| format!("Failed to parse Context7 response: {}", e))?;
+        if let Some(error) = body.error {
+            return Ok(AgentToolResult::error(format!("Context7 API error: {}", error)));
         }
-
-        if search.results.is_empty() {
-            return Ok(AgentToolResult::success(format!(
-                "No libraries found matching \"{}\". Try a different search term.",
-                library_name
-            )));
-        }
-
-        Ok(AgentToolResult::success(format_search_results(
-            &search.results,
-        )))
+        Ok(AgentToolResult::success(format_search_results(&body.results)))
     }
 }
 
+async fn map_error(response: reqwest::Response) -> AgentToolResult {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let hint = key_location_hint();
+    let msg = match status.as_u16() {
+        429 => format!("Rate limited or quota exceeded. Add an API key for higher limits: {}", hint),
+        401 => format!("Invalid API key. Check your key at: {}", hint),
+        404 => "Library not found. Use context7_resolve-library-id to get a valid ID.".to_string(),
+        _ => format!("Context7 API error ({}): {}", status, body.chars().take(200).collect::<String>()),
+    };
+    AgentToolResult::error(msg)
+}
+
 // ── Tool 2: query-docs ──────────────────────────────────────────────
+
+#[derive(Deserialize, JsonSchema)]
+pub struct Context7QueryDocsArgs {
+    #[serde(rename = "libraryId")]
+    library_id: String,
+    query: String,
+    #[serde(default)]
+    research_mode: bool,
+}
 
 /// Query up-to-date documentation from Context7.
 pub struct Context7QueryDocsTool;
@@ -249,127 +267,65 @@ impl Context7QueryDocsTool {
         Self
     }
 }
-
 #[async_trait]
 impl AgentTool for Context7QueryDocsTool {
-    fn name(&self) -> &str {
-        "context7_query-docs"
-    }
-
-    fn label(&self) -> &str {
-        "Context7: Query Documentation"
-    }
-
+    fn name(&self) -> &str { "context7_query-docs" }
+    fn label(&self) -> &str { "Context7: Query Documentation" }
     fn description(&self) -> &str {
-        "Retrieves and queries up-to-date documentation and code examples from Context7 for any programming library or framework.\n\n\
-         You must call 'Resolve Context7 Library ID' tool first to obtain the exact Context7-compatible library ID required to use this tool, UNLESS the user explicitly provides a library ID in the format '/org/project' or '/org/project/version' in their query.\n\n\
-         Workflow: call first without researchMode. If that doesn't answer the question, retry with researchMode: true. Do not call each tool more than 3 times per question"
+        "Retrieves and queries up-to-date documentation and code examples from Context7 for any programming library or framework."
     }
-
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "libraryId": {
-                    "type": "string",
-                    "description": "Exact Context7-compatible library ID (e.g. '/mongodb/docs', '/vercel/next.js', '/supabase/supabase', '/vercel/next.js/v14.3.0-canary.87') retrieved from 'resolve-library-id' or directly from user query in the format '/org/project' or '/org/project/version'."
-                },
-                "query": {
-                    "type": "string",
-                    "description": "The question or task you need help with. Be specific and include relevant details. Good: 'How to set up authentication with JWT in Express.js' or 'React useEffect cleanup function examples'. Bad: 'auth' or 'hooks'. The query is sent to the Context7 API for processing. Do not include any sensitive or confidential information such as API keys, passwords, credentials, personal data, or proprietary code in your query."
-                },
-                "researchMode": {
-                    "type": "boolean",
-                    "description": "Retry the query with deep research: spins up sandboxed agents that read the actual source repos and runs a live web search, then synthesizes a fresh answer. Set true on retry if you weren't satisfied with the first answer and want a more thorough one. Requires an API key — you can get one free at https://context7.com/."
-                }
+                "libraryId": { "type": "string", "description": "Exact Context7 library ID" },
+                "query": { "type": "string", "description": "The question or task" },
+                "researchMode": { "type": "boolean", "description": "Retry with deep research" }
             },
             "required": ["libraryId", "query"],
             "additionalProperties": false
         })
     }
-
     async fn execute(
         &self,
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, String> {
-        let library_id = params
-            .get("libraryId")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: libraryId")?;
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing required parameter: query")?;
-        let research_mode = params
-            .get("researchMode")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let mut request = client()
-            .get(format!("{}/v2/context", api_base_url()))
-            .query(&[("query", query), ("libraryId", library_id)]);
-
-        if let Some(ref key) = *api_key() {
-            request = request.bearer_auth(key);
-        }
-
-        if research_mode {
-            request = request.query(&[("researchMode", "true")]);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| format!("Context7 API request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            return Ok(map_error(response).await);
-        }
-
-        let text = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read Context7 response: {}", e))?;
-
-        if text.is_empty() {
-            return Ok(AgentToolResult::success(format!(
-                "No documentation found for library \"{}\". \
-                     This might be because the library ID is invalid. \
-                     Use context7_resolve-library-id to get a valid ID.",
-                library_id
-            )));
-        }
-
-        Ok(AgentToolResult::success(text))
+    ) -> Result<AgentToolResult, ToolError> {
+        let args: Context7QueryDocsArgs = serde_json::from_value(params)
+            .map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
     }
 }
 
-// ── Shared helpers ───────────────────────────────────────────────────
+#[async_trait]
+impl TypedTool for Context7QueryDocsTool {
+    type Args = Context7QueryDocsArgs;
 
-/// Map a non-success HTTP response into an `AgentToolResult`.
-async fn map_error(response: reqwest::Response) -> AgentToolResult {
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    let hint = key_location_hint();
-
-    let msg = match status.as_u16() {
-        429 => format!(
-            "Rate limited or quota exceeded. Add an API key for higher limits: {}",
-            hint
-        ),
-        401 => format!("Invalid API key. Check your key at: {}", hint),
-        404 => "Library not found. Use context7_resolve-library-id to get a valid ID.".to_string(),
-        _ => format!(
-            "Context7 API error ({}): {}",
-            status,
-            body.chars().take(200).collect::<String>()
-        ),
-    };
-
-    AgentToolResult::error(msg)
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let mut request = client()
+            .get(format!("{}/v2/context", api_base_url()))
+            .query(&[("query", &args.query), ("libraryId", &args.library_id)]);
+        if let Some(ref key) = *api_key() {
+            request = request.bearer_auth(key);
+        }
+        if args.research_mode {
+            request = request.query(&[("researchMode", "true")]);
+        }
+        let response = request.send().await.map_err(|e| format!("Context7 API request failed: {}", e))?;
+        if !response.status().is_success() {
+            return Ok(map_error(response).await);
+        }
+        let text = response.text().await.map_err(|e| format!("Failed to read Context7 response: {}", e))?;
+        Ok(AgentToolResult::success(text))
+    }
 }
 
 /// Format library search results into human-readable text.
