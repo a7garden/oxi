@@ -29,6 +29,7 @@ pub struct MemoryRetainArgs {
 fn default_retain_kind() -> String { "fact".to_string() }
 fn default_importance() -> f64 { 0.5 }
 
+#[allow(missing_docs)]
 pub struct MemoryRetainTool;
 
 #[async_trait]
@@ -105,9 +106,12 @@ impl TypedTool for MemoryRetainTool {
         if !VALID_KINDS.contains(&args.kind.as_str()) {
             return Err(format!("Invalid kind '{}'. Must be one of: fact, preference, context, summary", args.kind));
         }
+        if !(0.0..=1.0).contains(&args.importance) {
+            return Err(format!("importance must be between 0.0 and 1.0, got {}", args.importance));
+        }
         let subject = ctx.session_id.as_deref().unwrap_or("default");
         backend.put(&args.content, &args.kind, subject).await?;
-        Ok(AgentToolResult::success(format!("Stored memory ({}, importance: {:.1}).", args.kind, args.importance)))
+        Ok(AgentToolResult::success(format!("Retained [{}] to memory.", args.kind)))
     }
 }
 

@@ -21,6 +21,7 @@ pub struct MemoryReflectArgs {
     summary: String,
 }
 
+#[allow(missing_docs)]
 pub struct MemoryReflectTool;
 
 #[async_trait]

@@ -22,6 +22,7 @@ pub struct MemoryEditArgs {
     subject: Option<String>,
 }
 
+#[allow(missing_docs)]
 pub struct MemoryEditTool;
 
 #[async_trait]
@@ -189,7 +190,7 @@ mod tests {
         assert!(result.success);
         assert_eq!(
             result.output,
-            "Updated memory item (old id: mem-1, new id: new-id)."
+            "Updated memory mem-1 (kind: fact)."
         );
         let puts = mock.puts.lock();
         assert_eq!(puts.len(), 1);
@@ -208,7 +209,7 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert_eq!(result.output, "Deleted memory item (id: mem-1).");
+        assert_eq!(result.output, "Deleted memory mem-1.");
         assert_eq!(mock.deletes.lock().len(), 1);
         assert_eq!(mock.deletes.lock()[0], "mem-1");
         assert_eq!(mock.puts.lock().len(), 0);

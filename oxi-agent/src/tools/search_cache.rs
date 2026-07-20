@@ -4,10 +4,8 @@ use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
 use tokio::sync::oneshot;
 use crate::tools::typed::TypedTool;
 
@@ -100,6 +98,7 @@ pub struct GetSearchResultsTool {
 }
 
 #[derive(Deserialize, JsonSchema)]
+#[allow(missing_docs)]
 pub struct GetSearchResultsArgs {
     #[serde(rename = "searchId")]
     search_id: String,
@@ -178,15 +177,17 @@ impl TypedTool for GetSearchResultsTool {
         ))
     }
 }
+#[allow(dead_code)]
 mod rng {
+    #[allow(unused_imports)]
     use std::cell::Cell;
+    #[allow(unused_imports)]
     use std::time::SystemTime;
 
     thread_local! {
         static SEED: Cell<u64> = const { Cell::new(0) };
     }
 
-    /// Simple xorshift pseudo-random number generator.
     pub fn random() -> u32 {
         SEED.with(|s| {
             let mut x = if s.get() == 0 {
@@ -195,9 +196,7 @@ mod rng {
                     .unwrap_or_default()
                     .as_nanos() as u64;
                 ns ^ (thread_id() as u64)
-            } else {
-                s.get()
-            };
+            } else { s.get() };
             x ^= x << 13;
             x ^= x >> 7;
             x ^= x << 17;

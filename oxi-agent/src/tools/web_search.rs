@@ -19,19 +19,20 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use crate::tools::typed::TypedTool;
 
-/// Maximum number of results to return by default.
+#[allow(dead_code)]
 const DEFAULT_MAX_RESULTS: usize = 10;
 
 /// Maximum number of results allowed.
 const MAX_RESULTS: usize = 30;
 
-/// Default search engines.
+#[allow(dead_code)]
 const DEFAULT_ENGINES: &str = "ddg,wiki";
 
 /// Search timeout in seconds.
 const SEARCH_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Deserialize, JsonSchema)]
+#[allow(missing_docs)]
 pub struct WebSearchArgs {
     query: String,
     #[serde(default = "default_web_engines")]

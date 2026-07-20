@@ -8,6 +8,7 @@ use crate::tools::typed::TypedTool;
 use super::{AgentTool, AgentToolResult, MemoryItem, ToolContext, ToolError};
 
 /// Default number of results returned by [`MemoryRecallTool`] when `limit` is omitted.
+#[allow(dead_code)]
 const DEFAULT_LIMIT: usize = 5;
 /// Maximum number of results [`MemoryRecallTool`] will return.
 const MAX_LIMIT: usize = 20;
