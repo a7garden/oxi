@@ -4,7 +4,7 @@
 # Upstream crate: xai-grok-markdown. See NOTICE-vendored.md.
 name = "oxi-vendor-grok-markdown"
 version = "0.1.0"
-edition.workspace = true
+edition = "2024"
 rust-version.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
@@ -12,17 +12,17 @@ repository = "https://github.com/xai-org/grok-build"
 description = "Vendored: streaming markdown renderer for terminal UIs"
 
 [dependencies]
-anstyle = { workspace = true }
-anstyle-lossy = { workspace = true }
-anstyle-syntect = { workspace = true }
-html-escape = { workspace = true }
-linkify = { workspace = true }
-pulldown-cmark = { workspace = true }
-ratatui = { workspace = true }
-supports-color = { workspace = true }
-syntect = { workspace = true }
-two-face = { workspace = true }
-textwrap = { workspace = true }
-unicode-width = { workspace = true }
-url = { workspace = true }
-oxi-vendor-grok-markdown-core = { workspace = true }
+anstyle = "1.0"
+anstyle-lossy = "1.1.4"
+anstyle-syntect = "1.0.4"
+html-escape = "0.2"
+linkify = "0.10"
+pulldown-cmark = "0.13"
+ratatui = { version = "0.30", features = ["unstable-widget-ref", "unstable-rendered-line-info", "unstable-backend-writer"] }
+supports-color = "3.0"
+syntect = "5.3"
+two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
+textwrap = "0.16"
+unicode-width = "0.2"
+url = "2"
+oxi-vendor-grok-markdown-core = { path = "../oxi-vendor-grok-markdown-core" }

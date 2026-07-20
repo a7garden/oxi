@@ -4,7 +4,7 @@
 # Upstream crate: xai-ratatui-textarea. See NOTICE-vendored.md.
 name = "oxi-vendor-ratatui-textarea"
 version = "0.1.0"
-edition.workspace = true
+edition = "2024"
 rust-version.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
@@ -12,10 +12,10 @@ repository = "https://github.com/xai-org/grok-build"
 description = "Vendored: ratatui textarea widget with IME/paste/undo"
 
 [dependencies]
-crossterm = { workspace = true }
-ratatui = { workspace = true }
-ratatui-core = { workspace = true }
-textwrap = { workspace = true }
-tui-scrollbar = { workspace = true }
-unicode-segmentation = { workspace = true }
-unicode-width = { workspace = true }
+crossterm = "0.28"
+ratatui = { version = "0.30", features = ["unstable-widget-ref"] }
+ratatui-core = "0.1"
+textwrap = "0.16"
+tui-scrollbar = "0.2"
+unicode-segmentation = "1.12.0"
+unicode-width = "0.2"

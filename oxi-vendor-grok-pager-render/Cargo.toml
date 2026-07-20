@@ -1,0 +1,101 @@
+[package]
+name = "oxi-vendor-grok-pager-render"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+# TTY safety
+dunce = "1"
+oxi-vendor-tty-utils = { path = "../oxi-vendor-tty-utils" }
+
+# Rendering
+ratatui = { version = "0.30", features = ["unstable-widget-ref", "unstable-rendered-line-info", "unstable-backend-writer"] }
+ratatui-core = "0.1"
+crossterm = { version = "0.28", features = ["event-stream", "bracketed-paste"] }
+textwrap = "0.16"
+regex = "1"
+unicode-width = "0.2"
+unicode-segmentation = "1.12.0"
+linkify = "0.10"
+tui-scrollbar = "0.2"
+
+# Markdown / syntax highlighting
+oxi-vendor-grok-markdown = { path = "../oxi-vendor-grok-markdown" }
+syntect = "5.3"
+anstyle = "1.0"
+supports-color = "3.0"
+
+# Data
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+toml_edit = { version = "0.22", features = ["serde"] }
+documented = "0.9"
+
+# VTE terminal emulation for native rendering of command output (SGR, cursor, \r)
+vte = "0.15.0"
+
+# System appearance detection (dark/light mode)
+dark-light = "2"
+
+# Utilities
+strum = { version = "0.27", features = ["derive"] }
+anyhow = { version = "1", features = ["backtrace"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+
+# Prompt text input
+oxi-vendor-ratatui-textarea = { path = "../oxi-vendor-ratatui-textarea" }
+oxi-vendor-ratatui-inline = { path = "../oxi-vendor-ratatui-inline" }
+
+# ACP
+agent-client-protocol = { version = "0.10.4", features = ["unstable"] }
+oxi-vendor-grok-shim = { path = "../oxi-vendor-grok-shim" }
+# shim covers this
+# shim covers this
+# shim covers this
+# shim covers this
+oxi-vendor-grok-paths = { path = "../oxi-vendor-grok-paths" }
+
+# Base64 encoding for image data
+base64 = "0.22"
+
+# Image decoding/resizing for clipboard image validation before send
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg", "tiff", "gif", "webp"] }
+
+# ID generation
+uuid = { version = "1", features = ["serde", "v4", "v5"] }
+
+# Path computation
+dirs = "5.0"
+shellexpand = "3.1"
+
+# Parsing
+url = "2"
+
+# Hot-reload config (dev mode)
+notify = "8"
+
+# libc: poll/read for non-blocking terminal reads in theme/osc11.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# EnumDisplaySettingsW for primary-display refresh probe (host/display_refresh).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Graphics_Gdi"] }
+
+[dev-dependencies]
+pretty_assertions = "1"
+serial_test = "3"
+tempfile = "3"
+
+[features]
+# Exposes `#[cfg(test)]` test-only helpers (mock setters, test guards,
+# deterministic pinning) to downstream crates' test builds. Enabled by
+test-support = []
+# CI builds a single shared rlib variant per crate, so the pager's CI
+# test target links the same render lib as production. Enabling the test-only
+# helpers in the CI default set keeps them present for the pager test while
+# leaving cargo's `default` (and thus cargo production builds) without them.
+# The helpers are inert unless their mock setters are called.
+default-bazel = ["test-support"]

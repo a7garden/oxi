@@ -4,10 +4,10 @@
 # Upstream crate: xai-grok-markdown-core. See NOTICE-vendored.md.
 name = "oxi-vendor-grok-markdown-core"
 version = "0.1.0"
-edition.workspace = true
+edition = "2024"
 rust-version.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
 repository = "https://github.com/xai-org/grok-build"
 [dependencies]
-pulldown-cmark = { workspace = true }
+pulldown-cmark = "0.13"

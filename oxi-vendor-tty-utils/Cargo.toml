@@ -1,0 +1,18 @@
+[package]
+name = "oxi-vendor-tty-utils"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Lightweight process-spawning utilities for TTY safety — detach from controlling terminal, suppress interactive pagers, process-group lifecycle"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", features = ["poll", "process", "signal", "sched", "term", "mount", "fs", "ioctl", "mman", "reboot", "user"]}
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Security", "Win32_Security_Authorization", "Win32_Foundation", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Console", "Win32_System_Pipes"] }
+
+[lints]
