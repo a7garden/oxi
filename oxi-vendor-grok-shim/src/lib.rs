@@ -12,3 +12,7 @@ pub mod telemetry;
 pub mod tools;
 pub mod ui_config;
 pub mod workspace;
+/// Stub for RemoteAnnouncement.
+pub struct RemoteAnnouncement;
+/// Stub for sandbox profile_name.
+pub fn sandbox_profile_name() -> Option<String> { None }

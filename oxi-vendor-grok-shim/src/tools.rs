@@ -7,3 +7,7 @@ pub mod util {
     }
     pub fn detach_std_command(_cmd: &mut std::process::Command) {}
 }
+/// Stub for skill_name_from_path.
+pub fn skill_name_from_path(path: &str) -> String {
+    path.to_string()
+}
