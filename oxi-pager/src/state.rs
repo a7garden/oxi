@@ -15,6 +15,9 @@ pub struct PagerState {
     pub status: StatusState,
     pub sticky_panels: StickyPanelState,
     pub modal: Option<ModalKind>,
+    /// When `Some(instant)`, user pressed quit once within the 2s window.
+    #[doc(hidden)]
+    pub confirm_quit: Option<std::time::Instant>,
 }
 
 pub type SharedState = Arc<RwLock<PagerState>>;

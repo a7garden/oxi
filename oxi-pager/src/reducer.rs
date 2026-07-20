@@ -1,7 +1,7 @@
 // reduce — pure state-update function.
 
+use std::time::Duration;
 use oxi_agent::events::AgentEvent;
-
 use crate::emitter::PagerEvent;
 use crate::state::{ModalKind, PagerState};
 
@@ -27,23 +27,28 @@ pub enum AgentCmd {
 
 #[derive(Debug, Clone)]
 pub enum TermCmd { Stub }
-
 #[derive(Debug, Clone)]
 pub enum Sound { Stub }
-
 #[derive(Debug, Default)]
-pub struct ModalCtx {
-    pub payload: Option<Box<dyn std::any::Any + Send + Sync>>,
-}
-
+pub struct ModalCtx { pub payload: Option<Box<dyn std::any::Any + Send + Sync>> }
 #[derive(Debug)]
 pub enum ExitReason { UserQuit, AgentDone, Error(String) }
+
+const QUIT_CONFIRM_MS: u64 = 2000;
 
 pub fn reduce(state: &mut PagerState, event: PagerEvent) -> Vec<PagerAction> {
     match event {
         PagerEvent::Agent(agent_ev) => reduce_agent(state, *agent_ev),
-        PagerEvent::Input(_) => Vec::new(),
-        PagerEvent::Tick => { state.status.tick(); vec![PagerAction::Render] }
+        PagerEvent::Input(..) => Vec::new(),
+        PagerEvent::Tick => {
+            if state.confirm_quit.is_some()
+                && state.confirm_quit.unwrap().elapsed() >= Duration::from_millis(QUIT_CONFIRM_MS)
+            {
+                state.confirm_quit = None;
+            }
+            state.status.tick();
+            vec![PagerAction::Render]
+        }
         PagerEvent::Background(_) => Vec::new(),
     }
 }

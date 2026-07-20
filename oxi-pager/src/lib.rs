@@ -15,6 +15,7 @@ pub mod slash;
 pub mod state;
 pub mod status;
 pub mod theme_bridge;
+pub mod widgets;
 
 pub use emitter::{BackgroundEvent, PagerEvent, ResolvedKey};
 pub use keymap::{FocusTarget, KeyRouter, ModalInput};
@@ -27,7 +28,4 @@ pub use scrollback::ScrollbackState;
 pub use state::{ModalKind, PagerState, SharedState, StickyPanelState};
 pub use status::StatusState;
 
-/// Returns the crate version.
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+pub fn version() -> &'static str { env!("CARGO_PKG_VERSION") }
