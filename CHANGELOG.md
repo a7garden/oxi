@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Clippy publish blocker** — resolved 33 clippy errors under
+- **Clippy publish blocker** — resolved 34 clippy errors under
   `-D warnings` (default + `native-browser` features) that were blocking
   the `publish.yml` `verify` job:
   - 29 missing-doc diagnostics across `oxi_as_server.rs`, `ask.rs`,
@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `parking_lot::RwLockReadGuard` is now dropped at the end of the
     handler-lookup statement, before any `.await` runs.
   - 2 unused imports / dead constants.
+  - 1 `vec_init_then_push` in `oxi-sandbox/src/linux.rs::build_bwrap_args`
+    (Linux-only module, invisible to macOS clippy — caught by CI on ubuntu).
 
 ### Added
 

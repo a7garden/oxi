@@ -64,22 +64,22 @@ impl Sandbox {
 
 /// Build bwrap arguments for the given profile.
 fn build_bwrap_args(profile: &SandboxProfile) -> Vec<&'static str> {
-    let mut args = Vec::new();
-
     // Minimal root filesystem
-    args.push("--ro-bind");
-    args.push("/usr");
-    args.push("/usr");
-    args.push("--ro-bind");
-    args.push("/lib");
-    args.push("/lib");
-    args.push("--ro-bind");
-    args.push("/lib64");
-    args.push("/lib64");
-    args.push("--proc");
-    args.push("/proc");
-    args.push("--dev");
-    args.push("/dev");
+    let mut args = vec![
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--ro-bind",
+        "/lib",
+        "/lib",
+        "--ro-bind",
+        "/lib64",
+        "/lib64",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+    ];
 
     // Working directory access
     match profile {
