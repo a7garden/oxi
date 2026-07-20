@@ -10,6 +10,7 @@ description = "Pager state machine + emitter + reducer for the oxi-cli TUI"
 [dependencies]
 oxi-tui = { path = "../oxi-tui" }
 oxi-agent = { path = "../oxi-agent" }
+oxi-ai = { path = "../oxi-ai" }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 crossterm = "0.29"

@@ -1,73 +1,72 @@
-// reduce — pure state-update function. PR-2 ships a stub that returns
-// an empty action list; PR-5 fills in the full body per spec §4.
-//
-// The reducer is `&mut PagerState -> Vec<PagerAction>`, no async, no
-// external calls. This keeps the lock-guard-borrowed-across-await
-// pattern safe (AGENTS.md pitfall).
+// reduce — pure state-update function.
+
+use oxi_agent::events::AgentEvent;
 
 use crate::emitter::PagerEvent;
 use crate::state::{ModalKind, PagerState};
 
-/// A command the main loop should execute after `reduce` returns.
 #[derive(Debug)]
 pub enum PagerAction {
-    /// Trigger a render pass.
     Render,
-    /// Send a command to the agent.
     SendToAgent(AgentCmd),
-    /// Execute a raw terminal operation.
     SendToTerminal(TermCmd),
-    /// Play a sound (1차 no-op).
     PlaySound(Sound),
-    /// Reschedule the next tick.
     ScheduleTick(u64),
-    /// Open a modal overlay.
     OpenModal(ModalKind, ModalCtx),
-    /// Close the current modal.
     CloseModal,
-    /// Quit the TUI.
     Quit(ExitReason),
 }
 
 #[derive(Debug, Clone)]
 pub enum AgentCmd {
-    /// Submit a user message to the agent.
     SubmitUserMessage { text: String },
-    /// Cancel the in-flight agent run.
     Cancel,
-    /// Approve a tool call.
     ApproveTool { call_id: String },
-    /// Deny a tool call.
     DenyTool { call_id: String, reason: String },
 }
 
 #[derive(Debug, Clone)]
-pub enum TermCmd {
-    /// Reserved for OSC 8 / cursor / etc. — see PR-7.
-    Stub,
-}
+pub enum TermCmd { Stub }
 
 #[derive(Debug, Clone)]
-pub enum Sound {
-    Stub,
-}
+pub enum Sound { Stub }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ModalCtx {
-    /// Opaque context passed to the overlay factory. PR-6 will type this.
     pub payload: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
-#[derive(Debug, Clone)]
-pub enum ExitReason {
-    UserQuit,
-    AgentDone,
-    Error(String),
+#[derive(Debug)]
+pub enum ExitReason { UserQuit, AgentDone, Error(String) }
+
+pub fn reduce(state: &mut PagerState, event: PagerEvent) -> Vec<PagerAction> {
+    match event {
+        PagerEvent::Agent(agent_ev) => reduce_agent(state, *agent_ev),
+        PagerEvent::Input(_) => Vec::new(),
+        PagerEvent::Tick => { state.status.tick(); vec![PagerAction::Render] }
+        PagerEvent::Background(_) => Vec::new(),
+    }
 }
 
-/// Pure state-update function. PR-2 stub: returns no actions.
-pub fn reduce(_state: &mut PagerState, _event: PagerEvent) -> Vec<PagerAction> {
-    Vec::new()
+fn reduce_agent(state: &mut PagerState, event: AgentEvent) -> Vec<PagerAction> {
+    use AgentEvent::*;
+    match event {
+        MessageUpdate { delta, .. } => {
+            if let Some(text) = delta { state.scrollback.append_token(&text); }
+            vec![PagerAction::Render]
+        }
+        MessageStart { .. } => { state.scrollback.begin_assistant(); vec![PagerAction::Render] }
+        MessageEnd { .. } => { state.scrollback.end_assistant(); vec![PagerAction::Render] }
+        ToolExecutionStart { tool_name, tool_call_id, .. } => {
+            state.scrollback.begin_tool_call(&tool_name, &tool_call_id);
+            vec![PagerAction::Render]
+        }
+        ToolExecutionEnd { .. } => { state.scrollback.end_tool_call(""); vec![PagerAction::Render] }
+        ToolError { error, .. } => { state.status.set_error(error); vec![PagerAction::Render] }
+        Error { .. } => vec![PagerAction::Render],
+        AgentStart { .. } | AgentEnd { .. } => vec![PagerAction::Render],
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -76,9 +75,18 @@ mod tests {
     use crate::state::PagerState;
 
     #[test]
-    fn reduce_stub_returns_empty_for_any_event() {
+    fn reduce_tick_triggers_render() {
         let mut state = PagerState::default();
         let actions = reduce(&mut state, PagerEvent::Tick);
-        assert!(actions.is_empty(), "PR-2 reducer is a no-op");
+        assert!(actions.iter().any(|a| matches!(a, PagerAction::Render)));
+    }
+
+    #[test]
+    fn reduce_agent_start_triggers_render() {
+        let mut state = PagerState::default();
+        let actions = reduce(&mut state, PagerEvent::Agent(Box::new(
+            AgentEvent::AgentStart { prompts: vec![], session_id: None },
+        )));
+        assert!(actions.iter().any(|a| matches!(a, PagerAction::Render)));
     }
 }
