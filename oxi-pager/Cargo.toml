@@ -12,6 +12,6 @@ oxi-tui = { path = "../oxi-tui" }
 oxi-agent = { path = "../oxi-agent" }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
-crossterm = "0.28"
+crossterm = "0.29"
 tracing = "0.1"
 anyhow = "1"

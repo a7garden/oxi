@@ -9,16 +9,16 @@
 #![forbid(unsafe_code)]
 
 pub mod emitter;
+pub mod keymap;
 pub mod reducer;
 pub mod state;
 
 pub use emitter::{BackgroundEvent, PagerEvent, ResolvedKey};
-pub use reducer::{
-    reduce, AgentCmd, ExitReason, ModalCtx, PagerAction, Sound, TermCmd,
-};
+pub use keymap::{FocusTarget, KeyRouter, ModalInput};
+pub use reducer::{AgentCmd, ExitReason, ModalCtx, PagerAction, Sound, TermCmd, reduce};
 pub use state::{
-    AgentMetaState, ModalKind, PagerState, PromptState, ScrollbackState, SharedState,
-    StickyPanelState, StatusState,
+    AgentMetaState, ModalKind, PagerState, PromptState, ScrollbackState, SharedState, StatusState,
+    StickyPanelState,
 };
 
 /// Returns the crate version (matches `Cargo.toml`).

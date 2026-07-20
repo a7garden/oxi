@@ -78,4 +78,3 @@ pub enum ModalKind {
     Skill,
     ToolConfirm,
 }
-

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-pager"]
+members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-pager", "oxi-sandbox"]
 exclude = ["scripts"]
 
 # Shared defaults inherited by every workspace member. Members can override
@@ -25,6 +25,7 @@ nucleo = "0.5"
 linkify = "0.10"
 regex = "1"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy", "regex-onig"] }
+serde = { version = "1", features = ["derive"] }
 
 [profile.release]
 opt-level = 3
