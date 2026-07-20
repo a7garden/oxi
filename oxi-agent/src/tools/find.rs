@@ -1,15 +1,15 @@
 use super::path_security::PathGuard;
 /// Find tool - find files by name or pattern
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
+use glob::Pattern;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use glob::Pattern;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 /// Typed arguments for [`FindTool`].
 #[derive(Deserialize, JsonSchema)]
@@ -27,7 +27,9 @@ pub struct FindArgs {
     follow_symlinks: bool,
 }
 
-fn default_find_results() -> usize { 100 }
+fn default_find_results() -> usize {
+    100
+}
 
 /// FindTool.
 pub struct FindTool {
@@ -378,8 +380,8 @@ impl AgentTool for FindTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: FindArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: FindArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -395,11 +397,26 @@ impl TypedTool for FindTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path = &args.path;
-        if let Some(ref resolver) = ctx.url_resolver && resolver.can_resolve(path) {
-            return Ok(AgentToolResult::error("find does not support internal URLs. Use grep for searching URL content."));
+        if let Some(ref resolver) = ctx.url_resolver
+            && resolver.can_resolve(path)
+        {
+            return Ok(AgentToolResult::error(
+                "find does not support internal URLs. Use grep for searching URL content.",
+            ));
         }
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-        match Self::find_impl(root, path, args.name.as_deref(), args.file_type.as_deref(), args.max_depth, args.max_results, &args.exclude, args.follow_symlinks).await {
+        match Self::find_impl(
+            root,
+            path,
+            args.name.as_deref(),
+            args.file_type.as_deref(),
+            args.max_depth,
+            args.max_results,
+            &args.exclude,
+            args.follow_symlinks,
+        )
+        .await
+        {
             Ok(output) => Ok(AgentToolResult::success(output)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }

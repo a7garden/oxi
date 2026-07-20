@@ -60,7 +60,6 @@ pub trait TypedTool: Send + Sync + 'static {
     ) -> Result<AgentToolResult, ToolError>;
 }
 
-
 /// [`TypedTool`] 을 [`AgentTool`] 로 소거하는 어댑터.
 ///
 /// [`super::tool_definition_wrapper::DefinitionWrapper`] 와 같은 모양이지만
@@ -76,12 +75,24 @@ impl<T: TypedTool + AgentTool + ?Sized> std::fmt::Debug for TypedToolAdapter<T> 
 }
 #[async_trait]
 impl<T: TypedTool + AgentTool + ?Sized> AgentTool for TypedToolAdapter<T> {
-    fn name(&self) -> &str { self.0.name() }
-    fn label(&self) -> &str { self.0.label() }
-    fn description(&self) -> &str { self.0.description() }
-    fn essential(&self) -> bool { self.0.essential() }
-    fn execution_mode(&self) -> ToolExecutionMode { self.0.execution_mode() }
-    fn parameters_schema(&self) -> serde_json::Value { self.0.parameters_schema() }
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn label(&self) -> &str {
+        self.0.label()
+    }
+    fn description(&self) -> &str {
+        self.0.description()
+    }
+    fn essential(&self) -> bool {
+        self.0.essential()
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        self.0.execution_mode()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.0.parameters_schema()
+    }
 
     async fn execute(
         &self,
@@ -135,9 +146,15 @@ mod tests {
 
     #[async_trait]
     impl AgentTool for EchoTool {
-        fn name(&self) -> &str { "echo" }
-        fn label(&self) -> &str { "echo" }
-        fn description(&self) -> &str { "echo back the message" }
+        fn name(&self) -> &str {
+            "echo"
+        }
+        fn label(&self) -> &str {
+            "echo"
+        }
+        fn description(&self) -> &str {
+            "echo back the message"
+        }
         fn parameters_schema(&self) -> serde_json::Value {
             serde_json::json!({"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]})
         }

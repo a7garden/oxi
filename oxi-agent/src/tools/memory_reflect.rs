@@ -1,9 +1,9 @@
 //! `memory_reflect` tool — persist a session summary to memory.
 
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use crate::tools::typed::TypedTool;
 use serde_json::{Value, json};
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -63,8 +63,8 @@ impl AgentTool for MemoryReflectTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: MemoryReflectArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: MemoryReflectArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }

@@ -5,7 +5,8 @@
 //! 활성 todo / (향후) 서브에이전트 / (향후) background task 상태를 조회해
 //! "Focus areas after compaction:" 섹션을 만든다.
 
-use crate::tools::todo::{TodoPhase, TodoStateProvider, TodoStatus};
+use crate::tools::TodoStateProvider;
+use crate::tools::todo::{TodoPhase, TodoStatus};
 
 /// 컴팩션 시점에 활성 상태를 조회하기 위한 입력 묶음.
 pub struct ActiveReminderInputs<'a> {

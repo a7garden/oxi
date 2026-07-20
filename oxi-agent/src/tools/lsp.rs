@@ -5,9 +5,31 @@
 //! The actual LSP client lives in the (future) `oxi-lsp` crate.
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::sync::oneshot;
 
 use super::{AgentTool, AgentToolResult, LspAction, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
+
+/// Typed arguments for [`LspTool`].
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct LspArgs {
+    action: String,
+    file: Option<String>,
+    #[serde(rename = "oldPath")]
+    old_path: Option<String>,
+    #[serde(rename = "newPath")]
+    new_path: Option<String>,
+    line: Option<u32>,
+    symbol: Option<String>,
+    #[serde(rename = "newName")]
+    new_name: Option<String>,
+    #[serde(default)]
+    apply: bool,
+    query: Option<String>,
+}
 
 /// `lsp` agent tool — IDE-grade code intelligence.
 ///
@@ -64,7 +86,24 @@ impl AgentTool for LspTool {
         &self,
         _tool_call_id: &str,
         params: Value,
-        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let args: LspArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for LspTool {
+    type Args = LspArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let provider = ctx
@@ -72,10 +111,9 @@ impl AgentTool for LspTool {
             .as_ref()
             .ok_or("LSP not configured. Enable LSP in settings or install language servers.")?;
 
+        let params = serde_json::to_value(&args).map_err(|e| format!("serialize: {e}"))?;
         let action = parse_lsp_action(&params)?;
-
         let result = provider.execute_action(&action).await?;
-
         Ok(AgentToolResult::success(result))
     }
 }

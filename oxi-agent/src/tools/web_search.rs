@@ -11,13 +11,13 @@ use super::search_cache::{SearchCache, SearchResult};
 /// - Configurable engine selection and result count
 /// - Zero-config: no API keys, no external binary needed
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 #[allow(dead_code)]
 const DEFAULT_MAX_RESULTS: usize = 10;
@@ -41,8 +41,12 @@ pub struct WebSearchArgs {
     limit: u64,
 }
 
-fn default_web_engines() -> String { "ddg,wiki".to_string() }
-fn default_web_limit() -> u64 { 10 }
+fn default_web_engines() -> String {
+    "ddg,wiki".to_string()
+}
+fn default_web_limit() -> u64 {
+    10
+}
 
 // ── WebSearchTool ─────────────────────────────────────────────────
 
@@ -149,8 +153,8 @@ impl AgentTool for WebSearchTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: WebSearchArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: WebSearchArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, _ctx).await
     }
 }
@@ -169,7 +173,10 @@ impl TypedTool for WebSearchTool {
         let limit = args.limit.min(MAX_RESULTS as u64) as usize;
         let results = self.do_search(&args.query, &args.engines, limit).await?;
         if results.is_empty() {
-            return Ok(AgentToolResult::success(format!("No results found for: {}", args.query)));
+            return Ok(AgentToolResult::success(format!(
+                "No results found for: {}",
+                args.query
+            )));
         }
         let search_id = self.cache.insert(&args.query, results.clone());
         let output = format_results(&results);

@@ -8,13 +8,59 @@ use super::config::BrowseConfig;
 use super::engine::{BrowserEngine, BrowserError};
 use super::helpers;
 use super::tab_guard::TabGuard;
+
+use crate::tools::typed::TypedTool;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, oneshot};
+/// Typed arguments for [`BrowseSessionTool`].
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct BrowseSessionArgs {
+    action: String,
+    url: Option<String>,
+    selector: Option<String>,
+    value: Option<String>,
+    combo: Option<String>,
+    #[serde(default = "default_pixels")]
+    pixels: u64,
+    javascript: Option<String>,
+    #[serde(default = "default_format")]
+    format: String,
+    #[serde(default = "default_timeout_ms")]
+    timeout_ms: u64,
+    #[serde(default = "default_wait_condition")]
+    wait_condition: String,
+    #[serde(rename = "fromSelector")]
+    from_selector: Option<String>,
+    #[serde(rename = "toSelector")]
+    to_selector: Option<String>,
+    #[serde(rename = "filePath")]
+    file_path: Option<String>,
+    #[serde(default = "default_width")]
+    width: u64,
+}
+
+fn default_pixels() -> u64 {
+    300
+}
+fn default_format() -> String {
+    "markdown".to_string()
+}
+fn default_timeout_ms() -> u64 {
+    10000
+}
+fn default_wait_condition() -> String {
+    "network_idle".to_string()
+}
+fn default_width() -> u64 {
+    800
+}
 
 /// Interactive browser session with a persistent tab across calls.
 ///
@@ -262,6 +308,34 @@ impl AgentTool for BrowseSessionTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        let args: BrowseSessionArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for BrowseSessionTool {
+    type Args = BrowseSessionArgs;
+
+    #[allow(clippy::too_many_lines)]
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let params = serde_json::to_value(&args).map_err(|e| format!("serialize: {e}"))?;
+        self.dispatch_action(params).await
+    }
+}
+
+impl BrowseSessionTool {
+    /// Inner dispatch that takes raw JSON params — reused by both
+    /// AgentTool::execute and TypedTool::execute_typed.
+    #[allow(clippy::too_many_lines)]
+    async fn dispatch_action(&self, params: Value) -> Result<AgentToolResult, ToolError> {
         let action = params["action"]
             .as_str()
             .ok_or_else(|| "Missing required parameter: action".to_string())?;
@@ -291,7 +365,6 @@ impl AgentTool for BrowseSessionTool {
             // ── Lifecycle ────────────────────────────────────────────
             "open" => {
                 let mut slot = self.tab.lock().await;
-                // If a session is already open, close it first
                 if let Some(old_guard) = slot.take() {
                     tracing::warn!("browse_session: closing previous session on re-open");
                     old_guard.close().await;
@@ -302,14 +375,9 @@ impl AgentTool for BrowseSessionTool {
                     .await
                     .map_err(|e| format!("Failed to open browser tab: {}", e))?;
 
-                // Store tab_id so the agent loop can include it in
-                // ToolExecutionUpdate events.
                 let tab_id = raw_tab.tab_id();
                 *self.tab_id_slot.lock().lock() = Some(tab_id);
 
-                // Register progress callbacks on the new tab via the
-                // engine's registry. BrowserEvents for this tab will
-                // flow through to ToolExecutionUpdate.
                 self.callbacks
                     .register_on_registry(tab_id, self.engine.callback_registry().as_ref());
 
@@ -323,7 +391,6 @@ impl AgentTool for BrowseSessionTool {
                 match slot.take() {
                     Some(guard) => {
                         guard.close().await;
-                        // Clear the tab_id slot
                         *self.tab_id_slot.lock().lock() = None;
                         Ok(json_ok())
                     }
@@ -486,7 +553,7 @@ impl AgentTool for BrowseSessionTool {
                 tab.wait_for(sel, timeout_ms).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
-            // ── Structured wait (NetworkIdle / lifecycle) ──────────
+
             "wait" => {
                 self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
@@ -494,7 +561,6 @@ impl AgentTool for BrowseSessionTool {
                 let cond = match params["wait_condition"].as_str().unwrap_or("network_idle") {
                     "dom_content_loaded" => super::engine::BrowseWaitCondition::DomContentLoaded,
                     "load" => super::engine::BrowseWaitCondition::Load,
-                    // default + "network_idle"
                     _ => super::engine::BrowseWaitCondition::NetworkIdle,
                 };
                 tab.wait_for_condition(&cond, timeout_ms)
@@ -503,7 +569,7 @@ impl AgentTool for BrowseSessionTool {
                 Ok(json_ok())
             }
 
-            // ── Observe (omp `observe()` parity) ───────────────────
+            // ── Observe ─────────────────────────────────────────────
             "observe" => {
                 self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
@@ -549,7 +615,6 @@ impl AgentTool for BrowseSessionTool {
                         }
                     }
                     _ => {
-                        // "markdown" (default)
                         if let Some(sel) = selector {
                             tab.query_all(sel).await.map_err(browser_err)?.join("\n\n")
                         } else {

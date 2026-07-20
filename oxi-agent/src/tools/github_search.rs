@@ -9,16 +9,16 @@ use super::search_cache::{SearchCache, SearchResult};
 /// - Structured JSON results — no HTML scraping
 /// - Result caching with the shared SearchCache
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
-/// Maximum results to return by default.
-const DEFAULT_MAX_RESULTS: usize = 10;
+/// Default results per response — referenced by `default_gs_limit`.
+const DEFAULT_MAX_RESULTS: u64 = 10;
 
 /// Maximum results allowed (GitHub API max is 100 per page).
 const MAX_RESULTS: usize = 30;
@@ -286,6 +286,7 @@ impl GitHubSearchTool {
     }
 }
 
+/// Arguments accepted by the GitHub code-search tool.
 #[derive(Deserialize, JsonSchema)]
 pub struct GitHubSearchArgs {
     query: String,
@@ -298,10 +299,15 @@ pub struct GitHubSearchArgs {
     limit: u64,
 }
 
-fn default_gs_sort() -> String { "stars".to_string() }
-fn default_gs_order() -> String { "desc".to_string() }
-fn default_gs_limit() -> u64 { 10 }
-
+fn default_gs_sort() -> String {
+    "stars".to_string()
+}
+fn default_gs_order() -> String {
+    "desc".to_string()
+}
+fn default_gs_limit() -> u64 {
+    DEFAULT_MAX_RESULTS
+}
 
 #[async_trait]
 impl AgentTool for GitHubSearchTool {
@@ -358,8 +364,8 @@ impl AgentTool for GitHubSearchTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GitHubSearchArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: GitHubSearchArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, _ctx).await
     }
 }
@@ -375,15 +381,27 @@ impl TypedTool for GitHubSearchTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let sort = match args.sort.as_str() { "forks" | "updated" => args.sort.as_str(), _ => "stars" };
-        let order = match args.order.as_str() { "asc" => "asc", _ => "desc" };
+        let sort = match args.sort.as_str() {
+            "forks" | "updated" => args.sort.as_str(),
+            _ => "stars",
+        };
+        let order = match args.order.as_str() {
+            "asc" => "asc",
+            _ => "desc",
+        };
         let limit = (args.limit as usize).min(MAX_RESULTS);
-        let (total, results) = search_github_repos(&args.query, sort, order, limit, args.language.as_deref()).await?;
+        let (total, results) =
+            search_github_repos(&args.query, sort, order, limit, args.language.as_deref()).await?;
         if results.is_empty() {
-            return Ok(AgentToolResult::success(format!("No GitHub repositories found for: {}", args.query)));
+            return Ok(AgentToolResult::success(format!(
+                "No GitHub repositories found for: {}",
+                args.query
+            )));
         }
-        let search_id = self.cache.insert(&format!("github:{}", args.query),
-            results.iter().map(|r| r.into()).collect());
+        let search_id = self.cache.insert(
+            &format!("github:{}", args.query),
+            results.iter().map(|r| r.into()).collect(),
+        );
         let output = format_github_results(total, &results);
         let results_json: Vec<Value> = results.iter().map(|r| {
             json!({"full_name": r.full_name, "url": r.url, "description": r.description, "language": r.language, "stars": r.stars, "forks": r.forks, "open_issues": r.open_issues, "updated_at": r.updated_at, "topics": r.topics, "license": r.license})

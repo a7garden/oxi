@@ -1,6 +1,6 @@
 [package]
 name = "oxi-pager"
-version = "0.56.0"
+version = "0.57.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,9 +9,9 @@ repository.workspace = true
 description = "Pager state machine + emitter + reducer for the oxi-cli TUI"
 
 [dependencies]
-oxi-tui = { path = "../oxi-tui" }
-oxi-agent = { path = "../oxi-agent" }
-oxi-ai = { path = "../oxi-ai" }
+oxi-tui = { version = "0.57.0", path = "../oxi-tui" }
+oxi-agent = { version = "0.57.0", path = "../oxi-agent" }
+oxi-ai = { version = "0.57.0", path = "../oxi-ai" }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 crossterm = "0.29"

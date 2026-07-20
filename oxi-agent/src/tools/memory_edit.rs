@@ -1,9 +1,9 @@
 //! `memory_edit` tool — update or delete a memory item.
 
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use crate::tools::typed::TypedTool;
 use serde_json::{Value, json};
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -76,8 +76,8 @@ impl AgentTool for MemoryEditTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: MemoryEditArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: MemoryEditArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -96,12 +96,22 @@ impl TypedTool for MemoryEditTool {
         let backend = ctx.memory.as_ref().ok_or("Memory not configured")?;
         if let Some(content) = &args.content {
             let kind = args.kind.as_deref().unwrap_or("fact");
-            let subject = args.subject.as_deref().or(ctx.session_id.as_deref()).unwrap_or("default");
+            let subject = args
+                .subject
+                .as_deref()
+                .or(ctx.session_id.as_deref())
+                .unwrap_or("default");
             backend.put(content, kind, subject).await?;
-            Ok(AgentToolResult::success(format!("Updated memory {} (kind: {}).", args.id, kind)))
+            Ok(AgentToolResult::success(format!(
+                "Updated memory {} (kind: {}).",
+                args.id, kind
+            )))
         } else {
             backend.delete(&args.id).await?;
-            Ok(AgentToolResult::success(format!("Deleted memory {}.", args.id)))
+            Ok(AgentToolResult::success(format!(
+                "Deleted memory {}.",
+                args.id
+            )))
         }
     }
 }
@@ -188,10 +198,7 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert_eq!(
-            result.output,
-            "Updated memory mem-1 (kind: fact)."
-        );
+        assert_eq!(result.output, "Updated memory mem-1 (kind: fact).");
         let puts = mock.puts.lock();
         assert_eq!(puts.len(), 1);
         assert_eq!(puts[0].0, "updated");

@@ -18,14 +18,15 @@
 //! combining the call arguments (the full option list) with the result text
 //! (which option was selected).
 
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
+use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::oneshot;
-
-use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use async_trait::async_trait;
 
 /// Shared bridge between the ask tool (agent thread) and the TUI overlay (main
 /// thread). Created in `oxi-cli`, injected into both the tool and `AppState`.
@@ -225,7 +226,39 @@ pub struct Answer {
 
 // ── Tool ───────────────────────────────────────────────────────────────────
 
-/// The ask tool — asks the user one or more questions via TUI overlay.
+/// Typed arguments for [`AskTool`].
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct AskArgs {
+    questions: Vec<AskArgsQuestion>,
+}
+/// A single question within [`AskArgs`].
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct AskArgsQuestion {
+    id: String,
+    label: Option<String>,
+    prompt: String,
+    #[serde(default)]
+    options: Vec<AskArgsOption>,
+    #[serde(rename = "allowOther")]
+    #[serde(default = "default_true")]
+    allow_other: bool,
+    #[serde(rename = "multiSelect")]
+    #[serde(default)]
+    multi_select: bool,
+    recommended: Option<usize>,
+}
+
+/// An option within a question.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct AskArgsOption {
+    value: String,
+    label: String,
+    description: Option<String>,
+}
+
+/// Tool that surfaces a multiple-choice prompt to the user via the [`AskBridge`].
+///
+/// Blocks the agent loop until the user picks an option or aborts.
 pub struct AskTool {
     bridge: Arc<AskBridge>,
 }
@@ -346,7 +379,24 @@ impl AgentTool for AskTool {
         signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        // 0. Headless guard — refuse in non-interactive mode
+        let args: AskArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, signal, _ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for AskTool {
+    type Args = AskArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        // 0. Headless guard
         if !self.bridge.is_ui_attached() {
             return Ok(AgentToolResult::error(
                 "Ask requires interactive TUI mode. \
@@ -354,26 +404,22 @@ impl AgentTool for AskTool {
             ));
         }
 
-        // 0b. Ownership guard — refuse if no session_id is bound. Mirrors the
-        // issue-system invariant (AGENTS.md "Issue-system ownership identity
-        // (Phase 0 / defect #13)"): a non-empty session_id identifies the
-        // caller for CAS / overlay-ownership checks. Calling attach() without
-        // a session is a programming error in production; the assertion
-        // surfaces it during development.
+        // 0b. Ownership guard
         let session_id = self.bridge.session_id();
         debug_assert!(
             session_id.as_deref().is_some_and(|s| !s.is_empty()),
             "AskBridge was attached without a non-empty session_id; refusing to run"
         );
 
-        // 1. Parse and validate
+        // 1. Serialize args to Value for parse_questions
+        let params = serde_json::to_value(&args).map_err(|e| format!("serialize: {e}"))?;
         let questions = parse_questions(&params)?;
         let timeout = self.bridge.timeout();
 
         // 2. Create oneshot channel
         let (tx, rx) = oneshot::channel();
 
-        // 3. Store in bridge — TUI polls it on the main thread
+        // 3. Store in bridge
         if !self.bridge.set(PendingAsk {
             questions,
             responder: tx,
@@ -383,7 +429,7 @@ impl AgentTool for AskTool {
             return Ok(AgentToolResult::error("Another ask is already pending"));
         }
 
-        // 4. Wait for user response — handle abort via tokio::select!
+        // 4. Wait for user response
         select_with_abort(rx, signal, &self.bridge).await
     }
 }

@@ -6,12 +6,14 @@
 //! - Markdown 라운드트립
 //! - sub-agent 매칭 헬퍼 (⑥ 연동 후 활성화)
 
-use std::fmt;
-
-use async_trait::async_trait;
-use serde_json::{Value, json};
-
+use crate::tools::typed::TypedTool;
 use crate::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::fmt;
+use tokio::sync::oneshot;
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -623,6 +625,29 @@ pub trait TodoStateProvider: Send + Sync {
         Box<dyn std::future::Future<Output = Result<TodoUpdateResult, ToolError>> + Send + 'a>,
     >;
 }
+/// Typed arguments for [`TodoTool`].
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TodoArgs {
+    ops: Vec<TodoOpArg>,
+}
+
+/// A single todo operation in the arguments.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TodoOpArg {
+    op: String,
+    task: Option<String>,
+    phase: Option<String>,
+    items: Option<Vec<String>>,
+    list: Option<Vec<TodoListEntryArg>>,
+}
+
+/// A list entry for `init` op.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TodoListEntryArg {
+    phase: Option<String>,
+    items: Option<Vec<String>>,
+}
+
 // ── TodoTool (AgentTool 구현) ─────────────────────────────────────────
 
 /// `todo` agent tool. 상태 비저장 (상태는 `TodoStateProvider`가 보유).
@@ -688,16 +713,30 @@ impl AgentTool for TodoTool {
         &self,
         _tool_call_id: &str,
         params: Value,
-        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        // v2: 능력 특성 주입 (ToolContext.todo)
+        let args: TodoArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, ctx).await
+    }
+}
+
+#[async_trait]
+impl TypedTool for TodoTool {
+    type Args = TodoArgs;
+
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
         let provider = ctx.todo.as_ref().ok_or("Todo not configured")?;
 
-        let ops_value = params
-            .get("ops")
-            .cloned()
-            .ok_or_else(|| "Missing required parameter: ops".to_string())?;
+        // Serialize ops back to Value for existing deserialization
+        let ops_value = serde_json::to_value(&args.ops).map_err(|e| format!("serialize: {e}"))?;
 
         let ops: Vec<TodoOp> =
             serde_json::from_value(ops_value).map_err(|e| format!("Invalid ops format: {}", e))?;

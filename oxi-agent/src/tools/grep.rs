@@ -1,15 +1,15 @@
 use super::path_security::PathGuard;
 /// Grep tool - search files for patterns
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use regex::RegexBuilder;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use crate::tools::typed::TypedTool;
 
 /// Maximum characters per line in grep output
 const GREP_MAX_LINE_LENGTH: usize = 500;
@@ -411,8 +411,8 @@ impl AgentTool for GrepTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GrepArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: GrepArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -427,7 +427,11 @@ impl TypedTool for GrepTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let path = if args.path.is_empty() { "." } else { &args.path };
+        let path = if args.path.is_empty() {
+            "."
+        } else {
+            &args.path
+        };
         let pattern = &args.pattern;
         let case_insensitive = args.case_insensitive;
         let literal = args.literal;
@@ -463,22 +467,30 @@ impl TypedTool for GrepTool {
                         let start = i.saturating_sub(context);
                         for (j, ctx_line) in lines.iter().enumerate().take(i).skip(start) {
                             let (truncated, was_trunc) = truncate_line(ctx_line);
-                            if was_trunc { lines_truncated = true; }
+                            if was_trunc {
+                                lines_truncated = true;
+                            }
                             matches.push(format!("{}-{}- {}", path, j + 1, truncated));
                         }
                     }
                     let (truncated, was_trunc) = truncate_line(line);
-                    if was_trunc { lines_truncated = true; }
+                    if was_trunc {
+                        lines_truncated = true;
+                    }
                     matches.push(format!("{}:{}: {}", path, i + 1, truncated));
                     if context > 0 {
                         let end = std::cmp::min(lines.len(), i + context + 1);
                         for (j, ctx_line) in lines.iter().enumerate().take(end).skip(i + 1) {
                             let (truncated, was_trunc) = truncate_line(ctx_line);
-                            if was_trunc { lines_truncated = true; }
+                            if was_trunc {
+                                lines_truncated = true;
+                            }
                             matches.push(format!("{}-{}- {}", path, j + 1, truncated));
                         }
                     }
-                    if matches.len() >= max_results { break; }
+                    if matches.len() >= max_results {
+                        break;
+                    }
                 }
             }
             let output = if matches.is_empty() {
@@ -497,7 +509,19 @@ impl TypedTool for GrepTool {
         }
 
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-        match Self::grep_impl(root, pattern, path, case_insensitive, literal, context, context, include, max_results).await {
+        match Self::grep_impl(
+            root,
+            pattern,
+            path,
+            case_insensitive,
+            literal,
+            context,
+            context,
+            include,
+            max_results,
+        )
+        .await
+        {
             Ok((output, lines_truncated)) => {
                 let mut result = AgentToolResult::success(output);
                 if lines_truncated {

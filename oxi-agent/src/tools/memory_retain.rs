@@ -1,9 +1,9 @@
 //! `memory_retain` tool — persist a memory item to the backend.
 
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use crate::tools::typed::TypedTool;
 use serde_json::{Value, json};
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -26,8 +26,12 @@ pub struct MemoryRetainArgs {
     importance: f64,
 }
 
-fn default_retain_kind() -> String { "fact".to_string() }
-fn default_importance() -> f64 { 0.5 }
+fn default_retain_kind() -> String {
+    "fact".to_string()
+}
+fn default_importance() -> f64 {
+    0.5
+}
 
 #[allow(missing_docs)]
 pub struct MemoryRetainTool;
@@ -85,8 +89,8 @@ impl AgentTool for MemoryRetainTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: MemoryRetainArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: MemoryRetainArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -104,14 +108,23 @@ impl TypedTool for MemoryRetainTool {
     ) -> Result<AgentToolResult, ToolError> {
         let backend = ctx.memory.as_ref().ok_or("Memory not configured")?;
         if !VALID_KINDS.contains(&args.kind.as_str()) {
-            return Err(format!("Invalid kind '{}'. Must be one of: fact, preference, context, summary", args.kind));
+            return Err(format!(
+                "Invalid kind '{}'. Must be one of: fact, preference, context, summary",
+                args.kind
+            ));
         }
         if !(0.0..=1.0).contains(&args.importance) {
-            return Err(format!("importance must be between 0.0 and 1.0, got {}", args.importance));
+            return Err(format!(
+                "importance must be between 0.0 and 1.0, got {}",
+                args.importance
+            ));
         }
         let subject = ctx.session_id.as_deref().unwrap_or("default");
         backend.put(&args.content, &args.kind, subject).await?;
-        Ok(AgentToolResult::success(format!("Retained [{}] to memory.", args.kind)))
+        Ok(AgentToolResult::success(format!(
+            "Retained [{}] to memory.",
+            args.kind
+        )))
     }
 }
 

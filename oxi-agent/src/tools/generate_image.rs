@@ -5,14 +5,14 @@
 
 use super::http_client::shared_http_client;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use base64::{Engine, engine::general_purpose};
 use oxi_ai::types::{ImageGenerationRequest, ImageGenerationResponse};
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::env;
-use crate::tools::typed::TypedTool;
 
 /// Default image generation model.
 const DEFAULT_MODEL: &str = "black-forest-labs/flux-1-dev";
@@ -20,6 +20,7 @@ const DEFAULT_MODEL: &str = "black-forest-labs/flux-1-dev";
 /// OpenRouter API base URL.
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
+/// Arguments for image generation.
 #[derive(Deserialize, JsonSchema)]
 pub struct GenerateImageArgs {
     prompt: String,
@@ -232,8 +233,8 @@ impl AgentTool for GenerateImageTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GenerateImageArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: GenerateImageArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, _ctx).await
     }
 }
@@ -253,7 +254,11 @@ impl TypedTool for GenerateImageTool {
             return Err("Prompt cannot be empty".to_string());
         }
         if args.prompt.chars().count() > MAX_PROMPT_LEN {
-            tracing::warn!("Prompt length {} exceeds recommended max {}", args.prompt.chars().count(), MAX_PROMPT_LEN);
+            tracing::warn!(
+                "Prompt length {} exceeds recommended max {}",
+                args.prompt.chars().count(),
+                MAX_PROMPT_LEN
+            );
         }
         let request = ImageGenerationRequest {
             prompt: args.prompt,
@@ -267,7 +272,9 @@ impl TypedTool for GenerateImageTool {
             .map_err(|_| "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. Please set your API key before using the image generation tool.")?;
         let response = self.call_openrouter(&api_key, &request).await?;
         if response.images.is_empty() {
-            return Ok(AgentToolResult::success("Image generation completed but returned no images."));
+            return Ok(AgentToolResult::success(
+                "Image generation completed but returned no images.",
+            ));
         }
         let n_images = response.images.len();
         let mut output = format!("Generated {} image(s).\n\n", n_images);
@@ -276,7 +283,12 @@ impl TypedTool for GenerateImageTool {
         }
         for (i, img_data) in response.images.iter().enumerate() {
             let b64 = general_purpose::STANDARD.encode(img_data);
-            output.push_str(&format!("Image {} ({} bytes, base64):\n{}\n\n", i + 1, img_data.len(), b64));
+            output.push_str(&format!(
+                "Image {} ({} bytes, base64):\n{}\n\n",
+                i + 1,
+                img_data.len(),
+                b64
+            ));
         }
         Ok(AgentToolResult::success(output.trim_end()))
     }

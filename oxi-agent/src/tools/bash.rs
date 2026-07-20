@@ -9,6 +9,7 @@
 /// - Process tree kill on abort/cancel via signal
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -19,7 +20,6 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 /// Environment variables that are blocked from injection via the LLM.
 /// These can be used for privilege escalation, library injection, or path manipulation.
@@ -180,7 +180,9 @@ pub struct BashArgs {
     env: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-fn default_bash_timeout() -> u64 { 120 }
+fn default_bash_timeout() -> u64 {
+    120
+}
 
 /// BashTool.
 pub struct BashTool {
@@ -559,8 +561,8 @@ impl AgentTool for BashTool {
         signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: BashArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: BashArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, signal, ctx).await
     }
 
@@ -584,14 +586,19 @@ impl TypedTool for BashTool {
         if std::env::var_os("OXI_STRICT_BASH").as_deref() == Some(std::ffi::OsStr::new("1"))
             && let Some(reason) = is_dangerous_command(&args.command)
         {
-            return Err(format!("OXI_STRICT_BASH=1 blocked dangerous command: {reason}"));
+            return Err(format!(
+                "OXI_STRICT_BASH=1 blocked dangerous command: {reason}"
+            ));
         }
 
         let cwd = args.cwd.as_deref();
         let timeout = Some(args.timeout);
         let env = args.env.as_ref();
-        let progress_cb = self.progress_callback
-            .lock().expect("progress callback lock poisoned").clone();
+        let progress_cb = self
+            .progress_callback
+            .lock()
+            .expect("progress callback lock poisoned")
+            .clone();
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
         Self::run_command(root, &args.command, cwd, env, timeout, &progress_cb, signal).await
     }
@@ -672,11 +679,7 @@ mod tests {
             .execute("test-4", json!({}), None, &ToolContext::default())
             .await;
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("command")
-        );
+        assert!(result.unwrap_err().contains("command"));
     }
 
     #[tokio::test]

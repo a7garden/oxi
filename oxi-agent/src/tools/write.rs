@@ -10,6 +10,7 @@ use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -17,8 +18,6 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
-
 
 /// Typed arguments for [`WriteTool`].
 #[derive(Deserialize, JsonSchema)]
@@ -228,8 +227,8 @@ impl AgentTool for WriteTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: WriteArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: WriteArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -245,7 +244,8 @@ impl TypedTool for WriteTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
-        let write_result = Self::write_file_impl(root, &args.path, &args.content, args.append).await;
+        let write_result =
+            Self::write_file_impl(root, &args.path, &args.content, args.append).await;
 
         let notify_path = std::path::Path::new(&args.path).to_path_buf();
         let notify_abs = if notify_path.is_absolute() {

@@ -1,11 +1,11 @@
 //! `memory_recall` tool — search the memory backend for relevant items.
 
+use super::{AgentTool, AgentToolResult, MemoryItem, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use crate::tools::typed::TypedTool;
-use super::{AgentTool, AgentToolResult, MemoryItem, ToolContext, ToolError};
 
 /// Default number of results returned by [`MemoryRecallTool`] when `limit` is omitted.
 #[allow(dead_code)]
@@ -22,7 +22,9 @@ pub struct MemoryRecallArgs {
     limit: u64,
 }
 
-fn default_mem_limit() -> u64 { 5 }
+fn default_mem_limit() -> u64 {
+    5
+}
 
 ///
 /// Requires `ctx.memory` to be set; otherwise returns an error.
@@ -75,8 +77,8 @@ impl AgentTool for MemoryRecallTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: MemoryRecallArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: MemoryRecallArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }

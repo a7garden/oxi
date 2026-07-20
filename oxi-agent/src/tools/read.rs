@@ -1,6 +1,7 @@
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use base64::Engine;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
@@ -14,14 +15,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use crate::tools::typed::TypedTool;
 /// Maximum bytes to read for binary detection
 const BINARY_DETECT_BYTES: usize = 8192;
 
 /// Supported image extensions and their MIME types
 const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
     ("jpg", "image/jpeg"),
-
     ("jpeg", "image/jpeg"),
     ("png", "image/png"),
     ("gif", "image/gif"),
@@ -342,8 +341,8 @@ impl AgentTool for ReadTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: ReadArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: ReadArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 

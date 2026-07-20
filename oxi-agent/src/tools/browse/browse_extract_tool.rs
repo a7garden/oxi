@@ -7,12 +7,37 @@ use super::config::BrowseConfig;
 use super::engine::{BrowserEngine, BrowserError, BrowserTab};
 use super::helpers;
 use super::tab_guard::TabGuard;
+use crate::tools::typed::TypedTool;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
+/// Typed arguments for [`BrowseExtractTool`].
+#[derive(Deserialize, JsonSchema)]
+pub struct BrowseExtractArgs {
+    url: String,
+    selector: String,
+    #[serde(default = "default_extract")]
+    extract: String,
+    #[serde(default = "default_true")]
+    all: bool,
+    #[serde(default = "default_timeout")]
+    timeout: u64,
+}
+
+fn default_extract() -> String {
+    "text".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_timeout() -> u64 {
+    30
+}
 
 /// Extract structured data from a web page using CSS selectors.
 ///
@@ -20,6 +45,7 @@ use tokio::sync::oneshot;
 /// matching the given CSS selector.
 pub struct BrowseExtractTool {
     engine: Arc<dyn BrowserEngine>,
+    #[allow(dead_code)]
     config: BrowseConfig,
     /// Shared callback management (progress + browse progress).
     callbacks: super::callback_mixin::BrowseCallbacks,
@@ -121,23 +147,31 @@ impl AgentTool for BrowseExtractTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let url = params["url"]
-            .as_str()
-            .ok_or_else(|| "Missing required parameter: url".to_string())?;
+        let args: BrowseExtractArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
+        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
+    }
+}
 
-        let selector = params["selector"]
-            .as_str()
-            .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+#[async_trait]
+impl TypedTool for BrowseExtractTool {
+    type Args = BrowseExtractArgs;
 
-        let extract = params["extract"].as_str().unwrap_or("text");
-        let all = params["all"].as_bool().unwrap_or(true);
-        let timeout_secs = params["timeout"]
-            .as_u64()
-            .unwrap_or(self.config.page_timeout_secs);
+    async fn execute_typed(
+        &self,
+        _tool_call_id: &str,
+        args: Self::Args,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let url = &args.url;
+        let selector = &args.selector;
+        let extract = &args.extract;
+        let all = args.all;
+        let timeout_secs = args.timeout;
 
         tracing::info!(url = %url, selector = %selector, extract = %extract, "extracting page data");
 
-        // Wrap the entire operation in a timeout
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             self.extract_from_new_tab(url, selector, extract, all),

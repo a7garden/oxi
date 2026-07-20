@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
-use tokio::sync::{mpsc, oneshot, broadcast, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use url::Url;
@@ -178,10 +178,21 @@ impl WebSocketTransport {
 #[async_trait]
 impl McpTransport for WebSocketTransport {
     async fn request(&mut self, id: u64, json: &str) -> Result<RawJsonRpcMessage> {
+        // WS-2: Ensure connected before sending.
+        self.ensure_connected().await?;
+
         let mut rx = self.state.lock().inbound_rx.resubscribe();
         {
-            let s = self.state.lock();
-            s.outbound_tx.send(json.to_string()).map_err(|_| anyhow::anyhow!("request channel closed"))?;
+            let mut s = self.state.lock();
+            s.outbound_tx
+                .send(json.to_string())
+                .map_err(|_| anyhow::anyhow!("request channel closed"))?;
+
+            // WS-3: Add to replay buffer for potential retransmission.
+            if s.replay_buf.len() >= REPLAY_BUFFER_CAP {
+                s.replay_buf.pop_front();
+            }
+            s.replay_buf.push_back((id, json.to_string()));
         }
 
         tokio::time::timeout(REQUEST_TIMEOUT, async {
@@ -189,10 +200,16 @@ impl McpTransport for WebSocketTransport {
                 match rx.recv().await {
                     Ok(msg) => {
                         if msg.id == Some(id) {
+                            // WS-3: Remove from replay buffer on successful response.
+                            let mut s = self.state.lock();
+                            s.replay_buf.retain(|(i, _)| *i != id);
                             return Ok(msg);
                         }
-                        // Non-matching messages are dropped (notifications handled
-                        // in a future dispatch loop).
+                        // WS-1: Dispatch non-matching messages to InboundHandler.
+                        let mut s = self.state.lock();
+                        if let Some(ref mut handler) = s.handler {
+                            let _ = handler(msg);
+                        }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("inbound lagged, skipped {n}");
@@ -208,6 +225,7 @@ impl McpTransport for WebSocketTransport {
     }
 
     async fn notify(&mut self, json: &str) -> Result<()> {
+        self.ensure_connected().await?;
         self.state
             .lock()
             .outbound_tx
@@ -232,6 +250,34 @@ impl McpTransport for WebSocketTransport {
 
     fn is_connected(&self) -> bool {
         self.state.lock().connection_state == ConnectionState::Connected
+    }
+}
+
+impl WebSocketTransport {
+    /// WS-2: Ensure the transport is connected, reconnecting if necessary.
+    pub async fn ensure_connected(&self) -> Result<()> {
+        if !self.is_connected() {
+            // Preserve replay buffer before reconnect.
+            let replay: Vec<(u64, String)> = {
+                let s = self.state.lock();
+                s.replay_buf.iter().cloned().collect()
+            };
+
+            Self::connect_inner(&self.state, &self.url).await?;
+
+            // WS-3: Retransmit replay buffer after reconnect.
+            if !replay.is_empty() {
+                let s = self.state.lock();
+                for (_id, json) in &replay {
+                    let _ = s.outbound_tx.send(json.clone());
+                }
+                tracing::info!(
+                    "replayed {} in-flight requests after reconnect",
+                    replay.len()
+                );
+            }
+        }
+        Ok(())
     }
 }
 

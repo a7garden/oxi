@@ -1,4 +1,15 @@
-//! oxi-sandbox — PR-D1 스켈레톤.
+//! oxi-sandbox — sandboxed command execution.
+//!
+//! Provides platform-specific sandbox implementations:
+//! - macOS: `sandbox-exec(1)`
+//! - Linux: `bwrap(1)` (bubblewrap)
+//! - Other: noop fallback
+
+#[cfg_attr(target_os = "macos", path = "macos.rs")]
+#[cfg_attr(target_os = "linux", path = "linux.rs")]
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), path = "noop.rs")]
+mod platform;
+pub use platform::Sandbox;
 
 use std::path::{Path, PathBuf};
 
@@ -44,8 +55,15 @@ pub struct PolicyRules {
     pub allowed_write_paths: Vec<PathBuf>,
     /// 네트워크 허용 호스트.
     pub allowed_network_hosts: Vec<String>,
+    /// 네트워크 접근 허용 여부.
+    #[serde(default = "default_network_access")]
+    pub network_access: bool,
     /// 차단 env var (예: `LD_PRELOAD`). 비어있으면 차단 안 함.
     pub blocked_env_vars: Vec<String>,
+}
+
+fn default_network_access() -> bool {
+    true
 }
 
 /// Sandbox 오류.
@@ -57,6 +75,12 @@ pub enum SandboxError {
     /// 워크스페이스 경로 부재 / 잘못됨.
     #[error("invalid workspace path: {0}")]
     InvalidWorkspace(PathBuf),
+    /// 실행 오류 (명령어 실패 or sandbox 미설치).
+    #[error("sandbox execution error: {0}")]
+    Execution(String),
+    /// 설정 오류.
+    #[error("sandbox config error: {0}")]
+    Config(String),
     /// 정책 위반.
     #[error("sandbox policy violation: target={target}, op={op}")]
     PolicyViolation { target: String, op: String },
@@ -125,6 +149,15 @@ impl SandboxManager {
         }
     }
 
+    /// Run a command within the configured sandbox profile.
+    ///
+    /// Delegates to the platform-specific [`Sandbox::run`] implementation.
+    /// On macOS uses `sandbox-exec`, on Linux uses `bwrap`, on other
+    /// platforms runs without isolation.
+    pub fn run_command(&self, command: &str, args: &[&str]) -> Result<String, SandboxError> {
+        Sandbox::run(&self.profile, command, args)
+    }
+
     /// 경로가 workspace 내부인지 검사.
     pub fn is_within_workspace(&self, path: &Path) -> bool {
         path.starts_with(&self.workspace_root)
@@ -167,6 +200,7 @@ mod tests {
             allowed_read_paths: vec![PathBuf::from("/usr")],
             allowed_write_paths: vec![PathBuf::from("/workspace")],
             allowed_network_hosts: vec!["api.example.com".into()],
+            network_access: true,
             blocked_env_vars: vec!["LD_PRELOAD".into()],
         };
         let p = SandboxProfile::Custom(policy.clone());

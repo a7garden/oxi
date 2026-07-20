@@ -2,6 +2,7 @@ use super::path_security::PathGuard;
 /// Ls tool - list directory contents
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::tools::truncate::{TruncationOptions, format_bytes, truncate_head};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -9,7 +10,6 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 /// Typed arguments for [`LsTool`].
 #[derive(Deserialize, JsonSchema)]
@@ -272,8 +272,8 @@ impl AgentTool for LsTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: LsArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: LsArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -288,7 +288,11 @@ impl TypedTool for LsTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let path = if args.path.is_empty() { "." } else { &args.path };
+        let path = if args.path.is_empty() {
+            "."
+        } else {
+            &args.path
+        };
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
         match Self::ls_impl(root, path, args.all, args.long_format, args.entry_limit).await {
             Ok(output) => Ok(AgentToolResult::success(output)),

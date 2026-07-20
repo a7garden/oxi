@@ -14,6 +14,7 @@
 //! Anonymous access works without a key but has lower rate limits.
 
 use crate::tools::http_client::shared_http_client;
+use crate::tools::typed::TypedTool;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -21,7 +22,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -110,6 +110,7 @@ struct LibraryResult {
     trust_score: Option<f64>,
 }
 
+/// Arguments for the resolve-library-id sub-tool.
 #[derive(Deserialize, JsonSchema)]
 pub struct Context7ResolveLibraryIdArgs {
     query: String,
@@ -193,10 +194,10 @@ impl AgentTool for Context7ResolveLibraryIdTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: Context7ResolveLibraryIdArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: Context7ResolveLibraryIdArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, _ctx).await
-}
+    }
 }
 
 #[async_trait]
@@ -212,19 +213,33 @@ impl TypedTool for Context7ResolveLibraryIdTool {
     ) -> Result<AgentToolResult, ToolError> {
         let mut request = client()
             .get(format!("{}/v2/libs/search", api_base_url()))
-            .query(&[("query", args.query.as_str()), ("libraryName", args.library_name.as_str())]);
+            .query(&[
+                ("query", args.query.as_str()),
+                ("libraryName", args.library_name.as_str()),
+            ]);
         if let Some(ref key) = *api_key() {
             request = request.bearer_auth(key);
         }
-        let response = request.send().await.map_err(|e| format!("Context7 API request failed: {}", e))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("Context7 API request failed: {}", e))?;
         if !response.status().is_success() {
             return Ok(map_error(response).await);
         }
-        let body: SearchResponse = response.json().await.map_err(|e| format!("Failed to parse Context7 response: {}", e))?;
+        let body: SearchResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse Context7 response: {}", e))?;
         if let Some(error) = body.error {
-            return Ok(AgentToolResult::error(format!("Context7 API error: {}", error)));
+            return Ok(AgentToolResult::error(format!(
+                "Context7 API error: {}",
+                error
+            )));
         }
-        Ok(AgentToolResult::success(format_search_results(&body.results)))
+        Ok(AgentToolResult::success(format_search_results(
+            &body.results,
+        )))
     }
 }
 
@@ -233,16 +248,24 @@ async fn map_error(response: reqwest::Response) -> AgentToolResult {
     let body = response.text().await.unwrap_or_default();
     let hint = key_location_hint();
     let msg = match status.as_u16() {
-        429 => format!("Rate limited or quota exceeded. Add an API key for higher limits: {}", hint),
+        429 => format!(
+            "Rate limited or quota exceeded. Add an API key for higher limits: {}",
+            hint
+        ),
         401 => format!("Invalid API key. Check your key at: {}", hint),
         404 => "Library not found. Use context7_resolve-library-id to get a valid ID.".to_string(),
-        _ => format!("Context7 API error ({}): {}", status, body.chars().take(200).collect::<String>()),
+        _ => format!(
+            "Context7 API error ({}): {}",
+            status,
+            body.chars().take(200).collect::<String>()
+        ),
     };
     AgentToolResult::error(msg)
 }
 
 // ── Tool 2: query-docs ──────────────────────────────────────────────
 
+/// Arguments for the query-docs sub-tool.
 #[derive(Deserialize, JsonSchema)]
 pub struct Context7QueryDocsArgs {
     #[serde(rename = "libraryId")]
@@ -269,8 +292,12 @@ impl Context7QueryDocsTool {
 }
 #[async_trait]
 impl AgentTool for Context7QueryDocsTool {
-    fn name(&self) -> &str { "context7_query-docs" }
-    fn label(&self) -> &str { "Context7: Query Documentation" }
+    fn name(&self) -> &str {
+        "context7_query-docs"
+    }
+    fn label(&self) -> &str {
+        "Context7: Query Documentation"
+    }
     fn description(&self) -> &str {
         "Retrieves and queries up-to-date documentation and code examples from Context7 for any programming library or framework."
     }
@@ -293,8 +320,8 @@ impl AgentTool for Context7QueryDocsTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: Context7QueryDocsArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: Context7QueryDocsArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, _ctx).await
     }
 }
@@ -319,11 +346,17 @@ impl TypedTool for Context7QueryDocsTool {
         if args.research_mode {
             request = request.query(&[("researchMode", "true")]);
         }
-        let response = request.send().await.map_err(|e| format!("Context7 API request failed: {}", e))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("Context7 API request failed: {}", e))?;
         if !response.status().is_success() {
             return Ok(map_error(response).await);
         }
-        let text = response.text().await.map_err(|e| format!("Failed to read Context7 response: {}", e))?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read Context7 response: {}", e))?;
         Ok(AgentToolResult::success(text))
     }
 }

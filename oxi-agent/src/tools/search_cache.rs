@@ -1,4 +1,5 @@
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
@@ -7,7 +8,6 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 // Re-export oxibrowser's SearchResult for all search tools.
 pub use oxibrowser::SearchResult;
@@ -105,7 +105,6 @@ pub struct GetSearchResultsArgs {
 }
 
 impl GetSearchResultsTool {
-
     /// Create a new GetSearchResultsTool with the given cache.
     pub fn new(cache: Arc<SearchCache>) -> Self {
         Self { cache }
@@ -146,8 +145,8 @@ impl AgentTool for GetSearchResultsTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GetSearchResultsArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: GetSearchResultsArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, _ctx).await
     }
 }
@@ -163,11 +162,19 @@ impl TypedTool for GetSearchResultsTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let (query, results) = self.cache.get(&args.search_id)
+        let (query, results) = self
+            .cache
+            .get(&args.search_id)
             .ok_or_else(|| format!("Search not found for ID: {}", args.search_id))?;
         let mut output = format!("Cached results for: \"{}\"\n\n", query);
         for (i, result) in results.iter().enumerate() {
-            output.push_str(&format!("{}. **{}**\n   {}\n   {}\n\n", i + 1, result.title, result.url, result.snippet));
+            output.push_str(&format!(
+                "{}. **{}**\n   {}\n   {}\n\n",
+                i + 1,
+                result.title,
+                result.url,
+                result.snippet
+            ));
         }
         let results_json: Vec<Value> = results.iter().map(|r| {
             json!({"title": r.title, "url": r.url, "snippet": r.snippet, "source": r.source})
@@ -196,7 +203,9 @@ mod rng {
                     .unwrap_or_default()
                     .as_nanos() as u64;
                 ns ^ (thread_id() as u64)
-            } else { s.get() };
+            } else {
+                s.get()
+            };
             x ^= x << 13;
             x ^= x >> 7;
             x ^= x << 17;

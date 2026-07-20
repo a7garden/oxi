@@ -14,6 +14,7 @@ use super::file_mutation_queue::global_mutation_queue;
 use super::hashline_fs::TokioHashlineFs;
 use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use oxi_hashline::parser::split_patch_input;
 use oxi_hashline::patcher::Patcher;
@@ -24,7 +25,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::oneshot;
-use crate::tools::typed::TypedTool;
 
 /// Typed arguments for [`EditTool`].
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -414,8 +414,8 @@ impl AgentTool for EditTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: EditArgs = serde_json::from_value(params)
-            .map_err(|e| format!("invalid params: {e}"))?;
+        let args: EditArgs =
+            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
         self.execute_typed(_tool_call_id, args, _signal, ctx).await
     }
 }
@@ -430,8 +430,8 @@ impl TypedTool for EditTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let params = serde_json::to_value(&args)
-            .map_err(|e| format!("serialization error: {e}"))?;
+        let params =
+            serde_json::to_value(&args).map_err(|e| format!("serialization error: {e}"))?;
         let input = Self::prepare_arguments(&params);
 
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
@@ -442,18 +442,24 @@ impl TypedTool for EditTool {
         };
         match output {
             Ok(output) => {
-                let mut result = AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
+                let mut result =
+                    AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
                 if let Some(line) = output.first_changed_line {
                     result = result.with_metadata(json!({ "firstChangedLine": line }));
                 }
                 if let Some(provider) = ctx.lsp.as_ref() {
                     let notify_path = std::path::Path::new(&input.path).to_path_buf();
-                    let notify_abs = if notify_path.is_absolute() { notify_path }
-                        else { std::path::Path::new(root).join(&notify_path) };
+                    let notify_abs = if notify_path.is_absolute() {
+                        notify_path
+                    } else {
+                        std::path::Path::new(root).join(&notify_path)
+                    };
                     let content_owned = std::fs::read_to_string(&notify_abs).unwrap_or_default();
                     let provider_clone = provider.clone();
                     tokio::spawn(async move {
-                        provider_clone.notify_file_changed(&notify_abs, &content_owned).await;
+                        provider_clone
+                            .notify_file_changed(&notify_abs, &content_owned)
+                            .await;
                     });
                 }
                 Ok(result)
