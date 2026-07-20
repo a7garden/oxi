@@ -1,35 +1,37 @@
 // ScrollbackState — message history with block tracking.
 
-#[derive(Debug, Clone)]
 pub struct RenderedBlock {
     pub id: u64,
     pub kind: BlockKind,
     pub text: String,
+    pub lines: Vec<ratatui::text::Line<'static>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockKind {
     User,
     Assistant,
     ToolCall { name: String, call_id: String },
     ToolResult { call_id: String },
     System,
+    Thinking,
+    Error(String),
 }
 
-#[derive(Debug, Clone)]
 pub struct ScrollbackState {
     pub blocks: Vec<RenderedBlock>,
     pub next_id: u64,
     pub follow_tail: bool,
+    pub scroll_offset: usize,
 }
 
-#[allow(clippy::derivable_impls)]
 impl Default for ScrollbackState {
     fn default() -> Self {
         Self {
             blocks: Vec::new(),
             next_id: 1,
             follow_tail: true,
+            scroll_offset: 0,
         }
     }
 }
@@ -47,6 +49,7 @@ impl ScrollbackState {
             id,
             kind: BlockKind::Assistant,
             text: String::new(),
+            lines: Vec::new(),
         });
         id
     }
@@ -72,6 +75,7 @@ impl ScrollbackState {
                 call_id: call_id.to_string(),
             },
             text: String::new(),
+            lines: Vec::new(),
         });
         id
     }

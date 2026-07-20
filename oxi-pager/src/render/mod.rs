@@ -1,236 +1,280 @@
-//! oxi-pager render entry. The `grok/` and `theme/` subtrees are vendored
-//! verbatim from grok-build (Apache-2.0, © 2023-2026 SpaceXAI — see
-//! NOTICE-vendored.md). This module is the oxi-side adapter that drives
-//! those primitives from `PagerState`.
+//! oxi-pager render entry — grok-build quality TUI rendering.
+//!
+//! Uses vendored grok render primitives (theme, wrapping, glyphs, scrollbar)
+//! from `render/grok/` and `render/theme/` to produce grok's visual identity.
 
 pub mod grok;
 pub mod markdown_streaming;
 pub mod theme;
 
-use crate::render::theme::Theme as GrokTheme;
-use crate::render::theme::md_style;
+use crate::render::theme::Theme;
 use crate::scrollback::{BlockKind, RenderedBlock};
 use crate::state::PagerState;
-use crate::theme_bridge;
-use oxi_tui::theme::Theme;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Margin, Rect},
-    style::{Color, Modifier, Style},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 
-/// Render the full TUI frame from `PagerState`.
-///
-/// Syncs the live oxi theme into grok's global, then lays out:
-/// - chat scrollback (user / assistant / tool blocks)
-/// - token bar (1 row)
-/// - prompt input (3 rows)
-///
-/// Markdown flows through the vendored pipeline
-/// (`oxi_vendor_grok_markdown::render_markdown_ratatui_full` +
-/// `grok::wrapping::word_wrap_lines_with_joiners`) so styled spans, OSC8
-/// hyperlinks, and code-block syntax highlighting all work end-to-end.
-pub fn render(frame: &mut Frame, state: &PagerState, theme: &Theme) {
-    // Sync oxi theme → grok global so vendored render sees the right palette.
-    theme_bridge::apply_oxi_theme(theme);
-    let grok = GrokTheme::current();
+// ── Layout constants ────────────────────────────────────────────────────────
 
+const OUTER_HPAD: u16 = 2;
+const OUTER_VPAD: u16 = 1;
+const ACCENT_WIDTH: u16 = 1;
+const BLOCK_PAD_LEFT: u16 = 2;
+const BLOCK_PAD_RIGHT: u16 = 1;
+const PROMPT_CHROME_LEFT: u16 = 2;
+const MIN_SCROLLBACK: u16 = 5;
+const STATUS_HEIGHT: u16 = 1;
+const PROMPT_HEIGHT: u16 = 3;
+
+// ── Public entry point ──────────────────────────────────────────────────────
+
+pub fn render(frame: &mut Frame, state: &PagerState, theme: &Theme) {
     let area = frame.area();
-    if area.width < 16 || area.height < 4 {
+
+    let hpad = if area.width >= 40 { OUTER_HPAD } else { 0 };
+    let vpad = if area.height >= 16 { OUTER_VPAD } else { 0 };
+    let inner = area.inner(Margin::new(hpad, vpad));
+
+    let layout = Layout::vertical([
+        Constraint::Length(STATUS_HEIGHT),
+        Constraint::Min(MIN_SCROLLBACK),
+        Constraint::Length(PROMPT_HEIGHT),
+    ])
+    .split(inner);
+
+    let status_area = layout[0];
+    let scrollback_area = layout[1];
+    let prompt_area = layout[2];
+
+    frame.render_widget(
+        Paragraph::new("").style(Style::default().bg(theme.bg_base)),
+        area,
+    );
+
+    render_scrollback(frame, scrollback_area, state, theme);
+    render_status(frame, status_area, state, theme);
+    render_prompt(frame, prompt_area, state, theme);
+}
+
+// ── Scrollback ──────────────────────────────────────────────────────────────
+
+fn render_scrollback(frame: &mut Frame, area: Rect, state: &PagerState, theme: &Theme) {
+    let blocks = &state.scrollback.blocks;
+    if blocks.is_empty() {
+        let welcome = Paragraph::new("Welcome to oxi — type a message to begin.")
+            .style(Style::default().fg(theme.gray_dim))
+            .alignment(Alignment::Center);
+        let center = centered_rect(area, 50, 1);
+        frame.render_widget(welcome, center);
         return;
     }
 
-    let inner = area.inner(Margin::new(1, 0));
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),    // scrollback
-            Constraint::Length(1), // token bar
-            Constraint::Length(3), // prompt
-        ])
-        .split(inner);
+    // Convert blocks to wrapped lines
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    let content_width = area
+        .width
+        .saturating_sub(ACCENT_WIDTH + BLOCK_PAD_LEFT + BLOCK_PAD_RIGHT)
+        as usize;
 
-    render_scrollback(frame, chunks[0], state, &grok);
-    render_token_bar(frame, chunks[1], state, &grok);
-    render_prompt(frame, chunks[2], state, &grok);
+    for block in blocks {
+        render_block_to_lines(block, content_width, theme, &mut lines);
+    }
+
+    let scroll_offset = state
+        .scrollback
+        .scroll_offset
+        .min(lines.len().saturating_sub(area.height as usize));
+
+    let visible: Vec<Line> = lines
+        .into_iter()
+        .skip(scroll_offset)
+        .take(area.height as usize)
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(ratatui::text::Text::from(visible))
+            .style(Style::default().bg(theme.bg_base)),
+        area,
+    );
 }
 
-fn render_scrollback(frame: &mut Frame, area: Rect, state: &PagerState, grok: &GrokTheme) {
-    if state.scrollback.blocks.is_empty() {
-        let welcome = format!(
-            " {} {} — waiting",
-            spinner_glyph(state.status.spinner_phase),
-            state.status.model.as_deref().unwrap_or("oxi"),
-        );
+fn render_block_to_lines(
+    block: &RenderedBlock,
+    content_width: usize,
+    theme: &Theme,
+    out: &mut Vec<Line<'_>>,
+) {
+    let (accent_color, bg_color) = block_role_colors(&block.kind, theme);
+
+    // Wrap text to content_width and create styled lines
+    if !block.text.is_empty() {
+        let wrapped = textwrap::wrap(&block.text, content_width);
+        for line_text in wrapped {
+            let mut spans = Vec::new();
+
+            // Accent column
+            let accent_char = if accent_color.is_some() { "┃" } else { " " };
+            spans.push(Span::styled(
+                accent_char.to_string(),
+                Style::default()
+                    .fg(accent_color.unwrap_or(theme.bg_base))
+                    .bg(bg_color),
+            ));
+
+            // Left padding
+            spans.push(Span::styled(
+                " ".repeat(BLOCK_PAD_LEFT as usize),
+                Style::default().bg(bg_color),
+            ));
+
+            // Content
+            spans.push(Span::styled(
+                line_text.to_string(),
+                Style::default().fg(theme.text_primary).bg(bg_color),
+            ));
+
+            // Fill remaining
+            let used: usize = spans.iter().map(|s| s.width()).sum();
+            let total = content_width + ACCENT_WIDTH as usize + BLOCK_PAD_LEFT as usize;
+            if used < total {
+                spans.push(Span::styled(
+                    " ".repeat(total - used),
+                    Style::default().bg(bg_color),
+                ));
+            }
+
+            out.push(Line::from(spans));
+        }
+    }
+}
+
+fn block_role_colors(kind: &BlockKind, theme: &Theme) -> (Option<Color>, Color) {
+    match kind {
+        BlockKind::User => (None, theme.bg_light),
+        BlockKind::Assistant => (None, theme.bg_base),
+        BlockKind::ToolCall { .. } => (Some(theme.accent_tool), theme.bg_dark),
+        BlockKind::ToolResult { .. } => (Some(theme.accent_success), theme.bg_dark),
+        BlockKind::System => (Some(theme.accent_system), theme.bg_dark),
+        BlockKind::Thinking => (Some(theme.accent_thinking), theme.bg_dark),
+        BlockKind::Error(_) => (Some(theme.accent_error), theme.bg_dark),
+    }
+}
+
+// ── Status Bar ──────────────────────────────────────────────────────────────
+
+fn render_status(frame: &mut Frame, area: Rect, state: &PagerState, theme: &Theme) {
+    let mut spans = Vec::new();
+
+    if state.is_streaming {
+        if let Some(model) = &state.status.model {
+            spans.push(Span::styled(
+                format!(" {} ", model),
+                Style::default().fg(theme.accent_assistant).bg(theme.bg_dark),
+            ));
+        }
+    }
+
+    // Spacer fills the bar
+    spans.push(Span::styled(
+        " ".repeat(area.width as usize),
+        Style::default().bg(theme.bg_dark),
+    ));
+
+    let tokens = state.status.tokens_in + state.status.tokens_out;
+    if tokens > 0 {
+        let token_text = format!("⇣{}", format_tokens(tokens));
+        // Right-aligned token count rendered separately
+        let line = Line::from(spans);
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                welcome,
-                Style::new().fg(grok.gray_dim),
-            ))),
+            Paragraph::new(line).style(Style::default().bg(theme.bg_dark)),
             area,
         );
         return;
     }
 
-    let width = area.width.max(8) as usize;
-    let mut items: Vec<ListItem> = Vec::new();
-    let block_count = state.scrollback.blocks.len();
-    for (idx, block) in state.scrollback.blocks.iter().enumerate() {
-        for line in render_block_lines(block, width, grok) {
-            items.push(ListItem::new(line));
-        }
-        if idx + 1 < block_count {
-            items.push(ListItem::new(Line::from(Span::styled(
-                " ",
-                Style::new().fg(grok.gray_dim),
-            ))));
-        }
-    }
-
-    let mut list_state = state.list_state;
-    if state.scrollback.follow_tail {
-        list_state.select(Some(items.len().saturating_sub(1)));
-    }
-    frame.render_stateful_widget(
-        List::new(items).block(Block::default()),
-        area,
-        &mut list_state,
-    );
-}
-
-fn render_block_lines(block: &RenderedBlock, width: usize, grok: &GrokTheme) -> Vec<Line<'static>> {
-    match &block.kind {
-        BlockKind::ToolCall { name, .. } => {
-            let label = format!(" {} {}", spinner_glyph(0), name);
-            vec![Line::from(Span::styled(
-                label,
-                Style::new()
-                    .fg(grok.accent_tool)
-                    .add_modifier(Modifier::DIM),
-            ))]
-        }
-        BlockKind::ToolResult { .. } => {
-            vec![Line::from(Span::styled(
-                block.text.clone(),
-                Style::new().fg(grok.gray),
-            ))]
-        }
-        BlockKind::System => {
-            vec![Line::from(Span::styled(
-                block.text.clone(),
-                Style::new().fg(grok.gray_dim).add_modifier(Modifier::DIM),
-            ))]
-        }
-        BlockKind::User => {
-            let mut lines = Vec::new();
-            lines.push(Line::from(Span::styled(
-                " You",
-                Style::new()
-                    .fg(grok.accent_user)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.extend(wrap_plain(&block.text, width, grok.text_primary));
-            lines
-        }
-        BlockKind::Assistant => {
-            let mut lines = Vec::new();
-            lines.push(Line::from(Span::styled(
-                " Assistant",
-                Style::new()
-                    .fg(grok.accent_assistant)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.extend(render_markdown_wrapped(&block.text, width));
-            lines
-        }
-    }
-}
-
-fn render_markdown_wrapped(text: &str, width: usize) -> Vec<Line<'static>> {
-    let ms = md_style::style();
-    let (out, _checkpoint) =
-        oxi_vendor_grok_markdown::render_markdown_ratatui_full(text, ms, true, None);
-    let (wrapped, _joiners) =
-        crate::render::grok::wrapping::word_wrap_lines_with_joiners(out.lines, width);
-    wrapped
-}
-
-fn wrap_plain(text: &str, width: usize, fg: Color) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    for raw in text.split('\n') {
-        let mut buf = String::new();
-        let mut col: usize = 0;
-        for word in raw.split(' ') {
-            let w = word.chars().count();
-            if col == 0 {
-                buf.push_str(word);
-                col = w;
-            } else if col + 1 + w <= width {
-                buf.push(' ');
-                buf.push_str(word);
-                col += 1 + w;
-            } else {
-                out.push(Line::from(Span::styled(
-                    std::mem::take(&mut buf),
-                    Style::new().fg(fg),
-                )));
-                buf.push_str(word);
-                col = w;
-            }
-        }
-        out.push(Line::from(Span::styled(buf, Style::new().fg(fg))));
-    }
-    if out.is_empty() {
-        out.push(Line::from(Span::styled(String::new(), Style::new().fg(fg))));
-    }
-    out
-}
-
-fn render_token_bar(frame: &mut Frame, area: Rect, state: &PagerState, grok: &GrokTheme) {
-    let model = state.status.model.as_deref().unwrap_or("oxi");
-    let line = format!(
-        " {} {}  in {} · out {}{}",
-        spinner_glyph(state.status.spinner_phase),
-        model,
-        state.status.tokens_in,
-        state.status.tokens_out,
-        if state.status.cost > 0.0 {
-            format!(" · ${:.4}", state.status.cost)
-        } else {
-            String::new()
-        },
-    );
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(line, Style::new().fg(grok.gray)))),
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.bg_dark)),
         area,
     );
 }
 
-fn render_prompt(frame: &mut Frame, area: Rect, state: &PagerState, grok: &GrokTheme) {
-    let text = if state.prompt.text.is_empty() {
-        Span::styled(" Type a message…", Style::new().fg(grok.gray_dim))
+fn format_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+// ── Prompt ──────────────────────────────────────────────────────────────────
+
+fn render_prompt(frame: &mut Frame, area: Rect, state: &PagerState, theme: &Theme) {
+    let focused = !state.waiting_for_input;
+    let border_color = if focused {
+        theme.accent_user
+    } else {
+        theme.gray_dim
+    };
+
+    let mut spans = Vec::new();
+
+    spans.push(Span::styled(
+        "❯ ",
+        Style::default()
+            .fg(if focused { theme.accent_user } else { theme.gray })
+            .bg(theme.bg_dark),
+    ));
+
+    let input = if state.prompt.text.is_empty() {
+        Span::styled(
+            "Type a message...",
+            Style::default().fg(theme.gray_dim).bg(theme.bg_dark),
+        )
     } else {
         Span::styled(
-            format!(" {}", state.prompt.text),
-            Style::new().fg(grok.text_primary),
+            &state.prompt.text,
+            Style::default().fg(theme.text_primary).bg(theme.bg_dark),
         )
     };
+    spans.push(input);
+
+    // Fill remaining width
+    let used: usize = spans.iter().map(|s| s.width()).sum();
+    let remaining = area.width.saturating_sub(4) as usize;
+    if used < remaining {
+        spans.push(Span::styled(
+            " ".repeat(remaining - used),
+            Style::default().bg(theme.bg_dark),
+        ));
+    }
+
+    // Build bordered prompt
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let top = format!("╭{}╮", "─".repeat(inner_width));
+    let bottom = format!("╰{}╯", "─".repeat(inner_width));
+
+    let lines = vec![
+        Line::styled(&top, Style::default().fg(border_color).bg(theme.bg_dark)),
+        Line::from(spans),
+        Line::styled(&bottom, Style::default().fg(border_color).bg(theme.bg_dark)),
+    ];
+
     frame.render_widget(
-        Paragraph::new(Line::from(text))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::new().fg(grok.prompt_border_active))
-                    .title(" Input "),
-            )
-            .wrap(Wrap { trim: true }),
+        Paragraph::new(lines).style(Style::default().bg(theme.bg_dark)),
         area,
     );
 }
 
-fn spinner_glyph(phase: u8) -> &'static str {
-    const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "⠟", "⠻"];
-    FRAMES[(phase as usize) % FRAMES.len()]
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn centered_rect(r: Rect, width: u16, height: u16) -> Rect {
+    let x = r.x + r.width.saturating_sub(width) / 2;
+    let y = r.y + r.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width.min(r.width), height.min(r.height))
 }

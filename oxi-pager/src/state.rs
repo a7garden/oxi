@@ -10,6 +10,8 @@ use std::sync::Arc;
 /// Top-level pager state.
 #[derive(Default)]
 pub struct PagerState {
+    pub is_streaming: bool,
+    pub waiting_for_input: bool,
     pub scrollback: ScrollbackState,
     /// Scroll state for the chat list.
     pub list_state: ListState,

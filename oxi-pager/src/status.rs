@@ -1,5 +1,4 @@
 // StatusState — footer status, spinner, token tracking.
-#[derive(Debug, Clone)]
 pub struct StatusState {
     pub spinner_phase: u8,
     pub tokens_in: u64,
