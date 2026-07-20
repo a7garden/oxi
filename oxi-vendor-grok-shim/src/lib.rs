@@ -16,3 +16,7 @@ pub mod workspace;
 pub struct RemoteAnnouncement;
 /// Stub for sandbox profile_name.
 pub fn sandbox_profile_name() -> Option<String> { None }
+
+// Stubs for grok view/scrollback agent dependencies
+pub mod sampling { pub mod types { pub struct ReasoningEffort; } }
+pub fn env_bool(_key: &str) -> Option<bool> { None }
