@@ -7,7 +7,7 @@
 //     x.f = ..;` test-setup pattern.
 #![warn(clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::field_reassign_with_default))]
-#![allow(unknown_lints, dead_code)]
+#![allow(unknown_lints)]
 
 //! oxi: CLI coding harness
 //!
@@ -41,6 +41,7 @@ pub mod storage; // public for main.rs (packages)
 pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
 pub mod tools;
+pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
 

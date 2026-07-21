@@ -5,12 +5,9 @@
 
 use super::http_client::shared_http_client;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose};
 use oxi_ai::types::{ImageGenerationRequest, ImageGenerationResponse};
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::env;
 
@@ -19,15 +16,6 @@ const DEFAULT_MODEL: &str = "black-forest-labs/flux-1-dev";
 
 /// OpenRouter API base URL.
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
-
-/// Arguments for image generation.
-#[derive(Deserialize, JsonSchema)]
-pub struct GenerateImageArgs {
-    prompt: String,
-    model: Option<String>,
-    size: Option<String>,
-    n: Option<u64>,
-}
 
 /// Maximum prompt length to warn about.
 const MAX_PROMPT_LEN: usize = 4000;
@@ -233,54 +221,62 @@ impl AgentTool for GenerateImageTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GenerateImageArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
-    }
-}
+        // Parse parameters
+        let prompt: String = params
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required parameter: prompt".to_string())?
+            .to_string();
 
-#[async_trait]
-impl TypedTool for GenerateImageTool {
-    type Args = GenerateImageArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        if args.prompt.is_empty() {
+        if prompt.is_empty() {
             return Err("Prompt cannot be empty".to_string());
         }
-        if args.prompt.chars().count() > MAX_PROMPT_LEN {
+
+        if prompt.chars().count() > MAX_PROMPT_LEN {
             tracing::warn!(
                 "Prompt length {} exceeds recommended max {}",
-                args.prompt.chars().count(),
+                prompt.chars().count(),
                 MAX_PROMPT_LEN
             );
         }
+
         let request = ImageGenerationRequest {
-            prompt: args.prompt,
-            model: args.model,
-            size: args.size,
-            n: args.n.map(|v| v as u32),
+            prompt: prompt.clone(),
+            model: params
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            size: params
+                .get("size")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            n: params.get("n").and_then(|v| v.as_u64()).map(|v| v as u32),
             response_format: Some("b64_json".to_string()),
         };
+
         let api_key = env::var("OPENROUTER_API_KEY")
             .or_else(|_| env::var("OPENAI_API_KEY"))
-            .map_err(|_| "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. Please set your API key before using the image generation tool.")?;
+            .map_err(|_| {
+                "OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable is not set. \
+                     Please set your API key before using the image generation tool."
+            })?;
+
         let response = self.call_openrouter(&api_key, &request).await?;
+
         if response.images.is_empty() {
             return Ok(AgentToolResult::success(
                 "Image generation completed but returned no images.",
             ));
         }
+
+        // Format response for the agent
         let n_images = response.images.len();
         let mut output = format!("Generated {} image(s).\n\n", n_images);
+
         if let Some(ref revised) = response.revised_prompt {
             output.push_str(&format!("Revised prompt: {}\n\n", revised));
         }
+
         for (i, img_data) in response.images.iter().enumerate() {
             let b64 = general_purpose::STANDARD.encode(img_data);
             output.push_str(&format!(
@@ -290,6 +286,7 @@ impl TypedTool for GenerateImageTool {
                 b64
             ));
         }
+
         Ok(AgentToolResult::success(output.trim_end()))
     }
 }

@@ -84,43 +84,6 @@ impl ClosureTool {
         }
     }
 }
-impl ClosureTool {
-    /// Typed async closure helper.
-    ///
-    /// Generates the parameters schema via `schemars::schema_for!(Args)` and
-    /// forwards deserialized args to `handler`. Reduces boilerplate for
-    /// SDK consumers implementing custom tools.
-    pub fn new_typed_async<Args, F, Fut>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
-    where
-        Args: schemars::JsonSchema + serde::de::DeserializeOwned + Send + 'static,
-        F: Fn(Args, &ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<AgentToolResult, ToolError>> + Send + 'static,
-    {
-        use std::sync::Arc;
-        let schema = serde_json::to_value(schemars::schema_for!(Args))
-            .unwrap_or_else(|_| serde_json::json!({"type": "object"}));
-        let name_owned: String = name.into();
-        let handler: Arc<F> = Arc::new(handler);
-        Self::new_async(name_owned, description, schema, move |params, ctx| {
-            match serde_json::from_value::<Args>(params) {
-                Ok(args) => {
-                    let handler = handler.clone();
-                    let fut = handler(args, ctx);
-                    Box::pin(fut)
-                }
-                Err(e) => Box::pin(async move {
-                    Err::<AgentToolResult, ToolError>(format!(
-                        "invalid args for typed closure: {e}"
-                    ))
-                }),
-            }
-        })
-    }
-}
 
 #[async_trait]
 impl AgentTool for ClosureTool {
@@ -148,74 +111,5 @@ impl AgentTool for ClosureTool {
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         (self.handler)(params, ctx).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
-
-    #[derive(Debug, Deserialize, JsonSchema)]
-    struct EchoArgs {
-        message: String,
-    }
-
-    fn ctx() -> ToolContext {
-        ToolContext::default()
-    }
-
-    #[tokio::test]
-    async fn new_typed_async_generates_schema() {
-        let tool = ClosureTool::new_typed_async::<EchoArgs, _, _>(
-            "echo",
-            "echo back",
-            |args, _ctx| async move { Ok(AgentToolResult::success(args.message)) },
-        );
-        assert_eq!(tool.name(), "echo");
-        assert_eq!(tool.description(), "echo back");
-        let schema = tool.parameters_schema();
-        assert!(
-            schema.get("properties").is_some(),
-            "schema missing properties: {schema}"
-        );
-    }
-
-    #[tokio::test]
-    async fn new_typed_async_deserializes_args() {
-        let tool = ClosureTool::new_typed_async::<EchoArgs, _, _>(
-            "echo",
-            "echo back",
-            |args, _ctx| async move { Ok(AgentToolResult::success(args.message)) },
-        );
-        let result = tool
-            .execute(
-                "call_1",
-                serde_json::json!({"message": "hello"}),
-                None,
-                &ctx(),
-            )
-            .await
-            .expect("execute ok");
-        assert!(result.success);
-        assert_eq!(result.output, "hello");
-    }
-
-    #[tokio::test]
-    async fn new_typed_async_rejects_invalid_args() {
-        let tool = ClosureTool::new_typed_async::<EchoArgs, _, _>(
-            "echo",
-            "echo back",
-            |args, _ctx| async move { Ok(AgentToolResult::success(args.message)) },
-        );
-        let err = tool
-            .execute("call_1", serde_json::json!({}), None, &ctx())
-            .await
-            .expect_err("missing field should fail");
-        assert!(
-            err.contains("invalid args for typed closure"),
-            "unexpected error: {err}"
-        );
     }
 }

@@ -649,7 +649,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
         "glyph" | "glyph_set" => {
             settings.glyph_set = value
                 .parse()
-                .map_err(|e: String| anyhow::anyhow!("{e}"))?;
+                .map_err(|e: oxi_tui::symbols::UnknownGlyphSet| anyhow::anyhow!("{e}"))?;
         }
         "enable_routing" | "routing" => {
             settings.enable_routing = parse_config_bool(value)?;

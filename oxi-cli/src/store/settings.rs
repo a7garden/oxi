@@ -19,45 +19,12 @@
 // acknowledge the layering violation in this comment so a future
 // contributor doesn't assume the dependency is intentional.
 use anyhow::{Context, Result};
-// use oxi_tui::GlyphSet; // removed — grok pager handles themes
+use oxi_tui::GlyphSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-// Minimal GlyphSet stub (oxi-tui removed — grok pager handles glyphs)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum GlyphSet {
-    #[default]
-    Unicode,
-    Ascii,
-    Nerd,
-}
-
-impl GlyphSet {
-    pub fn label(&self) -> &'static str {
-        match self {
-            GlyphSet::Unicode => "Unicode",
-            GlyphSet::Ascii => "ASCII",
-            GlyphSet::Nerd => "Nerd Font",
-        }
-    }
-}
-
-impl std::str::FromStr for GlyphSet {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "unicode" => Ok(GlyphSet::Unicode),
-            "ascii" => Ok(GlyphSet::Ascii),
-            "nerd" | "nerd_font" | "nerdfont" => Ok(GlyphSet::Nerd),
-            _ => Err(format!("unknown glyph set: {s}")),
-        }
-    }
-}
-
 
 /// Current settings format version.
 ///

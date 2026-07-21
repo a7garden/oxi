@@ -45,11 +45,9 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        description: cargo clippy --workspace --all-targets -- -D warnings (vendor test code excluded — see AGENTS.md "Vendored Crates" → "Lint gate policy")
-        entry: cargo clippy --workspace --all-targets --exclude oxi-vendor-grok-markdown --exclude oxi-vendor-grok-markdown-core --exclude oxi-vendor-ratatui-textarea --exclude oxi-vendor-ratatui-inline -- -D warnings
+        description: cargo clippy --workspace --all-targets -- -D warnings
+        entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false
         # clippy is heavy; skip the staged-files optimization.
-        # Vendor crates' test code references upstream APIs that no longer
-        # compile under ratatui 0.30 — they're excluded here per AGENTS.md.

@@ -9,11 +9,9 @@ use super::config::BrowseConfig;
 use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
-use crate::tools::typed::TypedTool;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -420,18 +418,7 @@ async fn execute_single_step(
 
 // ── BrowseScriptTool ──────────────────────────────────────────────────────────
 
-/// Typed arguments for [`BrowseScriptTool`].
-#[derive(Deserialize, JsonSchema)]
-pub struct BrowseScriptArgs {
-    script: String,
-    #[serde(default = "default_script_timeout")]
-    timeout: u64,
-}
-
-fn default_script_timeout() -> u64 {
-    60
-}
-
+/// Multi-step browser automation tool.
 pub struct BrowseScriptTool {
     engine: Arc<dyn BrowserEngine>,
     config: BrowseConfig,
@@ -520,25 +507,11 @@ impl AgentTool for BrowseScriptTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: BrowseScriptArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
-    }
-}
+        let script_input = params["script"]
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: script".to_string())?;
 
-#[async_trait]
-impl TypedTool for BrowseScriptTool {
-    type Args = BrowseScriptArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let script_input = &args.script;
-        let timeout_secs = args.timeout;
+        let timeout_secs = params["timeout"].as_u64().unwrap_or(60);
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
 
         // Load script from file if it's a path
@@ -556,8 +529,11 @@ impl TypedTool for BrowseScriptTool {
 
         tracing::info!(steps = steps.len(), "executing browse script");
 
+        // Take the pending progress callback for step-level emission.
+        // The browse callback is registered on the registry separately.
         let progress_cb = self.callbacks.take_progress();
 
+        // Open one tab for the entire script
         let raw_tab = self
             .engine
             .new_tab()
@@ -567,10 +543,12 @@ impl TypedTool for BrowseScriptTool {
         let tab_id = raw_tab.tab_id();
         *self.tab_id_slot.lock().lock() = Some(tab_id);
 
+        // Register progress callback on the registry for BrowserEvent routing.
         if let Some(ref cb) = progress_cb {
             let registry = self.engine.callback_registry();
             registry.set(tab_id, cb.clone());
         }
+        // Register browse callback (still pending, not taken by take_progress).
         self.callbacks
             .register_browse_on_registry(tab_id, self.engine.callback_registry().as_ref());
 
@@ -585,6 +563,7 @@ impl TypedTool for BrowseScriptTool {
         )
         .await?;
 
+        // Build output
         let mut output_parts = Vec::new();
         if !script_result.outputs.is_empty() {
             output_parts.push(script_result.outputs.join("\n"));
@@ -597,6 +576,7 @@ impl TypedTool for BrowseScriptTool {
 
         let mut result = AgentToolResult::success(output_parts.join("\n")).with_metadata(metadata);
 
+        // Attach screenshot if captured
         if let Some(png) = script_result.screenshot {
             let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
             let img = oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));

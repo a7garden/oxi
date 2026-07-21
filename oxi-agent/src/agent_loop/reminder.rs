@@ -5,55 +5,18 @@
 //! 활성 todo / (향후) 서브에이전트 / (향후) background task 상태를 조회해
 //! "Focus areas after compaction:" 섹션을 만든다.
 
-use crate::tools::TodoStateProvider;
-use crate::tools::todo::{TodoPhase, TodoStatus};
+use crate::tools::todo::{TodoPhase, TodoStateProvider, TodoStatus};
 
 /// 컴팩션 시점에 활성 상태를 조회하기 위한 입력 묶음.
+#[derive(Default, Clone)]
 pub struct ActiveReminderInputs<'a> {
-    /// Active todo snapshot source. `None` means no reminder section.
     pub todos: Option<&'a dyn TodoStateProvider>,
-    /// Reserved for future sub-agent counts. PR-C4+.
     #[allow(dead_code)]
     pub subagent_state: Option<()>,
-    /// Reserved for future background-task counts. PR-C4+.
     #[allow(dead_code)]
     pub background_tasks: Option<()>,
-    /// Reserved for future keyword extraction from recent turns.
     #[allow(dead_code)]
     pub last_n_assistant_turns: usize,
-}
-/// Default initializer — every source `None`, turns count 0.
-impl<'a> Default for ActiveReminderInputs<'a> {
-    fn default() -> Self {
-        Self {
-            todos: None,
-            subagent_state: None,
-            background_tasks: None,
-            last_n_assistant_turns: 0,
-        }
-    }
-}
-
-impl<'a> Clone for ActiveReminderInputs<'a> {
-    fn clone(&self) -> Self {
-        Self {
-            todos: self.todos,
-            subagent_state: self.subagent_state,
-            background_tasks: self.background_tasks,
-            last_n_assistant_turns: self.last_n_assistant_turns,
-        }
-    }
-}
-
-impl<'a> std::fmt::Debug for ActiveReminderInputs<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ActiveReminderInputs")
-            .field("todos", &self.todos.map(|p| p.get_phases()))
-            .field("subagent_state", &self.subagent_state)
-            .field("background_tasks", &self.background_tasks)
-            .field("last_n_assistant_turns", &self.last_n_assistant_turns)
-            .finish()
-    }
 }
 
 /// Reminder 문자열 생성기.
@@ -63,16 +26,15 @@ pub struct CompactionReminderBuilder {
 }
 
 impl CompactionReminderBuilder {
-    /// Build a default builder with 800-char cap.
     pub fn new() -> Self {
         Self { max_chars: 800 }
     }
-    /// Override the cap. Pass 0 for unlimited.
+
     pub fn with_max_chars(mut self, max_chars: usize) -> Self {
         self.max_chars = max_chars;
         self
     }
-    /// Render the reminder text. Empty string when no active sources.
+
     pub fn build(&self, inputs: &ActiveReminderInputs<'_>) -> String {
         let mut sections = Vec::new();
 
@@ -151,11 +113,7 @@ fn todo_summary(phases: &[TodoPhase]) -> String {
 
 /// `compaction_instruction` (정적) + reminder (동적) 결합.
 pub fn combine_instruction(static_part: Option<String>, reminder: String) -> Option<String> {
-    let dynamic = if reminder.is_empty() {
-        None
-    } else {
-        Some(reminder)
-    };
+    let dynamic = if reminder.is_empty() { None } else { Some(reminder) };
     match (static_part, dynamic) {
         (None, None) => None,
         (Some(s), None) => Some(s),
@@ -167,8 +125,8 @@ pub fn combine_instruction(static_part: Option<String>, reminder: String) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::ToolError;
     use crate::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, TodoUpdateResult};
+    use crate::tools::ToolError;
 
     #[derive(Debug)]
     struct StubTodos(Vec<TodoPhase>);
@@ -180,8 +138,11 @@ mod tests {
         fn apply_ops<'a>(
             &'a self,
             _ops: Vec<TodoOp>,
-        ) -> std::pin::Pin<Box<dyn Future<Output = Result<TodoUpdateResult, ToolError>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<
+            Box<
+                dyn Future<Output = Result<TodoUpdateResult, ToolError>> + Send + 'a,
+            >,
+        > {
             Box::pin(async move { Err("stub does not accept ops".to_string()) })
         }
     }

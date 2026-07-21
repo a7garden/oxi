@@ -4,42 +4,7 @@ All notable changes to the oxi project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [0.57.0] - 2026-07-20
-
-### Fixed
-
-- **Clippy publish blocker** — resolved 34 clippy errors under
-  `-D warnings` (default + `native-browser` features) that were blocking
-  the `publish.yml` `verify` job:
-  - 29 missing-doc diagnostics across `oxi_as_server.rs`, `ask.rs`,
-    `commit.rs`, `context7.rs`, `generate_image.rs`, `github_search.rs`.
-  - 2 `MutexGuard`-held-across-`.await` bugs in
-    `oxi_as_server.rs::ToolServer::{call_tool, dispatch_hook}` — the
-    `parking_lot::RwLockReadGuard` is now dropped at the end of the
-    handler-lookup statement, before any `.await` runs.
-  - 2 unused imports / dead constants.
-  - 1 `vec_init_then_push` in `oxi-sandbox/src/linux.rs::build_bwrap_args`
-    (Linux-only module, invisible to macOS clippy — caught by CI on ubuntu).
-
-### Added
-
-- **`oxi-pager` publish pipeline** — the new `oxi-pager` crate was
-  unreachable by `cargo publish oxi-cli` (hard path dep, no crates.io
-  presence). Wired into `publish.yml`:
-  - `version = "0.57.0"` added to its `oxi-{tui,agent,ai}` path deps
-    (path-only deps are rejected by `cargo publish`).
-  - Added to the publish matrix after `oxi-sdk`, before `oxi-cli`.
-  - Added `oxi-pager` to `oxi-cli`'s `wait-list` so the publish job
-    blocks until `oxi-pager 0.57.0` is visible on crates.io.
-- **`oxi-sandbox` publish pipeline** — added to matrix, `package-check`
-  leaf list, and `wait-list` early-exit group. README.md added.
-
-### Changed
-
-- **Version bump 0.56.0 → 0.57.0** across all 11 workspace crates with
-  inter-dep version sync (every path dep carries a matching `version`).
-
- ## [0.56.0] - 2026-07-19
+## [0.56.0] - 2026-07-19
 
 ### Added
 

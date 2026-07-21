@@ -246,22 +246,12 @@ pub async fn dispatch_run_mode(args: &CliArgs, app: crate::App) -> Result<i32> {
     }
 
     if prompt.is_empty() || args.interactive {
-        // TUI mode: launch grok pager (replaces old oxi-tui/oxi-pager)
-        // The grok pager provides the full TUI with oxi-ai provider bridge.
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let grok_pager = exe_dir.join("xai-grok-pager");
-        if grok_pager.exists() {
-            let status = std::process::Command::new(&grok_pager).status()?;
-            std::process::exit(status.code().unwrap_or(1));
+        if args.continue_session {
+            crate::tui::run_tui_interactive_with_continue(app, true).await?;
         } else {
-            anyhow::bail!(
-                "grok pager binary not found at {}. Run: cargo build -p xai-grok-pager-bin --release",
-                grok_pager.display()
-            );
+            crate::tui::run_tui_interactive(app).await?;
         }
+        return Ok(0);
     }
 
     crate::main_dispatch::run_single_prompt(app, &prompt).await?;

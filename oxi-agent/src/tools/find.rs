@@ -1,35 +1,12 @@
 use super::path_security::PathGuard;
 /// Find tool - find files by name or pattern
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use glob::Pattern;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
-
-/// Typed arguments for [`FindTool`].
-#[derive(Deserialize, JsonSchema)]
-pub struct FindArgs {
-    path: String,
-    name: Option<String>,
-    #[serde(rename = "type")]
-    file_type: Option<String>,
-    max_depth: Option<usize>,
-    #[serde(default = "default_find_results")]
-    max_results: usize,
-    #[serde(default)]
-    exclude: Vec<String>,
-    #[serde(default)]
-    follow_symlinks: bool,
-}
-
-fn default_find_results() -> usize {
-    100
-}
 
 /// FindTool.
 pub struct FindTool {
@@ -380,23 +357,40 @@ impl AgentTool for FindTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: FindArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, ctx).await
-    }
-}
+        let path = params
+            .get("path")
+            .and_then(|v: &Value| v.as_str())
+            .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-#[async_trait]
-impl TypedTool for FindTool {
-    type Args = FindArgs;
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let path = &args.path;
+        let name = params.get("name").and_then(|v: &Value| v.as_str());
+        let file_type = params.get("type").and_then(|v: &Value| v.as_str());
+        let max_depth = params
+            .get("max_depth")
+            .and_then(|v: &Value| v.as_u64())
+            .map(|d| d as usize);
+        let max_results = params
+            .get("max_results")
+            .and_then(|v: &Value| v.as_u64())
+            .unwrap_or(100) as usize;
+
+        // Parse exclude patterns
+        let exclude: Vec<String> = params
+            .get("exclude")
+            .and_then(|v: &Value| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let follow_symlinks = params
+            .get("follow_symlinks")
+            .and_then(|v: &Value| v.as_bool())
+            .unwrap_or(false);
+
+        // ── Internal URL guard ──
+        // find is filesystem-only; reject internal URLs gracefully.
         if let Some(ref resolver) = ctx.url_resolver
             && resolver.can_resolve(path)
         {
@@ -404,16 +398,19 @@ impl TypedTool for FindTool {
                 "find does not support internal URLs. Use grep for searching URL content.",
             ));
         }
+
+        // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+
         match Self::find_impl(
             root,
             path,
-            args.name.as_deref(),
-            args.file_type.as_deref(),
-            args.max_depth,
-            args.max_results,
-            &args.exclude,
-            args.follow_symlinks,
+            name,
+            file_type,
+            max_depth,
+            max_results,
+            &exclude,
+            follow_symlinks,
         )
         .await
         {

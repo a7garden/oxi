@@ -1,9 +1,13 @@
+/// Search result cache and get_search_results tool.
+///
+/// Stores search results in memory keyed by generated IDs, enabling the
+/// `get_search_results` tool to retrieve previous results without re-querying.
+///
+/// Uses `oxibrowser::SearchResult` as the canonical result type, shared across
+/// web_search, github, and get_search_results tools.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,7 +90,7 @@ fn generate_search_id() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let rand_part: u32 = rng::random();
+    let rand_part: u32 = rand::random();
     format!("{:x}{:06x}", ts, rand_part & 0xFFFFFF)
 }
 
@@ -95,13 +99,6 @@ fn generate_search_id() -> String {
 /// Tool for retrieving cached search results by ID.
 pub struct GetSearchResultsTool {
     cache: Arc<SearchCache>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[allow(missing_docs)]
-pub struct GetSearchResultsArgs {
-    #[serde(rename = "searchId")]
-    search_id: String,
 }
 
 impl GetSearchResultsTool {
@@ -145,27 +142,15 @@ impl AgentTool for GetSearchResultsTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GetSearchResultsArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
-    }
-}
+        let search_id = params["searchId"]
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: searchId".to_string())?;
 
-#[async_trait]
-impl TypedTool for GetSearchResultsTool {
-    type Args = GetSearchResultsArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
         let (query, results) = self
             .cache
-            .get(&args.search_id)
-            .ok_or_else(|| format!("Search not found for ID: {}", args.search_id))?;
+            .get(search_id)
+            .ok_or_else(|| format!("Search not found for ID: {}", search_id))?;
+
         let mut output = format!("Cached results for: \"{}\"\n\n", query);
         for (i, result) in results.iter().enumerate() {
             output.push_str(&format!(
@@ -176,32 +161,45 @@ impl TypedTool for GetSearchResultsTool {
                 result.snippet
             ));
         }
-        let results_json: Vec<Value> = results.iter().map(|r| {
-            json!({"title": r.title, "url": r.url, "snippet": r.snippet, "source": r.source})
-        }).collect();
+
+        let results_json: Vec<Value> = results
+            .iter()
+            .map(|r| {
+                json!({
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet,
+                    "source": r.source,
+                })
+            })
+            .collect();
+
         Ok(AgentToolResult::success(output).with_metadata(
-            json!({ "results": results_json, "query": query, "searchId": args.search_id }),
+            json!({ "results": results_json, "query": query, "searchId": search_id }),
         ))
     }
 }
-#[allow(dead_code)]
-mod rng {
-    #[allow(unused_imports)]
+
+// ── rand helper (no external crate needed) ────────────────────────
+
+mod rand {
     use std::cell::Cell;
-    #[allow(unused_imports)]
     use std::time::SystemTime;
 
     thread_local! {
         static SEED: Cell<u64> = const { Cell::new(0) };
     }
 
+    /// Simple xorshift pseudo-random number generator.
     pub fn random() -> u32 {
         SEED.with(|s| {
             let mut x = if s.get() == 0 {
+                // Initialise from system time on first use per thread
                 let ns = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos() as u64;
+                // Mix with thread id for extra entropy
                 ns ^ (thread_id() as u64)
             } else {
                 s.get()
@@ -215,6 +213,7 @@ mod rng {
     }
 
     fn thread_id() -> usize {
+        // Use the address of a thread-local as a cheap thread id
         thread_local! { static ANCHOR: () = const {  }; }
         ANCHOR.with(|_| &ANCHOR as *const _ as usize)
     }

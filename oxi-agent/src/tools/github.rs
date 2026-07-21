@@ -11,10 +11,7 @@ use super::search_cache::{SearchCache, SearchResult};
 /// Prerequisites: `gh` CLI installed and authenticated (`gh auth status`).
 /// Disable via `disabled_tools = ["github"]` or `OXI_DISABLED_TOOLS=github`.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -699,35 +696,6 @@ fn format_run_view(run: &Value) -> String {
     out
 }
 
-/// Typed arguments for [`GitHubTool`].
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct GitHubArgs {
-    #[serde(default = "default_action")]
-    action: String,
-    query: Option<String>,
-    kind: Option<String>,
-    number: Option<i64>,
-    title: Option<String>,
-    body: Option<String>,
-    state: Option<String>,
-    #[serde(default = "default_limit")]
-    limit: i64,
-    repo: Option<String>,
-    base: Option<String>,
-    head: Option<String>,
-    strategy: Option<String>,
-    id: Option<i64>,
-    label: Option<String>,
-    language: Option<String>,
-}
-
-fn default_action() -> String {
-    "search".to_string()
-}
-fn default_limit() -> i64 {
-    10
-}
-
 // ── GitHubTool ────────────────────────────────────────────────────
 
 /// Unified GitHub tool using `gh` CLI.
@@ -841,29 +809,12 @@ impl AgentTool for GitHubTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: GitHubArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
-    }
-}
-
-#[async_trait]
-impl TypedTool for GitHubTool {
-    type Args = GitHubArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let params = serde_json::to_value(&args).map_err(|e| format!("serialize: {e}"))?;
         let action = params["action"].as_str().unwrap_or("search");
 
         match action {
             "search" => {
                 let result = gh_search(&params).await?;
+                // Cache search results
                 if let Some(query) = params["query"].as_str() {
                     let kind = params["kind"].as_str().unwrap_or("repos");
                     let search_id = self.cache.insert(

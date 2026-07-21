@@ -7,32 +7,12 @@ use super::config::BrowseConfig;
 use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
-use crate::tools::typed::TypedTool;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMode};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
-
-/// Typed arguments for [`BrowseTool`].
-#[derive(Deserialize, JsonSchema)]
-pub struct BrowseArgs {
-    url: String,
-    #[serde(default = "default_format")]
-    format: String,
-    selector: Option<String>,
-    #[serde(rename = "waitFor")]
-    wait_for: Option<String>,
-    #[serde(default)]
-    screenshot: bool,
-}
-
-fn default_format() -> String {
-    "markdown".to_string()
-}
 
 /// Render a web page using the built-in headless browser.
 ///
@@ -152,53 +132,50 @@ impl AgentTool for BrowseTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: BrowseArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, _ctx).await
-    }
-}
+        let url = params["url"]
+            .as_str()
+            .ok_or_else(|| "Missing required parameter: url".to_string())?;
 
-#[async_trait]
-impl TypedTool for BrowseTool {
-    type Args = BrowseArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<oneshot::Receiver<()>>,
-        _ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let url = &args.url;
-        let format = &args.format;
-        let selector = args.selector.as_deref();
-        let wait_for = args.wait_for.as_deref();
-        let want_screenshot = args.screenshot;
+        let format = params["format"].as_str().unwrap_or("markdown");
+        let selector = params["selector"].as_str();
+        let wait_for = params["wait_for"].as_str();
+        let want_screenshot = params["screenshot"].as_bool().unwrap_or(false);
 
         tracing::info!(url = %url, format = %format, "browsing page");
 
+        // Open exactly one tab for this request
         let raw_tab = self
             .engine
             .new_tab()
             .await
             .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+
+        // Store the tab_id so the agent loop's progress callback can
+        // include it in `ToolExecutionUpdate` events.
         let tab_id = raw_tab.tab_id();
         *self.tab_id_slot.lock().lock() = Some(tab_id);
+
+        // Register the pending callbacks on this tab.
         self.callbacks.register_on_tab(raw_tab.as_ref());
+
         let guard = TabGuard::new(raw_tab);
         let tab = guard.tab();
 
+        // Navigate
         let page = tab
             .goto(url)
             .await
             .map_err(|e| format!("Navigation failed: {}", e))?;
+
+        // Wait for dynamic content if requested
         if let Some(sel) = wait_for {
             tab.wait_for(sel, self.config.default_wait_timeout_ms)
                 .await
                 .map_err(|e| format!("wait_for '{}' failed: {}", sel, e))?;
         }
 
-        let output = match format.as_str() {
+        // Build output — all from the same tab
+        let output = match format {
             "html" => {
                 if let Some(sel) = selector {
                     tab.query_all(sel)
@@ -224,6 +201,7 @@ impl TypedTool for BrowseTool {
                 }
             }
             _ => {
+                // "markdown" (default)
                 if let Some(sel) = selector {
                     tab.query_all(sel)
                         .await
@@ -239,6 +217,7 @@ impl TypedTool for BrowseTool {
         let final_url = page.url.clone();
         let status = page.status;
 
+        // Screenshot from the same tab (no re-render)
         let screenshot_blocks = if want_screenshot {
             match tab.screenshot(self.config.screenshot_width).await {
                 Ok(png) => {
@@ -257,6 +236,7 @@ impl TypedTool for BrowseTool {
             None
         };
 
+        // Explicitly close the tab and clear the tab_id slot
         guard.close().await;
         *self.tab_id_slot.lock().lock() = None;
 

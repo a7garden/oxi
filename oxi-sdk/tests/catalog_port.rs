@@ -60,7 +60,6 @@ async fn file_catalog_init_loads_snap() {
         cache_path: tmp.path().join("models-dev.json"),
         etag_path: tmp.path().join("models-dev.json.etag"),
         override_path: tmp.path().join("overrides.toml"),
-        fetch_enabled: false,
         ..Default::default()
     };
     let cat = FileModelCatalog::init(config).await.unwrap();
@@ -79,7 +78,6 @@ async fn file_catalog_get_model_anthropic() {
         cache_path: tmp.path().join("cache.json"),
         etag_path: tmp.path().join("cache.etag"),
         override_path: tmp.path().join("overrides.toml"),
-        fetch_enabled: false,
         ..Default::default()
     };
     let cat = FileModelCatalog::init(config).await.unwrap();
@@ -102,7 +100,6 @@ async fn file_catalog_provider_lookup() {
         cache_path: tmp.path().join("cache.json"),
         etag_path: tmp.path().join("cache.etag"),
         override_path: tmp.path().join("overrides.toml"),
-        fetch_enabled: false,
         ..Default::default()
     };
     let cat = FileModelCatalog::init(config).await.unwrap();
@@ -123,7 +120,6 @@ async fn file_catalog_search_finds_models() {
         cache_path: tmp.path().join("cache.json"),
         etag_path: tmp.path().join("cache.etag"),
         override_path: tmp.path().join("overrides.toml"),
-        fetch_enabled: false,
         ..Default::default()
     };
     let cat = FileModelCatalog::init(config).await.unwrap();

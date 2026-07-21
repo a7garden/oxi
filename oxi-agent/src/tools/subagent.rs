@@ -15,9 +15,7 @@ use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError
 use crate::agent_definition::{
     AgentDefinition, AgentDiscovery, AgentScope, current_subagent_depth, max_subagent_depth,
 };
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -521,31 +519,6 @@ struct ChainStep {
 
 // ── Tool Implementation ────────────────────────────────────────────────
 
-/// Typed arguments for [`SubagentTool`].
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SubagentArgs {
-    agent: Option<String>,
-    task: Option<String>,
-    tasks: Option<Vec<SubagentTaskArg>>,
-    chain: Option<Vec<SubagentTaskArg>>,
-    #[serde(rename = "agentScope")]
-    #[serde(default = "default_subagent_scope")]
-    agent_scope: String,
-    cwd: Option<String>,
-}
-
-/// A task entry within `tasks` or `chain`.
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SubagentTaskArg {
-    agent: String,
-    task: String,
-    cwd: Option<String>,
-}
-
-fn default_subagent_scope() -> String {
-    "user".to_string()
-}
-
 /// Subagent tool for delegating tasks to specialized agents.
 pub struct SubagentTool {
     /// Explicit working directory override. If None, uses ToolContext.root() at runtime.
@@ -666,37 +639,12 @@ impl AgentTool for SubagentTool {
         signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: SubagentArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, signal, ctx).await
-    }
-}
-
-#[async_trait]
-impl TypedTool for SubagentTool {
-    type Args = SubagentArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        let params = serde_json::to_value(&args).map_err(|e| format!("serialize: {e}"))?;
-        self._execute_with_params(params, signal, ctx).await
-    }
-}
-
-impl SubagentTool {
-    /// Shared execution logic, accepting raw JSON params.
-    async fn _execute_with_params(
-        &self,
-        params: Value,
-        signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
         // ── Depth check ──
+        // For the in-process path, depth is tracked via ToolContext
+        // (NOT env vars — concurrent set_var is UB, and env state
+        // leaks between forks). For the CLI path, depth is tracked
+        // via OXI_SUBAGENT_DEPTH env var (safe: each subprocess has
+        // its own env).
         let runner = ctx.subagent_runner.clone();
         let depth = if runner.is_some() {
             ctx.subagent_depth
@@ -704,7 +652,7 @@ impl SubagentTool {
             current_subagent_depth()
         };
         let max = if runner.is_some() {
-            3
+            3 // default; overridden per-agent below
         } else {
             max_subagent_depth()
         };
@@ -716,6 +664,7 @@ impl SubagentTool {
             )));
         }
 
+        // Use explicit cwd if set, else ctx.root()
         let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
 
         let scope: AgentScope = params
@@ -757,7 +706,11 @@ impl SubagentTool {
             )));
         }
 
-        // ── In-process path ──
+        // ── In-process path (library-native delegation) ──
+        // When a SubagentRunner is wired, prefer it over shelling out.
+        // This is the path library consumers (Oxios) use — they have
+        // no `oxi` subprocess. The CLI fallback below is the default
+        // for oxi-cli.
         if let Some(runner) = &runner {
             return execute_in_process(
                 effective_cwd,
@@ -771,16 +724,21 @@ impl SubagentTool {
             .await;
         }
 
-        // ── CLI fallback ──
+        // ── CLI fallback (existing path) ──
         let binary = self.get_binary();
 
+        // ── Chain mode ──
         if has_chain {
             return execute_chain_mode(effective_cwd, &agents, params, &binary, progress, signal)
                 .await;
         }
+
+        // ── Parallel mode ──
         if has_tasks {
             return execute_parallel_mode(effective_cwd, &agents, params, &binary, progress).await;
         }
+
+        // ── Single mode ──
         if has_single {
             return execute_single_mode(effective_cwd, &agents, params, &binary, progress, signal)
                 .await;

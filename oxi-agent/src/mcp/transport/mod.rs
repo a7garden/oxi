@@ -17,9 +17,6 @@
 
 pub mod http;
 pub mod stdio;
-/// PR-B1/B2: WebSocket MCP transport (gated behind `ws-transport` feature).
-#[cfg(feature = "ws-transport")]
-pub mod ws_transport;
 
 use crate::mcp::types::RawJsonRpcMessage;
 use anyhow::Result;

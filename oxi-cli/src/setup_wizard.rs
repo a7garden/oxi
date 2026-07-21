@@ -484,13 +484,9 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
 // ── Load theme list ─────────────────────────────────────────────────────────
 
 fn load_themes() -> Vec<String> {
-    // Static theme list (oxi-tui removed — grok pager handles theming)
-    vec![
-        "dark".to_string(),
-        "light".to_string(),
-        "nord".to_string(),
-        "catppuccin".to_string(),
-    ]
+    // Use the canonical theme name list from oxi-tui so the setup wizard
+    // and the `/settings` overlay always offer the same themes.
+    oxi_tui::THEME_NAMES.iter().map(|s| s.to_string()).collect()
 }
 
 // ── Save auth keys ──────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Item | Value |
 |------|-------|
 | Language | Rust 2024 edition |
-|Workspace crates|15 crates — see "Workspace Layout" below. First-party: `oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`, `oxi-hashline`, `oxi-lsp`, `oxi-mnemopi`, `oxi-snapcompact`, `oxi-pager`, `oxi-sandbox`. Vendored (Apache-2.0, © SpaceXAI — see `NOTICE-vendored.md`): `oxi-vendor-grok-markdown`, `oxi-vendor-grok-markdown-core`, `oxi-vendor-ratatui-textarea`, `oxi-vendor-ratatui-inline`.|
+|Workspace crates|`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`, `oxi-hashline` (6 crates)|
 | Version | see `Cargo.toml` / `git tag` — single source of truth (do NOT hardcode the number here; it drifts) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
@@ -27,16 +27,7 @@ oxi/
 ├── oxi-tui/      Terminal UI widgets — chat, themes, markdown rendering (ratatui)
 ├── oxi-sdk/      Multi-agent SDK + port contract: 15 port traits + reference impls
 ├── oxi-cli/      CLI binary — composition root (TUI + RPC + print modes)
-├── oxi-hashline/ Line-anchored patch format for AI-assisted code editing
-├── oxi-lsp/      LSP bridge
-├── oxi-mnemopi/  Long-term memory bindings
-├── oxi-snapcompact/ Context compaction
-├── oxi-pager/    TUI pager state machine + grok-vendored render adapter
-├── oxi-sandbox/  Code sandbox
-├── oxi-vendor-grok-markdown(-core)/  Vendored from grok-build (Apache-2.0)
-├── oxi-vendor-ratatui-textarea/       Vendored from grok-build (Apache-2.0)
-└── oxi-vendor-ratatui-inline/         Vendored from grok-build (Apache-2.0)
-```
+└── oxi-hashline/  Line-anchored patch format for AI-assisted code editing
 
 ### Dependency Flow
 
@@ -478,69 +469,3 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   - The brightness hierarchy is `background ≤ response_bg < thinking_bg < surface_bg < user_bg < panel_bg` — new slots must respect this ordering. See `docs/THEME_GUIDE.md` for the derivation rules.
   - **`DashboardWidget` takes `&Theme`** (not `Theme::dark()`). The MCP dashboard overlay constructs it fresh in `render()` with the live theme. Do not re-introduce a hardcoded `Theme::dark()` in any widget — pass the theme through.
   - **`OxiStyleSheet` is theme-aware** — constructed via `OxiStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
-
-## Vendored Crates (grok-build, Apache-2.0)
-
-Four workspace crates are verbatim copies of upstream `xai-org/grok-build`
-code (commit `ba69d70c2f7d70a130a323b2becdf137af784c7f`), kept under their
-original Apache-2.0 license — see `NOTICE-vendored.md` for the legal
-attribution + the file-by-file inventory. oxi itself is MIT; the vendored
-files are NOT relicensed (the dual license is reflected in each crate's
-`license = "Apache-2.0"` Cargo field).
-
-| oxi crate | Upstream | Purpose |
-|-----------|----------|---------|
-| `oxi-vendor-grok-markdown` | `xai-grok-markdown` | Streaming markdown renderer (pulldown-cmark + syntect) |
-| `oxi-vendor-grok-markdown-core` | `xai-grok-markdown-core` | Headless pulldown-cmark config sharing |
-| `oxi-vendor-ratatui-textarea` | `xai-ratatui-textarea` | Prompt textarea (IME / paste / undo) |
-| `oxi-vendor-ratatui-inline` | `xai-ratatui-inline` | Ratatui terminal backend with OSC8 hyperlinks |
-
-### Local modifications
-
-- `oxi-vendor-ratatui-inline/src/{terminal.rs,common.rs}` carry
-  `B: Backend<Error = io::Error>` bounds to bridge ratatui 0.30's
-  associated-type Backend trait (7 sites). Each is marked
-  `// OXI-CHANGE:` per Apache-2.0 §4(b).
-- `oxi-vendor-grok-markdown/src/parse.rs` has one rename:
-  `xai_grok_markdown_core::` → `oxi_vendor_grok_markdown_core::`.
-- Every vendor `lib.rs` prepends a lint-allow block (`#![allow(deprecated, dead_code, clippy::all, …)]`).
-
-### Lint gate policy
-
-**Vendor crates are EXCLUDED from the workspace `--all-targets` clippy gate.**
-Their test code references upstream APIs that no longer compile under
-ratatui 0.30 and dev-deps we don't ship. The workspace clippy command is:
-
-```bash
-cargo clippy --workspace --all-targets \
-  --exclude oxi-vendor-grok-markdown \
-  --exclude oxi-vendor-grok-markdown-core \
-  --exclude oxi-vendor-ratatui-textarea \
-  --exclude oxi-vendor-ratatui-inline \
-  -- -D warnings
-```
-
-The lib code in each vendor crate still type-checks under the workspace
-build (the `#![allow(...)]` block only relaxes lints, not type errors); the
-exclusion is specifically for the test/bench targets.
-
-### oxi-pager render pipeline
-
-`oxi-pager` is the oxi-side adapter that drives the vendored primitives
-from a `PagerState`. Its `render::render()` entry:
-
-1. pushes the live `oxi_tui::Theme` into the grok global via
-   `theme_bridge::apply_oxi_theme()` (advisory-confirmed setter pattern —
-   the vendored render reads `Theme::current()`, not `&Theme`);
-2. maps `ChatViewState.messages` → `Vec<RenderedBlock>` each frame
-   (`oxi-cli/src/tui/render.rs::build_pager_blocks`);
-3. drives
-   `oxi_vendor_grok_markdown::render_markdown_ratatui_full` +
-   `grok::wrapping::word_wrap_lines_with_joiners` for assistant blocks;
-4. paints user / assistant / tool-call / tool-result / system blocks with
-   the grok theme palette.
-
-`oxi-pager` is `#![deny(unsafe_code)]` (not `forbid`) so the vendored
-`render::grok` module — which contains the raw-fd / tty code from
-upstream — can locally `#![allow(unsafe_code)]`. First-party oxi-pager
-code stays unsafe-free.

@@ -12,8 +12,6 @@ pub mod config;
 pub mod helpers;
 /// Internal message/event queues.
 pub mod queues;
-/// Compaction reminder system (PR-C1).
-pub mod reminder;
 /// Retry logic for the agent loop.
 pub mod retry;
 /// Stream outcome types for TTSR integration.
@@ -1041,41 +1039,21 @@ impl AgentLoop {
     /// Build the compaction instruction, appending injected TTSR rule
     /// names so that the model remembers rules already enforced.
     fn build_compaction_instruction(&self) -> Option<String> {
-        use crate::agent_loop::reminder::{
-            ActiveReminderInputs, CompactionReminderBuilder, combine_instruction,
-        };
-
         let base = self.config.compaction_instruction.as_deref();
         let injected = self
             .ttsr_engine
             .as_ref()
             .map(|e| e.injected_records())
             .unwrap_or_default();
-
-        let instruction = if injected.is_empty() {
-            base.map(|s| s.to_string())
-        } else {
-            let mut instr = base.map(|s| s.to_string()).unwrap_or_default();
-            instr.push_str("\n\nThe following rules have already been enforced in this session and corrections applied. Do NOT violate them again:");
-            for (name, _turn) in &injected {
-                instr.push_str(&format!("\n- {name}"));
-            }
-            Some(instr)
-        };
-
-        // Append compaction reminder if a todo state provider is available.
-        if let Some(todo_provider) = self.config.todo.as_ref() {
-            let inputs = ActiveReminderInputs {
-                todos: Some(todo_provider.as_ref()),
-                subagent_state: None,
-                background_tasks: None,
-                last_n_assistant_turns: 0,
-            };
-            let reminder = CompactionReminderBuilder::new().build(&inputs);
-            combine_instruction(instruction, reminder)
-        } else {
-            instruction
+        if injected.is_empty() {
+            return base.map(|s| s.to_string());
         }
+        let mut instr = base.map(|s| s.to_string()).unwrap_or_default();
+        instr.push_str("\n\nThe following rules have already been enforced in this session and corrections applied. Do NOT violate them again:");
+        for (name, _turn) in &injected {
+            instr.push_str(&format!("\n- {name}"));
+        }
+        Some(instr)
     }
 
     async fn maybe_compact(&self, messages: &mut Vec<Message>, iteration: usize, emit: &EmitFn) {

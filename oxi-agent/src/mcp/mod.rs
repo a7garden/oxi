@@ -51,7 +51,6 @@ pub mod consent;
 pub mod content;
 pub mod direct_tool;
 pub mod lifecycle;
-pub mod oxi_as_server;
 pub mod tool;
 pub mod transport;
 pub mod types;

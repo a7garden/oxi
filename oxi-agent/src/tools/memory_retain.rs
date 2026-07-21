@@ -1,9 +1,6 @@
 //! `memory_retain` tool — persist a memory item to the backend.
 
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
@@ -17,23 +14,6 @@ const VALID_KINDS: [&str; 4] = ["fact", "preference", "context", "summary"];
 /// Requires `ctx.memory` to be set; otherwise returns an error. The memory
 /// is scoped to the current session (`ctx.session_id`), falling back to
 /// `"default"` when no session id is available.
-#[derive(Deserialize, JsonSchema)]
-pub struct MemoryRetainArgs {
-    content: String,
-    #[serde(default = "default_retain_kind")]
-    kind: String,
-    #[serde(default = "default_importance")]
-    importance: f64,
-}
-
-fn default_retain_kind() -> String {
-    "fact".to_string()
-}
-fn default_importance() -> f64 {
-    0.5
-}
-
-#[allow(missing_docs)]
 pub struct MemoryRetainTool;
 
 #[async_trait]
@@ -89,41 +69,41 @@ impl AgentTool for MemoryRetainTool {
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: MemoryRetainArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, ctx).await
-    }
-}
-
-#[async_trait]
-impl TypedTool for MemoryRetainTool {
-    type Args = MemoryRetainArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
         let backend = ctx.memory.as_ref().ok_or("Memory not configured")?;
-        if !VALID_KINDS.contains(&args.kind.as_str()) {
+
+        let content = params
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing required parameter: content")?;
+
+        let kind = params
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("fact");
+        if !VALID_KINDS.contains(&kind) {
             return Err(format!(
-                "Invalid kind '{}'. Must be one of: fact, preference, context, summary",
-                args.kind
+                "Invalid kind '{}': expected one of {:?}",
+                kind, VALID_KINDS
             ));
         }
-        if !(0.0..=1.0).contains(&args.importance) {
+
+        // `importance` is validated for forward-compatibility; the current
+        // `MemoryBackend::put` signature does not persist it.
+        if let Some(importance) = params.get("importance").and_then(|v| v.as_f64())
+            && !(0.0..=1.0).contains(&importance)
+        {
             return Err(format!(
-                "importance must be between 0.0 and 1.0, got {}",
-                args.importance
+                "importance must be between 0 and 1, got {}",
+                importance
             ));
         }
+
         let subject = ctx.session_id.as_deref().unwrap_or("default");
-        backend.put(&args.content, &args.kind, subject).await?;
+        backend.put(content, kind, subject).await?;
+
         Ok(AgentToolResult::success(format!(
             "Retained [{}] to memory.",
-            args.kind
+            kind
         )))
     }
 }

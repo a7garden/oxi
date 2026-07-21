@@ -4,7 +4,6 @@ use oxi::rpc_mode::{RpcClient, RpcClientConfig, RpcResponse};
 fn rpc_client_round_trips_ready_and_real_state() {
     let mut client = RpcClient::new(RpcClientConfig {
         binary_path: env!("CARGO_BIN_EXE_oxi").to_string(),
-        model: Some("openai/gpt-4o-mini".to_string()),
         ..Default::default()
     });
     client.start().unwrap();
@@ -29,7 +28,6 @@ fn rpc_client_round_trips_ready_and_real_state() {
 fn rpc_client_surfaces_unsupported_command_errors() {
     let mut client = RpcClient::new(RpcClientConfig {
         binary_path: env!("CARGO_BIN_EXE_oxi").to_string(),
-        model: Some("openai/gpt-4o-mini".to_string()),
         ..Default::default()
     });
     client.start().unwrap();

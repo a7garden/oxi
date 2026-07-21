@@ -11,9 +11,7 @@
 //! single LLM analysis call plus a deterministic fallback.
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use crate::tools::typed::TypedTool;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1052,25 +1050,28 @@ impl GitOps {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CommitTool
+// ═══════════════════════════════════════════════════════════════════════════
+
 /// Parsed parameters for the commit tool.
-#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct CommitArgs {
+#[derive(Debug, Default)]
+struct CommitArgs {
     /// Preview without committing.
-    #[serde(default)]
-    pub dry_run: bool,
+    dry_run: bool,
     /// Push after committing.
-    #[serde(default)]
-    pub push: bool,
-    /// Skip the CHANGELOG update step even when one would normally apply.
-    #[serde(default)]
-    pub no_changelog: bool,
+    push: bool,
+    /// Skip the changelog update.
+    no_changelog: bool,
     /// Extra context passed to the LLM analysis.
-    pub context: Option<String>,
+    context: Option<String>,
 }
 
-#[allow(dead_code)]
 fn parse_args(params: &Value) -> Result<CommitArgs, String> {
-    serde_json::from_value(params.clone()).map_err(|e| e.to_string())
+    Ok(CommitArgs {
+        dry_run: params["dry_run"].as_bool().unwrap_or(false),
+        push: params["push"].as_bool().unwrap_or(false),
+        no_changelog: params["no_changelog"].as_bool().unwrap_or(false),
+        context: params["context"].as_str().map(String::from),
+    })
 }
 
 /// Agent tool that produces conventional commits from the working tree.
@@ -1155,34 +1156,7 @@ impl AgentTool for CommitTool {
         _signal: Option<oneshot::Receiver<()>>,
         ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
-        let args: CommitArgs =
-            serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
-        self.execute_typed(_tool_call_id, args, _signal, ctx).await
-    }
-}
-
-#[async_trait]
-impl TypedTool for CommitTool {
-    type Args = CommitArgs;
-
-    async fn execute_typed(
-        &self,
-        _tool_call_id: &str,
-        args: Self::Args,
-        _signal: Option<oneshot::Receiver<()>>,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
-        self._execute_impl(args, ctx).await
-    }
-}
-
-impl CommitTool {
-    /// Shared execution logic used by both AgentTool and TypedTool paths.
-    async fn _execute_impl(
-        &self,
-        args: CommitArgs,
-        ctx: &ToolContext,
-    ) -> Result<AgentToolResult, ToolError> {
+        let args = parse_args(&params)?;
         let cwd = ctx.root().to_path_buf();
         let git = GitOps::new(cwd.clone());
 

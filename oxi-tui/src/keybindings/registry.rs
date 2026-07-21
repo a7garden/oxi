@@ -106,16 +106,6 @@ pub enum Action {
     CompletionDismiss,
     /// Accept selected completion.
     CompletionAccept,
-
-    // ── Sticky panels (added in oxi-pager redesign, see spec §5.6) ─
-    /// Toggle the todo sticky panel.
-    ToggleTodo,
-    /// Toggle the issues sticky panel.
-    ToggleIssues,
-    /// Toggle the agent hub overlay.
-    ToggleHub,
-    /// Toggle the LSP diagnostics panel.
-    ToggleLsp,
 }
 
 // ---------------------------------------------------------------------------
@@ -270,14 +260,8 @@ impl KeybindingsManager {
             (CompletionPrev, vec![]),
             (CompletionDismiss, vec![]), // Esc handled via Cancel
             (CompletionAccept, vec![]),
-            // ── Sticky panels (oxi-pager redesign, spec §5.6) ────
-            // F5-F8 chosen because Ctrl+T (ToggleExpand) and Ctrl+I
-            // (OpenImage) are already taken by other actions.
-            (ToggleTodo, vec!["F5"]),
-            (ToggleIssues, vec!["F6"]),
-            (ToggleHub, vec!["F7"]),
-            (ToggleLsp, vec!["F8"]),
         ];
+
         for (action, key_strings) in defaults {
             let keys: Vec<KeyId> = key_strings.into_iter().filter_map(parse_key_id).collect();
             self.defaults.insert(action, keys);

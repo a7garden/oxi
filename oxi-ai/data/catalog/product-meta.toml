@@ -44,7 +44,3 @@ extra_headers = [["HTTP-Referer", "https://oxi.dev/"], ["X-Title", "oxi"]]
 [[provider]]
 id = "zenmux"
 extra_headers = [["HTTP-Referer", "https://oxi.dev/"], ["X-Title", "oxi"]]
-
-[[provider]]
-id = "minimax"
-extra_headers = []
