@@ -1,0 +1,17 @@
+[package]
+name = "oxi-proxy"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "OpenAI-compatible proxy that routes grok TUI requests through oxi-ai providers"
+
+[dependencies]
+oxi-ai = { path = "../oxi-ai" }
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

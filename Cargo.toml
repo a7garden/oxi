@@ -343,6 +343,7 @@ oxi-vendor-grok-markdown-core = { path = "oxi-vendor-grok-markdown-core" }
 oxi-vendor-grok-markdown = { path = "oxi-vendor-grok-markdown" }
 oxi-vendor-ratatui-textarea = { path = "oxi-vendor-ratatui-textarea" }
 oxi-vendor-ratatui-inline = { path = "oxi-vendor-ratatui-inline" }
+oxi-ai = { path = "oxi-ai" }
 [profile.release]
 incremental = true
 panic = "abort"
@@ -362,6 +363,7 @@ oxi-vendor-grok-markdown-core = { path = "oxi-vendor-grok-markdown-core" }
 oxi-vendor-grok-markdown = { path = "oxi-vendor-grok-markdown" }
 oxi-vendor-ratatui-textarea = { path = "oxi-vendor-ratatui-textarea" }
 oxi-vendor-ratatui-inline = { path = "oxi-vendor-ratatui-inline" }
+oxi-ai = { path = "oxi-ai" }
 [profile.release-dist]
 inherits = "release"
 lto = "thin"
@@ -379,6 +381,7 @@ oxi-vendor-grok-markdown-core = { path = "oxi-vendor-grok-markdown-core" }
 oxi-vendor-grok-markdown = { path = "oxi-vendor-grok-markdown" }
 oxi-vendor-ratatui-textarea = { path = "oxi-vendor-ratatui-textarea" }
 oxi-vendor-ratatui-inline = { path = "oxi-vendor-ratatui-inline" }
+oxi-ai = { path = "oxi-ai" }
 [profile.x-prod]
 inherits = "release"
 lto = "thin"
@@ -398,6 +401,7 @@ oxi-vendor-grok-markdown-core = { path = "oxi-vendor-grok-markdown-core" }
 oxi-vendor-grok-markdown = { path = "oxi-vendor-grok-markdown" }
 oxi-vendor-ratatui-textarea = { path = "oxi-vendor-ratatui-textarea" }
 oxi-vendor-ratatui-inline = { path = "oxi-vendor-ratatui-inline" }
+oxi-ai = { path = "oxi-ai" }
 [profile.release-dist-jemalloc]
 inherits = "release-dist"
 # All settings now match the parent — this is an intentional alias.
@@ -409,6 +413,7 @@ oxi-vendor-grok-markdown-core = { path = "oxi-vendor-grok-markdown-core" }
 oxi-vendor-grok-markdown = { path = "oxi-vendor-grok-markdown" }
 oxi-vendor-ratatui-textarea = { path = "oxi-vendor-ratatui-textarea" }
 oxi-vendor-ratatui-inline = { path = "oxi-vendor-ratatui-inline" }
+oxi-ai = { path = "oxi-ai" }
 [profile.dev]
 panic = "abort"
 split-debuginfo = "unpacked"
@@ -424,6 +429,7 @@ oxi-vendor-grok-markdown-core = { path = "oxi-vendor-grok-markdown-core" }
 oxi-vendor-grok-markdown = { path = "oxi-vendor-grok-markdown" }
 oxi-vendor-ratatui-textarea = { path = "oxi-vendor-ratatui-textarea" }
 oxi-vendor-ratatui-inline = { path = "oxi-vendor-ratatui-inline" }
+oxi-ai = { path = "oxi-ai" }
 [profile.bench]
 debug = true
 

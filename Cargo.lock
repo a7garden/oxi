@@ -15900,6 +15900,7 @@ dependencies = [
  "eventsource-stream",
  "futures-util",
  "indexmap",
+ "oxi-ai",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
