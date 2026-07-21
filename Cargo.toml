@@ -22,7 +22,7 @@ thiserror = "2"
 supports-color = "3.0"
 portable-pty = "0.9"
 nucleo = "0.5"
-linkify = "0.10"
+linkify = "0.11"
 regex = "1"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy", "regex-onig"] }
 
