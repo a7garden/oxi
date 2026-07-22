@@ -4,6 +4,81 @@ All notable changes to the oxi project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased] — oxi-tui v2 Terminal-First Pipeline
+
+### Architecture — oxi-tui Greenfield Rewrite
+
+- **Terminal-first rendering pipeline** — `draw_frame()` decomposes ratatui's
+  `Terminal::draw()` into `autoresize → hash-skip → render → flush →
+  conditional cursor → swap_buffers`. Cursor blink preserved via dedup
+  (same position → 0 bytes). No fork, no writer thread, no SafeBuf.
+  Ratatui 0.30 lifecycle methods are all `pub` — no Terminal fork needed.
+
+- **Retained widget tree + content_hash memoization** — `Renderable` trait
+  with `content_hash()` / `height_for()` / `render()`. `RetainedChild<T>`
+  wrapper auto-skips unchanged subtrees. During streaming, only the active
+  message re-renders; siblings (Footer, panels) skip entirely.
+
+- **CursorSlot tri-state** — `{NotSet, Show(Position), Hide}` distinguishes
+  "hash-skipped widget" from "explicit hide". Prevents cursor flicker
+  regression that simple `.or(last_cursor)` fallback would cause.
+
+- **Streaming markdown checkpoint renderer** — stable content (behind
+  paragraph break or closed code block) is parsed once and frozen; only the
+  unstable tail is re-parsed per token. Reduces CPU from O(N) to O(tail).
+
+- **Capability-aware theme** — `theme/capability.rs` detects terminal caps
+  AND adapts theme colors in the same module. Structural fix for legacy's
+  394-LOC dead `color_level.rs` (detection without consumption).
+
+- **OSC8 hyperlink emission** — `DiffBackend::set_links()` stores link spans;
+  row writes emit `\x1b]8;;<url>\x1b\\` inline, inside the CSI 2026 sync
+  window. Caps-gated (zero bytes if terminal doesn't support hyperlinks).
+
+- **CJK-aware word wrap** — `unicode-width` based, handles double-width
+  characters and soft/hard break tracking.
+
+### oxi-cli Integration
+
+- **Pipeline LIVE** — main loop uses `draw_frame_closure()` instead of
+  `terminal.draw(closure)`. Cursor dedup + CSI 2026 sync + DECCARA bg-fill
+  active for the real TUI.
+
+- **Dual-write ChatLog** — agent events (MessageStart/Update/End) feed both
+  legacy `ChatViewState` AND new `ChatLog`. State preparation for rendering
+  migration.
+
+- **v2 render path** — `OXI_V2_RENDER=1` env var gates new ChatView widget
+  rendering. When enabled, chat area renders via `ChatView::render()` (new
+  Renderable API). Footer/input/overlays still legacy (incremental
+  migration).
+
+- **Bridge layer** — `ClosureRoot` adapter wraps legacy render closures as
+  `Renderable`. `LegacyOverlayAdapter` wraps old overlays. `RenderCtx::
+  with_frame()` provides temporary Frame access for legacy bridging.
+
+### Module Structure (oxi-tui v2, 42 files, ~9.7K LOC)
+
+```
+pipeline/   draw_frame, draw_frame_closure, CursorState, CursorSlot,
+            DiffBackend (4-file: mod/row/deccara/caps), OSC8 emission
+widget/     Renderable, RetainedTree, RetainedChild, RenderCtx, Text
+  chat/     ChatView, MessageItem, ToolCall, Spinner
+  panel/    Footer, Sticky, Overlay
+  primitive/ Border, List (virtualized), Scrollbar
+content/    ChatLog (O(1) hash), ChatViewState, ChatMessage, StreamingState
+text/       StreamingMarkdown (checkpoint), CJK wrap, syntax (feature-gated)
+theme/      palette (28 slots, 6 constructors), capability (detect+adapt),
+            serializer (TOML load/save with atomic write)
+input/      textarea wrapper (stock ratatui-textarea 0.9)
+```
+
+### Legacy Preservation
+
+- `oxi-tui` renamed to `oxi-tui-legacy` — all 27 oxi-cli callsites migrated
+  (`oxi_tui` → `oxi_tui_legacy`). Legacy crate continues to work unchanged.
+  Removal planned after full rendering migration (Plan D).
 ## [0.56.0] - 2026-07-19
 
 ### Added
