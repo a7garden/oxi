@@ -9,6 +9,7 @@ mod overlay;
 mod render;
 mod slash;
 mod welcome;
+mod v2_bridge;
 
 pub use app::run_tui_interactive;
 pub use app::run_tui_interactive_with_continue;
