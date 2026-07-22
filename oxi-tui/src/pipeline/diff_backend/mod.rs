@@ -21,9 +21,6 @@ pub mod row;
 
 pub use caps::TerminalCaps;
 
-use std::fmt;
-use std::io;
-
 use crossterm::{
     cursor::MoveTo,
     style::{
@@ -37,6 +34,9 @@ use ratatui::{
     layout::{Position, Size},
     style::Modifier,
 };
+use std::fmt;
+use std::io;
+use std::path::PathBuf;
 
 use crate::pipeline::diff_backend::row::{Row, all_text_attrs, build_row, write_modifier_delta};
 
@@ -81,8 +81,11 @@ pub struct DiffBackend<W: io::Write> {
     /// (e.g. CSI 2026 synchronized output) so unsupported features aren't sent.
     caps: TerminalCaps,
     /// Whether the DECCARA bg-fill optimizer is active: the terminal must
-    /// advertise DECCARA (Kitty/Ghostty) and `OXI_NO_DECCARA` must be unset.
     deccara_enabled: bool,
+    /// OSC8 link spans for the next flush. Populated by [`DiffBackend::set_links`]
+    /// before `flush()`; consumed (cleared) by the row-writer when OSC8
+    /// emission lands in Plan C PR-7. Until then this is just storage.
+    links: Vec<(CellRange, LinkTarget)>,
 }
 
 impl<W: io::Write> DiffBackend<W> {
@@ -106,12 +109,92 @@ impl<W: io::Write> DiffBackend<W> {
             last_height: 0,
             deccara_enabled: caps.deccara && std::env::var_os("OXI_NO_DECCARA").is_none(),
             caps,
+            links: Vec::new(),
         }
     }
 
     /// Force a full redraw on the next frame.
     pub fn invalidate(&mut self) {
         self.force_full_redraw = true;
+    }
+
+    /// Set OSC8 link spans for the next flush.
+    ///
+    /// Called BEFORE [`Backend::flush`] so row writes can emit inline OSC8
+    /// escapes (Plan C PR-7 fills in the emission). For now (foundation)
+    /// this just stores the spans — emission is a no-op until PR-7 lands.
+    pub fn set_links(&mut self, mut links: LinkCollector) {
+        self.links = links.take();
+    }
+}
+
+// ── OSC8 link collection (stub — emission comes in Plan C PR-7) ─────────
+
+/// Where a link points. `Url` for http/https/other schemes, `File` for absolute paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkTarget {
+    /// External URL (https, http, mailto, etc.).
+    Url(String),
+    /// Local file with optional line number.
+    File {
+        /// Absolute path to the file.
+        path: PathBuf,
+        /// Optional 1-based line number.
+        line: Option<u32>,
+    },
+}
+
+/// A horizontal range of cells on a single row that a link covers.
+///
+/// Coordinates are absolute (post-layout) screen positions. `x_end` is
+/// inclusive — a single-cell link has `x_start == x_end`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellRange {
+    /// Row (0-indexed from top of frame).
+    pub y: u16,
+    /// First cell column (0-indexed, inclusive).
+    pub x_start: u16,
+    /// Last cell column (0-indexed, inclusive).
+    pub x_end: u16,
+}
+
+/// Collects link spans emitted by widgets during `render()`.
+///
+/// DiffBackend will emit OSC8 sequences inline during row writes (Plan C
+/// PR-7), inside the CSI 2026 window. For now this is just storage.
+#[derive(Debug, Default, Clone)]
+pub struct LinkCollector {
+    spans: Vec<(CellRange, LinkTarget)>,
+}
+
+impl LinkCollector {
+    /// Create an empty collector.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a link span. Order of `add` calls defines emission order
+    /// (Plan C PR-7 will sort by row/column before writing).
+    pub fn add(&mut self, range: CellRange, target: LinkTarget) {
+        self.spans.push((range, target));
+    }
+
+    /// True when no spans have been collected.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+
+    /// Number of collected spans.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.spans.len()
+    }
+
+    /// Take the collected spans, leaving an empty collector.
+    pub fn take(&mut self) -> Vec<(CellRange, LinkTarget)> {
+        std::mem::take(&mut self.spans)
     }
 }
 
@@ -512,5 +595,46 @@ mod tests {
             !emitted.contains("\x1b[2*x"),
             "DECCARA leaked while disabled: {emitted:?}"
         );
+    }
+
+    #[test]
+    fn link_collector_add_and_take() {
+        let mut c = LinkCollector::new();
+        assert!(c.is_empty());
+        c.add(
+            CellRange {
+                y: 0,
+                x_start: 0,
+                x_end: 4,
+            },
+            LinkTarget::Url("https://example.com".into()),
+        );
+        assert_eq!(c.len(), 1);
+        let taken = c.take();
+        assert_eq!(taken.len(), 1);
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn diff_backend_accepts_set_links_without_emitting() {
+        // Foundation: `set_links` is a no-op storage. Emission comes in
+        // Plan C PR-7 (OSC8 inside the CSI 2026 window).
+        let mut backend = DiffBackend::with_capabilities(
+            ratatui::backend::CrosstermBackend::new(Vec::<u8>::new()),
+            plain_caps(),
+        );
+        let mut links = LinkCollector::new();
+        links.add(
+            CellRange {
+                y: 0,
+                x_start: 0,
+                x_end: 3,
+            },
+            LinkTarget::Url("https://example.com".into()),
+        );
+        backend.set_links(links);
+        // No assertion on bytes — the test only verifies the API is
+        // callable and that `set_links` accepts the spans without
+        // touching the underlying writer.
     }
 }
