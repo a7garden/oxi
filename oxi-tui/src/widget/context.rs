@@ -103,6 +103,16 @@ impl<'a, 'f> RenderCtx<'a, 'f> {
     pub(crate) fn take_links(&mut self) -> LinkCollector {
         std::mem::take(&mut self.links)
     }
+    /// Access the underlying `Frame` for legacy bridging.
+    ///
+    /// Used by `LegacyOverlayAdapter` to forward `Renderable::render` calls
+    /// to legacy `Overlay` implementations that operate on a raw
+    /// `&mut Frame`. NOTE: This is a temporary bridge API. Once all overlays
+    /// are migrated to `Renderable`, this accessor should be removed.
+    pub fn with_frame<R>(&mut self, f: impl FnOnce(&mut Frame<'f>) -> R) -> R {
+        f(self.frame)
+    }
+
 }
 
 #[cfg(test)]
@@ -162,6 +172,32 @@ mod tests {
         })
         .unwrap();
     }
+    #[test]
+    fn with_frame_provides_access_to_frame() {
+        let backend = TestBackend::new(10, 5);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
+        term.draw(|f| {
+            let mut ctx = make_ctx(f, &theme, &caps);
+            // Verify the closure receives a `&mut Frame` and can mutate it.
+            ctx.with_frame(|frame| {
+                let area = frame.area();
+                assert_eq!(area.width, 10);
+                assert_eq!(area.height, 5);
+            });
+            // The closure can mutate; surface a sentinel symbol via the buffer
+            // and verify it landed in the underlying frame.
+            ctx.with_frame(|frame| {
+                let cell = &mut frame.buffer_mut()[(0, 0)];
+                cell.set_symbol("Z");
+            });
+            // after closure exits, ctx is still usable: another borrow works.
+            assert_eq!(ctx.area().width, 10);
+        })
+        .unwrap();
+    }
+
 
     #[test]
     fn take_resets_to_notset() {
