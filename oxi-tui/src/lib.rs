@@ -15,4 +15,5 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod pipeline;
+pub mod theme;
 pub mod widget;
