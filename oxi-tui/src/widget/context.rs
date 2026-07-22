@@ -82,7 +82,6 @@ impl<'a, 'f> RenderCtx<'a, 'f> {
 
     /// Drain the cursor slot, resetting to `NotSet`. Called by `RetainedTree`
     /// after render to inspect what widgets requested.
-    #[expect(dead_code, reason = "used by RetainedTree in Task 9")]
     pub(crate) fn take_cursor_slot(&mut self) -> CursorSlot {
         std::mem::replace(&mut self.cursor, CursorSlot::NotSet)
     }
