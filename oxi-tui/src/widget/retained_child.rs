@@ -18,6 +18,7 @@ use ratatui::layout::Rect;
 
 use crate::widget::{RenderCtx, Renderable};
 
+#[derive(Debug)]
 pub struct RetainedChild<T: Renderable> {
     inner: T,
     last_hash: u64,

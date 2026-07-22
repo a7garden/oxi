@@ -15,7 +15,7 @@ pub mod renderable;
 pub mod retained_child;
 pub mod tree;
 
-pub use primitive::Text;
+pub use primitive::{Border, List, Scrollbar, Text};
 
 pub use crate::pipeline::diff_backend::{CellRange, LinkCollector, LinkTarget};
 pub use context::{FocusTarget, RenderCtx};

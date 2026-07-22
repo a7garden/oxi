@@ -1,10 +1,22 @@
-//! Minimal primitive widgets. The full set (Border, List, Scrollbar) comes
-//! in Plan B. This module just has `Text` for integration testing of the
-//! pipeline + retained tree.
+//! Primitive widgets — `Text` (single-line / multi-line text), `Border`
+//! (bordered box with optional title), `List<T>` (virtualized list of
+//! `Renderable` items), and `Scrollbar` (vertical scroll position
+//! indicator).
+//!
+//! See `Renderable` for the shared contract; each primitive is a small
+//! `Renderable` that wraps either a ratatui widget (`Block`, `Scrollbar`)
+//! or a `Vec<RetainedChild<T>>` and forwards the `Renderable` lifecycle.
 
+pub mod border;
+pub mod list;
+pub mod scrollbar;
+
+pub use border::Border;
+pub use list::List;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+pub use scrollbar::Scrollbar;
 
 use crate::widget::{RenderCtx, Renderable, hash_str};
 
