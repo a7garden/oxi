@@ -41,6 +41,26 @@ use crossterm::{
 use oxi_tui_legacy::render::DiffBackend;
 use ratatui::{Terminal, backend::CrosstermBackend};
 
+use oxi_tui::pipeline::CursorState as V2CursorState;
+use oxi_tui::theme::{TerminalCaps, Theme as V2Theme};
+
+/// Convert a legacy `oxi_tui_legacy::theme::Theme` into a v2 `oxi_tui::theme::Theme`
+/// by matching the legacy theme name against the v2 built-in constructors.
+///
+/// Cutover-only: full palette conversion is Plan D. The six built-in legacy
+/// themes (`dark`, `light`, `nord`, `catppuccin`, `github_dark`, `monokai`)
+/// map to their v2 counterparts; custom themes fall back to `Theme::dark()`.
+fn v2_theme_from_legacy(legacy: &oxi_tui_legacy::theme::Theme) -> V2Theme {
+    match legacy.name.as_str() {
+        "light" => V2Theme::light(),
+        "nord" => V2Theme::nord(),
+        "catppuccin" => V2Theme::catppuccin(),
+        "github_dark" => V2Theme::github_dark(),
+        "monokai" => V2Theme::monokai(),
+        _ => V2Theme::dark(),
+    }
+}
+
 // ── Terminal Lifecycle ───────────────────────────────────────────────────
 
 /// Terminal wrapper following ratatui best practices.
@@ -373,6 +393,10 @@ pub(crate) struct AppState {
     /// Todo panel state — synced from the agent's `todo` tool via
     /// `TodoStateProvider`. Rendered as a sticky panel above the input.
     pub todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState,
+    /// Cursor blink state shared with the v2 pipeline. Initialized once in
+    /// `AppState::new()` and threaded through every `draw_frame_closure` call
+    /// so cursor escapes are emitted only when the position/visibility changes.
+    pub cursor_state: V2CursorState,
 }
 
 /// A toast notification to display temporarily.
@@ -520,6 +544,7 @@ impl AppState {
             catalog: None,
             todo_provider: None,
             todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState::new(),
+            cursor_state: V2CursorState::new(),
         };
 
         // Load user keybindings from settings
@@ -1544,7 +1569,32 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 );
             }
 
-            tui.draw(|f| render::draw(f, &mut state, &theme))?;
+            // Terminal-first pipeline. The v2 draw_frame_closure owns cursor
+            // blink + CSI 2026 sync + DECCARA; the legacy render::draw still
+            // runs inside the v2 closure via `with_frame`, so the visible
+            // output is identical to the pre-cutover path. borrows: `state`
+            // and `theme` are captured by the closure for its lifetime; we
+            // temporarily move `cursor_state` out of `state` via `mem::take`
+            // so the pipeline can own it, then put it back after.
+            let v2_theme = v2_theme_from_legacy(&theme);
+            let caps = TerminalCaps::detect();
+            {
+                let mut cursor_state = std::mem::take(&mut state.cursor_state);
+                let result = oxi_tui::pipeline::draw_frame_closure(
+                    &mut tui.terminal,
+                    &mut cursor_state,
+                    oxi_tui::widget::FocusTarget::None,
+                    &v2_theme,
+                    &caps,
+                    |ctx| {
+                        ctx.with_frame(|frame| {
+                            render::draw(frame, &mut state, &theme);
+                        });
+                    },
+                );
+                state.cursor_state = cursor_state;
+                result?;
+            }
             let draw_dur = draw_start.elapsed();
             if draw_dur > std::time::Duration::from_millis(100) {
                 tracing::warn!(
