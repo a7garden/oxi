@@ -9,6 +9,7 @@
 //!
 //! See spec §5.
 
+pub mod chat;
 pub mod context;
 pub mod primitive;
 pub mod renderable;
