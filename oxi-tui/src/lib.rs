@@ -10,7 +10,8 @@
 //!
 //! Higher-level modules (`content`, `text`, `link`, `input`, `widget/{chat,panel,primitive}`)
 //! are added in Plans B/C.
-
 #![forbid(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
+
+pub mod pipeline;
