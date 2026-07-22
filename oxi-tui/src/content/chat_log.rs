@@ -2,7 +2,7 @@ use super::{ChatMessage, MessageId, MessageRole, StreamId, StreamingState};
 use crate::widget::{hash_combine, hash_str};
 
 /// Append-only conversation history with an optional assistant stream.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChatLog {
     messages: Vec<ChatMessage>,
     next_id: MessageId,

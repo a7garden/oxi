@@ -298,6 +298,10 @@ pub(crate) struct AppState {
     /// Plan C cutover Phase 5. Not read yet — rendering migration is future work.
     #[allow(dead_code)]
     pub v2_chat: oxi_tui::content::ChatLog,
+    /// v2 ChatView widget — renders the chat area when OXI_V2_RENDER=1 is set.
+    /// Synced from `v2_chat` each frame via `v2_render::sync_chat_view`.
+    /// Owned by AppState so its retained item slots survive across frames.
+    pub v2_chat_view: oxi_tui::widget::chat::ChatView,
     pub input: InputState,
     pub footer_state: FooterState,
     pub is_agent_busy: bool,
@@ -504,6 +508,7 @@ impl AppState {
         let mut state = Self {
             chat: ChatViewState::default(),
             v2_chat: oxi_tui::content::ChatLog::new(),
+            v2_chat_view: oxi_tui::widget::chat::ChatView::new(),
             input: InputState::default(),
             footer_state: FooterState::default(),
             is_agent_busy: false,
@@ -1601,13 +1606,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     &v2_theme,
                     &caps,
                     |ctx| {
-                        ctx.with_frame(|frame| {
-                            if use_v2_render {
-                                super::v2_render::draw_v2(frame, &mut state, &theme);
-                            } else {
+                        if use_v2_render {
+                            super::v2_render::draw_v2(ctx, &mut state);
+                        } else {
+                            ctx.with_frame(|frame| {
                                 render::draw(frame, &mut state, &theme);
-                            }
-                        });
+                            });
+                        }
                     },
                 );
                 state.cursor_state = cursor_state;
