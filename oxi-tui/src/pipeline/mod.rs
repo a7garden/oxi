@@ -8,3 +8,16 @@ pub mod cursor_slot;
 
 pub use cursor::CursorState;
 pub use cursor_slot::CursorSlot;
+
+/// Outcome of a single `draw_frame` call. Lets the caller sleep until the next
+/// tick when nothing changed (idle skip — spec §1.4 proactive optimization).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FrameOutcome {
+    /// No work was done: `content_hash` unchanged, no resize, no cursor change.
+    /// Caller may sleep until the next event/tick.
+    #[default]
+    Idle,
+    /// A frame was rendered. Cell diff may or may not have emitted bytes
+    /// (`DiffBackend` knows, but pipeline doesn't need to).
+    Rendered,
+}
