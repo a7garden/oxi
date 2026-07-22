@@ -30,6 +30,8 @@ pub struct MessageItem {
     md: StreamingMarkdown,
     tool_calls: Vec<ToolCall>,
     cached_hash: u64,
+    #[cfg(test)]
+    render_count: usize,
 }
 
 impl MessageItem {
@@ -49,7 +51,14 @@ impl MessageItem {
             md,
             tool_calls,
             cached_hash,
+            #[cfg(test)]
+            render_count: 0,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn render_count(&self) -> usize {
+        self.render_count
     }
 
     /// Pull the latest content from `message`. If the role or block list
@@ -123,6 +132,10 @@ impl Renderable for MessageItem {
     }
 
     fn render(&mut self, area: Rect, ctx: &mut RenderCtx) {
+        #[cfg(test)]
+        {
+            self.render_count = self.render_count.saturating_add(1);
+        }
         if area.width == 0 || area.height == 0 {
             return;
         }
