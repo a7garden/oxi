@@ -19,6 +19,7 @@ use ratatui::layout::{Position, Rect};
 
 use crate::pipeline::CursorSlot;
 use crate::pipeline::diff_backend::{LinkCollector, LinkTarget};
+use crate::theme::{TerminalCaps, Theme};
 use crate::widget::CellRange;
 
 /// What has focus this frame. Affects rendering of input cursor, highlights, etc.
@@ -39,11 +40,8 @@ pub enum FocusTarget {
 /// to `RenderCtx<'_, '_>`.
 pub struct RenderCtx<'a, 'f> {
     frame: &'a mut Frame<'f>,
-    /// Placeholder until theme module lands (Task 11). For now, () — widgets
-    /// use hardcoded styles or skip theme-dependent rendering.
-    _theme: (),
-    /// Placeholder for terminal capabilities. Task 11 adds real `TerminalCaps`.
-    _caps: (),
+    theme: &'a Theme,
+    caps: &'a TerminalCaps,
     pub focus: FocusTarget,
     pub time: Instant,
     links: LinkCollector,
@@ -51,16 +49,26 @@ pub struct RenderCtx<'a, 'f> {
 }
 
 impl<'a, 'f> RenderCtx<'a, 'f> {
-    pub fn new(frame: &'a mut Frame<'f>) -> Self {
+    pub fn new(frame: &'a mut Frame<'f>, theme: &'a Theme, caps: &'a TerminalCaps) -> Self {
         Self {
             frame,
-            _theme: (),
-            _caps: (),
+            theme,
+            caps,
             focus: FocusTarget::default(),
             time: Instant::now(),
             links: LinkCollector::new(),
             cursor: CursorSlot::NotSet,
         }
+    }
+
+    #[must_use]
+    pub fn theme(&self) -> &Theme {
+        self.theme
+    }
+
+    #[must_use]
+    pub fn caps(&self) -> &TerminalCaps {
+        self.caps
     }
 
     pub fn buffer_mut(&mut self) -> &mut Buffer {
@@ -103,16 +111,22 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    fn make_ctx<'a, 'f>(frame: &'a mut Frame<'f>) -> RenderCtx<'a, 'f> {
-        RenderCtx::new(frame)
+    fn make_ctx<'a, 'f>(
+        frame: &'a mut Frame<'f>,
+        theme: &'a Theme,
+        caps: &'a TerminalCaps,
+    ) -> RenderCtx<'a, 'f> {
+        RenderCtx::new(frame, theme, caps)
     }
 
     #[test]
     fn cursor_starts_notset() {
         let backend = TestBackend::new(10, 5);
         let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
         term.draw(|f| {
-            let mut ctx = make_ctx(f);
+            let mut ctx = make_ctx(f, &theme, &caps);
             let slot = ctx.take_cursor_slot();
             assert_eq!(slot, CursorSlot::NotSet);
         })
@@ -123,8 +137,10 @@ mod tests {
     fn set_cursor_makes_slot_show() {
         let backend = TestBackend::new(10, 5);
         let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
         term.draw(|f| {
-            let mut ctx = make_ctx(f);
+            let mut ctx = make_ctx(f, &theme, &caps);
             ctx.set_cursor(Position { x: 3, y: 4 });
             let slot = ctx.take_cursor_slot();
             assert_eq!(slot, CursorSlot::Show(Position { x: 3, y: 4 }));
@@ -136,8 +152,10 @@ mod tests {
     fn hide_cursor_makes_slot_hide() {
         let backend = TestBackend::new(10, 5);
         let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
         term.draw(|f| {
-            let mut ctx = make_ctx(f);
+            let mut ctx = make_ctx(f, &theme, &caps);
             ctx.hide_cursor();
             let slot = ctx.take_cursor_slot();
             assert_eq!(slot, CursorSlot::Hide);
@@ -149,8 +167,10 @@ mod tests {
     fn take_resets_to_notset() {
         let backend = TestBackend::new(10, 5);
         let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
         term.draw(|f| {
-            let mut ctx = make_ctx(f);
+            let mut ctx = make_ctx(f, &theme, &caps);
             ctx.set_cursor(Position { x: 0, y: 0 });
             let _ = ctx.take_cursor_slot();
             let slot2 = ctx.take_cursor_slot();

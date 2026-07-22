@@ -80,10 +80,12 @@ mod tests {
         tree: &mut RetainedTree,
         terminal: &mut Terminal<TestBackend>,
     ) -> Option<Position> {
+        let theme = crate::theme::Theme::dark();
+        let caps = crate::theme::TerminalCaps::default();
         let mut cursor_position = None;
         terminal
             .draw(|frame| {
-                let mut ctx = RenderCtx::new(frame);
+                let mut ctx = RenderCtx::new(frame, &theme, &caps);
                 cursor_position = tree.render(&mut ctx);
             })
             .unwrap();

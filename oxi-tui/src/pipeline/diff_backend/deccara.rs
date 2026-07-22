@@ -117,7 +117,7 @@ pub(crate) fn analyze_row(cells: &[(u16, &Cell)], width: u16) -> Option<BgFill> 
     // row is spaces).
     let mut content_end = 0u16;
     for col in 0..width {
-        let cell = by_col[col as usize].expect("checked present");
+        let cell = by_col[col as usize]?;
         if cell.symbol() != " " {
             content_end = col + 1;
         }
@@ -132,11 +132,11 @@ fn analyze_trailing(by_col: &[Option<&Cell>], content_end: u16, width: u16) -> O
     if content_end >= width {
         return None; // no trailing region
     }
-    let first = by_col[content_end as usize].expect("full-width");
+    let first = by_col[content_end as usize]?;
     let bg = first.bg;
     bg_sgr(bg)?; // default/reset background — nothing to paint
     for c in &by_col[content_end as usize + 1..width as usize] {
-        let cell = c.expect("full-width");
+        let cell = c.as_ref()?;
         if cell.symbol() != " " || cell.bg != bg {
             return None; // non-space or drifted background — refuse
         }

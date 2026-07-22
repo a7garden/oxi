@@ -14,6 +14,7 @@ pub use diff_backend::DiffBackend;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
+use crate::theme::{TerminalCaps, Theme};
 use crate::widget::{FocusTarget, RenderCtx, RetainedTree};
 
 /// Draws one terminal-first frame, skipping unchanged content when not resized.
@@ -22,6 +23,8 @@ pub fn draw_frame<B: Backend>(
     tree: &mut RetainedTree,
     cursor: &mut CursorState,
     focus: FocusTarget,
+    theme: &Theme,
+    caps: &TerminalCaps,
 ) -> Result<FrameOutcome, B::Error> {
     let prev_size = term.size()?;
     term.autoresize()?;
@@ -31,7 +34,7 @@ pub fn draw_frame<B: Backend>(
     }
     let want = {
         let mut frame = term.get_frame();
-        let mut ctx = RenderCtx::new(&mut frame);
+        let mut ctx = RenderCtx::new(&mut frame, theme, caps);
         ctx.focus = focus;
         tree.render(&mut ctx)
     };
@@ -70,11 +73,15 @@ mod draw_frame_tests {
         let mut term = make_term();
         let mut tree = RetainedTree::new(Box::new(Text::new("hello")));
         let mut cursor = CursorState::new();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
         let outcome = draw_frame(
             &mut term,
             &mut tree,
             &mut cursor,
             crate::widget::FocusTarget::None,
+            &theme,
+            &caps,
         )
         .unwrap();
         assert_eq!(outcome, FrameOutcome::Rendered);
@@ -85,11 +92,15 @@ mod draw_frame_tests {
         let mut term = make_term();
         let mut tree = RetainedTree::new(Box::new(Text::new("hello")));
         let mut cursor = CursorState::new();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
         let _ = draw_frame(
             &mut term,
             &mut tree,
             &mut cursor,
             crate::widget::FocusTarget::None,
+            &theme,
+            &caps,
         )
         .unwrap();
         let outcome = draw_frame(
@@ -97,6 +108,8 @@ mod draw_frame_tests {
             &mut tree,
             &mut cursor,
             crate::widget::FocusTarget::None,
+            &theme,
+            &caps,
         )
         .unwrap();
         assert_eq!(outcome, FrameOutcome::Idle);

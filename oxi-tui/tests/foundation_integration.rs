@@ -8,7 +8,7 @@
 //!   Plan B child→parent hash propagation chain).
 
 use oxi_tui::pipeline::{CursorState, FrameOutcome, draw_frame};
-use oxi_tui::theme::Theme;
+use oxi_tui::theme::{TerminalCaps, Theme};
 use oxi_tui::widget::{FocusTarget, RetainedTree, Text, hash_combine, hash_str};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -21,19 +21,37 @@ fn foundation_idle_frame_skips_render() {
         Text::new("hello world").fg(ratatui::style::Color::Green),
     ));
     let mut cursor = CursorState::new();
+    let theme = Theme::dark();
+    let caps = TerminalCaps::default();
 
     // Frame 1: rendered (first call always).
-    let o1 = draw_frame(&mut term, &mut tree, &mut cursor, FocusTarget::None).unwrap();
+    let o1 = draw_frame(
+        &mut term,
+        &mut tree,
+        &mut cursor,
+        FocusTarget::None,
+        &theme,
+        &caps,
+    )
+    .unwrap();
     assert_eq!(o1, FrameOutcome::Rendered);
 
     // Frame 2: idle (hash unchanged, no resize).
-    let o2 = draw_frame(&mut term, &mut tree, &mut cursor, FocusTarget::None).unwrap();
+    let o2 = draw_frame(
+        &mut term,
+        &mut tree,
+        &mut cursor,
+        FocusTarget::None,
+        &theme,
+        &caps,
+    )
+    .unwrap();
     assert_eq!(o2, FrameOutcome::Idle);
 }
 
 #[test]
 fn foundation_theme_adapt_to_basic_level() {
-    use oxi_tui::theme::{ColorLevel, TerminalCaps};
+    use oxi_tui::theme::ColorLevel;
     let mut theme = Theme::dark();
     let _original_bg = theme.colors.background;
     let caps = TerminalCaps {
