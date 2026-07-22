@@ -197,12 +197,7 @@ mod tests {
         fn handle_key(&mut self, _key: KeyEvent) -> crate::tui::overlay::OverlayAction {
             crate::tui::overlay::OverlayAction::None
         }
-        fn render(
-            &mut self,
-            frame: &mut ratatui::Frame,
-            area: Rect,
-            _theme: &LegacyTheme,
-        ) {
+        fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, _theme: &LegacyTheme) {
             // Paint the sentinel at the top-left cell of the supplied
             // area. Single-cell render keeps the post-draw assertion
             // unambiguous.
