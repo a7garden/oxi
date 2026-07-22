@@ -10,11 +10,13 @@
 //! See spec §5.
 
 pub mod context;
+pub mod primitive;
 pub mod renderable;
 pub mod tree;
 
+pub use primitive::Text;
+
 pub use crate::pipeline::diff_backend::{CellRange, LinkCollector, LinkTarget};
 pub use context::{FocusTarget, RenderCtx};
-
 pub use renderable::{Renderable, hash_combine, hash_str};
 pub use tree::RetainedTree;
