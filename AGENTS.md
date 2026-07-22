@@ -469,3 +469,59 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   - The brightness hierarchy is `background ≤ response_bg < thinking_bg < surface_bg < user_bg < panel_bg` — new slots must respect this ordering. See `docs/THEME_GUIDE.md` for the derivation rules.
   - **`DashboardWidget` takes `&Theme`** (not `Theme::dark()`). The MCP dashboard overlay constructs it fresh in `render()` with the live theme. Do not re-introduce a hardcoded `Theme::dark()` in any widget — pass the theme through.
   - **`OxiStyleSheet` is theme-aware** — constructed via `OxiStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
+
+## oxi-tui v2 — Terminal-First Pipeline (2026-07-22)
+
+**Branch**: `oxi-tui-v2-plan-a` (37 commits)
+
+### What Changed
+
+`oxi-tui` was greenfield-rewritten as a terminal-first rendering pipeline. The old crate is preserved as `oxi-tui-legacy` for reference. Key architectural shift: **decompose `Terminal::draw()` to own the frame lifecycle** instead of wrapping ratatui's backend.
+
+### Three Pillars
+
+1. **Terminal-first pipeline** — `draw_frame()` (14 LOC body): `autoresize → hash-skip → render → flush(DiffBackend) → reconcile(CursorState) → swap_buffers`. No fork, no writer thread, no SafeBuf. Cursor blink preserved via dedup (same position → 0 bytes).
+
+2. **Retained tree + content_hash memoization** — `RetainedTree` tracks root hash; `RetainedChild<T>` wraps per-subtree for automatic skip. During streaming, only the active message re-renders.
+
+3. **Capability detection + consumption same module** — `theme/capability.rs` detects terminal caps AND adapts theme colors. Structural fix for legacy's 394-LOC dead `color_level.rs`.
+
+### Module Structure
+
+```
+oxi-tui/src/
+├── pipeline/          draw_frame, CursorState, CursorSlot, DiffBackend (4-file), OSC8
+├── widget/            Renderable trait, RetainedTree, RetainedChild, RenderCtx, Text
+│   ├── chat/          ChatView, MessageItem, ToolCall, Spinner
+│   ├── panel/         Footer, Sticky, Overlay
+│   └── primitive/     Border, List (virtualized), Scrollbar
+├── content/           ChatLog (O(1) hash), ChatView state, ChatMessage, StreamingState
+├── text/              StreamingMarkdown (checkpoint), CJK wrap, syntax (feature-gated)
+├── theme/             palette (28 slots), capability (detect+adapt), serializer (TOML)
+└── input/             textarea wrapper (stock ratatui-textarea 0.9)
+```
+
+### Status
+
+- 222 oxi-tui tests, 9.7K LOC, all gates clean
+- **Pipeline is LIVE** in oxi-cli via `draw_frame_closure` (cutover Phase 4 complete)
+- `LegacyOverlayAdapter` + `ClosureRoot` bridge legacy rendering through new pipeline
+- Remaining: full rendering migration (Phase 5), legacy removal (Plan D)
+
+### Key API Contracts
+
+```rust
+// Pipeline
+pub fn draw_frame<B>(term, tree, cursor, focus, theme, caps) -> Result<FrameOutcome, B::Error>
+pub fn draw_frame_closure<B, F>(term, cursor, focus, theme, caps, render_fn) -> Result<FrameOutcome, B::Error>
+pub struct CursorState { fn reconcile(want, term) -> Result<()> }
+
+// Widget model
+pub trait Renderable { fn content_hash(&self) -> u64; fn height_for(...) -> u16; fn render(area, ctx) }
+pub struct RetainedTree { fn any_hash_changed() -> bool; fn render(ctx) -> Option<Position> }
+pub struct RetainedChild<T: Renderable> { fn render_if_changed(area, ctx) -> bool }
+
+// CursorSlot tri-state (prevents flicker)
+pub enum CursorSlot { NotSet, Show(Position), Hide }
+impl CursorSlot { fn resolve(self, last_cursor) -> Option<Position> }
+```
