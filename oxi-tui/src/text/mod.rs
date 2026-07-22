@@ -17,6 +17,10 @@
 
 pub mod wrap;
 pub mod streaming_md;
+pub mod syntax;
 
 pub use wrap::{wrap_lines, wrap_lines_styled};
 pub use streaming_md::StreamingMarkdown;
+
+#[cfg(feature = "syntax")]
+pub use syntax::SyntaxHighlighter;

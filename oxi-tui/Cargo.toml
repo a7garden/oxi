@@ -38,5 +38,15 @@ supports-color = { workspace = true }
 pulldown-cmark = "0.13"
 linkify = { workspace = true }
 
+# Syntax highlighting (optional — opt-in via `features = ["syntax"]`)
+# Syntect provides a rich TextMate grammar + theme ecosystem for code blocks.
+# Without the feature, SyntaxHighlighter falls back to plain monospace lines.
+syntect = { version = "5", optional = true }
+
+[features]
+# syntax feature: enables syntect-based code highlighting. Opt-in to keep the
+# binary small; off by default.
+syntax = ["dep:syntect"]
+
 [dev-dependencies]
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }

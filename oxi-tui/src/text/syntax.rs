@@ -9,9 +9,12 @@
 //! syntax and theme packs on first use, and [`SyntaxHighlighter::highlight`]
 //! renders `code` tagged with `lang` into a vector of styled [`Line`]s.
 
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 #[cfg(feature = "syntax")]
-use ratatui::style::{Color, Style};
+use ratatui::{
+    style::{Color, Style},
+    text::Span,
+};
 
 /// Syntax highlighter for fenced code blocks.
 ///
@@ -88,17 +91,29 @@ impl SyntaxHighlighter {
             let ranges = highlighter.highlight_line(line, &self.syntax_set);
             // A failed highlight still emits the source text unstyled rather
             // than dropping the line — the user keeps their code.
+            // Each `LinesWithEndings` slice ends with `\n`, and the highlighter
+            // puts that newline on the last range. Strip it so each ratatui
+            // `Line` (one terminal row) does not embed a literal newline in
+            // its span content.
             let spans = match ranges {
-                Ok(ranges) => ranges
-                    .into_iter()
-                    .map(|(style, text)| Span::styled(text.to_owned(), convert_style(style)))
-                    .collect(),
+                Ok(ranges) => {
+                    let len = ranges.len();
+                    ranges
+                        .into_iter()
+                        .enumerate()
+                        .map(|(idx, (style, text))| {
+                            let cleaned = if idx + 1 == len {
+                                text.trim_end_matches(['\n', '\r']).to_owned()
+                            } else {
+                                text.to_owned()
+                            };
+                            Span::styled(cleaned, convert_style(style))
+                        })
+                        .collect()
+                }
                 Err(_) => vec![Span::raw(line.trim_end_matches(['\n', '\r']).to_owned())],
             };
             lines.push(Line::from(spans));
-        }
-        if lines.is_empty() {
-            lines.push(Line::from(""));
         }
         lines
     }
@@ -125,29 +140,11 @@ impl Default for SyntaxHighlighter {
     }
 }
 
-/// Build plain monospace lines from raw source. Line endings are kept on
-/// each span so concatenation matches the original source; `Line::to_string`
-/// still produces a clean rendering because the trailing `\n` is consumed by
-/// the terminal.
+/// Build plain monospace lines from raw source. Newlines are stripped so
+/// each ratatui `Line` (one terminal row) does not embed a literal newline
+/// in its span content — matches the syntax path's behavior.
 fn plain_lines(code: &str) -> Vec<Line<'static>> {
-    if code.is_empty() {
-        return Vec::new();
-    }
-    let mut lines = Vec::with_capacity(code.lines().count() + 1);
-    let mut start = 0usize;
-    let bytes = code.as_bytes();
-    for (idx, byte) in bytes.iter().enumerate() {
-        if *byte == b'\n' {
-            let slice = code[start..=idx].to_owned();
-            lines.push(Line::from(vec![Span::raw(slice)]));
-            start = idx + 1;
-        }
-    }
-    if start < bytes.len() {
-        let slice = code[start..].to_owned();
-        lines.push(Line::from(vec![Span::raw(slice)]));
-    }
-    lines
+    code.lines().map(|s| Line::from(s.to_owned())).collect()
 }
 
 /// Convert a syntect [`syntect::highlighting::Style`] into a ratatui
@@ -183,13 +180,13 @@ mod tests {
         let lines = hl.highlight(code, "rust");
         assert_eq!(lines.len(), 3, "should produce one line per source line");
 
-        // The rendered lines must contain the full source text across all spans.
+        // Concatenated span content matches the source with newlines stripped.
         let rendered: String = lines
             .iter()
             .flat_map(|line| line.spans.iter())
             .map(|span| span.content.as_ref())
             .collect();
-        assert_eq!(rendered, "fn main() {\n    println!(\"hi\");\n}\n");
+        assert_eq!(rendered, "fn main() {    println!(\"hi\");}");
 
         // At least one span on the function definition should carry a
         // non-default foreground color (the `fn` keyword).
@@ -211,10 +208,7 @@ mod tests {
             .flat_map(|line| line.spans.iter())
             .map(|span| span.content.as_ref())
             .collect();
-        assert!(
-            rendered.contains("hello") && rendered.contains("world"),
-            "unknown language should still emit the source text"
-        );
+        assert_eq!(rendered, "helloworld");
     }
 
     #[cfg(not(feature = "syntax"))]
@@ -228,7 +222,7 @@ mod tests {
             .flat_map(|line| line.spans.iter())
             .map(|span| span.content.as_ref())
             .collect();
-        assert_eq!(rendered, "fn main() {\n    println!(\"hi\");\n}\n");
+        assert_eq!(rendered, "fn main() {    println!(\"hi\");}");
         for line in &lines {
             for span in &line.spans {
                 assert!(
