@@ -153,6 +153,7 @@ mod tests {
     /// Existence of this type at all proves the adapter accepts a
     /// `!Send` overlay. If we ever put `+ Send` back on the trait or the
     /// adapter, this mock will fail to coerce and the build will fail.
+
     struct NotSendOverlay(*mut ());
 
     impl std::fmt::Debug for NotSendOverlay {
@@ -166,6 +167,47 @@ mod tests {
             crate::tui::overlay::OverlayAction::None
         }
         fn render(&mut self, _frame: &mut ratatui::Frame, _area: Rect, _theme: &LegacyTheme) {}
+        fn hint(&self) -> &str {
+            ""
+        }
+    }
+
+    /// A `!Send` overlay mock that paints a sentinel symbol into the frame
+    /// buffer at the top-left of the supplied area on `render`. Used to
+    /// verify the adapter's bridge actually forwards the legacy render
+    /// through `RenderCtx::with_frame` end-to-end.
+    struct PaintingOverlay {
+        sentinel: &'static str,
+        // `*mut ()` makes this type `!Send`, mirroring real factory
+        // overlays. If `Renderable` or the adapter re-adds `+ Send`, the
+        // `Box::new(PaintingOverlay { ... })` coercion in the integration
+        // test fails to compile.
+        _not_send_witness: *mut (),
+    }
+
+    impl std::fmt::Debug for PaintingOverlay {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("PaintingOverlay")
+                .field("sentinel", &self.sentinel)
+                .finish()
+        }
+    }
+
+    impl OverlayComponent for PaintingOverlay {
+        fn handle_key(&mut self, _key: KeyEvent) -> crate::tui::overlay::OverlayAction {
+            crate::tui::overlay::OverlayAction::None
+        }
+        fn render(
+            &mut self,
+            frame: &mut ratatui::Frame,
+            area: Rect,
+            _theme: &LegacyTheme,
+        ) {
+            // Paint the sentinel at the top-left cell of the supplied
+            // area. Single-cell render keeps the post-draw assertion
+            // unambiguous.
+            frame.buffer_mut()[(area.x, area.y)].set_symbol(self.sentinel);
+        }
         fn hint(&self) -> &str {
             ""
         }
@@ -233,7 +275,6 @@ mod tests {
 
     /// `convert_theme` must preserve name + foreground/background and not
     /// panic on any built-in V2 theme.
-
     #[test]
     fn convert_theme_preserves_core_slots() {
         use oxi_tui::theme::Theme;
@@ -246,5 +287,61 @@ mod tests {
         assert_eq!(legacy.colors.border, v2.colors.border);
         // Spacing + Symbols default to legacy crate's defaults.
         assert_eq!(legacy.spacing.padding, 1);
+    }
+
+    /// End-to-end: drive `Renderable::render` on the adapter through a
+    /// real `TestBackend` and confirm the legacy overlay's paint actually
+    /// lands in the buffer. This is the only test that exercises the
+    /// bridge's three pieces together (`convert_theme` +
+    /// `RenderCtx::with_frame` + legacy `OverlayComponent::render`), so
+    /// any of the three breaking silently would trip it.
+    #[test]
+    fn render_delegates_to_legacy_overlay() {
+        use oxi_tui::theme::{TerminalCaps, Theme};
+        use oxi_tui::widget::RenderCtx;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let backend = TestBackend::new(10, 5);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let caps = TerminalCaps::default();
+
+        let overlay: Box<dyn OverlayComponent> = Box::new(PaintingOverlay {
+            sentinel: "X",
+            _not_send_witness: std::ptr::null_mut(),
+        });
+        let mut adapter = LegacyOverlayAdapter::new(overlay);
+        let h_before = adapter.content_hash();
+
+        // Drive `adapter.render` through the same harness as
+        // `with_frame_provides_access_to_frame` in context.rs.
+        term.draw(|f| {
+            let mut ctx = RenderCtx::new(f, &theme, &caps);
+            let area = Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 5,
+            };
+            adapter.render(area, &mut ctx);
+        })
+        .unwrap();
+
+        // The legacy overlay's sentinel cell landed in the buffer.
+        let buf = term.backend().buffer().clone();
+        let symbol = buf.cell((0, 0)).map_or("", ratatui::buffer::Cell::symbol);
+        assert_eq!(
+            symbol, "X",
+            "legacy overlay's sentinel cell must be visible after adapter.render"
+        );
+
+        // The adapter bumped its dirty counter so the pipeline knows to
+        // re-render next frame.
+        assert_ne!(
+            adapter.content_hash(),
+            h_before,
+            "render() must bump dirty_seq so the next content_hash differs"
+        );
     }
 }
