@@ -5,9 +5,11 @@
 
 pub mod cursor;
 pub mod cursor_slot;
+pub mod diff_backend;
 
 pub use cursor::CursorState;
 pub use cursor_slot::CursorSlot;
+pub use diff_backend::DiffBackend;
 
 /// Outcome of a single `draw_frame` call. Lets the caller sleep until the next
 /// tick when nothing changed (idle skip — spec §1.4 proactive optimization).
