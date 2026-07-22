@@ -10,6 +10,7 @@ mod render;
 mod slash;
 pub mod v2_bridge;
 mod v2_overlay_adapter;
+mod v2_render;
 mod welcome;
 
 pub use app::run_tui_interactive;

@@ -1585,6 +1585,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             // so the pipeline can own it, then put it back after.
             let v2_theme = v2_theme_from_legacy(&theme);
             let caps = TerminalCaps::detect();
+            // Render-path gating. When `OXI_V2_RENDER=1` is set, dispatch through
+            // `v2_render::draw_v2` instead of the legacy `render::draw`. Both
+            // paths currently render identically (v2 delegates to legacy) so
+            // flipping this env var is a no-op visually. Once the v2 ChatView
+            // bridging lands, the v2 path will diverge without touching this
+            // call site.
+            let use_v2_render = std::env::var("OXI_V2_RENDER").as_deref() == Ok("1");
             {
                 let mut cursor_state = std::mem::take(&mut state.cursor_state);
                 let result = oxi_tui::pipeline::draw_frame_closure(
@@ -1595,7 +1602,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     &caps,
                     |ctx| {
                         ctx.with_frame(|frame| {
-                            render::draw(frame, &mut state, &theme);
+                            if use_v2_render {
+                                super::v2_render::draw_v2(frame, &mut state, &theme);
+                            } else {
+                                render::draw(frame, &mut state, &theme);
+                            }
                         });
                     },
                 );
