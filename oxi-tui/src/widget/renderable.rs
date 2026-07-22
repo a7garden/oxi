@@ -20,7 +20,7 @@ use ratatui::layout::Rect;
 
 use crate::widget::RenderCtx;
 
-pub trait Renderable: Send {
+pub trait Renderable {
     /// Hash of the widget's content. Change this when output would change.
     /// Must be deterministic and cheap.
     fn content_hash(&self) -> u64;
