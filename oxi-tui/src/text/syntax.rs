@@ -49,12 +49,7 @@ impl SyntaxHighlighter {
         let theme_name = if theme_set.themes.contains_key("base16-ocean.dark") {
             "base16-ocean.dark".to_owned()
         } else {
-            theme_set
-                .themes
-                .keys()
-                .next()
-                .cloned()
-                .unwrap_or_default()
+            theme_set.themes.keys().next().cloned().unwrap_or_default()
         };
         Self {
             syntax_set,
@@ -153,7 +148,11 @@ fn plain_lines(code: &str) -> Vec<Line<'static>> {
 /// panels, code backgrounds) keeps full control.
 #[cfg(feature = "syntax")]
 fn convert_style(syn_style: syntect::highlighting::Style) -> Style {
-    let fg = Color::Rgb(syn_style.foreground.r, syn_style.foreground.g, syn_style.foreground.b);
+    let fg = Color::Rgb(
+        syn_style.foreground.r,
+        syn_style.foreground.g,
+        syn_style.foreground.b,
+    );
     let mut style = Style::default().fg(fg);
     let fs = syn_style.font_style;
     if fs.contains(syntect::highlighting::FontStyle::BOLD) {

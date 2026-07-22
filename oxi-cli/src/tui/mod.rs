@@ -8,9 +8,9 @@ mod handlers;
 mod overlay;
 mod render;
 mod slash;
-mod welcome;
 pub mod v2_bridge;
 mod v2_overlay_adapter;
+mod welcome;
 
 pub use app::run_tui_interactive;
 pub use app::run_tui_interactive_with_continue;

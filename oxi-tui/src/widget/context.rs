@@ -112,7 +112,6 @@ impl<'a, 'f> RenderCtx<'a, 'f> {
     pub fn with_frame<R>(&mut self, f: impl FnOnce(&mut Frame<'f>) -> R) -> R {
         f(self.frame)
     }
-
 }
 
 #[cfg(test)]
@@ -197,7 +196,6 @@ mod tests {
         })
         .unwrap();
     }
-
 
     #[test]
     fn take_resets_to_notset() {

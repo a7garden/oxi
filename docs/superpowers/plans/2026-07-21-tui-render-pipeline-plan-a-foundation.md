@@ -36,7 +36,7 @@ oxi-tui/                          (NEW tree, replaces old oxi-tui/ contents)
     │   ├── mod.rs                (draw_frame, FrameOutcome)
     │   ├── cursor.rs             (CursorState, reconcile)
     │   ├── cursor_slot.rs        (CursorSlot tri-state enum)
-    │   └── diff_backend.rs       (DiffBackend 이식 — from render/{mod.rs(DiffBackend 부분), diff.rs, deccara.rs})
+    │   └── diff_backend/        (4-file module: mod.rs / row.rs / deccara.rs / caps.rs — mirrors legacy split, each ≤500 LOC)
     ├── widget/
     │   ├── mod.rs                (RetainedTree 공개 API + CursorSlot re-export)
     │   ├── renderable.rs         (trait Renderable)
@@ -600,17 +600,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they FAIL first (TDD red)**
-
-Run: `cargo nextest run -p oxi-tui`
-Expected: tests fail to compile (no `cursor.rs` yet — but wait, we just wrote it. So tests should PASS.)
-
-Actually, this step's "fail" verification was conceptual — the file contains both impl and tests together. Run the tests; they should pass on first try.
-
-Run: `cargo nextest run -p oxi-tui`
-Expected: 6 cursor tests pass + 4 CursorSlot tests pass = 10 total.
-
-- [ ] **Step 3: Wire cursor into pipeline mod**
+- [ ] **Step 4: Wire cursor into pipeline mod**
 
 Modify `oxi-tui/src/pipeline/mod.rs`:
 ```rust
@@ -621,12 +611,12 @@ pub use cursor::CursorState;
 pub use cursor_slot::CursorSlot;
 ```
 
-- [ ] **Step 4: Verify clippy is clean**
+- [ ] **Step 5: Verify clippy is clean**
 
 Run: `cargo clippy -p oxi-tui -- -D warnings`
 Expected: clean. Address any warnings (likely `too_many_lines`, `cast_possible_truncation` — fix at source).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add oxi-tui/src/pipeline/
@@ -706,43 +696,69 @@ Plan A PR-1 (3/5)"
 ## Task 5: PR-1 — DiffBackend migration (no behavioral changes)
 
 **Files:**
-- Create: `oxi-tui/src/pipeline/diff_backend.rs` (copy from `oxi-tui-legacy/src/render/mod.rs` DiffBackend impl + `diff.rs` + `deccara.rs`, merged)
+- Create: `oxi-tui/src/pipeline/diff_backend/mod.rs` (~400 LOC — DiffBackend struct + impls)
+- Create: `oxi-tui/src/pipeline/diff_backend/row.rs` (~150 LOC — Row, build_row, checksum)
+- Create: `oxi-tui/src/pipeline/diff_backend/deccara.rs` (~410 LOC — DECCARA plan + emit)
+- Create: `oxi-tui/src/pipeline/diff_backend/caps.rs` (~80 LOC — TerminalCaps inline, will move to theme/ in Task 13)
 - Modify: `oxi-tui/src/pipeline/mod.rs`
 
 **Interfaces:**
-- Produces: `pub struct DiffBackend<W>` with same API as legacy. Later (Plan B Task for link integration) we add `set_links()`.
+- Produces: `pub struct DiffBackend<W>` with same API as legacy. Later (Task 6) we add `set_links()`.
 
-**NOTE:** This task is mechanical code-move + import-path fixups. No new behavior. Tests come from legacy crate — they should pass without modification after path fixes.
+**NOTE:** Mechanical code-move + import-path fixups. No new behavior. Mirrors the legacy 3-file split — each new file stays ≤500 LOC per Global Constraint.
 
-- [ ] **Step 1: Read the legacy files to know what to migrate**
+- [ ] **Step 1: Read the legacy files**
 
 Read:
-- `oxi-tui-legacy/src/render/mod.rs` (743 LOC) — extract DiffBackend struct + impl
-- `oxi-tui-legacy/src/render/diff.rs` (144 LOC) — `Row` type, `build_row`, checksum
-- `oxi-tui-legacy/src/render/deccara.rs` (406 LOC) — DECCARA bg-fill optimizer
+- `oxi-tui-legacy/src/render/mod.rs` (743 LOC) — DiffBackend struct + both impls + inline TerminalCaps
+- `oxi-tui-legacy/src/render/diff.rs` (144 LOC) — Row, build_row, checksum
+- `oxi-tui-legacy/src/render/deccara.rs` (406 LOC) — DECCARA plan + emission
+- `oxi-tui-legacy/src/render/terminal.rs` — TerminalCaps struct + TerminalKind enum + detect()
 
-Identify DiffBackend-related items:
-- `pub struct DiffBackend<W>` + `impl<W: Write> DiffBackend<W>` + `impl<W: Write> Backend for DiffBackend<W>`
-- `struct Row`, `fn build_row`, checksum logic
-- DECCARA plan + emission
-- `TerminalCaps` struct (referenced — will be moved to `theme/capability.rs` in Task 11, but for now keep inline as `pub mod terminal_caps`)
-- CSI 2026 wrap (`\x1b[?2026h` / `\x1b[?2026l`)
+Catalog items per file. Each new file owns one concern.
 
-- [ ] **Step 2: Create diff_backend.rs with migrated code**
+- [ ] **Step 2: Create `diff_backend/` directory with 4 files**
 
-Create `oxi-tui/src/pipeline/diff_backend.rs`:
-- Copy DiffBackend struct + impl + Backend impl from legacy mod.rs
-- Copy `Row`, `build_row`, checksum from legacy diff.rs
-- Copy DECCARA from legacy deccara.rs
-- Update all imports from `crate::render::*` → `crate::pipeline::diff_backend::*` (internal) and `crate::render::terminal::{TerminalCaps, ...}` → keep as inline `pub struct TerminalCaps` for now (will be promoted in Task 11)
-- Keep CSI 2026 emission unchanged (lines 350, 477 of legacy)
-- Keep `force_full_redraw` resize logic unchanged (lines 320-325)
-- Add `#![allow(clippy::too_many_lines)]` at top if needed for the migration
-- Total target: ~950 LOC
+**`diff_backend/mod.rs`** (~400 LOC):
+- DiffBackend struct definition + fields (force_full_redraw, last_width, last_height, prev_rows, caps, deccara_enabled, etc.)
+- `impl<W: Write> DiffBackend<W>` inherent methods (new, force_redraw, etc.)
+- `impl<W: Write> Backend for DiffBackend<W>` trait methods (draw, hide_cursor, show_cursor, set_cursor_position, flush, size, clear, etc.)
+- `pub use` re-exports of Row (from row.rs), DeccaraPlan (from deccara.rs), TerminalCaps (from caps.rs)
+- CSI 2026 emission bytes (`\x1b[?2026h` / `\x1b[?2026l`) stay here at flush boundaries
+- `pub mod` declarations for row, deccara, caps submodules
+- Module doc comment noting migration source
+
+**`diff_backend/row.rs`** (~150 LOC):
+- `pub(crate) struct Row` (or pub if needed by tests)
+- `pub(crate) fn build_row(...)`
+- u64 checksum logic
+- Migrated verbatim from legacy `render/diff.rs`
+
+**`diff_backend/deccara.rs`** (~410 LOC):
+- `pub(crate) struct DeccaraPlan` (or pub if mod.rs needs it)
+- `pub(crate) fn compute_deccara_plan(...)`
+- `pub(crate) fn emit_deccara(...)`
+- All helper functions for DECCARA bg-fill optimization
+- Migrated verbatim from legacy `render/deccara.rs`
+
+**`diff_backend/caps.rs`** (~80 LOC):
+- `pub struct TerminalCaps` with all fields (color_level, true_color, hyperlinks, kitty_protocol, sixel, synchronized_output, deccara, cell_size, terminal_name)
+- `pub enum TerminalKind` (or pub(crate) if only used internally)
+- `pub fn detect() -> TerminalCaps` (basic stub OK — full impl in Task 13)
+- `impl Default for TerminalCaps`
+- Migrated from legacy `render/terminal.rs`. **Will be promoted to `theme/capability.rs` in Task 13** — kept here so DiffBackend compiles standalone in PR-1.
+
+All imports: `crate::render::*` → `crate::pipeline::diff_backend::*` (specific submodule). Drop unused imports.
 
 - [ ] **Step 3: Inline-test the migration with TestBackend parity**
 
-Copy a subset of legacy tests (force_full_redraw, basic cell diff, CSI 2026 emission, DECCARA plan computation) into `diff_backend.rs` `#[cfg(test)] mod tests`. They should pass unchanged after path fixes.
+Copy a subset of legacy tests into `diff_backend/mod.rs` `#[cfg(test)] mod tests` (or co-locate in the submodule being tested):
+- 1-2 force_full_redraw tests
+- 1-2 basic cell diff tests
+- 1 CSI 2026 emission test (verifies `\x1b[?2026h` and `\x1b[?2026l` are queued)
+- 1 DECCARA plan computation test (if self-contained)
+
+Target ~8-12 migrated tests. Skip tests requiring legacy infrastructure not present in new crate.
 
 - [ ] **Step 4: Wire into pipeline/mod.rs**
 
@@ -757,13 +773,18 @@ pub use cursor_slot::CursorSlot;
 pub use diff_backend::DiffBackend;
 ```
 
+Preserve existing `FrameOutcome` enum.
+
 - [ ] **Step 5: Verify build and tests**
 
 Run: `cargo nextest run -p oxi-tui`
-Expected: legacy DiffBackend tests pass (typically 8-12 tests).
+Expected: ~8-12 DiffBackend tests pass + existing 10 cursor/cursorslot tests.
 
 Run: `cargo clippy -p oxi-tui -- -D warnings`
-Expected: clean. Fix imports/dead-code warnings.
+Expected: clean. Fix any dead_code warnings (likely some TerminalCaps fields not yet consumed — `#[allow(dead_code)]` is acceptable with a comment explaining Task 13 will consume them).
+
+Run: `cargo fmt --all -- --check`
+Expected: clean.
 
 - [ ] **Step 6: Commit**
 
@@ -771,8 +792,9 @@ Expected: clean. Fix imports/dead-code warnings.
 git add oxi-tui/src/pipeline/
 git commit -m "feat(oxi-tui/pipeline): migrate DiffBackend from legacy render/
 
-Merges oxi-tui-legacy/src/render/{mod.rs(DiffBackend 부분), diff.rs, deccara.rs}
-into single pipeline/diff_backend.rs (~950 LOC). No behavioral change.
+Merges oxi-tui-legacy/src/render/{mod.rs(DiffBackend 부분), diff.rs, deccara.rs, terminal.rs}
+into pipeline/diff_backend/ 4-file module (mod/row/deccara/caps).
+Each file ≤500 LOC per Global Constraint. No behavioral change.
 
 Preserves: line-level u64 checksum diff, CSI 2026 sync wrap, DECCARA
 bg-fill optimizer, force_full_redraw on resize.
@@ -793,9 +815,10 @@ Plan A PR-1 (4/5)"
 **NOTE:** This task adds the hook but the OSC8 emission inside row writes comes in Plan C (link axis PR-7). The hook here is just `set_links` storing the collector for later use; the row-writer doesn't yet emit OSC8. This keeps the foundation PR small.
 
 - [ ] **Step 1: Write the failing test**
+**Files:**
+- Modify: `oxi-tui/src/pipeline/diff_backend/mod.rs` (add LinkCollector + set_links)
 
-Add to `oxi-tui/src/pipeline/diff_backend.rs` (at end, before `#[cfg(test)]`):
-```rust
+**Interfaces:**
 // ── OSC8 link collection (stub — emission comes in Plan C PR-7) ────────
 
 use std::path::PathBuf;
@@ -908,7 +931,7 @@ Expected: 2 new tests pass + all prior tests still pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/diff_backend.rs
+git add oxi-tui/src/pipeline/diff_backend/mod.rs
 git commit -m "feat(oxi-tui/pipeline): add LinkCollector + set_links hook on DiffBackend
 
 LinkCollector stores (CellRange, LinkTarget) spans collected during render.
@@ -1228,7 +1251,7 @@ mod tests {
 
 - [ ] **Step 2: Wire CellRange / LinkTarget re-exports**
 
-The `RenderCtx` references `CellRange` and `LinkTarget`. These are defined in `pipeline/diff_backend.rs`. Add a re-export at the top of `widget/mod.rs`:
+The `RenderCtx` references `CellRange` and `LinkTarget`. These are defined in `pipeline/diff_backend/mod.rs`. Add a re-export at the top of `widget/mod.rs`:
 
 ```rust
 pub use crate::pipeline::diff_backend::{CellRange, LinkCollector, LinkTarget};
@@ -1324,8 +1347,10 @@ impl RetainedTree {
     /// Render the tree. Returns the resolved cursor position for this frame
     /// (None = hide, Some = show at position). CursorSlot::NotSet falls back
     /// to `last_cursor`; Show/Hide are authoritative.
-    pub fn render(&mut self, frame: &mut Frame, ctx: &mut RenderCtx) -> Option<Position> {
-        let area = frame.area();
+    pub fn render(&mut self, ctx: &mut RenderCtx) -> Option<Position> {
+        let area = ctx.area();
+        // ctx.begin_frame은 draw_frame이 호출 (단일 책임).
+        // ctx.cursor는 begin_frame 시 CursorSlot::NotSet으로 리셋.
         self.root.render(area, ctx);
         let slot = ctx.take_cursor_slot();
         let cursor = slot.resolve(self.last_cursor);
@@ -1369,7 +1394,7 @@ mod tests {
         let mut cursor_pos = None;
         term.draw(|frame| {
             let mut ctx = RenderCtx::new(frame);
-            cursor_pos = tree.render(frame, &mut ctx);
+            cursor_pos = tree.render(&mut ctx);
         }).unwrap();
         cursor_pos
     }
@@ -1676,7 +1701,7 @@ pub fn draw_frame<B: Backend>(
         let mut frame = term.get_frame();
         let mut ctx = RenderCtx::new(&mut frame);
         ctx.focus = focus;
-        tree.render(&mut frame, &mut ctx)
+        tree.render(&mut ctx)
         // ctx drops here; links drained by DiffBackend in Plan C
     };
 
@@ -1944,7 +1969,7 @@ Plan A PR-3 (1/3)"
 **Files:**
 - Create: `oxi-tui/src/theme/capability.rs`
 - Modify: `oxi-tui/src/theme/mod.rs`
-- Modify: `oxi-tui/src/pipeline/diff_backend.rs` (remove inline `TerminalCaps` — now lives in theme/capability)
+- Modify: `oxi-tui/src/pipeline/diff_backend/caps.rs` (move TerminalCaps out, leave re-export)
 
 **Interfaces:**
 - Produces: `pub enum ColorLevel { None, Basic, Ansi256, TrueColor }`, `pub struct TerminalCaps { color_level, true_color, hyperlinks, kitty_protocol, sixel, synchronized_output, deccara, cell_size }`, `TerminalCaps::detect()`, `TerminalCaps::adapt_theme(&self, theme)`. **Same module owns detection AND consumption — dead code prevention.**
@@ -2123,11 +2148,11 @@ pub use capability::{ColorLevel, TerminalCaps, adapt_color};
 pub use palette::{ColorScheme, Theme, ThemeStyles};
 ```
 
-- [ ] **Step 3: Migrate TerminalCaps from pipeline/diff_backend.rs**
+- [ ] **Step 3: Migrate TerminalCaps from pipeline/diff_backend/caps.rs**
 
-In `oxi-tui/src/pipeline/diff_backend.rs`, the `TerminalCaps` struct (originally inline from legacy `render/terminal.rs`) should now be a re-export from `theme::capability`. Replace the inline definition with:
+In `oxi-tui/src/pipeline/diff_backend/caps.rs`, replace the `TerminalCaps` struct definition with a re-export from `theme::capability`. The `TerminalKind` enum and `detect()` function move entirely to `theme/capability.rs`:
 ```rust
-pub use crate::theme::capability::TerminalCaps;
+pub use crate::theme::capability::{TerminalCaps, TerminalKind};
 ```
 
 This makes DiffBackend consume theme's TerminalCaps. Anywhere DiffBackend uses `TerminalCaps` fields (`caps.synchronized_output`, `caps.deccara`), the access is the same.
@@ -2143,7 +2168,7 @@ Expected: clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-tui/src/theme/ oxi-tui/src/pipeline/diff_backend.rs
+git add oxi-tui/src/theme/ oxi-tui/src/pipeline/diff_backend/caps.rs
 git commit -m "feat(oxi-tui/theme): capability detection + adapt_theme (3-way 2/3)
 
 TerminalCaps::detect() honors NO_COLOR/COLORTERM/TERM. adapt_theme

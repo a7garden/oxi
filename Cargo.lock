@@ -4579,6 +4579,7 @@ dependencies = [
  "oxi-lsp",
  "oxi-mnemopi",
  "oxi-sdk",
+ "oxi-tui",
  "oxi-tui-legacy",
  "parking_lot",
  "portable-pty",

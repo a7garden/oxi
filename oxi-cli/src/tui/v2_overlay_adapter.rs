@@ -13,10 +13,13 @@
 //! This is a temporary bridge. Once overlays are ported, delete this file and
 //! the `with_frame` accessor in `RenderCtx`.
 
-#![allow(dead_code, reason = "Bridge module; consumers wire up in Plan C integration")]
+#![allow(
+    dead_code,
+    reason = "Bridge module; consumers wire up in Plan C integration"
+)]
 
-use oxi_tui::widget::Renderable;
 use oxi_tui::widget::RenderCtx;
+use oxi_tui::widget::Renderable;
 use oxi_tui_legacy::Symbols;
 use oxi_tui_legacy::theme::{ColorScheme, Spacing, Theme as LegacyTheme};
 use ratatui::layout::Rect;
@@ -34,7 +37,10 @@ pub struct LegacyOverlayAdapter {
 impl LegacyOverlayAdapter {
     /// Wrap a legacy overlay component for V2 rendering.
     pub fn new(overlay: Box<dyn OverlayComponent>) -> Self {
-        Self { overlay, dirty_seq: 1 }
+        Self {
+            overlay,
+            dirty_seq: 1,
+        }
     }
     /// Borrow the inner overlay mutably so callers can drive events/polls.
     pub fn overlay_mut(&mut self) -> &mut Box<dyn OverlayComponent> {
@@ -159,13 +165,7 @@ mod tests {
         fn handle_key(&mut self, _key: KeyEvent) -> crate::tui::overlay::OverlayAction {
             crate::tui::overlay::OverlayAction::None
         }
-        fn render(
-            &mut self,
-            _frame: &mut ratatui::Frame,
-            _area: Rect,
-            _theme: &LegacyTheme,
-        ) {
-        }
+        fn render(&mut self, _frame: &mut ratatui::Frame, _area: Rect, _theme: &LegacyTheme) {}
         fn hint(&self) -> &str {
             ""
         }
@@ -188,8 +188,7 @@ mod tests {
         // `Box<dyn OverlayComponent>` is the structural proof that the
         // adapter's overlay slot has no `+ Send` bound — if anyone ever
         // re-adds one, this `Box::new` line fails to compile.
-        let overlay: Box<dyn OverlayComponent> =
-            Box::new(NotSendOverlay(std::ptr::null_mut()));
+        let overlay: Box<dyn OverlayComponent> = Box::new(NotSendOverlay(std::ptr::null_mut()));
         let mut adapter = LegacyOverlayAdapter::new(overlay);
         // Verify the adapter exposes the overlay for external driving.
         let _inner: &Box<dyn OverlayComponent> = adapter.overlay_mut();
@@ -212,7 +211,6 @@ mod tests {
         adapter.dirty_seq = adapter.dirty_seq.wrapping_add(1).max(1);
         assert_ne!(adapter.content_hash(), 1);
     }
-
 
     /// Construct a `LegacyOverlayAdapter` from a *real* legacy overlay
     /// (`McpConfigOverlay::new(None, cwd)`). Proves the bridge works at a

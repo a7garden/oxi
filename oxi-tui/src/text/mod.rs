@@ -15,12 +15,12 @@
 //! every CJK character as its own breakable token while keeping ASCII
 //! word-boundary semantics.
 
-pub mod wrap;
 pub mod streaming_md;
 pub mod syntax;
+pub mod wrap;
 
-pub use wrap::{wrap_lines, wrap_lines_styled};
 pub use streaming_md::StreamingMarkdown;
+pub use wrap::{wrap_lines, wrap_lines_styled};
 
 #[cfg(feature = "syntax")]
 pub use syntax::SyntaxHighlighter;
