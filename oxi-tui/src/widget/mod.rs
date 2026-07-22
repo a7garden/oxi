@@ -11,6 +11,7 @@
 
 pub mod chat;
 pub mod context;
+pub mod panel;
 pub mod primitive;
 pub mod renderable;
 pub mod retained_child;
