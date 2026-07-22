@@ -442,6 +442,37 @@ mod tests {
         assert!(!buf.is_empty(), "invalidate() should force a full redraw");
     }
 
+    /// CSI 2026 synchronization must wrap changed-cell bytes on diff frames.
+    #[test]
+    fn csi_2026_emits_sync_wrappers_around_diff_writes() {
+        let caps = TerminalCaps {
+            synchronized_output: true,
+            ..plain_caps()
+        };
+        let (mut backend, recorder) = backend_with_caps(caps);
+
+        draw_cells(&mut backend, &[(0, 0, Cell::new("A"))]);
+        backend.flush().unwrap();
+        recorder.0.borrow_mut().clear();
+
+        draw_cells(&mut backend, &[(0, 0, Cell::new("B"))]);
+        backend.flush().unwrap();
+
+        let buf = recorder.0.borrow();
+        let emitted = String::from_utf8_lossy(&buf);
+        let begin = emitted
+            .find("\x1b[?2026h")
+            .expect("CSI 2026 begin must be emitted");
+        let changed_cell = emitted.find('B').expect("changed cell must be emitted");
+        let end = emitted
+            .rfind("\x1b[?2026l")
+            .expect("CSI 2026 end must be emitted");
+        assert!(
+            begin < changed_cell && changed_cell < end,
+            "changed cell byte must be inside sync window: {emitted:?}"
+        );
+    }
+
     /// With caps.deccara = true, a changed full-width solid-bg block must be
     /// painted by a single DECCARA rectangle.
     #[test]
