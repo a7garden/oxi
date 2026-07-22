@@ -16,5 +16,7 @@
 //! word-boundary semantics.
 
 pub mod wrap;
+pub mod streaming_md;
 
 pub use wrap::{wrap_lines, wrap_lines_styled};
+pub use streaming_md::StreamingMarkdown;

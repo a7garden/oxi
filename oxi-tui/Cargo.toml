@@ -35,6 +35,7 @@ parking_lot = "0.12"
 unicode-width = "0.2"
 unicode-segmentation = "1"
 supports-color = { workspace = true }
+pulldown-cmark = "0.13"
 linkify = { workspace = true }
 
 [dev-dependencies]
