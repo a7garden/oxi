@@ -17,6 +17,9 @@ exclude = ["target/"]
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 ratatui-core = "0.1"
 crossterm = "0.29"
+# Multi-line input editor (IME, paste, undo, soft-wrap) — stock ratatui-textarea wrapper.
+# See `oxi-tui/src/input/textarea.rs` for the Renderable adapter.
+ratatui-textarea = "0.9"
 
 # Serialization (for theme TOML loading)
 serde = { version = "1", features = ["derive"] }

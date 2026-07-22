@@ -8,14 +8,16 @@
 //! - `widget`: retained tree + memoization (`Renderable`, `RetainedTree`, `RenderCtx`)
 //! - `theme`: capability-aware palette (`palette`, `capability`, `serializer`)
 //! - `text`: CJK-aware word wrapping (`wrap_lines`, `wrap_lines_styled`)
+//! - `input`: prompt input area (`InputArea` — stock `ratatui-textarea` wrapper)
 //!
-//! Higher-level modules (`content`, `link`, `input`, `widget/{chat,panel,primitive}`)
+//! Higher-level modules (`content`, `link`, `widget/{chat,panel,primitive}`)
 //! are added in Plans B/C.
 #![forbid(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod content;
+pub mod input;
 pub mod pipeline;
 pub mod text;
 pub mod theme;

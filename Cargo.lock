@@ -4724,6 +4724,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "ratatui-core",
+ "ratatui-textarea",
  "serde",
  "serde_json",
  "supports-color",
