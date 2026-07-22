@@ -11,6 +11,7 @@ use crate::context::auto_compaction::CompactionReason;
 use crate::media::clipboard_write;
 use base64::Engine;
 use oxi_agent::AgentEvent;
+use oxi_tui::content::MessageRole as V2MessageRole;
 use oxi_tui_legacy::widgets::chat::ToolCallStatus;
 use tokio::sync::mpsc;
 
@@ -632,6 +633,9 @@ pub fn handle_ui_event(
         // These are the primary rendering events.
         UiEvent::MessageStart { message } => {
             // pi-mono: message_start — begin streaming
+            // Dual-write: also append Assistant to v2 ChatLog. Rendering
+            // still uses legacy `chat`. Plan C cutover Phase 5.
+            let _ = state.v2_chat.append_message(V2MessageRole::Assistant);
             let auto_committed = state.chat.start_streaming();
             if auto_committed {
                 state.message_count += 1;
@@ -648,10 +652,16 @@ pub fn handle_ui_event(
         UiEvent::MessageUpdate { message, delta } => {
             // pi-mono: message_update — full snapshot with separated content blocks.
             // The provider has already split text vs toolCall vs thinking.
+            // Dual-write: forward token delta to v2 ChatLog when present.
+            if let Some(token) = delta.as_deref() {
+                state.v2_chat.append_token(token);
+            }
             state.update_streaming_message(&message, delta.as_deref());
         }
         UiEvent::MessageEnd { message } => {
             // pi-mono: message_end — finalize the message
+            // Dual-write: finalize the v2 ChatLog stream. Plan C cutover Phase 5.
+            state.v2_chat.finalize_stream();
             state.finalize_streaming_message(&message);
 
             // Event-driven persist: convert the event message directly to

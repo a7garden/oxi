@@ -292,6 +292,12 @@ pub(crate) enum TuiNextAction {
 
 pub(crate) struct AppState {
     pub chat: ChatViewState,
+    /// v2 chat log populated by dual-write alongside the legacy `chat`.
+    /// Rendering still uses `chat` (legacy); this field is populated by the
+    /// agent event handlers so future rendering migration has a ready source.
+    /// Plan C cutover Phase 5. Not read yet — rendering migration is future work.
+    #[allow(dead_code)]
+    pub v2_chat: oxi_tui::content::ChatLog,
     pub input: InputState,
     pub footer_state: FooterState,
     pub is_agent_busy: bool,
@@ -497,6 +503,7 @@ impl AppState {
     pub fn new() -> Self {
         let mut state = Self {
             chat: ChatViewState::default(),
+            v2_chat: oxi_tui::content::ChatLog::new(),
             input: InputState::default(),
             footer_state: FooterState::default(),
             is_agent_busy: false,
