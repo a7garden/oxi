@@ -6,7 +6,7 @@
 //! - An inline popup for API key entry (no screen transition)
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_tui::Theme;
+use oxi_tui_legacy::Theme;
 use ratatui::{
     Frame,
     layout::Rect,

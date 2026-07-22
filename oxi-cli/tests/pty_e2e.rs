@@ -2,7 +2,7 @@
 //!
 //! These tests spawn the actual `oxi` binary in a PTY and verify
 //! the byte-level terminal output. They complement the unit tests
-//! in oxi-tui (which use ratatui's TestBackend).
+//! in oxi-tui-legacy (which use ratatui's TestBackend).
 //!
 //! Run with: cargo nextest run -p oxi-cli --test pty_e2e
 

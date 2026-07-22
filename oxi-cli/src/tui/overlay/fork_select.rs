@@ -16,7 +16,7 @@ use ratatui::{
 
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::AgentSessionHandle;
-use oxi_tui::Theme;
+use oxi_tui_legacy::Theme;
 
 // ---------------------------------------------------------------------------
 // Shared AppState wrapper (matches factories.rs convention)

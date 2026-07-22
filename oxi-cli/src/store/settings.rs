@@ -11,15 +11,15 @@
 
 // F-13 (audit 2026-06-21): the `glyph_set` field technically makes the
 // store layer (`oxi-cli/src/store/`) depend on the UI layer
-// (`oxi_tui`). The proper fix is to store only a discriminant
-// (`"unicode" | "ascii" | "nerd"`) here and let `oxi_tui` map it to
+// (`oxi_tui_legacy`). The proper fix is to store only a discriminant
+// (`"unicode" | "ascii" | "nerd"`) here and let `oxi_tui_legacy` map it to
 // `GlyphSet` at the rendering site; that refactor is tracked as a
 // follow-up because 5 call sites + on-disk TOML compatibility would
 // need to change together. For now we keep the enum import but
 // acknowledge the layering violation in this comment so a future
 // contributor doesn't assume the dependency is intentional.
 use anyhow::{Context, Result};
-use oxi_tui::GlyphSet;
+use oxi_tui_legacy::GlyphSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -293,7 +293,7 @@ pub struct Settings {
     // ── Keybindings ────────────────────────────────────────────────────
     /// User-defined keybinding overrides.
     /// Format: `{ "ActionName": ["Ctrl+x", "Alt+y"] }`
-    /// Actions are matched case-insensitively to the Action enum in oxi-tui.
+    /// Actions are matched case-insensitively to the Action enum in oxi-tui-legacy.
     #[serde(default)]
     pub keybindings: HashMap<String, Vec<String>>,
 

@@ -37,7 +37,7 @@ use oxi_agent::mcp::{
     ConsentState, LifecycleMode, McpConfig, McpConnectionStatus, McpManager, ServerEntry,
     ToolPrefix, config,
 };
-use oxi_tui::{Theme, ThemeStyles};
+use oxi_tui_legacy::{Theme, ThemeStyles};
 use ratatui::{
     Frame,
     layout::Rect,

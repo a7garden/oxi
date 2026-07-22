@@ -7,7 +7,7 @@ use super::super::registry::SlashCommand;
 use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
 use crate::tui::app::{NotificationKind, UiEvent};
 use crate::tui::slash::{SlashCtx, SlashOutcome};
-use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
+use oxi_tui_legacy::widgets::chat::{ContentBlock, MessageRole};
 use std::path::PathBuf;
 
 /// `/export [path]` — export session to HTML.

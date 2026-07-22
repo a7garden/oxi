@@ -8,7 +8,7 @@ fn main() {
     println!();
 
     // Load the default theme
-    let theme = oxi_tui::Theme::default();
+    let theme = oxi_tui_legacy::Theme::default();
     println!("Default theme: {}", theme.name);
     println!("  Foreground:   {:?}", theme.colors.foreground);
     println!("  Background:   {:?}", theme.colors.background);
@@ -18,8 +18,8 @@ fn main() {
 
     // Show all 28 ColorScheme slots for each built-in theme
     println!("Built-in themes (28 color slots each):");
-    for &name in oxi_tui::THEME_NAMES {
-        let t = oxi_tui::Theme::by_name(name);
+    for &name in oxi_tui_legacy::THEME_NAMES {
+        let t = oxi_tui_legacy::Theme::by_name(name);
         let c = &t.colors;
         println!();
         println!("  ── {} ──", name);
@@ -43,14 +43,14 @@ fn main() {
     println!();
 
     // Text truncation utility
-    use oxi_tui::truncate_to_width;
+    use oxi_tui_legacy::truncate_to_width;
     let text = "Hello, this is a long string that might not fit in the terminal";
     let truncated = truncate_to_width(text, 30);
     println!("Truncated (width 30): '{truncated}'");
     println!();
 
     // Fuzzy matching utility
-    use oxi_tui::fuzzy_match;
+    use oxi_tui_legacy::fuzzy_match;
     let result = fuzzy_match("hlo", "hello world");
     if let Some(fr) = result {
         println!("Fuzzy match 'hlo' in 'hello world': score={}", fr.score);

@@ -11,7 +11,7 @@ use crate::context::auto_compaction::CompactionReason;
 use crate::media::clipboard_write;
 use base64::Engine;
 use oxi_agent::AgentEvent;
-use oxi_tui::widgets::chat::ToolCallStatus;
+use oxi_tui_legacy::widgets::chat::ToolCallStatus;
 use tokio::sync::mpsc;
 
 use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
@@ -67,9 +67,9 @@ pub async fn handle_input(
                     // gesture grouping, and per-flush cap.
                     if let Some(scroll) = state
                         .scroll_normalizer
-                        .push(oxi_tui::widgets::chat::ScrollDirection::Up)
+                        .push(oxi_tui_legacy::widgets::chat::ScrollDirection::Up)
                     {
-                        let delta = oxi_tui::widgets::chat::ScrollNormalizer::cap_delta(
+                        let delta = oxi_tui_legacy::widgets::chat::ScrollNormalizer::cap_delta(
                             scroll.delta_lines,
                             viewport_h,
                         );
@@ -83,9 +83,9 @@ pub async fn handle_input(
                 MouseEventKind::ScrollDown => {
                     if let Some(scroll) = state
                         .scroll_normalizer
-                        .push(oxi_tui::widgets::chat::ScrollDirection::Down)
+                        .push(oxi_tui_legacy::widgets::chat::ScrollDirection::Down)
                     {
-                        let delta = oxi_tui::widgets::chat::ScrollNormalizer::cap_delta(
+                        let delta = oxi_tui_legacy::widgets::chat::ScrollNormalizer::cap_delta(
                             scroll.delta_lines,
                             viewport_h,
                         );
@@ -152,7 +152,7 @@ async fn handle_key(
         return action;
     }
 
-    use oxi_tui::keybindings::keys::KeyId;
+    use oxi_tui_legacy::keybindings::keys::KeyId;
     let key_id = KeyId::from(key);
 
     // Try keybinding lookup first
@@ -164,7 +164,7 @@ async fn handle_key(
     if !key_id.ctrl
         && !key_id.alt
         && !key_id.super_
-        && let oxi_tui::keybindings::keys::BaseKey::Char(c) = key_id.base
+        && let oxi_tui_legacy::keybindings::keys::BaseKey::Char(c) = key_id.base
     {
         state.input.insert_char(c);
         state.update_slash_completions(session);
@@ -238,14 +238,14 @@ fn refresh_queue_snapshot(state: &mut AppState, session: &AgentSession) {
 
 /// Dispatch a resolved keybinding action.
 async fn dispatch_action(
-    action: oxi_tui::keybindings::registry::Action,
+    action: oxi_tui_legacy::keybindings::registry::Action,
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
     session: &AgentSession,
     ui_tx: &mpsc::UnboundedSender<UiEvent>,
     running: &mut bool,
 ) -> Option<Action> {
-    use oxi_tui::keybindings::registry::Action as KAction;
+    use oxi_tui_legacy::keybindings::registry::Action as KAction;
 
     match action {
         // ── Submit ────────────────────────────────────────────
@@ -426,7 +426,9 @@ async fn dispatch_action(
             state.overlay_state = None;
             let snap = oxi_sdk::router::RouterProvider::get_snapshot();
             let data = if let Some(ref s) = snap {
-                use oxi_tui::widgets::routing::{ProviderHealth, ProviderInfo, RoutingStatusData};
+                use oxi_tui_legacy::widgets::routing::{
+                    ProviderHealth, ProviderInfo, RoutingStatusData,
+                };
                 let chain = vec![ProviderInfo {
                     name: s.last_provider.clone().unwrap_or_default(),
                     health: ProviderHealth::Healthy,
@@ -440,7 +442,7 @@ async fn dispatch_action(
                     active_index: 0,
                 }
             } else {
-                oxi_tui::widgets::routing::RoutingStatusData::default()
+                oxi_tui_legacy::widgets::routing::RoutingStatusData::default()
             };
             state.overlay_state = Some(super::overlay::factories::routing_status(data));
             None
@@ -895,7 +897,7 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
         SessionEvent::SessionInfoChanged => {}
         // Advisor notes (aside/preserve channel) — surfaced as a system
         // message toast so the user sees the advice. (A dedicated `<advisory>`
-        // chat card is a future oxi-tui enhancement; this makes aside advice
+        // chat card is a future oxi-tui-legacy enhancement; this makes aside advice
         // immediately visible. Steer-channel advice injects into the primary
         // directly and is not routed through here.)
         SessionEvent::Advisor { channel, body } => {

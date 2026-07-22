@@ -95,31 +95,55 @@ name = "oxi-tui-legacy"
 
 - [ ] **Step 4: Update workspace root Cargo.toml members**
 
-Modify `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` `members` array: replace `"oxi-tui"` with both `"oxi-tui"` and `"oxi-tui-legacy"`.
+Modify `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` `members` array: rename the existing `"oxi-tui"` entry to `"oxi-tui-legacy"`. **Do NOT add `"oxi-tui"` yet** — the new `oxi-tui/` directory does not exist. We'll add it in Step 8 after the new crate is created.
 
 ```toml
 members = [
     # ... existing entries ...
-    "oxi-tui",
-    "oxi-tui-legacy",
+    "oxi-tui-legacy",   # was "oxi-tui"; new oxi-tui added in Step 8
     # ... rest ...
 ]
 ```
 
-- [ ] **Step 5: Update all `oxi-tui` dependency references in workspace**
+- [ ] **Step 5: Update legacy `oxi-tui-legacy/Cargo.toml` references**
 
-Run: `grep -rn 'oxi-tui' --include='*.toml' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxi/ | grep -v 'oxi-tui-legacy\|target/\|Cargo.lock'`
+The `oxi-tui-legacy/Cargo.toml` `name` field is `"oxi-tui-legacy"` (Step 3). Now update everything that depends on the old name to point at the new name.
 
-For each hit in `oxi-cli/Cargo.toml`, `oxi-cli/src/**/*.rs`, `oxi-sdk/Cargo.toml`, etc.: change `oxi-tui` → `oxi-tui-legacy` (path or version reference). The legacy crate must keep working under its new name while we build the new one.
+**5a — `oxi-cli/Cargo.toml`** (and any other workspace crate depending on oxi-tui): change the dependency from `oxi-tui` to `oxi-tui-legacy`. For path deps:
 
-- [ ] **Step 6: Verify legacy crate still builds under new name**
+```toml
+oxi-tui-legacy = { path = "../oxi-tui-legacy" }
+```
+
+**5b — Rust source files (★ CRITICAL: underscore form)**. Rust source uses `oxi_tui` (underscore) — NOT `oxi-tui`. A hyphen-only grep misses every `.rs` file. Scan with both forms:
+
+```bash
+# Hyphen form (Cargo.toml, rare .rs string literals)
+grep -rln 'oxi-tui' --include='*.toml' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxi/ \
+  | grep -v 'oxi-tui-legacy\|target/\|Cargo.lock\|docs/'
+
+# Underscore form (Rust use statements, paths, types) — this is the bulk
+grep -rln 'oxi_tui' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxi/ \
+  | grep -v 'oxi-tui-legacy\|target/'
+```
+
+Expected underscore-form hits (verified 2026-07-21): **27 files in `oxi-cli/src/`** including:
+- `oxi-cli/src/main.rs`, `setup_wizard.rs`, `store/settings.rs`
+- `oxi-cli/src/tui/{app.rs, handlers.rs, render.rs, welcome.rs}`
+- `oxi-cli/src/tui/overlay/*.rs` (18 files: ask, factories, extensions, fork_select, mcp_config, mcp_dashboard, model_select_inline, provider_select, roles_config, router_setup, settings, text_viewer, tree_navigator, mod, anchor, issues_panel/{mod,input,render})
+- `oxi-cli/src/tui/slash/builtin/{export_grp,clipboard}.rs`
+
+For each hit, do a global replace `oxi_tui` → `oxi_tui_legacy` (in `use` statements, fully-qualified paths, type references). Use `sed -i '' 's/oxi_tui/oxi_tui_legacy/g'` per file, or an editor macro. Do NOT touch `oxi_tui_legacy` itself (the new crate's own source — there is none yet).
+
+- [ ] **Step 6: Verify legacy crate builds under new name**
 
 Run: `cargo check -p oxi-tui-legacy`
 Expected: `Finished` with no errors.
 
-Run: `cargo check --workspace`
-Expected: `Finished` (all crates resolve to `oxi-tui-legacy`).
+Run: `cargo check -p oxi-cli`
+Expected: `Finished` (oxi-cli now depends on oxi-tui-legacy, all `oxi_tui_legacy::` paths resolve).
 
+**★ Do NOT run `cargo check --workspace` yet** — `oxi-tui` is still not in members (Step 4 deliberately omitted it). The workspace check happens after Step 8.
 - [ ] **Step 7: Create empty new oxi-tui crate**
 
 Create `oxi-tui/Cargo.toml`:
@@ -196,15 +220,29 @@ Terminal-first rendering pipeline and widget library for oxi. Decomposes ratatui
 MIT licensed. Clean-room — no upstream code copied.
 ```
 
-- [ ] **Step 8: Verify new crate compiles empty**
+- [ ] **Step 8: Add new oxi-tui to workspace and verify**
 
-Run: `cargo check -p oxi-tui`
-Expected: `Finished` (empty lib).
+**8a** — Modify `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` members: add `"oxi-tui"` alongside `"oxi-tui-legacy"`. Now both are workspace members.
 
-Run: `cargo fmt --all -- --check`
+```toml
+members = [
+    # ... existing entries ...
+    "oxi-tui",
+    "oxi-tui-legacy",
+    # ... rest ...
+]
+```
+
+**8b** — Run: `cargo check -p oxi-tui`
+Expected: `Finished` (empty lib compiles).
+
+**8c** — Run: `cargo check --workspace`
+Expected: `Finished` — both old (legacy) and new (empty) oxi-tui resolve, oxi-cli compiles against legacy.
+
+**8d** — Run: `cargo fmt --all -- --check`
 Expected: clean.
 
-Run: `cargo clippy --workspace --all-targets --exclude oxi-vendor-* -- -D warnings`
+**8e** — Run: `cargo clippy --workspace --all-targets --exclude oxi-vendor-* -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 9: Commit**

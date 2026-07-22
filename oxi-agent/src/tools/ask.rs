@@ -13,7 +13,7 @@
 //!   oneshot `Sender`. The tool's `execute()` receives it via `rx.await`.
 //! - Abort (Ctrl+C) is handled via `tokio::select!` with the abort signal.
 //!
-//! The transcript renderer (`format_ask_result` in `oxi-tui`) reconstructs the
+//! The transcript renderer (`format_ask_result` in `oxi-tui-legacy`) reconstructs the
 //! "filled menu" (every option re-shown with its selection marker filled) by
 //! combining the call arguments (the full option list) with the result text
 //! (which option was selected).

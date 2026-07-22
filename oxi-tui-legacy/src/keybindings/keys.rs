@@ -174,7 +174,7 @@ impl From<KeyEvent> for KeyId {
 ///
 /// # Examples
 /// ```
-/// use oxi_tui::keybindings::keys::parse_key_id;
+/// use oxi_tui_legacy::keybindings::keys::parse_key_id;
 ///
 /// let k = parse_key_id("Ctrl+c").unwrap();
 /// assert!(k.ctrl);

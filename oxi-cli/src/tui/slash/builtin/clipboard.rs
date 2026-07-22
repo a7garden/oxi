@@ -5,7 +5,7 @@ use super::super::registry::SlashCommand;
 use crate::media::clipboard_write;
 use crate::tui::app::NotificationKind;
 use crate::tui::slash::{SlashCtx, SlashOutcome};
-use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
+use oxi_tui_legacy::widgets::chat::{ContentBlock, MessageRole};
 
 /// `/copy` — copy code block / last reply to clipboard.
 pub(crate) struct CopyCommand;

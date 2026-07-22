@@ -1,7 +1,7 @@
 //! Router configuration setup overlay.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_tui::{Theme, ThemeStyles};
+use oxi_tui_legacy::{Theme, ThemeStyles};
 use ratatui::{
     Frame,
     layout::Rect,

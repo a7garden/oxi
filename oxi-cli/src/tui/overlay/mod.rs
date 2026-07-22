@@ -5,7 +5,7 @@
 //! This follows ratatui's StatefulWidget philosophy at the overlay level.
 
 use crossterm::event::{KeyEvent, MouseEvent};
-use oxi_tui::Theme;
+use oxi_tui_legacy::Theme;
 use ratatui::{Frame, layout::Rect};
 
 pub mod anchor;
@@ -160,7 +160,7 @@ pub fn centered_popup(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
 /// Create a centered layout using the new anchor system.
 /// Drop-in replacement for `centered_popup` that delegates to `resolve_overlay_layout`.
 pub fn centered_layout(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
-    use oxi_tui::overlay_anchor::{
+    use oxi_tui_legacy::overlay_anchor::{
         OverlayAnchor, OverlayLayout, SizeValue, resolve_overlay_layout,
     };
     let layout = OverlayLayout {

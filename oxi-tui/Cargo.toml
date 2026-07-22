@@ -1,9 +1,9 @@
 [package]
 name = "oxi-tui"
-version = "0.56.0"
+version = "0.58.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Terminal UI widgets and theme system for oxi, built on ratatui"
+description = "Terminal UI rendering pipeline and widget library for oxi (v2 — terminal-first pipeline)"
 readme = "README.md"
 license = "MIT"
 authors = ["a7garden <a7garden@icloud.com>"]
@@ -13,19 +13,12 @@ categories = ["command-line-interface", "gui"]
 exclude = ["target/"]
 
 [dependencies]
-# Terminal UI
+# Terminal rendering
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
-ratatui-textarea = "0.9"
+ratatui-core = "0.1"
 crossterm = "0.29"
-tui-markdown = { version = "0.3", default-features = false, features = [] }
-strum = { version = "0.28", features = ["derive"] }
-supports-color = { workspace = true }
-nucleo = { workspace = true }
-linkify = { workspace = true }
-regex = { workspace = true }
-syntect = { workspace = true, optional = true }
 
-# Serialization (for theme file loading)
+# Serialization (for theme TOML loading)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
@@ -35,20 +28,14 @@ tracing = "0.1"
 
 # Error handling
 anyhow = "1"
+thiserror = "2"
 
 # Utilities
 parking_lot = "0.12"
 unicode-width = "0.2"
 unicode-segmentation = "1"
-base64 = "0.22"
-dirs = "6"
-pulldown-cmark = "0.13.3"
+supports-color = { workspace = true }
+linkify = { workspace = true }
 
-[features]
-# syntax feature: enables syntect-based tmTheme code highlighting.
-# Opt-in to keep the binary small; off by default.
-syntax = ["dep:syntect"]
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+[dev-dependencies]
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }

@@ -7,8 +7,8 @@ use super::IssuesPanelOverlay;
 use super::state::View;
 use crate::store::issues::{Issue, Priority, Status};
 use crate::tui::overlay::OverlayComponent;
-use oxi_tui::Theme;
-use oxi_tui::text::truncate_to_width;
+use oxi_tui_legacy::Theme;
+use oxi_tui_legacy::text::truncate_to_width;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
@@ -101,7 +101,7 @@ impl IssuesPanelOverlay {
         // ── Filter input bar (only when `/`-mode is active) ─────────
         if self.filter_input_mode && rows.len() > 2 {
             let bar = Paragraph::new(format!("/ filter: {}\u{2588}", self.filter_input_text))
-                .style(Style::default().fg(oxi_tui::cell::Color::Yellow));
+                .style(Style::default().fg(oxi_tui_legacy::cell::Color::Yellow));
             frame.render_widget(bar, rows[2]);
         }
 
@@ -310,7 +310,7 @@ fn build_detail_title(id: u32, title: &str, position: &str, total: usize) -> Lin
 fn detail_body_lines_for_render(
     issue: &Issue,
     hash: &str,
-    styles: &oxi_tui::theme::ThemeStyles,
+    styles: &oxi_tui_legacy::theme::ThemeStyles,
 ) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     out.push(Line::from(vec![
@@ -360,7 +360,8 @@ fn detail_body_lines_for_render(
     if issue.body.is_empty() {
         out.push(Line::from("(empty body)".dim().italic()));
     } else {
-        let md_lines = oxi_tui::widgets::chat::markdown::render_markdown(&issue.body, styles);
+        let md_lines =
+            oxi_tui_legacy::widgets::chat::markdown::render_markdown(&issue.body, styles);
         out.extend(md_lines);
     }
     out

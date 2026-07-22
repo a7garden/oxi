@@ -12,8 +12,8 @@
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_agent::tools::ask::{Answer, AskResponse, Question};
-use oxi_tui::theme::{Theme, ThemeStyles};
-use oxi_tui::widgets::list_selector::{
+use oxi_tui_legacy::theme::{Theme, ThemeStyles};
+use oxi_tui_legacy::widgets::list_selector::{
     ControlRowKind, ListSelectorState, SelectorAction, SelectorMarker, SelectorOption,
 };
 use ratatui::{
