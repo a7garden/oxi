@@ -9,8 +9,10 @@
 //!
 //! See spec §5.
 
+pub mod context;
 pub mod renderable;
 
-pub use renderable::{Renderable, hash_combine, hash_str};
+pub use crate::pipeline::diff_backend::{CellRange, LinkCollector, LinkTarget};
+pub use context::{FocusTarget, RenderCtx};
 
-// Forward-declared — RenderCtx comes in Task 8.
+pub use renderable::{Renderable, hash_combine, hash_str};
