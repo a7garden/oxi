@@ -28,7 +28,7 @@ oxi-tui = { version = "0.58.0", path = "../oxi-tui" }
 oxi-tui-legacy = { version = "0.58.0", path = "../oxi-tui-legacy" }
 oxi-mnemopi = { version = "0.58.0", path = "../oxi-mnemopi", features = ["remote-embeddings"] }
 oxi-lsp = { version = "0.58.0", path = "../oxi-lsp" }
-lsp-types = "0.95"
+lsp-types = "0.97"
 
 # Async
 async-trait = "0.1"
@@ -38,7 +38,7 @@ futures = "0.3"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.9"
+toml = "1.1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -61,7 +61,7 @@ crossterm = "0.29"
 ratatui = { version = "0.30", features = ["crossterm"] }
 unicode-width = "0.2"
 base64 = "0.22"
-rand = "0.9"
+rand = "0.10"
 sha2 = "0.10"
 url = "2"
 
@@ -94,7 +94,7 @@ semver = { version = "1", features = ["serde"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # Self-update (optional)
-self_update = { version = "0.41", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.43", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"], optional = true }
 serde_yaml = "0.9"
 
 # OAuth support
