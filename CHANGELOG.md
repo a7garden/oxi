@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — oxi-tui v2 Terminal-First Pipeline
 
+### Added — oxi-agent streaming lifecycle events
+
+- **`AgentEvent::ToolCallDelta`** (P0) — the provider's streamed tool-arg
+  fragments are now forwarded as `AgentEvent::ToolCallDelta { tool_call_id,
+  args_delta }`, so downstream consumers can render tool-argument
+  construction token-by-token (LobeHub chat-UX parity). The `tool_call_id` is
+  resolved from a `content_index → id` map populated at `ToolCallStart` and
+  reconciled at `ToolCallEnd`, because providers (Anthropic, OpenAI, Azure,
+  Mistral) keep the id in a private pending map and never embed a
+  `ContentBlock::ToolCall` in the streaming partial until the call finalizes
+  — the doc's proposed `extract_tool_call_id` partial-content lookup was dead
+  for all providers. Serialized camelCase: `{type:"toolCallDelta",
+  toolCallId, argsDelta}`.
+- **`AgentEvent::ThinkingEnd`** (P1) — signal-only event marking the end of a
+  reasoning span, forwarded from `ProviderEvent::ThinkingEnd` (previously
+  dropped by the catch-all). Fires per thinking span, giving the exact
+  reasoning↔text boundary for interleaved-reasoning models (Claude 4,
+  o-series).
+- **Scope/caveat** — `oxi-agent` only (`events.rs`, `agent_loop/streaming.rs`
+  + unit tests). Oxios consumes `AgentEvent` directly via `oxi-sdk`
+  (re-exported, `lib.rs:192`), so the LobeHub port's already-built
+  `AgentEvent → KernelEvent` handler now receives both events with no
+  further oxi change. The JSON-RPC IDE bridge (`rpc_mode::agent_event_to_rpc`)
+  is a separate lossy consumer and still drops both variants via its
+  `_ => None` catch-all — wiring them for IDE consumers is a follow-up, not
+  part of this change.
+
 ### Architecture — oxi-tui Greenfield Rewrite
 
 - **Terminal-first rendering pipeline** — `draw_frame()` decomposes ratatui's

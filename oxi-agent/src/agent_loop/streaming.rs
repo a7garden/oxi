@@ -12,7 +12,7 @@ use futures::StreamExt;
 use oxi_ai::{
     ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions, Tool as OxTool,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::helpers::sanitize_orphaned_tool_results;
 use super::stream_outcome::StreamOutcome;
@@ -102,6 +102,12 @@ pub(crate) async fn stream_assistant_response(
 
     let mut added_partial = false;
     let mut event_count = 0u32;
+    // content_index → resolved tool-call id, populated from `ToolCallStart`
+    // and reconciled at `ToolCallEnd`. Lets `ToolCallDelta` forward the
+    // correct id even though providers (Anthropic, OpenAI) keep the id in a
+    // private pending map and do not embed a `ContentBlock::ToolCall` in the
+    // streaming partial until the call finalizes.
+    let mut tool_call_ids: HashMap<usize, String> = HashMap::new();
 
     // Reset the thinking-loop detector so each stream attempt is guarded
     // independently. Without this, the detector's `fired` flag stays
@@ -349,22 +355,71 @@ pub(crate) async fn stream_assistant_response(
                     delta: Some(delta),
                 });
             }
-
-            ProviderEvent::ToolCallStart { partial, .. } if added_partial => {
+            ProviderEvent::ThinkingEnd { partial, .. } if added_partial => {
                 let last_idx = messages.len() - 1;
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
                     *m = (*partial).clone();
                 }
+                emit(super::AgentEvent::ThinkingEnd);
             }
 
-            ProviderEvent::ToolCallDelta { partial, .. } if added_partial => {
+            ProviderEvent::ToolCallStart {
+                content_index,
+                tool_call_id,
+                partial,
+                ..
+            } if added_partial => {
                 let last_idx = messages.len() - 1;
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
                     *m = (*partial).clone();
                 }
+                // Register the provider id so later ToolCallDelta events can
+                // forward it. OpenAI re-emits ToolCallStart on id-bearing
+                // deltas, so this also fills the map when the first start
+                // lacked an id.
+                if let Some(id) = tool_call_id
+                    && !id.is_empty()
+                {
+                    tool_call_ids.insert(content_index, id);
+                }
             }
 
-            ProviderEvent::ToolCallEnd { tool_call, .. } if added_partial => {
+            ProviderEvent::ToolCallDelta {
+                content_index,
+                delta,
+                partial,
+                ..
+            } if added_partial => {
+                let last_idx = messages.len() - 1;
+                if let Message::Assistant(ref mut m) = messages[last_idx] {
+                    *m = (*partial).clone();
+                }
+                // Forward the streamed argument fragment to downstream
+                // consumers (live tool-arg construction UIs, Oxios kernel).
+                // Resolve the id from the ToolCallStart registration; fall
+                // back to the finalized block in the accumulated partial for
+                // any provider that embeds it there. If neither resolves we
+                // skip this delta rather than emit an unverified id.
+                let resolved_id = tool_call_ids
+                    .get(&content_index)
+                    .cloned()
+                    .or_else(|| extract_tool_call_id(messages, content_index));
+                if let Some(id) = resolved_id {
+                    emit(super::AgentEvent::ToolCallDelta {
+                        tool_call_id: id,
+                        args_delta: delta,
+                    });
+                }
+            }
+
+            ProviderEvent::ToolCallEnd {
+                content_index,
+                tool_call,
+                ..
+            } if added_partial => {
+                // Reconcile the id map with the finalized call so any
+                // trailing deltas (and the map itself) stay authoritative.
+                tool_call_ids.insert(content_index, tool_call.id.clone());
                 let last_idx = messages.len() - 1;
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
                     m.content.push(ContentBlock::ToolCall(tool_call));
@@ -563,4 +618,308 @@ pub(crate) async fn stream_assistant_response(
 fn estimate_tokens_from_messages(messages: &[Message]) -> usize {
     let json = serde_json::to_string(messages).unwrap_or_default();
     json.len() / 4
+}
+
+/// Best-effort extraction of a tool-call id from the accumulated assistant
+/// message's content block at `content_index`.
+///
+/// This is a fallback for the `tool_call_ids` map used in
+/// [`stream_assistant_response`]: most providers (Anthropic, OpenAI) surface
+/// the id at `ToolCallStart` and keep it in a private pending map, so the
+/// `ToolCall` block is *not* present in the streaming partial during deltas.
+/// The lookup only resolves for providers that embed the block early, but it
+/// costs nothing and is forward-compatible.
+fn extract_tool_call_id(messages: &[Message], content_index: usize) -> Option<String> {
+    let last = messages.last()?;
+    let Message::Assistant(m) = last else {
+        return None;
+    };
+    m.content.get(content_index).and_then(|b| match b {
+        ContentBlock::ToolCall(tc) => Some(tc.id.clone()),
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod streaming_lifecycle_tests {
+    //! Verifies `stream_assistant_response` forwards provider streaming
+    //! lifecycle events as `AgentEvent`s:
+    //! - `ProviderEvent::ThinkingEnd` → `AgentEvent::ThinkingEnd`
+    //! - `ProviderEvent::ToolCallDelta` → `AgentEvent::ToolCallDelta { tool_call_id, args_delta }`
+    //!
+    //! The `tool_call_id` is resolved from a content_index→id map populated
+    //! at `ToolCallStart`/`ToolCallEnd`, because providers keep the id in a
+    //! private pending map and never embed a `ContentBlock::ToolCall` in the
+    //! streaming partial until the call finalizes.
+    use super::stream_assistant_response;
+    use crate::ProviderResolver;
+    use crate::config::ToolExecutionMode;
+    use crate::events::AgentEvent;
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use crate::{AgentLoop, AgentLoopConfig};
+    use futures::Stream;
+    use oxi_ai::{
+        Api, AssistantMessage, CompactionStrategy, ContentBlock, Context, Message, Model, Provider,
+        ProviderEvent, StopReason, StreamOptions, StreamResult, ToolCall, UserMessage,
+    };
+    use std::collections::VecDeque;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context as TaskContext, Poll};
+
+    /// Provider that replays a fixed script of `ProviderEvent`s.
+    struct ScriptedProvider {
+        events: Arc<Vec<ProviderEvent>>,
+    }
+
+    impl ScriptedProvider {
+        fn new(events: Vec<ProviderEvent>) -> Self {
+            Self {
+                events: Arc::new(events),
+            }
+        }
+    }
+
+    impl Provider for ScriptedProvider {
+        fn stream<'a>(
+            &'a self,
+            _model: &'a Model,
+            _context: &'a Context,
+            _options: Option<StreamOptions>,
+        ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+            let events = Arc::clone(&self.events);
+            Box::pin(async move {
+                Ok(Box::pin(ScriptedStream {
+                    events: VecDeque::from((*events).clone()),
+                })
+                    as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+            })
+        }
+        fn name(&self) -> &str {
+            "scripted"
+        }
+    }
+
+    struct ScriptedStream {
+        events: VecDeque<ProviderEvent>,
+    }
+
+    impl Stream for ScriptedStream {
+        type Item = ProviderEvent;
+        fn poll_next(
+            mut self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.events.pop_front())
+        }
+    }
+
+    struct DummyResolver;
+    impl ProviderResolver for DummyResolver {
+        fn resolve_provider(&self, _name: &str) -> Option<Arc<dyn Provider>> {
+            None
+        }
+        fn resolve_model(&self, _model_id: &str) -> Option<Model> {
+            Some(Model::new(
+                "test/model",
+                "Test",
+                Api::AnthropicMessages,
+                "mock",
+                "https://mock.test",
+            ))
+        }
+    }
+
+    fn empty_partial() -> Arc<AssistantMessage> {
+        Arc::new(AssistantMessage::new(
+            Api::AnthropicMessages,
+            "mock",
+            "test/model",
+        ))
+    }
+
+    fn make_loop(provider: Arc<dyn Provider>) -> AgentLoop {
+        let config = AgentLoopConfig {
+            model_id: "test/model".to_string(),
+            system_prompt: None,
+            temperature: 1.0,
+            max_tokens: 4096,
+            tool_execution: ToolExecutionMode::Sequential,
+            compaction_strategy: CompactionStrategy::Disabled,
+            context_window: 128_000,
+            compact_on_start: false,
+            auto_retry_enabled: false,
+            auto_retry_max_attempts: 1,
+            thinking_loop_detection: false,
+            ..Default::default()
+        };
+        AgentLoop::new_with_resolver(
+            provider,
+            config,
+            Arc::new(ToolRegistry::new()),
+            SharedState::new(),
+            Arc::new(DummyResolver),
+        )
+    }
+
+    /// Runs a scripted provider through `stream_assistant_response` and
+    /// returns every emitted `AgentEvent` in order.
+    async fn run_script(events: Vec<ProviderEvent>) -> Vec<AgentEvent> {
+        let provider: Arc<dyn Provider> = Arc::new(ScriptedProvider::new(events));
+        let agent_loop = make_loop(provider);
+        let collected: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&collected);
+        let emit: Arc<dyn Fn(AgentEvent) + Send + Sync> =
+            Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut messages: Vec<Message> = vec![Message::User(UserMessage::new("hi".to_string()))];
+        let _ = stream_assistant_response(&agent_loop, &mut messages, &emit, None).await;
+        collected.lock().unwrap().clone()
+    }
+
+    /// Anthropic-style: the tool-call id is known up front at `ToolCallStart`.
+    #[tokio::test]
+    async fn thinking_end_and_tool_call_delta_forwarded() {
+        let finalized = ToolCall::new("tc_abc", "bash", serde_json::json!({"command":"ls"}));
+        let mut done_msg = AssistantMessage::new(Api::AnthropicMessages, "mock", "test/model");
+        done_msg
+            .content
+            .push(ContentBlock::ToolCall(finalized.clone()));
+        let events = vec![
+            ProviderEvent::Start {
+                partial: empty_partial(),
+            },
+            ProviderEvent::ThinkingStart {
+                content_index: 0,
+                partial: empty_partial(),
+            },
+            ProviderEvent::ThinkingDelta {
+                content_index: 0,
+                delta: "reasoning...".to_string(),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ThinkingEnd {
+                content_index: 0,
+                content: "reasoning...".to_string(),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallStart {
+                content_index: 1,
+                tool_call_id: Some("tc_abc".to_string()),
+                tool_name: Some("bash".to_string()),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallDelta {
+                content_index: 1,
+                delta: "{\"command\":".to_string(),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallDelta {
+                content_index: 1,
+                delta: "\"ls\"}".to_string(),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallEnd {
+                content_index: 1,
+                tool_call: finalized,
+                partial: empty_partial(),
+            },
+            ProviderEvent::Done {
+                reason: StopReason::Stop,
+                message: done_msg,
+            },
+        ];
+
+        let emitted = run_script(events).await;
+
+        let thinking_end_at = emitted
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ThinkingEnd));
+        assert!(
+            thinking_end_at.is_some(),
+            "AgentEvent::ThinkingEnd must be emitted"
+        );
+
+        let deltas: Vec<(&str, &str)> = emitted
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallDelta {
+                    tool_call_id,
+                    args_delta,
+                } => Some((tool_call_id.as_str(), args_delta.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas.len(), 2, "expected exactly two ToolCallDelta events");
+        assert_eq!(deltas[0], ("tc_abc", "{\"command\":"));
+        assert_eq!(deltas[1], ("tc_abc", "\"ls\"}"));
+
+        let first_delta_at = emitted
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ToolCallDelta { .. }))
+            .expect("at least one ToolCallDelta");
+        assert!(
+            thinking_end_at.unwrap() < first_delta_at,
+            "ThinkingEnd must precede ToolCallDelta"
+        );
+    }
+
+    /// OpenAI-style: the first `ToolCallStart` carries no id (name only),
+    /// then a second id-bearing delta re-emits `ToolCallStart`. The map must
+    /// pick up the id so later `ToolCallDelta`s resolve.
+    #[tokio::test]
+    async fn tool_call_delta_resolves_late_id() {
+        let finalized = ToolCall::new("tc_late", "grep", serde_json::json!({"pattern":"foo"}));
+        let mut done_msg = AssistantMessage::new(Api::AnthropicMessages, "mock", "test/model");
+        done_msg
+            .content
+            .push(ContentBlock::ToolCall(finalized.clone()));
+        let events = vec![
+            ProviderEvent::Start {
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallStart {
+                content_index: 0,
+                tool_call_id: None,
+                tool_name: Some("grep".to_string()),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallStart {
+                content_index: 0,
+                tool_call_id: Some("tc_late".to_string()),
+                tool_name: Some("grep".to_string()),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallDelta {
+                content_index: 0,
+                delta: "{\"pattern\":".to_string(),
+                partial: empty_partial(),
+            },
+            ProviderEvent::ToolCallEnd {
+                content_index: 0,
+                tool_call: finalized,
+                partial: empty_partial(),
+            },
+            ProviderEvent::Done {
+                reason: StopReason::Stop,
+                message: done_msg,
+            },
+        ];
+
+        let emitted = run_script(events).await;
+
+        let ids: Vec<String> = emitted
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallDelta { tool_call_id, .. } => Some(tool_call_id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["tc_late".to_string()],
+            "ToolCallDelta must resolve the id from the second ToolCallStart"
+        );
+    }
 }

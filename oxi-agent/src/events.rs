@@ -233,6 +233,21 @@ pub enum AgentEvent {
         is_error: bool,
     },
 
+    // ── Streaming tool-call events ───────────────────────────────────
+    /// Partial tool-call arguments streamed by the LLM while it is still
+    /// constructing a tool call. Emitted between the provider's
+    /// `ToolCallStart` and `ToolCallEnd`, before [`AgentEvent::ToolExecutionStart`].
+    ///
+    /// Each `args_delta` is a raw JSON fragment (not valid JSON on its own) —
+    /// downstream consumers accumulate per `tool_call_id`.
+    ToolCallDelta {
+        /// Tool call identifier (matches the id later carried by
+        /// `ToolExecutionStart`).
+        tool_call_id: String,
+        /// Raw JSON argument fragment from the LLM stream.
+        args_delta: String,
+    },
+
     // ── Legacy events (kept for backward compatibility) ──────────
     /// Legacy: agent started processing a prompt.
     #[serde(rename = "start")]
@@ -249,6 +264,14 @@ pub enum AgentEvent {
         /// The reasoning text delta.
         text: String,
     },
+
+    /// The model finished a reasoning/thinking span and is about to produce
+    /// the answer (or begin another content block). Signal-only (no payload).
+    ///
+    /// Emitted when the provider reports `ThinkingEnd`. For models that
+    /// interleave reasoning and text (Claude 4, o-series) this may fire more
+    /// than once per turn — once per thinking span.
+    ThinkingEnd,
 
     /// A chunk of generated text from the model.
     TextChunk {
@@ -426,9 +449,11 @@ impl AgentEvent {
             AgentEvent::ToolExecutionStart { .. } => "tool_execution_start",
             AgentEvent::ToolExecutionUpdate { .. } => "tool_execution_update",
             AgentEvent::ToolExecutionEnd { .. } => "tool_execution_end",
+            AgentEvent::ToolCallDelta { .. } => "tool_call_delta",
             AgentEvent::Start { .. } => "start",
             AgentEvent::Thinking => "thinking",
             AgentEvent::ThinkingDelta { .. } => "thinking_delta",
+            AgentEvent::ThinkingEnd => "thinking_end",
             AgentEvent::TextChunk { .. } => "text_chunk",
             AgentEvent::ToolCall { .. } => "tool_call",
             AgentEvent::ToolStart { .. } => "tool_start",
