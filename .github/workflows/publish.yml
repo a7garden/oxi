@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-hashline oxi-ai oxi-tui oxi-mnemopi; do
+          for crate in oxi-hashline oxi-ai oxi-tui oxi-tui-legacy oxi-mnemopi oxi-lsp oxi-snapcompact; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -102,8 +102,8 @@ jobs:
         run: cargo nextest run --workspace --profile ci
 
   # ── Publish in topological order ─────────────────────────────
-  # Matrix with max-parallel: 1 enforces order: oxi-hashline →
-  # oxi-ai → oxi-tui → oxi-mnemopi → oxi-agent → oxi-sdk → oxi-cli.
+  # Matrix with max-parallel: 1 enforces topological order: leaves first
+  # (hashline, ai, tui, tui-legacy, mnemopi, lsp, snapcompact) → agent → sdk → cli.
   # Each crate waits for its dependency's crates.io index to
   # propagate (~30-60s) before publishing.
   publish:
@@ -120,7 +120,10 @@ jobs:
           - oxi-hashline
           - oxi-ai
           - oxi-tui
+          - oxi-tui-legacy
           - oxi-mnemopi
+          - oxi-lsp
+          - oxi-snapcompact
           - oxi-agent
           - oxi-sdk
           - oxi-cli
@@ -135,10 +138,10 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxi-hashline|oxi-ai|oxi-tui|oxi-mnemopi) exit 0 ;;
-            oxi-agent) WAITS="oxi-ai" ;;
-            oxi-sdk) WAITS="oxi-agent" ;;
-            oxi-cli) WAITS="oxi-sdk oxi-mnemopi" ;;
+            oxi-hashline|oxi-ai|oxi-tui|oxi-tui-legacy|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
+            oxi-agent) WAITS="oxi-ai oxi-hashline" ;;
+            oxi-sdk) WAITS="oxi-agent oxi-snapcompact" ;;
+            oxi-cli) WAITS="oxi-sdk oxi-tui-legacy oxi-lsp" ;;
             *) exit 0 ;;
           esac
           for WAIT in $WAITS; do
