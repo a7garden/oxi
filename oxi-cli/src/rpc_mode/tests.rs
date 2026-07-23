@@ -205,6 +205,20 @@ fn agent_events_map_to_rpc_stream_frames() {
         }),
         Some(protocol::RpcEvent::ToolStart { tool }) if tool == "read"
     ));
+    assert!(matches!(
+        handlers::agent_event_to_rpc(&oxi_agent::AgentEvent::ThinkingEnd),
+        Some(protocol::RpcEvent::ThinkingEnd)
+    ));
+    assert!(matches!(
+        handlers::agent_event_to_rpc(&oxi_agent::AgentEvent::ToolCallDelta {
+            tool_call_id: "call-2".to_string(),
+            args_delta: "{\"x\":".to_string(),
+        }),
+        Some(protocol::RpcEvent::ToolCallDelta {
+            tool_call_id,
+            args_delta,
+        }) if tool_call_id == "call-2" && args_delta == "{\"x\":"
+    ));
 }
 
 #[test]
@@ -292,6 +306,26 @@ fn test_rpc_event_agent_end() {
     let event = protocol::RpcEvent::AgentEnd;
     let json = serde_json::to_string(&event).unwrap();
     assert!(json.contains("\"type\":\"agent_end\""));
+}
+
+#[test]
+fn test_rpc_event_thinking_end() {
+    let event = protocol::RpcEvent::ThinkingEnd;
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains("\"type\":\"thinking_end\""));
+}
+
+#[test]
+fn test_rpc_event_tool_call_delta() {
+    let event = protocol::RpcEvent::ToolCallDelta {
+        tool_call_id: "call-1".to_string(),
+        args_delta: r#"{"a":1"#.to_string(),
+    };
+    let v: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
+    assert_eq!(v["type"], "tool_call_delta");
+    assert_eq!(v["tool_call_id"], "call-1");
+    assert_eq!(v["args_delta"], r#"{"a":1"#);
 }
 
 // ── Paste handler tests ──────────────────────────────────────────

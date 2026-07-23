@@ -29,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   + unit tests). Oxios consumes `AgentEvent` directly via `oxi-sdk`
   (re-exported, `lib.rs:192`), so the LobeHub port's already-built
   `AgentEvent → KernelEvent` handler now receives both events with no
-  further oxi change. The JSON-RPC IDE bridge (`rpc_mode::agent_event_to_rpc`)
-  is a separate lossy consumer and still drops both variants via its
-  `_ => None` catch-all — wiring them for IDE consumers is a follow-up, not
-  part of this change.
+  further oxi change. The JSON-RPC IDE bridge (`agent_event_to_rpc`) now
+  also forwards both variants — `RpcEvent::ThinkingEnd` and
+  `RpcEvent::ToolCallDelta { tool_call_id, args_delta }` — across the SEND
+  path (agent → JSON for IDE clients) and the RECEIVE path (both `RpcClient`
+  JSON → RpcEvent parsing blocks). Wire shapes (RpcEvent is snake_case):
+  `{"type":"thinking_end"}` and
+  `{"type":"tool_call_delta","tool_call_id":…,"args_delta":…}`.
 
 ### Architecture — oxi-tui Greenfield Rewrite
 

@@ -601,6 +601,23 @@ impl RpcClient {
                                         "agent_start" => Some(RpcEvent::AgentStart),
                                         "agent_end" => Some(RpcEvent::AgentEnd),
                                         "thinking" => Some(RpcEvent::Thinking),
+                                        "thinking_end" => Some(RpcEvent::ThinkingEnd),
+                                        "tool_call_delta" => {
+                                            let tool_call_id = obj
+                                                .get("tool_call_id")
+                                                .and_then(|v: &Value| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            let args_delta = obj
+                                                .get("args_delta")
+                                                .and_then(|v: &Value| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            Some(RpcEvent::ToolCallDelta {
+                                                tool_call_id,
+                                                args_delta,
+                                            })
+                                        }
                                         "error" => {
                                             let msg = obj
                                                 .get("message")
@@ -693,6 +710,23 @@ impl RpcClient {
                 "agent_start" => Some(RpcEvent::AgentStart),
                 "agent_end" => Some(RpcEvent::AgentEnd),
                 "thinking" => Some(RpcEvent::Thinking),
+                "thinking_end" => Some(RpcEvent::ThinkingEnd),
+                "tool_call_delta" => {
+                    let tool_call_id = obj
+                        .get("tool_call_id")
+                        .and_then(|v: &Value| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args_delta = obj
+                        .get("args_delta")
+                        .and_then(|v: &Value| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(RpcEvent::ToolCallDelta {
+                        tool_call_id,
+                        args_delta,
+                    })
+                }
                 "error" => {
                     let msg = obj
                         .get("message")

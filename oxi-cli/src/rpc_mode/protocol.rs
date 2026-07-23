@@ -590,6 +590,19 @@ pub enum RpcEvent {
     },
     /// Agent is thinking
     Thinking,
+    /// A reasoning/thinking span ended — the model is about to produce the
+    /// answer or start another content block. Signal-only. Fires per span
+    /// for interleaved-reasoning models (Claude 4, o-series).
+    ThinkingEnd,
+    /// Partial tool-call arguments streamed while the LLM is still
+    /// constructing a tool call (before `tool_start`). Each `args_delta` is
+    /// a raw JSON fragment — accumulate per `tool_call_id`.
+    ToolCallDelta {
+        /// Tool call identifier (matches the id carried by `tool_start`).
+        tool_call_id: String,
+        /// Raw JSON argument fragment from the LLM stream.
+        args_delta: String,
+    },
     /// Tool execution started
     ToolStart {
         /// Name of the tool being executed.
