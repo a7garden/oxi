@@ -7,7 +7,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Item | Value |
 |------|-------|
 | Language | Rust 2024 edition |
-|Workspace crates|`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`, `oxi-hashline` (6 crates)|
+|Workspace crates|10 crates — see "Workspace Layout" below (do NOT hardcode the count; the set evolves)|
 | Version | see `Cargo.toml` / `git tag` — single source of truth (do NOT hardcode the number here; it drifts) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
@@ -22,21 +22,39 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 
 ```
 oxi/
-├── oxi-ai/       Unified LLM API — streaming, multi-provider abstraction
-├── oxi-agent/    Agent runtime — tool-calling loop, MCP client, built-in tools
-├── oxi-tui/      Terminal UI widgets — chat, themes, markdown rendering (ratatui)
-├── oxi-sdk/      Multi-agent SDK + port contract: 15 port traits + reference impls
-├── oxi-cli/      CLI binary — composition root (TUI + RPC + print modes)
-└── oxi-hashline/  Line-anchored patch format for AI-assisted code editing
+├── oxi-ai/            Unified LLM API — streaming, multi-provider abstraction (foundation)
+├── oxi-agent/         Agent runtime — tool-calling loop, MCP client, built-in tools
+├── oxi-sdk/           Multi-agent SDK + port contract: 15 port traits + reference impls
+├── oxi-cli/           CLI binary — composition root (TUI + RPC + print modes)
+├── oxi-hashline/      Line-anchored patch format for AI-assisted code editing
+├── oxi-lsp/           LSP bridge
+├── oxi-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
+├── oxi-snapcompact/   Context compaction via PNG rasterization (fontdue)
+├── oxi-tui/           Terminal UI — v2 terminal-first rendering pipeline (ratatui)
+└── oxi-tui-legacy/    Legacy terminal UI — preserved during the oxi-tui v2 migration
+```
 
 ### Dependency Flow
 
-oxi-hashline  (independent, no oxi-* deps)  →  oxi-agent
-oxi-ai  →  oxi-agent  →  oxi-sdk  →  oxi-cli
-oxi-tui  (independent, no oxi-* deps)  →  oxi-cli
+Leaf crates (zero internal `oxi-*` deps): `oxi-ai`, `oxi-hashline`, `oxi-lsp`,
+`oxi-mnemopi`, `oxi-snapcompact`, `oxi-tui` (v2), `oxi-tui-legacy`.
+
+```
+oxi-ai  (foundation)              oxi-hashline (independent)
+  ↓                                 ↓
+oxi-agent  ←  oxi-ai, oxi-hashline
+  ↓
+oxi-sdk  ←  oxi-ai, oxi-agent, oxi-snapcompact
+  ↓
+oxi-cli  ←  oxi-ai, oxi-agent, oxi-sdk, oxi-lsp, oxi-mnemopi,
+             oxi-tui (v0.58), oxi-tui-legacy (v0.56)
+```
 
 `oxi-ai` is the foundation layer with zero internal dependencies.
 `oxi-cli` is the integration layer that depends on all other crates.
+oxi-cli links **both** `oxi-tui` and `oxi-tui-legacy` during the in-progress
+v2 render migration (see "oxi-tui v2" below); `LegacyOverlayAdapter` bridges
+legacy rendering through the new pipeline.
 Never create circular dependencies between crates.
 
 ## Port System (oxi-sdk)
@@ -91,16 +109,19 @@ pub trait Provider: Send + Sync + 'static {
 ```
 
 **8 built-in providers** in `src/providers/`: openai, openai-responses, anthropic, google, vertex, mistral, azure, bedrock.
-`model_db.rs` indexes pricing/context/feature data for 5000+ models across 70+
-providers, sourced from a materialized catalog (see `catalog/`):
-- **Layer 1** — built-in TOML (`include_str!`-ed at build time)
-- **Layer 2** — user overrides (`~/.oxi/catalog/overrides.toml`)
-- **Layer 2.5** — **models.dev live enrichment** (`catalog/models_dev.rs`):
-  fetches `https://models.dev/api.json` (5-min cache) to fill `0.0` price gaps
-  and refresh context/max_tokens/reasoning. MIT upstream (also used by opencode).
+`model_db.rs` + `catalog/` index pricing/context/feature data for 5000+ models
+across 70+ providers, with models.dev as the source of truth (see
+`data/catalog/README.md`):
+- **SNAP (Layer 1)** — embedded models.dev snapshot `_snapshot.json.gz`
+  (`include_bytes!`-ed; works fully offline on first run).
+- **LIVE (Layer 2.5)** — runtime cache `~/.oxi/cache/models-dev.json` (ETag-aware
+  conditional GET, ~1h mtime window). `catalog/models_dev.rs`.
+- **Layer 2** — user overrides (`~/.oxi/catalog/overrides.toml`).
+- **LOCAL (Layer 3)** — runtime `/v1/models` discovery for local servers
+  (ollama/lmstudio/vllm/sglang).
   Gates: `OXI_MODELS_DEV`, `OXI_MODELS_DEV_URL`, `OXI_MODELS_DEV_DISABLE_FETCH`,
-  `OXI_MODELS_DEV_TTL`, `OXI_MODELS_DEV_CACHE_PATH`.
-- **Layer 3** — runtime `/v1/models` discovery for local servers (ollama/lmstudio/vllm/sglang)
+  `OXI_MODELS_DEV_MTIME_WINDOW`, `OXI_MODELS_DEV_FORCE_REFRESH`,
+  `OXI_MODELS_DEV_CACHE_PATH`, `OXI_CATALOG_SNAPSHOT`.
 `compaction.rs` summarizes old messages when context grows too large.
 `ProviderRegistry` in `mod.rs` supports both custom providers (via `register()`) and built-in fallback (via `register_builtins.rs`).
 
@@ -138,7 +159,11 @@ Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 
 ### oxi-tui — Terminal UI
 
-Built on `ratatui` + `crossterm`. **No oxi-* dependencies** — pure widget library.
+`oxi-tui` is a greenfield **v2 terminal-first rendering pipeline** built on
+`ratatui` + `crossterm`. **No oxi-* dependencies** — pure widget library. The
+pre-v2 crate is preserved as `oxi-tui-legacy` (still linked by oxi-cli during
+the migration; `LegacyOverlayAdapter` bridges it through the v2 pipeline). See
+"oxi-tui v2 — Terminal-First Pipeline" below for the v2 architecture.
 
 - Theme system with hot-reload from TOML/JSON files.
 - **Glyph set system** (`symbols.rs`): every UI symbol (status markers, list
@@ -293,10 +318,11 @@ Extension system (`src/extensions/types.rs`):
 1. Create `oxi-ai/src/providers/<name>.rs`.
 2. Implement the `Provider` trait.
 3. Add `BuiltinProvider` entry in `oxi-ai/src/providers/register_builtins.rs`.
-4. Add model data to `oxi-ai/data/catalog/models/<provider>.toml` (no Rust
-   changes needed — `build.rs` picks it up). If the provider exists on
-   models.dev, the Layer 2.5 enrichment will fill pricing/limits
-   automatically at runtime.
+4. The model catalog is powered by models.dev (see `oxi-ai/data/catalog/README.md`).
+   If the provider exists on models.dev, its models appear automatically once the
+   embedded snapshot is refreshed (regenerate `data/catalog/_snapshot.json.gz`).
+   Add oxi-specific provider metadata (extra HTTP headers, etc.) to
+   `data/catalog/product-meta.toml`.
 
 ### Adding a New Tool
 
@@ -332,7 +358,7 @@ cargo nextest run --profile ci       # CI profile (retries, no fail-fast)
 cargo nextest run -j 1               # Sequential (debug race conditions)
 
 # Lint & Format
-cargo clippy --workspace -- -D warnings   # Lint
+cargo clippy --workspace --all-targets -- -D warnings   # Lint
 cargo fmt --all -- --check           # Format check
 
 # Docs
@@ -444,11 +470,11 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   `update` also does **no-op detection** (skips write/timestamp/invalidate when
   nothing meaningful changed), so don't rely on a no-op `update` bumping
   `updated_at` or the dir mtime.
-- The catalog lives in `data/catalog/*.toml`, not hand-written Rust. Adding a
-  TOML file requires no Rust code (build script auto-enumerates). Many oxi-
-  original entries ship `cost_input`/`cost_output` = `0.0`; these are
-  transparently enriched at runtime by the models.dev Layer 2.5
-  (`catalog/models_dev.rs`). Set `OXI_MODELS_DEV=off` to test Layer 1 alone.
+- The catalog is models.dev-sourced, not hand-written. The embedded snapshot
+  `data/catalog/_snapshot.json.gz` is the source of truth (regenerate per
+  `oxi-ai/data/catalog/README.md`); per-provider TOML no longer exists.
+  oxi-specific provider metadata lives in `data/catalog/product-meta.toml`.
+  Set `OXI_MODELS_DEV=off` to test the embedded snapshot alone.
 - SSE parsing handles partial UTF-8 lines. Do not assume line boundaries are clean.
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.
 - Port trait methods are **async**. `MutexGuard`s held across `.await` will not compile (`!Send`). Use `tokio::sync::Mutex` or scope the lock.

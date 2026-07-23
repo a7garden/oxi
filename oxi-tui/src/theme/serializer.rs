@@ -31,7 +31,7 @@ pub struct ThemeFile {
 ///
 /// Each field is either a hex string (`#rrggbb`), an indexed-color
 /// reference (`i<N>`), or a named color (`red`, `default`, ...).
-/// See [`parse_color_str`] for the full grammar.
+/// See `parse_color_str` for the full grammar.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ColorSchemeFile {
     // ── 21 "original" slots (14 fg + 7 bg) ──────────────────────────

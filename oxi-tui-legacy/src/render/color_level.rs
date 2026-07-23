@@ -53,7 +53,7 @@ static COLOR_LEVEL: LazyLock<ColorLevel> = LazyLock::new(detect_color_level_inne
 
 /// Detect the terminal's color support level. Cached after first call.
 ///
-/// Respects `NO_COLOR` env (https://no-color.org/) — returns `ColorLevel::None`.
+/// Respects `NO_COLOR` env (<https://no-color.org/>) — returns `ColorLevel::None`.
 /// Checks `COLORTERM`, `TERM`, and terminal-specific env vars via the
 /// `supports-color` crate. Recovers truecolor when tmux/SSH/mosh strip
 /// `COLORTERM` by recognizing known truecolor terminals (iTerm2, WezTerm,

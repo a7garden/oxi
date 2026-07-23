@@ -117,7 +117,7 @@ impl Mnemopi {
     ///
     /// When [`MnemopiConfig::llm_backend`] is set, returns an
     /// [`crate::extraction::LlmExtractor`] wrapped over that backend;
-    /// otherwise returns the always-available [`HeuristicExtractor`].
+    /// otherwise returns the always-available [`crate::extraction::HeuristicExtractor`].
     /// Hosts can call this from a `remember` prelude to split a long
     /// user message into atomic memories before storing each separately.
     ///

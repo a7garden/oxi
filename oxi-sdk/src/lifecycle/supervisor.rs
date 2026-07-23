@@ -458,7 +458,7 @@ impl AgentSupervisor {
         }
     }
 
-    /// Attach an [`crate::Oxi`] reference and an [`AgentDecorator`]
+    /// Attach an [`crate::Oxi`] reference and an [`crate::observability::AgentDecorator`]
     /// to this supervisor. Subsequent [`Self::spawn`] calls will
     /// route through `Oxi::agent(config)` + `decorator.decorate()`
     /// instead of the bare `Agent::new()` fast path, so the
@@ -488,9 +488,9 @@ impl AgentSupervisor {
     /// Spawn a new agent.
     ///
     /// When the supervisor was configured with both an `Oxi` reference
-    /// and an [`AgentDecorator`] (via
+    /// and an [`crate::observability::AgentDecorator`] (via
     /// [`with_agent_decorator`](Self::with_agent_decorator) or
-    /// [`SupervisorBuilder::with_agent_decorator`]), this routes
+    /// [`crate::builder::SupervisorBuilder::with_agent_decorator`]), this routes
     /// through `Oxi::agent(config)` and lets the decorator apply
     /// audit / authorizer / tracer / cost hooks before `.build()`.
     /// Otherwise it takes the legacy fast path

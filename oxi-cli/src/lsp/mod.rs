@@ -18,7 +18,8 @@
 //!
 //! Servers are configured via two sources (in priority order):
 //!
-//! 1. Programmatic: [`CliLspProvider::with_servers`].
+//! 1. Programmatic: [`CliLspProvider::new`] over a [`LspManager`] built from a
+//!    custom server table (see [`LspManager::new`]).
 //! 2. Default table: `default_servers()` returns `rust-analyzer`
 //!    for `.rs` files when the binary is on `PATH`.
 //!

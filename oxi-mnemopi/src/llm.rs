@@ -31,7 +31,7 @@ pub struct CompleteOptions {
     /// Per-call timeout. `None` = backend default (typically 30 s).
     ///
     /// Honored via `reqwest::blocking::RequestBuilder::timeout` in
-    /// [`RemoteLlmBackend`]; client-level timeouts act only as a ceiling.
+    /// `RemoteLlmBackend`; client-level timeouts act only as a ceiling.
     pub timeout: Option<Duration>,
 }
 

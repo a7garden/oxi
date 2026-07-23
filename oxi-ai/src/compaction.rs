@@ -342,7 +342,7 @@ pub enum CompactionStrategy {
     /// Compact when context exceeds this absolute token count
     AbsoluteTokens(usize),
     /// Always compact using the snapcompact PNG renderer.
-    /// The compactor must be set to a [`SnapcompactCompactor`]
+    /// The compactor must be set to a `SnapcompactCompactor`
     /// (from `oxi-sdk`) for this to produce frames.
     Snapcompact,
 }

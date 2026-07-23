@@ -206,7 +206,7 @@ impl Oxi {
         self.include_builtins
     }
 
-    /// Borrow the shared [`RoutingControl`] instance. Use this to
+    /// Borrow the shared [`crate::routing::RoutingControl`] instance. Use this to
     /// call `set_enabled`, `exclude_model`, `set_fallback_models`, etc.
     /// Mutations are observed by the next model/provider resolution.
     pub fn routing(&self) -> &Arc<crate::routing::RoutingControl> {
@@ -767,14 +767,14 @@ impl SupervisorBuilder {
         self
     }
 
-    /// Attach an [`AgentDecorator`] that wraps every
+    /// Attach an [`crate::observability::AgentDecorator`] that wraps every
     /// supervisor-spawned agent.
     ///
     /// When set, [`SupervisorBuilder::build`] clones the built `Oxi`
     /// into the supervisor and configures it to route spawns through
     /// `Oxi::agent(config)` + `decorator.decorate(builder)` instead
     /// of the bare `Agent::new(provider, config, tools)` fast path.
-    /// Use [`ObservabilityDecorator`] to bundle audit / authorizer /
+    /// Use [`crate::observability::ObservabilityDecorator`] to bundle audit / authorizer /
     /// tracer / cost-tracker — those hooks then actually run on
     /// every spawned agent (no longer silent no-ops).
     ///

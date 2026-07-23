@@ -37,6 +37,10 @@ ignore = [
     # oxibrowser-core is pinned; paste is only used for CSS selector engine internals.
     # Re-evaluate when oxibrowser-core updates.
     "RUSTSEC-2024-0436",
+    # ttf-parser 0.21.1 - unmaintained, transitive via fontdue 0.9.3 (latest)
+    # → oxi-snapcompact (snapcompact_render.rs). fontdue pins ttf-parser ^0.21;
+    # no upgrade path. Informational, no known exploit. Mirror of audit.toml.
+    "RUSTSEC-2026-0192",
     # quick-xml 0.23.1 — transitive via self_update → oxi-cli. Both
     # RUSTSEC-2026-0194 (quadratic DoS) and RUSTSEC-2026-0195 (memory
     # DoS) need attacker-controlled XML; self_update is behind the

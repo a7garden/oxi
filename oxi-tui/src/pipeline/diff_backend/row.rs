@@ -2,10 +2,10 @@
 //!
 //! Two responsibilities live here:
 //!
-//! 1. [`Row`] + [`build_row`] — compact byte representation of a row of cells
+//! 1. `Row` + `build_row` — compact byte representation of a row of cells
 //!    used for line-level diffing between consecutive frames.
-//! 2. SGR attribute delta helpers ([`modifier_delta_codes`], [`write_modifier_delta`],
-//!    [`all_text_attrs`]) — minimal attribute transition encoder so a
+//! 2. SGR attribute delta helpers (`modifier_delta_codes`, `write_modifier_delta`,
+//!    `all_text_attrs`) — minimal attribute transition encoder so a
 //!    modifier change between adjacent cells only emits the few bytes needed
 //!    to flip the differing bits (replaces the older "SGR 0 + re-apply" path).
 //!

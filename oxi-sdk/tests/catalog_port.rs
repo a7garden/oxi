@@ -78,6 +78,9 @@ async fn file_catalog_get_model_anthropic() {
         cache_path: tmp.path().join("cache.json"),
         etag_path: tmp.path().join("cache.etag"),
         override_path: tmp.path().join("overrides.toml"),
+        // Deterministic: test the *embedded* SNAP, not live models.dev
+        // (which can retire dated model ids and make this flaky).
+        fetch_enabled: false,
         ..Default::default()
     };
     let cat = FileModelCatalog::init(config).await.unwrap();
