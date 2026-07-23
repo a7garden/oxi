@@ -759,7 +759,7 @@ mod tests {
 
         let buf = recorder.0.borrow();
         let emitted = String::from_utf8_lossy(&buf);
-        let begin = format!("\x1b]8;;https://example.com\x1b\\");
+        let begin = "\x1b]8;;https://example.com\x1b\\".to_string();
         let end = "\x1b]8;;\x1b\\";
         let begin_pos = emitted
             .find(&begin)

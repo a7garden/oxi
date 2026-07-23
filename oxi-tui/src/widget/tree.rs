@@ -1,5 +1,21 @@
-//! The retained widget tree root. Owns the top-level widget and tracks
-//! content hash and resolved cursor state across frames.
+//! The retained widget tree root. Owns the top-level widget and tracks its
+//! content hash and resolved cursor position across frames.
+//!
+//! ## Frame lifecycle (the memoization contract)
+//!
+//! 1. **`any_hash_changed`** — walk the root, aggregating child hashes via
+//!    [`Renderable::content_hash`][crate::widget::Renderable]. The pipeline
+//!    compares this to last frame's hash; if unchanged (and no resize) it
+//!    skips rendering and flushing entirely — an idle frame is ~free.
+//! 2. **`render`** — when the hash changed, paint the tree into the frame
+//!    buffer, then take the cursor slot the widgets requested and resolve
+//!    it against `last_cursor`. The resolved position is handed to
+//!    [`CursorState::reconcile`][crate::pipeline::CursorState], which emits
+//!    cursor bytes only when something actually changed.
+//!
+//! Composite widgets get finer-grained skip by wrapping children in
+//! [`RetainedChild`][crate::widget::RetainedChild]: a token change in one
+//! subtree trips the root hash, but only that subtree re-renders.
 
 use ratatui::layout::Position;
 

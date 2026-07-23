@@ -1,3 +1,15 @@
+//! Append-only conversation history with an optional live assistant stream.
+//!
+//! [`ChatLog`] is the model layer: messages are never mutated, only
+//! appended, and each gets a monotonically increasing [`MessageId`]. While
+//! an assistant response streams in, `append_token` accumulates into the
+//! active message without touching the frozen history.
+//!
+//! A cached content hash (built with
+//! [`hash_combine`]) lets a wrapping
+//! [`Renderable`][crate::widget::Renderable] skip re-rendering until the
+//! log actually changes. The chat view renders a `ChatLog` into the frame.
+
 use super::{ChatMessage, MessageId, MessageRole, StreamId, StreamingState};
 use crate::widget::{hash_combine, hash_str};
 

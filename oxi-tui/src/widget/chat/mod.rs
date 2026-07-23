@@ -132,9 +132,9 @@ mod tests {
     #[test]
     fn streaming_token_re_renders_only_active_message() {
         let mut view = ChatView::new();
-        view.log_mut().append_message(MessageRole::User);
-        view.log_mut().append_message(MessageRole::User);
-        view.log_mut().append_message(MessageRole::Assistant);
+        let _ = view.log_mut().append_message(MessageRole::User);
+        let _ = view.log_mut().append_message(MessageRole::User);
+        let _ = view.log_mut().append_message(MessageRole::Assistant);
         view.log_mut().append_token("token");
         render(&mut view, 80, 24);
         let before: Vec<usize> = view
@@ -158,7 +158,7 @@ mod tests {
     fn renders_visible_messages_only() {
         let mut view = ChatView::new();
         for _ in 0..5 {
-            view.log_mut().append_message(MessageRole::User);
+            let _ = view.log_mut().append_message(MessageRole::User);
         }
         render(&mut view, 80, 2);
         assert_eq!(
@@ -174,7 +174,7 @@ mod tests {
     fn scroll_skips_offscreen_messages() {
         let mut view = ChatView::new();
         for _ in 0..5 {
-            view.log_mut().append_message(MessageRole::User);
+            let _ = view.log_mut().append_message(MessageRole::User);
         }
         view.view_mut().scroll_up(2);
         render(&mut view, 80, 2);
@@ -190,9 +190,9 @@ mod tests {
     #[test]
     fn new_message_appended_correctly() {
         let mut view = ChatView::new();
-        view.log_mut().append_message(MessageRole::User);
+        let _ = view.log_mut().append_message(MessageRole::User);
         render(&mut view, 80, 2);
-        view.log_mut().append_message(MessageRole::Assistant);
+        let _ = view.log_mut().append_message(MessageRole::Assistant);
         assert_eq!(view.items.len(), 1);
         render(&mut view, 80, 2);
         assert_eq!(view.items.len(), 2);

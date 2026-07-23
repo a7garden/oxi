@@ -1,7 +1,23 @@
 //! Terminal-first frame lifecycle.
 //!
-//! Decomposes ratatui's `Terminal::draw()` so the application owns the cursor
-//! emission decision. See spec §4.
+//! Decomposes ratatui's `Terminal::draw()` so the application owns the
+//! cursor-emission decision. One frame is:
+//! `autoresize → hash-skip → render → flush(DiffBackend) → reconcile cursor → swap`.
+//!
+//! ## Two entry points
+//!
+//! - [`draw_frame`] — the retained path. Pass a
+//!   [`RetainedTree`] whose root hash is
+//!   checked each frame; if unchanged (and no resize), rendering and
+//!   flushing are skipped entirely. This is the target API.
+//! - [`draw_frame_closure`] — the cutover path. Takes a transient render
+//!   closure instead of a retained tree, so there is no hash to memoize
+//!   (it always renders). Used while widgets are still being migrated to
+//!   [`Renderable`][crate::widget::Renderable]; still preserves cursor
+//!   dedup, CSI 2026 sync, and DECCARA background fill.
+//!
+//! Both preserve [`CursorState`] dedup (same cursor position emits zero
+//! bytes) and wrap diffed writes in CSI 2026 synchronized output. See spec §4.
 
 pub mod cursor;
 pub mod cursor_slot;

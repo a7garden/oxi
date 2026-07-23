@@ -53,3 +53,12 @@ syntax = ["dep:syntect"]
 
 [dev-dependencies]
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
+criterion = "0.5"
+
+[[bench]]
+name = "streaming_memoization"
+harness = false
+
+[[bench]]
+name = "cursor_dedup"
+harness = false
