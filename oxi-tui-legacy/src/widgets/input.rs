@@ -53,6 +53,15 @@ impl InputState {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Terminal cursor position of the textarea as `(row, col)`, relative to
+    /// the textarea's rendered top-left. Used by the render loop's cursor
+    /// bridge to position the terminal cursor under the v2 pipeline (the
+    /// legacy Input widget paints into the buffer but never sets the cursor).
+    #[must_use]
+    pub fn screen_cursor(&self) -> (usize, usize) {
+        let sc = self.textarea.screen_cursor();
+        (sc.row, sc.col)
+    }
 
     /// Get the current text content
     pub fn text(&self) -> String {

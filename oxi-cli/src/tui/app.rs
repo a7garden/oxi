@@ -298,9 +298,11 @@ pub(crate) struct AppState {
     /// Plan C cutover Phase 5. Not read yet — rendering migration is future work.
     #[allow(dead_code)]
     pub v2_chat: oxi_tui::content::ChatLog,
-    /// v2 ChatView widget — renders the chat area when OXI_V2_RENDER=1 is set.
-    /// Synced from `v2_chat` each frame via `v2_render::sync_chat_view`.
-    /// Owned by AppState so its retained item slots survive across frames.
+    /// v2 ChatView widget — retained for the future v2 chat-area migration
+    /// (blocked on completing dual-write of all message types + incremental
+    /// sync). Not read by the default render path today, which delegates to
+    /// the legacy `render::draw` via `v2_render::draw_v2`.
+    #[allow(dead_code)]
     pub v2_chat_view: oxi_tui::widget::chat::ChatView,
     pub input: InputState,
     pub footer_state: FooterState,
@@ -407,6 +409,11 @@ pub(crate) struct AppState {
     /// `AppState::new()` and threaded through every `draw_frame_closure` call
     /// so cursor escapes are emitted only when the position/visibility changes.
     pub cursor_state: V2CursorState,
+    /// Terminal cursor position of the input textarea, recorded by
+    /// `render_input_area` each frame and read by the main-loop dispatch to
+    /// bridge the cursor into the v2 pipeline (`ctx.set_cursor`). `None` on
+    /// frames where the input is not painted (e.g. overlay active).
+    pub last_input_cursor: Option<ratatui::layout::Position>,
 }
 
 /// A toast notification to display temporarily.
@@ -557,6 +564,7 @@ impl AppState {
             todo_provider: None,
             todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState::new(),
             cursor_state: V2CursorState::new(),
+            last_input_cursor: None,
         };
 
         // Load user keybindings from settings
@@ -1590,13 +1598,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             // so the pipeline can own it, then put it back after.
             let v2_theme = v2_theme_from_legacy(&theme);
             let caps = TerminalCaps::detect();
-            // Render-path gating. When `OXI_V2_RENDER=1` is set, dispatch through
-            // `v2_render::draw_v2` instead of the legacy `render::draw`. Both
-            // paths currently render identically (v2 delegates to legacy) so
-            // flipping this env var is a no-op visually. Once the v2 ChatView
-            // bridging lands, the v2 path will diverge without touching this
-            // call site.
-            let use_v2_render = std::env::var("OXI_V2_RENDER").as_deref() == Ok("1");
+            // Render-path gating. The v2 pipeline is the default render path;
+            // `OXI_V2_RENDER=0` keeps the pure-legacy path as a rollback safety
+            // net. Both paths paint through the legacy `render::draw` (the v2
+            // `draw_v2` delegates to it), so output is visually identical — the
+            // v2 pipeline only adds cursor-blink dedup, CSI 2026 sync, DECCARA
+            // background fills, and cell-level diffing on top.
+            let use_v2_render = std::env::var("OXI_V2_RENDER").as_deref() != Ok("0");
             {
                 let mut cursor_state = std::mem::take(&mut state.cursor_state);
                 let result = oxi_tui::pipeline::draw_frame_closure(
@@ -1606,12 +1614,22 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     &v2_theme,
                     &caps,
                     |ctx| {
+                        // Reset each frame. `render_input_area` sets this only
+                        // when the input is actually painted, so overlay frames
+                        // (which early-return) leave it None and the cursor hides.
+                        state.last_input_cursor = None;
                         if use_v2_render {
-                            super::v2_render::draw_v2(ctx, &mut state);
+                            super::v2_render::draw_v2(ctx, &mut state, &theme);
                         } else {
                             ctx.with_frame(|frame| {
                                 render::draw(frame, &mut state, &theme);
                             });
+                        }
+                        // Cursor bridge: the legacy renderer never touches the v2
+                        // cursor slot, so position the terminal cursor from the
+                        // textarea cursor that `render_input_area` recorded.
+                        if let Some(p) = state.last_input_cursor {
+                            ctx.set_cursor(p);
                         }
                     },
                 );

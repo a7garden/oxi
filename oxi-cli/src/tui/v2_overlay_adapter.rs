@@ -153,7 +153,6 @@ mod tests {
     /// Existence of this type at all proves the adapter accepts a
     /// `!Send` overlay. If we ever put `+ Send` back on the trait or the
     /// adapter, this mock will fail to coerce and the build will fail.
-
     struct NotSendOverlay(*mut ());
 
     impl std::fmt::Debug for NotSendOverlay {
@@ -228,7 +227,7 @@ mod tests {
         let overlay: Box<dyn OverlayComponent> = Box::new(NotSendOverlay(std::ptr::null_mut()));
         let mut adapter = LegacyOverlayAdapter::new(overlay);
         // Verify the adapter exposes the overlay for external driving.
-        let _inner: &Box<dyn OverlayComponent> = adapter.overlay_mut();
+        let _inner = adapter.overlay_mut();
     }
 
     /// `content_hash` must change between calls to defeat the pipeline's
