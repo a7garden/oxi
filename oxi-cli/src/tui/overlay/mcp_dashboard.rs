@@ -302,6 +302,9 @@ fn tool_to_item(tool: &McpToolInfo, _server: &str) -> DashboardItem {
     let consent_label = match tool.consent {
         ConsentState::Allow => "ALLOW",
         ConsentState::Deny => "DENY",
+        // Ask is the spawn-gate default for unknown servers (F-2); a tool
+        // surfacing as Ask means its server hasn't been trusted yet.
+        ConsentState::Ask => "ASK",
     };
     let mut badges = vec![];
     if tool.is_direct {

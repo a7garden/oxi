@@ -372,15 +372,28 @@ impl Default for DirectToolsConfig {
     }
 }
 
-/// MCP tool execution consent state (Phase 3, extended in Phase 4).
+/// MCP consent state.
+///
+/// Two persisted states (`Allow` / `Deny`) survive across sessions in
+/// `mcp-consent.json`. The transient `Ask` variant is never persisted: it
+/// is the in-memory default for *unknown servers at the spawn gate* and is
+/// resolved to `Allow`/`Deny` (via `oxi mcp trust`/`untrust`) before
+/// storage. The per-tool consent path ([`crate::mcp::consent::ConsentManager::check`])
+/// keeps `Allow` as its default so the tool-call gate at
+/// `direct_tool.rs` (`!= Deny`) is unaffected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ConsentState {
-    /// Always allow execution.
+    /// Persisted: always allow.
     #[default]
     Allow,
-    /// Always deny execution.
+    /// Persisted: always deny.
     Deny,
+    /// Transient (never persisted): unknown at the spawn gate — resolve
+    /// via `ConsentManager::check_spawn_consent`. Serializes as `"ask"`
+    /// for forward compatibility but `ConsentManager::decide` never
+    /// stores it.
+    Ask,
 }
 
 /// Definition for a tool to be registered as a direct `AgentTool` (Phase 3).

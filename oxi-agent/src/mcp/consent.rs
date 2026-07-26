@@ -1,11 +1,18 @@
-//! MCP tool execution consent management (Phase 3).
+//! MCP consent management — two policies over one store.
 //!
-//! Stores per-tool (or per-server) decisions in memory and on disk so that
-//! consent survives across sessions. The default is [`ConsentState::Allow`],
-//! which preserves the previous (no-consent) behaviour.
+//! Persists per-tool and per-server decisions to `mcp-consent.json` so they
+//! survive across sessions. Two distinct default policies share the store:
 //!
-//! Phase 4+ may extend this with a runtime `Ask` mode; for now the only
-//! two states are `Allow` and `Deny`.
+//! - **Tool-call gate** ([`ConsentManager::check`]): unknown tools default
+//!   to `Allow`. Used by `direct_tool.rs` which only blocks `Deny`.
+//! - **Spawn gate** ([`ConsentManager::check_spawn_consent`]): unknown
+//!   servers default to `Ask`, which [`crate::mcp::McpManager::connect`]
+//!   treats as "not trusted — deny spawn". Closing the clone-to-RCE
+//!   surface (F-2, code audit 2026-07-25). The user pre-trusts servers via
+//!   `oxi mcp trust <name>`.
+//!
+//! `Ask` is never persisted: [`ConsentManager::decide`] silently normalizes
+//! it to `Deny` so the on-disk file only ever contains `allow`/`deny`.
 
 use super::types::ConsentState;
 use anyhow::{Context, Result};
@@ -102,9 +109,37 @@ impl ConsentManager {
             .unwrap_or(ConsentState::Allow)
     }
 
-    /// Persist a consent decision. `name` is typically a tool name
-    /// (or a server name as a broader rule).
+    /// Spawn-path consent check. Unknown servers return `Ask` (the caller
+    /// treats `Ask` and `Deny` identically: deny the spawn and surface
+    /// `McpError::ConsentDenied`). This is deliberately a *separate*
+    /// default from [`check`](Self::check) so the per-tool gate at
+    /// `direct_tool.rs` (which only blocks `Deny`) is unaffected.
+    pub fn check_spawn_consent(&self, name: &str) -> ConsentState {
+        self.store
+            .read()
+            .decisions
+            .get(name)
+            .cloned()
+            .unwrap_or(ConsentState::Ask)
+    }
+
+    /// Persist a consent decision. `name` is a tool or server name.
+    ///
+    /// `Ask` is normalized to `Deny` — it is a transient runtime signal,
+    /// never a stored state (see the module docs). Callers that resolve
+    /// `Ask` interactively must pass the resolved `Allow`/`Deny` here.
     pub fn decide(&self, name: &str, state: ConsentState) -> Result<()> {
+        let state = match state {
+            ConsentState::Ask => {
+                tracing::warn!(
+                    "MCP consent: `Ask` passed to decide({name:?}) — \
+                     normalizing to `Deny` (Ask is transient, never persisted)"
+                );
+                ConsentState::Deny
+            }
+            // Allow and Deny pass through unchanged.
+            other => other,
+        };
         let snapshot;
         {
             let mut store = self.store.write();
@@ -116,6 +151,18 @@ impl ConsentManager {
             };
         }
         self.write_to_disk(&snapshot)
+    }
+
+    /// Trust a server (persist `Allow`). Convenience wrapper around
+    /// [`decide`](Self::decide). Used by `oxi mcp trust <server>`.
+    pub fn trust(&self, name: &str) -> Result<()> {
+        self.decide(name, ConsentState::Allow)
+    }
+
+    /// Revoke trust for a server (persist `Deny`). Convenience wrapper
+    /// around [`decide`](Self::decide). Used by `oxi mcp untrust <server>`.
+    pub fn untrust(&self, name: &str) -> Result<()> {
+        self.decide(name, ConsentState::Deny)
     }
 
     /// All current decisions (for the TUI dashboard).
@@ -199,5 +246,87 @@ mod tests {
         assert_eq!(m2.check("tool_a"), ConsentState::Deny);
         assert_eq!(m2.check("tool_b"), ConsentState::Allow);
         assert_eq!(m2.check("unknown"), ConsentState::Allow);
+    }
+
+    // ── F-2 spawn consent (code audit 2026-07-25) ─────────────────────
+
+    #[test]
+    fn spawn_consent_defaults_to_ask_for_unknown_servers() {
+        // The spawn gate treats unknown servers as `Ask` (→ deny spawn),
+        // closing the clone-to-RCE surface. Contrast with `check()` below
+        // which still returns `Allow` for the per-tool gate.
+        let m = ConsentManager::new();
+        assert_eq!(
+            m.check_spawn_consent("untrusted-server"),
+            ConsentState::Ask,
+            "unknown servers must be Ask at the spawn gate"
+        );
+        // Per-tool gate unchanged — backward compat for direct_tool.rs.
+        assert_eq!(
+            m.check("untrusted-server"),
+            ConsentState::Allow,
+            "unknown names stay Allow for the tool-call gate"
+        );
+    }
+
+    #[test]
+    fn trust_persists_allow_then_spawn_consent_allows() {
+        let dir = TempDir::new().unwrap();
+        let m = ConsentManager::with_path(dir.path().join("consent.json"));
+        m.load().unwrap();
+
+        // Before trust: spawn gate denies.
+        assert_eq!(m.check_spawn_consent("github"), ConsentState::Ask);
+
+        m.trust("github").unwrap();
+        assert_eq!(m.check_spawn_consent("github"), ConsentState::Allow);
+        // Tool gate also sees Allow.
+        assert_eq!(m.check("github"), ConsentState::Allow);
+    }
+
+    #[test]
+    fn untrust_persists_deny_then_both_gates_block() {
+        let dir = TempDir::new().unwrap();
+        let m = ConsentManager::with_path(dir.path().join("consent.json"));
+        m.load().unwrap();
+
+        m.untrust("sketchy").unwrap();
+        assert_eq!(m.check_spawn_consent("sketchy"), ConsentState::Deny);
+        assert_eq!(m.check("sketchy"), ConsentState::Deny);
+    }
+
+    #[test]
+    fn decide_normalizes_ask_to_deny_never_persists_ask() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("consent.json");
+        let m = ConsentManager::with_path(path.clone());
+        m.load().unwrap();
+
+        // Ask must not be stored — it's a transient runtime signal.
+        m.decide("transient", ConsentState::Ask).unwrap();
+
+        // Reload and verify only Deny was persisted.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !raw.contains("ask"),
+            "Ask must never be written to disk, got: {raw}"
+        );
+        let m2 = ConsentManager::with_path(path);
+        m2.load().unwrap();
+        assert_eq!(m2.check("transient"), ConsentState::Deny);
+    }
+
+    #[test]
+    fn trusted_server_survives_reload() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("consent.json");
+
+        let m1 = ConsentManager::with_path(path.clone());
+        m1.load().unwrap();
+        m1.trust("persistent").unwrap();
+
+        let m2 = ConsentManager::with_path(path);
+        m2.load().unwrap();
+        assert_eq!(m2.check_spawn_consent("persistent"), ConsentState::Allow);
     }
 }

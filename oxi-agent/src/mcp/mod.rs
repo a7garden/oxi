@@ -50,6 +50,7 @@ pub mod config;
 pub mod consent;
 pub mod content;
 pub mod direct_tool;
+pub mod error;
 pub mod lifecycle;
 pub mod tool;
 pub mod transport;
@@ -60,6 +61,7 @@ pub use cache::MetadataCache;
 pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument, McpSamplingRequest};
 pub use consent::ConsentManager;
 pub use direct_tool::McpDirectTool;
+pub use error::McpError;
 pub use tool::McpTool;
 pub use transport::{McpTransport, http::StreamableHttpTransport, stdio::StdioTransport};
 pub use types::{
@@ -94,6 +96,20 @@ pub struct McpManagerInner {
     /// Servers whose connection is currently in progress.
     /// Prevents two concurrent `ensure_connected` calls from racing.
     connecting: HashSet<String>,
+}
+
+/// Determine which server names to auto-trust during the one-time consent
+/// migration. Only servers found in the provided config `paths` (expected:
+/// global config files) are included — project-local config files are
+/// deliberately NOT passed here, so servers introduced by `git clone` stay
+/// `Ask` at the spawn gate. This is the clone-to-RCE guard; see the
+/// `migration_trusts_only_global_servers_not_project_local` regression test.
+fn migration_trust_set(global_paths: &[PathBuf]) -> HashSet<String> {
+    global_paths
+        .iter()
+        .filter_map(|path| config::read_config_file(path))
+        .flat_map(|cfg| cfg.mcp_servers.into_keys().collect::<Vec<_>>())
+        .collect()
 }
 
 /// Central manager for all MCP server connections.
@@ -179,8 +195,33 @@ impl McpManager {
             Some(p) => ConsentManager::with_path(p),
             None => ConsentManager::new(),
         };
+        // Check before load: a missing file means fresh install/upgrade and
+        // triggers the one-time auto-trust migration below.
+        let consent_existed_before = consent.path().exists();
         let _ = consent.load();
 
+        // ── F-2 migration (code audit 2026-07-25) ───────────────────────
+        // One-time backward-compat: if the consent file didn't exist on
+        // disk, auto-trust only servers from the GLOBAL config file(s)
+        // (`~/.config/oxi/mcp.json`, `~/.config/mcp/mcp.json`). Project-
+        // local servers (`.oxi/mcp.json`, `.mcp.json` from a cloned repo)
+        // are deliberately left as `Ask` — auto-trusting them would reopen
+        // the clone-to-RCE surface F-2 closes. New global servers added
+        // later also require explicit `oxi mcp trust <name>`.
+        if !consent_existed_before {
+            let global_servers = migration_trust_set(&config::global_config_paths());
+            for name in &global_servers {
+                let _ = consent.decide(name, ConsentState::Allow);
+            }
+            if !global_servers.is_empty() {
+                tracing::info!(
+                    "MCP: consent file not found — auto-trusting {} global \
+                     server(s) for backward compat; project-local servers stay \
+                     gated (`oxi mcp trust <name>` to allow)",
+                    global_servers.len()
+                );
+            }
+        }
         // Pre-populate the in-memory cache snapshot for any servers that
         // have cached tools.
         let cached_servers = cache.cached_servers();
@@ -575,6 +616,19 @@ impl McpManager {
         };
 
         let provider = self.credential_provider.read().clone();
+
+        // ── Consent gate (F-2, code audit 2026-07-25) ───────────────────
+        // Covers BOTH stdio (spawn) and HTTP transports — the gate sits
+        // before the `match (command, url)`, so neither path can bypass it.
+        // Unknown servers return `Ask` from `check_spawn_consent`, which we
+        // treat as "not trusted" and deny with an actionable error.
+        let spawn_consent = self.consent.check_spawn_consent(server_name);
+        if spawn_consent != ConsentState::Allow {
+            return Err(McpError::ConsentDenied {
+                server: server_name.to_string(),
+            }
+            .into());
+        }
         let transport: Box<dyn McpTransport> = match (command, url) {
             (Some(cmd), _) => Box::new(
                 StdioTransport::spawn(&cmd, &args, &env, cwd.as_deref(), debug)
@@ -629,6 +683,20 @@ impl McpManager {
                     .join("\n")
             ))
         }
+    }
+
+    /// Trust an MCP server for spawn consent (persist `Allow` to disk).
+    /// Used by `oxi mcp trust <server>`. After this, the server's next
+    /// `connect()` proceeds past the consent gate.
+    pub fn trust_server(&self, server_name: &str) -> Result<()> {
+        self.consent.trust(server_name)
+    }
+
+    /// Revoke spawn trust for an MCP server (persist `Deny` to disk).
+    /// Used by `oxi mcp untrust <server>`. After this, the server's next
+    /// `connect()` is denied with [`McpError::ConsentDenied`].
+    pub fn untrust_server(&self, server_name: &str) -> Result<()> {
+        self.consent.untrust(server_name)
     }
 
     /// Lazily connect (or return true if already connected).
@@ -1438,5 +1506,64 @@ mod tests {
         assert!(!mgr.disconnect("chrome").await.unwrap());
         // An unknown server name is a clean Ok(false), not an error.
         assert!(!mgr.disconnect("never-configured").await.unwrap());
+    }
+
+    // ── F-2 migration regression (code audit 2026-07-25) ────────────────
+    // The migration must auto-trust ONLY global-config servers. Project-
+    // local servers (from a cloned repo's .oxi/mcp.json) must stay `Ask`
+    // — this is the clone-to-RCE guard. If this test fails, the migration
+    // is accidentally trusting untrusted input.
+    #[test]
+    fn migration_trusts_only_global_servers_not_project_local() {
+        let dir = TempDir::new().unwrap();
+
+        // Simulate a global config file (user-authored, trusted).
+        let global_path = dir.path().join("global-mcp.json");
+        std::fs::write(
+            &global_path,
+            r#"{"mcpServers": {"safe-global": {"command": "echo", "args": []}}}"#,
+        )
+        .unwrap();
+
+        // Simulate a project-local config file (from `git clone`, untrusted).
+        let project_path = dir.path().join("project-mcp.json");
+        std::fs::write(
+            &project_path,
+            r#"{"mcpServers": {"malicious-clone": {"command": "pwned", "args": []}}}"#,
+        )
+        .unwrap();
+
+        // The migration function receives ONLY the global path — this is
+        // the invariant that must hold. Passing the project path here would
+        // be the regression.
+        let trust_set = migration_trust_set(&[global_path.clone()]);
+
+        assert!(
+            trust_set.contains("safe-global"),
+            "global server must be in the auto-trust set"
+        );
+        assert!(
+            !trust_set.contains("malicious-clone"),
+            "project-local server must NOT be auto-trusted — \
+             this is the clone-to-RCE guard (F-2)"
+        );
+
+        // End-to-end: feed the trust set into a fresh ConsentManager and
+        // verify the consent states match the security policy.
+        let consent = consent::ConsentManager::with_path(dir.path().join("consent.json"));
+        let _ = consent.load();
+        for name in &trust_set {
+            let _ = consent.decide(name, ConsentState::Allow);
+        }
+        assert_eq!(
+            consent.check_spawn_consent("safe-global"),
+            ConsentState::Allow,
+            "global server should be trusted after migration"
+        );
+        assert_eq!(
+            consent.check_spawn_consent("malicious-clone"),
+            ConsentState::Ask,
+            "project-local server must stay Ask — not trusted by migration"
+        );
     }
 }

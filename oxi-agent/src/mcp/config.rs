@@ -33,6 +33,21 @@ pub fn config_paths(cwd: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Global config paths only (`~/.config/mcp/mcp.json` and
+/// `~/.config/oxi/mcp.json`). These are user-authored and trusted for the
+/// one-time consent migration in [`crate::mcp::McpManager::spawn_with_paths`].
+/// Project-local paths (`.mcp.json`, `.oxi/mcp.json`) are deliberately
+/// excluded — a cloned repo may ship a malicious project-local config, and
+/// auto-trusting it would reopen the clone-to-RCE surface F-2 closes.
+pub fn global_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(config_dir) = dirs::config_dir() {
+        paths.push(config_dir.join("mcp").join("mcp.json"));
+        paths.push(config_dir.join("oxi").join("mcp.json"));
+    }
+    paths
+}
+
 /// Load MCP configuration, merging all discovered config files.
 ///
 /// Later files override earlier ones for server entries.

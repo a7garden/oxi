@@ -1,8 +1,16 @@
 //! Authentication storage for API keys, OAuth tokens, and session tokens.
 //!
-//! Provides secure storage and retrieval of authentication credentials,
-//! with OS keyring integration and fallback to encrypted file storage.
-//! Supports multi-provider auth, credential validation, and session tokens.
+//! # Storage model (F-1, code audit 2026-07-25)
+//!
+//! Credentials are stored as a plaintext JSON file at `~/.oxi/auth.json`
+//! with Unix `0600` permissions — **not encrypted at rest**. This matches
+//! the convention used by `aws-cli`, `gh`, `kubectl`, and `npm`, all of
+//! which store secrets as mode-`0600` plaintext on the local disk.
+//! Secret fields are masked in [`std::fmt::Debug`] output (see the manual
+//! `Debug` impl on [`AuthCredential`]) so `tracing::debug!`/`dbg!`/panic
+//! backtraces never echo raw keys. An OS-keyring backend is the planned
+//! hardening upgrade; the `#[cfg(feature = "keyring")]` helpers below are
+//! its scaffolding.
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -15,7 +23,7 @@ use std::sync::{Arc, OnceLock};
 // ============================================================================
 
 /// Authentication credential
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthCredential {
     /// API key credential
@@ -49,6 +57,45 @@ pub enum AuthCredential {
         #[serde(default)]
         metadata: Option<serde_json::Value>,
     },
+}
+
+// Manual `Debug` — masks every secret field so `dbg!`/`tracing::debug!`/
+// panic backtraces never surface raw API keys, OAuth tokens, or session
+// tokens. Non-secret fields (`expires_at`, `scopes`) are preserved so the
+// output stays useful for diagnosing expiry/lifetime bugs. F-1, code audit
+// 2026-07-25: the prior `#[derive(Debug)]` echoed `key`/`access_token`/
+// `token` verbatim.
+impl std::fmt::Debug for AuthCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthCredential::ApiKey { .. } => f
+                .debug_struct("AuthCredential::ApiKey")
+                .field("key", &"<redacted>")
+                .finish(),
+            AuthCredential::OAuth {
+                expires_at,
+                refresh_token,
+                ..
+            } => f
+                .debug_struct("AuthCredential::OAuth")
+                .field("access_token", &"<redacted>")
+                .field(
+                    "refresh_token",
+                    &if refresh_token.is_some() {
+                        "<redacted>"
+                    } else {
+                        "None"
+                    },
+                )
+                .field("expires_at", expires_at)
+                .finish(),
+            AuthCredential::Session { expires_at, .. } => f
+                .debug_struct("AuthCredential::Session")
+                .field("token", &"<redacted>")
+                .field("expires_at", expires_at)
+                .finish(),
+        }
+    }
 }
 
 impl AuthCredential {
@@ -1839,6 +1886,67 @@ mod tests {
             }
             .type_name(),
             "session"
+        );
+    }
+
+    // ── F-1 secret masking (code audit 2026-07-25) ──────────────────────
+
+    #[test]
+    fn debug_impl_masks_api_key() {
+        let cred = AuthCredential::ApiKey {
+            key: "sk-super-secret-12345".to_string(),
+        };
+        let dbg = format!("{cred:?}");
+        assert!(
+            !dbg.contains("sk-super-secret-12345"),
+            "Debug must not leak the API key, got: {dbg}"
+        );
+        assert!(
+            dbg.contains("<redacted>"),
+            "Debug must show <redacted> placeholder, got: {dbg}"
+        );
+    }
+
+    #[test]
+    fn debug_impl_masks_oauth_tokens() {
+        let cred = AuthCredential::OAuth {
+            access_token: "ya29.access-token-value".to_string(),
+            refresh_token: Some("ya29.refresh-token-value".to_string()),
+            expires_at: 9999999999,
+            scopes: None,
+            provider_data: None,
+        };
+        let dbg = format!("{cred:?}");
+        assert!(
+            !dbg.contains("access-token-value"),
+            "Debug must not leak the access token, got: {dbg}"
+        );
+        assert!(
+            !dbg.contains("refresh-token-value"),
+            "Debug must not leak the refresh token, got: {dbg}"
+        );
+        // Non-secret fields stay visible for debugging expiry issues.
+        assert!(
+            dbg.contains("9999999999"),
+            "Debug must still show expires_at for diagnostics, got: {dbg}"
+        );
+    }
+
+    #[test]
+    fn debug_impl_masks_session_token() {
+        let cred = AuthCredential::Session {
+            token: "sess-abc-def-ghi".to_string(),
+            expires_at: 0,
+            metadata: None,
+        };
+        let dbg = format!("{cred:?}");
+        assert!(
+            !dbg.contains("sess-abc-def-ghi"),
+            "Debug must not leak the session token, got: {dbg}"
+        );
+        assert!(
+            dbg.contains("<redacted>"),
+            "Debug must show <redacted> placeholder, got: {dbg}"
         );
     }
 }
