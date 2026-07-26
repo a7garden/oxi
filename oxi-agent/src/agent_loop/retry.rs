@@ -111,7 +111,7 @@ pub(crate) async fn handle_retryable_error(
     messages: &mut Vec<Message>,
     emit: &super::EmitFn,
 ) -> bool {
-    if !loop_ref.config.auto_retry_enabled {
+    if !loop_ref.auto_retry_enabled() {
         return false;
     }
 
@@ -149,25 +149,25 @@ pub(crate) async fn handle_retryable_error(
     }
 
     // Reset cancel flag before entering the wait.
-    loop_ref.auto_retry_cancel.store(false, Ordering::SeqCst);
+    loop_ref.reset_auto_retry_cancel();
 
     // Wait with immediate wake-up via Notify.
     // If cancel_auto_retry() is called during the sleep, the Notify fires
     // and we wake up immediately instead of waiting for the full delay.
     tokio::select! {
-        _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {
-            // Normal delay elapsed — check cancel flag one more time.
-        }
+        biased;
         _ = loop_ref.auto_retry_notify.notified() => {
-            // Woken up by cancel_auto_retry().
-            tracing::info!(
-                attempt,
-                "Auto-retry wait interrupted by cancellation"
-            );
+            tracing::info!(attempt, "Auto-retry wait interrupted by cancellation");
+        }
+        _ = loop_ref.external_auto_retry_notified() => {
+            tracing::info!(attempt, "Auto-retry wait interrupted by external cancellation");
+        }
+        _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {
+            // Normal delay elapsed — check cancel flag below.
         }
     }
 
-    if loop_ref.auto_retry_cancel.load(Ordering::SeqCst) {
+    if loop_ref.auto_retry_cancelled() {
         emit(AgentEvent::AutoRetryEnd {
             success: false,
             attempt,
@@ -185,8 +185,7 @@ pub(crate) async fn handle_retryable_error(
 /// Sets the cancel flag and fires the [`tokio::sync::Notify`] to immediately
 /// wake up the retry delay sleep.
 pub fn cancel_auto_retry(loop_ref: &super::AgentLoop) {
-    loop_ref.auto_retry_cancel.store(true, Ordering::SeqCst);
-    loop_ref.auto_retry_notify.notify_waiters();
+    loop_ref.fire_auto_retry_cancel();
 }
 
 /// Returns the current auto-retry attempt number (0 = no retry in progress).

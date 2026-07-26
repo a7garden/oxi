@@ -79,13 +79,21 @@ pub struct AgentLoop {
     /// Set by `Agent::cancel()` and checked by the streaming loop's periodic
     /// timer so cancellation is detected even when no stream events arrive.
     cancel_signal: Option<Arc<AtomicBool>>,
+    /// External auto-retry enabled override — when set, the retry layer reads
+    /// this shared flag instead of `config.auto_retry_enabled`, enabling a
+    /// runtime toggle (RPC `set_auto_retry`). Mirrors `cancel_signal`.
+    auto_retry_enabled_override: Option<Arc<AtomicBool>>,
+    /// External auto-retry cancel signal shared with `Agent` (RPC `abort_retry`).
+    auto_retry_cancel_signal: Option<Arc<AtomicBool>>,
+    /// External auto-retry notify shared with `Agent` for immediate wake-up.
+    auto_retry_notify_signal: Option<Arc<tokio::sync::Notify>>,
     /// Provider/model resolver for isolated model lookups.
     resolver: Arc<dyn ProviderResolver>,
     /// Steering hook from AgentHooks — polled each turn to drain new messages
     /// from AgentSession's queue into AgentLoop's internal steering_queue.
-    steering_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
+    steering_hook: Option<Arc<dyn Fn() -> Vec<Message> + Send + Sync>>,
     /// Follow-up hook from AgentHooks — same as steering but for follow-ups.
-    follow_up_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
+    follow_up_hook: Option<Arc<dyn Fn() -> Vec<Message> + Send + Sync>>,
     /// TTSR engine for stream rule checking.
     ttsr_engine: Option<Arc<ttsr::TtsrEngine>>,
     /// Thinking-loop detector — fed every thinking delta. When a loop
@@ -141,6 +149,9 @@ impl AgentLoop {
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             external_stop: Arc::new(AtomicBool::new(false)),
             cancel_signal: None,
+            auto_retry_enabled_override: None,
+            auto_retry_cancel_signal: None,
+            auto_retry_notify_signal: None,
             resolver,
             steering_hook: None,
             follow_up_hook: None,
@@ -322,6 +333,70 @@ impl AgentLoop {
     pub fn set_cancel_signal(&mut self, flag: Arc<AtomicBool>) {
         self.cancel_signal = Some(flag);
     }
+    /// Install shared auto-retry state (enabled flag + cancel + notify) so the
+    /// owning `Agent` can toggle auto-retry and abort an in-progress retry at
+    /// runtime. Called once per run, mirroring [`Self::set_cancel_signal`].
+    /// Also defensively resets the cancel flag so a prior `abort_retry` does
+    /// not bleed into this run (retry.rs resets it before each wait regardless).
+    pub fn set_auto_retry_state(
+        &mut self,
+        enabled: Arc<AtomicBool>,
+        cancel: Arc<AtomicBool>,
+        notify: Arc<tokio::sync::Notify>,
+    ) {
+        cancel.store(false, Ordering::SeqCst);
+        self.auto_retry_enabled_override = Some(enabled);
+        self.auto_retry_cancel_signal = Some(cancel);
+        self.auto_retry_notify_signal = Some(notify);
+    }
+
+    /// Whether auto-retry is currently enabled — the installed override flag
+    /// if present (runtime toggle), else the config default.
+    pub(crate) fn auto_retry_enabled(&self) -> bool {
+        self.auto_retry_enabled_override
+            .as_ref()
+            .map_or(self.config.auto_retry_enabled, |f| f.load(Ordering::SeqCst))
+    }
+
+    /// Combined auto-retry cancel state (internal OR external signal).
+    pub(crate) fn auto_retry_cancelled(&self) -> bool {
+        self.auto_retry_cancel.load(Ordering::SeqCst)
+            || self
+                .auto_retry_cancel_signal
+                .as_ref()
+                .is_some_and(|c| c.load(Ordering::SeqCst))
+    }
+
+    /// Reset both internal and external cancel flags before a retry wait.
+    pub(crate) fn reset_auto_retry_cancel(&self) {
+        self.auto_retry_cancel.store(false, Ordering::SeqCst);
+        if let Some(c) = &self.auto_retry_cancel_signal {
+            c.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Fire cancellation on both internal and external signals (set flags +
+    /// wake all waiters on both notifies).
+    pub(crate) fn fire_auto_retry_cancel(&self) {
+        self.auto_retry_cancel.store(true, Ordering::SeqCst);
+        if let Some(c) = &self.auto_retry_cancel_signal {
+            c.store(true, Ordering::SeqCst);
+        }
+        self.auto_retry_notify.notify_waiters();
+        if let Some(n) = &self.auto_retry_notify_signal {
+            n.notify_waiters();
+        }
+    }
+
+    /// A future that resolves when the external auto-retry notify fires, or
+    /// never if no external notify is installed. Awaited alongside the
+    /// internal notify in the retry sleep `select!`.
+    pub(crate) async fn external_auto_retry_notified(&self) {
+        match &self.auto_retry_notify_signal {
+            Some(n) => n.notified().await,
+            None => std::future::pending::<()>().await,
+        }
+    }
 
     /// Returns a clone of the loop's cancel-signal flag, if one has been
     /// installed via [`Self::set_cancel_signal`]. Used by tool execution
@@ -351,13 +426,13 @@ impl AgentLoop {
 
     /// Set the steering hook — called each turn to drain new messages
     /// from the session's steering queue into the loop's internal queue.
-    pub fn set_steering_hook(&mut self, hook: Arc<dyn Fn() -> Vec<String> + Send + Sync>) {
+    pub fn set_steering_hook(&mut self, hook: Arc<dyn Fn() -> Vec<Message> + Send + Sync>) {
         self.steering_hook = Some(hook);
     }
 
     /// Set the follow-up hook — called each turn to drain new messages
     /// from the session's follow-up queue into the loop's internal queue.
-    pub fn set_follow_up_hook(&mut self, hook: Arc<dyn Fn() -> Vec<String> + Send + Sync>) {
+    pub fn set_follow_up_hook(&mut self, hook: Arc<dyn Fn() -> Vec<Message> + Send + Sync>) {
         self.follow_up_hook = Some(hook);
     }
 
@@ -365,13 +440,13 @@ impl AgentLoop {
     /// into the internal queues.
     fn poll_external_queues(&self) {
         if let Some(ref hook) = self.steering_hook {
-            for msg_text in hook() {
-                self.steer(Message::User(UserMessage::new(msg_text)));
+            for msg in hook() {
+                self.steer(msg);
             }
         }
         if let Some(ref hook) = self.follow_up_hook {
-            for msg_text in hook() {
-                self.follow_up(Message::User(UserMessage::new(msg_text)));
+            for msg in hook() {
+                self.follow_up(msg);
             }
         }
     }
@@ -384,6 +459,18 @@ impl AgentLoop {
         emit: impl Fn(AgentEvent) + Send + Sync + 'static,
     ) -> Result<Vec<AgentEvent>> {
         let message = Message::User(UserMessage::new(prompt));
+        let emit = Arc::new(emit);
+        self.run_messages(vec![message], emit).await
+    }
+
+    /// Run with an explicit initial [`Message`] (e.g. a user message carrying
+    /// image content blocks) instead of a plain-text prompt. Thin wrapper
+    /// over [`run_messages()`](Self::run_messages), mirroring [`run()`](Self::run).
+    pub async fn run_message(
+        &self,
+        message: Message,
+        emit: impl Fn(AgentEvent) + Send + Sync + 'static,
+    ) -> Result<Vec<AgentEvent>> {
         let emit = Arc::new(emit);
         self.run_messages(vec![message], emit).await
     }

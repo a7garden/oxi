@@ -1143,7 +1143,8 @@ impl PackageManager {
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
-        let _ = self.save_lockfile();
+        self.save_lockfile()
+            .context("failed to persist package lockfile")?;
         Ok(manifest)
     }
 
@@ -1339,7 +1340,8 @@ impl PackageManager {
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
-        let _ = self.save_lockfile();
+        self.save_lockfile()
+            .context("failed to persist package lockfile")?;
         Ok(manifest)
     }
 
@@ -1426,7 +1428,8 @@ impl PackageManager {
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
-        let _ = self.save_lockfile();
+        self.save_lockfile()
+            .context("failed to persist package lockfile")?;
         Ok(manifest)
     }
 
@@ -1521,7 +1524,8 @@ impl PackageManager {
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
-        let _ = self.save_lockfile();
+        self.save_lockfile()
+            .context("failed to persist package lockfile")?;
         Ok(manifest)
     }
 
@@ -1548,7 +1552,8 @@ impl PackageManager {
         // Also try to clean up git/npm scoped dirs
         // (best effort)
         let _ = self.lockfile.remove(name);
-        let _ = self.save_lockfile();
+        self.save_lockfile()
+            .context("failed to persist package lockfile")?;
 
         self.installed.remove(name);
         Ok(())
@@ -1594,7 +1599,8 @@ impl PackageManager {
                 }
                 self.installed.remove(name);
                 self.lockfile.remove(name);
-                let _ = self.save_lockfile();
+                self.save_lockfile()
+                    .context("failed to persist package lockfile")?;
                 Ok(())
             }
             ParsedSource::Git { host, path, .. } => {
@@ -1611,7 +1617,8 @@ impl PackageManager {
                     let parsed_e = ParsedSource::parse(&entry.source);
                     parsed_e.identity() != parsed.identity()
                 });
-                let _ = self.save_lockfile();
+                self.save_lockfile()
+                    .context("failed to persist package lockfile")?;
                 Ok(())
             }
             ParsedSource::Local { .. } => Ok(()),
@@ -1620,7 +1627,8 @@ impl PackageManager {
                 self.lockfile
                     .packages
                     .retain(|_, e| ParsedSource::parse(&e.source).identity() != identity);
-                let _ = self.save_lockfile();
+                self.save_lockfile()
+                    .context("failed to persist package lockfile")?;
                 Ok(())
             }
         }

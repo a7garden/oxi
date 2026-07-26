@@ -29,7 +29,9 @@ fn remove_from_steering_queue(session: &AgentSession, index: usize) -> Option<St
     let queue = session.steering_queue();
     let mut guard = queue.write();
     if index < guard.len() {
-        guard.remove(index)
+        guard
+            .remove(index)
+            .map(|m| m.text_content().unwrap_or_default())
     } else {
         None
     }
@@ -225,12 +227,9 @@ fn handle_queue_panel_key(
 
 /// Refresh the queue panel snapshot from the session.
 fn refresh_queue_snapshot(state: &mut AppState, session: &AgentSession) {
-    let msgs = session.steering_messages();
-    let fq = session.follow_up_messages();
-    let pending = msgs.len() + fq.len();
-    let mut all = msgs;
-    all.extend(fq);
-    state.pending_steering = pending;
+    let mut all: Vec<oxi_sdk::Message> = session.steering_messages().into_iter().collect();
+    all.extend(session.follow_up_messages());
+    state.pending_steering = all.len();
     state.steering_messages_snapshot = all;
     if state.queue_panel_selected >= state.steering_messages_snapshot.len() {
         state.queue_panel_selected = state.steering_messages_snapshot.len().saturating_sub(1);
@@ -564,7 +563,9 @@ async fn handle_submit(
         }
         state.history_index = 0;
         session.steer_sync(value.clone());
-        state.steering_messages_snapshot.push(value);
+        state
+            .steering_messages_snapshot
+            .push(oxi_sdk::Message::User(oxi_sdk::UserMessage::new(value)));
         state.pending_steering = state.steering_messages_snapshot.len();
         state.input_clear();
         return None;
@@ -834,7 +835,7 @@ pub fn handle_ui_event(
             if let Some(pos) = state
                 .steering_messages_snapshot
                 .iter()
-                .position(|m| m == &prompt)
+                .position(|m| m.text_content().unwrap_or_default() == prompt)
             {
                 state.steering_messages_snapshot.remove(pos);
             } else if !state.steering_messages_snapshot.is_empty() {

@@ -66,9 +66,9 @@ pub enum SessionEvent {
     /// A steering or follow-up queue changed.
     QueueUpdate {
         /// Current steering messages.
-        steering: Vec<String>,
+        steering: Vec<oxi_sdk::Message>,
         /// Current follow-up messages.
-        follow_up: Vec<String>,
+        follow_up: Vec<oxi_sdk::Message>,
     },
     /// Compaction started.
     CompactionStart {
@@ -172,8 +172,15 @@ pub struct AgentSession {
     scoped_models: Arc<RwLock<Vec<ScopedModel>>>,
 
     // ── Queues ───────────────────────────────────────────────────────
-    steering_messages: Arc<RwLock<VecDeque<String>>>,
-    follow_up_messages: Arc<RwLock<VecDeque<String>>>,
+    steering_messages: Arc<RwLock<VecDeque<oxi_sdk::Message>>>,
+    follow_up_messages: Arc<RwLock<VecDeque<oxi_sdk::Message>>>,
+    // ── Queue injection modes (RPC/IDE state) ───────────────────────
+    /// Whether steering/follow-up messages are surfaced ("all") or only
+    /// injected silently ("system"). Informational in RPC mode — the agent
+    /// loop always drains both queues regardless; this only controls how
+    /// the client surfaces them.
+    steering_mode: Arc<RwLock<String>>,
+    follow_up_mode: Arc<RwLock<String>>,
 
     // ── Compaction state ─────────────────────────────────────────────
     compaction_config: Arc<RwLock<CompactionConfig>>,
@@ -402,6 +409,8 @@ impl AgentSession {
             scoped_models: Arc::new(RwLock::new(Vec::new())),
             steering_messages: Arc::new(RwLock::new(VecDeque::new())),
             follow_up_messages: Arc::new(RwLock::new(VecDeque::new())),
+            steering_mode: Arc::new(RwLock::new("all".to_string())),
+            follow_up_mode: Arc::new(RwLock::new("all".to_string())),
             compaction_config: Arc::new(RwLock::new(compaction_config)),
             compaction_abort: Arc::new(Mutex::new(None)),
             overflow_recovery_attempted: Arc::new(RwLock::new(false)),
@@ -526,22 +535,24 @@ impl AgentSession {
     }
 
     /// Get pending steering messages.
-    pub fn steering_messages(&self) -> Vec<String> {
+    /// Get pending steering messages (full [`Message`]s, including any image
+    /// content blocks; the TUI extracts text via `text_content()` for display).
+    pub fn steering_messages(&self) -> Vec<oxi_sdk::Message> {
         self.steering_messages.read().iter().cloned().collect()
     }
 
-    /// Get pending follow-up messages.
-    pub fn follow_up_messages(&self) -> Vec<String> {
+    /// Get pending follow-up messages (full [`Message`]s).
+    pub fn follow_up_messages(&self) -> Vec<oxi_sdk::Message> {
         self.follow_up_messages.read().iter().cloned().collect()
     }
 
     /// Get a reference to the steering message queue (for hook wiring).
-    pub fn steering_queue(&self) -> Arc<RwLock<std::collections::VecDeque<String>>> {
+    pub fn steering_queue(&self) -> Arc<RwLock<std::collections::VecDeque<oxi_sdk::Message>>> {
         self.steering_messages.clone()
     }
 
     /// Get a reference to the follow-up message queue (for hook wiring).
-    pub fn follow_up_queue(&self) -> Arc<RwLock<std::collections::VecDeque<String>>> {
+    pub fn follow_up_queue(&self) -> Arc<RwLock<std::collections::VecDeque<oxi_sdk::Message>>> {
         self.follow_up_messages.clone()
     }
 
@@ -555,10 +566,97 @@ impl AgentSession {
     pub fn scoped_models(&self) -> Vec<ScopedModel> {
         self.scoped_models.read().clone()
     }
+    /// Cycle to the next scoped model and apply it.
+    ///
+    /// Returns the new `provider/model` id, or `None` when fewer than two
+    /// scoped models are configured (nothing to cycle).
+    pub fn cycle_model(&self) -> Option<String> {
+        let models = self.scoped_models.read().clone();
+        if models.len() < 2 {
+            return None;
+        }
+        let current = self.model_id();
+        let idx = models
+            .iter()
+            .position(|m| format!("{}/{}", m.provider, m.model_id) == current)
+            .unwrap_or(0);
+        let next = models.get((idx + 1) % models.len())?;
+        let id = format!("{}/{}", next.provider, next.model_id);
+        match self.set_model(&id) {
+            Ok(()) => Some(id),
+            Err(_) => None,
+        }
+    }
+    /// Render the current conversation as a self-contained HTML string.
+    ///
+    /// Used by the RPC `export_html` command (and reusable by the TUI
+    /// `/export` slash command). Each message is flattened to its text
+    /// content for the export.
+    pub fn export_html(&self) -> Result<String> {
+        use crate::storage::export::{ExportMeta, HtmlExportOptions, export_to_html};
+        let meta = ExportMeta {
+            model: Some(self.model_id()),
+            provider: None,
+            exported_at: chrono::Utc::now().timestamp_millis(),
+            total_user_tokens: None,
+            total_assistant_tokens: None,
+        };
+        // Use the canonical persisted entries directly — avoids the lossy
+        // Message→SessionEntry round-trip (preserves tool calls, thinking, etc.).
+        let entries = self.session_manager.read().get_entries();
+        export_to_html(&entries, &meta, &HtmlExportOptions::default())
+    }
+    /// Current session file path (used by RPC `clone`/`fork`), if persisted.
+    pub fn session_file(&self) -> Option<String> {
+        self.session_manager.read().get_session_file()
+    }
+    /// Fork the current session at the given entry (RPC `fork`).
+    ///
+    /// Delegates to `SessionManager::branch_from_entry`, materializing a new
+    /// session file containing only the entries up to and including
+    /// `entry_id`. Returns the path of the new file; callers feed it through
+    /// `SessionManager::open` and `swap_session` to activate the fork.
+    pub fn branch_from_entry(&self, entry_id: &str) -> Result<String, String> {
+        self.session_manager.read().branch_from_entry(entry_id)
+    }
 
     /// Check if auto-compaction is enabled.
     pub fn auto_compaction_enabled(&self) -> bool {
         self.compaction_config.read().enabled
+    }
+
+    /// Toggle auto-compaction at runtime (RPC `set_auto_compaction`).
+    pub fn set_auto_compaction(&self, enabled: bool) {
+        self.compaction_config.write().enabled = enabled;
+    }
+    /// Toggle auto-retry at runtime (RPC `set_auto_retry`).
+    pub fn set_auto_retry(&self, enabled: bool) {
+        self.agent.set_auto_retry(enabled);
+    }
+
+    /// Abort any in-progress auto-retry wait (RPC `abort_retry`).
+    pub fn cancel_auto_retry(&self) {
+        self.agent.cancel_auto_retry();
+    }
+
+    /// Current steering-injection mode ("all" or "system").
+    pub fn steering_mode(&self) -> String {
+        self.steering_mode.read().clone()
+    }
+
+    /// Set the steering-injection mode.
+    pub fn set_steering_mode(&self, mode: String) {
+        *self.steering_mode.write() = mode;
+    }
+
+    /// Current follow-up-injection mode ("all" or "system").
+    pub fn follow_up_mode(&self) -> String {
+        self.follow_up_mode.read().clone()
+    }
+
+    /// Set the follow-up-injection mode.
+    pub fn set_follow_up_mode(&self, mode: String) {
+        *self.follow_up_mode.write() = mode;
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -612,10 +710,13 @@ impl AgentSession {
     /// hooks, and `run_with_channel` copies the current state at startup.
     /// Adding it here would cause a duplicate.
     pub fn steer_sync(&self, text: String) {
-        {
-            let mut queue = self.steering_messages.write();
-            queue.push_back(text);
-        }
+        self.steer_sync_message(oxi_sdk::Message::User(oxi_sdk::UserMessage::new(text)));
+    }
+
+    /// Queue a steering [`Message`] (supports image content blocks) — RPC `steer`
+    /// with images. Injected mid-run via the `get_steering_messages` hook.
+    pub fn steer_sync_message(&self, msg: oxi_sdk::Message) {
+        self.steering_messages.write().push_back(msg);
         self.emit_queue_update();
     }
 
@@ -628,10 +729,13 @@ impl AgentSession {
 
     /// Queue a follow-up message (processed after agent finishes).
     pub fn follow_up_sync(&self, text: String) {
-        {
-            let mut queue = self.follow_up_messages.write();
-            queue.push_back(text);
-        }
+        self.follow_up_sync_message(oxi_sdk::Message::User(oxi_sdk::UserMessage::new(text)));
+    }
+
+    /// Queue a follow-up [`Message`] (supports image content blocks) — RPC
+    /// `follow_up` with images.
+    pub fn follow_up_sync_message(&self, msg: oxi_sdk::Message) {
+        self.follow_up_messages.write().push_back(msg);
         self.emit_queue_update();
     }
 
@@ -664,9 +768,9 @@ impl AgentSession {
     }
 
     /// Clear all queued messages and return them.
-    pub fn clear_queue(&self) -> (Vec<String>, Vec<String>) {
-        let steering: Vec<String> = self.steering_messages.write().drain(..).collect();
-        let follow_up: Vec<String> = self.follow_up_messages.write().drain(..).collect();
+    pub fn clear_queue(&self) -> (Vec<oxi_sdk::Message>, Vec<oxi_sdk::Message>) {
+        let steering = self.steering_messages.write().drain(..).collect();
+        let follow_up = self.follow_up_messages.write().drain(..).collect();
         self.emit_queue_update();
         (steering, follow_up)
     }
@@ -1202,6 +1306,8 @@ impl AgentSession {
             scoped_models: Arc::clone(&self.scoped_models),
             steering_messages: Arc::clone(&self.steering_messages),
             follow_up_messages: Arc::clone(&self.follow_up_messages),
+            steering_mode: Arc::clone(&self.steering_mode),
+            follow_up_mode: Arc::clone(&self.follow_up_mode),
             compaction_config: Arc::clone(&self.compaction_config),
             compaction_abort: Arc::clone(&self.compaction_abort),
             overflow_recovery_attempted: Arc::clone(&self.overflow_recovery_attempted),
@@ -1599,7 +1705,9 @@ impl AgentSession {
                 let body = format_advisory_batch(std::slice::from_ref(&note));
                 match channel {
                     AdvisorDeliveryChannel::Steer => {
-                        steering.write().push_back(body);
+                        steering
+                            .write()
+                            .push_back(oxi_sdk::Message::User(oxi_sdk::UserMessage::new(body)));
                         d.interrupt_immune_turn_start = Some(turns + 1);
                         *delivery.lock() = d;
                     }
@@ -1917,7 +2025,14 @@ mod tests {
     async fn test_steer_message() {
         let session = make_session();
         session.steer("direction 1".to_string()).await.unwrap();
-        assert_eq!(session.steering_messages(), vec!["direction 1"]);
+        assert_eq!(
+            session
+                .steering_messages()
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["direction 1"]
+        );
         assert_eq!(session.pending_message_count(), 1);
     }
 
@@ -1925,7 +2040,14 @@ mod tests {
     async fn test_follow_up_message() {
         let session = make_session();
         session.follow_up("next task".to_string()).await.unwrap();
-        assert_eq!(session.follow_up_messages(), vec!["next task"]);
+        assert_eq!(
+            session
+                .follow_up_messages()
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["next task"]
+        );
         assert_eq!(session.pending_message_count(), 1);
     }
 
@@ -1936,7 +2058,11 @@ mod tests {
         session.steer("second".to_string()).await.unwrap();
         session.steer("third".to_string()).await.unwrap();
         assert_eq!(
-            session.steering_messages(),
+            session
+                .steering_messages()
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
             vec!["first", "second", "third"]
         );
         assert_eq!(session.pending_message_count(), 3);
@@ -1947,7 +2073,14 @@ mod tests {
         let session = make_session();
         session.follow_up("a".to_string()).await.unwrap();
         session.follow_up("b".to_string()).await.unwrap();
-        assert_eq!(session.follow_up_messages(), vec!["a", "b"]);
+        assert_eq!(
+            session
+                .follow_up_messages()
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
     }
 
     #[tokio::test]
@@ -1957,8 +2090,22 @@ mod tests {
         session.follow_up("follow-1".to_string()).await.unwrap();
         session.steer("steer-2".to_string()).await.unwrap();
         assert_eq!(session.pending_message_count(), 3);
-        assert_eq!(session.steering_messages(), vec!["steer-1", "steer-2"]);
-        assert_eq!(session.follow_up_messages(), vec!["follow-1"]);
+        assert_eq!(
+            session
+                .steering_messages()
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["steer-1", "steer-2"]
+        );
+        assert_eq!(
+            session
+                .follow_up_messages()
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["follow-1"]
+        );
     }
 
     #[test]
@@ -1967,18 +2114,30 @@ mod tests {
         // Manually insert items
         {
             let mut q = session.steering_messages.write();
-            q.push_back("s1".to_string());
-            q.push_back("s2".to_string());
+            q.push_back(oxi_sdk::Message::User(oxi_sdk::UserMessage::new("s1")));
+            q.push_back(oxi_sdk::Message::User(oxi_sdk::UserMessage::new("s2")));
         }
         {
             let mut q = session.follow_up_messages.write();
-            q.push_back("f1".to_string());
+            q.push_back(oxi_sdk::Message::User(oxi_sdk::UserMessage::new("f1")));
         }
         assert_eq!(session.pending_message_count(), 3);
 
         let (steering, follow_up) = session.clear_queue();
-        assert_eq!(steering, vec!["s1", "s2"]);
-        assert_eq!(follow_up, vec!["f1"]);
+        assert_eq!(
+            steering
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["s1", "s2"]
+        );
+        assert_eq!(
+            follow_up
+                .iter()
+                .map(|m| m.text_content().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["f1"]
+        );
         assert_eq!(session.pending_message_count(), 0);
     }
 
@@ -2169,11 +2328,11 @@ mod tests {
         // Add messages to queues (using internal fields directly)
         {
             let mut q = session.steering_messages.write();
-            q.push_back("steer".to_string());
+            q.push_back(oxi_sdk::Message::User(oxi_sdk::UserMessage::new("steer")));
         }
         {
             let mut q = session.follow_up_messages.write();
-            q.push_back("follow".to_string());
+            q.push_back(oxi_sdk::Message::User(oxi_sdk::UserMessage::new("follow")));
         }
         *session.overflow_recovery_attempted.write() = true;
 

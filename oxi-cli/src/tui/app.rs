@@ -231,8 +231,9 @@ pub(crate) enum UiEvent {
     },
     QueueUpdate {
         pending: usize,
-        /// Snapshot of current steering queue messages
-        messages: Vec<String>,
+        /// Snapshot of current steering queue messages (full [`Message`]s;
+        /// rendering extracts text via `text_content()`).
+        messages: Vec<oxi_sdk::Message>,
     },
     /// Token usage updated.
     TokenUsage {
@@ -246,7 +247,6 @@ pub(crate) enum UiEvent {
 
     /// A queued message is being auto-processed (sent from the worker
     /// thread when draining the steering/follow-up queue after a run).
-    /// The TUI should display the user message and enter streaming state.
     AutoProcessStart {
         prompt: String,
     },
@@ -350,8 +350,9 @@ pub(crate) struct AppState {
     pub next_action: Option<TuiNextAction>,
     /// Count of pending steering messages (shown in busy input)
     pub pending_steering: usize,
-    /// Snapshot of steering queue message texts
-    pub steering_messages_snapshot: Vec<String>,
+    /// Snapshot of steering queue messages (full [`Message`]s; rendering
+    /// extracts text via `text_content()`).
+    pub steering_messages_snapshot: Vec<oxi_sdk::Message>,
     /// Whether the queue panel is visible (toggle with Ctrl+Q)
     pub queue_panel_visible: bool,
     /// Selected index in the queue panel
@@ -1271,7 +1272,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             let sq = steering_q.read();
                                             let fq = follow_up_q.read();
                                             let pending = sq.len() + fq.len();
-                                            let mut msgs: Vec<String> =
+                                            let mut msgs: Vec<oxi_sdk::Message> =
                                                 sq.iter().cloned().collect();
                                             msgs.extend(fq.iter().cloned());
                                             drop(sq);
@@ -1288,7 +1289,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             let sq = steering_q.read();
                                             let fq = follow_up_q.read();
                                             let pending = sq.len() + fq.len();
-                                            let mut msgs: Vec<String> =
+                                            let mut msgs: Vec<oxi_sdk::Message> =
                                                 sq.iter().cloned().collect();
                                             msgs.extend(fq.iter().cloned());
                                             drop(sq);
@@ -1788,7 +1789,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     let fq = agent_session.follow_up_queue();
                     let mut sq_guard = sq.write();
                     let mut fq_guard = fq.write();
-                    sq_guard.pop_front().or_else(|| fq_guard.pop_front())
+                    sq_guard
+                        .pop_front()
+                        .or_else(|| fq_guard.pop_front())
+                        .map(|m| m.text_content().unwrap_or_default())
                 };
                 if let Some(msg) = first_pending {
                     let remaining = agent_session.pending_message_count();

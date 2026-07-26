@@ -3,8 +3,9 @@
 use crate::App;
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
 use crate::store::session::SessionManager;
+use crate::store::settings::Settings;
 use anyhow::{Context, Result};
-use oxi_agent::{AgentEvent, AgentHooks, ToolExecutionMode};
+use oxi_agent::{Agent, AgentEvent, AgentHooks, ToolExecutionMode};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -32,6 +33,10 @@ struct RpcActor {
     session: AgentSessionHandle,
     output: mpsc::UnboundedSender<WriterFrame>,
     active_run: Option<tokio::task::JoinHandle<Result<()>>>,
+    agent: Arc<Agent>,
+    settings: Settings,
+    cwd: String,
+    active_bash: Arc<parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 /// Run the RPC server over JSON Lines on stdin/stdout.
@@ -40,11 +45,13 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .to_string_lossy()
         .into_owned();
+    let agent = app.agent();
+    let settings = app.settings().clone();
     let session = AgentSession::new(
-        app.agent(),
-        app.settings().clone(),
+        Arc::clone(&agent),
+        settings.clone(),
         SessionManager::create(&cwd, None),
-        cwd,
+        cwd.clone(),
     );
     install_session_hooks(&session);
     let session = session.clone_handle();
@@ -65,6 +72,10 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
         session,
         output: output_tx,
         active_run: None,
+        agent,
+        settings,
+        cwd,
+        active_bash: Arc::new(parking_lot::Mutex::new(None)),
     };
 
     while let Some(command) = command_rx.recv().await {
@@ -139,8 +150,16 @@ pub(crate) fn parse_command_line(line: &str) -> std::result::Result<RpcCommand, 
             "extension UI responses are not yet supported in RPC mode",
         ));
     }
+    // Extract the request ID before `from_value` consumes `value`. Without
+    // this, parse-error responses carry `id: null` and the RPC client's
+    // response-matcher (`send_and_wait`) never matches them — causing the
+    // client to hang until timeout (F-3 test, 2026-07-25).
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
     serde_json::from_value(value)
-        .map_err(|error| error_response(None, "parse", format!("Parse error: {error}")))
+        .map_err(|error| error_response(id, "parse", format!("Parse error: {error}")))
 }
 
 async fn write_frames(mut rx: mpsc::UnboundedReceiver<WriterFrame>) -> Result<()> {
@@ -170,35 +189,38 @@ impl RpcActor {
                 id,
                 message,
                 images,
-            } => {
-                if images.as_ref().is_some_and(|images| !images.is_empty()) {
-                    self.respond(unsupported_response(id, "steer with images"));
-                } else {
-                    self.session.steer_sync(message);
+            } => match build_user_message(message, &images) {
+                Ok(msg) => {
+                    self.session.steer_sync_message(msg);
                     self.respond(success_response(id, "steer", None));
                 }
-            }
+                Err(e) => self.respond(error_response(id, "steer", e)),
+            },
             RpcCommand::FollowUp {
                 id,
                 message,
                 images,
-            } => {
-                if images.as_ref().is_some_and(|images| !images.is_empty()) {
-                    self.respond(unsupported_response(id, "follow_up with images"));
-                } else {
-                    self.session.follow_up_sync(message);
+            } => match build_user_message(message, &images) {
+                Ok(msg) => {
+                    self.session.follow_up_sync_message(msg);
                     self.respond(success_response(id, "follow_up", None));
                 }
-            }
+                Err(e) => self.respond(error_response(id, "follow_up", e)),
+            },
             RpcCommand::Abort { id } => {
                 self.session.abort().await;
                 self.session.agent_ref().cancel();
-                // The session hook and Agent cancel flag stop the dedicated local runtime.
-                // Keep the join task alive so it can persist final state and clear streaming.
                 self.respond(success_response(id, "abort", None));
             }
             RpcCommand::NewSession { id, .. } => {
-                self.respond(unsupported_response(id, "new_session"));
+                let handle = self
+                    .swap_session(SessionManager::create(&self.cwd, None))
+                    .await;
+                self.respond(success_response(
+                    id,
+                    "new_session",
+                    Some(serde_json::json!({ "session_id": handle.session_id() })),
+                ));
             }
             RpcCommand::GetState { id } => self.respond(success_response(
                 id,
@@ -224,7 +246,18 @@ impl RpcActor {
                     Err(error) => self.respond(error_response(id, "set_model", error.to_string())),
                 }
             }
-            RpcCommand::CycleModel { id } => self.respond(unsupported_response(id, "cycle_model")),
+            RpcCommand::CycleModel { id } => match self.session.cycle_model() {
+                Some(model) => self.respond(success_response(
+                    id,
+                    "cycle_model",
+                    Some(serde_json::json!({ "model": model })),
+                )),
+                None => self.respond(error_response(
+                    id,
+                    "cycle_model",
+                    "no scoped models configured; use set_model to pick a model",
+                )),
+            },
             RpcCommand::GetAvailableModels { id } => {
                 let models: Vec<_> = oxi_sdk::get_all_models()
                     .map(|entry| {
@@ -265,11 +298,13 @@ impl RpcActor {
                     "the active model does not support another thinking level",
                 )),
             },
-            RpcCommand::SetSteeringMode { id, .. } => {
-                self.respond(unsupported_response(id, "set_steering_mode"));
+            RpcCommand::SetSteeringMode { id, mode } => {
+                self.session.set_steering_mode(mode);
+                self.respond(success_response(id, "set_steering_mode", None));
             }
-            RpcCommand::SetFollowUpMode { id, .. } => {
-                self.respond(unsupported_response(id, "set_follow_up_mode"));
+            RpcCommand::SetFollowUpMode { id, mode } => {
+                self.session.set_follow_up_mode(mode);
+                self.respond(success_response(id, "set_follow_up_mode", None));
             }
             RpcCommand::Compact {
                 id,
@@ -285,18 +320,32 @@ impl RpcActor {
                 )),
                 Err(error) => self.respond(error_response(id, "compact", error.to_string())),
             },
-            RpcCommand::SetAutoCompaction { id, .. } => {
-                self.respond(unsupported_response(id, "set_auto_compaction"));
+            RpcCommand::SetAutoCompaction { id, enabled } => {
+                self.session.set_auto_compaction(enabled);
+                self.respond(success_response(id, "set_auto_compaction", None));
             }
-            RpcCommand::SetAutoRetry { id, .. } => {
-                self.respond(unsupported_response(id, "set_auto_retry"));
+            RpcCommand::SetAutoRetry { id, enabled } => {
+                self.session.set_auto_retry(enabled);
+                self.respond(success_response(id, "set_auto_retry", None));
             }
             RpcCommand::AbortRetry { id } => {
-                self.respond(unsupported_response(id, "abort_retry"));
+                self.session.cancel_auto_retry();
+                self.respond(success_response(id, "abort_retry", None));
             }
-            RpcCommand::Bash { id, command } => self.run_bash(id, command).await,
+            RpcCommand::Bash { id, command } => self.run_bash(id, command),
             RpcCommand::AbortBash { id } => {
-                self.respond(unsupported_response(id, "abort_bash"));
+                let sender = self.active_bash.lock().take();
+                match sender {
+                    Some(tx) => {
+                        let _ = tx.send(());
+                        self.respond(success_response(id, "abort_bash", None));
+                    }
+                    None => self.respond(error_response(
+                        id,
+                        "abort_bash",
+                        "no bash command is running",
+                    )),
+                }
             }
             RpcCommand::GetSessionStats { id } => {
                 let state = self.session.state();
@@ -345,27 +394,121 @@ impl RpcActor {
                 Some(serde_json::json!({ "messages": self.session.messages() })),
             )),
             RpcCommand::GetCommands { id } => {
-                self.respond(unsupported_response(id, "get_commands"));
+                let registry = crate::tui::slash::registry::SlashRegistry::builtins();
+                let commands: Vec<_> = registry
+                    .builtin_commands()
+                    .into_iter()
+                    .map(|(name, description, aliases)| {
+                        serde_json::json!({
+                            "name": name,
+                            "description": description,
+                            "aliases": aliases,
+                        })
+                    })
+                    .collect();
+                self.respond(success_response(
+                    id,
+                    "get_commands",
+                    Some(serde_json::json!({ "commands": commands })),
+                ));
             }
-            RpcCommand::ExportHtml { id, .. } => {
-                self.respond(unsupported_response(id, "export_html"));
+            RpcCommand::ExportHtml { id, output_path } => match output_path {
+                Some(path) => match self.session.export_html() {
+                    Ok(html) => match std::fs::write(&path, &html) {
+                        Ok(()) => self.respond(success_response(
+                            id,
+                            "export_html",
+                            Some(serde_json::json!({ "path": path })),
+                        )),
+                        Err(e) => self.respond(error_response(
+                            id,
+                            "export_html",
+                            format!("failed to write {path}: {e}"),
+                        )),
+                    },
+                    Err(e) => self.respond(error_response(id, "export_html", e.to_string())),
+                },
+                None => self.respond(error_response(id, "export_html", "output_path is required")),
+            },
+            RpcCommand::SwitchSession { id, session_path } => {
+                if session_path.is_empty() || !std::path::Path::new(&session_path).exists() {
+                    self.respond(error_response(
+                        id,
+                        "switch_session",
+                        format!("session file not found: {session_path}"),
+                    ));
+                } else {
+                    let sm = SessionManager::open(&session_path, None, Some(&self.cwd));
+                    let handle = self.swap_session(sm).await;
+                    self.respond(success_response(
+                        id,
+                        "switch_session",
+                        Some(serde_json::json!({ "session_id": handle.session_id() })),
+                    ));
+                }
             }
-            RpcCommand::SwitchSession { id, .. } => {
-                self.respond(unsupported_response(id, "switch_session"));
+            RpcCommand::Fork { id, entry_id } => {
+                // `branch_from_entry` delegates to the live session manager
+                // (with its current entries) and returns the path of a new
+                // session file containing entries up to and including
+                // `entry_id`. Open that file and `swap_session` to it so
+                // future commands operate on the fork.
+                match self.session.branch_from_entry(&entry_id) {
+                    Ok(new_path) => {
+                        let new_sm = SessionManager::open(&new_path, None, Some(&self.cwd));
+                        let handle = self.swap_session(new_sm).await;
+                        self.respond(success_response(
+                            id,
+                            "fork",
+                            Some(serde_json::json!({ "session_id": handle.session_id() })),
+                        ));
+                    }
+                    Err(e) => self.respond(error_response(id, "fork", e)),
+                }
             }
-            RpcCommand::Fork { id, .. } => self.respond(unsupported_response(id, "fork")),
-            RpcCommand::Clone { id } => self.respond(unsupported_response(id, "clone")),
+            RpcCommand::Clone { id } => match self.session.session_file() {
+                Some(path) => match SessionManager::fork_from(&path, &self.cwd, None) {
+                    Ok(sm) => {
+                        let handle = self.swap_session(sm).await;
+                        self.respond(success_response(
+                            id,
+                            "clone",
+                            Some(serde_json::json!({ "session_id": handle.session_id() })),
+                        ));
+                    }
+                    Err(e) => self.respond(error_response(id, "clone", e)),
+                },
+                None => self.respond(error_response(
+                    id,
+                    "clone",
+                    "no current session file to clone",
+                )),
+            },
             RpcCommand::GetForkMessages { id } => {
-                self.respond(unsupported_response(id, "get_fork_messages"));
+                self.respond(success_response(
+                    id,
+                    "get_fork_messages",
+                    Some(serde_json::json!({ "messages": self.session.messages() })),
+                ));
             }
         }
     }
+    async fn swap_session(&mut self, session_manager: SessionManager) -> AgentSessionHandle {
+        let new_session = AgentSession::new(
+            Arc::clone(&self.agent),
+            self.settings.clone(),
+            session_manager,
+            self.cwd.clone(),
+        );
+        install_session_hooks(&new_session);
+        let handle = new_session.clone_handle();
+        // Replace the active handle. The previous session is dropped here;
+        // any in-flight prompts continue running on their cloned handles.
+        self.session = handle.clone();
+        handle
+    }
 
     fn prompt(&mut self, id: Option<String>, message: String, images: Option<Vec<ImageData>>) {
-        if images.as_ref().is_some_and(|images| !images.is_empty()) {
-            self.respond(unsupported_response(id, "prompt with images"));
-            return;
-        }
         if self.session.is_streaming() {
             self.respond(error_response(
                 id,
@@ -378,9 +521,16 @@ impl RpcActor {
         self.session.reset_should_stop();
         self.session.agent_ref().reset_cancel();
         self.session.streaming_flag().store(true, Ordering::SeqCst);
-        self.session.persist_user_message(message.clone());
 
         let session = self.session.clone_handle();
+        let prompt_message = match build_user_message(message.clone(), &images) {
+            Ok(m) => m,
+            Err(e) => {
+                self.respond(error_response(id, "prompt", e));
+                return;
+            }
+        };
+        self.session.persist_user_message(message.clone());
         let output = self.output.clone();
         let agent = session.agent_ref();
         let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
@@ -397,8 +547,8 @@ impl RpcActor {
                 }
             }
         });
-        let output = self.output.clone();
         let session = self.session.clone_handle();
+
         let agent_run = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -407,10 +557,11 @@ impl RpcActor {
             runtime.block_on(async {
                 let local = tokio::task::LocalSet::new();
                 local
-                    .run_until(agent.run_with_channel(message, event_tx))
+                    .run_until(agent.run_with_channel_message(prompt_message, event_tx))
                     .await
             })
         });
+        let output = self.output.clone();
         self.active_run = Some(tokio::spawn(async move {
             let result = agent_run.await;
             let _ = forwarder.await;
@@ -439,31 +590,122 @@ impl RpcActor {
         ));
     }
 
-    async fn run_bash(&self, id: Option<String>, command: String) {
+    fn run_bash(&self, id: Option<String>, command: String) {
         if is_dangerous_rpc_command(&command) {
             tracing::warn!("RPC bash command contains dangerous pattern: {:?}", command);
         }
-        let result = tokio::task::spawn_blocking(move || {
-            std::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .output()
-        })
-        .await;
-        let response = match result {
-            Ok(Ok(output)) => success_response(
-                id,
-                "bash",
-                Some(serde_json::json!({
-                    "stdout": String::from_utf8_lossy(&output.stdout),
-                    "stderr": String::from_utf8_lossy(&output.stderr),
-                    "exit_code": output.status.code(),
-                })),
-            ),
-            Ok(Err(error)) => error_response(id, "bash", error.to_string()),
-            Err(error) => error_response(id, "bash", format!("bash task failed: {error}")),
-        };
-        self.respond(response);
+
+        // Reject a fresh bash command while another is still in flight — the
+        // RPC protocol only exposes a single active_bash slot for abort.
+        {
+            let mut slot = self.active_bash.lock();
+            if slot.is_some() {
+                self.respond(error_response(
+                    id,
+                    "bash",
+                    "another bash command is already running",
+                ));
+                return;
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            *slot = Some(tx);
+            // Drop the lock before spawning to release the mutex.
+            drop(slot);
+            self.spawn_bash(id, command, rx);
+        }
+    }
+
+    fn spawn_bash(
+        &self,
+        id: Option<String>,
+        command: String,
+        abort_rx: tokio::sync::oneshot::Receiver<()>,
+    ) {
+        let output = self.output.clone();
+        let active_bash = Arc::clone(&self.active_bash);
+        tokio::spawn(async move {
+            use std::process::Stdio;
+            use tokio::io::AsyncReadExt;
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.arg("-c")
+                .arg(&command)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            let mut child = match cmd.spawn() {
+                Ok(child) => child,
+                Err(error) => {
+                    // Clear the active slot before responding so a future
+                    // bash command can run.
+                    active_bash.lock().take();
+                    let _ = output.send(WriterFrame::Response(error_response(
+                        id,
+                        "bash",
+                        error.to_string(),
+                    )));
+                    return;
+                }
+            };
+            // Detach piped handles BEFORE the select and drain them concurrently
+            // with `wait()`. Otherwise, a command that writes more than the OS
+            // pipe buffer (~64 KB) would block on write while we wait, deadlocking
+            // forever. On the abort path `start_kill()` + `wait()` closes the
+            // pipes so the read tasks see EOF and finish with whatever is buffered.
+            let mut stdout_pipe = child.stdout.take();
+            let mut stderr_pipe = child.stderr.take();
+            let stdout_task = tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut buf = Vec::new();
+                if let Some(pipe) = stdout_pipe.as_mut() {
+                    let _ = pipe.read_to_end(&mut buf).await;
+                }
+                buf
+            });
+            let stderr_task = tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut buf = Vec::new();
+                if let Some(pipe) = stderr_pipe.as_mut() {
+                    let _ = pipe.read_to_end(&mut buf).await;
+                }
+                buf
+            });
+            let aborted;
+            let exit_status = tokio::select! {
+                biased;
+                _ = abort_rx => {
+                    aborted = true;
+                    // Abort requested: kill the child and reap it so the
+                    // piped streams see EOF and the read tasks finish.
+                    let _ = child.start_kill();
+                    child.wait().await
+                }
+                status = child.wait() => {
+                    aborted = false;
+                    status
+                }
+            };
+            // Collect the concurrent read tasks (they always complete after
+            // the child exits / is killed, which closes the pipes).
+            let stdout_bytes = stdout_task.await.unwrap_or_default();
+            let stderr_bytes = stderr_task.await.unwrap_or_default();
+            // Clear the slot regardless of outcome so the next bash can run.
+            active_bash.lock().take();
+            let response = match exit_status {
+                Ok(status) => success_response(
+                    id,
+                    "bash",
+                    Some(serde_json::json!({
+                        "stdout": String::from_utf8_lossy(&stdout_bytes),
+                        "stderr": String::from_utf8_lossy(&stderr_bytes),
+                        "exit_code": status.code(),
+                        "aborted": aborted,
+                    })),
+                ),
+                Err(error) => error_response(id, "bash", error.to_string()),
+            };
+            let _ = output.send(WriterFrame::Response(response));
+        });
     }
 
     fn session_state_value(&self) -> Value {
@@ -478,8 +720,8 @@ impl RpcActor {
             "thinking_level": format_thinking_level(self.session.thinking_level()),
             "is_streaming": self.session.is_streaming(),
             "is_compacting": self.session.is_compacting(),
-            "steering_mode": "all",
-            "follow_up_mode": "all",
+            "steering_mode": self.session.steering_mode(),
+            "follow_up_mode": self.session.follow_up_mode(),
             "session_id": self.session.session_id(),
             "auto_compaction_enabled": self.session.auto_compaction_enabled(),
             "message_count": state.messages.len(),
@@ -535,6 +777,47 @@ pub(crate) fn agent_event_to_rpc(event: &AgentEvent) -> Option<RpcEvent> {
         }
         _ => None,
     }
+}
+
+fn build_user_message(
+    text: String,
+    images: &Option<Vec<ImageData>>,
+) -> Result<oxi_ai::Message, String> {
+    let mut blocks: Vec<oxi_ai::ContentBlock> = Vec::new();
+    if !text.is_empty() {
+        blocks.push(oxi_ai::ContentBlock::Text(oxi_ai::TextContent::new(text)));
+    }
+    if let Some(images) = images.as_ref() {
+        for image in images {
+            // Accept either raw base64 or a `data:<mime>;base64,...` prefix.
+            let raw = image.source.as_str();
+            let (mime, payload) = if let Some(rest) = raw.strip_prefix("data:") {
+                match rest.split_once(";base64,") {
+                    Some((mime, b64)) => (mime.to_string(), b64.to_string()),
+                    None => {
+                        return Err(format!(
+                            "image source for {} is not a base64 data URL",
+                            image.media_type
+                        ));
+                    }
+                }
+            } else {
+                let mime = if image.media_type.is_empty() {
+                    "image/png".to_string()
+                } else {
+                    image.media_type.clone()
+                };
+                (mime, raw.to_string())
+            };
+            blocks.push(oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(
+                payload, mime,
+            )));
+        }
+    }
+    if blocks.is_empty() {
+        return Err("steer/follow_up requires a non-empty message".to_string());
+    }
+    Ok(oxi_ai::Message::User(oxi_ai::UserMessage::new(blocks)))
 }
 
 fn success_response(id: Option<String>, command: &str, data: Option<Value>) -> RpcResponse {

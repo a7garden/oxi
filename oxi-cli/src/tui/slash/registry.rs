@@ -118,6 +118,23 @@ impl SlashRegistry {
         super::builtin::register_all(&mut registry);
         registry
     }
+    /// Enumerate built-in command metadata: `(name, description, aliases)`.
+    #[allow(dead_code)]
+    pub(crate) fn builtin_commands(&self) -> Vec<(String, String, Vec<String>)> {
+        self.builtin
+            .iter()
+            .map(|cmd| {
+                (
+                    cmd.name().to_string(),
+                    cmd.description().to_string(),
+                    cmd.aliases()
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect()
+    }
 
     /// Register one command.
     pub(crate) fn register(&mut self, cmd: Box<dyn SlashCommand>) {

@@ -281,16 +281,24 @@ pub fn init_logging() {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_filter));
 
-    let log_file = std::fs::File::create(&log_path).expect("Failed to create log file");
-    let writer = std::sync::Mutex::new(log_file);
-
-    tracing_subscriber::fmt()
+    // Logging is non-critical infrastructure: if the log file can't be
+    // created (permissions, read-only fs, …), degrade to stderr instead of
+    // aborting the process. Previously this `.expect()`-panicked on init,
+    // which under `panic = "abort"` killed the app before it could start.
+    let subscriber = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
-        .with_writer(writer)
         .with_target(true)
         .with_thread_ids(true)
-        .with_ansi(false)
-        .init();
+        .with_ansi(false);
+    match std::fs::File::create(&log_path) {
+        Ok(file) => {
+            subscriber.with_writer(std::sync::Mutex::new(file)).init();
+        }
+        Err(e) => {
+            eprintln!("oxi: could not open log file {log_path:?} ({e}); falling back to stderr");
+            subscriber.with_writer(std::io::stderr).init();
+        }
+    }
 
     tracing::info!("Logging initialized, log file: {:?}", log_path);
 }

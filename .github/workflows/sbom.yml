@@ -37,8 +37,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "sbom"
-      - name: Install cargo-cyclonedx
-        run: cargo install --locked cargo-cyclonedx --version "^0.5"
+      # Prebuilt binary via taiki-e (seconds) instead of `cargo install`,
+      # which compiled cargo-cyclonedx + deps from source on every push to
+      # main (~2-3 min) and could fail on dependency resolution.
+      - uses: taiki-e/install-action@cargo-cyclonedx
 
       - name: Generate SBOM
         run: |

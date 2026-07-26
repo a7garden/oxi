@@ -1964,7 +1964,7 @@ impl SessionManager {
         writeln!(
             &mut handle,
             "{}",
-            serde_json::to_string(&new_header).expect("session header serializable")
+            serde_json::to_string(&new_header).map_err(|e| e.to_string())?
         )
         .map_err(|e| e.to_string())?;
 
@@ -1974,7 +1974,7 @@ impl SessionManager {
                 writeln!(
                     &mut handle,
                     "{}",
-                    serde_json::to_string(file_entry).expect("session entry serializable")
+                    serde_json::to_string(file_entry).map_err(|e| e.to_string())?
                 )
                 .map_err(|e| e.to_string())?;
             }

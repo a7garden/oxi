@@ -215,9 +215,10 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
         let badge = if i == 0 { "next" } else { "" };
         let num = format!("{}. ", i + 1);
         let prefix_w: u16 = (num.len() + badge.len()) as u16;
+        let text = msg.text_content().unwrap_or_default();
         let max_chars = area.width.saturating_sub(prefix_w + 3) as usize;
-        let truncated: String = msg.chars().take(max_chars).collect();
-        let ellipsis = if msg.chars().count() > max_chars {
+        let truncated: String = text.chars().take(max_chars).collect();
+        let ellipsis = if text.chars().count() > max_chars {
             "…"
         } else {
             ""
@@ -291,9 +292,10 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
         let badge = if i == 0 { "next " } else { "" };
         let num = format!("{}. ", i + 1);
         let prefix_w: u16 = (pointer.len() + num.len() + badge.len()) as u16;
+        let text = msg.text_content().unwrap_or_default();
         let max_chars = area.width.saturating_sub(prefix_w + 2) as usize;
-        let truncated: String = msg.chars().take(max_chars).collect();
-        let ellipsis = if msg.chars().count() > max_chars {
+        let truncated: String = text.chars().take(max_chars).collect();
+        let ellipsis = if text.chars().count() > max_chars {
             "…"
         } else {
             ""

@@ -430,6 +430,13 @@ impl RpcClient {
         Self::require_success(self.send_and_wait(serde_json::json!({ "type": "abort_retry" }))?)
     }
 
+    /// Send an arbitrary RPC command and require success. Exposed for
+    /// integration tests that need to verify error handling for unknown
+    /// command types (e.g. `rpc_client_surfaces_unsupported_command_errors`).
+    pub fn send_raw(&mut self, command: Value) -> Result<()> {
+        Self::require_success(self.send_and_wait(command)?)
+    }
+
     /// Execute a bash command.
     pub fn bash(&mut self, command: &str) -> Result<RpcResponse> {
         self.send_and_wait(serde_json::json!({

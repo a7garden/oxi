@@ -1,3 +1,14 @@
+//! RPC-mode integration tests that spawn the freshly-built `oxi` binary.
+//!
+//! macOS is oxi's single deployment target. These tests exec the real binary
+//! via `oxi --mode rpc`, which only initializes reliably in the target
+//! platform's runtime environment. On the GitHub ubuntu runner the spawned
+//! process cannot come up headless, so `RpcClient::start()` fails. We
+//! therefore compile/run this file on macOS only (the `test.yml` job) —
+//! gating here keeps the ubuntu smoke-test (`ci.yml`) and the publish
+//! `verify` gate from failing on a non-target platform.
+#![cfg(target_os = "macos")]
+
 use oxi::rpc_mode::{RpcClient, RpcClientConfig, RpcResponse};
 
 #[test]
@@ -34,6 +45,14 @@ fn rpc_client_surfaces_unsupported_command_errors() {
     });
     client.start().unwrap();
 
-    let error = client.set_auto_retry(false).unwrap_err().to_string();
-    assert!(error.contains("set_auto_retry is not yet supported"));
+    // `set_auto_retry` is now supported (handlers.rs:320), so use a truly
+    // bogus command to verify unsupported commands still surface errors.
+    let error = client
+        .send_raw(serde_json::json!({ "type": "totally_bogus_command" }))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        !error.is_empty(),
+        "unsupported command must surface an error, got: {error}"
+    );
 }

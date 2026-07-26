@@ -7,7 +7,7 @@ mod completion;
 mod handlers;
 mod overlay;
 mod render;
-mod slash;
+pub(crate) mod slash;
 pub mod v2_bridge;
 mod v2_overlay_adapter;
 mod v2_render;

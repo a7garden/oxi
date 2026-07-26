@@ -126,6 +126,13 @@ pub struct Agent {
     /// Shared cancellation flag. Set by `cancel()` (e.g. on Ctrl+C),
     /// propagated to AgentLoop's `external_stop` during each run.
     cancel_flag: Arc<AtomicBool>,
+    /// Shared auto-retry enabled flag — runtime-toggleable via `set_auto_retry`,
+    /// injected into each ephemeral AgentLoop via `set_auto_retry_state`.
+    auto_retry_enabled: Arc<AtomicBool>,
+    /// Shared auto-retry cancel flag (RPC `abort_retry`).
+    auto_retry_cancel: Arc<AtomicBool>,
+    /// Shared auto-retry notify for immediate retry-sleep wake-up.
+    auto_retry_notify: Arc<tokio::sync::Notify>,
     /// Pending model switch — stored when the agent is running,
     /// applied after the current loop completes.
     pending_model_switch: RwLock<Option<PendingModelSwitch>>,
@@ -215,6 +222,9 @@ impl Agent {
             is_running: Arc::new(AtomicBool::new(false)),
             resolver,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            auto_retry_enabled: Arc::new(AtomicBool::new(true)),
+            auto_retry_cancel: Arc::new(AtomicBool::new(false)),
+            auto_retry_notify: Arc::new(tokio::sync::Notify::new()),
             pending_model_switch: RwLock::new(None),
         }
     }
@@ -497,6 +507,19 @@ impl Agent {
         prompt: String,
         tx: std::sync::mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
+        self.run_with_channel_message(oxi_ai::Message::User(oxi_ai::UserMessage::new(prompt)), tx)
+            .await
+    }
+
+    /// Run with an explicit user [`Message`] (supports image content blocks).
+    /// Used by RPC `prompt` with images. The running-guard logic lives here;
+    /// [`run_with_channel`](Self::run_with_channel) delegates after converting
+    /// its String prompt into a text-only user message.
+    pub async fn run_with_channel_message(
+        &self,
+        prompt: oxi_ai::Message,
+        tx: std::sync::mpsc::Sender<AgentEvent>,
+    ) -> Result<Response> {
         // pi-mono: Agent.prompt() throws if activeRun exists.
         // Prevent concurrent runs that would corrupt shared state.
         if self
@@ -523,7 +546,7 @@ impl Agent {
     /// Inner implementation of run_with_channel, called after the running guard is set.
     async fn run_with_channel_inner(
         &self,
-        prompt: String,
+        prompt: oxi_ai::Message,
         tx: std::sync::mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
         use crate::agent_loop::AgentLoop;
@@ -605,23 +628,20 @@ impl Agent {
         // Sync happens at AgentEnd (after run_loop completes), where
         // Agent.state is overwritten with fresh_state (which has all messages).
         self.state.update(|s| {
-            s.messages
-                .push(oxi_ai::Message::User(oxi_ai::UserMessage::new(
-                    prompt.clone(),
-                )));
+            s.messages.push(prompt.clone());
         });
 
         // Pre-populate steering/follow-up from hooks
         {
             let hooks = self.hooks.read();
             if let Some(ref get_steering) = hooks.get_steering_messages {
-                for msg_text in get_steering() {
-                    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
+                for msg in get_steering() {
+                    agent_loop.steer(msg);
                 }
             }
             if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
-                for msg_text in get_follow_up() {
-                    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
+                for msg in get_follow_up() {
+                    agent_loop.follow_up(msg);
                 }
             }
 
@@ -654,6 +674,8 @@ impl Agent {
         // This closes the gap where cancel() was ineffective when the
         // provider stream produced no events.
         al.set_cancel_signal(self.cancel_flag.clone());
+        let (ar_enabled, ar_cancel, ar_notify) = self.auto_retry_state();
+        al.set_auto_retry_state(ar_enabled, ar_cancel, ar_notify);
 
         // Create emit callback that sends through the channel.
         // AgentLoop calls this synchronously. UnboundedSender::send() is
@@ -668,7 +690,7 @@ impl Agent {
             { self.inner.read().observability_dispatch.lock().clone() };
         tracing::info!("[AGENT] Starting agent run with channel");
         let result = al
-            .run(prompt.clone(), move |event: AgentEvent| {
+            .run_message(prompt.clone(), move |event: AgentEvent| {
                 // Forward event to channel (std::sync::mpsc — send from sync context)
                 tracing::info!("[AGENT-EMIT] Event: {:?}", std::mem::discriminant(&event));
                 if let Err(e) = tx_emit.send(event.clone()) {
@@ -820,6 +842,32 @@ impl Agent {
     /// (no events arriving).
     pub fn cancel(&self) {
         self.cancel_flag.store(true, Ordering::SeqCst);
+    }
+
+    /// Toggle auto-retry at runtime (affects the next retry decision in an
+    /// active run; does not interrupt an in-progress retry sleep — use
+    /// [`Self::cancel_auto_retry`] for that).
+    pub fn set_auto_retry(&self, enabled: bool) {
+        self.auto_retry_enabled.store(enabled, Ordering::SeqCst);
+    }
+
+    /// Abort any in-progress auto-retry wait immediately. The running turn
+    /// ends without retrying the error.
+    pub fn cancel_auto_retry(&self) {
+        self.auto_retry_cancel.store(true, Ordering::SeqCst);
+        self.auto_retry_notify.notify_waiters();
+    }
+
+    /// Shared auto-retry state (enabled + cancel + notify) for injection
+    /// into an ephemeral `AgentLoop` at run-start.
+    pub(crate) fn auto_retry_state(
+        &self,
+    ) -> (Arc<AtomicBool>, Arc<AtomicBool>, Arc<tokio::sync::Notify>) {
+        (
+            Arc::clone(&self.auto_retry_enabled),
+            Arc::clone(&self.auto_retry_cancel),
+            Arc::clone(&self.auto_retry_notify),
+        )
     }
 
     /// Reset the cancellation flag before starting a new run.
@@ -999,7 +1047,7 @@ impl Agent {
         // modified by a previous run that used a different SharedState).
         let shared_state = self.state.clone();
 
-        let agent_loop = crate::agent_loop::AgentLoop::new_with_resolver(
+        let mut agent_loop = crate::agent_loop::AgentLoop::new_with_resolver(
             provider,
             loop_config,
             tools,
@@ -1009,6 +1057,8 @@ impl Agent {
 
         let maybe_hook = should_stop_hook;
         let ext_stop = agent_loop.external_stop().clone();
+        let (ar_enabled, ar_cancel, ar_notify) = self.auto_retry_state();
+        agent_loop.set_auto_retry_state(ar_enabled, ar_cancel, ar_notify);
 
         // Clone the is_running Arc so the spawned task can clear it.
         let is_running_flag = Arc::clone(&self.is_running);
