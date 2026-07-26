@@ -183,7 +183,9 @@ impl Provider for OpenAiResponsesProvider {
             );
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                "application/json".parse().expect("valid header value"),
+                "application/json".parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+                })?,
             );
 
             // Add custom headers

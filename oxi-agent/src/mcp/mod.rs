@@ -1536,7 +1536,7 @@ mod tests {
         // The migration function receives ONLY the global path — this is
         // the invariant that must hold. Passing the project path here would
         // be the regression.
-        let trust_set = migration_trust_set(&[global_path.clone()]);
+        let trust_set = migration_trust_set(std::slice::from_ref(&global_path));
 
         assert!(
             trust_set.contains("safe-global"),

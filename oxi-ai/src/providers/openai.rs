@@ -209,7 +209,9 @@ impl Provider for OpenAiProvider {
             );
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                "application/json".parse().expect("valid header value"),
+                "application/json".parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+                })?,
             );
 
             // Provider-level default headers (e.g. OpenRouter HTTP-Referer)

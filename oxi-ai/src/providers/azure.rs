@@ -109,14 +109,21 @@ impl AzureProvider {
         &self,
         api_key: &str,
         options: &Option<StreamOptions>,
-    ) -> reqwest::header::HeaderMap {
+    ) -> Result<reqwest::header::HeaderMap, ProviderError> {
         let mut headers = reqwest::header::HeaderMap::new();
 
         // Azure uses api-key header instead of Bearer token
-        headers.insert("api-key", api_key.parse().expect("valid header value"));
+        headers.insert(
+            "api-key",
+            api_key.parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
+        );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().expect("valid header value"),
+            "application/json".parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
         );
 
         // Add custom headers from options
@@ -131,7 +138,7 @@ impl AzureProvider {
             }
         }
 
-        headers
+        Ok(headers)
     }
 }
 
@@ -186,7 +193,7 @@ impl Provider for AzureProvider {
             }
 
             // Build headers
-            let headers = self.build_headers(&api_key, &options);
+            let headers = self.build_headers(&api_key, &options)?;
 
             // Make request
             let response = self
@@ -208,23 +215,41 @@ impl Provider for AzureProvider {
             let provider_name = model.provider.clone();
             let model_id = model.id.clone();
 
-            let stream =
-                response
-                    .bytes_stream()
-                    .flat_map(move |chunk: Result<Bytes, reqwest::Error>| match chunk {
-                        Ok(bytes) => {
-                            let text = String::from_utf8_lossy(&bytes).to_string();
-                            futures::stream::iter(parse_sse_events(
-                                &text,
-                                &provider_name,
-                                &model_id,
-                            ))
-                        }
-                        Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                            reason: StopReason::Error,
-                            error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                        }]),
-                    });
+            let stream = response
+                .bytes_stream()
+                .scan(
+                    Vec::<u8>::new(),
+                    move |pending_bytes, chunk: Result<Bytes, reqwest::Error>| {
+                        let pn = provider_name.clone();
+                        let mid = model_id.clone();
+                        // Synchronous computation — split_complete_lines and
+                        // parse_sse_events are sync, so no async block needed.
+                        // Using ready() avoids the lifetime error where an async
+                        // block would borrow `pending_bytes` beyond its scope.
+                        let events = match chunk {
+                            Ok(bytes) => {
+                                // Accumulate across HTTP chunk boundaries so SSE
+                                // lines split mid-stream are not silently dropped
+                                // (F-10, code audit 2026-07-25). Same pattern as
+                                // the openai/anthropic/google/vertex providers.
+                                let mut combined =
+                                    Vec::with_capacity(pending_bytes.len() + bytes.len());
+                                combined.extend_from_slice(pending_bytes);
+                                combined.extend_from_slice(&bytes);
+                                let (text, trailing) =
+                                    super::openai::split_complete_lines(&combined);
+                                *pending_bytes = trailing;
+                                parse_sse_events(&text, &pn, &mid)
+                            }
+                            Err(e) => vec![ProviderEvent::Error {
+                                reason: StopReason::Error,
+                                error: create_error_message(&e.to_string(), &pn, &mid),
+                            }],
+                        };
+                        std::future::ready(Some(futures::stream::iter(events)))
+                    },
+                )
+                .flatten();
 
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
@@ -701,7 +726,7 @@ data: [DONE]"#;
         let provider = AzureProvider::new();
         let api_key = "test-api-key-12345";
 
-        let headers = provider.build_headers(api_key, &None);
+        let headers = provider.build_headers(api_key, &None).unwrap();
 
         // Check api-key header is present
         let api_key_header = headers.get("api-key");
@@ -718,7 +743,7 @@ data: [DONE]"#;
         let provider = AzureProvider::new();
         let api_key = "test-api-key-12345";
 
-        let headers = provider.build_headers(api_key, &None);
+        let headers = provider.build_headers(api_key, &None).unwrap();
 
         // Azure should NOT use Authorization header with Bearer token
         let auth_header = headers.get(reqwest::header::AUTHORIZATION);

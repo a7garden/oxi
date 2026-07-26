@@ -396,10 +396,17 @@ impl Provider for AnthropicProvider {
 
             // Build headers
             let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert("x-api-key", api_key.parse().expect("valid header value"));
+            headers.insert(
+                "x-api-key",
+                api_key.parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+                })?,
+            );
             headers.insert(
                 "content-type",
-                "application/json".parse().expect("valid header value"),
+                "application/json".parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+                })?,
             );
 
             // Provider-level default headers (e.g. anthropic-version, anthropic-beta)

@@ -117,7 +117,7 @@ graph LR
 
 | Crate | Purpose |
 |-------|---------|
-| [**oxi-ai**](oxi-ai/) | Unified LLM API — 10 providers, streaming, tool calling, compaction |
+| [**oxi-ai**](oxi-ai/) | Unified LLM API — 8 providers, streaming, tool calling, compaction |
 | [**oxi-agent**](oxi-agent/) | Agent runtime — tool-calling loop, event system, MCP client |
 | [**oxi-tui**](oxi-tui/) | Terminal UI — differential rendering, themes, markdown, chat widgets |
 | [**oxi-sdk**](oxi-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |

@@ -78,7 +78,7 @@ or `with_ports(PortRegistry)`.
 | `CronScheduler` | Time-based triggers | ✅ `InMemoryCronScheduler` | 🔜 TBD |
 | `ResourceMonitor` | Usage limits | ✅ `CountingResourceMonitor` | 🔜 TBD |
 | `InternalUrlRouter` | Resolve internal URIs (`skill://`, `issue://`, …) | ✅ wired | 🔜 TBD |
-| `ProtocolHandler` | Handle internal-protocol requests | 🔜 TBD | 🔜 TBD |
+| `ProtocolHandler` | Handle internal-protocol requests | ✅ wired (7 impls: issue, pr, memory, skill, rule, agent, local in `services.rs`) | 🔜 TBD |
 | `RuleRegistry` | Project steering rules (TTSR) | ✅ wired | 🔜 TBD |
 | `EmbeddingProvider` | Vector embeddings for memory | 🔜 TBD | 🔜 TBD |
 
@@ -479,7 +479,7 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.
 - Port trait methods are **async**. `MutexGuard`s held across `.await` will not compile (`!Send`). Use `tokio::sync::Mutex` or scope the lock.
 - The legacy `oxi-store` crate no longer exists. If a new file needs session/settings/auth, put it in `oxi-cli/src/store/` (or in a sibling product's store).
-- The `oxi-cli` crate is a **monorepo monolith** by design (~17K lines). Do not split it into more crates — the 4 separation conditions (independent reuse, independent versioning, build isolation, team boundary) do not hold.
+- The `oxi-cli` crate is a **monorepo monolith** by design (~66K lines as of 2026-07-25; was ~17K when this rationale was written — the crate has grown 4× since). Do not split it into more crates unless the 4 separation conditions (independent reuse, independent versioning, build isolation, team boundary) genuinely hold — re-evaluate at ~80K LOC.
 - **TUI language policy is TUI-only — by design, not oversight.** `Settings::output_languages` (see `oxi-cli/src/store/settings.rs`) is consumed **exclusively** by `app::agent_session_runtime::build_system_prompt` (the TUI session build path). The `lib.rs` App build path used by `oxi --print` and RPC mode does **not** inject the policy — it has its own simpler `build_system_prompt` that omits it. So a policy written to `settings.toml` is **silently ignored** in non-TUI modes.
   - **Why this asymmetry is intentional:** `oxi --print` and RPC mode are programmatic/scriptable interfaces where language determinism is the caller's responsibility (they control the prompt and can pre-translate or route through any language). The TUI is the conversational surface where this policy earns its place.
   - **Do NOT "fix" the asymmetry** by injecting the directive into `oxi-cli/src/lib.rs::build_system_prompt` without an explicit product decision. If a future caller needs the policy in print/RPC, add an explicit opt-in (CLI flag or extra config field) rather than making it implicit. The single injection point to add later is `oxi-cli/src/lib.rs::build_system_prompt`.

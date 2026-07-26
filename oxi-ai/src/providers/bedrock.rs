@@ -195,13 +195,27 @@ impl BedrockProvider {
         // Set required headers
         headers.insert(
             "content-type",
-            "application/json".parse().expect("valid header value"),
+            "application/json".parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
         );
-        headers.insert("host", host.parse().expect("valid header value"));
-        headers.insert("x-amz-date", datetime.parse().expect("valid header value"));
+        headers.insert(
+            "host",
+            host.parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
+        );
+        headers.insert(
+            "x-amz-date",
+            datetime.parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
+        );
         headers.insert(
             "x-amz-content-sha256",
-            content_hash.parse().expect("valid header value"),
+            content_hash.parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
         );
 
         // Build canonical request
@@ -231,7 +245,9 @@ impl BedrockProvider {
 
         headers.insert(
             "authorization",
-            authorization.parse().expect("valid header value"),
+            authorization.parse().map_err(|e| {
+                ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+            })?,
         );
 
         Ok(())
@@ -426,14 +442,18 @@ impl Provider for BedrockProvider {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
-                "application/json".parse().expect("valid header value"),
+                "application/json".parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+                })?,
             );
 
             // Add session token if present (for temporary credentials)
             if let Some(token) = session_token {
                 headers.insert(
                     "x-amz-security-token",
-                    token.parse().expect("valid header value"),
+                    token.parse().map_err(|e| {
+                        ProviderError::InvalidResponse(format!("invalid header value: {e}"))
+                    })?,
                 );
             }
 
