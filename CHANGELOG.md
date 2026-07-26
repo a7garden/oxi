@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-07-27 — RPC auto-retry, provider robustness, MCP spawn consent
+
+### Added — RPC auto-retry + agent loop enhancements
+
+- **RPC auto-retry** — two new JSON-RPC commands, `set_auto_retry` and
+  `abort_retry` (`rpc_mode/handlers.rs`), let IDE clients drive automatic
+  retry of a failing agent turn. Session handoff + export improvements
+  thread retry state through `agent_session.rs`.
+- **Agent loop / retry** — `agent_loop/mod.rs` (+103) and `retry.rs` (+25)
+  harden the retry loop; `agent.rs` (+72) threads the new state through the
+  runtime.
+- **`send_raw()` test helper** (`rpc_mode/utils.rs`) — emits arbitrary
+  commands for RPC testing; `rpc_mode.rs` test for "unsupported command"
+  updated to a genuinely-bogus command now that `set_auto_retry` is real.
+- RPC parse-error responses now carry the caller's request ID (extracted
+  before `serde_json::from_value` consumes the JSON), so `RpcClient`'s
+  response-matcher finds them instead of timing out at 60s.
+
+### Security — MCP spawn consent + credential masking
+
+- **F-2: MCP spawn consent gate** — MCP server spawn is now gated behind
+  explicit consent (`ConsentState::Ask` sits in `connect()` before the
+  transport match, covering both stdio and HTTP). Unknown servers default
+  to `Ask` at the spawn gate, closing the clone-to-RCE surface; the
+  per-tool gate keeps its `Allow` default so `direct_tool.rs` is
+  unaffected. A one-time migration auto-trusts **only** global config
+  servers (`~/.config/oxi/mcp.json`) — project-local servers from a
+  cloned repo stay gated. Typed `McpError::ConsentDenied` replaces
+  anyhow at the new boundary. 5 new consent tests.
+- **F-1: `AuthCredential` Debug masking** — replaced
+  `#[derive(Debug)]` with a manual impl that masks
+  `key`/`access_token`/`refresh_token`/`token` as `<redacted>`, fixing
+  the info-disclosure vector where `dbg!`/`tracing::debug!`/panic
+  backtraces echoed raw API keys. 3 new masking tests.
+
+### Fixed — provider robustness
+
+- **F-3: Header `.expect()` → `?`** — replaced 14
+  `.expect("valid header value")` panics with
+  `.map_err(ProviderError::InvalidResponse)?` across all 6 providers
+  (anthropic, azure, bedrock, mistral, openai, openai_responses). A
+  malformed API key (newline, non-ASCII, corrupt config) no longer kills
+  the process via `panic=abort`. Azure's `build_headers()` now returns
+  `Result<HeaderMap, ProviderError>`.
+- **F-10: Azure/Mistral SSE chunk-boundary fix** — Azure and Mistral SSE
+  streams now use `split_complete_lines` + `pending_bytes` (the same
+  pattern as openai/anthropic/google/vertex). SSE `data:` lines split
+  across HTTP chunk boundaries are no longer silently dropped.
+- **F-14: Doc drift** — corrected AGENTS.md oxi-cli LOC (17K → 66K),
+  `ProtocolHandler` port status (🔜 TBD → ✅ wired), and README provider
+  count (10 → 8).
+
 ## [0.58.0] - 2026-07-23 — oxi-tui v2 Terminal-First Pipeline
 
 ### Added — oxi-agent streaming lifecycle events
