@@ -1,6 +1,6 @@
 [package]
 name = "oxi-tui"
-version = "0.59.0"
+version = "0.59.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Terminal UI rendering pipeline and widget library for oxi (v2 — terminal-first pipeline)"

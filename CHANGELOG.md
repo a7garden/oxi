@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.1] - 2026-07-27 — TUI bug fixes
+
+### Fixed
+
+- **`/skill off` completion** — `complete_arg` computed `looking_for_skill`
+  with `!rest.contains(' ')`, but `strip_prefix("off")` leaves a leading
+  space (`" off open"` → `" off"`), so the check flipped false and dropped
+  every skill for `/skill off <partial>`. Extracted `skill_complete_prefix`
+  as a pure helper and fixed the space handling. 4 tests added.
+- **Extension commands in `/help` and completion** — `state.slash_registry`
+  was built as bare `builtins()` at `AppState::new` and never synced with
+  `wasm_ext`. Dispatch uses a per-call local registry that syncs extensions,
+  so extension commands executed but stayed invisible in `/help` and
+  command-name completion. Now synced at both mutation sites: initial wiring
+  (`app.rs`) and runtime reload via `/settings` and `/reload` (`settings.rs`).
+- **MCP manager on session agent registry** — `register_arc` copies only
+  `Arc<dyn AgentTool>`, not the `mcp_manager` field. The TUI session builder
+  created a fresh `ToolRegistry`, copied tools, but never called
+  `set_mcp_manager` — so `session.agent_ref().tools().mcp_manager()` returned
+  `None` and `/mcp dashboard|status|reauth` warned "MCP runtime manager
+  unavailable" despite `McpTool` being registered. Now mirrors
+  `bootstrap.rs:425`. Contract test added.
+- **`/provider` overlay dropped all providers** — `build_visible_items`
+  iterated 6 hardcoded categories and silently dropped every provider whose
+  category didn't match. The catalog (sourced from models.dev) sets
+  `category=""` for all providers — models.dev JSON carries no category field
+  — so all providers were dropped while the count hint still rendered. Added
+  a fallback bucket that renders empty/unrecognized-category providers
+  alphabetically; the "Other" header is suppressed when it is the only bucket.
+  3 regression tests added.
+
 ## [0.59.0] - 2026-07-27 — RPC auto-retry, provider robustness, MCP spawn consent
 
 ### Added — RPC auto-retry + agent loop enhancements
@@ -228,8 +259,6 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 - **`oxi-tui` module compile fix** — restored `tool_renderer` module
   declaration.
 - **Workspace version uniformity** — all 9 crates at `0.56.0`.
-
-## [Unreleased]
 
 ## [0.55.0] - 2026-07-18
 
