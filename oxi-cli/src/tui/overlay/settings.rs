@@ -688,6 +688,14 @@ pub(crate) fn sync_wasm_extensions(
     } else {
         state.wasm_ext = None;
     }
+    // Re-sync the long-lived slash registry so `/help` and Tab completion
+    // reflect the reloaded extensions. Without this, dispatch (per-call
+    // local registry) keeps working but `state.slash_registry` stays stale
+    // after a `/settings` toggle or `/reload`. Same fix as the initial
+    // wiring in app.rs.
+    state
+        .slash_registry
+        .sync_extensions(state.wasm_ext.as_ref());
 }
 
 fn build_settings_items(

@@ -1422,6 +1422,15 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.footer_state.data.thinking_level =
             Some(format!("{:?}", settings.thinking_level).to_lowercase());
         state.wasm_ext = wasm_ext.clone();
+        // Surface extension commands in `/help` and Tab completion. Dispatch
+        // uses a per-call local registry that syncs extensions (slash/mod.rs),
+        // but `state.slash_registry` — read by `/help` (`complete_command`) and
+        // command-name completion — was built as bare `builtins()` at
+        // `AppState::new` and never synced, so extension commands existed and
+        // executed but were invisible in help/completion.
+        state
+            .slash_registry
+            .sync_extensions(state.wasm_ext.as_ref());
 
         // Share skill manager and active skills from App
         {
