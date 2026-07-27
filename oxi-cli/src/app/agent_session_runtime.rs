@@ -442,6 +442,15 @@ pub async fn create_agent_session_from_services(
             agent_tools.register_arc(tool);
         }
     }
+    // Propagate the MCP manager from the source registry to the agent's
+    // registry. `register_arc` copies only `Arc<dyn AgentTool>`; the
+    // manager lives in a separate field and would otherwise be `None`,
+    // breaking the TUI's `/mcp dashboard|status|reauth` overlays (they
+    // read `session.agent_ref().tools().mcp_manager()` and silently warn
+    // "MCP runtime manager unavailable"). Mirrors bootstrap.rs:425-427.
+    if let Some(mgr) = registry.mcp_manager() {
+        agent_tools.set_mcp_manager(mgr);
+    }
 
     // Create the session
     let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
@@ -1157,5 +1166,41 @@ mod tests {
         assert_eq!(opts.cwd, PathBuf::from("/tmp"));
         assert!(opts.agent_dir.is_none());
         assert!(opts.auth_storage.is_none());
+    }
+    /// Regression: `register_arc` copies only `Arc<dyn AgentTool>` and NOT
+    /// the `mcp_manager`. The TUI session builder in
+    /// `create_agent_session_from_services` must therefore call
+    /// `set_mcp_manager` after its copy loop (mirroring bootstrap.rs), or
+    /// `session.agent_ref().tools().mcp_manager()` returns `None` and
+    /// `/mcp dashboard|status|reauth` warn "MCP runtime manager
+    /// unavailable" even though the `McpTool` is registered.
+    #[test]
+    fn register_arc_copies_tools_not_mcp_manager() {
+        let src = oxi_agent::ToolRegistry::with_builtins_cwd(std::path::PathBuf::from("/tmp"), &[]);
+        assert!(
+            src.mcp_manager().is_some(),
+            "with_builtins_cwd attaches the MCP manager"
+        );
+
+        // Mirror the session builder's copy loop exactly.
+        let dst = oxi_agent::ToolRegistry::new();
+        for name in src.names() {
+            if let Some(tool) = src.get(&name) {
+                dst.register_arc(tool);
+            }
+        }
+        assert!(
+            dst.mcp_manager().is_none(),
+            "register_arc copies tools only, never the manager — the trap"
+        );
+
+        // The required explicit propagation.
+        if let Some(mgr) = src.mcp_manager() {
+            dst.set_mcp_manager(mgr);
+        }
+        assert!(
+            dst.mcp_manager().is_some(),
+            "set_mcp_manager propagates the live manager"
+        );
     }
 }
