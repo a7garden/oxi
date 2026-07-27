@@ -2,55 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt;
 use std::hash::Hash;
 
 /// Provider API identifier.
 ///
 /// Selects the wire-format / protocol dialect spoken to a particular LLM provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Api {
-    /// OpenAI Chat Completions API.
-    #[serde(rename = "openai-completions")]
-    OpenAiCompletions,
-    /// OpenAI Responses API.
-    #[serde(rename = "openai-responses")]
-    OpenAiResponses,
-    /// Anthropic Messages API.
-    #[serde(rename = "anthropic-messages")]
-    AnthropicMessages,
-    /// Google Generative AI (Gemini) API.
-    #[serde(rename = "google-generative-ai")]
-    GoogleGenerativeAi,
-    /// Google Vertex AI endpoint.
-    #[serde(rename = "google-vertex")]
-    GoogleVertex,
-    /// Mistral Conversations API.
-    #[serde(rename = "mistral-conversations")]
-    MistralConversations,
-    /// Azure OpenAI Responses API.
-    #[serde(rename = "azure-openai-responses")]
-    AzureOpenAiResponses,
-    /// AWS Bedrock Converse Stream API.
-    #[serde(rename = "bedrock-converse-stream")]
-    BedrockConverseStream,
-}
-
-impl fmt::Display for Api {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Api::OpenAiCompletions => write!(f, "openai-completions"),
-            Api::OpenAiResponses => write!(f, "openai-responses"),
-            Api::AnthropicMessages => write!(f, "anthropic-messages"),
-            Api::GoogleGenerativeAi => write!(f, "google-generative-ai"),
-            Api::GoogleVertex => write!(f, "google-vertex"),
-            Api::MistralConversations => write!(f, "mistral-conversations"),
-            Api::AzureOpenAiResponses => write!(f, "azure-openai-responses"),
-            Api::BedrockConverseStream => write!(f, "bedrock-converse-stream"),
-        }
-    }
-}
+/// Moved to the `oxi-catalog` crate (omp aligns `KnownApi` with `pi-catalog`).
+/// Re-exported here for backward compatibility; new code should use
+/// `oxi_catalog::Api` directly.
+pub use oxi_catalog::Api;
 
 /// Cache retention preference
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

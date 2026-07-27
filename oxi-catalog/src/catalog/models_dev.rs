@@ -14,7 +14,7 @@
 //! Layer 3   /v1/models runtime discovery          local servers
 //! ```
 //!
-//! Enrichment runs inside [`crate::model_db::get_all_models`] after
+//! Enrichment runs inside the consumer's model database (oxi-ai's `model_db`) after
 //! Layer 2 overrides are applied. Only fields that are missing or
 //! unverifiable in Layer 1 are overwritten — see the precedence rules below.
 //!

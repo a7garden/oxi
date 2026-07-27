@@ -347,6 +347,10 @@ pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
                 )))
             }
         }
+        // `Api` is `#[non_exhaustive]` and lives in oxi-catalog, so future
+        // dialects (ollama-chat, cursor-agent, … — see P0-C) must be handled
+        // explicitly. Unknown dialects have no transport yet → None.
+        _ => None,
     }
 }
 
@@ -466,6 +470,9 @@ pub fn create_builtin_provider_with_options(
                 create_builtin_provider(name)
             }
         }
+        // `Api` is `#[non_exhaustive]` (oxi-catalog). Unknown/future dialects
+        // have no transport wired yet → None (see P0-C for the expansion).
+        _ => None,
     }
 }
 

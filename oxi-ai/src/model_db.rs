@@ -476,8 +476,8 @@ mod tests {
         // Verify the materialize path can decode the embedded snapshot and
         // produce valid ModelEntry records. This tests the full pipeline:
         //   gzip → MdCatalog → materialize() → ModelEntry
-        let compressed = include_bytes!("../data/catalog/_snapshot.json.gz");
-        let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
+        let compressed = oxi_catalog::snapshot_gzip_bytes();
+        let mut decoder = flate2::read::GzDecoder::new(compressed);
         let mut json = String::new();
         decoder.read_to_string(&mut json).unwrap();
         let catalog: crate::catalog::MdCatalog = serde_json::from_str(&json).unwrap();
