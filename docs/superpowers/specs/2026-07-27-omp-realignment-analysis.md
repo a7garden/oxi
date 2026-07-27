@@ -20,28 +20,29 @@ create_builtin_provider("deepseek").name() == "openai"   // :548-551
 create_builtin_provider("minimax").name()  == "anthropic" // :554-557
 ```
 
-**근본 원인**: OMP는 스트리밍 **transport**와 provider **identity**를 분리하지만, OXI는 하나의 `Provider` trait로 융합했다.
+**근본 원인**: OMP는 스트리밍 **transport / auth-login / model-host-metadata** 세 우려를 분리하지만, OXI는 하나의 `Provider` trait + `BuiltinProvider` struct로 융합했다 (상세 §1.2).
 - `Api::OpenAiCompletions` arm (`register_builtins.rs:320-349`)이 항상 `OpenAiProvider`를 반환.
 - `OpenAiProvider::name()`은 하드코딩 `"openai"`.
 - `builtin.name`(catalog id "deepseek")이 무시됨.
 
-### 1.2 핵심 아키텍처 발견 — transport vs identity 분리 (정정됨)
+### 1.2 핵심 아키텍처 발견 — 세 우려 분리 (정정됨, primary spec 원칙 1과 일치)
 
-> 초기 표현 "OMP has NO Provider interface"는 **과장**. OMP는 `Provider` trait가 없을 뿐, 두 우려(concern)를 분리하는 명확한 추상이 있다.
+> 초기 표현 "OMP has NO Provider interface"는 **과장**. OMP는 `Provider` trait가 없을 뿐, **세 우려(concern)**를 분리하는 명확한 추상이 있다 (omp 소스 검증: `registry/types.ts`, `descriptor-types.ts`, `types.ts:8-22`).
 
-OMP는 두 우려를 **분리**한다:
-- **Streaming transport** = per-API `StreamFunction<TApi>` (`streamAnthropic`, `streamOllama`, `streamCursor`, `streamDevin`…), `model.api`로 dispatch. **provider identity를 전혀 갖지 않음.**
-- **Provider identity/auth/env-keys** = flat `ProviderDefinition` registry (`packages/ai/src/registry/registry.ts`, ~70+ 엔트리). omp `registry.ts:73-79`: *"단일 per-provider 목록… 모든 legacy 구조(KnownProvider/OAuthProvider union, descriptor, env map, login list)가 이 registry에서 파생된다."*
+OMP는 세 우려를 **분리**한다:
+1. **Streaming transport** = per-API `StreamFunction<TApi>` (`streamAnthropic`, `streamOllama`, `streamCursor`, `streamDevin`…), `model.api`로 dispatch. **identity·auth·메타데이터를 전혀 갖지 않음.** (`packages/ai/src/types.ts:631`)
+2. **Auth/login wiring** = `ProviderDefinition` registry (`packages/ai/src/registry/`). 필드: id, name, envKeys, login, refreshToken, callbackPort, pasteCodeFlow 등. **base_url/auth_method/category는 여기 없다.** ~65 엔트리, code-as-data, compile-time completeness check (`registry.ts:153-167`).
+3. **Model/host 메타데이터 + discovery** = `ProviderDescriptor` (`packages/catalog/src/provider-models/`). `createModelManagerOptions`, `catalogDiscovery`, 기본 base URL.
 
-OXI는 이 둘을 하나의 `Provider` trait로 융합해 `name()`이 identity 역할을 하게 됨 → 정체성 붕괴.
+OXI는 이 셋을 하나의 `Provider` trait + `BuiltinProvider` struct로 융합해 `name()`이 identity 역할을 하게 됨 → 정체성 붕괴.
 
-**수정의 함의**: "trait를 `Api` enum으로 keying"만으로는 deepseek→openai가 **안 고쳐짐** (deepseek는 여전히 `OpenAiCompletions` impl로 라우팅). 수정은 **identity를 streaming trait에서 완전히 제거**해 `ProviderDefinition` registry로 옮기는 것뿐.
+**수정의 함의**: "trait를 `Api` enum으로 keying"만으로는 deepseek→openai가 **안 고쳐짐** (deepseek는 여전히 `OpenAiCompletions` impl로 라우팅). 수정은 identity/auth/메타데이터를 streaming trait에서 완전히 빼서 (2)와 (3)으로 옮기는 것뿐.
 
 ### 1.3 API dialect gap (P0 scope 확장)
 
-OMP는 ~13개 고유 API dialect: `anthropic`, `openai-completions`, `openai-responses`, `google`, `bedrock`, `mistral`, `azure`, `vertex`, **`ollama-chat`, `cursor-agent`, `devin-agent`, `gitlab-duo-agent`, `google-gemini-cli`, `openai-codex-responses`**, `kimi`, `synthetic`.
+OMP는 `KnownApi` 14개 고유 API dialect (`catalog/src/types.ts:8-22`): `openai-completions`, `openai-responses`, `openrouter`, `openai-codex-responses`, `azure-openai-responses`, `anthropic-messages`, `bedrock-converse-stream`, `google-generative-ai`, `google-gemini-cli`, `google-vertex`, `ollama-chat`, `cursor-agent`, `gitlab-duo-agent`, `devin-agent`.
 
-OXI는 8개만 (`anthropic`, `openai`, `openai-responses`, `google`, `bedrock`, `mistral`, `azure`, `vertex`).
+OXI는 8개만 (`Anthropic`, `OpenAiCompletions`, `OpenAiResponses`, `Google`, `Bedrock`, `Mistral`, `Azure`, `Vertex`). **OXI의 `Mistral` enum은 틀림** — omp는 Mistral을 `openai-completions` 호환으로 취급 (별도 dialect 아님). omp의 `mistral`/`kimi`/`synthetic`은 provider id이지 API dialect가 아님.
 
 **주의**: `cursor-agent`/`devin-agent`/`gitlab-duo-agent`는 OpenAI-compatible endpoint가 아니라 **remote-AGENT 프로토콜** — 각각 고유 stream function과 고유 프로토콜 필요. Ollama/Cursor는 production 필수.
 
@@ -226,6 +227,6 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 
 oxi는 pi 포팅으로 시작 → omp 기능 흡수 → grok-build TUI 포팅 시도(revert)의 3층이 누적됐으나 조율 안 됨. 결과: omp 포팅도, 깔끔한 Rust-native도 아닌, 충돌하는 아키텍처 논제들이 싸우는 하이브리드.
 
-**프로바이더 "이상함"의 정확한 진단** (advisor 교차 검증): `Provider` trait가 스트리밍 transport와 provider identity를 동시에 담당하도록 융합된 결과. OMP는 이 둘을 `StreamFunction`(transport, identity 없음)과 `ProviderDefinition` registry(identity/auth/env-keys 단일 소스)로 분리. "trait를 Api로 keying"만으로는 정체성 붕괴가 안 고쳐지고, identity를 trait에서 빼서 registry로 올리는 것이 유일한 수정. 추가로 omp의 ~13개 API dialect(그중 cursor/devin/gitlab-duo는 remote-AGENT 프로토콜)가 P0 scope.
+**프로바이더 "이상함"의 정확한 진단** (advisor 교차 검증): `Provider` trait + `BuiltinProvider` struct가 스트리밍 transport + auth/login wiring + model/host 메타데이터 **세 우려**를 동시에 담당하도록 융합된 결과. OMP는 이 셋을 `StreamFunction`(transport, identity 없음) / `ProviderDefinition` registry(auth/login) / `ProviderDescriptor`(catalog, 메타데이터+discovery)로 분리. "trait를 Api로 keying"만으로는 정체성 붕괴가 안 고쳐지고, identity/auth/메타데이터를 trait에서 빼서 (2)·(3)으로 올리는 것이 유일한 수정. 추가로 omp의 `KnownApi` 14개 dialect(그중 cursor/devin/gitlab-duo는 remote-AGENT 프로토콜)가 P0 scope.
 
 **TUI "이상함"의 진단**: v2가 omp 포팅이 아니라 grok-inspired 재해석. legacy가 omp에 더 가깝다(전체 위젯, glyph, mermaid 보유).
