@@ -1,6 +1,6 @@
 [package]
 name = "oxi-snapcompact"
-version = "0.59.1"
+version = "0.60.0"
 description = "Bitmap-frame context compression for vision-capable LLMs — Rust port of omp snapcompact"
 edition = { workspace = true }
 rust-version = { workspace = true }
