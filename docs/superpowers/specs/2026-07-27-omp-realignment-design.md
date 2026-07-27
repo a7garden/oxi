@@ -70,25 +70,29 @@ Leaf 크레이트 (oxi-* 의존 없음):
 
 ### 3.2 핵심 원칙 (5개)
 
-#### 원칙 1 — Provider trait를 omp처럼 **transport와 identity로 분리**
+#### 원칙 1 — Provider를 omp처럼 **세 우려로 분리** (transport / auth-login / metadata)
 
-이것이 사용자의 핵심 pain이자 가장 중요한 재설계. 현재 oxi는 하나의 `Provider` trait가 두 역할을 동시에 담당한다:
+이것이 사용자의 핵심 pain이자 가장 중요한 재설계. omp 소스 직접 조사로 정제됨 (초기 "둘로 분리" 표현에서 "셋"으로 확정 — advisor 교차 검증 + `registry/types.ts`, `descriptor-types.ts`, `types.ts:8-22` 조사).
 
-- **스트리밍 transport**: HTTP/SSE로 토큰을 스트리밍하는 방법 (API dialect별로 다름)
-- **Provider identity**: 이름, env key, base URL, auth method, 카테고리
+현재 oxi는 하나의 `Provider` trait + `BuiltinProvider` struct가 세 우려를 전부 융합한다:
+- **스트리밍 transport**: HTTP/SSE로 토큰을 스트리밍하는 방법 (API dialect별)
+- **Auth/login wiring**: env key, OAuth login/refresh, callback port
+- **Model/host 메타데이터 + discovery**: base URL, 기본 모델, 모델 발견
 
-OMP는 이 둘을 **엄격히 분리**한다:
-- **Streaming transport** = per-API `StreamFunction<TApi>` (`streamAnthropic`, `streamOllama`, `streamCursor`, `streamDevin`…), `model.api`로 dispatch. **이 transport는 provider identity를 전혀 갖지 않는다.**
-- **Provider identity/auth/env-keys** = flat `ProviderDefinition` registry 테이블 (~70+ 엔트리, omp `registry/registry.ts`). omp `registry.ts:73-79`: *"단일 per-provider 목록… 모든 legacy 구조(KnownProvider/OAuthProvider union, descriptor, env map, login list)가 이 registry에서 파생된다."*
+OMP는 이 셋을 **엄격히 분리**한다 (omp 소스 검증):
+1. **Streaming transport** = per-API `StreamFunction<TApi>` (`streamAnthropic`, `streamOllama`, `streamCursor`, `streamDevin`…), `model.api`로 dispatch. **identity·auth·메타데이터를 전혀 갖지 않는다.** (`packages/ai/src/types.ts:631`)
+2. **Auth/login wiring** = `ProviderDefinition` registry (`packages/ai/src/registry/`). 필드: `id`, `name`, `available`, `showInLoginList`, `envKeys`, `login`, `refreshToken`, `getApiKey`, `storeCredentialsAs`, `callbackPort`, `pasteCodeFlow`. **base_url·auth_method·category는 여기 없다.** ~65 엔트리, provider당 1 코드 모듈 → `ALL` 배열 집계 → `PROVIDER_REGISTRY` 단일 소스. **컴파일타임 완전성 검사**: 모든 catalog chat-model provider가 registry에 정의되어야 함 (TypeScript type-level; Rust에서는 test로 복제). (`registry/registry.ts:153-167`, `registry/types.ts:36-56`)
+3. **Model/host 메타데이터 + discovery** = `ProviderDescriptor` (`packages/catalog/src/provider-models/`). `createModelManagerOptions(config)`, `catalogDiscovery`, 기본 base URL, 모델 발견. (`descriptor-types.ts`)
 
-**정체성 붕괴의 근본 원인**: 현재 `Provider::name()`이 transport에 붙어 있어, `Api::OpenAiCompletions` arm이 항상 `OpenAiProvider`를 반환하고 그 `name()`은 하드코딩 "openai" → `create_builtin_provider("deepseek").name() == "openai"`.
+**정체성 붕괴의 근본 원인**: 현재 `Provider::name()`이 transport에 붙어 있어, `Api::OpenAiCompletions` arm이 항상 `OpenAiProvider`를 반환하고 그 `name()`은 하드코딩 "openai" → `create_builtin_provider("deepseek").name() == "openai"` (`register_builtins.rs:548-551` 단정).
 
-**핵심 함의**: "trait를 `Api` enum으로 keying"만으로는 이 버그가 **고쳐지지 않는다** — deepseek는 여전히 `OpenAiCompletions` impl로 라우팅되기 때문. 수정은 **identity를 streaming trait에서 완전히 제거**하고 `ProviderDefinition` registry 테이블로 옮기는 것뿐이다. transport trait는 identity를 반환하지 않는다 (또는 반환하더라도 catalog id가 아닌 protocol family 이름만).
+**핵심 함의**: "trait를 `Api` enum으로 keying"만으로는 이 버그가 **고쳐지지 않는다** — deepseek는 여전히 `OpenAiCompletions` impl로 라우팅되기 때문. 수정은 identity/auth/메타데이터를 streaming trait에서 완전히 빼서 (2)와 (3)으로 옮기는 것뿐이다. transport trait는 어떤 identity도 반환하지 않는다.
 
 **Rust 번역**:
-- `Api` enum (transport dialect): omp의 ~13개 dialect 포함 — `Anthropic`, `OpenAiCompletions`, `OpenAiResponses`, `Google`, `Bedrock`, `Mistral`, `Azure`, `Vertex`, `OllamaChat`, `CursorAgent`, `DevinAgent`, `GitLabDuoAgent`, `GoogleGeminiCli`, `OpenAiCodexResponses`, `Kimi`, `Synthetic`. **주의**: `cursor-agent`/`devin-agent`/`gitlab-duo-agent`는 OpenAI-compatible endpoint가 아니라 **remote-AGENT 프로토콜** — 각각 고유 stream function과 고유 프로토콜 필요.
-- `ProviderDefinition` registry: id, display name, env keys, auth method, base URL, login/refresh token flow, callback port, category. omp의 단일 소스 원칙 유지.
-- `stream()` dispatch: `model.api`로 `Api` 선택 → 해당 transport 함수 호출. identity는 `model.provider`(catalog id)로 registry에서 조회.
+- `Api` enum (transport dialect) = omp `KnownApi` 14개 (아래 P0-C에서 full list + 매핑).
+- `ProviderDefinition` registry (oxi-ai): auth/login wiring만. code-as-data 정적 테이블 (provider당 1 모듈, `phf::Map` 또는 `const` slice 집계). compile-time completeness test로 catalog `KnownProvider` 전부 커버 검증.
+- `ProviderDescriptor` (oxi-catalog): model/host 메타데이터 + discovery. P0-A의 catalog 분리와 함께 이관.
+- `stream()` dispatch: `model.api` → `Api` → transport 함수. identity는 `model.provider` → registry 조회.
 
 #### 원칙 2 — `oxi-catalog`은 별도 크레이트, 단일 소스
 - 현: catalog가 oxi-ai에 임베디드. oxi-ai가 catalog materialization까지 담당.
@@ -123,22 +127,43 @@ OMP는 이 둘을 **엄격히 분리**한다:
 - `oxi-catalog` 신규 크레이트 추출 (oxi-ai의 `catalog/`, `data/catalog/`, `model_db.rs` 이관).
 - 의존성 방향: `oxi-ai` → `oxi-catalog` 단방향.
 
-**B. transport/identity 분리 (정체성 붕괴 수정의 핵심)**
-- `ProviderDefinition` registry 추출 (~70+ 엔트리): id, display name, env keys, auth method, base URL, login/refresh flow, callback port, category. omp `registry/registry.ts`의 단일 소스 원칙 적용.
-- Streaming transport trait에서 identity 제거. `name()`은 제거하거나 protocol family 이름만 반환 (catalog id 아님).
-- 정체성 조회는 `model.provider`(catalog id) → registry에서 `ProviderDefinition` 검색.
-- **이것이 deepseek→openai 정체성 붕괴의 실제 수정** — trait를 Api로 keying만으로는 안 됨.
+**B. 세 우려 분리 (정체성 붕괴 수정의 핵심 — 원칙 1 구현)**
+- `ProviderDefinition` registry 추출 (oxi-ai, **auth/login wiring만**): `id`, `name`, `env_keys`, `login`/`refresh_token`/`get_api_key`, `store_credentials_as`, `callback_port`, `paste_code_flow`. omp `registry/types.ts:36-56` 필드 매칭. **base_url/auth_method/category는 여기서 빼** catalog descriptor로.
+- `ProviderDescriptor` (oxi-catalog): model/host 메타데이터 + discovery (`create_model_manager_options`, `catalog_discovery`, 기본 base URL). P0-A와 함께 catalog로 이관.
+- Streaming transport trait에서 identity/auth/메타데이터 **전부** 제거. `name()` 제거 (또는 protocol family 이름만, catalog id 아님).
+- code-as-data 정적 registry: provider당 1 모듈, `phf::Map`/`const` slice 집계. **compile-time completeness test** 추가 (catalog `KnownProvider` 전부 registry에 정의됨을 검증 — omp의 TypeScript type-level 검사 `registry.ts:162-167`를 Rust test로 복제).
+- 정체성 조회: `model.provider` → `ProviderDefinition` registry. **이것이 deepseek→openai 정체성 붕괴의 실제 수정** — trait를 Api로 keying만으로는 안 됨.
 
-**C. API dialect 확장 (transport)**
-- `Api` enum을 omp의 ~13 dialect로 확장: 현 8개(`Anthropic`, `OpenAiCompletions`, `OpenAiResponses`, `Google`, `Bedrock`, `Mistral`, `Azure`, `Vertex`)에 추가 — `OllamaChat`, `CursorAgent`, `DevinAgent`, `GitLabDuoAgent`, `GoogleGeminiCli`, `OpenAiCodexResponses`, `Kimi`, `Synthetic`.
-- **remote-AGENT 프로토콜 우선 포팅**: `cursor-agent`, `devin-agent`, `gitlab-duo-agent`는 OpenAI-compatible endpoint가 아님. 각각 고유 stream function + 고유 프로토콜 구현 필요. Ollama도 production 필수.
+**C. API dialect 확장 (transport) — omp `KnownApi` 14개로 정렬**
+- `Api` enum을 omp `KnownApi`(`catalog/src/types.ts:8-22`) 14개로 정렬:
+
+| omp KnownApi | Rust variant | oxi 현 |
+|---|---|---|
+| `openai-completions` | `OpenAiCompletions` | ✓ |
+| `openai-responses` | `OpenAiResponses` | ✓ |
+| `openrouter` | `OpenRouter` | ✗ 신규 |
+| `openai-codex-responses` | `OpenAiCodexResponses` | ✗ 신규 |
+| `azure-openai-responses` | `AzureOpenAiResponses` | (oxi `Azure`→재명명) |
+| `anthropic-messages` | `AnthropicMessages` | (oxi `Anthropic`→재명명) |
+| `bedrock-converse-stream` | `BedrockConverseStream` | (oxi `Bedrock`→재명명) |
+| `google-generative-ai` | `GoogleGenerativeAi` | (oxi `Google`→재명명) |
+| `google-gemini-cli` | `GoogleGeminiCli` | ✗ 신규 |
+| `google-vertex` | `GoogleVertex` | (oxi `Vertex`→재명명) |
+| `ollama-chat` | `OllamaChat` | ✗ 신규 |
+| `cursor-agent` | `CursorAgent` | ✗ 신규 (remote-AGENT) |
+| `gitlab-duo-agent` | `GitLabDuoAgent` | ✗ 신규 (remote-AGENT) |
+| `devin-agent` | `DevinAgent` | ✗ 신규 (remote-AGENT) |
+
+- **oxi `Mistral` Api는 제거** — omp는 Mistral을 `openai-completions` 호환으로 취급 (별도 dialect 아님). oxi의 `Mistral` enum이 틀린 것.
+- `Api = KnownApi | String` (omp의 open extension) → Rust는 `Api::Known(KnownApi)` + `Api::Custom(String)` 또는 별도 custom registry.
+- **remote-AGENT 프로토콜 우선 포팅**: `cursor-agent`/`devin-agent`/`gitlab-duo-agent`는 OpenAI-compatible endpoint가 아님 — 각각 고유 stream function + 고유 프로토콜. `ollama-chat`도 production 필수.
 - `parse_api()` silent coercion 제거 (알 수 없는 API → 명시적 에러).
 
 **D. AI 층 품질**
 - SSE 파싱 중앙화 (`read_sse_events()` 단일 구현, omp `pi-utils` 대응). 8개 provider의 private `parse_sse_events()` 제거.
 - per-provider 에러 계층 (`AnthropicApiError`, `OpenAiHttpError`, `BedrockApiError`, `GoogleApiError`, `OllamaApiError`, `DevinApiError`, `CodexProviderStreamError` … — omp `error/classes.ts` 대응).
 - `ProviderEvent::ImageEnd` 변형 추가 (증분 이미지 스트리밍).
-- omp 없는 oxi-original 평가: `MultiProvider`(complexity router), `FallbackChain`, `CircuitBreaker`, `ProviderPool` (~2500줄) — **제거** 또는 catalog의 complexity router로 이동 (omp에 복잡도 라우팅 있으면 검토 후 이동 권장).
+- **oxi-original 제거 (확정)**: `MultiProvider`(complexity router), `FallbackChain`, `CircuitBreaker`, `ProviderPool` (~2500줄) — omp catalog/ai 어디에도 complexity router 대응 없음 (`classify.ts`는 모델 family/id 의미 분류만, 조사 완료). **P0에서 제거**. 자동 라우팅/폴백이 필요하면 추후 oxi-specific opt-in 기능으로 별도 격리 boundary에서 재도입.
 - `Model` 타입 보강: `request_model_id`(alias), `supports_tools`, nullable `context_window`/`max_tokens` (omp는 `number | null`).
 - `StreamOptions` 보강: signal, watchdog timeout, middleware hook, per-provider options (omp 25+ 필드 수렴).
 
@@ -182,9 +207,15 @@ OMP는 이 둘을 **엄격히 분리**한다:
 - 파일 포맷 변경(TOML→YAML 등) — Rust 생태계 표준 유지.
 
 ## 7. 공개 질문 (각 phase 상세 spec에서 해결)
-- P0: oxi-original `MultiProvider`/`FallbackChain`/`CircuitBreaker` 제거 vs catalog complexity router로 이동? (omp `packages/catalog` 복잡도 라우팅 존재 확인 필요.)
-- P0: `Api` enum의 정확한 dialect 목록 — omp `KnownApi` 1:1 포팅 vs Rust 관용구 재분류. remote-AGENT 프로토콜(cursor/devin/gitlab-duo)의 Rust 스트리밍 추상 형태.
-- P0: `ProviderDefinition` registry의 저장 형태 — 컴파일타임 정적 테이블(`phf`/`const`) vs 빌드시 생성 코드 vs 런타임 로드.
+
+**P0 — omp 소스 조사로 해결됨 (본 섹션에 기록)**:
+- ~~`MultiProvider`/`FallbackChain`/`CircuitBreaker` 제거 vs catalog 이동?~~ → **제거 확정**. omp catalog/ai에 complexity router 대응 없음 (`classify.ts`는 의미 분류만).
+- ~~`Api` dialect 목록?~~ → **omp `KnownApi` 14개 1:1 정렬** (P0-C 표 참조). oxi `Mistral` enum은 제거.
+- ~~`ProviderDefinition` registry 저장 형태?~~ → **code-as-data 정적 테이블** (provider당 1 모듈, 집계, compile-time completeness test).
+- ~~omp가 transport/identity를 둘로 나눈다?~~ → 실제는 **3-way 분리** (transport / auth-login / model-host-metadata). 원칙 1에 반영.
+
+**잔존 공개 질문**:
+- P0: remote-AGENT 프로토콜(`cursor-agent`/`devin-agent`/`gitlab-duo-agent`)의 Rust 스트리밍 추상 형태 — omp는 각각 고유 stream function. oxi에서 공통 trait로 뽑을지, per-protocol 독립 함수로 할지.
 - P1: 16개 누락 도구 우선순위 — 전부 vs 핵심(`ast_grep`, `ast_edit`, `debug`, `eval`) 우선.
 - P2: native scrollback Rust 구현체 — 자체 구현 vs 기존 crate 조사.
 - P3: CLI 명령어 우선순위 — 전부 vs 자주 쓰는 것.
