@@ -127,6 +127,10 @@ impl ProviderSelectOverlay {
 
     fn build_visible_items(&self) -> Vec<VisibleRow> {
         let mut rows = Vec::new();
+        // Track which providers were placed in a known category so the
+        // fallback bucket below only gets the remainder.
+        let mut shown: Vec<bool> = vec![false; self.providers.len()];
+
         for (cat_key, label, tag) in CATEGORIES {
             let cat_providers: Vec<(usize, &ProviderEntry)> = self
                 .providers
@@ -145,12 +149,45 @@ impl ProviderSelectOverlay {
             });
 
             for (idx, entry) in cat_providers {
+                shown[idx] = true;
                 rows.push(VisibleRow::Provider {
                     entry: entry.clone(),
                     global_index: idx,
                 });
             }
         }
+
+        // Fallback bucket for providers whose category is empty or not in
+        // `CATEGORIES`. models.dev (the catalog source) does not carry
+        // categories, so in practice nearly every provider lands here;
+        // `self.providers` is already name-sorted within the fallback rank
+        // by `build_provider_entries_inner`, satisfying the documented
+        // "alphabet sort as fallback" contract on `CatalogProviderEntry`.
+        // The header is suppressed when this is the only bucket, so the
+        // common all-empty-category case renders as a clean flat list
+        // rather than a lone header above every provider.
+        let fallback: Vec<(usize, &ProviderEntry)> = self
+            .providers
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !shown[*i])
+            .collect();
+
+        if !fallback.is_empty() {
+            if !rows.is_empty() {
+                rows.push(VisibleRow::CategoryHeader {
+                    label: "Other".to_string(),
+                    tag: "[+]".to_string(),
+                });
+            }
+            for (idx, entry) in fallback {
+                rows.push(VisibleRow::Provider {
+                    entry: entry.clone(),
+                    global_index: idx,
+                });
+            }
+        }
+
         rows
     }
 
@@ -871,4 +908,109 @@ fn build_provider_entries_inner(
     });
 
     providers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, category: &str) -> ProviderEntry {
+        ProviderEntry {
+            name: name.into(),
+            display_name: name.into(),
+            has_key: false,
+            category: category.into(),
+            description: String::new(),
+            env_key: None,
+        }
+    }
+
+    fn provider_names(rows: &[VisibleRow]) -> Vec<String> {
+        rows.iter()
+            .filter_map(|r| match r {
+                VisibleRow::Provider { entry, .. } => Some(entry.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn header_labels(rows: &[VisibleRow]) -> Vec<String> {
+        rows.iter()
+            .filter_map(|r| match r {
+                VisibleRow::CategoryHeader { label, .. } => Some(label.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Regression: every provider in the catalog has an empty category
+    /// (models.dev does not provide categories). Before the fix,
+    /// `build_visible_items` dropped them all and only the count hint
+    /// ("N providers") rendered — the list itself was empty.
+    #[test]
+    fn empty_category_providers_appear_in_fallback() {
+        let providers = vec![
+            entry("anthropic", ""),
+            entry("openai", ""),
+            entry("requesty", ""),
+        ];
+        let overlay = ProviderSelectOverlay::new(providers, false);
+
+        let rows = overlay.build_visible_items();
+
+        // No known categories matched → no category headers at all, and
+        // every provider is rendered as a flat alphabetical list.
+        assert_eq!(header_labels(&rows), Vec::<String>::new());
+        assert_eq!(
+            provider_names(&rows),
+            vec!["anthropic", "openai", "requesty"]
+        );
+    }
+
+    /// Known-category providers keep their header; the remainder falls into
+    /// an "Other" bucket, but only when at least one known header exists.
+    #[test]
+    fn mixed_categories_get_other_bucket() {
+        let providers = vec![
+            entry("anthropic", "primary"),
+            entry("deepseek", "chinese"),
+            entry("requesty", ""),
+            entry("kilocode", "unknown-cat"),
+        ];
+        let overlay = ProviderSelectOverlay::new(providers, false);
+
+        let rows = overlay.build_visible_items();
+
+        assert_eq!(
+            header_labels(&rows),
+            vec!["Primary", "China", "Other"],
+            "known categories get their labels; unknown/empty merge into Other"
+        );
+        // Every provider is present exactly once.
+        let mut names = provider_names(&rows);
+        names.sort();
+        assert_eq!(names, vec!["anthropic", "deepseek", "kilocode", "requesty"]);
+    }
+
+    /// `global_index` must point back into `self.providers` so selection and
+    /// scrolling stay consistent when the fallback bucket reorders rows.
+    #[test]
+    fn fallback_preserves_global_index() {
+        let providers = vec![entry("zeta", ""), entry("alpha", "")];
+        let overlay = ProviderSelectOverlay::new(providers, false);
+
+        let rows = overlay.build_visible_items();
+
+        let indices: Vec<usize> = rows
+            .iter()
+            .filter_map(|r| match r {
+                VisibleRow::Provider { global_index, .. } => Some(*global_index),
+                _ => None,
+            })
+            .collect();
+        // Indices are unique and cover every provider.
+        let mut sorted = indices.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![0, 1]);
+    }
 }
