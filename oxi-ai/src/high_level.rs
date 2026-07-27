@@ -188,7 +188,13 @@ pub async fn complete(
                 )));
             }
             // Fallback events are informational — ignore in high-level API.
-            ProviderEvent::FallbackStart { .. } | ProviderEvent::FallbackExhausted { .. } => {}
+            // Image events belong to incremental image streaming (Gemini) and
+            // are not part of the text/tool-call completion surface here.
+            ProviderEvent::FallbackStart { .. }
+            | ProviderEvent::FallbackExhausted { .. }
+            | ProviderEvent::ImageStart { .. }
+            | ProviderEvent::ImageDelta { .. }
+            | ProviderEvent::ImageEnd { .. } => {}
         }
     }
 
