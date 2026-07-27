@@ -122,23 +122,16 @@ impl SlashCommand for SkillCommand {
         state: &AppState,
     ) -> Vec<CompletionItem> {
         // `/skill off <name>` → after "off", complete skill names.
-        let (after_off, looking_for_skill) = match prefix.strip_prefix("off") {
-            Some(rest) => (true, rest.trim_start().is_empty() || !rest.contains(' ')),
-            None => (false, true),
+        let Some(match_prefix) = skill_complete_prefix(prefix) else {
+            return Vec::new();
         };
-        let _ = after_off;
-        let skills = state.skills.read();
-        skills
+        let lower = match_prefix.to_lowercase();
+        state
+            .skills
+            .read()
             .all()
             .into_iter()
-            .filter(|s| {
-                if looking_for_skill {
-                    let last = prefix.rsplit(' ').next().unwrap_or("");
-                    s.name.to_lowercase().starts_with(&last.to_lowercase())
-                } else {
-                    false
-                }
-            })
+            .filter(|s| s.name.to_lowercase().starts_with(&lower))
             .map(|s| CompletionItem {
                 text: s.name.clone(),
                 label: s.name.clone(),
@@ -148,5 +141,54 @@ impl SlashCommand for SkillCommand {
                 },
             })
             .collect()
+    }
+}
+
+/// Skill-name prefix to complete for a `/skill` argument, or `None` when
+/// completion should yield nothing.
+///
+/// - `op`        → match skills starting with "op"
+/// - `off`       → match skills starting with "off" (bare keyword)
+/// - `off `      → match all skills (cursor after the keyword)
+/// - `off open`  → match skills starting with "open"
+/// - `off a b`   → `None` (one deactivation at a time)
+fn skill_complete_prefix(prefix: &str) -> Option<&str> {
+    let last = prefix.rsplit(' ').next().unwrap_or("");
+    let looking = match prefix.strip_prefix("off") {
+        // After "off": complete iff at most one (partial) name follows.
+        Some(rest) => rest.trim_start().is_empty() || !rest.trim_start().contains(' '),
+        None => true,
+    };
+    looking.then_some(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_then_partial_completes_after_leading_space() {
+        // Regression: `/skill off open` → strip_prefix("off") = " open",
+        // whose leading space used to trip `!rest.contains(' ')` and drop
+        // every skill. Must complete "open".
+        assert_eq!(skill_complete_prefix("off open"), Some("open"));
+    }
+
+    #[test]
+    fn off_bare_matches_all() {
+        // `/skill off ` (cursor after keyword) → complete any skill.
+        assert_eq!(skill_complete_prefix("off "), Some(""));
+    }
+
+    #[test]
+    fn plain_arg_matches_prefix() {
+        // `/skill op` → not after "off", match skills starting with "op".
+        assert_eq!(skill_complete_prefix("op"), Some("op"));
+    }
+
+    #[test]
+    fn off_two_tokens_yields_none() {
+        // One deactivation at a time: `/skill off foo bar` → no completion.
+        assert_eq!(skill_complete_prefix("off foo bar"), None);
     }
 }
