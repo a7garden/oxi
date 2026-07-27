@@ -274,7 +274,17 @@ pub fn is_builtin_provider(name: &str) -> bool {
 /// Returns `None` if the name is not a known built-in provider.
 pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
     let builtin = get_builtin_provider(name)?;
+    let inner = build_builtin_transport(builtin)?;
+    Some(super::NamedProvider::wrap(builtin.name, inner))
+}
 
+/// Build the transport for a built-in provider WITHOUT attaching identity.
+///
+/// Identity (the canonical catalog id) is attached by [`create_builtin_provider`]
+/// via [`super::NamedProvider`]. This separation is a stepping stone toward the
+/// omp three-way split — see
+/// `docs/superpowers/specs/2026-07-27-omp-realignment-design.md` (P0.3).
+fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn super::Provider>> {
     match builtin.api {
         // ── Anthropic Messages API ──────────────────────────────────────
         Api::AnthropicMessages => {
@@ -369,7 +379,19 @@ pub fn create_builtin_provider_with_options(
     base_url: Option<&str>,
 ) -> Option<Box<dyn super::Provider>> {
     let builtin = get_builtin_provider(name)?;
+    let inner = build_builtin_transport_with_options(builtin, api_key, base_url)?;
+    Some(super::NamedProvider::wrap(builtin.name, inner))
+}
 
+/// Build the transport for a built-in provider with credential/base-URL
+/// overrides, WITHOUT attaching identity. [`create_builtin_provider_with_options`]
+/// wraps the result with the canonical catalog id via [`super::NamedProvider`].
+/// Falls back to [`build_builtin_transport`] when no override applies.
+fn build_builtin_transport_with_options(
+    builtin: &'static BuiltinProvider,
+    api_key: Option<&str>,
+    base_url: Option<&str>,
+) -> Option<Box<dyn super::Provider>> {
     // Resolve API key: explicit override > environment variables
     let resolved_key = api_key.map(String::from).or_else(|| {
         std::env::var(builtin.env_key).ok().or_else(|| {
@@ -417,25 +439,25 @@ pub fn create_builtin_provider_with_options(
             } else {
                 // No key and no base URL — fall back to default construction
                 // (reads from env at stream time)
-                create_builtin_provider(name)
+                build_builtin_transport(builtin)
             }
         }
 
         // ── Google APIs ─────────────────────────────────────────────────
-        Api::GoogleGenerativeAi => create_builtin_provider(name),
-        Api::GoogleVertex => create_builtin_provider(name),
+        Api::GoogleGenerativeAi => build_builtin_transport(builtin),
+        Api::GoogleVertex => build_builtin_transport(builtin),
 
         // ── Mistral ─────────────────────────────────────────────────────
-        Api::MistralConversations => create_builtin_provider(name),
+        Api::MistralConversations => build_builtin_transport(builtin),
 
         // ── Azure ───────────────────────────────────────────────────────
-        Api::AzureOpenAiResponses => create_builtin_provider(name),
+        Api::AzureOpenAiResponses => build_builtin_transport(builtin),
 
         // ── Bedrock ─────────────────────────────────────────────────────
-        Api::BedrockConverseStream => create_builtin_provider(name),
+        Api::BedrockConverseStream => build_builtin_transport(builtin),
 
         // ── OpenAI Responses API ────────────────────────────────────────
-        Api::OpenAiResponses => create_builtin_provider(name),
+        Api::OpenAiResponses => build_builtin_transport(builtin),
 
         // ── OpenAI Chat Completions API ─────────────────────────────────
         Api::OpenAiCompletions => {
@@ -467,7 +489,7 @@ pub fn create_builtin_provider_with_options(
                     extra_headers,
                 )))
             } else {
-                create_builtin_provider(name)
+                build_builtin_transport(builtin)
             }
         }
         // `Api` is `#[non_exhaustive]` (oxi-catalog). Unknown/future dialects
@@ -499,7 +521,7 @@ mod tests {
     #[test]
     fn test_create_builtin_provider_by_alias() {
         let p = create_builtin_provider("amazon-bedrock").unwrap();
-        assert_eq!(p.name(), "bedrock");
+        assert_eq!(p.name(), "amazon-bedrock"); // catalog id, not the BedrockProvider hardcoded name
     }
 
     #[test]
@@ -554,37 +576,37 @@ description = "Test provider from override"
     #[test]
     fn test_create_builtin_provider_deepseek() {
         let p = create_builtin_provider("deepseek").unwrap();
-        assert_eq!(p.name(), "openai"); // Uses OpenAI provider with custom base URL
+        assert_eq!(p.name(), "deepseek"); // identity = catalog id (transport is OpenAI-compatible)
     }
 
     #[test]
     fn test_create_builtin_provider_minimax() {
         let p = create_builtin_provider("minimax").unwrap();
-        assert_eq!(p.name(), "anthropic"); // Uses Anthropic provider with custom base URL
+        assert_eq!(p.name(), "minimax"); // identity = catalog id (transport is Anthropic-compatible)
     }
 
     #[test]
     fn test_create_builtin_provider_minimax_cn() {
         let p = create_builtin_provider("minimax-cn").unwrap();
-        assert_eq!(p.name(), "anthropic"); // Uses Anthropic provider with custom base URL
+        assert_eq!(p.name(), "minimax-cn"); // identity = catalog id (transport is Anthropic-compatible)
     }
 
     #[test]
     fn test_create_builtin_provider_togetherai() {
         let p = create_builtin_provider("togetherai").unwrap();
-        assert_eq!(p.name(), "openai");
+        assert_eq!(p.name(), "togetherai"); // identity = catalog id
     }
 
     #[test]
     fn test_create_builtin_provider_openrouter() {
         let p = create_builtin_provider("openrouter").unwrap();
-        assert_eq!(p.name(), "openai");
+        assert_eq!(p.name(), "openrouter"); // identity = catalog id
     }
 
     #[test]
     fn test_create_builtin_provider_cerebras() {
         let p = create_builtin_provider("cerebras").unwrap();
-        assert_eq!(p.name(), "openai");
+        assert_eq!(p.name(), "cerebras"); // identity = catalog id
     }
 
     #[test]
