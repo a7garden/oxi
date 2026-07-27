@@ -109,8 +109,6 @@ pub use providers::OpenAiResponsesProvider;
 pub use providers::BedrockProvider;
 /// Google (Gemini) provider implementation.
 pub use providers::GoogleProvider;
-/// Mistral provider implementation.
-pub use providers::MistralProvider;
 /// Google Vertex AI provider implementation.
 pub use providers::VertexProvider;
 

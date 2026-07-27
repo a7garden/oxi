@@ -303,7 +303,6 @@ pub fn protocol_for(npm: &str) -> (Api, AuthMethod) {
         "@ai-sdk/google-vertex" | "@ai-sdk/google-vertex/anthropic" => {
             (Api::GoogleVertex, AuthMethod::None)
         }
-        "@ai-sdk/mistral" => (Api::MistralConversations, AuthMethod::Bearer),
         "@ai-sdk/azure" => (Api::AzureOpenAiResponses, AuthMethod::ApiKey),
         "@ai-sdk/amazon-bedrock" => (Api::BedrockConverseStream, AuthMethod::None),
         // @ai-sdk/openai, @ai-sdk/openai-compatible, groq, xai, togetherai,

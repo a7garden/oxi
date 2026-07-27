@@ -8,7 +8,6 @@ mod bedrock;
 mod event;
 mod google;
 mod google_shared;
-mod mistral;
 pub mod model_fetch;
 mod openai;
 mod openai_responses;
@@ -43,8 +42,6 @@ pub use event::FallbackReason;
 pub use event::ProviderEvent;
 #[allow(unused_imports)]
 pub use google::GoogleProvider;
-#[allow(unused_imports)]
-pub use mistral::MistralProvider;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
 pub use openai::normalize_messages;

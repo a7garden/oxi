@@ -60,8 +60,6 @@ pub enum CatalogProtocol {
     /// Google Vertex (`@ai-sdk/google-vertex`,
     /// `@ai-sdk/google-vertex/anthropic`).
     GoogleVertex,
-    /// Mistral Conversations (`@ai-sdk/mistral`).
-    MistralConversations,
     /// AWS Bedrock Converse Stream (`@ai-sdk/amazon-bedrock`).
     BedrockConverseStream,
     /// OpenAI-compatible fallback for unknown npm values.
@@ -83,8 +81,7 @@ impl CatalogProtocol {
             | CatalogProtocol::BedrockConverseStream => AuthMethod::None,
             CatalogProtocol::OpenAiCompletions
             | CatalogProtocol::OpenAiResponses
-            | CatalogProtocol::OpenAiCompatible
-            | CatalogProtocol::MistralConversations => AuthMethod::Bearer,
+            | CatalogProtocol::OpenAiCompatible => AuthMethod::Bearer,
         }
     }
 
@@ -105,7 +102,6 @@ impl CatalogProtocol {
             AzureOpenAiResponses => oxi_ai::Api::AzureOpenAiResponses,
             GoogleGenerativeAi => oxi_ai::Api::GoogleGenerativeAi,
             GoogleVertex => oxi_ai::Api::GoogleVertex,
-            MistralConversations => oxi_ai::Api::MistralConversations,
             BedrockConverseStream => oxi_ai::Api::BedrockConverseStream,
             // OpenAI 호환은 oxi-ai 에서 OpenAiCompletions 로 처리
             OpenAiCompatible => oxi_ai::Api::OpenAiCompletions,
@@ -125,7 +121,6 @@ impl CatalogProtocol {
             AzureOpenAiResponses => "azure-openai-responses",
             GoogleGenerativeAi => "google-generative-ai",
             GoogleVertex => "google-vertex",
-            MistralConversations => "mistral-conversations",
             BedrockConverseStream => "bedrock-converse-stream",
             OpenAiCompatible => "openai-compatible",
         }

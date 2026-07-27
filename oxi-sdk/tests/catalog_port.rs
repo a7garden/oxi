@@ -223,10 +223,6 @@ fn catalog_protocol_default_auth_matches_documented_mapping() {
         AuthMethod::Bearer
     );
     assert_eq!(
-        CatalogProtocol::MistralConversations.default_auth(),
-        AuthMethod::Bearer
-    );
-    assert_eq!(
         CatalogProtocol::OpenAiCompatible.default_auth(),
         AuthMethod::Bearer
     );
@@ -258,10 +254,6 @@ fn catalog_protocol_as_oxi_api_covers_all_variants() {
     assert_eq!(
         CatalogProtocol::GoogleVertex.as_oxi_api(),
         Api::GoogleVertex
-    );
-    assert_eq!(
-        CatalogProtocol::MistralConversations.as_oxi_api(),
-        Api::MistralConversations
     );
     assert_eq!(
         CatalogProtocol::BedrockConverseStream.as_oxi_api(),

@@ -45,7 +45,6 @@ fn parse_api(s: &str) -> Api {
         "openai-responses" => Api::OpenAiResponses,
         "google-generative-ai" => Api::GoogleGenerativeAi,
         "google-vertex" => Api::GoogleVertex,
-        "mistral-conversations" => Api::MistralConversations,
         "azure-openai-responses" => Api::AzureOpenAiResponses,
         "bedrock-converse-stream" => Api::BedrockConverseStream,
         _ => Api::OpenAiCompletions,
@@ -502,7 +501,6 @@ mod tests {
                         | Api::OpenAiResponses
                         | Api::GoogleGenerativeAi
                         | Api::GoogleVertex
-                        | Api::MistralConversations
                         | Api::AzureOpenAiResponses
                         | Api::BedrockConverseStream
                 ),

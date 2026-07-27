@@ -272,7 +272,6 @@ pub(crate) fn protocol_for(npm: &str) -> CatalogProtocol {
         "@ai-sdk/google-vertex" | "@ai-sdk/google-vertex/anthropic" => {
             CatalogProtocol::GoogleVertex
         }
-        "@ai-sdk/mistral" => CatalogProtocol::MistralConversations,
         "@ai-sdk/azure" => CatalogProtocol::AzureOpenAiResponses,
         "@ai-sdk/amazon-bedrock" => CatalogProtocol::BedrockConverseStream,
         "@ai-sdk/openai" | "@ai-sdk/openai-compatible" => CatalogProtocol::OpenAiCompletions,
@@ -1166,10 +1165,6 @@ mod tests {
         );
         assert_eq!(
             CatalogProtocol::OpenAiCompatible.default_auth(),
-            AuthMethod::Bearer
-        );
-        assert_eq!(
-            CatalogProtocol::MistralConversations.default_auth(),
             AuthMethod::Bearer
         );
         assert_eq!(

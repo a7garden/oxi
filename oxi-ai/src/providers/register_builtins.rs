@@ -75,7 +75,6 @@ fn parse_api(s: &str) -> Api {
         "anthropic-messages" => Api::AnthropicMessages,
         "google-generative-ai" => Api::GoogleGenerativeAi,
         "google-vertex" => Api::GoogleVertex,
-        "mistral-conversations" => Api::MistralConversations,
         "azure-openai-responses" => Api::AzureOpenAiResponses,
         "bedrock-converse-stream" => Api::BedrockConverseStream,
         _ => Api::OpenAiCompletions,
@@ -159,7 +158,6 @@ impl From<&BuiltinProviderEntry> for BuiltinProvider {
 static API_TO_PROVIDER: &[(&str, Api)] = &[
     ("anthropic-messages", Api::AnthropicMessages),
     ("openai-completions", Api::OpenAiCompletions),
-    ("mistral-conversations", Api::MistralConversations),
     ("openai-responses", Api::OpenAiResponses),
     ("azure-openai-responses", Api::AzureOpenAiResponses),
     ("google-generative-ai", Api::GoogleGenerativeAi),
@@ -310,9 +308,6 @@ fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn 
         Api::GoogleGenerativeAi => Some(Box::new(super::google::GoogleProvider::new())),
         Api::GoogleVertex => Some(Box::new(super::vertex::VertexProvider::new())),
 
-        // ── Mistral ─────────────────────────────────────────────────────
-        Api::MistralConversations => Some(Box::new(super::mistral::MistralProvider::new())),
-
         // ── Azure ───────────────────────────────────────────────────────
         Api::AzureOpenAiResponses => Some(Box::new(super::azure::AzureProvider::new())),
 
@@ -446,10 +441,6 @@ fn build_builtin_transport_with_options(
         // ── Google APIs ─────────────────────────────────────────────────
         Api::GoogleGenerativeAi => build_builtin_transport(builtin),
         Api::GoogleVertex => build_builtin_transport(builtin),
-
-        // ── Mistral ─────────────────────────────────────────────────────
-        Api::MistralConversations => build_builtin_transport(builtin),
-
         // ── Azure ───────────────────────────────────────────────────────
         Api::AzureOpenAiResponses => build_builtin_transport(builtin),
 

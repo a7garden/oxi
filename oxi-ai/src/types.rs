@@ -492,10 +492,6 @@ mod tests {
         assert_eq!(Api::GoogleGenerativeAi.to_string(), "google-generative-ai");
         assert_eq!(Api::GoogleVertex.to_string(), "google-vertex");
         assert_eq!(
-            Api::MistralConversations.to_string(),
-            "mistral-conversations"
-        );
-        assert_eq!(
             Api::AzureOpenAiResponses.to_string(),
             "azure-openai-responses"
         );
@@ -513,7 +509,6 @@ mod tests {
             Api::AnthropicMessages,
             Api::GoogleGenerativeAi,
             Api::GoogleVertex,
-            Api::MistralConversations,
             Api::AzureOpenAiResponses,
             Api::BedrockConverseStream,
         ] {
