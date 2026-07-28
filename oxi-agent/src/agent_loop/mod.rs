@@ -752,6 +752,10 @@ impl AgentLoop {
 
         let mut pending_messages: Vec<Message> = self.drain_steering_queue();
 
+        // Append-only context for prefix-stable message management.
+        let mut append_only =
+            crate::agent_loop::append_only::AppendOnlyContext::new(messages.clone());
+
         loop {
             tracing::info!(
                 "[AGENT-LOOP] Top of loop, has_more_tool_calls={}, pending_messages={}",
@@ -788,6 +792,10 @@ impl AgentLoop {
 
                 self.maybe_compact(&mut messages, turn_number as usize, &emit)
                     .await;
+
+                // Keep the append-only context in sync with messages.
+                // After compaction, messages may have been replaced entirely.
+                append_only.sync_from(&messages);
 
                 tracing::info!("[AGENT-LOOP] About to call stream_assistant_response");
                 let ttsr = self.ttsr_engine.as_deref();
@@ -1197,6 +1205,9 @@ impl AgentLoop {
 
             break;
         }
+
+        // Final sync: keep append-only context consistent.
+        append_only.sync_from(&messages);
 
         Ok((messages, events))
     }
