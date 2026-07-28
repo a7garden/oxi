@@ -238,8 +238,7 @@ impl Provider for AzureProvider {
                                     Vec::with_capacity(pending_bytes.len() + bytes.len());
                                 combined.extend_from_slice(pending_bytes);
                                 combined.extend_from_slice(&bytes);
-                                let (text, trailing) =
-                                    super::openai::split_complete_lines(&combined);
+                                let (text, trailing) = super::sse::split_complete_lines(&combined);
                                 *pending_bytes = trailing;
                                 parse_sse_events(&text, &pn, &mid)
                             }

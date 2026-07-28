@@ -8,9 +8,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use super::openai::split_complete_lines;
 use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
+use super::sse::split_complete_lines;
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
     StreamOptions, StreamResult, TextContent, ThinkingContent, ToolCall, Usage,

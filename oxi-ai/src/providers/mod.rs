@@ -14,6 +14,8 @@ mod openai_responses;
 pub mod openai_responses_shared;
 mod options;
 pub mod register_builtins;
+mod sse;
+
 #[allow(unused_imports)]
 pub use register_builtins::AuthMethod;
 #[allow(unused_imports)]

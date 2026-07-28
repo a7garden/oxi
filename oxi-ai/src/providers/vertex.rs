@@ -12,8 +12,8 @@ use std::pin::Pin;
 use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
-use super::openai::split_complete_lines;
 use super::shared_client;
+use super::sse::split_complete_lines;
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions, StreamResult};
 use crate::{Api, Context, Model, StopReason};
 
