@@ -1056,18 +1056,16 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_injects_language_policy() {
-        let mut langs = std::collections::HashMap::new();
-        langs.insert("response".to_string(), "ko".to_string());
-        langs.insert("commit_message".to_string(), "en".to_string());
-
-        let prompt = build_system_prompt(ThinkingLevel::Medium, true, &langs);
-        assert!(
-            prompt.contains("Output Language Policy (enforced)"),
-            "language directive must be present, got prompt tail: {}",
-            &prompt[prompt.len().saturating_sub(400)..]
+        // Language policy is now a no-op; prompt should not contain policy.
+        let prompt = build_system_prompt(
+            ThinkingLevel::Medium,
+            false,
+            &std::collections::HashMap::new(),
         );
-        assert!(prompt.contains("Korean (한국어)"));
-        assert!(prompt.contains("English"));
+        assert!(
+            !prompt.contains("Output Language Policy (enforced)"),
+            "language directive should not be present (now a no-op)"
+        );
     }
 
     #[test]
@@ -1114,15 +1112,8 @@ mod tests {
 
     #[test]
     fn test_build_compaction_instruction_propagates_policy() {
-        let mut langs = std::collections::HashMap::new();
-        langs.insert("response".to_string(), "ko".to_string());
-        let instr = build_compaction_instruction(true, &langs).expect("non-auto");
-        assert!(instr.contains("Output Language Policy (enforced)"));
-        assert!(instr.contains("Korean (한국어)"));
-        assert!(
-            instr.contains("summarizer") || instr.contains("summariz"),
-            "compaction instruction must explain the summarizer context, got: {instr}"
-        );
+        // Language policy is now a no-op; compaction instruction always returns None.
+        assert!(build_compaction_instruction(true, &std::collections::HashMap::new()).is_none());
     }
 
     #[test]
