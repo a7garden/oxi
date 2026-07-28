@@ -1,8 +1,8 @@
 # omp-정렬 리팩토링 — 다음 세션 인계 (HANDOFF)
 
 - **최종 갱신**: 2026-07-28
-- **브랜치**: `main` (모든 P0 작업 + Step 2 병합 완료)
-- **상태**: **P0 완료 + Step 2(Provider trait `name()` 제거) 완료**. P1–P4 미착수.
+- **브랜치**: `main` (P0 + Step 2 + P1.1 dialect foundation 병합 완료)
+- **상태**: **P0 완료 + Step 2 완료 + P1.1 owned dialect foundation 완료**. P1 나머지·P2–P4 미착수.
 
 > **이 문서를 가장 먼저 읽으세요.** 완료된 작업·남은 작업·실행 방법·존중할 결정이 한 곳에 있습니다.
 
@@ -10,7 +10,7 @@
 
 ## 0. 한 줄 요약
 
-P0(Provider/AI 재설계)가 **완료**되었습니다. 프로바이더 정체성 붕괴 수정, catalog 분리, KnownApi 14 정렬, complexity machinery 전체 제거(−4791 lines), Ollama provider 포팅이 main에 병합되어 있습니다. **Step 2 — Provider trait `name()` 제거도 완료**: trait에서 `name()`을 제거하고 `NamedProvider` 래퍼를 폐기하여 identity가 registry key / `Model.provider`에만 존재하는 완전한 3-way 분리를 달성했습니다. 남은 작업은 P1(agent 루프)·P2(TUI)·P3(프롬프트/CLI)·P4(oxi-original 처리)와 P0.5 remote-AGENT provider 3개입니다.
+P0(Provider/AI 재설계)와 Step 2(Provider trait `name()` 제거)가 **완료**되었습니다. 프로바이더 정체성 붕괴 수정, catalog 분리, KnownApi 14 정렬, complexity machinery 제거(−4791 lines), Ollama provider, 완전한 3-way identity 분리가 main에 있습니다. **P1.1 owned dialect 엔진의 foundation도 완료**(`5584ee46`): `oxi-ai/src/dialect/`에 11종 dialect enum + 3-piece 계약 + XML dialect 완전 구현(24 tests). 남은 작업은 P1 나머지(루프 wiring·intent tracing·도구 16개)·P2(TUI)·P3(프롬프트/CLI)·P4(oxi-original)와 P0.5 remote-AGENT provider 3개입니다.
 
 ---
 
@@ -74,9 +74,13 @@ omp 고유 프로토콜. 각각 다-일 작업. `Api` enum에 variant 이미 존
 ### Step 2 — P0.3 후속: Provider trait에서 `name()` 제거 [완료]
 `Provider::name()`을 trait에서 제거하고 `NamedProvider` 래퍼를 폐기함. identity는 이제 registry key와 `Model.provider` 필드에만 존재. factory 함수(`create_builtin_provider*`)는 transport를 직접 반환. P0.3 정체성 회귀 테스트는 `is_some()` + registry-key 기반으로 마이그레이션됨.
 
-### Step 3 — P1: Agent 루프 재정렬
+### Step 3 — P1: Agent 루프 재정렬 [진행 중]
 omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-p1-agent-loop-realignment.md`.
-- owned dialect system, intent tracing(`i` 필드), append-only context
+
+**P1.1 owned dialect — foundation 완료** (`5584ee46`): `oxi-ai/src/dialect/` 엔진. `Dialect` enum(11종) + `from_name`/`preferred_for_model`, 3-piece 계약(prompt 주입 / history 인코딩 / output 파싱), XML dialect 완전 구현(renderer + batch parser, render→parse round-trip 검증), coercion(string-arg 스키마 감지). 24 tests. **후속**: streaming scanner + agent 루프 wiring(턴 완료 시 `parse()` 호출).
+
+남은 P1:
+- intent tracing(`i` 필드), append-only context
 - approval/tier, soft tool requirements, Harmony leak 감지
 - 누락 도구 16개 포팅: `ast_grep`, `ast_edit`, `debug`, `eval`, `computer`, `checkpoint`, `rewind`, `hub`, `learn`, `manage_skill`, `inspect_image`, `yield`, `goal`, `review`, `tts`, `vibe`
 
