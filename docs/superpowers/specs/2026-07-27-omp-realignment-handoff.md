@@ -51,7 +51,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 | `ae441c1f` | **P0.2** | opt-in routing 층 제거: `multi_provider.rs`, `complexity_router.rs`, `provider_pool.rs`, `OxiBuilder::enable_routing()`, `FallbackStart/FallbackExhausted` 이벤트, `AgentEvent::Fallback`, `UiEvent::ModelChanged`. **−2730 lines**. |
 | `afe9cf04` | **P0.2b** | CircuitBreaker + FallbackChain 제거: `circuit_breaker.rs`(944 LOC), `fallback_chain.rs`(642 LOC), agent 루프 retry 재연결(독립 retry 로직 유지). **−2061 lines**. |
 | `50d88302` | **P0.5** | `OllamaProvider` — NDJSON streaming, thinking/tool-call 지원, `sanitizeSchemaForOllama`, `Api::OllamaChat` transport 연결. **+693 lines, 9 tests**. |
-| *(new)* | **Step 2** | `Provider::name()` trait에서 제거. `NamedProvider` 래퍼 폐기. identity = registry key / `Model.provider`. 21 files, −175 lines. 3556 tests green. |
+| `72f1df92` | **Step 2** | `Provider::name()` trait에서 제거. `NamedProvider` 래퍼 폐기. identity = registry key / `Model.provider`. 24 files, −174 lines. 3556 tests green. |
 
 **검증**: 매 커밋 build + clippy + native-browser + fmt + nextest green. 최종 3556 tests.
 
