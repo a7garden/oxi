@@ -654,9 +654,6 @@ mod streaming_lifecycle_tests {
                     as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
             })
         }
-        fn name(&self) -> &str {
-            "scripted"
-        }
     }
 
     struct ScriptedStream {

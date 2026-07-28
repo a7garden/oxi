@@ -13,10 +13,6 @@ use std::pin::Pin;
 pub struct MockProvider;
 
 impl Provider for MockProvider {
-    fn name(&self) -> &str {
-        "mock"
-    }
-
     fn stream<'a>(
         &'a self,
         _model: &'a Model,

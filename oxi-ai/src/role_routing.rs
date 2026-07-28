@@ -143,10 +143,6 @@ impl Provider for RoleRoutingProvider {
             }
         })
     }
-
-    fn name(&self) -> &str {
-        self.default.name()
-    }
 }
 
 #[cfg(test)]

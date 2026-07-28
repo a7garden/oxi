@@ -214,10 +214,6 @@ impl Provider for VertexProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "vertex"
-    }
 }
 
 fn base64_url_encode(value: &serde_json::Value) -> String {
@@ -273,12 +269,6 @@ struct ServiceAccountCreds {
 mod tests {
     use super::*;
     use crate::{Context, Message};
-
-    #[test]
-    fn test_vertex_provider_name() {
-        let provider = VertexProvider::new();
-        assert_eq!(provider.name(), "vertex");
-    }
 
     #[test]
     fn test_build_vertex_contents_with_text() {

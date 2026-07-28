@@ -264,18 +264,22 @@ pub fn is_builtin_provider(name: &str) -> bool {
 /// the `BuiltinProvider` metadata and creates the appropriate provider struct
 /// with the correct base URL, API key, and extra headers.
 ///
+/// The returned transport carries **no identity** — provider identity (the
+/// canonical catalog id) lives in the registry key / `Model.provider` field,
+/// not on the transport. This completes the omp three-way split (transport /
+/// identity / metadata) — see
+/// `docs/superpowers/specs/2026-07-27-omp-realignment-design.md` (P0.3).
+///
 /// Returns `None` if the name is not a known built-in provider.
 pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
     let builtin = get_builtin_provider(name)?;
-    let inner = build_builtin_transport(builtin)?;
-    Some(super::NamedProvider::wrap(builtin.name, inner))
+    build_builtin_transport(builtin)
 }
 
-/// Build the transport for a built-in provider WITHOUT attaching identity.
+/// Build the transport for a built-in provider.
 ///
-/// Identity (the canonical catalog id) is attached by [`create_builtin_provider`]
-/// via [`super::NamedProvider`]. This separation is a stepping stone toward the
-/// omp three-way split — see
+/// Transports carry no identity; the canonical catalog id is the registry key
+/// (see [`create_builtin_provider`]). Part of the omp three-way split — see
 /// `docs/superpowers/specs/2026-07-27-omp-realignment-design.md` (P0.3).
 fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn super::Provider>> {
     match builtin.api {
@@ -378,14 +382,13 @@ pub fn create_builtin_provider_with_options(
     base_url: Option<&str>,
 ) -> Option<Box<dyn super::Provider>> {
     let builtin = get_builtin_provider(name)?;
-    let inner = build_builtin_transport_with_options(builtin, api_key, base_url)?;
-    Some(super::NamedProvider::wrap(builtin.name, inner))
+    build_builtin_transport_with_options(builtin, api_key, base_url)
 }
 
 /// Build the transport for a built-in provider with credential/base-URL
-/// overrides, WITHOUT attaching identity. [`create_builtin_provider_with_options`]
-/// wraps the result with the canonical catalog id via [`super::NamedProvider`].
-/// Falls back to [`build_builtin_transport`] when no override applies.
+/// overrides. Transports carry no identity (the canonical catalog id is the
+/// registry key). Falls back to [`build_builtin_transport`] when no override
+/// applies.
 fn build_builtin_transport_with_options(
     builtin: &'static BuiltinProvider,
     api_key: Option<&str>,
@@ -513,20 +516,19 @@ mod tests {
 
     #[test]
     fn test_create_builtin_provider_anthropic() {
-        let p = create_builtin_provider("anthropic").unwrap();
-        assert_eq!(p.name(), "anthropic");
+        // Identity is the registry key, not a method on the transport.
+        assert!(create_builtin_provider("anthropic").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_openai() {
-        let p = create_builtin_provider("openai").unwrap();
-        assert_eq!(p.name(), "openai");
+        assert!(create_builtin_provider("openai").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_by_alias() {
-        let p = create_builtin_provider("amazon-bedrock").unwrap();
-        assert_eq!(p.name(), "amazon-bedrock"); // catalog id, not the BedrockProvider hardcoded name
+        // "amazon-bedrock" is the catalog id; the transport is BedrockProvider.
+        assert!(create_builtin_provider("amazon-bedrock").is_some());
     }
 
     #[test]
@@ -580,38 +582,35 @@ description = "Test provider from override"
 
     #[test]
     fn test_create_builtin_provider_deepseek() {
-        let p = create_builtin_provider("deepseek").unwrap();
-        assert_eq!(p.name(), "deepseek"); // identity = catalog id (transport is OpenAI-compatible)
+        // P0.3 regression: "deepseek" must resolve (identity = registry key,
+        // transport is OpenAI-compatible). Previously the transport reported
+        // name() == "openai"; now identity lives in the catalog key.
+        assert!(create_builtin_provider("deepseek").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_minimax() {
-        let p = create_builtin_provider("minimax").unwrap();
-        assert_eq!(p.name(), "minimax"); // identity = catalog id (transport is Anthropic-compatible)
+        assert!(create_builtin_provider("minimax").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_minimax_cn() {
-        let p = create_builtin_provider("minimax-cn").unwrap();
-        assert_eq!(p.name(), "minimax-cn"); // identity = catalog id (transport is Anthropic-compatible)
+        assert!(create_builtin_provider("minimax-cn").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_togetherai() {
-        let p = create_builtin_provider("togetherai").unwrap();
-        assert_eq!(p.name(), "togetherai"); // identity = catalog id
+        assert!(create_builtin_provider("togetherai").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_openrouter() {
-        let p = create_builtin_provider("openrouter").unwrap();
-        assert_eq!(p.name(), "openrouter"); // identity = catalog id
+        assert!(create_builtin_provider("openrouter").is_some());
     }
 
     #[test]
     fn test_create_builtin_provider_cerebras() {
-        let p = create_builtin_provider("cerebras").unwrap();
-        assert_eq!(p.name(), "cerebras"); // identity = catalog id
+        assert!(create_builtin_provider("cerebras").is_some());
     }
 
     #[test]
@@ -903,14 +902,12 @@ description = "Test provider from override"
             Some("https://my-proxy.example.com/v1"),
         );
         assert!(p.is_some());
-        assert_eq!(p.unwrap().name(), "openai");
     }
 
     #[test]
     fn test_create_builtin_provider_with_options_anthropic() {
         let p = create_builtin_provider_with_options("anthropic", Some("sk-ant-test-key"), None);
         assert!(p.is_some());
-        assert_eq!(p.unwrap().name(), "anthropic");
     }
 
     #[test]

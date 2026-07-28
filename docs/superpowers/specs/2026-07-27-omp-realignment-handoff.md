@@ -1,8 +1,8 @@
 # omp-정렬 리팩토링 — 다음 세션 인계 (HANDOFF)
 
 - **최종 갱신**: 2026-07-28
-- **브랜치**: `main` (모든 P0 작업 병합 완료)
-- **상태**: **P0 완료** (P0.1–P0.5 Ollama까지). P1–P4 미착수.
+- **브랜치**: `main` (모든 P0 작업 + Step 2 병합 완료)
+- **상태**: **P0 완료 + Step 2(Provider trait `name()` 제거) 완료**. P1–P4 미착수.
 
 > **이 문서를 가장 먼저 읽으세요.** 완료된 작업·남은 작업·실행 방법·존중할 결정이 한 곳에 있습니다.
 
@@ -10,7 +10,7 @@
 
 ## 0. 한 줄 요약
 
-P0(Provider/AI 재설계)가 **완료**되었습니다. 프로바이더 정체성 붕괴 수정, catalog 분리, KnownApi 14 정렬, complexity machinery 전체 제거(−4791 lines), Ollama provider 포팅이 main에 병합되어 있습니다. 남은 작업은 P1(agent 루프)·P2(TUI)·P3(프롬프트/CLI)·P4(oxi-original 처리)와 P0.5 remote-AGENT provider 3개입니다.
+P0(Provider/AI 재설계)가 **완료**되었습니다. 프로바이더 정체성 붕괴 수정, catalog 분리, KnownApi 14 정렬, complexity machinery 전체 제거(−4791 lines), Ollama provider 포팅이 main에 병합되어 있습니다. **Step 2 — Provider trait `name()` 제거도 완료**: trait에서 `name()`을 제거하고 `NamedProvider` 래퍼를 폐기하여 identity가 registry key / `Model.provider`에만 존재하는 완전한 3-way 분리를 달성했습니다. 남은 작업은 P1(agent 루프)·P2(TUI)·P3(프롬프트/CLI)·P4(oxi-original 처리)와 P0.5 remote-AGENT provider 3개입니다.
 
 ---
 
@@ -51,8 +51,9 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 | `ae441c1f` | **P0.2** | opt-in routing 층 제거: `multi_provider.rs`, `complexity_router.rs`, `provider_pool.rs`, `OxiBuilder::enable_routing()`, `FallbackStart/FallbackExhausted` 이벤트, `AgentEvent::Fallback`, `UiEvent::ModelChanged`. **−2730 lines**. |
 | `afe9cf04` | **P0.2b** | CircuitBreaker + FallbackChain 제거: `circuit_breaker.rs`(944 LOC), `fallback_chain.rs`(642 LOC), agent 루프 retry 재연결(독립 retry 로직 유지). **−2061 lines**. |
 | `50d88302` | **P0.5** | `OllamaProvider` — NDJSON streaming, thinking/tool-call 지원, `sanitizeSchemaForOllama`, `Api::OllamaChat` transport 연결. **+693 lines, 9 tests**. |
+| *(new)* | **Step 2** | `Provider::name()` trait에서 제거. `NamedProvider` 래퍼 폐기. identity = registry key / `Model.provider`. 21 files, −175 lines. 3556 tests green. |
 
-**검증**: 매 커밋 build + clippy + native-browser + fmt + nextest green. 최종 3561 tests.
+**검증**: 매 커밋 build + clippy + native-browser + fmt + nextest green. 최종 3556 tests.
 
 ### 사용자 pain 해결
 - **"프로바이더가 이상하다"** → 정체성 붕괴 수정됨.
@@ -70,11 +71,8 @@ omp 고유 프로토콜. 각각 다-일 작업. `Api` enum에 variant 이미 존
 - omp 소스: `packages/ai/src/providers/{cursor,devin,gitlab-duo}.ts`
 - 우선순위 낮음 — 사용자가 직접 요청할 때 진행.
 
-### Step 2 — P0.3 후속: Provider trait에서 `name()` 제거
-현재 `NamedProvider` 래퍼가 identity를 올바르게 전달하지만 trait에 `name()`이 여전히 붙어 있음. omp의 완전한 3-way 분리는:
-- `Provider::name()` trait에서 제거
-- `ProviderDefinition` registry를 identity 단일 소스로
-- base_url/auth 메타데이터를 oxi-catalog `ProviderDescriptor`로 이동
+### Step 2 — P0.3 후속: Provider trait에서 `name()` 제거 [완료]
+`Provider::name()`을 trait에서 제거하고 `NamedProvider` 래퍼를 폐기함. identity는 이제 registry key와 `Model.provider` 필드에만 존재. factory 함수(`create_builtin_provider*`)는 transport를 직접 반환. P0.3 정체성 회귀 테스트는 `is_some()` + registry-key 기반으로 마이그레이션됨.
 
 ### Step 3 — P1: Agent 루프 재정렬
 omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-p1-agent-loop-realignment.md`.
@@ -113,7 +111,7 @@ omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-
 - **language policy**: 제거/단순화.
 
 이미 구현된 architectural 결정:
-- **Provider identity ≠ transport**: `NamedProvider` 래퍼가 catalog id 전달. (P0.3)
+- **Provider identity ≠ transport**: `Provider::name()` trait 제거 완료. identity는 registry key / `Model.provider`에만 존재 (Step 2).
 - **oxi-catalog은 leaf, 단일 소스**: oxi-ai가 소비만. 역방향 의존 금지. (P0.1)
 - **Api = omp KnownApi 14**: Mistral 없음. (P0.4)
 - **complexity machinery 제거 완료**: MultiProvider, ComplexityRouter, CircuitBreaker, FallbackChain, ProviderPool 전부 삭제. agent 루프 retry는 독립 로직(`stream_retry.rs`: 3 attempts, exponential backoff)으로 동작. (P0.2/P0.2b)

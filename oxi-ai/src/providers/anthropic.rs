@@ -524,10 +524,6 @@ impl Provider for AnthropicProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "anthropic"
-    }
 }
 
 /// Build messages in Anthropic format from normalized Message structs.

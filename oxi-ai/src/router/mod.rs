@@ -430,10 +430,6 @@ impl RouterProvider {
 }
 
 impl Provider for RouterProvider {
-    fn name(&self) -> &str {
-        "router"
-    }
-
     fn stream<'a>(
         &'a self,
         model: &'a Model,

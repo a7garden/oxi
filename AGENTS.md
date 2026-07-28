@@ -96,19 +96,21 @@ writing new impls.
 Provider-agnostic streaming interface. Core trait in `providers/trait_def.rs`:
 
 ```rust
-#[async_trait]
 pub trait Provider: Send + Sync + 'static {
-    async fn stream(
-        &self,
-        model: &Model,
-        context: &Context,
+    fn stream<'a>(
+        &'a self,
+        model: &'a Model,
+        context: &'a Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>;
-    fn name(&self) -> &str;
+    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>>;
 }
 ```
 
-**8 built-in providers** in `src/providers/`: openai, openai-responses, anthropic, google, vertex, mistral, azure, bedrock.
+> **Identity ≠ transport.** The trait has **no `name()`** — provider identity
+> (the canonical catalog id) lives in the registry key and `Model.provider`,
+> never on the transport (Step 2 / P0.3 three-way split).
+
+**8 built-in providers** in `src/providers/`: openai, openai-responses, anthropic, google, vertex, azure, bedrock, ollama.
 `model_db.rs` + `catalog/` index pricing/context/feature data for 5000+ models
 across 70+ providers, with models.dev as the source of truth (see
 `data/catalog/README.md`):

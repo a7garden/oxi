@@ -71,10 +71,6 @@ mod tests {
                 Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
             })
         }
-
-        fn name(&self) -> &str {
-            "mock"
-        }
     }
 
     struct MockStream {
@@ -176,10 +172,6 @@ mod tests {
                 Ok(Box::pin(futures::stream::iter(events))
                     as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
             })
-        }
-
-        fn name(&self) -> &str {
-            "multi-turn-tool"
         }
     }
 

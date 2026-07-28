@@ -241,10 +241,6 @@ impl Provider for OpenAiResponsesProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "openai-responses"
-    }
 }
 
 /// Build the input array for the Responses API
@@ -856,12 +852,6 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_name() {
-        let provider = OpenAiResponsesProvider::new();
-        assert_eq!(provider.name(), "openai-responses");
-    }
-
-    #[test]
     fn test_build_input_with_text() {
         let mut context = create_test_context();
         context.add_message(Message::user("Hello, world!"));
@@ -1015,9 +1005,8 @@ mod tests {
 
     #[test]
     fn test_provider_with_api_key() {
-        let provider = OpenAiResponsesProvider::with_api_key("sk-test-key");
-        // Provider should be created successfully
-        assert_eq!(provider.name(), "openai-responses");
+        // Construction with an API key must not panic.
+        let _provider = OpenAiResponsesProvider::with_api_key("sk-test-key");
     }
 
     #[test]

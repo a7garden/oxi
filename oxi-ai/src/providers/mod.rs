@@ -301,49 +301,6 @@ impl Provider for ArcedProvider {
     ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
         Box::pin(async move { self.0.stream(model, context, options).await })
     }
-
-    fn name(&self) -> &str {
-        self.0.name()
-    }
-}
-
-/// Wrapper that attaches the canonical catalog provider id to a transport.
-///
-/// Fixes the provider identity collapse where a transport like `OpenAiProvider`
-/// hardcoded `name() -> "openai"` regardless of which catalog provider it
-/// served (so `create_builtin_provider("deepseek").name()` returned `"openai"`).
-/// The wrapped provider reports the correct catalog id via `name()` while
-/// delegating streaming to the inner transport unchanged.
-///
-/// This is a stepping stone toward the omp three-way split (transport carries
-/// no identity; identity lives in a `ProviderDefinition` registry) — see
-/// `docs/superpowers/specs/2026-07-27-omp-realignment-design.md` (P0.3).
-pub(crate) struct NamedProvider {
-    id: &'static str,
-    inner: Box<dyn Provider>,
-}
-
-impl NamedProvider {
-    /// Wrap `inner` so its reported `name()` is `id` (the catalog provider id),
-    /// not the inner transport's hardcoded protocol-family name.
-    pub(crate) fn wrap(id: &'static str, inner: Box<dyn Provider>) -> Box<dyn Provider> {
-        Box::new(Self { id, inner })
-    }
-}
-
-impl Provider for NamedProvider {
-    fn stream<'a>(
-        &'a self,
-        model: &'a Model,
-        context: &'a Context,
-        options: Option<StreamOptions>,
-    ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
-        self.inner.stream(model, context, options)
-    }
-
-    fn name(&self) -> &str {
-        self.id
-    }
 }
 
 /// Create a stream for a model using the appropriate provider

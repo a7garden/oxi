@@ -1302,9 +1302,6 @@ mod session_id_wiring_tests {
                 ))
             })
         }
-        fn name(&self) -> &str {
-            "nop"
-        }
     }
 
     struct NullResolver;
@@ -1412,9 +1409,6 @@ mod truncation_tests {
                     "truncation tests never stream".to_string(),
                 ))
             })
-        }
-        fn name(&self) -> &str {
-            "nop"
         }
     }
 

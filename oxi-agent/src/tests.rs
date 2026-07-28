@@ -85,10 +85,6 @@ impl Provider for MockProvider {
                 >)
         })
     }
-
-    fn name(&self) -> &str {
-        "mock"
-    }
 }
 
 #[derive(Default)]
@@ -486,10 +482,6 @@ impl Provider for LoopingToolCallProvider {
                 as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "looping-tool-call-provider"
-    }
 }
 
 /// Trivial tool that always returns the same result.
@@ -871,10 +863,6 @@ impl Provider for ApiAwareMockProvider {
                 >)
         })
     }
-
-    fn name(&self) -> &str {
-        "mock-api-aware"
-    }
 }
 
 #[tokio::test]
@@ -1050,10 +1038,6 @@ impl Provider for MultiTurnToolProvider {
                 as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "multi-turn-tool"
-    }
 }
 
 use async_trait::async_trait;
@@ -1156,10 +1140,6 @@ impl Provider for RetryableProvider {
                 >)
         })
     }
-
-    fn name(&self) -> &str {
-        "retryable"
-    }
 }
 
 /// Provider that always returns a provider-level error (non-retryable).
@@ -1178,10 +1158,6 @@ impl Provider for AlwaysErrorProvider {
                 "permanent error".to_string(),
             ))
         })
-    }
-
-    fn name(&self) -> &str {
-        "always-error"
     }
 }
 

@@ -545,10 +545,6 @@ impl Provider for OllamaProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "ollama"
-    }
 }
 
 // ---------------------------------------------------------------------------

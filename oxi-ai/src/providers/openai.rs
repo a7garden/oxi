@@ -465,10 +465,6 @@ impl Provider for OpenAiProvider {
             Ok(Box::pin(stream_with_start) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "openai"
-    }
 }
 
 /// Build messages array from normalized Message structs (without Context dependency).

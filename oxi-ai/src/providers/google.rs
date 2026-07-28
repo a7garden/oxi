@@ -179,22 +179,12 @@ impl Provider for GoogleProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "google"
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Context, Message};
-
-    #[test]
-    fn test_google_provider_name() {
-        let provider = GoogleProvider::new();
-        assert_eq!(provider.name(), "google");
-    }
 
     #[test]
     fn test_build_google_contents_with_text() {

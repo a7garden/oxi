@@ -512,10 +512,6 @@ impl Provider for BedrockProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "bedrock"
-    }
 }
 
 /// Build messages in Bedrock Converse format
@@ -1024,12 +1020,6 @@ mod tests {
     fn test_hex_encode() {
         let data = vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]; // "Hello"
         assert_eq!(hex_encode(data), "48656c6c6f");
-    }
-
-    #[test]
-    fn test_provider_name() {
-        let provider = BedrockProvider::new();
-        assert_eq!(provider.name(), "bedrock");
     }
 
     #[test]

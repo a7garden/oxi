@@ -255,10 +255,6 @@ impl Provider for AzureProvider {
             Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
         })
     }
-
-    fn name(&self) -> &str {
-        "azure"
-    }
 }
 
 /// Build messages array from context
@@ -562,12 +558,6 @@ mod tests {
 
     fn make_test_model(id: &str, base_url: &str) -> Model {
         Model::new(id, id, Api::OpenAiCompletions, "azure", base_url)
-    }
-
-    #[test]
-    fn test_provider_name() {
-        let provider = AzureProvider::new();
-        assert_eq!(provider.name(), "azure");
     }
 
     #[test]

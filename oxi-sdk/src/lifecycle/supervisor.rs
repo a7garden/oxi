@@ -805,9 +805,6 @@ mod tests {
     fn mock_resolver() -> Arc<dyn ProviderResolver> {
         struct MockProvider;
         impl oxi_ai::Provider for MockProvider {
-            fn name(&self) -> &str {
-                "mock"
-            }
             fn stream<'a>(
                 &'a self,
                 _model: &'a oxi_ai::Model,

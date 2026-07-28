@@ -20,7 +20,4 @@ pub trait Provider: Send + Sync + 'static {
         context: &'a Context,
         options: Option<StreamOptions>,
     ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>>;
-
-    /// Get the provider name
-    fn name(&self) -> &str;
 }

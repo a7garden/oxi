@@ -1,7 +1,7 @@
 # omp-정렬 리팩토링 — 진행 상황 (STATUS)
 
 - **최종 갱신**: 2026-07-28
-- **브랜치**: `main` (모든 P0 병합 완료)
+- **브랜치**: `main` (모든 P0 + Step 2 병합 완료)
 - **상위 설계**: `docs/superpowers/specs/2026-07-27-omp-realignment-design.md`
 - **실행 계획**: `docs/superpowers/plans/2026-07-27-p0-provider-redesign.md`
 - **분석 증거**: `docs/superpowers/specs/2026-07-27-omp-realignment-analysis.md`
@@ -47,12 +47,13 @@
 - [ ] **GitLab Duo** (`gitlab-duo-agent`): omp `packages/ai/src/providers/gitlab-duo.ts`. 고유 프로토콜. 높은 노력.
 - (우선순위 낮: OpenRouter, OpenAiCodexResponses, GoogleGeminiCli — OpenAI-compat 또는 경량)
 
-### P0.3 후속 — Provider trait `name()` 제거 [미착수]
+### P0.3 후속 — Provider trait `name()` 제거 [완료]
 
-현재 `NamedProvider` 래퍼가 identity를 올바르게 전달하지만 trait에 `name()`이 여전히 붙어 있음. 완전한 3-way 분리:
-- `Provider::name()` trait에서 제거
-- `ProviderDefinition` registry를 identity 단일 소스로
-- base_url/auth 메타데이터를 oxi-catalog `ProviderDescriptor`로 이동
+`Provider::name()`을 trait에서 제거하고 `NamedProvider` 래퍼를 폐기함 (21 files, −175 lines). 완전한 3-way 분리 달성:
+- `Provider::name()` trait에서 제거 — 모든 8개 transport + RouterProvider + RoleRoutingProvider + 모든 mock에서 삭제
+- `NamedProvider` 래퍼 폐기 — factory 함수(`create_builtin_provider*`)는 transport를 직접 반환
+- identity는 이제 registry key와 `Model.provider` 필드에만 존재
+- P0.3 정체성 회귀 테스트는 `is_some()` + registry-key 기반으로 마이그레이션
 
 ---
 

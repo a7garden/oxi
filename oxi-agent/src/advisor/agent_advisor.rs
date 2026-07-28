@@ -126,9 +126,6 @@ mod tests {
                 Box::pin(futures::stream::empty::<oxi_ai::ProviderEvent>());
             Box::pin(async move { Ok(s) })
         }
-        fn name(&self) -> &str {
-            "nop"
-        }
     }
 
     #[tokio::test]
