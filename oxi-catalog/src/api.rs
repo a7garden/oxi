@@ -88,3 +88,33 @@ impl fmt::Display for Api {
         f.write_str(s)
     }
 }
+
+impl Api {
+    /// Parse a kebab-case dialect string (omp `KnownApi` serialization) into
+    /// an `Api`. Returns `None` for unrecognized strings — the single
+    /// authoritative parser (callers decide the fallback, e.g.
+    /// OpenAI-compatible default for unknown gateways/aggregators).
+    ///
+    /// This exists so the dialect↔string mapping lives with the enum (not
+    /// duplicated as stale `parse_api` matches across crates that miss new
+    /// variants).
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "openai-completions" => Api::OpenAiCompletions,
+            "openai-responses" => Api::OpenAiResponses,
+            "openrouter" => Api::OpenRouter,
+            "openai-codex-responses" => Api::OpenAiCodexResponses,
+            "azure-openai-responses" => Api::AzureOpenAiResponses,
+            "anthropic-messages" => Api::AnthropicMessages,
+            "bedrock-converse-stream" => Api::BedrockConverseStream,
+            "google-generative-ai" => Api::GoogleGenerativeAi,
+            "google-gemini-cli" => Api::GoogleGeminiCli,
+            "google-vertex" => Api::GoogleVertex,
+            "ollama-chat" => Api::OllamaChat,
+            "cursor-agent" => Api::CursorAgent,
+            "gitlab-duo-agent" => Api::GitLabDuoAgent,
+            "devin-agent" => Api::DevinAgent,
+            _ => return None,
+        })
+    }
+}

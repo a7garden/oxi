@@ -69,16 +69,11 @@ pub struct BuiltinProvider {
 /// the historical behavior where most "AI gateway" providers expose an
 /// OpenAI-compatible endpoint.
 fn parse_api(s: &str) -> Api {
-    match s {
-        "openai-completions" => Api::OpenAiCompletions,
-        "openai-responses" => Api::OpenAiResponses,
-        "anthropic-messages" => Api::AnthropicMessages,
-        "google-generative-ai" => Api::GoogleGenerativeAi,
-        "google-vertex" => Api::GoogleVertex,
-        "azure-openai-responses" => Api::AzureOpenAiResponses,
-        "bedrock-converse-stream" => Api::BedrockConverseStream,
-        _ => Api::OpenAiCompletions,
-    }
+    // Delegate to the single authoritative parser on `Api` (covers all 14
+    // KnownApi dialects). Unknown strings default to OpenAI-compatible — the
+    // catalog only emits known dialects, so this is a defensive fallback for
+    // ad-hoc gateways/aggregators.
+    Api::from_kebab_str(s).unwrap_or(Api::OpenAiCompletions)
 }
 
 impl From<&BuiltinProviderEntry> for BuiltinProvider {

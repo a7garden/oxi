@@ -39,16 +39,8 @@ use crate::{Api, InputModality};
 // pattern used by `register_builtins.rs`.
 
 fn parse_api(s: &str) -> Api {
-    match s {
-        "anthropic-messages" => Api::AnthropicMessages,
-        "openai-completions" => Api::OpenAiCompletions,
-        "openai-responses" => Api::OpenAiResponses,
-        "google-generative-ai" => Api::GoogleGenerativeAi,
-        "google-vertex" => Api::GoogleVertex,
-        "azure-openai-responses" => Api::AzureOpenAiResponses,
-        "bedrock-converse-stream" => Api::BedrockConverseStream,
-        _ => Api::OpenAiCompletions,
-    }
+    // Delegate to the single authoritative parser on `Api` (all 14 KnownApi).
+    Api::from_kebab_str(s).unwrap_or(Api::OpenAiCompletions)
 }
 
 fn parse_input_modality(s: &str) -> InputModality {
