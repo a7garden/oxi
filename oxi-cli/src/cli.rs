@@ -75,23 +75,6 @@ pub struct CliArgs {
     /// Resume the most recent session for this project
     #[arg(short, long)]
     pub continue_session: bool,
-
-    // ── Routing configuration ─────────────────────────────────────────
-    /// Enable automatic model routing (falls back to cost-efficient models on errors)
-    #[arg(long = "enable-routing")]
-    pub enable_routing: bool,
-
-    /// Prefer cost-efficient models when routing is enabled
-    #[arg(long = "prefer-cost-efficient")]
-    pub prefer_cost_efficient: bool,
-
-    /// Fallback chain: comma-separated list of provider/model IDs (can be specified multiple times)
-    #[arg(long = "fallback-chain", value_delimiter = ',')]
-    pub fallback_chain: Vec<String>,
-
-    /// Disable automatic fallback (fail fast on errors instead of trying alternatives)
-    #[arg(long = "disable-fallback")]
-    pub disable_fallback: bool,
 }
 
 // ── Subcommands ────────────────────────────────────────────────────
@@ -767,98 +750,6 @@ mod tests {
             }
             _ => panic!("Expected Setup command with reset"),
         }
-    }
-
-    // ── Routing flags ──────────────────────────────────────────────
-
-    #[test]
-    fn test_parse_enable_routing_flag() {
-        let args = parse_args_from(["oxi", "--enable-routing", "Hello"]).unwrap();
-        assert!(args.enable_routing);
-        assert!(!args.prefer_cost_efficient);
-        assert!(args.fallback_chain.is_empty());
-        assert!(!args.disable_fallback);
-    }
-
-    #[test]
-    fn test_parse_prefer_cost_efficient_flag() {
-        let args = parse_args_from(["oxi", "--prefer-cost-efficient", "Hello"]).unwrap();
-        // prefer_cost_efficient alone should NOT set enable_routing
-        assert!(!args.enable_routing); // enable_routing is a separate flag
-        assert!(args.prefer_cost_efficient);
-        assert!(args.fallback_chain.is_empty());
-        assert!(!args.disable_fallback);
-    }
-
-    #[test]
-    fn test_parse_fallback_chain_single() {
-        let args = parse_args_from(["oxi", "--fallback-chain", "openai/gpt-4o", "Hello"]).unwrap();
-        assert_eq!(args.fallback_chain, vec!["openai/gpt-4o"]);
-    }
-
-    #[test]
-    fn test_parse_fallback_chain_comma_separated() {
-        let args = parse_args_from([
-            "oxi",
-            "--fallback-chain",
-            "openai/gpt-4o,anthropic/claude-3",
-            "Hello",
-        ])
-        .unwrap();
-        assert_eq!(
-            args.fallback_chain,
-            vec!["openai/gpt-4o", "anthropic/claude-3"]
-        );
-    }
-
-    #[test]
-    fn test_parse_fallback_chain_multiple_args() {
-        let args = parse_args_from([
-            "oxi",
-            "--fallback-chain",
-            "openai/gpt-4o",
-            "--fallback-chain",
-            "anthropic/claude-3",
-            "Hello",
-        ])
-        .unwrap();
-        assert_eq!(
-            args.fallback_chain,
-            vec!["openai/gpt-4o", "anthropic/claude-3"]
-        );
-    }
-
-    #[test]
-    fn test_parse_fallback_chain_empty() {
-        let args = parse_args_from(["oxi", "Hello"]).unwrap();
-        assert!(args.fallback_chain.is_empty());
-    }
-
-    #[test]
-    fn test_parse_disable_fallback_flag() {
-        let args = parse_args_from(["oxi", "--disable-fallback", "Hello"]).unwrap();
-        assert!(args.disable_fallback);
-    }
-
-    #[test]
-    fn test_parse_routing_all_flags() {
-        let args = parse_args_from([
-            "oxi",
-            "--enable-routing",
-            "--prefer-cost-efficient",
-            "--fallback-chain",
-            "openai/gpt-4o,anthropic/claude-3",
-            "--disable-fallback",
-            "Hello",
-        ])
-        .unwrap();
-        assert!(args.enable_routing);
-        assert!(args.prefer_cost_efficient);
-        assert_eq!(
-            args.fallback_chain,
-            vec!["openai/gpt-4o", "anthropic/claude-3"]
-        );
-        assert!(args.disable_fallback);
     }
 
     // ── Reset command ────────────────────────────────────────────

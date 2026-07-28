@@ -37,7 +37,12 @@ use std::path::{Path, PathBuf};
 /// - 9: model_roles field (named model roles ported from omp, default empty)
 /// - serde-default (no version bump): `advisor` field (`AdvisorSettings`,
 ///   default OFF) — `#[serde(default)]` fills it for older files, no migration.
-const SETTINGS_VERSION: u32 = 9;
+/// - 10: removed dead routing/fallback/circuit-breaker fields:
+///   `enable_routing`, `router_profile`, `prefer_cost_efficient`,
+///   `fallback_chain`, `enable_fallback`, `disable_fallback`,
+///   `circuit_breaker_failure_threshold`, `circuit_breaker_open_duration_secs`.
+///   Old settings files with these fields still load (serde ignores unknown keys).
+const SETTINGS_VERSION: u32 = 10;
 
 /// Known output channels for the TUI language policy.
 ///
@@ -256,39 +261,6 @@ pub struct Settings {
     /// Updated when API keys are entered in setup wizard or on demand.
     #[serde(default)]
     pub dynamic_models: HashMap<String, Vec<String>>,
-
-    // ── Multi-provider routing ─────────────────────────────────────────
-    /// Enable automatic complexity-based routing
-    #[serde(default = "default_false")]
-    pub enable_routing: bool,
-
-    /// Router profile name to use (e.g., "auto", "balanced").
-    #[serde(default)]
-    pub router_profile: Option<String>,
-
-    /// Prefer cost-efficient models when routing
-    #[serde(default = "default_true")]
-    pub prefer_cost_efficient: bool,
-
-    /// Fallback chain: ordered list of model IDs to try on failure
-    #[serde(default)]
-    pub fallback_chain: Vec<String>,
-
-    /// Whether to use provider fallback on errors (false = fail fast)
-    #[serde(default = "default_true")]
-    pub enable_fallback: bool,
-
-    /// Disable automatic fallback (same as enable_fallback = false)
-    #[serde(default)]
-    pub disable_fallback: bool,
-
-    /// Circuit breaker failure threshold per provider
-    #[serde(default = "default_circuit_failure_threshold")]
-    pub circuit_breaker_failure_threshold: u32,
-
-    /// Circuit breaker open duration in seconds
-    #[serde(default = "default_circuit_open_duration_secs")]
-    pub circuit_breaker_open_duration_secs: u64,
 
     // ── Keybindings ────────────────────────────────────────────────────
     /// User-defined keybinding overrides.
@@ -521,14 +493,6 @@ fn default_ttsr_mode() -> String {
     "prose_only".to_string()
 }
 
-fn default_circuit_failure_threshold() -> u32 {
-    5
-}
-
-fn default_circuit_open_duration_secs() -> u64 {
-    30
-}
-
 fn default_tool_timeout() -> u64 {
     120
 }
@@ -577,15 +541,6 @@ impl Default for Settings {
             themes: Vec::new(),
             custom_providers: Vec::new(),
             dynamic_models: HashMap::new(),
-            // Multi-provider routing defaults
-            enable_routing: false,
-            router_profile: None,
-            prefer_cost_efficient: true,
-            fallback_chain: Vec::new(),
-            enable_fallback: true,
-            disable_fallback: false,
-            circuit_breaker_failure_threshold: 5,
-            circuit_breaker_open_duration_secs: 30,
             keybindings: HashMap::new(),
             output_languages: HashMap::new(),
             language_policy_enabled: false,
@@ -1039,42 +994,12 @@ impl Settings {
     ///
     /// * `model` — CLI-specified model override
     /// * `provider` — CLI-specified provider override
-    /// * `enable_routing` — CLI-specified enable_routing override
-    /// * `prefer_cost_efficient` — CLI-specified prefer_cost_efficient override
-    /// * `fallback_chain` — CLI-specified fallback chain override
-    /// * `disable_fallback` — CLI-specified disable_fallback override
-    pub fn merge_cli(
-        &mut self,
-        model: Option<String>,
-        provider: Option<String>,
-        enable_routing: Option<bool>,
-        prefer_cost_efficient: Option<bool>,
-        fallback_chain: Option<Vec<String>>,
-        disable_fallback: Option<bool>,
-    ) {
+    pub fn merge_cli(&mut self, model: Option<String>, provider: Option<String>) {
         if let Some(m) = model {
             self.last_used_model = Some(m);
         }
         if let Some(p) = provider {
             self.last_used_provider = Some(p);
-        }
-        if let Some(r) = enable_routing {
-            self.enable_routing = r;
-        }
-        if let Some(p) = prefer_cost_efficient {
-            self.prefer_cost_efficient = p;
-        }
-        if let Some(fc) = fallback_chain
-            && !fc.is_empty()
-        {
-            self.fallback_chain = fc;
-        }
-        if let Some(df) = disable_fallback {
-            self.disable_fallback = df;
-            // If disable_fallback is true, disable fallback
-            if df {
-                self.enable_fallback = false;
-            }
         }
     }
 
@@ -1119,11 +1044,6 @@ impl Settings {
     pub fn effective_max_tokens(&self) -> Option<usize> {
         self.max_response_tokens
             .or(self.max_tokens.map(|t| t as usize))
-    }
-
-    /// Get the configured router profile name.
-    pub fn router_profile(&self) -> Option<&str> {
-        self.router_profile.as_deref()
     }
 
     // ── Theme persistence ─────────────────────────────────────────────
@@ -1446,31 +1366,11 @@ mod tests {
         let mut settings = Settings::default();
         settings.last_used_model = Some("gpt-4o".to_string());
 
-        settings.merge_cli(Some("claude".to_string()), None, None, None, None, None);
+        settings.merge_cli(Some("claude".to_string()), None);
         assert_eq!(settings.last_used_model, Some("claude".to_string()));
 
-        settings.merge_cli(None, Some("google".to_string()), None, None, None, None);
+        settings.merge_cli(None, Some("google".to_string()));
         assert_eq!(settings.last_used_provider, Some("google".to_string()));
-
-        // Test routing flags
-        settings.merge_cli(
-            None,
-            None,
-            Some(true),
-            Some(false),
-            Some(vec!["openai/gpt-4o".to_string()]),
-            Some(false),
-        );
-        assert!(settings.enable_routing);
-        assert!(!settings.prefer_cost_efficient);
-        assert_eq!(settings.fallback_chain, vec!["openai/gpt-4o"]);
-        assert!(!settings.disable_fallback);
-
-        // Test disable_fallback sets enable_fallback to false
-        let mut settings2 = Settings::default();
-        settings2.merge_cli(None, None, None, None, None, Some(true));
-        assert!(settings2.disable_fallback);
-        assert!(!settings2.enable_fallback);
     }
 
     // ── Layered loading ──────────────────────────────────────────────

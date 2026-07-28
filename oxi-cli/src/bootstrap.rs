@@ -30,18 +30,7 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // re-applies the exact same overrides — adding a new flag can't silently
     // diverge between the two call sites.
     let apply_cli_overrides = |s: &mut Settings| {
-        s.merge_cli(
-            args.model.clone(),
-            args.provider.clone(),
-            Some(args.enable_routing),
-            Some(args.prefer_cost_efficient),
-            if args.fallback_chain.is_empty() {
-                None
-            } else {
-                Some(args.fallback_chain.clone())
-            },
-            Some(args.disable_fallback),
-        );
+        s.merge_cli(args.model.clone(), args.provider.clone());
     };
     apply_cli_overrides(&mut settings);
 
@@ -82,8 +71,8 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // Register custom OpenAI-compatible providers from settings.
     register_custom_providers(&settings);
 
-    // Register model router (opt-in).
-    register_router_provider(&settings);
+    // Register model router (reads router_config file, opt-in).
+    register_router_provider();
 
     // Apply thinking level if specified.
     if let Some(ref level_str) = args.thinking {
@@ -480,8 +469,8 @@ fn load_wasm_extensions(
     Some(mgr)
 }
 
-/// Register the model auto-router if configured in settings.
-fn register_router_provider(settings: &Settings) {
+/// Register the model auto-router if configured in router_config.
+fn register_router_provider() {
     let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
     let project_dir = std::env::current_dir().unwrap_or_default();
 
@@ -561,10 +550,6 @@ fn register_router_provider(settings: &Settings) {
     );
 
     oxi_sdk::router::register_router(&ai_cfg);
-
-    if let Some(profile) = settings.router_profile() {
-        tracing::info!("Router active with profile: {profile}");
-    }
 }
 
 /// Decide whether this run is the TUI (interactive) mode. Mirrors the

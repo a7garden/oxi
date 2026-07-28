@@ -97,26 +97,6 @@ mod tests {
         assert_eq!(args.timeout, Some(30));
     }
 
-    #[test]
-    fn test_routing_flags() {
-        let args = CliArgs::try_parse_from([
-            "oxi",
-            "--enable-routing",
-            "--prefer-cost-efficient",
-            "--fallback-chain",
-            "openai/gpt-4o,anthropic/claude-3",
-            "--disable-fallback",
-        ])
-        .unwrap();
-        assert!(args.enable_routing);
-        assert!(args.prefer_cost_efficient);
-        assert_eq!(
-            args.fallback_chain,
-            vec!["openai/gpt-4o", "anthropic/claude-3"]
-        );
-        assert!(args.disable_fallback);
-    }
-
     // ── Subcommand parsing ──────────────────────────────────────────
 
     #[test]

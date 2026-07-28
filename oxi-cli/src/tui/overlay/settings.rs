@@ -121,9 +121,9 @@ struct SettingsOverlay {
     app_state: SharedAppState,
     changed: bool,
     /// Labels of items the user toggled/cycled in this session. Used to
-    /// guard side-effecting live-apply steps (extensions reload, routing
-    /// model switch) so they only fire when the user actually touched the
-    /// relevant toggle — not on every save.
+    /// guard side-effecting live-apply steps (extensions reload,
+    /// language policy rebuild) so they only fire when the user actually
+    /// touched the relevant toggle — not on every save.
     changed_labels: std::collections::HashSet<String>,
     /// Snapshot of the theme registry at overlay-open time. The
     /// choice list for the `theme` item is built from this: custom
@@ -171,7 +171,6 @@ impl SettingsOverlay {
                     SettingsItem::Toggle { label, value } => match label.as_str() {
                         "extensions" => settings.extensions_enabled = *value,
                         "auto_compaction" => settings.auto_compaction = *value,
-                        "routing" => settings.enable_routing = *value,
                         "language_policy" => settings.language_policy_enabled = *value,
                         _ => {}
                     },
@@ -425,43 +424,6 @@ impl OverlayComponent for SettingsOverlay {
                                         &self.session,
                                         fresh.extensions_enabled,
                                     );
-                                }
-                                if self.changed_labels.contains("routing") {
-                                    let fresh = crate::store::settings::Settings::load()
-                                        .unwrap_or_default();
-                                    let cur = self.session.model_id();
-                                    let on_router = cur.starts_with("router/");
-                                    if fresh.enable_routing && !on_router {
-                                        if let Err(e) = self.session.set_model("router/auto") {
-                                            app.add_notification(
-                                                format!("Could not enable router: {e}"),
-                                                crate::tui::app::NotificationKind::Warning,
-                                            );
-                                        } else {
-                                            app.footer_state.data.model_name =
-                                                "router/auto".to_string();
-                                        }
-                                    } else if !fresh.enable_routing && on_router {
-                                        let default =
-                                            fresh.effective_model(None).unwrap_or_default();
-                                        let provider =
-                                            fresh.effective_provider(None).unwrap_or_default();
-                                        let full = if default.contains('/') || provider.is_empty() {
-                                            default
-                                        } else {
-                                            format!("{provider}/{default}")
-                                        };
-                                        if !full.is_empty() {
-                                            if let Err(e) = self.session.set_model(&full) {
-                                                app.add_notification(
-                                                    format!("Could not disable router: {e}"),
-                                                    crate::tui::app::NotificationKind::Warning,
-                                                );
-                                            } else {
-                                                app.footer_state.data.model_name = full;
-                                            }
-                                        }
-                                    }
                                 }
                                 // 3b: if the user just touched
                                 // `language_policy` but the directive is
@@ -768,36 +730,6 @@ fn build_settings_items(
             // When OFF, the item is rendered greyed-out and Enter/Space
             // are blocked. When ON, channels become editable.
             disabled: !settings.language_policy_enabled,
-        });
-    }
-
-    // ── Routing ─────────────────────────────────────────────────────────
-    let gd = dirs::config_dir().unwrap_or_default().join("oxi");
-    let pd = std::env::current_dir().unwrap_or_default();
-    let has_router = crate::store::router_config::load_router_config(&gd, &pd).is_some();
-
-    items.push(SettingsItem::ReadOnly {
-        label: "───────────────────".to_string(),
-        value: "─────────────────────".to_string(),
-    });
-
-    if has_router {
-        items.push(SettingsItem::Toggle {
-            label: "routing".to_string(),
-            value: settings.enable_routing,
-        });
-        items.push(SettingsItem::Action {
-            label: "► Configure router".to_string(),
-            id: "router_setup",
-        });
-    } else {
-        items.push(SettingsItem::ReadOnly {
-            label: "routing".to_string(),
-            value: "not configured".to_string(),
-        });
-        items.push(SettingsItem::Action {
-            label: "► Set up router".to_string(),
-            id: "router_setup",
         });
     }
 

@@ -452,14 +452,6 @@ fn config_show() -> Result<()> {
     );
     println!("  Theme: {}", settings.get_theme_name());
     println!("  Glyph set: {}", settings.glyph_set.label());
-    println!(
-        "  Routing: {}",
-        if settings.enable_routing {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
     println!("  Thinking: {:?}", settings.thinking_level);
     println!("  Extensions enabled: {}", settings.extensions_enabled);
     println!("  Auto-compaction: {}", settings.auto_compaction);
@@ -651,9 +643,6 @@ fn config_set(key: &str, value: &str) -> Result<()> {
                 .parse()
                 .map_err(|e: oxi_tui_legacy::symbols::UnknownGlyphSet| anyhow::anyhow!("{e}"))?;
         }
-        "enable_routing" | "routing" => {
-            settings.enable_routing = parse_config_bool(value)?;
-        }
         "language_policy_enabled" | "language_policy" => {
             settings.language_policy_enabled = parse_config_bool(value)?;
         }
@@ -661,7 +650,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
                   thinking_level, extensions_enabled, auto_compaction,\
-                  glyph, enable_routing, language_policy_enabled, tool_timeout,\
+                  glyph, language_policy_enabled, tool_timeout,\
                   max_tokens, temperature, session_history_size",
                 key
             );
@@ -719,7 +708,6 @@ fn config_get(key: &str) -> Result<()> {
             }
         }
         "glyph" | "glyph_set" => settings.glyph_set.label().to_string(),
-        "enable_routing" | "routing" => settings.enable_routing.to_string(),
         "language_policy_enabled" | "language_policy" => {
             settings.language_policy_enabled.to_string()
         }
@@ -727,7 +715,7 @@ fn config_get(key: &str) -> Result<()> {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
                   thinking_level, extensions_enabled, auto_compaction,\
-                  glyph, enable_routing, language_policy_enabled, tool_timeout,\
+                  glyph, language_policy_enabled, tool_timeout,\
                   max_tokens, temperature, session_history_size,\
                   extensions, skills, prompts, themes, custom_providers",
                 key
