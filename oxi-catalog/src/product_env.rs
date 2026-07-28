@@ -57,7 +57,7 @@ fn resolve_home(oxi_home: Option<&str>, user_home: Option<&Path>) -> Option<Path
 /// # Examples
 ///
 /// ```
-/// # use oxi_ai::product_env::home_dir;
+/// # use oxi_catalog::product_env::home_dir;
 /// // In a normal environment this resolves to either $OXI_HOME or ~/.oxi.
 /// let _ = home_dir();
 /// ```

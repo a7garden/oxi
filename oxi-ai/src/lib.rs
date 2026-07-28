@@ -14,7 +14,10 @@
 //! This crate provides a unified interface for interacting with multiple LLM providers.
 //! It handles streaming, tool calling, context management, and cross-provider handoffs.
 
-pub mod catalog;
+// Catalog moved to the `oxi-catalog` crate (omp aligns `pi-catalog` as a
+// separate package). Re-exported here for backward compatibility during the
+// migration; new code should depend on `oxi-catalog` directly.
+pub use oxi_catalog::catalog;
 pub mod circuit_breaker;
 pub mod compaction;
 pub mod compaction_seam;
@@ -26,7 +29,10 @@ mod high_level;
 mod messages;
 pub mod oauth;
 /// Product home-directory resolution (`OXI_HOME` / `~/.oxi`).
-pub mod product_env;
+// `product_env` moved to oxi-catalog (it owns catalog cache/override dirs);
+// re-exported here so `oxi_ai::product_env` and `oxi_sdk::ports::fs::path`
+// (which delegates here) keep working.
+pub use oxi_catalog::product_env;
 pub mod provider_pool;
 pub mod provider_registry;
 mod providers;
@@ -60,6 +66,11 @@ pub mod prelude {
 
 /// Provider-specific error type for LLM operations.
 pub use crate::error::ProviderError;
+
+/// Structured HTTP error detail (status/body/provider/request-id) carried by
+/// [`ProviderError::HttpError`]. Re-exported so downstream crates (oxi-agent,
+/// oxi-cli) can construct/inspect structured errors.
+pub use crate::error::HttpErrorDetail;
 
 /// Shared conversation context.
 pub use context::Context;
@@ -103,8 +114,6 @@ pub use providers::OpenAiResponsesProvider;
 pub use providers::BedrockProvider;
 /// Google (Gemini) provider implementation.
 pub use providers::GoogleProvider;
-/// Mistral provider implementation.
-pub use providers::MistralProvider;
 /// Google Vertex AI provider implementation.
 pub use providers::VertexProvider;
 

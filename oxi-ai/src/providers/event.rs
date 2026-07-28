@@ -148,6 +148,42 @@ pub enum ProviderEvent {
         partial: Arc<AssistantMessage>,
     },
 
+    /// Image content block started (incremental image streaming, e.g. Gemini).
+    ///
+    /// Mirrors omp's `AssistantMessageEvent::image_start`. Without this event
+    /// family, providers that stream images incrementally (Gemini) cannot
+    /// represent image output — see P0-D in the omp-realignment design.
+    ImageStart {
+        /// Index of the content block in the message.
+        content_index: usize,
+        /// MIME type of the incoming image (e.g. `image/png`).
+        mime_type: String,
+        /// Partial assistant message state.
+        partial: Arc<AssistantMessage>,
+    },
+
+    /// Incremental image delta received (base64-encoded chunk).
+    ImageDelta {
+        /// Index of the content block in the message.
+        content_index: usize,
+        /// Base64-encoded image bytes delta to append.
+        delta: String,
+        /// Partial assistant message state.
+        partial: Arc<AssistantMessage>,
+    },
+
+    /// Image content block finished.
+    ImageEnd {
+        /// Index of the content block in the message.
+        content_index: usize,
+        /// The complete base64-encoded image data.
+        data: String,
+        /// MIME type of the image.
+        mime_type: String,
+        /// Partial assistant message state.
+        partial: Arc<AssistantMessage>,
+    },
+
     /// Stream completed successfully.
     Done {
         /// Why the model stopped generating.
@@ -203,7 +239,10 @@ impl ProviderEvent {
             | ProviderEvent::ThinkingEnd { partial, .. }
             | ProviderEvent::ToolCallStart { partial, .. }
             | ProviderEvent::ToolCallDelta { partial, .. }
-            | ProviderEvent::ToolCallEnd { partial, .. } => Some(partial),
+            | ProviderEvent::ToolCallEnd { partial, .. }
+            | ProviderEvent::ImageStart { partial, .. }
+            | ProviderEvent::ImageDelta { partial, .. }
+            | ProviderEvent::ImageEnd { partial, .. } => Some(partial),
             ProviderEvent::Done { message, .. } => Some(message),
             ProviderEvent::Error { error, .. } => Some(error),
             _ => None,

@@ -9,8 +9,8 @@ use std::pin::Pin;
 use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
-use super::openai::split_complete_lines;
 use super::shared_client;
+use super::sse::split_complete_lines;
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions, StreamResult};
 use crate::{Api, Context, Model, StopReason};
 
@@ -132,7 +132,9 @@ impl Provider for GoogleProvider {
             if !response.status().is_success() {
                 let status = response.status();
                 let body: String = response.text().await.unwrap_or_default();
-                return Err(ProviderError::HttpError(status.as_u16(), body));
+                return Err(ProviderError::HttpError(
+                    crate::error::HttpErrorDetail::new(status.as_u16(), body),
+                ));
             }
 
             // Create event stream — use split_complete_lines (like OpenAI provider)

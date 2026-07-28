@@ -599,9 +599,9 @@ impl StreamTrait for FallbackExhaustedStream {
 /// Determine the fallback reason from a provider error.
 fn error_to_fallback_reason(error: &ProviderError) -> FallbackReason {
     match error {
-        ProviderError::HttpError(429, _) => FallbackReason::RateLimit,
-        ProviderError::HttpError(code, _) if *code >= 500 => FallbackReason::ServerError,
-        ProviderError::HttpError(code, _) if *code == 401 || *code == 403 => {
+        ProviderError::HttpError(d) if d.status == 429 => FallbackReason::RateLimit,
+        ProviderError::HttpError(d) if d.status >= 500 => FallbackReason::ServerError,
+        ProviderError::HttpError(d) if d.status == 401 || d.status == 403 => {
             FallbackReason::AuthError
         }
         ProviderError::RequestFailed(_) => FallbackReason::NetworkError,

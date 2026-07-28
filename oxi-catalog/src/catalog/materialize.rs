@@ -256,8 +256,10 @@ mod tests {
 
     #[test]
     fn protocol_for_mistral() {
+        // omp treats Mistral as openai-completions-compatible (no separate
+        // dialect); it falls through to the default Bearer/openai-completions.
         let (api, auth) = protocol_for("@ai-sdk/mistral");
-        assert_eq!(api, Api::MistralConversations);
+        assert_eq!(api, Api::OpenAiCompletions);
         assert_eq!(auth, crate::catalog::provider::AuthMethod::Bearer);
     }
 

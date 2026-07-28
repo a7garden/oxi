@@ -2,6 +2,61 @@
 
 use thiserror::Error;
 
+/// Structured HTTP error detail.
+///
+/// omp aligns per-provider error classes — `AnthropicApiError` carries a
+/// `request-id`, `OpenAIHttpError` parses the body envelope, etc. This struct
+/// captures the common structured fields so callers inspect provider/error
+/// identity directly instead of parsing a flat `(u16, String)` tuple.
+#[derive(Debug, Clone)]
+pub struct HttpErrorDetail {
+    /// HTTP status code.
+    pub status: u16,
+    /// Raw response body.
+    pub body: String,
+    /// Provider id (e.g. `"anthropic"`, `"openai"`, `"deepseek"`), if known.
+    pub provider: Option<String>,
+    /// Provider request id (Anthropic `request-id`, OpenAI `x-request-id`, …).
+    pub request_id: Option<String>,
+}
+
+impl HttpErrorDetail {
+    /// Minimal detail from a status code and response body.
+    pub fn new(status: u16, body: String) -> Self {
+        Self {
+            status,
+            body,
+            provider: None,
+            request_id: None,
+        }
+    }
+
+    /// Attach the provider id.
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
+    }
+
+    /// Attach a provider request id (e.g. parsed from a response header).
+    pub fn with_request_id(mut self, request_id: Option<String>) -> Self {
+        self.request_id = request_id;
+        self
+    }
+}
+
+impl std::fmt::Display for HttpErrorDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP error {}: {}", self.status, self.body)?;
+        if let Some(provider) = &self.provider {
+            write!(f, " [{provider}]")?;
+        }
+        if let Some(id) = &self.request_id {
+            write!(f, " (request-id: {id})")?;
+        }
+        Ok(())
+    }
+}
+
 /// Provider-specific errors
 #[derive(Error, Debug)]
 pub enum ProviderError {
@@ -17,9 +72,9 @@ pub enum ProviderError {
     #[error("Provider not implemented: {0}")]
     NotImplemented(String),
 
-    /// HTTP error (status code + message).
-    #[error("HTTP error {0}: {1}")]
-    HttpError(u16, String),
+    /// HTTP error with structured detail (status, body, provider, request-id).
+    #[error("{0}")]
+    HttpError(HttpErrorDetail),
 
     /// HTTP request failed.
     #[error("Request failed: {0}")]
@@ -69,7 +124,7 @@ impl ProviderError {
     /// Returns whether this error is retryable.
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::HttpError(status, _) => *status == 429 || *status >= 500,
+            Self::HttpError(detail) => detail.status == 429 || detail.status >= 500,
             Self::NetworkError(_) => true,
             Self::Timeout => true,
             Self::RateLimited { .. } => true,
@@ -81,7 +136,21 @@ impl ProviderError {
     pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
             Self::RateLimited { retry_after } => *retry_after,
-            Self::HttpError(429, _) => Some(std::time::Duration::from_secs(5)),
+            Self::HttpError(detail) if detail.status == 429 => {
+                Some(std::time::Duration::from_secs(5))
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the HTTP status code if this is an HTTP error, else `None`.
+    ///
+    /// Convenience for call sites that previously destructured the old
+    /// `HttpError(u16, String)` tuple (e.g. inside `matches!`, which cannot
+    /// carry a guard).
+    pub fn http_status(&self) -> Option<u16> {
+        match self {
+            Self::HttpError(detail) => Some(detail.status),
             _ => None,
         }
     }
@@ -131,8 +200,19 @@ mod tests {
             "Unknown provider: foo"
         );
         assert_eq!(
-            ProviderError::HttpError(429, "rate limited".to_string()).to_string(),
+            ProviderError::HttpError(HttpErrorDetail::new(429, "rate limited".to_string()))
+                .to_string(),
             "HTTP error 429: rate limited"
+        );
+        // Structured detail surfaces provider + request-id (omp AnthropicApiError align).
+        assert_eq!(
+            ProviderError::HttpError(
+                HttpErrorDetail::new(500, "boom".to_string())
+                    .with_provider("anthropic")
+                    .with_request_id(Some("req_123".to_string()))
+            )
+            .to_string(),
+            "HTTP error 500: boom [anthropic] (request-id: req_123)"
         );
         assert_eq!(
             ProviderError::InvalidResponse("bad json".to_string()).to_string(),

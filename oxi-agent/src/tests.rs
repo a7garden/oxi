@@ -1134,8 +1134,7 @@ impl Provider for RetryableProvider {
 
             if *call_count <= self.fail_count {
                 return Err(oxi_ai::ProviderError::HttpError(
-                    429,
-                    "rate limited".to_string(),
+                    oxi_ai::HttpErrorDetail::new(429, "rate limited".to_string()),
                 ));
             }
 

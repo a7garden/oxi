@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-tui-legacy", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact"]
+members = ["oxi-catalog", "oxi-ai", "oxi-agent", "oxi-tui", "oxi-tui-legacy", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact"]
 exclude = ["scripts"]
 
 # Shared defaults inherited by every workspace member. Members can override

@@ -12,8 +12,8 @@ use std::pin::Pin;
 use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
-use super::openai::split_complete_lines;
 use super::shared_client;
+use super::sse::split_complete_lines;
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions, StreamResult};
 use crate::{Api, Context, Model, StopReason};
 
@@ -108,8 +108,10 @@ impl VertexProvider {
             .map_err(ProviderError::RequestFailed)?;
         if !response.status().is_success() {
             return Err(ProviderError::HttpError(
-                response.status().as_u16(),
-                response.text().await.unwrap_or_default(),
+                crate::error::HttpErrorDetail::new(
+                    response.status().as_u16(),
+                    response.text().await.unwrap_or_default(),
+                ),
             ));
         }
         let token_response: TokenResponse = response
@@ -175,7 +177,9 @@ impl Provider for VertexProvider {
             if !response.status().is_success() {
                 let status = response.status();
                 let body: String = response.text().await.unwrap_or_default();
-                return Err(ProviderError::HttpError(status.as_u16(), body));
+                return Err(ProviderError::HttpError(
+                    crate::error::HttpErrorDetail::new(status.as_u16(), body),
+                ));
             }
             let model_name = model.id.clone();
             // Use split_complete_lines for safe UTF-8 boundary handling

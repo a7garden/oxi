@@ -4590,6 +4590,7 @@ dependencies = [
  "hmac 0.12.1",
  "jsonschema",
  "mockito",
+ "oxi-catalog",
  "parking_lot",
  "pkcs8",
  "raii_flock",
@@ -4608,6 +4609,24 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "oxi-catalog"
+version = "0.60.0"
+dependencies = [
+ "dirs",
+ "filetime",
+ "flate2",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

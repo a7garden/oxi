@@ -208,7 +208,9 @@ impl Provider for AzureProvider {
             if !response.status().is_success() {
                 let status = response.status();
                 let body: String = response.text().await.unwrap_or_default();
-                return Err(ProviderError::HttpError(status.as_u16(), body));
+                return Err(ProviderError::HttpError(
+                    crate::error::HttpErrorDetail::new(status.as_u16(), body),
+                ));
             }
 
             // Create event stream
@@ -236,8 +238,7 @@ impl Provider for AzureProvider {
                                     Vec::with_capacity(pending_bytes.len() + bytes.len());
                                 combined.extend_from_slice(pending_bytes);
                                 combined.extend_from_slice(&bytes);
-                                let (text, trailing) =
-                                    super::openai::split_complete_lines(&combined);
+                                let (text, trailing) = super::sse::split_complete_lines(&combined);
                                 *pending_bytes = trailing;
                                 parse_sse_events(&text, &pn, &mid)
                             }

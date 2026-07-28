@@ -8,9 +8,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use super::openai::split_complete_lines;
 use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
+use super::sse::split_complete_lines;
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
     StreamOptions, StreamResult, TextContent, ThinkingContent, ToolCall, Usage,
@@ -441,8 +441,19 @@ impl Provider for AnthropicProvider {
 
             if !response.status().is_success() {
                 let status = response.status();
+                // Anthropic returns a request-id header — capture it so errors
+                // carry the traceable id (omp AnthropicApiError align).
+                let request_id = response
+                    .headers()
+                    .get("request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string);
                 let body: String = response.text().await.unwrap_or_default();
-                return Err(ProviderError::HttpError(status.as_u16(), body));
+                return Err(ProviderError::HttpError(
+                    crate::error::HttpErrorDetail::new(status.as_u16(), body)
+                        .with_provider("anthropic")
+                        .with_request_id(request_id),
+                ));
             }
 
             // Create event stream

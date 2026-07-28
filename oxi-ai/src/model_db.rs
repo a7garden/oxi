@@ -39,17 +39,8 @@ use crate::{Api, InputModality};
 // pattern used by `register_builtins.rs`.
 
 fn parse_api(s: &str) -> Api {
-    match s {
-        "anthropic-messages" => Api::AnthropicMessages,
-        "openai-completions" => Api::OpenAiCompletions,
-        "openai-responses" => Api::OpenAiResponses,
-        "google-generative-ai" => Api::GoogleGenerativeAi,
-        "google-vertex" => Api::GoogleVertex,
-        "mistral-conversations" => Api::MistralConversations,
-        "azure-openai-responses" => Api::AzureOpenAiResponses,
-        "bedrock-converse-stream" => Api::BedrockConverseStream,
-        _ => Api::OpenAiCompletions,
-    }
+    // Delegate to the single authoritative parser on `Api` (all 14 KnownApi).
+    Api::from_kebab_str(s).unwrap_or(Api::OpenAiCompletions)
 }
 
 fn parse_input_modality(s: &str) -> InputModality {
@@ -476,8 +467,8 @@ mod tests {
         // Verify the materialize path can decode the embedded snapshot and
         // produce valid ModelEntry records. This tests the full pipeline:
         //   gzip → MdCatalog → materialize() → ModelEntry
-        let compressed = include_bytes!("../data/catalog/_snapshot.json.gz");
-        let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
+        let compressed = oxi_catalog::snapshot_gzip_bytes();
+        let mut decoder = flate2::read::GzDecoder::new(compressed);
         let mut json = String::new();
         decoder.read_to_string(&mut json).unwrap();
         let catalog: crate::catalog::MdCatalog = serde_json::from_str(&json).unwrap();
@@ -502,7 +493,6 @@ mod tests {
                         | Api::OpenAiResponses
                         | Api::GoogleGenerativeAi
                         | Api::GoogleVertex
-                        | Api::MistralConversations
                         | Api::AzureOpenAiResponses
                         | Api::BedrockConverseStream
                 ),

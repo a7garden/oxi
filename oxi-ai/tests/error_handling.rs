@@ -26,39 +26,39 @@ fn not_implemented_display() {
 
 #[test]
 fn http_error_display() {
-    let err = ProviderError::HttpError(429, "rate limited".into());
+    let err = ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(429, "rate limited".into()));
     assert_eq!(err.to_string(), "HTTP error 429: rate limited");
 }
 
 #[test]
 fn http_error_common_status_codes() {
     assert!(
-        ProviderError::HttpError(400, "bad request".into())
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(400, "bad request".into()))
             .to_string()
             .contains("400")
     );
     assert!(
-        ProviderError::HttpError(401, "unauthorized".into())
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(401, "unauthorized".into()))
             .to_string()
             .contains("401")
     );
     assert!(
-        ProviderError::HttpError(403, "forbidden".into())
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(403, "forbidden".into()))
             .to_string()
             .contains("403")
     );
     assert!(
-        ProviderError::HttpError(500, "internal".into())
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(500, "internal".into()))
             .to_string()
             .contains("500")
     );
     assert!(
-        ProviderError::HttpError(502, "bad gateway".into())
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(502, "bad gateway".into()))
             .to_string()
             .contains("502")
     );
     assert!(
-        ProviderError::HttpError(503, "unavailable".into())
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(503, "unavailable".into()))
             .to_string()
             .contains("503")
     );
@@ -131,7 +131,10 @@ fn from_json_error_to_provider_error() {
 
 #[test]
 fn provider_error_chain_preserves_original_message() {
-    let inner = ProviderError::HttpError(503, "service unavailable".into());
+    let inner = ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(
+        503,
+        "service unavailable".into(),
+    ));
     let top: Error = inner.into();
     let msg = top.to_string();
     assert!(msg.contains("503"), "should preserve status code: {msg}");
@@ -248,7 +251,7 @@ fn provider_errors_have_debug_impl() {
         ProviderError::MissingApiKey,
         ProviderError::UnknownProvider("x".into()),
         ProviderError::NotImplemented("y".into()),
-        ProviderError::HttpError(500, "err".into()),
+        ProviderError::HttpError(oxi_ai::HttpErrorDetail::new(500, "err".into())),
         ProviderError::InvalidResponse("bad".into()),
         ProviderError::InvalidApiKey,
         ProviderError::StreamError("disconnected".into()),
