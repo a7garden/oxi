@@ -25,6 +25,10 @@ pub mod text;
 pub mod theme;
 pub mod widgets;
 
+/// omp-aligned append-only tape rendering engine (standalone, not wired into
+/// default render path — future integration gated behind `OXI_TAPE_RENDER=1`).
+pub mod tape;
+
 /// Color representation for TUI rendering.
 pub use cell::Color;
 
