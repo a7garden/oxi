@@ -1154,9 +1154,10 @@ impl ToolRegistry {
         all_tools.push(Box::new(computer_tool::ComputerTool));
         all_tools.push(Box::new(tts_tool::TtsTool));
         all_tools.push(Box::new(vibe_tool::VibeTool));
-        // debug_tool unregistered — 15/16 actions were scaffolds.
-        // Re-enable when full DAP proxy is wired.
-        // all_tools.push(Box::new(debug_tool::DebugTool));
+        // debug_tool — DAP-backed debugger integration.
+        // Most actions are validated scaffolds (route through xd://debug);
+        // real launch/attach/breakpoint control is wired via the harness device.
+        all_tools.push(Box::new(debug_tool::DebugTool));
 
         for tool in all_tools {
             if tool.essential() || !disabled.contains(tool.name()) {
