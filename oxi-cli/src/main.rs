@@ -2,8 +2,8 @@
 //!
 //! A command-line interface for interacting with AI models.
 
-use anyhow::Result;
-use clap::Parser;
+use anyhow::{Context, Result};
+use clap::{CommandFactory, Parser};
 use oxi::cli::{CliArgs, Commands, ConfigCommands, IssueCommands, PkgCommands};
 use oxi::storage::packages::{PackageManager, ResourceKind};
 use oxi::store::session::{AgentMessage, SessionManager};
@@ -114,6 +114,22 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         }
         Commands::Share { session_id } => {
             handle_share_command(session_id.as_deref()).await?;
+        }
+        Commands::Completions { shell } => {
+            handle_completions_command(shell)?;
+        }
+        Commands::Install { source } => {
+            handle_install_command(source).await?;
+        }
+        Commands::Update { check } => {
+            handle_update_command(*check).await?;
+        }
+        Commands::Commit {
+            push,
+            dry_run,
+            context,
+        } => {
+            handle_commit_command(*push, *dry_run, context.as_deref()).await?;
         }
     }
 
@@ -429,6 +445,7 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
         } => config_add_provider(name, base_url, api_key_env, api),
         ConfigCommands::RemoveProvider { name } => config_remove_provider(name),
         ConfigCommands::Reset { all } => handle_config_reset(*all),
+        ConfigCommands::Path => handle_config_path_command(),
     }
 }
 
@@ -1606,5 +1623,156 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("Failed to create gist: {}", stderr.trim());
     }
+    Ok(())
+}
+
+/// Handle `oxi completions <bash|zsh|fish>` — print shell completion script.
+fn handle_completions_command(shell: &str) -> Result<()> {
+    let shell = match shell {
+        "bash" => clap_complete::Shell::Bash,
+        "zsh" => clap_complete::Shell::Zsh,
+        "fish" => clap_complete::Shell::Fish,
+        "elvish" => clap_complete::Shell::Elvish,
+        "powershell" => clap_complete::Shell::PowerShell,
+        _ => {
+            anyhow::bail!("Unknown shell: {shell}. Supported: bash, zsh, fish, elvish, powershell")
+        }
+    };
+
+    let mut cmd = oxi::cli::CliArgs::command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+    Ok(())
+}
+
+/// Handle `oxi install <source>` — dispatch to `ext install` or `pkg install`.
+async fn handle_install_command(source: &str) -> Result<()> {
+    use oxi::cli::{ExtCommands, PkgCommands};
+
+    // Local paths or npm: prefix → pkg install
+    if source.starts_with('.')
+        || source.starts_with('/')
+        || source.starts_with('~')
+        || source.starts_with("npm:")
+    {
+        handle_pkg_command(&PkgCommands::Install {
+            source: source.to_string(),
+        })?;
+    } else {
+        // GitHub repo spec (owner/repo) → ext install
+        handle_ext_command(&ExtCommands::Install {
+            source: source.to_string(),
+            prerelease: false,
+        })
+        .await?;
+    }
+    Ok(())
+}
+
+/// Handle `oxi update [--check]` — check for and install updates.
+async fn handle_update_command(check: bool) -> Result<()> {
+    #[cfg(feature = "self-update")]
+    {
+        use self_update::cargo_crate_version;
+
+        let current = cargo_crate_version!();
+        println!("Current version: v{current}");
+
+        if check {
+            return Ok(());
+        }
+
+        // Use cargo install via `cargo install oxi-cli --force`
+        println!("Updating oxi...");
+        let status = tokio::process::Command::new("cargo")
+            .args(["install", "oxi-cli", "--force"])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .await?;
+
+        if !status.success() {
+            anyhow::bail!("Update failed: cargo install exited with {status}");
+        }
+
+        println!("✅ oxi updated successfully. Restart to use the new version.");
+        Ok(())
+    }
+
+    #[cfg(not(feature = "self-update"))]
+    {
+        let _ = check;
+        anyhow::bail!("Self-update is not available (compiled without `self-update` feature)");
+    }
+}
+
+/// Handle `oxi commit [--push] [--dry-run] [-c <context>]`.
+async fn handle_commit_command(push: bool, dry_run: bool, context: Option<&str>) -> Result<()> {
+    // Check for staged changes
+    let diff_output = tokio::process::Command::new("git")
+        .args(["diff", "--cached"])
+        .output()
+        .await
+        .with_context(|| "Failed to run git diff --cached")?;
+
+    if diff_output.stdout.is_empty() && diff_output.stderr.is_empty() {
+        // No staged changes — check working tree
+        let has_changes = tokio::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .output()
+            .await
+            .with_context(|| "Failed to run git status")?;
+        if has_changes.stdout.is_empty() {
+            anyhow::bail!("Nothing to commit. Working tree is clean.");
+        }
+        anyhow::bail!(
+            "No staged changes. Use `git add` to stage files, or include unstaged changes with `git commit -a`."
+        );
+    }
+
+    // TODO: wire into the agent's commit tool for LLM-driven message generation
+    // For now, fall back to an editor-based commit
+    let ctx = context.unwrap_or("");
+    let mut args = vec!["commit".to_string()];
+    if dry_run {
+        args.push("--dry-run".to_string());
+    }
+    if !ctx.is_empty() {
+        args.push("-m".to_string());
+        args.push(format!("feat: {ctx}"));
+    }
+    if push {
+        args.push("--verbose".to_string());
+    }
+
+    let status = tokio::process::Command::new("git")
+        .args(&args)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await?;
+
+    if status.success() {
+        if push {
+            let push_status = tokio::process::Command::new("git")
+                .args(["push"])
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status()
+                .await?;
+            if !push_status.success() {
+                anyhow::bail!("Commit succeeded but push failed.");
+            }
+        }
+        Ok(())
+    } else {
+        anyhow::bail!("Commit failed.");
+    }
+}
+
+/// Handle `oxi config path` — print config file path.
+fn handle_config_path_command() -> Result<()> {
+    let path = oxi::store::settings::Settings::settings_path()?;
+    println!("{}", path.display());
     Ok(())
 }

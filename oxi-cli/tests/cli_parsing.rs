@@ -241,4 +241,96 @@ mod tests {
         let res = CliArgs::try_parse_from(["oxi", "pkg"]);
         assert!(res.is_err());
     }
+
+    #[test]
+    fn test_completions_subcommand() {
+        let args = CliArgs::try_parse_from(["oxi", "completions", "bash"]).unwrap();
+        match args.command {
+            Some(Commands::Completions { shell }) => {
+                assert_eq!(shell, "bash");
+            }
+            other => panic!("Expected Completions command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_install_subcommand() {
+        let args = CliArgs::try_parse_from(["oxi", "install", "some/pkg"]).unwrap();
+        match args.command {
+            Some(Commands::Install { source }) => {
+                assert_eq!(source, "some/pkg");
+            }
+            other => panic!("Expected Install command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_update_subcommand() {
+        let args = CliArgs::try_parse_from(["oxi", "update"]).unwrap();
+        match args.command {
+            Some(Commands::Update { check }) => {
+                assert!(!check);
+            }
+            other => panic!("Expected Update command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_update_check_subcommand() {
+        let args = CliArgs::try_parse_from(["oxi", "update", "--check"]).unwrap();
+        match args.command {
+            Some(Commands::Update { check }) => {
+                assert!(check);
+            }
+            other => panic!("Expected Update command with --check, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_commit_subcommand() {
+        let args = CliArgs::try_parse_from(["oxi", "commit"]).unwrap();
+        match args.command {
+            Some(Commands::Commit {
+                push,
+                dry_run,
+                context,
+            }) => {
+                assert!(!push);
+                assert!(!dry_run);
+                assert!(context.is_none());
+            }
+            other => panic!("Expected Commit command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_commit_with_flags() {
+        let args =
+            CliArgs::try_parse_from(["oxi", "commit", "--push", "--dry-run", "-c", "fix bug"])
+                .unwrap();
+        match args.command {
+            Some(Commands::Commit {
+                push,
+                dry_run,
+                context,
+            }) => {
+                assert!(push);
+                assert!(dry_run);
+                assert_eq!(context.as_deref(), Some("fix bug"));
+            }
+            other => panic!("Expected Commit command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_config_path_subcommand() {
+        let args = CliArgs::try_parse_from(["oxi", "config", "path"]).unwrap();
+        match args.command {
+            Some(Commands::Config { action }) => match action {
+                ConfigCommands::Path => {}
+                other => panic!("Expected Path, got {:?}", other),
+            },
+            other => panic!("Expected Config command, got {:?}", other),
+        }
+    }
 }

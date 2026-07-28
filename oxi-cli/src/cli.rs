@@ -172,6 +172,34 @@ pub enum Commands {
         /// Session ID or prefix (default: most recent for this project)
         session_id: Option<String>,
     },
+    /// Generate shell completion scripts (bash, zsh, or fish)
+    Completions {
+        /// Shell type: bash, zsh, or fish
+        shell: String,
+    },
+    /// Install an extension package (alias for `ext install`/`pkg install`)
+    Install {
+        /// Package source: a local directory path or npm:@scope/name
+        source: String,
+    },
+    /// Update oxi to the latest version
+    Update {
+        /// Check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
+    /// Generate a commit message and commit staged changes
+    Commit {
+        /// Push after committing
+        #[arg(long)]
+        push: bool,
+        /// Preview without committing
+        #[arg(long)]
+        dry_run: bool,
+        /// Additional context for the model
+        #[arg(long, short)]
+        context: Option<String>,
+    },
 }
 
 // ── Package subcommands ────────────────────────────────────────────
@@ -349,6 +377,8 @@ pub enum ConfigCommands {
         #[arg(long, short)]
         all: bool,
     },
+    /// Show the config file path
+    Path,
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────
