@@ -272,6 +272,71 @@ struct PreparedToolCallOutcome {
     args: serde_json::Value,
 }
 
+/// Check whether a tool call requires approval before execution.
+///
+/// Returns `None` if approval is not required or was granted.
+/// Returns `Some(AgentToolResult)` (error) if denied or approval-required.
+/// In the latter case, also emits [`AgentEvent::ApprovalRequired`].
+async fn check_tool_approval(
+    loop_ref: &super::AgentLoop,
+    tool_call_id: &str,
+    tool_name: &str,
+    args: &serde_json::Value,
+    emit: &super::EmitFn,
+) -> Option<AgentToolResult> {
+    use crate::agent_loop::config::ApprovalDecision;
+
+    let config = &loop_ref.config.approval_config;
+
+    // No tiers configured = no approval gating.
+    if config.require_approval_for.is_empty() {
+        return None;
+    }
+
+    // No hook registered = permissive.
+    let hook = config.hook.as_ref()?;
+
+    // Get the tool's tier. Default Exec (safest) if tool not found.
+    let tier = loop_ref
+        .tools
+        .get(tool_name)
+        .map(|t| t.tool_tier())
+        .unwrap_or(crate::tools::ToolTier::Exec);
+
+    // This tier doesn't require approval.
+    if !config.require_approval_for.contains(&tier) {
+        return None;
+    }
+
+    match hook(tool_name, args).await {
+        Ok(ApprovalDecision::Allow) => None,
+        Ok(ApprovalDecision::Deny(reason)) => {
+            Some(AgentToolResult::error(format!("Access denied: {}", reason)))
+        }
+        Ok(ApprovalDecision::RequireApproval(reason)) => {
+            emit(AgentEvent::ApprovalRequired {
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                args: args.clone(),
+                reason: reason.clone(),
+                session_id: loop_ref.session_id.clone(),
+            });
+            Some(AgentToolResult::error(format!(
+                "Approval required: {}",
+                reason
+            )))
+        }
+        Err(e) => {
+            tracing::warn!(
+                tool = %tool_name,
+                error = %e,
+                "Approval hook failed, allowing tool call"
+            );
+            None // Allow on hook error (fail open logged).
+        }
+    }
+}
+
 pub(crate) async fn execute_tool_calls(
     loop_ref: &super::AgentLoop,
     messages: &mut Vec<Message>,
@@ -328,6 +393,45 @@ async fn execute_tool_calls_sequential(
             intent: intent.clone(),
             context: infer_context(&tc_name, &tc_args),
         });
+
+        // Check approval before executing the tool.
+        if let Some(approval_result) =
+            check_tool_approval(loop_ref, &tc_id, &tc_name, &tc_args, emit).await
+        {
+            let finalized = FinalizedToolCall {
+                tool_call,
+                result: approval_result,
+                is_error: true,
+            };
+
+            let end_intent = loop_ref
+                .tools
+                .get(&tc_name)
+                .and_then(|t| Some(t.intent()?.to_string()));
+
+            emit(AgentEvent::ToolExecutionEnd {
+                tool_call_id: finalized.tool_call.id.clone(),
+                tool_name: finalized.tool_call.name.clone(),
+                intent: end_intent,
+                result: oxi_ai::ToolResult {
+                    tool_call_id: finalized.tool_call.id.clone(),
+                    content: finalized.result.output.clone(),
+                    status: String::from("error"),
+                },
+                is_error: true,
+            });
+
+            let tool_result_message = create_tool_result_message(&finalized);
+            let msg = Message::ToolResult(tool_result_message.clone());
+            emit(AgentEvent::MessageStart {
+                message: msg.clone(),
+            });
+            emit(AgentEvent::MessageEnd { message: msg });
+
+            finalized_calls.push(finalized);
+            tool_result_messages.push(tool_result_message);
+            continue;
+        }
 
         let prepared = prepare_tool_call(loop_ref, &tool_call).await;
 
@@ -435,6 +539,44 @@ async fn execute_tool_calls_parallel(
             intent: intent.clone(),
             context: infer_context(&tc_name, &tc_args),
         });
+
+        // Check approval before preparing the tool.
+        if let Some(approval_result) =
+            check_tool_approval(loop_ref, &tc_id, &tc_name, &tc_args, emit).await
+        {
+            let finalized = FinalizedToolCall {
+                tool_call,
+                result: approval_result,
+                is_error: true,
+            };
+
+            let end_intent = loop_ref
+                .tools
+                .get(&tc_name)
+                .and_then(|t| Some(t.intent()?.to_string()));
+
+            emit(AgentEvent::ToolExecutionEnd {
+                tool_call_id: finalized.tool_call.id.clone(),
+                tool_name: finalized.tool_call.name.clone(),
+                intent: end_intent,
+                result: oxi_ai::ToolResult {
+                    tool_call_id: finalized.tool_call.id.clone(),
+                    content: finalized.result.output.clone(),
+                    status: String::from("error"),
+                },
+                is_error: true,
+            });
+
+            let tool_result_message = create_tool_result_message(&finalized);
+            let msg = Message::ToolResult(tool_result_message.clone());
+            emit(AgentEvent::MessageStart {
+                message: msg.clone(),
+            });
+            emit(AgentEvent::MessageEnd { message: msg });
+
+            finalized_calls.push(FinalizedToolCallEntry::Immediate(Box::new(finalized)));
+            continue;
+        }
 
         let prepared = prepare_tool_call(loop_ref, &tool_call).await;
 
@@ -592,9 +734,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
 ) -> ExecutedToolCallOutcome {
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
-    let static_intent = tool.as_ref().and_then(|t| {
-        Some(t.intent()?.to_string())
-    });
+    let static_intent = tool.as_ref().and_then(|t| Some(t.intent()?.to_string()));
 
     let mut result = AgentToolResult::success("");
     let mut is_error = false;

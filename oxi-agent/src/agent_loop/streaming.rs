@@ -293,6 +293,42 @@ pub(crate) async fn stream_assistant_response(
                         };
                     }
                 }
+
+                // ── Harmony leak detection ──
+                if loop_ref.config.harmony_leak_detection && detect_harmony_leak(&delta_clone) {
+                    let preview = if delta_clone.len() > 80 {
+                        format!("{}...", &delta_clone[..80])
+                    } else {
+                        delta_clone.clone()
+                    };
+                    tracing::warn!(
+                        session_id = ?loop_ref.session_id,
+                        preview = %preview,
+                        "Harmony leak detected, aborting stream"
+                    );
+                    emit(super::AgentEvent::HarmonyLeakDetected {
+                        preview: preview.clone(),
+                        session_id: loop_ref.session_id.clone(),
+                    });
+                    let mut partial_msg = messages
+                        .last()
+                        .and_then(|m| match m {
+                            Message::Assistant(a) => Some(a.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| {
+                            oxi_ai::AssistantMessage::new(
+                                oxi_ai::Api::OpenAiCompletions,
+                                "agent",
+                                &loop_ref.config.model_id,
+                            )
+                        });
+                    partial_msg.stop_reason = StopReason::Aborted;
+                    return StreamOutcome::Error {
+                        message: partial_msg,
+                        detail: format!("Harmony leak detected: {}", preview),
+                    };
+                }
             }
 
             ProviderEvent::ThinkingStart { partial, .. } if added_partial => {
@@ -656,6 +692,36 @@ fn extract_tool_call_id(messages: &[Message], content_index: usize) -> Option<St
         ContentBlock::ToolCall(tc) => Some(tc.id.clone()),
         _ => None,
     })
+}
+
+/// Detect GPT-5 Harmony protocol leakage in model output.
+///
+/// Checks for known Harmony marker patterns:
+/// - `to=functions.<name>` — function routing directive
+/// - `<|start|>`, `<|end|>`, `<|channel|>`, etc. — Harmony block markers
+///
+/// Returns `true` if any marker is found.
+fn detect_harmony_leak(text: &str) -> bool {
+    use std::sync::LazyLock;
+
+    // Harmony function routing marker: `to=functions.xxx`
+    static MARKER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"\bto=functions\.[A-Za-z_]\w*\b").expect("valid harmony marker regex")
+    });
+    if MARKER_RE.is_match(text) {
+        return true;
+    }
+
+    // Harmony block markers: `<|start|>`, `<|end|>`, `<|channel|>`, etc.
+    static BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"<\|\s*(?:start|end|channel|message|call|return)\s*\|>")
+            .expect("valid harmony block regex")
+    });
+    if BLOCK_RE.is_match(text) {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]

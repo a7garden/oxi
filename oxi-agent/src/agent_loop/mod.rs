@@ -107,6 +107,8 @@ pub struct AgentLoop {
     /// agent injects a steering message to break the loop (omp
     /// `TERMINAL_TOOL_RESULT_ABORT_REASON` pattern).
     tool_call_loop_guard: parking_lot::Mutex<oxi_ai::utils::tool_call_loop::ToolCallLoopGuard>,
+    /// Soft requirement state — tracks which tools have been reminded.
+    soft_requirement_state: parking_lot::Mutex<crate::agent_loop::config::SoftRequirementState>,
 }
 
 impl AgentLoop {
@@ -164,6 +166,9 @@ impl AgentLoop {
                 oxi_ai::utils::tool_call_loop::ToolCallLoopGuard::new(
                     config.tool_call_loop_guard.clone(),
                 ),
+            ),
+            soft_requirement_state: parking_lot::Mutex::new(
+                crate::agent_loop::config::SoftRequirementState::default(),
             ),
         }
     }
@@ -1053,6 +1058,79 @@ impl AgentLoop {
                                 "tool-call loop detected; injecting steering message"
                             );
                             self.tool_call_loop_guard.lock().reset();
+                        }
+                    }
+                }
+
+                // ── Soft requirement check ──
+                // After tool execution, check if all soft-required tools were called.
+                // First miss → reminder steering message. Second miss → escalation.
+                let assistant_has_tool_calls = assistant_message
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, oxi_ai::ContentBlock::ToolCall(_)));
+                if !self.config.soft_requirements.is_empty() && assistant_has_tool_calls {
+                    let called_tools: std::collections::HashSet<String> = assistant_message
+                        .content
+                        .iter()
+                        .filter_map(|block| match block {
+                            oxi_ai::ContentBlock::ToolCall(tc) => Some(tc.name.clone()),
+                            _ => None,
+                        })
+                        .collect();
+
+                    for req in &self.config.soft_requirements {
+                        if called_tools.contains(&req.tool_name) {
+                            self.soft_requirement_state
+                                .lock()
+                                .reminded
+                                .remove(&req.tool_name);
+                            continue;
+                        }
+
+                        if self
+                            .soft_requirement_state
+                            .lock()
+                            .reminded
+                            .contains(&req.tool_name)
+                        {
+                            tracing::warn!(
+                                session_id = ?self.session_id,
+                                tool = %req.tool_name,
+                                "Soft requirement escalation"
+                            );
+                            emit(AgentEvent::SoftRequirementEscalation {
+                                tool_name: req.tool_name.clone(),
+                                reason: req.reason.clone(),
+                                session_id: self.session_id.clone(),
+                            });
+                            let escalate_msg = Message::User(oxi_ai::UserMessage::new(format!(
+                                "[IMPORTANT] You still have not used the `{}` tool, which is required. {}",
+                                req.tool_name, req.reason,
+                            )));
+                            messages.push(escalate_msg.clone());
+                            new_messages.push(escalate_msg);
+                        } else {
+                            tracing::info!(
+                                session_id = ?self.session_id,
+                                tool = %req.tool_name,
+                                "Soft requirement reminder"
+                            );
+                            self.soft_requirement_state
+                                .lock()
+                                .reminded
+                                .insert(req.tool_name.clone());
+                            emit(AgentEvent::SoftRequirementReminder {
+                                tool_name: req.tool_name.clone(),
+                                reason: req.reason.clone(),
+                                session_id: self.session_id.clone(),
+                            });
+                            let reminder_msg = Message::User(oxi_ai::UserMessage::new(format!(
+                                "Reminder: please use the `{}` tool. {}",
+                                req.tool_name, req.reason,
+                            )));
+                            messages.push(reminder_msg.clone());
+                            new_messages.push(reminder_msg);
                         }
                     }
                 }

@@ -675,6 +675,24 @@ pub struct RenderOutput {
 }
 
 /// Core trait for all agent tools
+/// Risk tier for approval gating.
+///
+/// Determines which approval tiers gate a tool call.
+/// - `Read`  — no side effects (lookup, search, inspection).
+/// - `Write` — mutates data (creates, edits, commits).
+/// - `Exec`  — arbitrary side effects (shell, eval, network).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolTier {
+    /// Read-only — inspection, search, lookup.
+    Read,
+    /// Data mutation — create, edit, commit.
+    Write,
+    /// Arbitrary execution — shell, eval, network, subagent.
+    #[default]
+    Exec,
+}
+
+/// Core trait for all agent tools
 #[async_trait]
 pub trait AgentTool: Send + Sync {
     /// Tool name (used in function calls)
@@ -771,6 +789,17 @@ pub trait AgentTool: Send + Sync {
         ToolExecutionMode::ParallelSafe
     }
 
+    /// Risk tier for approval gating.
+    ///
+    /// - `Read`  — no side effects (lookup, search, inspection).
+    /// - `Write` — mutates data (creates, edits, commits).
+    /// - `Exec`  — arbitrary side effects (shell, eval, network).
+    ///
+    /// Default: `Exec` (safest default — requires explicit opt-down).
+    fn tool_tier(&self) -> ToolTier {
+        ToolTier::Exec
+    }
+
     /// Return the current active tab ID, if this tool manages browser tabs.
     /// Defaults to `None`. Browser tools override this to return the tab ID
     /// of the currently-open tab during execution, so the agent loop can
@@ -798,10 +827,10 @@ pub trait AgentTool: Send + Sync {
 // Built-in tools
 /// Ask tool — ask the user one or more clarifying questions via the TUI overlay.
 pub mod ask;
-/// AST structural search tool (wraps the `sg` CLI).
-pub mod ast_grep;
 /// AST-aware structural code rewriting tool (ast-grep backed).
 pub mod ast_edit;
+/// AST structural search tool (wraps the `sg` CLI).
+pub mod ast_grep;
 /// Bash shell execution tool.
 pub mod bash;
 /// Browser tools (engine abstraction always compiled).
@@ -872,8 +901,8 @@ pub mod write;
 // Re-export for convenience
 pub use bash::BashTool;
 pub use debug_tool::DebugTool;
-pub use eval_tool::EvalTool;
 pub use edit::EditTool;
+pub use eval_tool::EvalTool;
 pub use find::FindTool;
 pub use grep::GrepTool;
 pub use ls::LsTool;
@@ -881,9 +910,9 @@ pub use read::ReadTool;
 // pub use search_cache;
 
 pub use crate::mcp::McpTool;
+pub use ask::{AskBridge, AskTool};
 pub use ast_edit::AstEditTool;
 pub use ast_grep::AstGrepTool;
-pub use ask::{AskBridge, AskTool};
 pub use commit::CommitTool;
 pub use context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
 pub use memory_edit::MemoryEditTool;

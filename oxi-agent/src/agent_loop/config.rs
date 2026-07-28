@@ -107,6 +107,27 @@ pub struct AgentLoopConfig {
     /// steering message to break the loop. Default: threshold 5, with
     /// `read`/`ls`/`grep` exempt.
     pub tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions,
+    /// Approval/tier configuration for gating tool execution.
+    ///
+    /// When configured, tool calls at tiers in `require_approval_for` are
+    /// checked against the approval hook before execution. Default: no
+    /// approval gating (all tools allowed without check).
+    pub approval_config: ApprovalConfig,
+
+    /// Soft tool requirements: tools the agent should call.
+    ///
+    /// On the first turn where a soft-required tool is missing, the loop
+    /// injects a reminder steering message. On the second consecutive miss,
+    /// it escalates. Default: empty (no soft requirements).
+    pub soft_requirements: Vec<SoftRequirement>,
+    /// Enable GPT-5 Harmony protocol leak detection.
+    ///
+    /// When `true`, each text delta is scanned for Harmony markers
+    /// (`to=functions.xxx`, `<|start|>`, etc.). On detection, the stream
+    /// is aborted, a `HarmonyLeakDetected` event is emitted, and the
+    /// turn is restarted. Default: `false`.
+    pub harmony_leak_detection: bool,
+
     /// Owned (in-band) tool-calling dialect.
     ///
     /// When `Some`, the loop targets models **without native tool support**:
@@ -151,6 +172,9 @@ impl Default for AgentLoopConfig {
             subagent_runner: None,
             subagent_depth: 0,
             thinking_loop_detection: true,
+            approval_config: ApprovalConfig::default(),
+            soft_requirements: Vec::new(),
+            harmony_leak_detection: false,
             dialect: None,
             tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions::default(
             ),
@@ -210,6 +234,68 @@ pub type AfterToolCallHook = Arc<
         + Send
         + Sync,
 >;
+
+// ── Approval system types ────────────────────────────────────────────────
+
+/// Decision returned by the approval hook for a tool call.
+#[derive(Debug, Clone)]
+pub enum ApprovalDecision {
+    /// Allow without conditions.
+    Allow,
+    /// Deny with a reason.
+    Deny(String),
+    /// Request human approval with a reason.
+    RequireApproval(String),
+}
+
+/// Async hook invoked before tool execution to check approval.
+///
+/// Receives the tool name and parsed arguments. Returns an `ApprovalDecision`.
+/// When `None` is returned (no hook registered), all tools are allowed.
+pub type ApprovalHook = Arc<
+    dyn Fn(&str, &Value) -> Pin<Box<dyn Future<Output = Result<ApprovalDecision, Error>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Configuration for the approval/tier system.
+///
+/// Controls which tool tiers require approval before execution.
+/// When `hook` is `None`, all tools are allowed regardless of tier.
+/// When empty `require_approval_for`, no tiers trigger approval checks.
+///
+/// Default: no tiers require approval (opt-in only).
+#[derive(Clone, Default)]
+pub struct ApprovalConfig {
+    /// Tool tiers that require approval before execution.
+    /// Empty = no approval gating.
+    pub require_approval_for: Vec<crate::tools::ToolTier>,
+    /// Approval hook. When `None`, decisions are permissive.
+    pub hook: Option<ApprovalHook>,
+}
+
+// ── Soft requirement types ──────────────────────────────────────────────
+
+/// State for soft requirement tracking across turns.
+///
+/// Tracks which soft-required tools have been reminded/escalated.
+/// Resets when all soft requirements are satisfied or config changes.
+#[derive(Debug, Clone, Default)]
+pub struct SoftRequirementState {
+    /// Set of tool names that have been reminded (missed once).
+    /// When a tool appears here and is still missing next turn, escalate.
+    pub reminded: std::collections::HashSet<String>,
+}
+
+/// Soft requirement: a tool the agent should ideally call.
+/// First miss → reminder; second miss → escalation.
+#[derive(Debug, Clone)]
+pub struct SoftRequirement {
+    /// Tool name to check for.
+    pub tool_name: String,
+    /// Reason shown to the model.
+    pub reason: String,
+}
 
 // MAX_RETRIES and BACKOFF_BASE_SECS are now defined in crate::stream_retry
 // and re-exported from crate::agent_loop::retry.

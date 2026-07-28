@@ -428,6 +428,68 @@ pub enum AgentEvent {
         /// The follow-up message.
         message: oxi_ai::Message,
     },
+
+    // ── Approval events ────────────────────────────────────────────
+    /// A tool call requires human approval.
+    ApprovalRequired {
+        /// Tool call identifier.
+        tool_call_id: String,
+        /// Name of the tool requiring approval.
+        tool_name: String,
+        /// Arguments passed to the tool.
+        args: serde_json::Value,
+        /// Why approval is needed.
+        reason: String,
+        /// Session identifier for correlation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
+    /// Result of an approval request.
+    ApprovalResult {
+        /// Tool call identifier this result corresponds to.
+        tool_call_id: String,
+        /// Whether the tool call was approved.
+        approved: bool,
+        /// Optional reason from the approver.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
+    // ── Soft requirement events ─────────────────────────────────────
+    /// A soft-required tool was not called on the first turn.
+    /// The loop injects a reminder steering message.
+    SoftRequirementReminder {
+        /// Tool that should have been called.
+        tool_name: String,
+        /// Reason why the tool is needed.
+        reason: String,
+        /// Session identifier for correlation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
+    /// A soft-required tool was not called after multiple turns.
+    /// Escalation — stronger action may be needed.
+    SoftRequirementEscalation {
+        /// Tool that should have been called.
+        tool_name: String,
+        /// Reason why the tool is needed.
+        reason: String,
+        /// Session identifier for correlation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
+
+    // ── Harmony leak event ──────────────────────────────────────────
+    /// GPT-5 Harmony protocol leak detected in streaming output.
+    /// The stream was aborted to prevent the leaked content from
+    /// being persisted or acted upon.
+    HarmonyLeakDetected {
+        /// A preview of the leaked content (truncated, privacy-safe).
+        preview: String,
+        /// Session identifier for correlation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
 }
 
 impl AgentEvent {
@@ -473,6 +535,11 @@ impl AgentEvent {
             AgentEvent::AutoRetryEnd { .. } => "auto_retry_end",
             AgentEvent::SteeringMessage { .. } => "steering_message",
             AgentEvent::FollowUpMessage { .. } => "follow_up_message",
+            AgentEvent::ApprovalRequired { .. } => "approval_required",
+            AgentEvent::ApprovalResult { .. } => "approval_result",
+            AgentEvent::SoftRequirementReminder { .. } => "soft_requirement_reminder",
+            AgentEvent::SoftRequirementEscalation { .. } => "soft_requirement_escalation",
+            AgentEvent::HarmonyLeakDetected { .. } => "harmony_leak_detected",
         }
     }
 }
