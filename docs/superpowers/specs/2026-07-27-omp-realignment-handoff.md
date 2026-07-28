@@ -1,8 +1,8 @@
 # omp-정렬 리팩토링 — 다음 세션 인계 (HANDOFF)
 
 - **최종 갱신**: 2026-07-28
-- **브랜치**: `main` (P0 + Step 2 + P1.1 dialect foundation 병합 완료)
-- **상태**: **P0 완료 + Step 2 완료 + P1.1 owned dialect foundation 완료**. P1 나머지·P2–P4 미착수.
+- **브랜치**: `main` (P0 + Step 2 + P1.1 owned dialect 완료 병합)
+- **상태**: **P0 완료 + Step 2 완료 + P1.1 owned dialect 완료**(엔진+루프 wiring+수락 테스트). P1 나머지·P2–P4 미착수.
 
 > **이 문서를 가장 먼저 읽으세요.** 완료된 작업·남은 작업·실행 방법·존중할 결정이 한 곳에 있습니다.
 
@@ -77,13 +77,11 @@ omp 고유 프로토콜. 각각 다-일 작업. `Api` enum에 variant 이미 존
 ### Step 3 — P1: Agent 루프 재정렬 [진행 중]
 omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-p1-agent-loop-realignment.md`.
 
-**P1.1 owned dialect — foundation 완료** (`5584ee46`): `oxi-ai/src/dialect/` 엔진. `Dialect` enum(11종) + `from_name`/`preferred_for_model`, 3-piece 계약(prompt 주입 / history 인코딩 / output 파싱), XML dialect 완전 구현(renderer + batch parser, render→parse round-trip 검증), coercion(string-arg 스키마 감지). 24 tests. **후속**: streaming scanner + agent 루프 wiring(턴 완료 시 `parse()` 호출).
-
-**P1.1 후속 — 루프 wiring 스코프** (다음 세션, 핵심 통합 지점 이미 파악):
-1. **capability 신호**: `oxi_ai::Model`에 tool-capability 플래그 없음 (catalog `models_dev.rs`에는 `tool_call: bool` 존재하나 `Model`에 미노출). omp는 `config.dialect` opt-in + `PI_DIALECT` env. 결정 필요: `Model.supports_tools` 추가 vs `AgentLoopConfig.dialect` opt-in(omp 정렬, 권장).
-2. **context 빌드**: `oxi-agent/src/agent_loop/streaming.rs:55` — 여기서 dialect 활성 시 (a) `render_inband_tool_prompt`로 시스템 프롬프트 확장, (b) `encode_inband_tool_history`로 메시지 재인코딩, (c) native tools 미전송.
-3. **output 파싱**: 턴 완료 시 누적 assistant 텍스트에 `Dialect::parse_assistant_message()` 호출 → 텍스트 내 tool call을 native `ToolCall` 블록으로 재물질화 (루프 나머지 부분은 무변경으로 실행).
-4. **streaming scanner**: 배치 파서(현재) → 증분 스캐너(omp `owned-stream.ts`의 `InbandStreamProjector`, fabrication abort 포함). 토큰 단위 UX에 필요, 기능 필수 아님.
+**P1.1 owned dialect — 완료** (`5584ee46` 엔진 + `414f2036` 루프 wiring):
+- **엔진** (`oxi-ai/src/dialect/`): `Dialect` enum(11종) + `from_name`/`preferred_for_model`, 3-piece 계약(prompt 주입 / history 인코딩 / output 파싱), XML dialect 완전 구현(renderer + batch parser, render→parse round-trip 검증), coercion(string-arg 스키마 감지). 24 tests.
+- **루프 wiring** (`AgentLoopConfig.dialect` opt-in, omp `config.dialect` 정렬): 요청 측 = 카탈로그 시스템 프롬프트 주입 + history 텍스트 재인코딩 + native tools 미전송 (`streaming.rs` context 빌드). 출력 측 = `Done`에서 `parse_assistant_message()`로 in-band 텍스트→native `ToolCall` 재물질화, clean Stop→ToolUse 전환으로 루프 지속.
+- **수락 테스트**: `test_owned_dialect_inband_tool_calling` — native tool 블록 없이 텍스트만 내뱉는 mock이 루프를 구동, in-band call 파싱·실행·루프 지속 검증.
+- **남은 강화(선택)**: 배치 파서 → 증분 streaming scanner(omp `owned-stream.ts`의 `InbandStreamProjector`, fabrication abort). 토큰 단위 UX 개선, 기능 필수 아님.
 
 
 남은 P1:
