@@ -10,7 +10,7 @@
 
 ---
 
-## 1. 완료된 작업 (5 커밋, 전부 green)
+## 1. 완료된 작업 (7 커밋, 전부 green)
 
 모든 커밋은 회귀 게이트를 통과했습니다: `cargo build --workspace`, `cargo clippy --workspace --all-targets -D warnings`, `cargo clippy -p oxi-sdk --features native-browser -D warnings`, `cargo fmt --all -- --check`, `cargo nextest run --workspace`.
 
@@ -20,6 +20,8 @@
 | `7532a22e` | **P0.3** | **프로바이더 정체성 붕괴 수정 (사용자 핵심 pain)**. `NamedProvider` 래퍼로 `create_builtin_provider("deepseek").name() == "deepseek"` (was "openai"). transport builder / identity-wrapping public wrapper로 분리. 7개 테스트(붕괴를 올바른 것으로 단정하던) 수정. |
 | `8410bc73` | **P0.4** | `ImageStart`/`ImageDelta`/`ImageEnd` 스트리밍 이벤트 추가. omp `AssistantMessageEvent` image family 대응 (Gemini 증분 이미지). |
 | `f408672c` | **P0.4** | `Api`를 omp `KnownApi` 14개로 확장 + `MistralConversations` 제거(omp는 Mistral을 openai-completions 호환 취급). 7개 신규 dialect 추가(OpenRouter, OpenAiCodexResponses, GoogleGeminiCli, OllamaChat, CursorAgent, GitLabDuoAgent, DevinAgent). `mistral.rs` + 16 테스트 삭제. oxi-sdk `CatalogProtocol` mirror에서도 제거. |
+| `2bd2ccdd` | **P0.4** | **per-provider 에러 계층**. 평면 `HttpError(u16, String)` → 구조화 `HttpErrorDetail { status, body, provider, request_id }`. Anthropic이 `request-id` 헤더 캡처(omp `AnthropicApiError` 정렬). `http_status()` 헬퍼 추가. 8 provider + oxi-agent + 테스트 전부 마이그레이션. |
+| `1c57c08c` | **P0.4** | **SSE byte-stream framing 중앙화**. `find_valid_utf8_prefix`/`split_complete_lines`를 `providers/sse.rs` 전용 모듈로 이관(omp `readSseEvents()` 정렬). 4개 provider가 `super::openai::` 대신 `super::sse::`로 import. |
 
 ### 사용자 pain 해결 상태
 - **"프로바이더가 이상하다"** → 정체성 붕괴 **수정됨** (`7532a22e`). deepseek/minimax/togetherai/openrouter/cerebras 모두 올바른 catalog id 반환.
@@ -30,24 +32,15 @@
 
 ## 2. 남은 P0 작업
 
-### P0.4 (마무리) — AI 품질 층 [부분 완료]
+### P0.4 — AI 품질 층 [완료]
 
-**남은 항목 2개** (둘 다 품질 개선, 사용자 pain 아님):
-
-- [ ] **SSE 파싱 중앙화**: scout가 "8중 복제"라고 했으나 실제로는 더 미묘함. `parse_sse_events(text,...)`는 3개 파일(azure/openai_responses/openai)만 있고 이는 **provider별 이벤트 해석**(핈수적으로 개별). 실제 중복은 **byte-stream 프레이밍 층** — 7개 provider가 각자 `.bytes_stream()` + pending-byte buffer + `\n\n` split + partial-UTF-8 처리. omp는 `readSseEvents()`로 중앙화.
-  - **작업**: `oxi-ai/src/utils/` (또는 `providers/sse.rs`)에 공유 `SseFrame` 디코더 추가 (byte stream → SSE frames). 7개 provider의 stream loop(`openai.rs:277`, `anthropic.rs:484`, `google.rs:144`, `vertex.rs:183`, `azure.rs:219`, `openai_responses.rs:223`, `bedrock.rs:494`)가 이를 사용하도록 전환.
-  - **위험**: 중간 (7개 provider stream loop 수정). 각 provider별로 별도 테스트 후 게이트.
-  - **수락 기준**: 7개 provider가 공유 프레이머 사용, 기존 SSE 테스트 전부 통과.
-
-- [ ] **per-provider 에러 계층**: omp `error/classes.ts`는 `AnthropicApiError`(request-id 파싱), `OpenAIHttpError`(body envelope), `BedrockApiError`, `GoogleApiError`, `OllamaApiError`, `DevinApiError`, `CodexProviderStreamError` 보유. oxi는 평면 `ProviderError::HttpError(u16, String)`.
-  - **작업**: `oxi-ai/src/error.rs`에 per-provider 에러 subtypes 추가. 각 provider의 HTTP 에러 처리가 구조화된 subtype 사용.
-  - **위험**: 중간 (모든 provider의 에러 생성 경로). 재시도 로직(`is_retryable()`)이 새 subtypes 인식하도록.
+4항목 전부 완료: ImageEnd 이벤트, KnownApi 14 + Mistral 제거, per-provider 에러 계층(`HttpErrorDetail` + Anthropic request-id), SSE byte-stream framing 중앙화(`providers/sse.rs`).
 
 ### P0.5 — provider 포팅 [미착수, 가장 큼]
 
 omp의 14 KnownApi 중 7개 dialect에 transport가 없음 (`_ => None` arm). remote-AGENT 프로토콜 3개는 OpenAI-compat endpoint가 아니라 **고유 프로토콜**:
 
-- [ ] **Ollama** (`ollama-chat`): omp `packages/ai/src/providers/ollama.ts` + `packages/catalog/src/provider-models/ollama.ts` 참조. 로컬 서버(`/api/chat`). production 필수. 중간 노력.
+- [ ] **Ollama** (`ollama-chat`): omp `packages/ai/src/providers/ollama.ts`는 **750줄** + 다수 omp 유틸 의존(`parseStreamingJson`, `stream-markup-healing`, `vision-guard`, `empty-completion-retry`, `idle-iterator`, `schema` sanitization). 로컬 서버 `/api/chat` (NDJSON 스트리밍, SSE 아님). production 필수. faithful 포팅은 유틸 포팅까지 수반해 **다-세션 작업**; 최소 동작 포팅은 mock Ollama 서버 테스트 인프라 필요. omp `packages/catalog/src/provider-models/ollama.ts`도 참조.
 - [ ] **Cursor** (`cursor-agent`): remote-AGENT 프로토콜. omp `packages/ai/src/providers/cursor.ts`. 고유 stream function + 프로토콜. 높은 노력.
 - [ ] **Devin** (`devin-agent`): remote-AGENT. omp `packages/ai/src/providers/devin.ts`. 높은 노력.
 - [ ] **GitLab Duo** (`gitlab-duo-agent`): remote-AGENT. omp `packages/ai/src/providers/gitlab-duo.ts`. 높은 노력.
