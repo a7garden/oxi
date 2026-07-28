@@ -50,9 +50,15 @@ omp의 14 KnownApi 중 7개 dialect에 transport가 없음 (`_ => None` arm). re
 
 ### P0.2 — complexity machinery 제거 [미착수, 위험]
 
-omp에 대응 없는 oxi-original ~225KB: `multi_provider.rs`(45KB), `complexity_router.rs`(22KB), `circuit_breaker.rs`(32KB), `fallback_chain.rs`(19KB), `provider_pool.rs`(6KB), `router/`(~100KB). consumer가 넓음: `oxi-agent` (agent_loop/retry, recovery, tests), `oxi-cli` (bootstrap, settings, tui/handlers), `oxi-sdk` (builder, 자체 multi_provider.rs, prelude), `ProviderEvent`의 FallbackStart/FallbackExhausted 변형.
-- **위험**: 높음 — agent 루프 retry/recovery가 이것에 의존. 전면 삭제는 agent의 fallback/retry 동작을 direct dispatch로 재연결해야.
-- **권장**: 별도 세션에서 신중히. `ProviderEvent::FallbackStart/FallbackExhausted` 제거 + consumer를 `get_provider`/`stream()` direct dispatch로 전환.
+omp에 대응 없는 oxi-original ~225KB: `multi_provider.rs`(45KB), `complexity_router.rs`(22KB), `circuit_breaker.rs`(32KB), `fallback_chain.rs`(19KB), `provider_pool.rs`(6KB), `router/`(~100KB), `oxi-sdk/src/multi_provider.rs`(빌더).
+
+**정밀 분석 (2026-07-27)**: 프로덕션에서 **한 번도 생성되지 않음** — `MultiProvider::new`/`ComplexityRouter::new`/`FallbackChain::new`는 doc 주석 + 자체 테스트에만. bootstrap은 표준 `oxi_sdk::register_provider` 사용. 하지만 **`CircuitBreaker`는 agent 루프에 live** (`agent_loop/mod.rs:74` 필드, `streaming.rs:333/435/529` record_failure/success, `retry.rs:41` allow_request). `FallbackChain`은 re-export만(생성 안 됨).
+
+**이중 구조**:
+- **opt-in (안전하게 제거 가능)**: `MultiProvider` + `ComplexityRouter` + `provider_pool` + `router/` + oxi-sdk `multi_provider` 빌더 — 기본 경로 아님, `with_multi_provider_routing` opt-in 빌더로만 생성.
+- **live (재연결 필요)**: `circuit_breaker` — agent retry가 의존. 제거 시 agent 루프 retry 로직을 direct dispatch로 재연결해야.
+
+- **권장 순서**: (1) opt-in 층(MultiProvider/ComplexityRouter/router/SDK builder) 먼저 제거 — 안전, ~170KB; (2) 별도 세션에서 CircuitBreaker 재연결 + fallback_chain/circuit_breaker 제거; (3) `ProviderEvent::FallbackStart/FallbackExhausted` 변형 제거(이들만 emit).
 
 ---
 
