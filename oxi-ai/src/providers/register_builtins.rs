@@ -162,7 +162,7 @@ static API_TO_PROVIDER: &[(&str, Api)] = &[
     ("cursor", Api::CursorAgent),
     ("devin-agent", Api::DevinAgent),
     ("devin", Api::DevinAgent),
-    ("gitlab-duo-agent", Api::GitLabDuoAgent),
+    ("gitlab-duo", Api::GitLabDuo),
 ];
 
 // ---------------------------------------------------------------------------
@@ -370,7 +370,7 @@ fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn 
         // WebSocket) that oxi-ai does not currently bundle.
         Api::CursorAgent => Some(Box::new(super::cursor::CursorProvider::new())),
         Api::DevinAgent => Some(Box::new(super::devin::DevinProvider::new())),
-        Api::GitLabDuoAgent => Some(Box::new(super::gitlab_duo::GitLabDuoProvider::new())),
+        Api::GitLabDuo => Some(Box::new(super::gitlab_duo::GitLabDuoProvider::new())),
         _ => None,
     }
 }
@@ -511,7 +511,7 @@ fn build_builtin_transport_with_options(
         // ── Remote-AGENT providers (WebSocket/protobuf) ─────────────────
         Api::CursorAgent => build_builtin_transport(builtin),
         Api::DevinAgent => build_builtin_transport(builtin),
-        Api::GitLabDuoAgent => build_builtin_transport(builtin),
+        Api::GitLabDuo => build_builtin_transport(builtin),
         _ => None,
     }
 }

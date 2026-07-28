@@ -59,7 +59,10 @@ pub enum Api {
     /// Cursor (remote-AGENT protocol).
     #[serde(rename = "cursor-agent")]
     CursorAgent,
-    /// GitLab Duo (remote-AGENT protocol).
+    /// GitLab Duo REST proxy (AI Gateway — delegates to Anthropic/OpenAI).
+    #[serde(rename = "gitlab-duo")]
+    GitLabDuo,
+    /// GitLab Duo Agent (WebSocket workflow protocol).
     #[serde(rename = "gitlab-duo-agent")]
     GitLabDuoAgent,
     /// Devin (remote-AGENT protocol).
@@ -82,6 +85,7 @@ impl fmt::Display for Api {
             Api::GoogleVertex => "google-vertex",
             Api::OllamaChat => "ollama-chat",
             Api::CursorAgent => "cursor-agent",
+            Api::GitLabDuo => "gitlab-duo",
             Api::GitLabDuoAgent => "gitlab-duo-agent",
             Api::DevinAgent => "devin-agent",
         };
@@ -112,6 +116,7 @@ impl Api {
             "google-vertex" => Api::GoogleVertex,
             "ollama-chat" => Api::OllamaChat,
             "cursor-agent" => Api::CursorAgent,
+            "gitlab-duo" => Api::GitLabDuo,
             "gitlab-duo-agent" => Api::GitLabDuoAgent,
             "devin-agent" => Api::DevinAgent,
             _ => return None,
