@@ -1,0 +1,16 @@
+[extensions]
+enabled = ["profile", "blog", "projects", "links"]
+
+[lobby]
+default_mode = "grid"
+
+[server]
+data_dir = "data"
+host = "127.0.0.1"
+port = 8787
+
+[site]
+base_url = "http://127.0.0.1:8787"
+default_lang = "ko"
+languages = ["ko", "en"]
+name = "A7gargen"

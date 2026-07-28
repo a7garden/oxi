@@ -825,7 +825,9 @@ impl Provider for GitLabDuoAgentProvider {
                     },
                     None => {
                         let result = request_direct_access(
-                            client, &base_url, &api_key,
+                            client,
+                            &base_url,
+                            &api_key,
                             &root_namespace_id,
                             None,
                         )
@@ -843,16 +845,15 @@ impl Provider for GitLabDuoAgentProvider {
                 let ws_base_url = conn.base_url.as_deref().unwrap_or(&base_url);
 
                 // 4. Create workflow.
-                let workflow_id = create_workflow(
-                    client, &base_url, &api_key, &namespace_id,
-                    &goal, None,
-                )
-                .await?;
+                let workflow_id =
+                    create_workflow(client, &base_url, &api_key, &namespace_id, &goal, None)
+                        .await?;
 
                 // 5. Fetch available models (best-effort).
-                let available_models = fetch_available_models(client, &base_url, &api_key, &namespace_id)
-                    .await
-                    .ok();
+                let available_models =
+                    fetch_available_models(client, &base_url, &api_key, &namespace_id)
+                        .await
+                        .ok();
                 let ws_base = normalize_gitlab_base_url(ws_base_url);
 
                 // 7. Build WebSocket URL with auth/context params.
