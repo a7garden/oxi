@@ -158,6 +158,11 @@ static API_TO_PROVIDER: &[(&str, Api)] = &[
     ("google-generative-ai", Api::GoogleGenerativeAi),
     ("google-vertex", Api::GoogleVertex),
     ("bedrock-converse-stream", Api::BedrockConverseStream),
+    ("cursor-agent", Api::CursorAgent),
+    ("cursor", Api::CursorAgent),
+    ("devin-agent", Api::DevinAgent),
+    ("devin", Api::DevinAgent),
+    ("gitlab-duo-agent", Api::GitLabDuoAgent),
 ];
 
 // ---------------------------------------------------------------------------
@@ -360,9 +365,12 @@ fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn 
             };
             Some(Box::new(super::ollama::OllamaProvider::with_base_url(base)))
         }
-        // `Api` is `#[non_exhaustive]` and lives in oxi-catalog, so future
-        // dialects (cursor-agent, … — see P0-C) must be handled
-        // explicitly. Unknown dialects have no transport yet → None.
+        // ── Remote-AGENT providers (WebSocket/protobuf) ─────────────────
+        // These providers require additional infra (HTTP/2, protobuf,
+        // WebSocket) that oxi-ai does not currently bundle.
+        Api::CursorAgent => Some(Box::new(super::cursor::CursorProvider::new())),
+        Api::DevinAgent => Some(Box::new(super::devin::DevinProvider::new())),
+        Api::GitLabDuoAgent => Some(Box::new(super::gitlab_duo::GitLabDuoProvider::new())),
         _ => None,
     }
 }
@@ -500,8 +508,10 @@ fn build_builtin_transport_with_options(
                 resolved_key,
             )))
         }
-        // `Api` is `#[non_exhaustive]` (oxi-catalog). Unknown/future dialects
-        // have no transport wired yet → None (see P0-C for the expansion).
+        // ── Remote-AGENT providers (WebSocket/protobuf) ─────────────────
+        Api::CursorAgent => build_builtin_transport(builtin),
+        Api::DevinAgent => build_builtin_transport(builtin),
+        Api::GitLabDuoAgent => build_builtin_transport(builtin),
         _ => None,
     }
 }
