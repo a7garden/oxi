@@ -38,28 +38,8 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use oxi_tui_legacy::render::DiffBackend;
+use oxi_tui_legacy::render::{CursorState, DiffBackend};
 use ratatui::{Terminal, backend::CrosstermBackend};
-
-use oxi_tui::pipeline::CursorState as V2CursorState;
-use oxi_tui::theme::{TerminalCaps, Theme as V2Theme};
-
-/// Convert a legacy `oxi_tui_legacy::theme::Theme` into a v2 `oxi_tui::theme::Theme`
-/// by matching the legacy theme name against the v2 built-in constructors.
-///
-/// Cutover-only: full palette conversion is Plan D. The six built-in legacy
-/// themes (`dark`, `light`, `nord`, `catppuccin`, `github_dark`, `monokai`)
-/// map to their v2 counterparts; custom themes fall back to `Theme::dark()`.
-fn v2_theme_from_legacy(legacy: &oxi_tui_legacy::theme::Theme) -> V2Theme {
-    match legacy.name.as_str() {
-        "light" => V2Theme::light(),
-        "nord" => V2Theme::nord(),
-        "catppuccin" => V2Theme::catppuccin(),
-        "github_dark" => V2Theme::github_dark(),
-        "monokai" => V2Theme::monokai(),
-        _ => V2Theme::dark(),
-    }
-}
 
 // ── Terminal Lifecycle ───────────────────────────────────────────────────
 
@@ -289,18 +269,6 @@ pub(crate) enum TuiNextAction {
 
 pub(crate) struct AppState {
     pub chat: ChatViewState,
-    /// v2 chat log populated by dual-write alongside the legacy `chat`.
-    /// Rendering still uses `chat` (legacy); this field is populated by the
-    /// agent event handlers so future rendering migration has a ready source.
-    /// Plan C cutover Phase 5. Not read yet — rendering migration is future work.
-    #[allow(dead_code)]
-    pub v2_chat: oxi_tui::content::ChatLog,
-    /// v2 ChatView widget — retained for the future v2 chat-area migration
-    /// (blocked on completing dual-write of all message types + incremental
-    /// sync). Not read by the default render path today, which delegates to
-    /// the legacy `render::draw` via `v2_render::draw_v2`.
-    #[allow(dead_code)]
-    pub v2_chat_view: oxi_tui::widget::chat::ChatView,
     pub input: InputState,
     pub footer_state: FooterState,
     pub is_agent_busy: bool,
@@ -401,16 +369,15 @@ pub(crate) struct AppState {
     /// Polled every frame to sync the sticky panel.
     pub todo_provider: Option<Arc<dyn TodoStateProvider>>,
     /// Todo panel state — synced from the agent's `todo` tool via
-    /// `TodoStateProvider`. Rendered as a sticky panel above the input.
+    /// the `TodoStateProvider`. Rendered as a sticky panel above the input.
     pub todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState,
-    /// Cursor blink state shared with the v2 pipeline. Initialized once in
-    /// `AppState::new()` and threaded through every `draw_frame_closure` call
-    /// so cursor escapes are emitted only when the position/visibility changes.
-    pub cursor_state: V2CursorState,
+    /// Cursor dedup state — tracks last cursor position/visibility to avoid
+    /// redundant escape sequences. `reconcile()` is called after
+    /// `terminal.draw()` each frame.
+    pub cursor_state: CursorState,
     /// Terminal cursor position of the input textarea, recorded by
-    /// `render_input_area` each frame and read by the main-loop dispatch to
-    /// bridge the cursor into the v2 pipeline (`ctx.set_cursor`). `None` on
-    /// frames where the input is not painted (e.g. overlay active).
+    /// `render_input_area` each frame. `None` on frames where the input is
+    /// not painted (e.g. overlay active).
     pub last_input_cursor: Option<ratatui::layout::Position>,
 }
 
@@ -512,8 +479,6 @@ impl AppState {
     pub fn new() -> Self {
         let mut state = Self {
             chat: ChatViewState::default(),
-            v2_chat: oxi_tui::content::ChatLog::new(),
-            v2_chat_view: oxi_tui::widget::chat::ChatView::new(),
             input: InputState::default(),
             footer_state: FooterState::default(),
             is_agent_busy: false,
@@ -561,7 +526,7 @@ impl AppState {
             catalog: None,
             todo_provider: None,
             todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState::new(),
-            cursor_state: V2CursorState::new(),
+            cursor_state: CursorState::new(),
             last_input_cursor: None,
         };
 
@@ -1597,53 +1562,19 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 );
             }
 
-            // Terminal-first pipeline. The v2 draw_frame_closure owns cursor
-            // blink + CSI 2026 sync + DECCARA; the legacy render::draw still
-            // runs inside the v2 closure via `with_frame`, so the visible
-            // output is identical to the pre-cutover path. borrows: `state`
-            // and `theme` are captured by the closure for its lifetime; we
-            // temporarily move `cursor_state` out of `state` via `mem::take`
-            // so the pipeline can own it, then put it back after.
-            let v2_theme = v2_theme_from_legacy(&theme);
-            let caps = TerminalCaps::detect();
-            // Render-path gating. The v2 pipeline is the default render path;
-            // `OXI_V2_RENDER=0` keeps the pure-legacy path as a rollback safety
-            // net. Both paths paint through the legacy `render::draw` (the v2
-            // `draw_v2` delegates to it), so output is visually identical — the
-            // v2 pipeline only adds cursor-blink dedup, CSI 2026 sync, DECCARA
-            // background fills, and cell-level diffing on top.
-            let use_v2_render = std::env::var("OXI_V2_RENDER").as_deref() != Ok("0");
-            {
-                let mut cursor_state = std::mem::take(&mut state.cursor_state);
-                let result = oxi_tui::pipeline::draw_frame_closure(
-                    &mut tui.terminal,
-                    &mut cursor_state,
-                    oxi_tui::widget::FocusTarget::None,
-                    &v2_theme,
-                    &caps,
-                    |ctx| {
-                        // Reset each frame. `render_input_area` sets this only
-                        // when the input is actually painted, so overlay frames
-                        // (which early-return) leave it None and the cursor hides.
-                        state.last_input_cursor = None;
-                        if use_v2_render {
-                            super::v2_render::draw_v2(ctx, &mut state, &theme);
-                        } else {
-                            ctx.with_frame(|frame| {
-                                render::draw(frame, &mut state, &theme);
-                            });
-                        }
-                        // Cursor bridge: the legacy renderer never touches the v2
-                        // cursor slot, so position the terminal cursor from the
-                        // textarea cursor that `render_input_area` recorded.
-                        if let Some(p) = state.last_input_cursor {
-                            ctx.set_cursor(p);
-                        }
-                    },
-                );
-                state.cursor_state = cursor_state;
-                result?;
-            }
+            // Legacy direct render path. DiffBackend provides CSI 2026 sync,
+            // DECCARA background fills, and row-level diffing. CursorState
+            // provides cursor dedup (same position → 0 bytes).
+            let want_cursor = {
+                state.last_input_cursor = None;
+                tui.terminal.draw(|frame| {
+                    render::draw(frame, &mut state, &theme);
+                })?;
+                state.last_input_cursor
+            };
+            state
+                .cursor_state
+                .reconcile(want_cursor, &mut tui.terminal)?;
             let draw_dur = draw_start.elapsed();
             if draw_dur > std::time::Duration::from_millis(100) {
                 tracing::warn!(

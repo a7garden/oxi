@@ -1610,7 +1610,6 @@ theme = "dracula"
     }
 
     #[test]
-    #[test]
     fn test_save_and_load_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
         let settings_path = tmp.path().join("settings.toml");
