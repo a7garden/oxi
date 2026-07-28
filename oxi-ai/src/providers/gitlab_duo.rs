@@ -29,8 +29,7 @@ use super::anthropic::AnthropicProvider;
 use super::openai::OpenAiProvider;
 use super::openai_responses::OpenAiResponsesProvider;
 use crate::{
-    Context, HttpErrorDetail, Model, Provider, StreamOptions, StreamResult,
-    error::ProviderError,
+    Context, HttpErrorDetail, Model, Provider, StreamOptions, StreamResult, error::ProviderError,
 };
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -386,10 +385,7 @@ async fn get_or_fetch_direct_access(
         return if status == 403 {
             Err(ProviderError::HttpError(HttpErrorDetail {
                 status: 403,
-                body: format!(
-                    "GitLab Duo access denied. Ensure Duo is enabled. {}",
-                    body
-                ),
+                body: format!("GitLab Duo access denied. Ensure Duo is enabled. {}", body),
                 provider: Some("gitlab-duo".to_string()),
                 request_id: None,
             }))
@@ -474,7 +470,10 @@ mod tests {
     fn test_model_mapping_openai_responses() {
         let mapping = get_model_mapping("duo-chat-gpt-5-codex").unwrap();
         assert_eq!(mapping.provider, GitLabProviderType::OpenAi);
-        assert_eq!(mapping.openai_api_type, Some(GitLabOpenAIApiType::Responses));
+        assert_eq!(
+            mapping.openai_api_type,
+            Some(GitLabOpenAIApiType::Responses)
+        );
     }
 
     #[test]

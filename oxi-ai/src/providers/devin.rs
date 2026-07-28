@@ -18,9 +18,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use futures::{Stream, StreamExt};
 use prost::Message;
 use std::io::Read;
@@ -30,8 +30,7 @@ use super::shared_client;
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
     StreamOptions, StreamResult, TextContent, TextContentType, ThinkingContent,
-    ThinkingContentType, ToolCall, ToolCallType, Usage,
-    error::ProviderError,
+    ThinkingContentType, ToolCall, ToolCallType, Usage, error::ProviderError,
 };
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -43,7 +42,11 @@ const DEVIN_SESSION_TOKEN_PREFIX: &str = "devin-session-token$";
 const DEVIN_IDE_VERSION: &str = "3.2.23";
 const DEVIN_EXTENSION_VERSION: &str = "1.48.2";
 const DEVIN_DEFAULT_STOP_PATTERNS: &[&str] = &[
-    "<|user|>", "<|bot|>", "<|context_request|>", "<|endoftext|>", "<|end_of_turn|>",
+    "<|user|>",
+    "<|bot|>",
+    "<|context_request|>",
+    "<|endoftext|>",
+    "<|end_of_turn|>",
 ];
 const CONNECT_COMPRESSED_FLAG: u8 = 0x01;
 const CONNECT_END_STREAM_FLAG: u8 = 0x02;
@@ -76,7 +79,9 @@ fn parse_connect_frames(buffer: &[u8]) -> (Vec<ConnectFrame>, Vec<u8>) {
         }
         frames.push(ConnectFrame {
             flags,
-            payload: Bytes::copy_from_slice(&buffer[offset + FRAME_HEADER_SIZE..offset + FRAME_HEADER_SIZE + len]),
+            payload: Bytes::copy_from_slice(
+                &buffer[offset + FRAME_HEADER_SIZE..offset + FRAME_HEADER_SIZE + len],
+            ),
         });
         offset += FRAME_HEADER_SIZE + len;
     }
@@ -86,9 +91,11 @@ fn parse_connect_frames(buffer: &[u8]) -> (Vec<ConnectFrame>, Vec<u8>) {
 fn build_connect_frame(payload: &[u8], compress: bool) -> Vec<u8> {
     let (data, flags) = if compress {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        std::io::Write::write_all(&mut encoder, payload)
-            .expect("Gzip encoder write failed");
-        (encoder.finish().expect("Gzip encoder finish failed"), CONNECT_COMPRESSED_FLAG)
+        std::io::Write::write_all(&mut encoder, payload).expect("Gzip encoder write failed");
+        (
+            encoder.finish().expect("Gzip encoder finish failed"),
+            CONNECT_COMPRESSED_FLAG,
+        )
     } else {
         (payload.to_vec(), 0)
     };
@@ -283,16 +290,24 @@ pub struct DevinProvider {
 
 impl DevinProvider {
     pub fn new() -> Self {
-        Self { client: shared_client(), base_url: DEVIN_API_URL.to_string() }
+        Self {
+            client: shared_client(),
+            base_url: DEVIN_API_URL.to_string(),
+        }
     }
     #[allow(dead_code)]
     pub fn with_base_url(base_url: &str) -> Self {
-        Self { client: shared_client(), base_url: base_url.trim_end_matches('/').to_string() }
+        Self {
+            client: shared_client(),
+            base_url: base_url.trim_end_matches('/').to_string(),
+        }
     }
 }
 
 impl Default for DevinProvider {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Provider for DevinProvider {
@@ -309,59 +324,85 @@ impl Provider for DevinProvider {
 
         Box::pin(async move {
             // 1. Resolve API key
-            let api_key = options.as_ref()
+            let api_key = options
+                .as_ref()
                 .and_then(|o| o.api_key.clone())
                 .or_else(|| std::env::var("DEVIN_API_KEY").ok())
                 .or_else(|| std::env::var("CODEIUM_API_KEY").ok())
                 .map(normalize_devin_session_token)
-                .ok_or_else(|| ProviderError::InvalidResponse(
-                    "Devin API key required — set DEVIN_API_KEY or CODEIUM_API_KEY".into()
-                ))?;
+                .ok_or_else(|| {
+                    ProviderError::InvalidResponse(
+                        "Devin API key required — set DEVIN_API_KEY or CODEIUM_API_KEY".into(),
+                    )
+                })?;
 
             // 2. Auth: GetUserJwt
             let auth_req = GetUserJwtRequest {
                 metadata: Some(Metadata {
-                    api_key: api_key.clone(), ide_name: "windsurf".into(),
-                    ide_version: DEVIN_IDE_VERSION.into(), extension_name: "windsurf".into(),
-                    extension_version: DEVIN_EXTENSION_VERSION.into(), locale: "en".into(),
+                    api_key: api_key.clone(),
+                    ide_name: "windsurf".into(),
+                    ide_version: DEVIN_IDE_VERSION.into(),
+                    extension_name: "windsurf".into(),
+                    extension_version: DEVIN_EXTENSION_VERSION.into(),
+                    locale: "en".into(),
                     user_jwt: String::new(),
                 }),
             };
             let auth_body = auth_req.encode_to_vec();
-            let auth_resp = client.post(format!("{}{}", base_url, DEVIN_AUTH_PATH))
+            let auth_resp = client
+                .post(format!("{}{}", base_url, DEVIN_AUTH_PATH))
                 .header("content-type", "application/proto")
                 .header("connect-protocol-version", "1")
                 .header("accept", "*/*")
-                .body(auth_body).send().await
+                .body(auth_body)
+                .send()
+                .await
                 .map_err(|e| ProviderError::NetworkError(format!("Devin auth failed: {e}")))?;
             let auth_status = auth_resp.status();
-            let auth_bytes = auth_resp.bytes().await
+            let auth_bytes = auth_resp
+                .bytes()
+                .await
                 .map_err(|e| ProviderError::NetworkError(format!("Devin auth read: {e}")))?;
             if !auth_status.is_success() {
                 return Err(ProviderError::HttpError(crate::HttpErrorDetail {
                     status: auth_status.as_u16(),
-                    body: format!("Devin auth {}: {}", auth_status, String::from_utf8_lossy(&auth_bytes)),
-                    provider: Some("devin".into()), request_id: None,
+                    body: format!(
+                        "Devin auth {}: {}",
+                        auth_status,
+                        String::from_utf8_lossy(&auth_bytes)
+                    ),
+                    provider: Some("devin".into()),
+                    request_id: None,
                 }));
             }
             let auth_decoded: GetUserJwtResponse = {
-                let data = if auth_bytes.len() >= 2 && auth_bytes[0] == 0x1f && auth_bytes[1] == 0x8b {
-                    let mut decoder = GzDecoder::new(&auth_bytes[..]);
-                    let mut buf = Vec::new();
-                    decoder.read_to_end(&mut buf)
-                        .map_err(|e| ProviderError::InvalidResponse(format!("Devin auth decompress: {e}")))?;
-                    Bytes::from(buf)
-                } else { auth_bytes };
-                GetUserJwtResponse::decode(data)
-                    .map_err(|e| ProviderError::InvalidResponse(format!("Devin auth decode: {e}")))?
+                let data =
+                    if auth_bytes.len() >= 2 && auth_bytes[0] == 0x1f && auth_bytes[1] == 0x8b {
+                        let mut decoder = GzDecoder::new(&auth_bytes[..]);
+                        let mut buf = Vec::new();
+                        decoder.read_to_end(&mut buf).map_err(|e| {
+                            ProviderError::InvalidResponse(format!("Devin auth decompress: {e}"))
+                        })?;
+                        Bytes::from(buf)
+                    } else {
+                        auth_bytes
+                    };
+                GetUserJwtResponse::decode(data).map_err(|e| {
+                    ProviderError::InvalidResponse(format!("Devin auth decode: {e}"))
+                })?
             };
             if auth_decoded.user_jwt.is_empty() {
-                return Err(ProviderError::InvalidResponse("Devin auth: empty user JWT".into()));
+                return Err(ProviderError::InvalidResponse(
+                    "Devin auth: empty user JWT".into(),
+                ));
             }
             let chat_base_url = if auth_decoded.custom_api_server_url.trim().is_empty() {
                 base_url.clone()
             } else {
-                auth_decoded.custom_api_server_url.trim_end_matches('/').to_string()
+                auth_decoded
+                    .custom_api_server_url
+                    .trim_end_matches('/')
+                    .to_string()
             };
 
             // 3. Build chat request
@@ -369,21 +410,26 @@ impl Provider for DevinProvider {
             let system_prompt = context_clone.system_prompt.as_deref().unwrap_or_default();
             let messages = &context_clone.messages;
             let chat_prompts = build_chat_message_prompts(messages, &cascade_id);
-            let tools: Vec<ChatToolDefinition> = context_clone.tools.iter().map(|t| {
-                ChatToolDefinition {
+            let tools: Vec<ChatToolDefinition> = context_clone
+                .tools
+                .iter()
+                .map(|t| ChatToolDefinition {
                     name: t.name.clone(),
                     description: t.description.clone(),
                     json_schema_string: "{}".to_string(),
                     strict: false,
-                }
-            }).collect();
+                })
+                .collect();
             let max_tokens = options.as_ref().and_then(|o| o.max_tokens).unwrap_or(64000) as u64;
             let temperature = options.as_ref().and_then(|o| o.temperature).unwrap_or(0.4);
             let chat_request = GetChatMessageRequest {
                 metadata: Some(Metadata {
-                    api_key: api_key.clone(), ide_name: "windsurf".into(),
-                    ide_version: DEVIN_IDE_VERSION.into(), extension_name: "windsurf".into(),
-                    extension_version: DEVIN_EXTENSION_VERSION.into(), locale: "en".into(),
+                    api_key: api_key.clone(),
+                    ide_name: "windsurf".into(),
+                    ide_version: DEVIN_IDE_VERSION.into(),
+                    extension_name: "windsurf".into(),
+                    extension_version: DEVIN_EXTENSION_VERSION.into(),
+                    locale: "en".into(),
                     user_jwt: auth_decoded.user_jwt.clone(),
                 }),
                 prompt: system_prompt.to_string(),
@@ -391,31 +437,48 @@ impl Provider for DevinProvider {
                 chat_model_uid: model_id.clone(),
                 request_type: 3,
                 configuration: Some(CompletionConfiguration {
-                    num_completions: 1, max_tokens, max_newlines: 200,
-                    temperature, top_k: 50, top_p: 1.0,
-                    stop_patterns: DEVIN_DEFAULT_STOP_PATTERNS.iter().map(|s| s.to_string()).collect(),
-                    fim_eot_prob_threshold: 1.0, first_temperature: temperature,
+                    num_completions: 1,
+                    max_tokens,
+                    max_newlines: 200,
+                    temperature,
+                    top_k: 50,
+                    top_p: 1.0,
+                    stop_patterns: DEVIN_DEFAULT_STOP_PATTERNS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                    fim_eot_prob_threshold: 1.0,
+                    first_temperature: temperature,
                 }),
-                tools, disable_parallel_tool_calls: true, cascade_id, planner_mode: 0,
+                tools,
+                disable_parallel_tool_calls: true,
+                cascade_id,
+                planner_mode: 0,
             };
             let chat_body = chat_request.encode_to_vec();
             let framed_body = build_connect_frame(&chat_body, true);
 
             // 4. Send chat request
-            let response = client.post(format!("{}{}", chat_base_url, CHAT_MESSAGE_PATH))
+            let response = client
+                .post(format!("{}{}", chat_base_url, CHAT_MESSAGE_PATH))
                 .header("content-type", "application/connect+proto")
                 .header("connect-protocol-version", "1")
                 .header("connect-content-encoding", "gzip")
                 .header("accept-encoding", "identity")
                 .header("user-agent", "connect-go/1.18.1 (go1.26.3)")
                 .header("connect-accept-encoding", "gzip")
-                .body(framed_body).send().await
+                .body(framed_body)
+                .send()
+                .await
                 .map_err(|e| ProviderError::NetworkError(format!("Devin chat: {e}")))?;
             if !response.status().is_success() {
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
                 return Err(ProviderError::HttpError(crate::HttpErrorDetail {
-                    status: status.as_u16(), body, provider: Some("devin".into()), request_id: None,
+                    status: status.as_u16(),
+                    body,
+                    provider: Some("devin".into()),
+                    request_id: None,
                 }));
             }
 
@@ -425,17 +488,21 @@ impl Provider for DevinProvider {
             tokio::spawn(async move {
                 let mut byte_stream = response.bytes_stream();
                 let mut pending = Vec::new();
-                let mut output = AssistantMessage::new(Api::DevinAgent, "devin".to_string(), model_id.clone());
+                let mut output =
+                    AssistantMessage::new(Api::DevinAgent, "devin".to_string(), model_id.clone());
                 let mut text_buf = String::new();
                 let mut thinking_buf = String::new();
                 let mut active_tool_call_id: Option<String> = None;
                 let mut tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args_json)
-                let mut tool_json_accum: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                let mut tool_json_accum: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
                 let mut latest_stop_reason = 0i32;
                 let text_index = 0usize;
                 let thinking_index = 0usize;
 
-                let _ = tx.send(ProviderEvent::Start { partial: Arc::new(output.clone()) });
+                let _ = tx.send(ProviderEvent::Start {
+                    partial: Arc::new(output.clone()),
+                });
 
                 'read: loop {
                     if pending.len() < FRAME_HEADER_SIZE {
@@ -463,11 +530,16 @@ impl Provider for DevinProvider {
                         let raw = if frame.flags & CONNECT_COMPRESSED_FLAG != 0 {
                             let mut decoder = GzDecoder::new(&frame.payload[..]);
                             let mut buf = Vec::new();
-                            if decoder.read_to_end(&mut buf).is_err() { continue; }
+                            if decoder.read_to_end(&mut buf).is_err() {
+                                continue;
+                            }
                             Bytes::from(buf)
-                        } else { frame.payload };
+                        } else {
+                            frame.payload
+                        };
                         let msg = match GetChatMessageResponse::decode(raw) {
-                            Ok(m) => m, Err(_) => continue,
+                            Ok(m) => m,
+                            Err(_) => continue,
                         };
 
                         if !msg.message_id.is_empty() {
@@ -522,7 +594,9 @@ impl Provider for DevinProvider {
                         // Tool call deltas
                         for tc in &msg.delta_tool_calls {
                             let tid = if tc.id.is_empty() {
-                                active_tool_call_id.get_or_insert_with(|| Uuid::new_v4().to_string()).clone()
+                                active_tool_call_id
+                                    .get_or_insert_with(|| Uuid::new_v4().to_string())
+                                    .clone()
                             } else {
                                 active_tool_call_id = Some(tc.id.clone());
                                 tc.id.clone()
@@ -536,7 +610,11 @@ impl Provider for DevinProvider {
                                 let _ = tx.send(ProviderEvent::ToolCallStart {
                                     content_index: output.content.len(),
                                     tool_call_id: Some(tid),
-                                    tool_name: if tc.name.is_empty() { None } else { Some(tc.name.clone()) },
+                                    tool_name: if tc.name.is_empty() {
+                                        None
+                                    } else {
+                                        Some(tc.name.clone())
+                                    },
                                     partial: Arc::new(output.clone()),
                                 });
                             }
@@ -580,7 +658,8 @@ impl Provider for DevinProvider {
                     }));
                 }
                 for (tid, _name, _args_json) in &tool_calls {
-                    let parsed_args = tool_json_accum.get(tid)
+                    let parsed_args = tool_json_accum
+                        .get(tid)
                         .and_then(|j| serde_json::from_str(j).ok())
                         .unwrap_or_default();
                     output.content.push(ContentBlock::ToolCall(ToolCall {
@@ -598,12 +677,15 @@ impl Provider for DevinProvider {
                 };
                 output.stop_reason = reason;
                 let _ = tx.send(ProviderEvent::Done {
-                    message: output, reason,
+                    message: output,
+                    reason,
                 });
             });
 
-            Ok(Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx))
-                as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+            Ok(
+                Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx))
+                    as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>,
+            )
         })
     }
 }
@@ -611,11 +693,17 @@ impl Provider for DevinProvider {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 fn normalize_devin_session_token(api_key: String) -> String {
-    if api_key.starts_with(DEVIN_SESSION_TOKEN_PREFIX) { api_key }
-    else { format!("{}{}", DEVIN_SESSION_TOKEN_PREFIX, api_key) }
+    if api_key.starts_with(DEVIN_SESSION_TOKEN_PREFIX) {
+        api_key
+    } else {
+        format!("{}{}", DEVIN_SESSION_TOKEN_PREFIX, api_key)
+    }
 }
 
-fn build_chat_message_prompts(messages: &[crate::Message], _cascade_id: &str) -> Vec<ChatMessagePrompt> {
+fn build_chat_message_prompts(
+    messages: &[crate::Message],
+    _cascade_id: &str,
+) -> Vec<ChatMessagePrompt> {
     let mut prompts = Vec::new();
     for msg in messages.iter() {
         let message_id = Uuid::new_v4().to_string();
@@ -624,10 +712,14 @@ fn build_chat_message_prompts(messages: &[crate::Message], _cascade_id: &str) ->
             crate::Message::User(_m) => {
                 let prompt_text = msg.text_content().unwrap_or_default();
                 prompts.push(ChatMessagePrompt {
-                    message_id, source: ChatMessageSource::User as i32,
-                    prompt: prompt_text, thinking: String::new(),
-                    signature: String::new(), tool_calls: Vec::new(),
-                    tool_call_id: String::new(), tool_result_is_error: false,
+                    message_id,
+                    source: ChatMessageSource::User as i32,
+                    prompt: prompt_text,
+                    thinking: String::new(),
+                    signature: String::new(),
+                    tool_calls: Vec::new(),
+                    tool_call_id: String::new(),
+                    tool_result_is_error: false,
                     signature_type: String::new(),
                 });
             }
@@ -641,8 +733,10 @@ fn build_chat_message_prompts(messages: &[crate::Message], _cascade_id: &str) ->
                         ContentBlock::Thinking(t) => thinking.push_str(&t.thinking),
                         ContentBlock::ToolCall(tc) => {
                             tool_calls.push(ChatToolCall {
-                                id: tc.id.clone(), name: tc.name.clone(),
-                                arguments_json: serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                                id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                arguments_json: serde_json::to_string(&tc.arguments)
+                                    .unwrap_or_default(),
                             });
                         }
                         _ => {}
@@ -652,10 +746,15 @@ fn build_chat_message_prompts(messages: &[crate::Message], _cascade_id: &str) ->
                     continue;
                 }
                 prompts.push(ChatMessagePrompt {
-                    message_id, source: ChatMessageSource::System as i32,
-                    prompt: prompt_text, thinking, signature: String::new(),
-                    tool_calls, tool_call_id: String::new(),
-                    tool_result_is_error: false, signature_type: String::new(),
+                    message_id,
+                    source: ChatMessageSource::System as i32,
+                    prompt: prompt_text,
+                    thinking,
+                    signature: String::new(),
+                    tool_calls,
+                    tool_call_id: String::new(),
+                    tool_result_is_error: false,
+                    signature_type: String::new(),
                 });
             }
             crate::Message::ToolResult(m) => {
@@ -664,9 +763,12 @@ fn build_chat_message_prompts(messages: &[crate::Message], _cascade_id: &str) ->
                 prompts.push(ChatMessagePrompt {
                     message_id: Uuid::new_v4().to_string(),
                     source: ChatMessageSource::Tool as i32,
-                    prompt: result_text, thinking: String::new(),
-                    signature: String::new(), tool_calls: Vec::new(),
-                    tool_call_id: tid.clone(), tool_result_is_error: m.is_error,
+                    prompt: result_text,
+                    thinking: String::new(),
+                    signature: String::new(),
+                    tool_calls: Vec::new(),
+                    tool_call_id: tid.clone(),
+                    tool_result_is_error: m.is_error,
                     signature_type: String::new(),
                 });
             }
@@ -743,7 +845,8 @@ mod tests {
 
     #[test]
     fn test_connect_trailer_parse() {
-        let err = parse_connect_trailer("{\"error\":{\"code\":\"canceled\",\"message\":\"canceled\"}}");
+        let err =
+            parse_connect_trailer("{\"error\":{\"code\":\"canceled\",\"message\":\"canceled\"}}");
         assert!(err.is_some());
         assert!(err.unwrap().contains("canceled"));
     }
@@ -763,9 +866,12 @@ mod tests {
     #[test]
     fn test_metadata_roundtrip() {
         let meta = Metadata {
-            api_key: "sk-key".into(), ide_name: "windsurf".into(),
-            ide_version: "1.0".into(), extension_name: "windsurf".into(),
-            extension_version: "1.0".into(), locale: "en".into(),
+            api_key: "sk-key".into(),
+            ide_name: "windsurf".into(),
+            ide_version: "1.0".into(),
+            extension_name: "windsurf".into(),
+            extension_version: "1.0".into(),
+            locale: "en".into(),
             user_jwt: "jwt".into(),
         };
         let enc = meta.encode_to_vec();
@@ -777,9 +883,12 @@ mod tests {
     fn test_get_user_jwt_request_roundtrip() {
         let req = GetUserJwtRequest {
             metadata: Some(Metadata {
-                api_key: "key".into(), ide_name: "ws".into(),
-                ide_version: "1".into(), extension_name: "ws".into(),
-                extension_version: "1".into(), locale: "en".into(),
+                api_key: "key".into(),
+                ide_name: "ws".into(),
+                ide_version: "1".into(),
+                extension_name: "ws".into(),
+                extension_version: "1".into(),
+                locale: "en".into(),
                 user_jwt: String::new(),
             }),
         };
@@ -791,7 +900,8 @@ mod tests {
     #[test]
     fn test_chat_tool_call_roundtrip() {
         let tc = ChatToolCall {
-            id: "call_1".into(), name: "bash".into(),
+            id: "call_1".into(),
+            name: "bash".into(),
             arguments_json: "{\"command\":\"ls\"}".into(),
         };
         let enc = tc.encode_to_vec();
@@ -805,32 +915,44 @@ mod tests {
     fn test_get_chat_message_request_roundtrip() {
         let request = GetChatMessageRequest {
             metadata: Some(Metadata {
-                api_key: "k".into(), ide_name: "ws".into(),
-                ide_version: "1".into(), extension_name: "ws".into(),
-                extension_version: "1".into(), locale: "en".into(),
+                api_key: "k".into(),
+                ide_name: "ws".into(),
+                ide_version: "1".into(),
+                extension_name: "ws".into(),
+                extension_version: "1".into(),
+                locale: "en".into(),
                 user_jwt: "j".into(),
             }),
             prompt: "system prompt".into(),
-            chat_message_prompts: vec![
-                ChatMessagePrompt {
-                    message_id: "m1".into(), source: ChatMessageSource::User as i32,
-                    prompt: "hi".into(), thinking: String::new(),
-                    signature: String::new(), tool_calls: Vec::new(),
-                    tool_call_id: String::new(), tool_result_is_error: false,
-                    signature_type: String::new(),
-                },
-            ],
+            chat_message_prompts: vec![ChatMessagePrompt {
+                message_id: "m1".into(),
+                source: ChatMessageSource::User as i32,
+                prompt: "hi".into(),
+                thinking: String::new(),
+                signature: String::new(),
+                tool_calls: Vec::new(),
+                tool_call_id: String::new(),
+                tool_result_is_error: false,
+                signature_type: String::new(),
+            }],
             chat_model_uid: "model-1".into(),
             request_type: 3,
             configuration: Some(CompletionConfiguration {
-                num_completions: 1, max_tokens: 4096, max_newlines: 200,
-                temperature: 0.4, top_k: 50, top_p: 1.0,
+                num_completions: 1,
+                max_tokens: 4096,
+                max_newlines: 200,
+                temperature: 0.4,
+                top_k: 50,
+                top_p: 1.0,
                 stop_patterns: vec!["<|end|>".into()],
-                fim_eot_prob_threshold: 1.0, first_temperature: 0.4,
+                fim_eot_prob_threshold: 1.0,
+                first_temperature: 0.4,
             }),
             tools: vec![ChatToolDefinition {
-                name: "read".into(), description: "Read".into(),
-                json_schema_string: "{}".into(), strict: false,
+                name: "read".into(),
+                description: "Read".into(),
+                json_schema_string: "{}".into(),
+                strict: false,
             }],
             disable_parallel_tool_calls: true,
             cascade_id: "c-1".into(),
@@ -853,12 +975,15 @@ mod tests {
             delta_text: "hello".into(),
             stop_reason: 0,
             delta_tool_calls: vec![ChatToolCall {
-                id: "tc1".into(), name: "bash".into(),
+                id: "tc1".into(),
+                name: "bash".into(),
                 arguments_json: "{\"cmd\":\"ls\"}".into(),
             }],
             usage: Some(ModelUsageStats {
-                input_tokens: 10, output_tokens: 5,
-                cache_read_tokens: 2, cache_write_tokens: 1,
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_read_tokens: 2,
+                cache_write_tokens: 1,
             }),
             delta_thinking: "thinking...".into(),
             delta_signature: "sig".into(),
@@ -879,13 +1004,18 @@ mod tests {
     #[test]
     fn test_frame_with_protobuf_payload() {
         let original = GetChatMessageResponse {
-            message_id: "f1".into(), delta_text: "hi".into(),
-            stop_reason: 0, delta_tool_calls: Vec::new(),
+            message_id: "f1".into(),
+            delta_text: "hi".into(),
+            stop_reason: 0,
+            delta_tool_calls: Vec::new(),
             usage: Some(ModelUsageStats {
-                input_tokens: 5, output_tokens: 3,
-                cache_read_tokens: 0, cache_write_tokens: 0,
+                input_tokens: 5,
+                output_tokens: 3,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
             }),
-            delta_thinking: String::new(), delta_signature: String::new(),
+            delta_thinking: String::new(),
+            delta_signature: String::new(),
         };
         let protobuf_bytes = original.encode_to_vec();
         let framed = build_connect_frame(&protobuf_bytes, true);

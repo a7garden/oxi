@@ -1,8 +1,8 @@
 # P0.5 — Remaining Work
 
-> **작성**: 2026-07-28 (session 5 종료, 이후 amended)
-> **Git 커밋**: `11165ac7` (Devin full impl) + `97b19f8c` (이전 docs)
-> **테스트**: 641/641 (oxi-ai), clippy clean, consumer check clean
+> **작성**: 2026-07-28 (session 6 완료 — Cursor Phase 3 구현 완료)
+> **Git 커밋**: `ae5d3f85` (이전 docs) + Cursor full impl
+> **테스트**: 654/654 (oxi-ai), clippy clean, consumer check clean
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Provider | File | Lines | Status | Protocol |
 |----------|------|-------|--------|----------|
-| Cursor | `oxi-ai/src/providers/cursor.rs` | 53 | **Stub** (NotImplemented) | HTTP/2 + Protobuf (WebSocket) |
-| **Devin** | `oxi-ai/src/providers/devin.rs` | **885** | **✅ Full impl** | HTTP/1.1 Connect + Protobuf |
+| **Cursor** | `oxi-ai/src/providers/cursor.rs` | **1117** | **✅ Full impl** | HTTP/2 + Connect + Protobuf (492 types via prost-build) |
+| **Devin** | `oxi-ai/src/providers/devin.rs` | **916** | **✅ Full impl** | HTTP/1.1 Connect + Protobuf |
 | **GitLab Duo** | `oxi-ai/src/providers/gitlab_duo.rs` | **480** | **✅ Working REST proxy** | REST + Auth Delegation |
 | GitLab Duo Agent | — | — | Not started | WebSocket + OAuth (gitlab-duo-workflow.ts) |
 
@@ -19,20 +19,24 @@
 
 | Api enum | Serde name | Dispatch | Maps to |
 |----------|-----------|----------|---------|
-| `Api::CursorAgent` | `cursor-agent` | `CursorProvider::new()` (stub) | Stub — NotImplemented error |
-| `Api::DevinAgent` | `devin-agent` | `DevinProvider::new()` (full impl) | **Working** — Connect + protobuf |
+| `Api::CursorAgent` | `cursor-agent` | `CursorProvider::new()` | **Working** — HTTP/2 + Connect + prost-build |
+| `Api::DevinAgent` | `devin-agent` | `DevinProvider::new()` | **Working** — Connect + protobuf |
 | `Api::GitLabDuo` | `gitlab-duo` | `GitLabDuoProvider::new()` | **Working** — REST proxy |
 | `Api::GitLabDuoAgent` | `gitlab-duo-agent` | `_ => None` (wildcard) | **Unimplemented** — WebSocket workflow |
 
 ### Test Suite
-- oxi-ai: **641/641** passing (was 626; +15 Devin tests for framing, protobuf roundtrips, edge cases)
+- oxi-ai: **654/654** passing (was 641; +14 Cursor tests for framing, protobuf roundtrips, request construction, blob store — 1 test replaced/merged)
 - clippy: clean (`-D warnings`)
 - consumer check (`cargo check -p oxi-cli`): clean
 - Full baseline (oxi-cli 763 + oxi-agent 746 + oxi-sdk 398 = 1907): verified via consumer check; additive changes only
 
-### Dependencies Added
-- `prost = "0.14"` — protobuf codec (Devin message types with derive macros)
+### Dependencies Added (runtime)
+- `prost = "0.14"` — protobuf codec
 - `tokio-stream = "0.1"` — streaming via `UnboundedReceiverStream`
+
+### Dependencies Added (build)
+- `prost-build = "0.14"` — proto compilation for Cursor's 492 message types
+- `protoc-bin-vendored = "3.0"` — bundled protoc (hermetic build)
 
 ---
 
@@ -46,38 +50,28 @@
 
 ### Phase 2 — Devin full implementation (✅ completed)
 - **Connect protocol framing**: 5-byte envelope (1 flag + 4 BE length), gzip compression, end-stream trailers
-- **Protobuf message types**: 9 prost-derived types (GetChatMessageRequest/Response, GetUserJwtRequest/Response, Metadata, ChatMessagePrompt, ChatToolCall, ChatToolDefinition, CompletionConfiguration, ModelUsageStats)
+- **Protobuf message types**: 9 prost-derived types
 - **Auth flow**: `GetUserJwtRequest` → `GetUserJwtResponse` with gzip fallback
-- **Streaming**: `tokio::spawn` + `mpsc::unbounded_channel` producing `ProviderEvent` variants (text/thinking/toolcall deltas)
-- **Tests**: 21 tests covering frame roundtrips (uncompressed, gzip, partial, multi-frame), protobuf roundtrips for all message types, trailer parsing, combined frame+protobuf fixture, session token normalization
-- **Agent loop integration**: Full `Context` → `GetChatMessageRequest` construction (system prompt, message history with User/Assistant/ToolResult mapping, tool definitions)
+- **Streaming**: `tokio::spawn` + `mpsc::unbounded_channel` producing `ProviderEvent`
+- **Tests**: 21 tests
+- **Agent loop integration**: Full `Context` → `GetChatMessageRequest` construction
 
----
+### Phase 3 — Cursor full implementation (✅ completed)
 
-## Remaining: Phase 3 — Cursor Full Implementation
+**Source**: omp `packages/ai/src/providers/cursor.ts` (3396 lines)
 
-**Source**: omp `packages/ai/src/providers/cursor.ts` (3395 lines)
-**Location**: `/tmp/omp/packages/catalog/src/discovery/cursor-gen/agent_pb.ts` (protobuf TS types)
+> **Transport correction**: The original doc claimed Cursor uses WebSocket. It does **not**. Cursor uses **HTTP/2 + Connect streaming protocol** (`content-type: application/connect+proto`, `connect-protocol-version: 1`) — the same Connect framing as Devin, but over HTTP/2 instead of HTTP/1.1. `reqwest` with `rustls-tls` already supports HTTP/2 via ALPN; `tokio-tungstenite` was never needed.
 
-### What's needed
-1. **WebSocket client**: `tokio-tungstenite` (not yet in `oxi-ai/Cargo.toml`)
-2. **Protobuf message types**: AgentService/AgentServerMessage (agent_v1 proto)
-   - TS types at `cursor-gen/agent_pb.ts` (4000+ lines of generated code)
-   - Need prost-derived types for: AgentServerMessage, AgentClientMessage, ConversationState, ShellStream, etc.
-3. **Connect protocol over HTTP/2**: Same framing as Devin, but over HTTP/2
-4. **Conversation state**: Server-side checkpoint resume per turn
-5. **Tool execution bridge**: Cursor-specific exec handlers (file ops, MCP bridge)
-6. **Proxy support**: TLS tunnel for HTTP/2 through proxies
-
-### Dependencies to add
-- `tokio-tungstenite` — WebSocket client
-- `reqwest` with `h2` feature (already has rustls-tls → HTTP/2 via ALPN)
-
-### Complexity
-- **Very high**. The Cursor protocol is the most complex of the three
-- Protobuf generated code is 4000+ lines for the message types alone
-- Requires conversation state caching and blob store
-- Includes shell streaming, MCP tool calling, and file operations
+Key implementation details:
+- **Proto schema**: 3526-line self-contained proto3 (`proto/cursor/agent.proto`, 492 messages, 17 enums, 5 services) compiled via `prost-build` + `protoc-bin-vendored` in `build.rs`
+- **Connect framing**: Reused Devin's 5-byte envelope (1 flag + 4 BE length); request sent uncompressed, decompressed on read
+- **Bidirectional HTTP/2 streaming**: `mpsc::unbounded_channel` feeds the request body; response reader clones the sender to answer KV blob requests
+- **Blob store**: SHA-256 keyed `HashMap<Vec<u8>, Vec<u8>>` for conversation state blobs (system prompt JSON, history turns)
+- **Request builder**: `Context` → `AgentRunRequest` with `root_prompt_messages_json` (Vercel-AI-SDK-shaped JSON blobs) + `turns` (`ConversationTurnStructure` blobs) + action
+- **Response decoder**: `AgentServerMessage` → `ProviderEvent` mapping (text deltas, thinking deltas, tool calls, turn_ended)
+- **KV channel**: Full `GetBlobArgs`/`SetBlobArgs` response handler (mandatory — server resolves blob IDs this way)
+- **Exec channel**: Native tool execution rejected with `ExecClientThrow` — tool calls surface as `ProviderEvent::ToolCallEnd` for the host agent loop
+- **Tests**: 14 tests for framing, protobuf roundtrips, blob store, request construction (single-turn + multi-turn history)
 
 ---
 
@@ -95,7 +89,7 @@
 7. **Step limit restart**: Fresh workflow restart when server report graph-recursion limit
 
 ### Dependencies to add
-- `tokio-tungstenite` — WebSocket client
+- `tokio-tungstenite` — WebSocket client (this one genuinely needs it; GitLab Duo Workflow uses WebSocket, not HTTP/2 Connect)
 - `reqwest` already available for REST setup calls
 
 ### Complexity
@@ -106,24 +100,19 @@
 
 ---
 
-## Priority Recommendation
+## Recommendations
 
-1. **Cursor** (Phase 3) — higher practical value (Cursor is widely used). Start by adding `tokio-tungstenite` to `oxi-ai/Cargo.toml`, then define the agent_v1 protobuf types, then implement the WebSocket streaming.
+1. **GitLab Duo Workflow** (Phase 4) — the only remaining P0.5 item. Needs `tokio-tungstenite` and a workflow state machine. Can be deferred; it's the least-used remote-AGENT provider.
 
-2. **GitLab Duo Workflow** (Phase 4) — the `gitlab-duo-agent` variant. Can be done after Cursor since both need `tokio-tungstenite`.
-
-Both require `tokio-tungstenite` as an additional dependency in `oxi-ai/Cargo.toml`. The key difference from Devin: both use **WebSocket** (not HTTP streaming), and both have significantly more complex state machines.
+2. **P2 — TUI omp realignment** (separate track, ~3–6 months) — see `docs/superpowers/plans/2026-07-27-p2-tui-realignment.md`. Not started.
 
 ### Quick-start for next session
 ```bash
-# Add tokio-tungstenite
-cd /Volumes/MERCURY/PROJECTS/oxi
-# In oxi-ai/Cargo.toml, add:
-# tokio-tungstenite = { version = "0.26", default-features = false }
-
-# Read Cursor's protobuf types
-read /tmp/omp/packages/catalog/src/discovery/cursor-gen/agent_pb.ts
-
-# Read GitLab Duo workflow
+# GitLab Duo Workflow — read the source
 read /tmp/omp/packages/ai/src/providers/gitlab-duo-workflow.ts
+
+# For the Cursor provider that's now complete, the proto was copied to:
+#   oxi-ai/proto/cursor/agent.proto
+# The build script is at:
+#   oxi-ai/build.rs
 ```
