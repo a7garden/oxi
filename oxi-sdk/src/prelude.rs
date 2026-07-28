@@ -24,7 +24,6 @@ pub use oxi_agent::tools::browse::{
     ElementInfo, LinkInfo, PageContent, TabGuard,
 };
 
-pub use oxi_ai::circuit_breaker::CircuitBreakerConfig;
 pub use oxi_ai::{CompactionStrategy, Model, Provider, UserMessage};
 
 // ── Catalog (models.dev-backed: SNAP/LIVE/override/LOCAL) ───────

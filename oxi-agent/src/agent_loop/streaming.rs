@@ -292,10 +292,6 @@ pub(crate) async fn stream_assistant_response(
                         reason = %reason,
                         "thinking-loop detected; aborting stream"
                     );
-                    // Reuse the circuit-breaker failure path: emit
-                    // a transient error and stop. The retry layer
-                    // will resample.
-                    loop_ref.circuit_breaker.record_failure();
                     emit(super::AgentEvent::Error {
                         message: reason,
                         session_id: loop_ref.session_id.clone(),
@@ -397,8 +393,6 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Done { message, .. } => {
-                loop_ref.circuit_breaker.record_success();
-
                 let (input, output) = (message.usage.input, message.usage.output);
                 if input > 0 || output > 0 {
                     // Snapshot the heuristic estimate of what was *just
@@ -491,8 +485,6 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Error { mut error, .. } => {
-                loop_ref.circuit_breaker.record_failure();
-
                 tracing::info!("Stream event #{}: Error", event_count);
                 let raw_msg = error.text_content();
                 let friendly = if raw_msg.is_empty() {

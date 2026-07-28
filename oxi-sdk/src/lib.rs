@@ -120,7 +120,6 @@ pub use coordination::{
 pub use routing::RoutingControl;
 
 // Re-export from oxi-ai
-pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
 pub use oxi_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, MessageContent,
     Model, ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions,

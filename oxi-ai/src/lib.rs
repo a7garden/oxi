@@ -18,7 +18,6 @@
 // separate package). Re-exported here for backward compatibility during the
 // migration; new code should depend on `oxi-catalog` directly.
 pub use oxi_catalog::catalog;
-pub mod circuit_breaker;
 pub mod compaction;
 pub mod compaction_seam;
 mod context;
@@ -172,12 +171,6 @@ pub use model_db::{
     get_reasoning_models, get_vision_models, model_count, search_models,
 };
 
-// Fallback chain for ordered model failover
-pub mod fallback_chain;
-
-/// Ordered fallback chain for model failover on failure.
-pub use fallback_chain::{FallbackChain, FallbackChainError};
-
 // Model roles — named model assignments (ported from omp)
 
 /// Named model roles with `pi/<role>` alias resolution.
@@ -214,10 +207,6 @@ pub mod partial_response;
 
 /// Partial response accumulator for stream recovery.
 pub use partial_response::PartialResponse;
-
-// Circuit breaker for provider health tracking
-/// Per-provider circuit breaker for health tracking.
-pub use circuit_breaker::{CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker};
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;

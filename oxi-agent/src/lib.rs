@@ -75,12 +75,7 @@ pub use agent_loop::config::CompactionHook;
 pub use compaction::{CompactedContext, CompactionEvent};
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
 /// Fault-recovery primitives for resilient agent execution.
-pub use recovery::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitOpenError as CircuitOpenErrorFromAi,
-    FallbackChain, PartialResponse,
-};
-// Also export the local circuit error type used by CircuitBreaker
-pub use recovery::CircuitOpenErrorLocal;
+pub use recovery::PartialResponse;
 pub use state::{AgentState, SharedState};
 pub use structured_output::{OutputMode, StructuredOutput, StructuredOutputError};
 

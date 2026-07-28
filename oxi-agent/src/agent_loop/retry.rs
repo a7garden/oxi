@@ -1,6 +1,6 @@
+use crate::AgentEvent;
 /// Retry logic for agent loop
 use crate::stream_retry::{self, RetryCallback};
-use crate::{AgentError, AgentEvent};
 use anyhow::Result;
 use oxi_ai::{Context, Message, Model, ProviderEvent, StopReason, StreamOptions};
 use regex::Regex;
@@ -28,8 +28,7 @@ impl RetryCallback for EmitRetryCallback<'_> {
 
 /// Stream with automatic retry on transient provider errors.
 ///
-/// Wraps [`stream_retry::stream_with_retry_core`] with circuit-breaker
-/// checks and per-session event emission.
+/// Wraps [`stream_retry::stream_with_retry_core`] with per-session event emission.
 pub(crate) async fn stream_with_retry(
     loop_ref: &super::AgentLoop,
     model: &Model,
@@ -37,16 +36,6 @@ pub(crate) async fn stream_with_retry(
     options: Option<StreamOptions>,
     emit: &super::EmitFn,
 ) -> Result<futures::stream::BoxStream<'static, ProviderEvent>> {
-    // Pre-check: circuit breaker.
-    if let Err(open_err) = loop_ref.circuit_breaker.allow_request() {
-        tracing::error!(session_id = ?loop_ref.session_id, "Circuit breaker open: {}", open_err);
-        emit(AgentEvent::Error {
-            message: format!("Circuit breaker open: {}", open_err),
-            session_id: loop_ref.session_id.clone(),
-        });
-        return Err(AgentError::Stream(format!("Circuit breaker open: {}", open_err)).into());
-    }
-
     let cb = EmitRetryCallback {
         emit,
         session_id: loop_ref.session_id.clone(),
@@ -54,23 +43,10 @@ pub(crate) async fn stream_with_retry(
 
     let provider = loop_ref.provider.as_ref();
     let max_delay = loop_ref.config.max_retry_delay_ms;
-    let cb_ref = &loop_ref.circuit_breaker;
 
-    let result = stream_retry::stream_with_retry_core(
-        provider,
-        model,
-        context,
-        options,
-        &cb,
-        max_delay,
-        || {
-            cb_ref.record_success();
-        },
-        || {
-            cb_ref.record_failure();
-        },
-    )
-    .await;
+    let result =
+        stream_retry::stream_with_retry_core(provider, model, context, options, &cb, max_delay)
+            .await;
 
     result.map_err(Into::into)
 }

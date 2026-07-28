@@ -27,7 +27,6 @@ pub mod ttsr;
 use crate::agent::ProviderResolver;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
-use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
 use crate::state::TokenSource;
 use crate::{state::SharedState, tools::ToolContext, tools::ToolRegistry};
 use anyhow::{Error, Result};
@@ -71,7 +70,6 @@ pub struct AgentLoop {
     auto_retry_cancel: AtomicBool,
     /// Notify used to wake up the auto-retry sleep immediately when cancelled.
     auto_retry_notify: tokio::sync::Notify,
-    circuit_breaker: CircuitBreaker,
     /// External stop flag — when set, should_stop_after_turn returns true.
     /// Used by Agent to forward the should_stop_flag from AgentHooks.
     external_stop: Arc<AtomicBool>,
@@ -146,7 +144,6 @@ impl AgentLoop {
             auto_retry_attempt: AtomicUsize::new(0),
             auto_retry_cancel: AtomicBool::new(false),
             auto_retry_notify: tokio::sync::Notify::new(),
-            circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             external_stop: Arc::new(AtomicBool::new(false)),
             cancel_signal: None,
             auto_retry_enabled_override: None,

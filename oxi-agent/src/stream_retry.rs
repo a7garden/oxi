@@ -31,13 +31,6 @@ pub trait RetryCallback: Send + Sync {
 /// * `options`    – stream options (temperature, max_tokens …).
 /// * `retry_cb`   – callback fired on each retry attempt.
 /// * `max_delay`  – optional cap on the back-off delay (seconds).
-/// * `on_success` – called when the provider returns a stream successfully.
-/// * `on_failure` – called when the provider returns an error.
-///
-/// The `on_success` / `on_failure` hooks are intended for circuit-breaker
-/// bookkeeping. Pass no-ops (`|_|{}`, `||{}`) when circuit-breaker tracking
-/// is not needed.
-#[allow(clippy::too_many_arguments)]
 pub async fn stream_with_retry_core(
     provider: &dyn oxi_ai::Provider,
     model: &Model,
@@ -45,15 +38,12 @@ pub async fn stream_with_retry_core(
     options: Option<StreamOptions>,
     retry_cb: &dyn RetryCallback,
     max_delay: Option<u64>,
-    on_success: impl Fn(),
-    on_failure: impl Fn(),
 ) -> Result<futures::stream::BoxStream<'static, ProviderEvent>, AgentError> {
     let mut last_err: Option<String> = None;
 
     for attempt in 0..=MAX_RETRIES {
         match provider.stream(model, context, options.clone()).await {
             Ok(stream) => {
-                on_success();
                 return Ok(stream as futures::stream::BoxStream<'static, ProviderEvent>);
             }
             Err(e) => {
@@ -64,25 +54,13 @@ pub async fn stream_with_retry_core(
                     || is_server_error
                     || matches!(e, oxi_ai::ProviderError::RequestFailed(_));
 
-                // F-9 (audit 2026-06-21, fixed at review time): a
-                // `MissingApiKey` is a *configuration* error, not a
-                // transient upstream failure. It must not be counted
-                // against the circuit breaker — otherwise a user who
-                // happens to run `oxi` five times without an API key
-                // configured would trip the circuit, and even after
-                // setting the key the next request would be rejected
-                // for the full recovery timeout. We therefore do NOT
-                // call `on_failure` for `MissingApiKey` and we
-                // fast-fail before any retry accounting. All other
-                // error paths still go through `on_failure` exactly
-                // as before, so the circuit-breaker semantics for
-                // transient failures are preserved.
+                // A `MissingApiKey` is a *configuration* error, not a
+                // transient upstream failure — fast-fail before any retry.
                 if matches!(e, oxi_ai::ProviderError::MissingApiKey) {
                     return Err(AgentError::Stream(format!(
                         "{msg} — set the corresponding *_API_KEY env var or run `oxi setup`"
                     )));
                 }
-                on_failure();
 
                 if !is_retryable && attempt == 0 {
                     return Err(AgentError::Stream(msg));

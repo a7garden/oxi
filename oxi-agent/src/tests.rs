@@ -1448,38 +1448,6 @@ async fn test_cross_provider_switch_with_tool_call_blocks() {
 // ── Test 4: Error recovery scenarios ─────────────────────────────────
 
 #[test]
-fn test_circuit_breaker_recovery_cycle() {
-    use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
-
-    let config = CircuitBreakerConfig {
-        failure_threshold: 3,
-        open_duration: std::time::Duration::from_millis(100),
-        half_open_successes: 1,
-    };
-    let cb = CircuitBreaker::new(config);
-
-    // Initially allows requests
-    assert!(cb.allow_request().is_ok());
-
-    // Record failures up to threshold
-    cb.record_failure();
-    cb.record_failure();
-    assert!(cb.allow_request().is_ok()); // Still below threshold
-    cb.record_failure(); // Hits threshold
-    assert!(cb.allow_request().is_err()); // Circuit is now open
-
-    // Wait for open_duration to expire
-    std::thread::sleep(std::time::Duration::from_millis(150));
-
-    // Should now be in half-open state and allow request
-    assert!(cb.allow_request().is_ok());
-
-    // Record success → circuit should close
-    cb.record_success();
-    assert!(cb.allow_request().is_ok());
-}
-
-#[test]
 fn test_partial_response_accumulator() {
     use crate::recovery::PartialResponse;
 
@@ -1504,34 +1472,6 @@ fn test_partial_response_accumulator() {
     pr.clear();
     assert!(pr.is_empty());
     assert!(!pr.has_thinking());
-}
-
-#[test]
-fn test_fallback_chain() {
-    use crate::recovery::FallbackChain;
-
-    // Create using from_ids which returns Result<Self, FallbackChainError>
-    let chain = FallbackChain::from_ids(&["openai/gpt-4o", "anthropic/claude-3-5-haiku-20241022"])
-        .expect("valid model IDs");
-
-    // Check first and last
-    assert_eq!(chain.first().expect("has first").id, "gpt-4o");
-    assert_eq!(
-        chain.last().expect("has last").id,
-        "claude-3-5-haiku-20241022"
-    );
-
-    // Check names
-    assert_eq!(
-        chain.names(),
-        &["openai/gpt-4o", "anthropic/claude-3-5-haiku-20241022"]
-    );
-    assert!(!chain.is_empty());
-
-    // Empty chain
-    let empty = FallbackChain::new(vec![]);
-    assert!(empty.is_empty());
-    assert_eq!(empty.first(), None);
 }
 
 #[test]
