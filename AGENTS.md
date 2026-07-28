@@ -30,14 +30,19 @@ oxi/
 ├── oxi-lsp/           LSP bridge
 ├── oxi-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
 ├── oxi-snapcompact/   Context compaction via PNG rasterization (fontdue)
-├── oxi-tui/           Terminal UI — v2 terminal-first rendering pipeline (ratatui)
-└── oxi-tui-legacy/    Legacy terminal UI — preserved during the oxi-tui v2 migration
+├── oxi-tui/           Terminal UI — widgets, theme, glyph, render (ratatui + DiffBackend)
 ```
+
+> The grok-inspired `oxi-tui` v2 crate was retired (P2.1, 2026-07-29).
+> The legacy crate was renamed to `oxi-tui` as the sole TUI crate.
+> Cursor dedup (`CursorState`) was ported from v2 to the legacy
+> `DiffBackend`, which already provided CSI 2026 sync, DECCARA, and
+> row-level diffing. See `docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`.
 
 ### Dependency Flow
 
 Leaf crates (zero internal `oxi-*` deps): `oxi-ai`, `oxi-hashline`, `oxi-lsp`,
-`oxi-mnemopi`, `oxi-snapcompact`, `oxi-tui` (v2), `oxi-tui-legacy`.
+`oxi-mnemopi`, `oxi-snapcompact`, `oxi-tui`.
 
 ```
 oxi-ai  (foundation)              oxi-hashline (independent)
@@ -46,15 +51,11 @@ oxi-agent  ←  oxi-ai, oxi-hashline
   ↓
 oxi-sdk  ←  oxi-ai, oxi-agent, oxi-snapcompact
   ↓
-oxi-cli  ←  oxi-ai, oxi-agent, oxi-sdk, oxi-lsp, oxi-mnemopi,
-             oxi-tui (v0.58), oxi-tui-legacy (v0.56)
+oxi-cli  ←  oxi-ai, oxi-agent, oxi-sdk, oxi-lsp, oxi-mnemopi, oxi-tui
 ```
 
 `oxi-ai` is the foundation layer with zero internal dependencies.
 `oxi-cli` is the integration layer that depends on all other crates.
-oxi-cli links **both** `oxi-tui` and `oxi-tui-legacy` during the in-progress
-v2 render migration (see "oxi-tui v2" below); `LegacyOverlayAdapter` bridges
-legacy rendering through the new pipeline.
 Never create circular dependencies between crates.
 
 ## Port System (oxi-sdk)
@@ -161,11 +162,13 @@ Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 
 ### oxi-tui — Terminal UI
 
-`oxi-tui` is a greenfield **v2 terminal-first rendering pipeline** built on
-`ratatui` + `crossterm`. **No oxi-* dependencies** — pure widget library. The
-pre-v2 crate is preserved as `oxi-tui-legacy` (still linked by oxi-cli during
-the migration; `LegacyOverlayAdapter` bridges it through the v2 pipeline). See
-"oxi-tui v2 — Terminal-First Pipeline" below for the v2 architecture.
+`oxi-tui` provides ratatui-based TUI widgets, theme system, glyph system,
+and event types. **No oxi-* dependencies** — pure widget library. The
+grok-inspired v2 pipeline crate was retired (P2.1, 2026-07-29); cursor
+dedup (`CursorState`) was ported to the `DiffBackend`, which already
+provided CSI 2026 sync, DECCARA, and row-level diffing. The next major
+evolution is the omp tape model (native scrollback) — see
+`docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`.
 
 - Theme system with hot-reload from TOML/JSON files.
 - **Glyph set system** (`symbols.rs`): every UI symbol (status markers, list
@@ -498,58 +501,17 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   - **`DashboardWidget` takes `&Theme`** (not `Theme::dark()`). The MCP dashboard overlay constructs it fresh in `render()` with the live theme. Do not re-introduce a hardcoded `Theme::dark()` in any widget — pass the theme through.
   - **`OxiStyleSheet` is theme-aware** — constructed via `OxiStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
 
-## oxi-tui v2 — Terminal-First Pipeline (2026-07-22)
+## oxi-tui v2 — RETIRED (2026-07-29, P2.1)
 
-**Branch**: `oxi-tui-v2-plan-a` (37 commits)
+The grok-inspired `oxi-tui` v2 crate (terminal-first pipeline with
+`RetainedTree`, `draw_frame_closure`, cell-level `DiffBackend`) has been
+**retired and deleted**. Investigation showed it added only cursor dedup
+over the legacy `DiffBackend` (which already had CSI 2026 sync, DECCARA,
+and row-level diffing). Cursor dedup was ported to legacy as
+`render::CursorState`; the legacy crate was renamed to `oxi-tui`.
 
-### What Changed
-
-`oxi-tui` was greenfield-rewritten as a terminal-first rendering pipeline. The old crate is preserved as `oxi-tui-legacy` for reference. Key architectural shift: **decompose `Terminal::draw()` to own the frame lifecycle** instead of wrapping ratatui's backend.
-
-### Three Pillars
-
-1. **Terminal-first pipeline** — `draw_frame()` (14 LOC body): `autoresize → hash-skip → render → flush(DiffBackend) → reconcile(CursorState) → swap_buffers`. No fork, no writer thread, no SafeBuf. Cursor blink preserved via dedup (same position → 0 bytes).
-
-2. **Retained tree + content_hash memoization** — `RetainedTree` tracks root hash; `RetainedChild<T>` wraps per-subtree for automatic skip. During streaming, only the active message re-renders.
-
-3. **Capability detection + consumption same module** — `theme/capability.rs` detects terminal caps AND adapts theme colors. Structural fix for legacy's 394-LOC dead `color_level.rs`.
-
-### Module Structure
-
-```
-oxi-tui/src/
-├── pipeline/          draw_frame, CursorState, CursorSlot, DiffBackend (4-file), OSC8
-├── widget/            Renderable trait, RetainedTree, RetainedChild, RenderCtx, Text
-│   ├── chat/          ChatView, MessageItem, ToolCall, Spinner
-│   ├── panel/         Footer, Sticky, Overlay
-│   └── primitive/     Border, List (virtualized), Scrollbar
-├── content/           ChatLog (O(1) hash), ChatView state, ChatMessage, StreamingState
-├── text/              StreamingMarkdown (checkpoint), CJK wrap, syntax (feature-gated)
-├── theme/             palette (28 slots), capability (detect+adapt), serializer (TOML)
-└── input/             textarea wrapper (stock ratatui-textarea 0.9)
-```
-
-### Status
-
-- 222 oxi-tui tests, 9.7K LOC, all gates clean
-- **Pipeline is LIVE** in oxi-cli via `draw_frame_closure` (cutover Phase 4 complete)
-- `LegacyOverlayAdapter` + `ClosureRoot` bridge legacy rendering through new pipeline
-- Remaining: full rendering migration (Phase 5), legacy removal (Plan D)
-
-### Key API Contracts
-
-```rust
-// Pipeline
-pub fn draw_frame<B>(term, tree, cursor, focus, theme, caps) -> Result<FrameOutcome, B::Error>
-pub fn draw_frame_closure<B, F>(term, cursor, focus, theme, caps, render_fn) -> Result<FrameOutcome, B::Error>
-pub struct CursorState { fn reconcile(want, term) -> Result<()> }
-
-// Widget model
-pub trait Renderable { fn content_hash(&self) -> u64; fn height_for(...) -> u16; fn render(area, ctx) }
-pub struct RetainedTree { fn any_hash_changed() -> bool; fn render(ctx) -> Option<Position> }
-pub struct RetainedChild<T: Renderable> { fn render_if_changed(area, ctx) -> bool }
-
-// CursorSlot tri-state (prevents flicker)
-pub enum CursorSlot { NotSet, Show(Position), Hide }
-impl CursorSlot { fn resolve(self, last_cursor) -> Option<Position> }
-```
+The next major TUI evolution is the **omp tape model** (native scrollback,
+append-only rendering, Component → `string[]` model). See
+`docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md` for the
+full design and `docs/superpowers/plans/2026-07-29-p2-tui-v2-retirement.md`
+for the retirement plan.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **TUI: v2 crate retirement + rename (P2.1)** — Retired the grok-inspired
+  `oxi-tui` v2 crate. Ported cursor dedup (`CursorState`) from v2 to legacy
+  `DiffBackend` (which already had CSI 2026 sync, DECCARA, row-level diffing).
+  Deleted the v2 crate (~9.8K LOC). Renamed `oxi-tui-legacy` → `oxi-tui` as
+  the single TUI crate. All `oxi_tui_legacy::*` imports updated to `oxi_tui::*`.
+
 ## [0.60.0] - 2026-07-27 — TUI bug fixes
 
 ### Fixed
