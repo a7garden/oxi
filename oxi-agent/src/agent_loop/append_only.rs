@@ -146,13 +146,11 @@ mod tests {
         let mut ctx = AppendOnlyContext::empty();
         ctx.append(Message::user("Turn 1"));
 
-        ctx.queue_tool_result(Message::ToolResult(
-            oxi_ai::ToolResultMessage::new(
-                "call-1",
-                "echo",
-                vec![ContentBlock::Text(TextContent::new("Result of tool"))],
-            ),
-        ));
+        ctx.queue_tool_result(Message::ToolResult(oxi_ai::ToolResultMessage::new(
+            "call-1",
+            "echo",
+            vec![ContentBlock::Text(TextContent::new("Result of tool"))],
+        )));
 
         // Build should include both history and pending
         let built = ctx.build_messages();
@@ -171,11 +169,7 @@ mod tests {
         ctx.append(Message::user("B"));
 
         // External has same prefix + one more
-        let external = vec![
-            Message::user("A"),
-            Message::user("B"),
-            Message::user("C"),
-        ];
+        let external = vec![Message::user("A"), Message::user("B"), Message::user("C")];
 
         let count = ctx.sync_from(&external);
         assert_eq!(count, 1); // Only "C" was new
@@ -190,13 +184,11 @@ mod tests {
     fn test_into_messages_flattens_all() {
         let mut ctx = AppendOnlyContext::empty();
         ctx.append(Message::user("A"));
-        ctx.queue_tool_result(Message::ToolResult(
-            oxi_ai::ToolResultMessage::new(
-                "call-1",
-                "echo",
-                vec![ContentBlock::Text(TextContent::new("result"))],
-            ),
-        ));
+        ctx.queue_tool_result(Message::ToolResult(oxi_ai::ToolResultMessage::new(
+            "call-1",
+            "echo",
+            vec![ContentBlock::Text(TextContent::new("result"))],
+        )));
 
         let all = ctx.into_messages();
         assert_eq!(all.len(), 2);
@@ -208,13 +200,11 @@ mod tests {
         ctx.append(Message::user("Turn 1 prompt"));
 
         // Queue a tool result: build shows both, but prefix (index 0) unchanged
-        ctx.queue_tool_result(Message::ToolResult(
-            oxi_ai::ToolResultMessage::new(
-                "call-1",
-                "echo",
-                vec![ContentBlock::Text(TextContent::new("tool result"))],
-            ),
-        ));
+        ctx.queue_tool_result(Message::ToolResult(oxi_ai::ToolResultMessage::new(
+            "call-1",
+            "echo",
+            vec![ContentBlock::Text(TextContent::new("tool result"))],
+        )));
 
         let before = ctx.build_messages();
         assert_eq!(before.len(), 2);

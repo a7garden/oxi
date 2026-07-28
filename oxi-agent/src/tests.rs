@@ -2316,9 +2316,7 @@ async fn test_intent_tracing_reaches_events() {
     // Find ToolExecutionStart and check it carries the intent
     let start = events.iter().find_map(|e| match e {
         AgentEvent::ToolExecutionStart {
-            tool_name,
-            intent,
-            ..
+            tool_name, intent, ..
         } if tool_name == "echo_with_intent" => Some(intent.clone()),
         _ => None,
     });
@@ -2327,9 +2325,7 @@ async fn test_intent_tracing_reaches_events() {
     // Find ToolExecutionEnd and check it carries the same intent (static fallback)
     let end = events.iter().find_map(|e| match e {
         AgentEvent::ToolExecutionEnd {
-            tool_name,
-            intent,
-            ..
+            tool_name, intent, ..
         } if tool_name == "echo_with_intent" => Some(intent.clone()),
         _ => None,
     });

@@ -65,7 +65,9 @@ impl AstEditTool {
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Resolve a single user-supplied path string against the tool root.
@@ -152,9 +154,7 @@ fn parse_ops(params: &Value) -> Result<Vec<RewriteOp>, ToolError> {
         .ok_or_else(|| "Missing required parameter: ops (must be an array)".to_string())?;
 
     if arr.is_empty() {
-        return Err(
-            "Parameter 'ops' must contain at least one { pat, out } entry".to_string(),
-        );
+        return Err("Parameter 'ops' must contain at least one { pat, out } entry".to_string());
     }
 
     let mut ops = Vec::with_capacity(arr.len());
@@ -214,10 +214,7 @@ async fn run_sg_for_op(
     dry_run: bool,
 ) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), String> {
     let mut cmd = Command::new("sg");
-    cmd.arg("-p")
-        .arg(&op.pat)
-        .arg("-r")
-        .arg(&op.out);
+    cmd.arg("-p").arg(&op.pat).arg("-r").arg(&op.out);
 
     if dry_run {
         // --json=stream: one match per line, easy to count.
@@ -286,8 +283,7 @@ async fn run_sg_for_op(
 /// silently skipped (counted toward total if they at least parsed as JSON).
 fn summarise_dry_run(stdout: &[u8]) -> (usize, std::collections::BTreeMap<PathBuf, usize>) {
     let mut total = 0usize;
-    let mut by_file: std::collections::BTreeMap<PathBuf, usize> =
-        std::collections::BTreeMap::new();
+    let mut by_file: std::collections::BTreeMap<PathBuf, usize> = std::collections::BTreeMap::new();
 
     for line in stdout.split(|b| *b == b'\n') {
         let trimmed: Vec<u8> = line
@@ -454,8 +450,7 @@ impl AgentTool for AstEditTool {
                 match run_sg_for_op(op, chunk, dry_run).await {
                     Ok((status, stdout, stderr)) => {
                         if !status.success() {
-                            let stderr_text =
-                                String::from_utf8_lossy(&stderr).trim().to_string();
+                            let stderr_text = String::from_utf8_lossy(&stderr).trim().to_string();
                             // Strip the noisy deprecation banner if it's the
                             // only thing on stderr.
                             let cleaned: String = stderr_text
@@ -469,20 +464,25 @@ impl AgentTool for AstEditTool {
                                 .collect::<Vec<_>>()
                                 .join(" ");
 
-                            let stdout_text =
-                                String::from_utf8_lossy(&stdout).trim().to_string();
+                            let stdout_text = String::from_utf8_lossy(&stdout).trim().to_string();
 
                             if !cleaned.is_empty() {
                                 had_error = true;
                                 error_messages.push(format!(
                                     "ops[{}] (pat='{}') failed (exit {:?}): {}",
-                                    op_idx, op.pat, status.code(), cleaned
+                                    op_idx,
+                                    op.pat,
+                                    status.code(),
+                                    cleaned
                                 ));
                             } else if !stdout_text.is_empty() {
                                 had_error = true;
                                 error_messages.push(format!(
                                     "ops[{}] (pat='{}') failed (exit {:?}): {}",
-                                    op_idx, op.pat, status.code(), stdout_text
+                                    op_idx,
+                                    op.pat,
+                                    status.code(),
+                                    stdout_text
                                 ));
                             }
                             // Otherwise: non-zero exit with empty output —

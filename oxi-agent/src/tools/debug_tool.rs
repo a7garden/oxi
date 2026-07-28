@@ -65,22 +65,54 @@ impl DebugTool {
     /// through the `xd://debug` virtual device right now.
     fn guidance(action: &str) -> &'static str {
         match action {
-            "sessions" => "List active debug sessions. Write `{\"action\":\"sessions\"}` to `xd://debug`.",
-            "launch" => "Start a new DAP session. Send `{\"action\":\"launch\",\"program\":\"<bin>\",\"args\":[…],\"adapter\":\"<gdb|lldb-dap|debugpy|dlv>\"}` to `xd://debug`.",
-            "attach" => "Attach to a running process. Send `{\"action\":\"attach\",\"adapter\":\"<gdb|lldb-dap|debugpy|dlv>\"}` plus the adapter's attach parameters to `xd://debug`.",
-            "set_breakpoint" => "Set a source breakpoint. Send `{\"action\":\"set_breakpoint\",\"file\":\"<path>\",\"line\":<n>,\"condition\":\"<expr>\"?}` to `xd://debug`.",
-            "remove_breakpoint" => "Remove a previously set breakpoint. Send `{\"action\":\"remove_breakpoint\",\"file\":\"<path>\",\"line\":<n>}` to `xd://debug`.",
-            "continue" => "Resume execution on a thread. Send `{\"action\":\"continue\",\"thread_id\":<n>}` to `xd://debug`.",
-            "pause" => "Suspend a running thread. Send `{\"action\":\"pause\",\"thread_id\":<n>}` to `xd://debug`.",
-            "step_in" => "Step into the current call. Send `{\"action\":\"step_in\",\"thread_id\":<n>}` to `xd://debug`.",
-            "step_over" => "Step over the current call. Send `{\"action\":\"step_over\",\"thread_id\":<n>}` to `xd://debug`.",
-            "step_out" => "Step out of the current frame. Send `{\"action\":\"step_out\",\"thread_id\":<n>}` to `xd://debug`.",
-            "threads" => "List threads in the current session. Send `{\"action\":\"threads\"}` to `xd://debug`.",
-            "stack_trace" => "Fetch the stack frames for a thread. Send `{\"action\":\"stack_trace\",\"thread_id\":<n>}` to `xd://debug`.",
-            "scopes" => "Fetch the lexical scopes for a frame. Send `{\"action\":\"scopes\",\"frame_id\":<n>}` to `xd://debug`.",
-            "variables" => "Fetch variables for a scope or variable reference. Send `{\"action\":\"variables\",\"frame_id\":<n>,\"variable_ref\":<n>?}` to `xd://debug`.",
-            "evaluate" => "Evaluate an expression in a frame. Send `{\"action\":\"evaluate\",\"expression\":\"<expr>\",\"frame_id\":<n>}` to `xd://debug`.",
-            "terminate" => "End the debug session. Send `{\"action\":\"terminate\"}` to `xd://debug`.",
+            "sessions" => {
+                "List active debug sessions. Write `{\"action\":\"sessions\"}` to `xd://debug`."
+            }
+            "launch" => {
+                "Start a new DAP session. Send `{\"action\":\"launch\",\"program\":\"<bin>\",\"args\":[…],\"adapter\":\"<gdb|lldb-dap|debugpy|dlv>\"}` to `xd://debug`."
+            }
+            "attach" => {
+                "Attach to a running process. Send `{\"action\":\"attach\",\"adapter\":\"<gdb|lldb-dap|debugpy|dlv>\"}` plus the adapter's attach parameters to `xd://debug`."
+            }
+            "set_breakpoint" => {
+                "Set a source breakpoint. Send `{\"action\":\"set_breakpoint\",\"file\":\"<path>\",\"line\":<n>,\"condition\":\"<expr>\"?}` to `xd://debug`."
+            }
+            "remove_breakpoint" => {
+                "Remove a previously set breakpoint. Send `{\"action\":\"remove_breakpoint\",\"file\":\"<path>\",\"line\":<n>}` to `xd://debug`."
+            }
+            "continue" => {
+                "Resume execution on a thread. Send `{\"action\":\"continue\",\"thread_id\":<n>}` to `xd://debug`."
+            }
+            "pause" => {
+                "Suspend a running thread. Send `{\"action\":\"pause\",\"thread_id\":<n>}` to `xd://debug`."
+            }
+            "step_in" => {
+                "Step into the current call. Send `{\"action\":\"step_in\",\"thread_id\":<n>}` to `xd://debug`."
+            }
+            "step_over" => {
+                "Step over the current call. Send `{\"action\":\"step_over\",\"thread_id\":<n>}` to `xd://debug`."
+            }
+            "step_out" => {
+                "Step out of the current frame. Send `{\"action\":\"step_out\",\"thread_id\":<n>}` to `xd://debug`."
+            }
+            "threads" => {
+                "List threads in the current session. Send `{\"action\":\"threads\"}` to `xd://debug`."
+            }
+            "stack_trace" => {
+                "Fetch the stack frames for a thread. Send `{\"action\":\"stack_trace\",\"thread_id\":<n>}` to `xd://debug`."
+            }
+            "scopes" => {
+                "Fetch the lexical scopes for a frame. Send `{\"action\":\"scopes\",\"frame_id\":<n>}` to `xd://debug`."
+            }
+            "variables" => {
+                "Fetch variables for a scope or variable reference. Send `{\"action\":\"variables\",\"frame_id\":<n>,\"variable_ref\":<n>?}` to `xd://debug`."
+            }
+            "evaluate" => {
+                "Evaluate an expression in a frame. Send `{\"action\":\"evaluate\",\"expression\":\"<expr>\",\"frame_id\":<n>}` to `xd://debug`."
+            }
+            "terminate" => {
+                "End the debug session. Send `{\"action\":\"terminate\"}` to `xd://debug`."
+            }
             _ => "Unknown action.",
         }
     }
@@ -327,7 +359,9 @@ fn validate_action_params(action: &str, params: &Value) -> Result<(), ToolError>
         "launch" => {
             require_str("program")?;
             // `args` is optional but must be a string array if present.
-            if let Some(args) = params.get("args") && !args.is_array() {
+            if let Some(args) = params.get("args")
+                && !args.is_array()
+            {
                 return Err("Parameter `args` must be an array of strings".to_string());
             }
         }
@@ -541,8 +575,7 @@ mod tests {
         assert!(result.success);
         // Sessions probes available adapters — output mentions adapters.
         assert!(
-            result.output.contains("adapter")
-                || result.output.contains("debug"),
+            result.output.contains("adapter") || result.output.contains("debug"),
             "unexpected output: {}",
             result.output
         );

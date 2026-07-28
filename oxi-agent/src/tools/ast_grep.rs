@@ -24,7 +24,9 @@ impl AstGrepTool {
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Resolve a `path` argument relative to the tool's effective root.
@@ -89,8 +91,10 @@ async fn run_sg(pattern: &str, target: &Path) -> Result<Vec<Value>, String> {
 
     let mut stdout_buf = Vec::new();
     let mut stderr_buf = Vec::new();
-    let (stdout_res, stderr_res) =
-        tokio::join!(stdout.read_to_end(&mut stdout_buf), stderr.read_to_end(&mut stderr_buf));
+    let (stdout_res, stderr_res) = tokio::join!(
+        stdout.read_to_end(&mut stdout_buf),
+        stderr.read_to_end(&mut stderr_buf)
+    );
     stdout_res.map_err(|e| format!("Failed reading `sg` stdout: {e}"))?;
     stderr_res.map_err(|e| format!("Failed reading `sg` stderr: {e}"))?;
 
@@ -104,8 +108,9 @@ async fn run_sg(pattern: &str, target: &Path) -> Result<Vec<Value>, String> {
     // could change the default. Try the array forms first (pretty emits
     // a multi-line `[ {…}, {…} ]`, compact emits it on one line), then
     // fall back to NDJSON (stream emits one `{…}` per line).
-    let matches = parse_sg_output(&stdout_buf)
-        .ok_or_else(|| "Failed to parse `sg` JSON output: no array or stream objects found".to_string())?;
+    let matches = parse_sg_output(&stdout_buf).ok_or_else(|| {
+        "Failed to parse `sg` JSON output: no array or stream objects found".to_string()
+    })?;
 
     // ast-grep exits non-zero on no matches (stdout empty) or on real
     // failures (stderr populated). Distinguish by stderr content.
@@ -175,7 +180,6 @@ fn parse_sg_output(buf: &[u8]) -> Option<Vec<Value>> {
     if parsed_any { Some(matches) } else { None }
 }
 
-
 /// Format matches grouped by directory + file with line numbers.
 ///
 /// Output shape (one section per file):
@@ -214,12 +218,7 @@ fn format_matches(matches: &[Value], root: &Path) -> (String, usize) {
             .unwrap_or_default();
 
         // Trim trailing whitespace but keep indentation for readability.
-        let trimmed = text
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim_end()
-            .to_string();
+        let trimmed = text.lines().next().unwrap_or("").trim_end().to_string();
 
         by_file.entry(file).or_default().push((line, col, trimmed));
     }
@@ -332,15 +331,9 @@ impl AgentTool for AstGrepTool {
         }
 
         // ── 2. Resolve search scope ───────────────────────────────────
-        let path_arg = params
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let path_arg = params.get("path").and_then(Value::as_str).unwrap_or("");
 
-        let skip = params
-            .get("skip")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
+        let skip = params.get("skip").and_then(Value::as_u64).unwrap_or(0) as usize;
 
         let limit = params
             .get("limit")

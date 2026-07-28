@@ -272,6 +272,10 @@ mod tests {
             .await
             .expect("py execution should succeed");
         assert!(result.success);
-        assert!(result.output.contains("stdout"), "output: {}", result.output);
+        assert!(
+            result.output.contains("stdout"),
+            "output: {}",
+            result.output
+        );
     }
 }
