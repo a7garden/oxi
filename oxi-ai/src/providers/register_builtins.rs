@@ -163,6 +163,7 @@ static API_TO_PROVIDER: &[(&str, Api)] = &[
     ("devin-agent", Api::DevinAgent),
     ("devin", Api::DevinAgent),
     ("gitlab-duo", Api::GitLabDuo),
+    ("gitlab-duo-agent", Api::GitLabDuoAgent),
 ];
 
 // ---------------------------------------------------------------------------
@@ -371,6 +372,9 @@ fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn 
         Api::CursorAgent => Some(Box::new(super::cursor::CursorProvider::new())),
         Api::DevinAgent => Some(Box::new(super::devin::DevinProvider::new())),
         Api::GitLabDuo => Some(Box::new(super::gitlab_duo::GitLabDuoProvider::new())),
+        Api::GitLabDuoAgent => Some(Box::new(
+            super::gitlab_duo_agent::GitLabDuoAgentProvider::new(),
+        )),
         _ => None,
     }
 }
@@ -512,6 +516,7 @@ fn build_builtin_transport_with_options(
         Api::CursorAgent => build_builtin_transport(builtin),
         Api::DevinAgent => build_builtin_transport(builtin),
         Api::GitLabDuo => build_builtin_transport(builtin),
+        Api::GitLabDuoAgent => build_builtin_transport(builtin),
         _ => None,
     }
 }

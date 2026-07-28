@@ -9,6 +9,7 @@ mod cursor;
 mod devin;
 mod event;
 mod gitlab_duo;
+mod gitlab_duo_agent;
 mod google;
 mod google_shared;
 pub mod model_fetch;

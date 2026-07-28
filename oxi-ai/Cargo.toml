@@ -66,6 +66,9 @@ rsa = { version = "0.9", features = ["pem"] }
 prost = "0.14"
 tokio-stream = "0.1"
 
+# WebSocket (GitLab Duo Workflow)
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+
 [build-dependencies]
 prost-build = "0.14"
 protoc-bin-vendored = "3.0"
