@@ -113,7 +113,7 @@ impl ImageContent {
 }
 
 /// Tool call content block emitted by the model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     /// Discriminator for untagged deserialization.
     #[serde(rename = "type")]

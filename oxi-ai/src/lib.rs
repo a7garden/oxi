@@ -21,6 +21,9 @@ pub use oxi_catalog::catalog;
 pub mod compaction;
 pub mod compaction_seam;
 mod context;
+/// Owned (in-band) tool-calling dialects — tool calls as text for models
+/// without native tool support (omp `pi-ai/dialect` port).
+pub mod dialect;
 pub mod env_api_keys;
 mod error;
 mod high_level;
