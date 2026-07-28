@@ -792,10 +792,6 @@ pub fn handle_ui_event(
                 NotificationKind::Warning,
             );
         }
-        UiEvent::ModelChanged { model_id } => {
-            state.add_notification(format!("Model: {}", model_id), NotificationKind::Success);
-            state.footer_state.data.model_name = model_id;
-        }
         UiEvent::ThinkingLevelChanged { level } => {
             state.add_notification(format!("Thinking: {}", level), NotificationKind::Info);
             state.footer_state.data.thinking_level = Some(level.to_lowercase());
@@ -919,11 +915,6 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
             )));
         }
         SessionEvent::Agent(agent_event) => match &*agent_event {
-            AgentEvent::Fallback { to_model, .. } => {
-                let _ = ui_tx.send(UiEvent::ModelChanged {
-                    model_id: to_model.clone(),
-                });
-            }
             AgentEvent::Retry {
                 attempt,
                 max_retries,

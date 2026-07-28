@@ -187,12 +187,9 @@ pub async fn complete(
                         .unwrap_or_else(|| "Unknown error".to_string()),
                 )));
             }
-            // Fallback events are informational — ignore in high-level API.
             // Image events belong to incremental image streaming (Gemini) and
             // are not part of the text/tool-call completion surface here.
-            ProviderEvent::FallbackStart { .. }
-            | ProviderEvent::FallbackExhausted { .. }
-            | ProviderEvent::ImageStart { .. }
+            ProviderEvent::ImageStart { .. }
             | ProviderEvent::ImageDelta { .. }
             | ProviderEvent::ImageEnd { .. } => {}
         }

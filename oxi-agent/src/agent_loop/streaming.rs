@@ -228,41 +228,6 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
-            ProviderEvent::FallbackStart {
-                from_model,
-                to_model,
-                ..
-            } => {
-                tracing::info!(
-                    "Stream event #{}: Fallback from {} to {}",
-                    event_count,
-                    from_model,
-                    to_model
-                );
-                emit(super::AgentEvent::Fallback {
-                    from_model,
-                    to_model,
-                });
-            }
-
-            ProviderEvent::FallbackExhausted {
-                models_tried,
-                final_error,
-            } => {
-                tracing::warn!(
-                    "Stream event #{}: All fallback models exhausted. Tried: {:?}, error: {}",
-                    event_count,
-                    models_tried,
-                    final_error
-                );
-                if let Some(last_model) = models_tried.last() {
-                    emit(super::AgentEvent::Fallback {
-                        from_model: last_model.clone(),
-                        to_model: "none".to_string(),
-                    });
-                }
-            }
-
             ProviderEvent::TextDelta { delta, partial, .. } => {
                 if added_partial {
                     let last_idx = messages.len() - 1;

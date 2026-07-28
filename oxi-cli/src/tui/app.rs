@@ -223,9 +223,6 @@ pub(crate) enum UiEvent {
         max_attempts: u32,
         error_message: String,
     },
-    ModelChanged {
-        model_id: String,
-    },
     ThinkingLevelChanged {
         level: String,
     },

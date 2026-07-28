@@ -9,7 +9,6 @@
 pub use crate::agent_builder::AgentBuilder;
 pub use crate::agent_definition::{AgentDefinition, AgentDiscovery, AgentScope, DefaultContext};
 pub use crate::builder::{Oxi, OxiBuilder};
-pub use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use crate::tool_factory::{browsing_tools, coding_tools, full_tools, readonly_tools};
 
 #[cfg(feature = "native-browser")]

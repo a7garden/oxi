@@ -368,14 +368,6 @@ pub enum AgentEvent {
         session_id: Option<String>,
     },
 
-    /// The agent switched to a fallback model.
-    Fallback {
-        /// Model that was being used before the failure.
-        from_model: String,
-        /// Fallback model that will be used instead.
-        to_model: String,
-    },
-
     /// A TTSR rule violation was detected during streaming.
     /// The stream was aborted and a system reminder will be injected.
     TtsrInterrupt {
@@ -466,7 +458,6 @@ impl AgentEvent {
             AgentEvent::Usage { .. } => "usage",
             AgentEvent::Compaction { .. } => "compaction",
             AgentEvent::Retry { .. } => "retry",
-            AgentEvent::Fallback { .. } => "fallback",
             AgentEvent::TtsrInterrupt { .. } => "ttsr_interrupt",
             AgentEvent::Cancelled => "cancelled",
             AgentEvent::PartialResponse { .. } => "partial_response",
