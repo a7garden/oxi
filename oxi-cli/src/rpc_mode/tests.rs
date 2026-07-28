@@ -201,6 +201,7 @@ fn agent_events_map_to_rpc_stream_frames() {
             tool_call_id: "call-1".to_string(),
             tool_name: "read".to_string(),
             args: serde_json::json!({}),
+            intent: None,
             context: None,
         }),
         Some(protocol::RpcEvent::ToolStart { tool }) if tool == "read"

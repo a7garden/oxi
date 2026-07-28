@@ -196,6 +196,10 @@ pub enum AgentEvent {
         tool_name: String,
         /// JSON arguments passed to the tool.
         args: serde_json::Value,
+        /// Intent trace — a concise description of what this tool call does.
+        /// `None` for tools without intent tracing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intent: Option<String>,
         /// Semantic context inferred from tool name and arguments.
         /// `None` for tools without a known context mapping.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -227,6 +231,10 @@ pub enum AgentEvent {
         tool_call_id: String,
         /// Name of the tool.
         tool_name: String,
+        /// Intent trace — a concise description of what this tool call did.
+        /// `None` for tools without intent tracing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intent: Option<String>,
         /// The tool result payload.
         result: oxi_ai::ToolResult,
         /// Whether the tool execution resulted in an error.

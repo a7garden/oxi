@@ -456,6 +456,7 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             tool_name,
             result,
             is_error,
+            intent: _,
         } => serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": tool_call_id,

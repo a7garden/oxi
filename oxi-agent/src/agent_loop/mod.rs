@@ -6,6 +6,8 @@
 //! state management. Handles streaming, tool execution, retry logic,
 //! and compaction events.
 
+/// Append-only context for stable prefix caching.
+pub mod append_only;
 /// Agent-loop configuration.
 pub mod config;
 /// Miscellaneous helper functions.
@@ -261,6 +263,7 @@ impl AgentLoop {
             lsp: self.config.lsp.clone(),
             subagent_runner: self.config.subagent_runner.clone(),
             subagent_depth: self.config.subagent_depth,
+            intent: None,
         }
     }
 

@@ -339,6 +339,10 @@ impl AgentTool for AskTool {
         })
     }
 
+    fn intent(&self) -> Option<&str> {
+        Some("Ask the user clarifying questions")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,

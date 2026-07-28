@@ -443,6 +443,10 @@ pub struct ToolContext {
     /// (issue #28 gap 3). The CLI path uses env vars instead.
     /// Default 0 (top-level agent).
     pub subagent_depth: u8,
+    /// Intent trace for the current tool call.
+    /// Set by the agent loop before executing each tool, read by tools
+    /// that surface intent to users (e.g. `ask`).
+    pub intent: Option<String>,
 }
 
 impl fmt::Debug for ToolContext {
@@ -482,6 +486,7 @@ impl ToolContext {
             lsp: None,
             subagent_runner: None,
             subagent_depth: 0,
+            intent: None,
         }
     }
 
@@ -533,6 +538,12 @@ impl ToolContext {
         self.subagent_runner = Some(runner);
         self
     }
+
+    /// Attach an intent trace to this context.
+    pub fn with_intent(mut self, intent: impl Into<String>) -> Self {
+        self.intent = Some(intent.into());
+        self
+    }
 }
 
 impl Default for ToolContext {
@@ -549,6 +560,7 @@ impl Default for ToolContext {
             lsp: None,
             subagent_runner: None,
             subagent_depth: 0,
+            intent: None,
         }
     }
 }
@@ -573,6 +585,10 @@ pub struct AgentToolResult {
     /// of tool calls completes.  Defaults to `false` so that the loop continues
     /// unless a tool explicitly opts-in to termination.
     pub terminate: bool,
+    /// Intent trace — a concise description of what this specific tool call did.
+    /// Set by the agent loop from the tool's static `intent()` or by the tool
+    /// itself for dynamic intent. Included in `ToolExecutionEnd` events.
+    pub intent: Option<String>,
 }
 
 impl AgentToolResult {
@@ -584,6 +600,7 @@ impl AgentToolResult {
             metadata: None,
             content_blocks: None,
             terminate: false,
+            intent: None,
         }
     }
 
@@ -595,6 +612,7 @@ impl AgentToolResult {
             metadata: None,
             content_blocks: None,
             terminate: false,
+            intent: None,
         }
     }
 
@@ -613,6 +631,12 @@ impl AgentToolResult {
     /// Mark this result as requesting agent-loop termination.
     pub fn with_terminate(mut self) -> Self {
         self.terminate = true;
+        self
+    }
+
+    /// Attach an intent trace to this result.
+    pub fn with_intent(mut self, intent: impl Into<String>) -> Self {
+        self.intent = Some(intent.into());
         self
     }
 }
@@ -733,6 +757,14 @@ pub trait AgentTool: Send + Sync {
         None
     }
 
+    /// Intent trace — a concise description of what this tool does.
+    /// Returned value is included in `ToolExecutionStart` / `ToolExecutionEnd`
+    /// events so the agent loop can surface intent to users or telemetry.
+    /// Default `None` (no intent tracing).
+    fn intent(&self) -> Option<&str> {
+        None
+    }
+
     /// Execution mode for parallel safety.
     /// Defaults to ParallelSafe. Override for file-mutating or sequential tools.
     fn execution_mode(&self) -> ToolExecutionMode {
@@ -766,6 +798,10 @@ pub trait AgentTool: Send + Sync {
 // Built-in tools
 /// Ask tool — ask the user one or more clarifying questions via the TUI overlay.
 pub mod ask;
+/// AST structural search tool (wraps the `sg` CLI).
+pub mod ast_grep;
+/// AST-aware structural code rewriting tool (ast-grep backed).
+pub mod ast_edit;
 /// Bash shell execution tool.
 pub mod bash;
 /// Browser tools (engine abstraction always compiled).
@@ -774,10 +810,14 @@ pub mod browse;
 pub mod commit;
 /// Context7 documentation tools.
 pub mod context7;
+/// Debug tool — DAP-backed debugger integration (scaffold).
+pub mod debug_tool;
 /// In-place file edit tool.
 pub mod edit;
 /// Diff-based edit helpers.
 pub mod edit_diff;
+/// Eval tool — persistent-kernel code execution (scaffold).
+pub mod eval_tool;
 /// Serialised file-mutation queue.
 pub mod file_mutation_queue;
 /// File-fsystem find tool.
@@ -831,6 +871,8 @@ pub mod write;
 
 // Re-export for convenience
 pub use bash::BashTool;
+pub use debug_tool::DebugTool;
+pub use eval_tool::EvalTool;
 pub use edit::EditTool;
 pub use find::FindTool;
 pub use grep::GrepTool;
@@ -839,6 +881,8 @@ pub use read::ReadTool;
 // pub use search_cache;
 
 pub use crate::mcp::McpTool;
+pub use ast_edit::AstEditTool;
+pub use ast_grep::AstGrepTool;
 pub use ask::{AskBridge, AskTool};
 pub use commit::CommitTool;
 pub use context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
@@ -998,8 +1042,9 @@ impl ToolRegistry {
         let mut all_tools: Vec<Box<dyn AgentTool>> = vec![
             Box::new(ReadTool::with_cwd(cwd.clone())),
             Box::new(WriteTool::with_cwd(cwd.clone())),
-            Box::new(EditTool::with_cwd(cwd.clone())),
+            Box::new(AstGrepTool::with_cwd(cwd.clone())),
             Box::new(BashTool::with_cwd(cwd.clone())),
+            Box::new(EditTool::with_cwd(cwd.clone())),
             Box::new(GrepTool::with_cwd(cwd.clone())),
             Box::new(FindTool::with_cwd(cwd.clone())),
             Box::new(LsTool::with_cwd(cwd.clone())),
@@ -1043,7 +1088,12 @@ impl ToolRegistry {
         all_tools.push(Box::new(context7::Context7QueryDocsTool::new()));
         all_tools.push(Box::new(generate_image::GenerateImageTool::new()));
         all_tools.push(Box::new(commit::CommitTool::unconfigured()));
+        all_tools.push(Box::new(ast_edit::AstEditTool::new()));
         all_tools.push(Box::new(lsp::LspTool));
+        all_tools.push(Box::new(eval_tool::EvalTool));
+        // debug_tool unregistered — 15/16 actions were scaffolds.
+        // Re-enable when full DAP proxy is wired.
+        // all_tools.push(Box::new(debug_tool::DebugTool));
 
         for tool in all_tools {
             if tool.essential() || !disabled.contains(tool.name()) {

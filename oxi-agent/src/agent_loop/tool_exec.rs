@@ -249,7 +249,7 @@ pub(crate) struct ExecutedToolCallBatch {
 }
 
 enum FinalizedToolCallEntry {
-    Immediate(FinalizedToolCall),
+    Immediate(Box<FinalizedToolCall>),
     Future(Pin<Box<dyn futures::Future<Output = FinalizedToolCall> + Send>>),
 }
 
@@ -316,10 +316,16 @@ async fn execute_tool_calls_sequential(
         let tc_name = tool_call.name.clone();
         let tc_args = tool_call.arguments.clone();
 
+        let intent = loop_ref
+            .tools
+            .get(&tc_name)
+            .and_then(|t| Some(t.intent()?.to_string()));
+
         emit(AgentEvent::ToolExecutionStart {
             tool_call_id: tc_id.clone(),
             tool_name: tc_name.clone(),
             args: tc_args.clone(),
+            intent: intent.clone(),
             context: infer_context(&tc_name, &tc_args),
         });
 
@@ -358,9 +364,12 @@ async fn execute_tool_calls_sequential(
             }
         };
 
+        let end_intent = finalized.result.intent.clone().or(intent);
+
         emit(AgentEvent::ToolExecutionEnd {
             tool_call_id: finalized.tool_call.id.clone(),
             tool_name: finalized.tool_call.name.clone(),
+            intent: end_intent,
             result: oxi_ai::ToolResult {
                 tool_call_id: finalized.tool_call.id.clone(),
                 content: finalized.result.output.clone(),
@@ -414,10 +423,16 @@ async fn execute_tool_calls_parallel(
         let tc_name = tool_call.name.clone();
         let tc_args = tool_call.arguments.clone();
 
+        let intent = loop_ref
+            .tools
+            .get(&tc_name)
+            .and_then(|t| Some(t.intent()?.to_string()));
+
         emit(AgentEvent::ToolExecutionStart {
             tool_call_id: tc_id.clone(),
             tool_name: tc_name.clone(),
             args: tc_args.clone(),
+            intent: intent.clone(),
             context: infer_context(&tc_name, &tc_args),
         });
 
@@ -430,9 +445,12 @@ async fn execute_tool_calls_parallel(
                 is_error: prepared.is_error,
             };
 
+            let end_intent = finalized.result.intent.clone().or(intent);
+
             emit(AgentEvent::ToolExecutionEnd {
                 tool_call_id: finalized.tool_call.id.clone(),
                 tool_name: finalized.tool_call.name.clone(),
+                intent: end_intent,
                 result: oxi_ai::ToolResult {
                     tool_call_id: finalized.tool_call.id.clone(),
                     content: finalized.result.output.clone(),
@@ -445,7 +463,7 @@ async fn execute_tool_calls_parallel(
                 is_error: finalized.is_error,
             });
 
-            finalized_calls.push(FinalizedToolCallEntry::Immediate(finalized));
+            finalized_calls.push(FinalizedToolCallEntry::Immediate(Box::new(finalized)));
         } else {
             let tool = prepared.tool.clone();
             let args = prepared.args.clone();
@@ -491,7 +509,7 @@ async fn execute_tool_calls_parallel(
 
     for (i, entry) in finalized_calls.into_iter().enumerate() {
         match entry {
-            FinalizedToolCallEntry::Immediate(f) => slots.push(Some(f)),
+            FinalizedToolCallEntry::Immediate(f) => slots.push(Some(*f)),
             FinalizedToolCallEntry::Future(f) => {
                 slots.push(None);
                 pending_futures.push((i, f));
@@ -574,6 +592,9 @@ pub(crate) async fn execute_prepared_tool_call_static(
 ) -> ExecutedToolCallOutcome {
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
+    let static_intent = tool.as_ref().and_then(|t| {
+        Some(t.intent()?.to_string())
+    });
 
     let mut result = AgentToolResult::success("");
     let mut is_error = false;
@@ -656,9 +677,12 @@ pub(crate) async fn execute_prepared_tool_call_static(
         is_error = !result.success;
     }
 
+    let end_intent = result.intent.clone().or(static_intent);
+
     emit(AgentEvent::ToolExecutionEnd {
         tool_call_id: tool_call_id.clone(),
         tool_name: tool_name.clone(),
+        intent: end_intent,
         result: oxi_ai::ToolResult {
             tool_call_id,
             content: result.output.clone(),

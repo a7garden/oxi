@@ -2203,3 +2203,135 @@ fn test_fork_result_defaults() {
     assert!(fr.model.is_none());
     assert!(fr.error.is_none());
 }
+
+/// Tool that reports an intent for tracing verification.
+struct IntentAwareEchoTool;
+
+#[async_trait]
+impl crate::tools::AgentTool for IntentAwareEchoTool {
+    fn name(&self) -> &str {
+        "echo_with_intent"
+    }
+
+    fn label(&self) -> &str {
+        "Echo Tool (with intent)"
+    }
+
+    fn description(&self) -> &str {
+        "Echoes back the input arguments with intent tracing"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string", "description": "Message to echo" }
+            },
+            "required": ["message"]
+        })
+    }
+
+    fn intent(&self) -> Option<&str> {
+        Some("Echo back the user message")
+    }
+
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        params: serde_json::Value,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        _ctx: &crate::tools::ToolContext,
+    ) -> std::result::Result<crate::tools::AgentToolResult, String> {
+        let msg = params
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<no message>");
+        Ok(crate::tools::AgentToolResult::success(format!(
+            "Echo: {}",
+            msg
+        )))
+    }
+}
+
+#[tokio::test]
+async fn test_intent_tracing_reaches_events() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![
+        MultiTurnToolResponse {
+            text: None,
+            tool_calls: vec![oxi_ai::ToolCall::new(
+                "call_intent_1",
+                "echo_with_intent",
+                serde_json::json!({"message": "test intent"}),
+            )],
+        },
+        MultiTurnToolResponse {
+            text: Some("Done".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+        workspace_dir: None,
+        provider_options: None,
+        on_compaction: None,
+        ..Default::default()
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    tools.register(IntentAwareEchoTool);
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run("Test intent tracing".to_string(), move |e| {
+            events_clone.lock().unwrap().push(e)
+        })
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    // Find ToolExecutionStart and check it carries the intent
+    let start = events.iter().find_map(|e| match e {
+        AgentEvent::ToolExecutionStart {
+            tool_name,
+            intent,
+            ..
+        } if tool_name == "echo_with_intent" => Some(intent.clone()),
+        _ => None,
+    });
+    assert_eq!(start, Some(Some("Echo back the user message".to_string())));
+
+    // Find ToolExecutionEnd and check it carries the same intent (static fallback)
+    let end = events.iter().find_map(|e| match e {
+        AgentEvent::ToolExecutionEnd {
+            tool_name,
+            intent,
+            ..
+        } if tool_name == "echo_with_intent" => Some(intent.clone()),
+        _ => None,
+    });
+    assert_eq!(end, Some(Some("Echo back the user message".to_string())));
+}

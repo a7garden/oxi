@@ -1175,6 +1175,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             tool_name,
                                             result,
                                             is_error,
+                                            intent: _,
                                         } => UiEvent::ToolExecutionEnd {
                                             tool_call_id,
                                             tool_name,
