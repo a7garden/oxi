@@ -54,13 +54,11 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 ## 3. 다음에 할 작업 (권장 순서)
 
-### Step 1 — P0.2 opt-in 층 제거 (안전, ~170KB) ⭐ 가장 추천
-complexity machinery는 **프로덕션에서 한 번도 생성되지 않음**(doc 주석 + 자체 테스트만). opt-in 층은 기본 bootstrap 경로에 없어 안전하게 제거 가능:
-- 삭제: `oxi-ai/src/{multi_provider.rs, complexity_router.rs, provider_pool.rs, router/}`, `oxi-sdk/src/multi_provider.rs`
-- 제거: `oxi-ai/src/lib.rs`의 `pub mod` 선언 + 재-내보내기, `oxi-sdk` builder의 `with_multi_provider_routing` + prelude/lib 재-내보내기
-- **유지**: `circuit_breaker.rs` + `fallback_chain.rs` (circuit_breaker는 agent 루프 retry에 live — 다음 단계에서 별도 처리)
-- `ProviderEvent::FallbackStart/FallbackExhausted` 변형은 이 층이 emit하므로 함께 제거(단, 제거 전 다른 emitter 없는지 확인)
-- **게이트**: 컴파일러가 빠진 참조를 안내. nextest green.
+### ~~Step 1 — P0.2 opt-in 층 제거~~ ✅ 완료 (2026-07-28, main 병합됨)
+complexity machinery 제거 완료 (−2730 lines, 3603 tests green):
+- 삭제: `oxi-ai/src/{multi_provider.rs, complexity_router.rs, provider_pool.rs}`, `oxi-sdk/src/multi_provider.rs`, `OxiBuilder::enable_routing()`
+- 제거: `ProviderEvent::FallbackStart/FallbackExhausted` + `FallbackReason`, `AgentEvent::Fallback`, `UiEvent::ModelChanged`
+- **유지됨**: `circuit_breaker.rs`, `fallback_chain.rs` (agent 루프 retry에 live), **`router/`** (oxi-cli auto-routing + `/router` 명령 + overlay에서 live — 이 문서 초판의 "router/ 삭제" 지시는 오류였음)
 
 ### Step 2 — P0.2 CircuitBreaker 재연결 + 제거 (위험, 별도 집중)
 `CircuitBreaker`는 `oxi-agent` retry/recovery에 live(`agent_loop/mod.rs:74`, `streaming.rs:333/435/529`, `retry.rs:41`). 제거 시 agent retry를 direct dispatch로 재연결. 신중한 회귀 필요.
