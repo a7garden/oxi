@@ -1097,14 +1097,14 @@ fn test_registry_with_builtins() {
     assert!(names.contains(&"generate_image".to_string()));
 
     // Keep this in sync with ToolRegistry::with_builtins_cwd()
-    assert_eq!(names.len(), 25);
+    assert_eq!(names.len(), 37);
 }
 
 #[test]
 fn test_registry_definitions() {
     let registry = ToolRegistry::with_builtins();
     let defs = registry.definitions();
-    assert_eq!(defs.len(), 25);
+    assert_eq!(defs.len(), 37);
 
     // Each should have name, description, and input_schema
     for def in &defs {

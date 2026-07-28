@@ -835,8 +835,12 @@ pub mod ast_grep;
 pub mod bash;
 /// Browser tools (engine abstraction always compiled).
 pub mod browse;
+/// Checkpoint and Rewind tools — save/restore investigation state.
+pub mod checkpoint_tool;
 /// Conventional-commit tool (deterministic scope + LLM analysis).
 pub mod commit;
+/// Computer tool — computer control using Vision AI.
+pub mod computer_tool;
 /// Context7 documentation tools.
 pub mod context7;
 /// Debug tool — DAP-backed debugger integration (scaffold).
@@ -857,16 +861,26 @@ pub mod generate_image;
 pub mod github;
 /// GitHub repository search tool (legacy REST API).
 pub mod github_search;
+/// Goal tool — manage investigation goals with token budgets.
+pub mod goal_tool;
 /// Content search (grep) tool.
 pub mod grep;
 /// TokioHashlineFs — tokio::fs-backed HashlineFs implementation.
 pub mod hashline_fs;
 /// Shared HTTP client singleton.
 pub mod http_client;
+/// Hub tool — agent coordination for peer messaging and job management.
+pub mod hub_tool;
+/// Inspect Image tool — analyze images using Vision LLM capabilities.
+pub mod inspect_image_tool;
+/// Learn tool — capture a reusable lesson to memory and optionally create a managed skill.
+pub mod learn_tool;
 /// Directory listing tool.
 pub mod ls;
 /// LSP tool (requires LspProvider capability).
 pub mod lsp;
+/// Manage Skill tool — create, update, or delete isolated managed SKILL.md files.
+pub mod manage_skill_tool;
 /// Memory edit tool — update or delete a memory item.
 pub mod memory_edit;
 /// Memory recall tool — semantic search over stored memories.
@@ -883,6 +897,8 @@ pub mod path_utils;
 pub mod read;
 /// Rendering utilities for tool output.
 pub mod render_utils;
+/// Review tool — request code review with focus areas and priorities.
+pub mod review_tool;
 /// Search result cache and get_search_results tool.
 pub mod search_cache;
 /// Sub-agent delegation tool.
@@ -893,10 +909,16 @@ pub mod todo;
 pub mod tool_definition_wrapper;
 /// Output truncation helpers.
 pub mod truncate;
+/// TTS tool — text-to-speech synthesis.
+pub mod tts_tool;
+/// Vibe tool — manage persistent worker sessions.
+pub mod vibe_tool;
 /// Multi-engine web search tool (oxibrowser search module).
 pub mod web_search;
 /// File writing tool.
 pub mod write;
+/// Yield tool — subagent result submission.
+pub mod yield_tool;
 
 // Re-export for convenience
 pub use bash::BashTool;
@@ -1120,6 +1142,18 @@ impl ToolRegistry {
         all_tools.push(Box::new(ast_edit::AstEditTool::new()));
         all_tools.push(Box::new(lsp::LspTool));
         all_tools.push(Box::new(eval_tool::EvalTool));
+        all_tools.push(Box::new(checkpoint_tool::CheckpointTool));
+        all_tools.push(Box::new(checkpoint_tool::RewindTool));
+        all_tools.push(Box::new(hub_tool::HubTool));
+        all_tools.push(Box::new(yield_tool::YieldTool));
+        all_tools.push(Box::new(goal_tool::GoalTool));
+        all_tools.push(Box::new(review_tool::ReviewTool));
+        all_tools.push(Box::new(learn_tool::LearnTool));
+        all_tools.push(Box::new(manage_skill_tool::ManageSkillTool));
+        all_tools.push(Box::new(inspect_image_tool::InspectImageTool));
+        all_tools.push(Box::new(computer_tool::ComputerTool));
+        all_tools.push(Box::new(tts_tool::TtsTool));
+        all_tools.push(Box::new(vibe_tool::VibeTool));
         // debug_tool unregistered — 15/16 actions were scaffolds.
         // Re-enable when full DAP proxy is wired.
         // all_tools.push(Box::new(debug_tool::DebugTool));
