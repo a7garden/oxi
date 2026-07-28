@@ -14,6 +14,7 @@
 
 pub mod ansi;
 pub mod color_level;
+pub mod cursor;
 #[allow(missing_docs)]
 mod deccara;
 pub mod diff;
@@ -32,6 +33,10 @@ pub use mermaid::{
     MermaidColorMode, MermaidRenderOptions, clear_mermaid_cache, render_ascii_diagram,
     render_mermaid_ascii,
 };
+
+/// Cursor dedup state — tracks last cursor position/visibility to avoid
+/// redundant escape sequences (blink preservation).
+pub use cursor::CursorState;
 
 use std::fmt;
 use std::io;
