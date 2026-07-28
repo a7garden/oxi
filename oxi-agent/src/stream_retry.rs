@@ -58,9 +58,8 @@ pub async fn stream_with_retry_core(
             }
             Err(e) => {
                 let msg = e.to_string();
-                let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
-                let is_server_error =
-                    matches!(e, oxi_ai::ProviderError::HttpError(code, _) if code >= 500);
+                let is_rate_limit = e.http_status() == Some(429);
+                let is_server_error = e.http_status().is_some_and(|code| code >= 500);
                 let is_retryable = is_rate_limit
                     || is_server_error
                     || matches!(e, oxi_ai::ProviderError::RequestFailed(_));

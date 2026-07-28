@@ -67,6 +67,11 @@ pub mod prelude {
 /// Provider-specific error type for LLM operations.
 pub use crate::error::ProviderError;
 
+/// Structured HTTP error detail (status/body/provider/request-id) carried by
+/// [`ProviderError::HttpError`]. Re-exported so downstream crates (oxi-agent,
+/// oxi-cli) can construct/inspect structured errors.
+pub use crate::error::HttpErrorDetail;
+
 /// Shared conversation context.
 pub use context::Context;
 

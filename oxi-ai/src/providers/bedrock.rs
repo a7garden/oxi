@@ -482,7 +482,9 @@ impl Provider for BedrockProvider {
             if !response.status().is_success() {
                 let status = response.status();
                 let body: String = response.text().await.unwrap_or_default();
-                return Err(ProviderError::HttpError(status.as_u16(), body));
+                return Err(ProviderError::HttpError(
+                    crate::error::HttpErrorDetail::new(status.as_u16(), body),
+                ));
             }
 
             // Create event stream
