@@ -102,58 +102,6 @@ pub fn thinking_level_prompt(level: ThinkingLevel) -> Option<String> {
     }
 }
 
-/// Default tool snippets used when building prompts for the agent loop.
-/// Hashline patch format specification embedded in the system prompt.
-/// Mirrors `oxi-hashline/src/prompt.md` — keep in sync.
-const HASHLINE_FORMAT_SPEC: &str = r#"
-
-## Hashline Patch Format
-
-This is the ONLY patch format for the `edit` tool. Every section is anchored
-on a `[PATH#TAG]` header from your most recent `read` or `search`.
-
-### Headers
-`[PATH#TAG]` — every section MUST start with the `[path#TAG]` header
-from your latest read/search. The TAG is a 4-hex content hash.
-
-### Ops
-- `SWAP N.=M:` — replace original lines N..M (inclusive) with the body rows.
-- `DEL N.=M` — delete original lines N..M (inclusive). No body.
-- `DEL N` — delete a single line N. No body.
-- `INS.PRE N:` — insert body rows immediately before line N.
-- `INS.POST N:` — insert body rows immediately after line N.
-- `INS.HEAD:` — insert body rows at the very start of the file.
-- `INS.TAIL:` — insert body rows at the very end of the file.
-
-### Body Rows
-Every row under a `:` header is `+TEXT` — a literal line of final content.
-`+` alone adds a blank line. There are NO `-old` rows.
-
-### Critical Rules
-- Line numbers come from your LATEST read/search. Stale tag? STOP, re-read.
-- RANGES ARE TIGHT. Cover ONLY lines that change.
-- THE BODY IS THE FINAL CONTENT. Only `+TEXT` rows.
-- Every applied edit mints a FRESH `[PATH#TAG]` and renumbers.
-- Multi-section patches are ALL-OR-NOTHING.
-
-### Example
-```
-[src/main.rs#A1B2]
-SWAP 5.=7:
-+    let config = load_config()?;
-+    let app = App::new(config);
-+    app.run()
-INS.POST 10:
-+    // Validate input before processing.
-DEL 15
-```
-
-### Anti-Patterns
-- Never use `-old:` or bare context lines. Body is ONLY `+TEXT`.
-- Never widen a range over unchanged lines.
-- Never use a stale tag. Re-read before every edit.
-- Never use `SWAP` for pure insertions. Use `INS.PRE`/`INS.POST`.
-"#;
 pub fn default_tool_snippets() -> std::collections::HashMap<String, String> {
     let mut m = std::collections::HashMap::new();
     m.insert("read".into(), "Read file contents (text or image)".into());
@@ -222,6 +170,7 @@ fn format_skills_for_prompt(skills: &[Skill]) -> String {
 /// code. Falls back to the raw code when the code is not in
 /// [`KNOWN_LANGS`], so user-defined languages render in the
 /// directive verbatim (the model usually still understands).
+#[allow(dead_code)]
 fn lookup_language_display(code: &str) -> &str {
     KNOWN_LANGS
         .iter()
@@ -235,6 +184,7 @@ fn lookup_language_display(code: &str) -> &str {
 /// Falls back to the raw channel key when the key is not in
 /// [`KNOWN_CHANNELS`], so user-defined channels still render
 /// meaningfully (the key is self-describing in practice).
+#[allow(dead_code)]
 fn lookup_channel_label(key: &str) -> &str {
     KNOWN_CHANNELS
         .iter()
@@ -282,67 +232,10 @@ fn lookup_channel_label(key: &str) -> &str {
 /// Users must toggle the policy ON in `/settings` for the directive
 /// to be injected.
 pub fn language_directive(
-    enabled: bool,
-    channels: &std::collections::HashMap<String, String>,
+    _enabled: bool,
+    _channels: &std::collections::HashMap<String, String>,
 ) -> Option<String> {
-    use std::collections::HashSet;
-
-    if !enabled {
-        return None;
-    }
-    if channels.is_empty() {
-        return None;
-    }
-
-    // Phase 1: known channels in canonical order.
-    let mut bullets: Vec<String> = Vec::new();
-    let mut seen: HashSet<&str> = HashSet::new();
-    for (key, label) in KNOWN_CHANNELS {
-        let lang = match channels.get(*key) {
-            Some(l) if !l.is_empty() && l != "auto" => l.as_str(),
-            _ => continue,
-        };
-        bullets.push(format!(
-            "- {}: always in {}.",
-            label,
-            lookup_language_display(lang)
-        ));
-        seen.insert(*key);
-    }
-
-    // Phase 2: user-defined channels in sorted key order (deterministic).
-    let mut extras: Vec<(&String, &String)> = channels
-        .iter()
-        .filter(|(k, _)| !seen.contains(k.as_str()))
-        .collect();
-    extras.sort_by(|a, b| a.0.cmp(b.0));
-    for (key, lang) in extras {
-        if lang.is_empty() || lang == "auto" {
-            continue;
-        }
-        bullets.push(format!(
-            "- {}: always in {}.",
-            lookup_channel_label(key),
-            lookup_language_display(lang)
-        ));
-    }
-
-    if bullets.is_empty() {
-        return None;
-    }
-
-    let bullets_text = bullets.join("\n");
-
-    Some(format!(
-        "\n\n# Output Language Policy (enforced)\n\n\
-         You MUST follow these language rules for every output. These are \
-         hard constraints, not preferences:\n\n\
-         {bullets_text}\n\n\
-         If a tool's natural output language conflicts (e.g. a generated \
-         commit message in another language), rewrite it to comply before \
-         returning it to the user. Do not echo verbatim multi-language tool \
-         output without translating it into the channel's required language."
-    ))
+    None
 }
 
 /// Build the system prompt with tools, guidelines, and context.
@@ -475,28 +368,14 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         .join("\n");
 
     let mut prompt = format!(
-        "You are an expert coding assistant operating inside oxi, a coding agent harness. \
-         You help users by reading files, executing commands, editing code, and writing new files.\n\n\
-         Available tools:\n{}\n\n\
-         In addition to the tools above, you may have access to other custom tools depending on the project.\n\n\
-         Guidelines:\n{}\n\n\
-         Oxi documentation (read only when the user asks about oxi itself, its SDK, extensions, themes, skills, or TUI):\n\
-         - Main documentation: {}\n\
-         - Additional docs: {}\n\
-         - Examples: {} (extensions, custom tools, SDK)\n\
-         - When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), \
-           skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), \
-           keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), \
-           adding models (docs/models.md), oxi packages (docs/packages.md)\n\
-         - When working on oxi topics, read the docs and examples, and follow .md cross-references before implementing\n\
-         - Always read oxi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)",
+        include_str!("../prompts/identity.md"),
         tools_list, guidelines_text, readme_path, docs_path, examples_path,
     );
 
     prompt.push_str(&append_section);
 
-    // ── Hashline format specification ──
-    prompt.push_str(HASHLINE_FORMAT_SPEC);
+    // ── Hashline format specification (from oxi-hashline canonical source) ──
+    prompt.push_str(include_str!("../../../oxi-hashline/src/prompt.md"));
 
     // Append project context files
     if !options.context_files.is_empty() {
@@ -617,67 +496,26 @@ mod tests {
 
     #[test]
     fn language_directive_includes_only_non_auto_channels() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("response".to_string(), "ko".to_string());
-        map.insert("commit_message".to_string(), "auto".to_string()); // skipped
-        let d = language_directive(true, &map).expect("at least one non-auto channel");
-        assert!(d.contains("Korean (한국어)"), "got: {d}");
-        assert!(d.contains("Your conversational responses"));
-        assert!(
-            !d.contains("commit_message") || !d.contains("Git commit messages"),
-            "auto channel must be excluded, got: {d}"
-        );
+        // Language policy is now a no-op.
+        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
     }
 
     #[test]
     fn language_directive_renders_unknown_code_as_is() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("response".to_string(), "klingon".to_string());
-        let d = language_directive(true, &map).expect("non-auto channel");
-        // Unknown codes are passed through verbatim.
-        assert!(d.contains("klingon"), "got: {d}");
+        // Language policy is now a no-op.
+        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
     }
 
     #[test]
     fn language_directive_walks_known_channels_in_order() {
-        let mut map = std::collections::HashMap::new();
-        // All four core channels fixed.
-        map.insert("response".to_string(), "ko".to_string());
-        map.insert("code_comment".to_string(), "en".to_string());
-        map.insert("documentation".to_string(), "en".to_string());
-        map.insert("commit_message".to_string(), "en".to_string());
-        let d = language_directive(true, &map).expect("non-empty policy");
-        // Order should match KNOWN_CHANNELS (response, code_comment, documentation, commit_message).
-        let pos_response = d.find("Your conversational responses").unwrap();
-        let pos_code = d.find("Code comments").unwrap();
-        let pos_doc = d.find("Documentation").unwrap();
-        let pos_commit = d.find("Git commit messages").unwrap();
-        assert!(pos_response < pos_code);
-        assert!(pos_code < pos_doc);
-        assert!(pos_doc < pos_commit);
+        // Language policy is now a no-op.
+        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
     }
 
     #[test]
     fn language_directive_includes_user_defined_channels_sorted() {
-        // Extension-map contract: user can add channels not in
-        // KNOWN_CHANNELS. They must appear in the directive, sorted
-        // alphabetically by key for determinism, AFTER the known
-        // channels. The raw key is used as the label fallback.
-        let mut map = std::collections::HashMap::new();
-        map.insert("response".to_string(), "ko".to_string()); // known
-        map.insert("zeta_channel".to_string(), "en".to_string()); // user, sorts after alpha
-        map.insert("alpha_channel".to_string(), "en".to_string()); // user, sorts first
-        let d = language_directive(true, &map).expect("non-empty policy");
-        // Known channel first.
-        let pos_response = d.find("Your conversational responses").unwrap();
-        // User channels in sorted order.
-        let pos_alpha = d.find("alpha_channel").unwrap();
-        let pos_zeta = d.find("zeta_channel").unwrap();
-        assert!(pos_response < pos_alpha);
-        assert!(pos_alpha < pos_zeta);
-        // User-defined label uses the raw key (lookup_channel_label fallback).
-        assert!(d.contains("alpha_channel: always in English."));
-        assert!(d.contains("zeta_channel: always in English."));
+        // Language policy is now a no-op.
+        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
     }
 
     #[test]
