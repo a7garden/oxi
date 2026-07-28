@@ -25,6 +25,7 @@
 //!    - `emit_update`: commit new chunk + repaint changed window rows only
 
 pub mod component;
+pub mod components;
 pub mod container;
 pub mod engine;
 pub mod line;
