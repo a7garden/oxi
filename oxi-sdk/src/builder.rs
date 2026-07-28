@@ -9,7 +9,6 @@ use oxi_ai::{Model, ModelRegistry, Provider, ProviderRegistry};
 
 use crate::agent_builder::AgentBuilder;
 use crate::lifecycle::{AgentSupervisor, FileSnapshotStore, SupervisorPolicy};
-use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
 use crate::ports::PortRegistry;
 
 /// Oxi AI engine instance — holds isolated provider and model registries.
@@ -552,62 +551,6 @@ impl OxiBuilder {
         let mut ports = self.ports.unwrap_or_default();
         ports.embeddings = embeddings;
         self.ports = Some(ports);
-        self
-    }
-
-    /// Enable multi-provider routing with automatic complexity-based model selection.
-    ///
-    /// This registers a [`MultiProvider`](oxi_ai::multi_provider::MultiProvider) that routes requests based on task complexity,
-    /// with configurable fallback chains and circuit breaker protection.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Routing configuration (use [`RoutingConfig::new()`] for defaults)
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use oxi_sdk::{OxiBuilder, RoutingConfig};
-    ///
-    /// let oxi = OxiBuilder::new()
-    ///     .with_builtins()
-    ///     .enable_routing(RoutingConfig::new().prefer_cost_efficient(true))
-    ///     .build();
-    /// ```
-    pub fn enable_routing(self, config: RoutingConfig) -> Self {
-        // Collect providers before consuming self
-        let provider_names: Vec<String> = self.providers.names();
-        let mut providers_to_add: Vec<(String, Arc<dyn Provider>)> = Vec::new();
-        for name in &provider_names {
-            if let Some(provider) = self.providers.get_custom(name) {
-                providers_to_add.push((name.clone(), provider));
-            }
-        }
-
-        // Build multi-provider with registered providers and routing config
-        let mut mp_builder = MultiProviderBuilder::new();
-
-        // Apply routing config
-        if config.auto_routing {
-            mp_builder = mp_builder.enable_auto_routing();
-        }
-        if config.prefer_cost_efficient {
-            mp_builder = mp_builder.prefer_cost_efficient();
-        }
-        if let Some(router) = config.router {
-            mp_builder = mp_builder.with_router_boxed(router);
-        }
-
-        // Add collected providers
-        for (name, provider) in providers_to_add {
-            mp_builder = mp_builder.provider(&name, provider);
-        }
-
-        // Build and register the multi-provider
-        let built = mp_builder.build();
-        if let Ok(mp) = built {
-            self.providers.register_arc("multi", mp);
-        }
         self
     }
 

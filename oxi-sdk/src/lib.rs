@@ -27,7 +27,6 @@ pub mod lifecycle;
 pub mod message_bus;
 pub mod metrics;
 pub mod middleware;
-pub mod multi_provider;
 pub mod observability;
 pub mod ports;
 
@@ -94,7 +93,6 @@ pub use middleware::{
     MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline, MiddlewareResult,
     build_hooks,
 };
-pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use observability::{
     AuditAction, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPersistence, AuditTrail,
     CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, EventQuery, EventStore,
@@ -123,8 +121,6 @@ pub use routing::RoutingControl;
 
 // Re-export from oxi-ai
 pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
-pub use oxi_ai::multi_provider::MultiProviderConfig;
-pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
 pub use oxi_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, MessageContent,
     Model, ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions,

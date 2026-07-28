@@ -21,7 +21,6 @@ pub use oxi_catalog::catalog;
 pub mod circuit_breaker;
 pub mod compaction;
 pub mod compaction_seam;
-mod complexity_router;
 mod context;
 pub mod env_api_keys;
 mod error;
@@ -33,7 +32,6 @@ pub mod oauth;
 // re-exported here so `oxi_ai::product_env` and `oxi_sdk::ports::fs::path`
 // (which delegates here) keep working.
 pub use oxi_catalog::product_env;
-pub mod provider_pool;
 pub mod provider_registry;
 mod providers;
 
@@ -144,11 +142,6 @@ pub use compaction::{
     LlmCompactor, NoopContextTransformer,
 };
 
-// Complexity-based routing
-
-/// Complexity-based model routing.
-pub use complexity_router::{ComplexityRouter, DefaultRouter};
-
 // Cross-provider message transformation
 
 /// Message transformation between provider formats.
@@ -156,14 +149,6 @@ pub use transform::{
     TransformOptions, anthropic_to_google, anthropic_to_openai, google_to_openai,
     normalize_tool_call_id, openai_to_anthropic, transform_messages, transform_messages_for_model,
 };
-
-// Multi-provider routing
-
-/// MultiProvider for intelligent routing with fallback support.
-pub mod multi_provider;
-
-/// Re-exports for multi_provider convenience.
-pub use multi_provider::MultiProvider;
 
 // Model registry (runtime mutable registry)
 mod model_registry;
