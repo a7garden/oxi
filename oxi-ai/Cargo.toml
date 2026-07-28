@@ -62,6 +62,10 @@ signature = "2"
 pkcs8 = "0.10"
 rsa = { version = "0.9", features = ["pem"] }
 
+# Protobuf (Devin, Cursor)
+prost = "0.14"
+tokio-stream = "0.1"
+
 [dev-dependencies]
 mockito = "1"
 tempfile = "3"
