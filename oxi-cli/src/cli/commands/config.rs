@@ -243,14 +243,11 @@ fn config_set(key: &str, value: &str) -> Result<()> {
                 .parse()
                 .map_err(|e: oxi_tui_legacy::symbols::UnknownGlyphSet| anyhow::anyhow!("{e}"))?;
         }
-        "language_policy_enabled" | "language_policy" => {
-            settings.language_policy_enabled = parse_config_bool(value)?;
-        }
         _ => {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
                   thinking_level, extensions_enabled, auto_compaction,\
-                  glyph, language_policy_enabled, tool_timeout,\
+                  glyph, tool_timeout,\
                   max_tokens, temperature, session_history_size",
                 key
             );
@@ -308,14 +305,11 @@ fn config_get(key: &str) -> Result<()> {
             }
         }
         "glyph" | "glyph_set" => settings.glyph_set.label().to_string(),
-        "language_policy_enabled" | "language_policy" => {
-            settings.language_policy_enabled.to_string()
-        }
         _ => {
             anyhow::bail!(
                 "Unknown setting: '{}'. Valid keys: theme, model, provider,\
                   thinking_level, extensions_enabled, auto_compaction,\
-                  glyph, language_policy_enabled, tool_timeout,\
+                  glyph, tool_timeout,\
                   max_tokens, temperature, session_history_size,\
                   extensions, skills, prompts, themes, custom_providers",
                 key

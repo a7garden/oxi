@@ -717,6 +717,8 @@ pub struct GitLabDuoAgentProvider {
     client: &'static Client,
     base_url: String,
     gitlab_token: Option<String>,
+    namespace_id: String,
+    root_namespace_id: String,
 }
 
 impl GitLabDuoAgentProvider {
@@ -725,6 +727,8 @@ impl GitLabDuoAgentProvider {
             client: shared_client(),
             base_url: GITLAB_COM_URL.to_string(),
             gitlab_token: None,
+            namespace_id: Self::resolve_namespace("GITLAB_NAMESPACE_ID"),
+            root_namespace_id: Self::resolve_namespace("GITLAB_ROOT_NAMESPACE_ID"),
         }
     }
 
@@ -733,6 +737,8 @@ impl GitLabDuoAgentProvider {
             client: shared_client(),
             base_url: GITLAB_COM_URL.to_string(),
             gitlab_token: Some(token.into()),
+            namespace_id: Self::resolve_namespace("GITLAB_NAMESPACE_ID"),
+            root_namespace_id: Self::resolve_namespace("GITLAB_ROOT_NAMESPACE_ID"),
         }
     }
 
@@ -742,7 +748,25 @@ impl GitLabDuoAgentProvider {
             client: shared_client(),
             base_url: normalize_gitlab_base_url(base_url),
             gitlab_token: None,
+            namespace_id: Self::resolve_namespace("GITLAB_NAMESPACE_ID"),
+            root_namespace_id: Self::resolve_namespace("GITLAB_ROOT_NAMESPACE_ID"),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_namespace(namespace_id: &str, root_namespace_id: &str) -> Self {
+        Self {
+            client: shared_client(),
+            base_url: GITLAB_COM_URL.to_string(),
+            gitlab_token: None,
+            namespace_id: namespace_id.to_string(),
+            root_namespace_id: root_namespace_id.to_string(),
+        }
+    }
+
+    /// Resolve a namespace ID from env var, falling back to `"1"`.
+    fn resolve_namespace(env_var: &str) -> String {
+        std::env::var(env_var).unwrap_or_else(|_| "1".to_string())
     }
 }
 
@@ -762,6 +786,8 @@ impl Provider for GitLabDuoAgentProvider {
         let client = self.client;
         let base_url = self.base_url.clone();
         let gitlab_token = self.gitlab_token.clone();
+        let namespace_id = self.namespace_id.clone();
+        let root_namespace_id = self.root_namespace_id.clone();
         let context_clone = context.clone();
         let options_clone = options.clone();
         let model_id = model.id.clone();
@@ -800,7 +826,7 @@ impl Provider for GitLabDuoAgentProvider {
                     None => {
                         let result = request_direct_access(
                             client, &base_url, &api_key,
-                            "1", // root_namespace_id — resolved dynamically in omp, use fallback
+                            &root_namespace_id,
                             None,
                         )
                         .await?;
@@ -818,13 +844,13 @@ impl Provider for GitLabDuoAgentProvider {
 
                 // 4. Create workflow.
                 let workflow_id = create_workflow(
-                    client, &base_url, &api_key, "1", // namespace_id fallback
+                    client, &base_url, &api_key, &namespace_id,
                     &goal, None,
                 )
                 .await?;
 
                 // 5. Fetch available models (best-effort).
-                let available_models = fetch_available_models(client, &base_url, &api_key, "1")
+                let available_models = fetch_available_models(client, &base_url, &api_key, &namespace_id)
                     .await
                     .ok();
                 let ws_base = normalize_gitlab_base_url(ws_base_url);
@@ -842,7 +868,7 @@ impl Provider for GitLabDuoAgentProvider {
                 {
                     let mut pairs = ws_url.query_pairs_mut();
                     pairs.append_pair("workflow_definition", GITLAB_DUO_WORKFLOW_DEFINITION);
-                    pairs.append_pair("namespace_id", "1"); // placeholder, needs real namespace
+                    pairs.append_pair("namespace_id", &namespace_id);
                 }
 
                 // 8. Build start request.

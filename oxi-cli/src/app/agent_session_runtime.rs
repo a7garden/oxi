@@ -294,8 +294,6 @@ pub async fn create_agent_session_from_services(
             model_id: String::new(),
             system_prompt: Some(build_system_prompt_with_memory(
                 thinking_level,
-                settings.language_policy_enabled,
-                &settings.output_languages,
                 memory_opt,
                 crate::services::read_path_block(&services.agent_dir, &services.cwd),
             )),
@@ -307,10 +305,7 @@ pub async fn create_agent_session_from_services(
             } else {
                 oxi_sdk::CompactionStrategy::Disabled
             },
-            compaction_instruction: build_compaction_instruction(
-                settings.language_policy_enabled,
-                &settings.output_languages,
-            ),
+            compaction_instruction: None,
             context_window: 128_000,
             workspace_dir: Some(services.cwd.clone()),
             output_mode: None,
@@ -377,8 +372,6 @@ pub async fn create_agent_session_from_services(
     };
     let system_prompt = build_system_prompt_with_memory(
         thinking_level,
-        settings.language_policy_enabled,
-        &settings.output_languages,
         memory_block_opt,
         crate::services::read_path_block(&services.agent_dir, &services.cwd),
     );
@@ -399,10 +392,7 @@ pub async fn create_agent_session_from_services(
         temperature: settings.effective_temperature(),
         max_tokens: settings.effective_max_tokens(),
         compaction_strategy,
-        compaction_instruction: build_compaction_instruction(
-            settings.language_policy_enabled,
-            &settings.output_languages,
-        ),
+        compaction_instruction: None,
         workspace_dir: Some(services.cwd.clone()),
         output_mode: None,
         provider_options: None,
@@ -843,31 +833,14 @@ fn parse_model_id(model_id: &str) -> (String, String) {
     }
 }
 
-/// Build the system prompt based on thinking level and the TUI language policy.
-///
-/// **TUI-only injection point.** This is the only place that injects
-/// the per-channel `output_languages` setting into the system
-/// prompt. The `lib.rs` App build path (used by `oxi --print` and
-/// RPC mode) does NOT call this function — it has its own simpler
-/// `build_system_prompt` that omits the language policy. See
-/// `crate::store::settings::Settings::output_languages` for scope.
+/// Build the system prompt based on thinking level.
 ///
 /// `pub(crate)` so [`crate::app::agent_session::AgentSession::rebuild_system_prompt`]
 /// can call it for live hot-apply from `/reload` and `/settings`.
 ///
 /// Delegates to [`crate::prompt::system_prompt::build_system_prompt`].
-pub(crate) fn build_system_prompt(
-    thinking_level: ThinkingLevel,
-    language_policy_enabled: bool,
-    languages: &std::collections::HashMap<String, String>,
-) -> String {
-    build_system_prompt_with_memory(
-        thinking_level,
-        language_policy_enabled,
-        languages,
-        None,
-        None,
-    )
+pub(crate) fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
+    build_system_prompt_with_memory(thinking_level, None, None)
 }
 
 /// Combine memory block with tool usage guidance for system prompt.
@@ -898,13 +871,9 @@ fn append_memory_and_tool_guidance(memory_block: Option<String>) -> Option<Strin
 /// Both are appended after the standard system prompt body.
 pub(crate) fn build_system_prompt_with_memory(
     thinking_level: ThinkingLevel,
-    language_policy_enabled: bool,
-    languages: &std::collections::HashMap<String, String>,
     memory_block: Option<String>,
     read_path_block: Option<String>,
 ) -> String {
-    let directive =
-        crate::prompt::system_prompt::language_directive(language_policy_enabled, languages);
     // Concatenate the two optional blocks in order (raw recall
     // first, then the autonomous read-path guidance).
     let combined = match (memory_block, read_path_block) {
@@ -920,46 +889,11 @@ pub(crate) fn build_system_prompt_with_memory(
             .unwrap_or_default(),
         selected_tools: crate::prompt::system_prompt::default_tool_names(),
         tool_snippets: crate::prompt::system_prompt::default_tool_snippets(),
-        language_directive: directive,
         append_system_prompt: append_memory_and_tool_guidance(combined),
         ..Default::default()
     };
 
     crate::prompt::system_prompt::build_system_prompt(&options)
-}
-
-/// Build a compaction instruction that propagates the TUI language
-/// policy to the conversation summarizer. Returns `None` when no
-/// language policy is active (all channels `auto`), so the
-/// compactor uses its default behavior.
-///
-/// **Framing caveat (weakens the MUST contract).** The summarizer
-/// LLM sees this instruction wrapped as `"Focus areas: {directive}"`
-/// (see `oxi-ai/src/compaction.rs::Compactor::build_summarize_prompt`).
-/// The "Focus areas" framing tells the model "these are aspects to
-/// attend to" — weaker than the direct "MUST" framing the main
-/// system prompt uses. The summarizer may therefore produce
-/// summaries whose language does not respect the policy (e.g.
-/// translating a Korean user message into English). This is a
-/// known, accepted limitation of the current MVP. To strengthen
-/// it, the instruction would need to be injected as a separate
-/// system-prompt section in the summarizer (cross-crate change
-/// to `oxi-ai`, out of scope here).
-fn build_compaction_instruction(
-    language_policy_enabled: bool,
-    languages: &std::collections::HashMap<String, String>,
-) -> Option<String> {
-    let directive =
-        crate::prompt::system_prompt::language_directive(language_policy_enabled, languages)?;
-    // Trim the leading "\n\n" so we can compose cleanly.
-    let body = directive.trim_start();
-    Some(format!(
-        "{body}\n\n\
-         Note: this policy applies to the summarizer itself as well. \
-         When summarizing the conversation, preserve the language of \
-         any quoted or paraphrased user/assistant content, and do not \
-         translate user-authored content into a different language."
-    ))
 }
 
 /// Get the default sessions directory.
@@ -1042,78 +976,14 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt() {
-        let empty = std::collections::HashMap::new();
-        // language_policy_enabled=true (boolean gate doesn't affect non-policy paths)
-        let prompt = build_system_prompt(ThinkingLevel::Off, true, &empty);
+        let prompt = build_system_prompt(ThinkingLevel::Off);
         assert!(prompt.contains("concise"));
 
-        let prompt = build_system_prompt(ThinkingLevel::Medium, true, &empty);
+        let prompt = build_system_prompt(ThinkingLevel::Medium);
         assert!(prompt.contains("coding"));
 
-        let prompt = build_system_prompt(ThinkingLevel::High, true, &empty);
+        let prompt = build_system_prompt(ThinkingLevel::High);
         assert!(prompt.contains("comprehensive"));
-    }
-
-    #[test]
-    fn test_build_system_prompt_injects_language_policy() {
-        // Language policy is now a no-op; prompt should not contain policy.
-        let prompt = build_system_prompt(
-            ThinkingLevel::Medium,
-            false,
-            &std::collections::HashMap::new(),
-        );
-        assert!(
-            !prompt.contains("Output Language Policy (enforced)"),
-            "language directive should not be present (now a no-op)"
-        );
-    }
-
-    #[test]
-    fn test_build_system_prompt_omits_policy_when_all_auto() {
-        let mut langs = std::collections::HashMap::new();
-        langs.insert("response".to_string(), "auto".to_string());
-        let prompt = build_system_prompt(ThinkingLevel::Medium, true, &langs);
-        assert!(
-            !prompt.contains("Output Language Policy"),
-            "no policy should be injected when all channels are auto"
-        );
-    }
-
-    #[test]
-    fn test_build_system_prompt_omits_policy_when_disabled() {
-        // v6: master gate. enabled=false must suppress the policy regardless of channels.
-        let mut langs = std::collections::HashMap::new();
-        langs.insert("response".to_string(), "ko".to_string());
-        langs.insert("commit_message".to_string(), "en".to_string());
-        let prompt = build_system_prompt(ThinkingLevel::Medium, false, &langs);
-        assert!(
-            !prompt.contains("Output Language Policy"),
-            "no policy should be injected when language_policy_enabled is false"
-        );
-    }
-
-    #[test]
-    fn test_build_compaction_instruction_none_for_all_auto() {
-        let langs = std::collections::HashMap::new();
-        assert!(build_compaction_instruction(true, &langs).is_none());
-
-        let mut langs = std::collections::HashMap::new();
-        langs.insert("response".to_string(), "auto".to_string());
-        assert!(build_compaction_instruction(true, &langs).is_none());
-    }
-
-    #[test]
-    fn test_build_compaction_instruction_none_when_disabled() {
-        // v6: master gate. enabled=false must return None regardless of channels.
-        let mut langs = std::collections::HashMap::new();
-        langs.insert("response".to_string(), "ko".to_string());
-        assert!(build_compaction_instruction(false, &langs).is_none());
-    }
-
-    #[test]
-    fn test_build_compaction_instruction_propagates_policy() {
-        // Language policy is now a no-op; compaction instruction always returns None.
-        assert!(build_compaction_instruction(true, &std::collections::HashMap::new()).is_none());
     }
 
     #[test]

@@ -871,32 +871,16 @@ impl AgentSession {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // System prompt rebuild (TUI language policy hot-apply)
+    // System prompt rebuild
     // ══════════════════════════════════════════════════════════════════
 
     /// Rebuild the system prompt from the current `Settings`, picking
-    /// up the latest `output_languages` (TUI language policy) and
-    /// `thinking_level`. Pushes the rebuilt prompt to the underlying
-    /// agent so the **next** user turn sees the updated policy.
+    /// up `thinking_level`. Pushes the rebuilt prompt to the underlying
+    /// agent so the **next** user turn sees updated settings.
     ///
     /// This is a no-op-safe: it always rewrites the system prompt
     /// (no change-detection), so it can be called unconditionally
     /// from `/reload` or other hot-apply paths.
-    ///
-    /// **Strong default, NOT a hard guarantee.** The rebuilt
-    /// prompt carries a prompt-level "MUST" directive. The model
-    /// can still occasionally violate the policy (long contexts,
-    /// tool-output echo, subagent summarization under a different
-    /// framing). This method only refreshes the prompt — it does
-    /// not enforce anything at the I/O layer.
-    ///
-    /// **Why this exists:** `Settings::output_languages` is consumed
-    /// exclusively by the TUI session build path
-    /// (`agent_session_runtime::build_system_prompt`). When the user
-    /// edits the policy via `/settings` (which persists to disk but
-    /// does not touch the live agent), the next call to this method
-    /// picks the new policy up. The `/reload` slash command calls
-    /// this alongside `set_thinking_level`/`set_model`.
     ///
     /// **v6 — disk fresh load:** this method now reloads `Settings`
     /// from disk before rebuilding the prompt. This synchronizes
@@ -910,8 +894,6 @@ impl AgentSession {
         // was just persisted (or hand-edited in settings.toml).
         let fresh = crate::store::settings::Settings::load().unwrap_or_default();
         let thinking = fresh.thinking_level;
-        let languages = fresh.output_languages.clone();
-        let language_policy_enabled = fresh.language_policy_enabled;
         let auto_compaction = fresh.auto_compaction;
         *self.settings.write() = fresh;
 
@@ -928,11 +910,7 @@ impl AgentSession {
         };
         self.agent.set_compaction_strategy(strategy);
 
-        let prompt = crate::app::agent_session_runtime::build_system_prompt(
-            thinking,
-            language_policy_enabled,
-            &languages,
-        );
+        let prompt = crate::app::agent_session_runtime::build_system_prompt(thinking);
         self.agent.set_system_prompt(prompt);
     }
 

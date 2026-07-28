@@ -2,7 +2,7 @@
 //!
 //! Originally inspired by pi-mono's system prompt construction.
 
-use crate::store::settings::{KNOWN_CHANNELS, KNOWN_LANGS, ThinkingLevel};
+use crate::store::settings::ThinkingLevel;
 use chrono::Local;
 
 /// A skill that can be included in the system prompt.
@@ -48,24 +48,6 @@ pub struct BuildSystemPromptOptions {
     pub docs_path: Option<String>,
     /// Path to examples.
     pub examples_path: Option<String>,
-    /// TUI language policy directive, rendered as the final section of
-    /// the system prompt (strongest position). `None` or empty string =
-    /// no policy injected.
-    ///
-    /// **Strong default, NOT a hard guarantee.** This is a
-    /// prompt-level "MUST" instruction. Long contexts, tool-output
-    /// echo, and subagent summarization can cause occasional
-    /// violations. See `Settings::output_languages` for the full
-    /// caveat list.
-    ///
-    /// **TUI-only.** This is populated exclusively by
-    /// `crate::app::agent_session_runtime::build_system_prompt` (the
-    /// TUI session build path). The `lib.rs` App build path used by
-    /// `oxi --print` and RPC mode must NOT set this field. See
-    /// `crate::store::settings::Settings::output_languages` for the
-    /// source map and `language_directive` for the helper that
-    /// generates this string.
-    pub language_directive: Option<String>,
 }
 
 /// Convert a [`ThinkingLevel`] to its default custom prompt string.
@@ -149,7 +131,6 @@ impl Default for BuildSystemPromptOptions {
             readme_path: None,
             docs_path: None,
             examples_path: None,
-            language_directive: None,
         }
     }
 }
@@ -166,79 +147,6 @@ fn format_skills_for_prompt(skills: &[Skill]) -> String {
     out
 }
 
-/// Look up a human-readable display label for an ISO 639-1 language
-/// code. Falls back to the raw code when the code is not in
-/// [`KNOWN_LANGS`], so user-defined languages render in the
-/// directive verbatim (the model usually still understands).
-#[allow(dead_code)]
-fn lookup_language_display(code: &str) -> &str {
-    KNOWN_LANGS
-        .iter()
-        .find(|(c, _)| *c == code)
-        .map(|(_, d)| *d)
-        .unwrap_or(code)
-}
-
-/// Look up a human-readable channel label (the phrase used in the
-/// rendered directive, e.g. `"Your conversational responses"`).
-/// Falls back to the raw channel key when the key is not in
-/// [`KNOWN_CHANNELS`], so user-defined channels still render
-/// meaningfully (the key is self-describing in practice).
-#[allow(dead_code)]
-fn lookup_channel_label(key: &str) -> &str {
-    KNOWN_CHANNELS
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, l)| *l)
-        .unwrap_or(key)
-}
-
-/// Build a strong-default language policy directive from the
-/// per-channel `output_languages` map.
-///
-/// **Channel ordering** (deterministic):
-/// 1. Channels present in [`KNOWN_CHANNELS`], in declaration order.
-/// 2. User-defined channels (not in `KNOWN_CHANNELS`), sorted by key.
-///
-/// This makes the directive stable across runs and predictable for
-/// tests, while still allowing users to add their own channels in
-/// `settings.toml` without code changes (e.g. `pr_description = "en"`).
-///
-/// **Language codes:** `KNOWN_LANGS` provides display labels for the
-/// core set (`"auto"`, `"en"`, `"ko"`, ...). Unknown codes are
-/// rendered verbatim — the model typically still understands.
-///
-/// **Channels whose value is missing, empty, or `"auto"` are
-/// skipped** (the default, and the way to opt out per channel).
-///
-/// **Strong default, not a hard guarantee.** The directive uses
-/// "MUST" framing so the model attends to it, but this is a
-/// prompt-level instruction: long contexts, tool-output echo, and
-/// subagent summarization can still cause occasional violations.
-/// See `Settings::output_languages` for the full caveat list.
-///
-/// Returns `None` when the map is empty or every channel is
-/// `"auto"`/empty (i.e. no policy should be injected).
-///
-/// **TUI-only.** This helper is called exclusively by
-/// `crate::app::agent_session_runtime::build_system_prompt`. The
-/// `lib.rs` App build path (used by `oxi --print` and RPC mode)
-/// does not call it. See the `BuildSystemPromptOptions::language_directive`
-/// field docs for the rationale.
-///
-/// **Master gate:** when `enabled` is `false`, returns `None`
-/// immediately regardless of channel contents. This corresponds to
-/// `Settings::language_policy_enabled` (default `false` since v6).
-/// Users must toggle the policy ON in `/settings` for the directive
-/// to be injected.
-pub fn language_directive(
-    _enabled: bool,
-    _channels: &std::collections::HashMap<String, String>,
-) -> Option<String> {
-    None
-}
-
-/// Build the system prompt with tools, guidelines, and context.
 pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     let prompt_cwd = options.cwd.replace('\\', "/");
     let date = Local::now().format("%Y-%m-%d").to_string();
@@ -274,15 +182,6 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         // Add date and working directory last
         prompt.push_str(&format!("\nCurrent date: {}", date));
         prompt.push_str(&format!("\nCurrent working directory: {}", prompt_cwd));
-
-        // Language policy directive (TUI-only) — appended LAST so it
-        // sits at the end of the prompt where models attend most
-        // strongly. Skipped when the option is None or empty.
-        if let Some(ref directive) = options.language_directive
-            && !directive.is_empty()
-        {
-            prompt.push_str(directive);
-        }
 
         return prompt;
     }
@@ -395,15 +294,6 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     prompt.push_str(&format!("\nCurrent date: {}", date));
     prompt.push_str(&format!("\nCurrent working directory: {}", prompt_cwd));
 
-    // Language policy directive (TUI-only) — appended LAST so it
-    // sits at the end of the prompt where models attend most
-    // strongly. Skipped when the option is None or empty.
-    if let Some(ref directive) = options.language_directive
-        && !directive.is_empty()
-    {
-        prompt.push_str(directive);
-    }
-
     prompt
 }
 
@@ -464,110 +354,5 @@ mod tests {
         };
         let prompt = build_system_prompt(&opts);
         assert!(prompt.contains("Extra rules"));
-    }
-
-    // ── language_directive tests (TUI language policy) ─────────────
-
-    #[test]
-    fn language_directive_returns_none_when_disabled() {
-        // v6: master gate. When enabled=false, returns None regardless of channels.
-        let mut map = std::collections::HashMap::new();
-        map.insert("response".to_string(), "ko".to_string());
-        map.insert("commit_message".to_string(), "en".to_string());
-        assert!(
-            language_directive(false, &map).is_none(),
-            "language_directive(false, _) must return None"
-        );
-    }
-
-    #[test]
-    fn language_directive_returns_none_for_empty_map() {
-        let map = std::collections::HashMap::new();
-        assert!(language_directive(true, &map).is_none());
-    }
-
-    #[test]
-    fn language_directive_returns_none_when_all_auto() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("response".to_string(), "auto".to_string());
-        map.insert("commit_message".to_string(), "auto".to_string());
-        assert!(language_directive(true, &map).is_none());
-    }
-
-    #[test]
-    fn language_directive_includes_only_non_auto_channels() {
-        // Language policy is now a no-op.
-        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
-    }
-
-    #[test]
-    fn language_directive_renders_unknown_code_as_is() {
-        // Language policy is now a no-op.
-        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
-    }
-
-    #[test]
-    fn language_directive_walks_known_channels_in_order() {
-        // Language policy is now a no-op.
-        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
-    }
-
-    #[test]
-    fn language_directive_includes_user_defined_channels_sorted() {
-        // Language policy is now a no-op.
-        assert!(language_directive(true, &std::collections::HashMap::new()).is_none());
-    }
-
-    #[test]
-    fn build_system_prompt_includes_language_directive_at_end() {
-        let opts = BuildSystemPromptOptions {
-            cwd: "/tmp".into(),
-            language_directive: Some(
-                "\n\n# Output Language Policy (enforced)\n\n- foo: bar.".to_string(),
-            ),
-            ..Default::default()
-        };
-        let prompt = build_system_prompt(&opts);
-        assert!(prompt.contains("Output Language Policy (enforced)"));
-        // Must be the very last content.
-        assert!(prompt.ends_with("- foo: bar."));
-    }
-
-    #[test]
-    fn build_system_prompt_skips_empty_language_directive() {
-        let opts = BuildSystemPromptOptions {
-            cwd: "/tmp".into(),
-            language_directive: Some(String::new()),
-            ..Default::default()
-        };
-        let prompt = build_system_prompt(&opts);
-        assert!(!prompt.contains("Output Language Policy"));
-    }
-
-    #[test]
-    fn build_system_prompt_skips_none_language_directive() {
-        let opts = BuildSystemPromptOptions {
-            cwd: "/tmp".into(),
-            language_directive: None,
-            ..Default::default()
-        };
-        let prompt = build_system_prompt(&opts);
-        assert!(!prompt.contains("Output Language Policy"));
-    }
-
-    #[test]
-    fn build_system_prompt_language_directive_in_custom_prompt_branch() {
-        // The custom-prompt early-return branch must also append the
-        // language directive (it sits at the END of both branches).
-        let opts = BuildSystemPromptOptions {
-            custom_prompt: Some("CUSTOM_BASE".into()),
-            cwd: "/tmp".into(),
-            language_directive: Some("\n\n# Output Language Policy (enforced)".into()),
-            ..Default::default()
-        };
-        let prompt = build_system_prompt(&opts);
-        assert!(prompt.starts_with("CUSTOM_BASE"));
-        assert!(prompt.contains("Output Language Policy (enforced)"));
-        assert!(prompt.ends_with("Output Language Policy (enforced)"));
     }
 }

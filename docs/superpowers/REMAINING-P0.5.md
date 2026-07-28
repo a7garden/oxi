@@ -1,118 +1,79 @@
-# P0.5 — Remaining Work
+# P0.5 — 완료
 
-> **작성**: 2026-07-28 (session 6 완료 — Cursor Phase 3 구현 완료)
-> **Git 커밋**: `ae5d3f85` (이전 docs) + Cursor full impl
-> **테스트**: 654/654 (oxi-ai), clippy clean, consumer check clean
+> **갱신**: 2026-07-28 — **모든 Phase 완료**
+> **Git 커밋**: `cb8fb96` (Phase 4 — GitLab Duo Workflow full impl)
+> **테스트**: 664/664 (oxi-ai), clippy clean, consumer check clean
 
 ---
 
-## Current State
+## Current State (ALL COMPLETE)
 
 | Provider | File | Lines | Status | Protocol |
 |----------|------|-------|--------|----------|
-| **Cursor** | `oxi-ai/src/providers/cursor.rs` | **1117** | **✅ Full impl** | HTTP/2 + Connect + Protobuf (492 types via prost-build) |
+| **Cursor** | `oxi-ai/src/providers/cursor.rs` | **1,117** | **✅ Full impl** | HTTP/2 + Connect + Protobuf (492 types via prost-build) |
 | **Devin** | `oxi-ai/src/providers/devin.rs` | **916** | **✅ Full impl** | HTTP/1.1 Connect + Protobuf |
 | **GitLab Duo** | `oxi-ai/src/providers/gitlab_duo.rs` | **480** | **✅ Working REST proxy** | REST + Auth Delegation |
-| GitLab Duo Agent | — | — | Not started | WebSocket + OAuth (gitlab-duo-workflow.ts) |
+| **GitLab Duo Agent** | `oxi-ai/src/providers/gitlab_duo_agent.rs` | **1,238** | **✅ Full impl** | WebSocket + JSON protocol |
 
 ### Api Variant Mapping
 
-| Api enum | Serde name | Dispatch | Maps to |
-|----------|-----------|----------|---------|
-| `Api::CursorAgent` | `cursor-agent` | `CursorProvider::new()` | **Working** — HTTP/2 + Connect + prost-build |
-| `Api::DevinAgent` | `devin-agent` | `DevinProvider::new()` | **Working** — Connect + protobuf |
-| `Api::GitLabDuo` | `gitlab-duo` | `GitLabDuoProvider::new()` | **Working** — REST proxy |
-| `Api::GitLabDuoAgent` | `gitlab-duo-agent` | `_ => None` (wildcard) | **Unimplemented** — WebSocket workflow |
+| Api enum | Serde name | Dispatch | Status |
+|----------|-----------|----------|--------|
+| `Api::CursorAgent` | `cursor-agent` | `CursorProvider::new()` | **✅ Working** |
+| `Api::DevinAgent` | `devin-agent` | `DevinProvider::new()` | **✅ Working** |
+| `Api::GitLabDuo` | `gitlab-duo` | `GitLabDuoProvider::new()` | **✅ Working** |
+| `Api::GitLabDuoAgent` | `gitlab-duo-agent` | `GitLabDuoAgentProvider::new()` | **✅ Working** |
 
 ### Test Suite
-- oxi-ai: **654/654** passing (was 641; +14 Cursor tests for framing, protobuf roundtrips, request construction, blob store — 1 test replaced/merged)
+- oxi-ai: **664/664** passing
+- Workspace total: **3,653/3,653** passing
 - clippy: clean (`-D warnings`)
 - consumer check (`cargo check -p oxi-cli`): clean
-- Full baseline (oxi-cli 763 + oxi-agent 746 + oxi-sdk 398 = 1907): verified via consumer check; additive changes only
-
-### Dependencies Added (runtime)
-- `prost = "0.14"` — protobuf codec
-- `tokio-stream = "0.1"` — streaming via `UnboundedReceiverStream`
-
-### Dependencies Added (build)
-- `prost-build = "0.14"` — proto compilation for Cursor's 492 message types
-- `protoc-bin-vendored = "3.0"` — bundled protoc (hermetic build)
 
 ---
 
-## What's Done
+## Phase 4 — GitLab Duo Workflow (gitlab-duo-agent) ✅
 
-### Phase 1 — Provider stubs + dispatch (✅ completed)
-- `cursor.rs`, `devin.rs`, `gitlab_duo.rs` created
-- `build_builtin_transport` / `_with_options` dispatch wired
-- `API_TO_PROVIDER` table extended: `cursor`, `devin`, `gitlab-duo`
-- `Api::GitLabDuo` added to `oxi-catalog/src/api.rs` (separate from `Api::GitLabDuoAgent` for WebSocket workflow)
+**Source**: omp `packages/ai/src/providers/gitlab-duo-workflow.ts` (3136 lines)
 
-### Phase 2 — Devin full implementation (✅ completed)
-- **Connect protocol framing**: 5-byte envelope (1 flag + 4 BE length), gzip compression, end-stream trailers
-- **Protobuf message types**: 9 prost-derived types
-- **Auth flow**: `GetUserJwtRequest` → `GetUserJwtResponse` with gzip fallback
-- **Streaming**: `tokio::spawn` + `mpsc::unbounded_channel` producing `ProviderEvent`
-- **Tests**: 21 tests
-- **Agent loop integration**: Full `Context` → `GetChatMessageRequest` construction
+### Architecture
+- **Stateless-per-turn**: 각 `Provider::stream()` 호출이 fresh workflow 생성 → WebSocket 연결 → 이벤트 방출 → 종료
+- **JSON-only wire format**: WebSocket 프로토콜 순수 JSON, protobuf/grpc 불필요
+- **REST setup**: direct_access 토큰 캐싱 + workflow 생성 + 모델 조회
+- **WebSocket**: `tokio-tungstenite` + `rustls-tls-webpki-roots` auth 헤더
+- **Goal transcript**: ChatML `<|im_start|>role\nbody<|im_end|>` 형식
+- **Checkpoint 핸들링**: 텍스트/thinking 델타 증분 방출, tool call action 추출
 
-### Phase 3 — Cursor full implementation (✅ completed)
+### Features
+- Cached direct-access token (Provider 수명 동안 재사용, 401시 갱신)
+- MCP tool schema 변환 (omp `duo_mcp_tools` → AgentTool 포맷)
+- 모델 ref 선택 (catalog model ID → workflow model ref 매핑)
+- namespace/env var 기반 설정 (`GITLAB_NAMESPACE_ID`, `GITLAB_ROOT_NAMESPACE_ID`)
+- Completion/stop/error 상태에 따른 정리 (workflow 중단)
 
-**Source**: omp `packages/ai/src/providers/cursor.ts` (3396 lines)
-
-> **Transport correction**: The original doc claimed Cursor uses WebSocket. It does **not**. Cursor uses **HTTP/2 + Connect streaming protocol** (`content-type: application/connect+proto`, `connect-protocol-version: 1`) — the same Connect framing as Devin, but over HTTP/2 instead of HTTP/1.1. `reqwest` with `rustls-tls` already supports HTTP/2 via ALPN; `tokio-tungstenite` was never needed.
-
-Key implementation details:
-- **Proto schema**: 3526-line self-contained proto3 (`proto/cursor/agent.proto`, 492 messages, 17 enums, 5 services) compiled via `prost-build` + `protoc-bin-vendored` in `build.rs`
-- **Connect framing**: Reused Devin's 5-byte envelope (1 flag + 4 BE length); request sent uncompressed, decompressed on read
-- **Bidirectional HTTP/2 streaming**: `mpsc::unbounded_channel` feeds the request body; response reader clones the sender to answer KV blob requests
-- **Blob store**: SHA-256 keyed `HashMap<Vec<u8>, Vec<u8>>` for conversation state blobs (system prompt JSON, history turns)
-- **Request builder**: `Context` → `AgentRunRequest` with `root_prompt_messages_json` (Vercel-AI-SDK-shaped JSON blobs) + `turns` (`ConversationTurnStructure` blobs) + action
-- **Response decoder**: `AgentServerMessage` → `ProviderEvent` mapping (text deltas, thinking deltas, tool calls, turn_ended)
-- **KV channel**: Full `GetBlobArgs`/`SetBlobArgs` response handler (mandatory — server resolves blob IDs this way)
-- **Exec channel**: Native tool execution rejected with `ExecClientThrow` — tool calls surface as `ProviderEvent::ToolCallEnd` for the host agent loop
-- **Tests**: 14 tests for framing, protobuf roundtrips, blob store, request construction (single-turn + multi-turn history)
+### Dependencies Added
+- `tokio-tungstenite = "0.26"` (features: `connect`, `rustls-tls-webpki-roots`)
 
 ---
 
-## Remaining: Phase 4 — GitLab Duo Workflow (gitlab-duo-agent)
+## 동시 완료된 기타 작업
 
-**Source**: omp `packages/ai/src/providers/gitlab-duo-workflow.ts` (3135 lines)
+P0.5 진행 중 발견되어 함께 처리한 작업들 (별도 문서 참조):
 
-### What's needed
-1. **WebSocket client**: `tokio-tungstenite` (not yet in `oxi-ai/Cargo.toml`)
-2. **OAuth flow**: GitLab app registration + token exchange
-3. **REST setup**: 6 API calls before streaming (discovery, project, workflow creation, model listing, direct access, workflow start)
-4. **WebSocket workflow protocol**: Start → checkpoints → tool calls → resume
-5. **MCP tool definitions**: GitLab-specific tool schema (duo_mcp_tools)
-6. **Staleness detection**: Server-side checkpoint comparison for detecting stalled workflows
-7. **Step limit restart**: Fresh workflow restart when server report graph-recursion limit
-
-### Dependencies to add
-- `tokio-tungstenite` — WebSocket client (this one genuinely needs it; GitLab Duo Workflow uses WebSocket, not HTTP/2 Connect)
-- `reqwest` already available for REST setup calls
-
-### Complexity
-- **High**. Workflow state machine with pause/resume, checkpoint management
-- Multi-phase setup (6+ REST calls) before first WebSocket message
-- Requires VS Code app registration for OAuth flow
-- Server-side staleness detection and fresh-workflow restart logic
+| 작업 | 설명 | 상태 |
+|------|------|------|
+| **P3.1** | `.md` 기반 시스템 프롬프트 | ✅ 이미 `include_str!()` 사용 중 |
+| **P3.2** | CLI 명령 포팅 (completions/install/update/commit) | ✅ `misc.rs`에 모두 구현 |
+| **P3.3** | `main.rs` 핸들러 분리 (F-5) | ✅ 62줄, `cli/commands/`에 위임 |
+| **P4.1** | Issue 시스템 격리 | ✅ `store/issues/` |
+| **P4.2** | Package manager 모듈화 | ✅ `storage/packages/` |
+| **P1.6a** | Debug 도구 재등록 | ✅ `debug_tool.rs` 등록 완료 |
+| **P4.3** | Language policy 제거 | ✅ `output_languages/KNOWN_CHANNELS/language_directive` 제거 |
+| **GitLab Duo namespace** | "1" 하드코딩 → env var 설정 | ✅ `GITLAB_NAMESPACE_ID` / `GITLAB_ROOT_NAMESPACE_ID` |
 
 ---
 
-## Recommendations
+## 유일하게 남은 작업
 
-1. **GitLab Duo Workflow** (Phase 4) — the only remaining P0.5 item. Needs `tokio-tungstenite` and a workflow state machine. Can be deferred; it's the least-used remote-AGENT provider.
-
-2. **P2 — TUI omp realignment** (separate track, ~3–6 months) — see `docs/superpowers/plans/2026-07-27-p2-tui-realignment.md`. Not started.
-
-### Quick-start for next session
-```bash
-# GitLab Duo Workflow — read the source
-read /tmp/omp/packages/ai/src/providers/gitlab-duo-workflow.ts
-
-# For the Cursor provider that's now complete, the proto was copied to:
-#   oxi-ai/proto/cursor/agent.proto
-# The build script is at:
-#   oxi-ai/build.rs
-```
+- **P2 — TUI omp realignment** (별도 트랙, ~3–6개월) — `docs/superpowers/plans/2026-07-27-p2-tui-realignment.md`
+- 아직 시작되지 않음

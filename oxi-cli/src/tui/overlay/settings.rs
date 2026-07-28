@@ -171,7 +171,6 @@ impl SettingsOverlay {
                     SettingsItem::Toggle { label, value } => match label.as_str() {
                         "extensions" => settings.extensions_enabled = *value,
                         "auto_compaction" => settings.auto_compaction = *value,
-                        "language_policy" => settings.language_policy_enabled = *value,
                         _ => {}
                     },
                     SettingsItem::Choice {
@@ -211,19 +210,6 @@ impl SettingsOverlay {
                                     .find(|g| g.label() == value)
                                     .copied()
                                     .unwrap_or(GlyphSet::Unicode);
-                            }
-                            // TUI language policy channels. `label` is
-                            // "language.<channel_key>"; the cycle value
-                            // is the language code (e.g. "ko", "en", "auto").
-                            // "auto" or empty value removes the channel
-                            // from the map (restoring default behavior).
-                            lbl if lbl.starts_with("language.") => {
-                                let channel = lbl.trim_start_matches("language.").to_string();
-                                if value == "auto" {
-                                    settings.output_languages.remove(&channel);
-                                } else {
-                                    settings.output_languages.insert(channel, value.clone());
-                                }
                             }
                             _ => {}
                         }
@@ -424,32 +410,6 @@ impl OverlayComponent for SettingsOverlay {
                                         &self.session,
                                         fresh.extensions_enabled,
                                     );
-                                }
-                                // 3b: if the user just touched
-                                // `language_policy` but the directive is
-                                // empty (policy ON yet no channel is set to
-                                // a language), warn so the toggle isn't a
-                                // silent no-op. `language_directive` returns
-                                // None when the map is empty or every
-                                // channel is "auto".
-                                if self.changed_labels.contains("language_policy") {
-                                    let fresh = crate::store::settings::Settings::load()
-                                        .unwrap_or_default();
-                                    if fresh.language_policy_enabled
-                                        && crate::prompt::system_prompt::language_directive(
-                                            true,
-                                            &fresh.output_languages,
-                                        )
-                                        .is_none()
-                                    {
-                                        app.add_notification(
-                                            "Language policy is ON but no channel \
-                                             is set — cycle a language.* entry to a \
-                                             language for it to take effect."
-                                                .to_string(),
-                                            crate::tui::app::NotificationKind::Warning,
-                                        );
-                                    }
                                 }
                                 app.add_notification(
                                     "Settings saved and applied.".to_string(),
@@ -702,37 +662,6 @@ fn build_settings_items(
         value: settings.auto_compaction,
     });
 
-    // ── TUI output language policy (TUI-only) ─────────────────────────────
-    // Each channel is a Choice that cycles through `KNOWN_LANGS` codes.
-    // "auto" (the default, when the channel is absent from the map) means
-    // "match the most recent user message language". These settings are
-    // consumed only by the TUI session build path; `oxi --print` and
-    // RPC mode ignore them. Closing the overlay auto-applies changes
-    // (see Esc handler).
-    items.push(SettingsItem::ReadOnly {
-        label: "── Language (TUI) ─".to_string(),
-        value: "─────────────────────".to_string(),
-    });
-    items.push(SettingsItem::Toggle {
-        label: "language_policy".to_string(),
-        value: settings.language_policy_enabled,
-    });
-    for (key, _label) in crate::store::settings::KNOWN_CHANNELS {
-        let value = settings
-            .output_languages
-            .get(*key)
-            .cloned()
-            .unwrap_or_else(|| "auto".to_string());
-        items.push(SettingsItem::Choice {
-            label: format!("language.{key}"),
-            value,
-            // Channels are gated by the master `language_policy` toggle.
-            // When OFF, the item is rendered greyed-out and Enter/Space
-            // are blocked. When ON, channels become editable.
-            disabled: !settings.language_policy_enabled,
-        });
-    }
-
     // ── Info ─────────────────────────────────────────────────────────────
     items.push(SettingsItem::ReadOnly {
         label: "───────────────────".to_string(),
@@ -828,20 +757,6 @@ fn get_choice_options(label: &str, theme_registry: &ThemeRegistry) -> Vec<String
             .iter()
             .map(|g| g.label().to_string())
             .collect(),
-        // TUI language policy channel cycles. Real languages cycle first
-        // (in `KNOWN_LANGS` order), with "auto" (the default = "no policy
-        // for this channel") placed last. Putting a concrete language one
-        // keypress away from the default reduces accidental resets to auto
-        // (which would silently remove the channel from the map).
-        lbl if lbl.starts_with("language.") => {
-            let mut langs: Vec<String> = crate::store::settings::KNOWN_LANGS
-                .iter()
-                .filter(|(code, _)| *code != "auto")
-                .map(|(code, _)| code.to_string())
-                .collect();
-            langs.push("auto".to_string());
-            langs
-        }
         _ => vec![],
     }
 }
