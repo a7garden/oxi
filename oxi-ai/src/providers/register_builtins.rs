@@ -347,8 +347,17 @@ fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn 
                 )))
             }
         }
+        // ── Ollama chat API (local NDJSON server) ──────────────────────
+        Api::OllamaChat => {
+            let base = if builtin.base_url.is_empty() {
+                "http://localhost:11434"
+            } else {
+                builtin.base_url
+            };
+            Some(Box::new(super::ollama::OllamaProvider::with_base_url(base)))
+        }
         // `Api` is `#[non_exhaustive]` and lives in oxi-catalog, so future
-        // dialects (ollama-chat, cursor-agent, … — see P0-C) must be handled
+        // dialects (cursor-agent, … — see P0-C) must be handled
         // explicitly. Unknown dialects have no transport yet → None.
         _ => None,
     }
@@ -477,6 +486,16 @@ fn build_builtin_transport_with_options(
             } else {
                 build_builtin_transport(builtin)
             }
+        }
+        // ── Ollama chat API ────────────────────────────────────────────
+        Api::OllamaChat => {
+            let url = resolved_base_url
+                .as_deref()
+                .unwrap_or("http://localhost:11434");
+            Some(Box::new(super::ollama::OllamaProvider::with_config(
+                url,
+                resolved_key,
+            )))
         }
         // `Api` is `#[non_exhaustive]` (oxi-catalog). Unknown/future dialects
         // have no transport wired yet → None (see P0-C for the expansion).

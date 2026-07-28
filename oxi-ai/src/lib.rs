@@ -111,6 +111,8 @@ pub use providers::OpenAiResponsesProvider;
 pub use providers::BedrockProvider;
 /// Google (Gemini) provider implementation.
 pub use providers::GoogleProvider;
+/// Ollama (local NDJSON server) provider implementation.
+pub use providers::OllamaProvider;
 /// Google Vertex AI provider implementation.
 pub use providers::VertexProvider;
 

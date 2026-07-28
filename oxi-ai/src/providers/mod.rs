@@ -9,6 +9,7 @@ mod event;
 mod google;
 mod google_shared;
 pub mod model_fetch;
+mod ollama;
 mod openai;
 mod openai_responses;
 pub mod openai_responses_shared;
@@ -43,6 +44,8 @@ pub use bedrock::BedrockProvider;
 pub use event::ProviderEvent;
 #[allow(unused_imports)]
 pub use google::GoogleProvider;
+#[allow(unused_imports)]
+pub use ollama::OllamaProvider;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
 pub use openai::normalize_messages;
