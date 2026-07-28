@@ -10,7 +10,7 @@
 //! change (session, settings, footer, notification).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_tui_legacy::Theme;
+use oxi_tui::Theme;
 use ratatui::{
     Frame,
     layout::Rect,

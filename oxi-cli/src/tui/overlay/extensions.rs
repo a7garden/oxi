@@ -40,7 +40,7 @@ struct ExtensionEntry {
 }
 
 impl ExtensionEntry {
-    fn status_icon(&self, symbols: &oxi_tui_legacy::Symbols) -> &str {
+    fn status_icon(&self, symbols: &oxi_tui::Symbols) -> &str {
         if !self.toggleable || self.enabled {
             symbols.dot_on
         } else {
@@ -48,7 +48,7 @@ impl ExtensionEntry {
         }
     }
 
-    fn status_color(&self, theme: &oxi_tui_legacy::Theme) -> ratatui::style::Color {
+    fn status_color(&self, theme: &oxi_tui::Theme) -> ratatui::style::Color {
         if !self.toggleable {
             theme.colors.muted
         } else if self.enabled {
@@ -434,7 +434,7 @@ impl OverlayComponent for ExtensionsOverlay {
         OverlayAction::None
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         let styles = theme.to_styles();
         let popup = centered_layout(area, 0.88, 0.88);
         frame.render_widget(Clear, popup);
@@ -549,11 +549,7 @@ impl OverlayComponent for ExtensionsOverlay {
 
 impl ExtensionsOverlay {
     /// Build the styled list items for rendering.
-    fn build_list_items(
-        &self,
-        theme: &oxi_tui_legacy::Theme,
-        list_width: u16,
-    ) -> Vec<ListItem<'static>> {
+    fn build_list_items(&self, theme: &oxi_tui::Theme, list_width: u16) -> Vec<ListItem<'static>> {
         let mut items = Vec::new();
 
         for row in &self.rows {
@@ -652,8 +648,8 @@ fn render_detail_panel(
     frame: &mut Frame,
     area: Rect,
     entry: &ExtensionEntry,
-    theme: &oxi_tui_legacy::Theme,
-    styles: &oxi_tui_legacy::ThemeStyles,
+    theme: &oxi_tui::Theme,
+    styles: &oxi_tui::ThemeStyles,
     scroll: usize,
 ) {
     let title_style = Style::default()

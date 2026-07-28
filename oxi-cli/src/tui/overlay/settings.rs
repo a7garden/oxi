@@ -15,7 +15,7 @@ use ratatui::{
 
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::AgentSessionHandle;
-use oxi_tui_legacy::{GlyphSet, THEME_NAMES, ThemeRegistry};
+use oxi_tui::{GlyphSet, THEME_NAMES, ThemeRegistry};
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
 
@@ -434,7 +434,7 @@ impl OverlayComponent for SettingsOverlay {
         OverlayAction::None
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::widgets::List;
         let styles = theme.to_styles();
         let filter_text = if self.filter.is_empty() {

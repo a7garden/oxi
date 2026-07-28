@@ -9,7 +9,7 @@ use super::IssuesPanelOverlay;
 use super::state::{StatusFilter, View};
 use crate::tui::overlay::{OverlayAction, OverlayComponent, centered_layout};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use oxi_tui_legacy::Theme;
+use oxi_tui::Theme;
 use ratatui::{Frame, layout::Rect, widgets::Clear};
 
 impl OverlayComponent for IssuesPanelOverlay {

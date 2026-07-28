@@ -340,7 +340,7 @@ mod tests {
     // Catch Layout-panic regressions on small terminals and verify that
     // position indicators land in the rendered frame.
 
-    use oxi_tui_legacy::Theme;
+    use oxi_tui::Theme;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 

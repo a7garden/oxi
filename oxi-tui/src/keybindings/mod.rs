@@ -10,7 +10,7 @@
 //!
 //! ```rust,no_run
 //! use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
-//! use oxi_tui_legacy::keybindings::{KeybindingsManager, keys::KeyId, registry::Action};
+//! use oxi_tui::keybindings::{KeybindingsManager, keys::KeyId, registry::Action};
 //!
 //! let mgr = KeybindingsManager::new();
 //!

@@ -17,9 +17,9 @@ use oxi_agent::tools::{
     TodoStateProvider,
     todo::{TodoPhase, TodoStatus},
 };
-use oxi_tui_legacy::theme::{ThemeManager, ThemeRegistry};
-use oxi_tui_legacy::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
-use oxi_tui_legacy::widgets::{
+use oxi_tui::theme::{ThemeManager, ThemeRegistry};
+use oxi_tui::widgets::todo_panel::{TodoPanelItem, TodoPanelPhase, TodoPanelStatus};
+use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole, ScrollNormalizer},
     footer::FooterState,
     input::InputState,
@@ -38,7 +38,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use oxi_tui_legacy::render::{CursorState, DiffBackend};
+use oxi_tui::render::{CursorState, DiffBackend};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 // ── Terminal Lifecycle ───────────────────────────────────────────────────
@@ -291,7 +291,7 @@ pub(crate) struct AppState {
     /// ModelSelect, LogoutSelect, ResumeSelect). Migrated from AppOverlay.
     pub overlay_state: Option<Box<dyn super::overlay::OverlayComponent>>,
     /// Keybinding manager — maps keys to actions.
-    pub keybindings: oxi_tui_legacy::keybindings::KeybindingsManager,
+    pub keybindings: oxi_tui::keybindings::KeybindingsManager,
     /// File path completion manager
     pub completion_manager: crate::tui::completion::CompletionManager,
     /// General completion items (file paths, fuzzy search)
@@ -334,7 +334,7 @@ pub(crate) struct AppState {
     /// overlay reads this to populate its theme choice list. The
     /// registry is built once in `AppState::new()` and shared by
     /// reference through the overlay's render path; cloning is cheap.
-    pub theme_registry: oxi_tui_legacy::theme::ThemeRegistry,
+    pub theme_registry: oxi_tui::theme::ThemeRegistry,
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
     /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
@@ -370,7 +370,7 @@ pub(crate) struct AppState {
     pub todo_provider: Option<Arc<dyn TodoStateProvider>>,
     /// Todo panel state — synced from the agent's `todo` tool via
     /// the `TodoStateProvider`. Rendered as a sticky panel above the input.
-    pub todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState,
+    pub todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState,
     /// Cursor dedup state — tracks last cursor position/visibility to avoid
     /// redundant escape sequences. `reconcile()` is called after
     /// `terminal.draw()` each frame.
@@ -442,10 +442,7 @@ impl NotificationKind {
 
 /// Convert agent `TodoPhase` list to TUI `TodoPanelPhase` list and
 /// update the panel state. Called every frame from the main loop.
-fn sync_todo_panel(
-    panel: &mut oxi_tui_legacy::widgets::todo_panel::TodoPanelState,
-    phases: &[TodoPhase],
-) {
+fn sync_todo_panel(panel: &mut oxi_tui::widgets::todo_panel::TodoPanelState, phases: &[TodoPhase]) {
     panel.set_phases(
         phases
             .iter()
@@ -494,7 +491,7 @@ impl AppState {
             message_count: 0,
             overlay: None,
             overlay_state: None,
-            keybindings: oxi_tui_legacy::keybindings::KeybindingsManager::new(),
+            keybindings: oxi_tui::keybindings::KeybindingsManager::new(),
             completion_manager: crate::tui::completion::CompletionManager::new(
                 std::env::current_dir().unwrap_or_default(),
             ),
@@ -515,7 +512,7 @@ impl AppState {
             queue_panel_selected: 0,
             needs_chat_rebuild: false,
             appearance_needs_reload: false,
-            theme_registry: oxi_tui_legacy::theme::ThemeRegistry::with_builtins(),
+            theme_registry: oxi_tui::theme::ThemeRegistry::with_builtins(),
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
@@ -525,7 +522,7 @@ impl AppState {
             issue_store: None,
             catalog: None,
             todo_provider: None,
-            todo_panel: oxi_tui_legacy::widgets::todo_panel::TodoPanelState::new(),
+            todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState::new(),
             cursor_state: CursorState::new(),
             last_input_cursor: None,
         };
@@ -749,7 +746,7 @@ impl AppState {
                             tc.id.clone(),
                             tc.name.clone(),
                             args_str,
-                            oxi_tui_legacy::widgets::chat::ToolCallStatus::Requested,
+                            oxi_tui::widgets::chat::ToolCallStatus::Requested,
                         );
                     }
                     oxi_sdk::ContentBlock::Thinking(t) => {
@@ -861,7 +858,7 @@ impl AppState {
     ///
     /// Call this from the render loop after content_height updates.
     pub fn ensure_auto_scroll(&mut self, visible_height: u16) {
-        use oxi_tui_legacy::widgets::chat::FollowMode;
+        use oxi_tui::widgets::chat::FollowMode;
         match self.chat.follow {
             FollowMode::Following | FollowMode::FollowingGrace { .. } => {
                 self.chat.scroll_to_bottom(visible_height);
@@ -1445,18 +1442,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 git_branch: git_branch.clone(),
                 project_name,
             };
-            state
-                .chat
-                .add_message(oxi_tui_legacy::widgets::chat::ChatMessage {
-                    role: oxi_tui_legacy::widgets::chat::MessageRole::System,
-                    content_blocks: vec![oxi_tui_legacy::widgets::chat::ContentBlock::Dashboard {
-                        info: welcome::build_dashboard_info(&welcome_info),
-                    }],
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as i64,
-                });
+            state.chat.add_message(oxi_tui::widgets::chat::ChatMessage {
+                role: oxi_tui::widgets::chat::MessageRole::System,
+                content_blocks: vec![oxi_tui::widgets::chat::ContentBlock::Dashboard {
+                    info: welcome::build_dashboard_info(&welcome_info),
+                }],
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64,
+            });
         }
 
         // Check if model is configured and resolvable
@@ -1587,10 +1582,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             // Post-render: display images via terminal protocol
             // After ratatui draws, output inline images that won't be overwritten
             if !state.chat.pending_images.is_empty() {
-                let caps = oxi_tui_legacy::render::terminal::TerminalCapabilities::detect();
+                let caps = oxi_tui::render::terminal::TerminalCapabilities::detect();
                 if let Some(protocol) = caps.image_protocol {
                     use base64::Engine;
-                    use oxi_tui_legacy::render::image::{
+                    use oxi_tui::render::image::{
                         ImageOptions, detect_dimensions, encode_iterm2, encode_kitty,
                     };
 
@@ -1607,10 +1602,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                         };
 
                         let encoded = match protocol {
-                            oxi_tui_legacy::render::terminal::ImageProtocol::Kitty => {
+                            oxi_tui::render::terminal::ImageProtocol::Kitty => {
                                 encode_kitty(b64_data, &opts)
                             }
-                            oxi_tui_legacy::render::terminal::ImageProtocol::ITerm2 => {
+                            oxi_tui::render::terminal::ImageProtocol::ITerm2 => {
                                 encode_iterm2(b64_data, &opts)
                             }
                         };
@@ -1896,7 +1891,7 @@ fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::Agent
                                 name: tc.name.clone(),
                                 arguments: tc.arguments.to_string(),
                                 result: None,
-                                status: oxi_tui_legacy::widgets::chat::ToolCallStatus::Done,
+                                status: oxi_tui::widgets::chat::ToolCallStatus::Done,
                                 duration: None,
                             });
                         }
@@ -1993,7 +1988,7 @@ fn render_session_branch_to_chat(
                                 name: name.clone(),
                                 arguments: arguments.to_string(),
                                 result: None,
-                                status: oxi_tui_legacy::widgets::chat::ToolCallStatus::Done,
+                                status: oxi_tui::widgets::chat::ToolCallStatus::Done,
                                 duration: None,
                             });
                         }

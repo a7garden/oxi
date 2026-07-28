@@ -4625,7 +4625,7 @@ dependencies = [
  "oxi-lsp",
  "oxi-mnemopi",
  "oxi-sdk",
- "oxi-tui-legacy",
+ "oxi-tui",
  "parking_lot",
  "portable-pty",
  "predicates",
@@ -4760,7 +4760,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxi-tui-legacy"
+name = "oxi-tui"
 version = "0.60.0"
 dependencies = [
  "anyhow",

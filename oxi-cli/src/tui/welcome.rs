@@ -1,6 +1,6 @@
 //! Welcome banner formatting with environment info.
 
-use oxi_tui_legacy::widgets::chat::DashboardInfo;
+use oxi_tui::widgets::chat::DashboardInfo;
 use std::path::Path;
 
 /// Information to display in the welcome banner.

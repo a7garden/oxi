@@ -4,7 +4,7 @@
 //! with the CLI overlay rendering system.
 
 #[allow(unused_imports)]
-pub use oxi_tui_legacy::overlay_anchor::{
+pub use oxi_tui::overlay_anchor::{
     OverlayAnchor, OverlayLayout, SizeValue, resolve_overlay_layout,
 };
 

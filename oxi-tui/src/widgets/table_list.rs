@@ -5,7 +5,7 @@
 //!
 //! Usage:
 //! ```ignore
-//! use oxi_tui_legacy::widgets::table_list::{TableItem, TableList, TableListStyles};
+//! use oxi_tui::widgets::table_list::{TableItem, TableList, TableListStyles};
 //!
 //! struct ModelEntry { id: String, context: u32 }
 //!

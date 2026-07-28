@@ -1,9 +1,9 @@
 //! Rendering functions for the TUI.
 
 use super::app::{AppState, NotificationKind};
-use oxi_tui_legacy::theme::Theme;
-use oxi_tui_legacy::truncate_to_width;
-use oxi_tui_legacy::widgets::{chat::ChatView, footer::Footer, input::Input};
+use oxi_tui::theme::Theme;
+use oxi_tui::truncate_to_width;
+use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
@@ -78,7 +78,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     // Todo sticky panel (only renders if non-empty)
     if todo_height > 0 {
         f.render_stateful_widget(
-            oxi_tui_legacy::widgets::todo_panel::TodoPanel::new(theme),
+            oxi_tui::widgets::todo_panel::TodoPanel::new(theme),
             chunks[1],
             &mut state.todo_panel,
         );

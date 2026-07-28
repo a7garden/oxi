@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use oxi_agent::mcp::{ConsentState, McpConnectionStatus, McpManager, McpServerInfo, McpToolInfo};
-use oxi_tui_legacy::Theme;
-use oxi_tui_legacy::widgets::dashboard::{
+use oxi_tui::Theme;
+use oxi_tui::widgets::dashboard::{
     DashboardData, DashboardItem, DashboardSection, DashboardState, DashboardWidget, ItemStatus,
 };
 use ratatui::{Frame, layout::Rect, widgets::StatefulWidget};

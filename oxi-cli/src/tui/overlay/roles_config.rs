@@ -24,7 +24,7 @@ use ratatui::{
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::store::settings::Settings;
 use oxi_sdk::ModelRole;
-use oxi_tui_legacy::Theme;
+use oxi_tui::Theme;
 
 #[derive(Debug)]
 enum Mode {

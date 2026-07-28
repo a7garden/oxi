@@ -486,10 +486,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
 fn load_themes() -> Vec<String> {
     // Use the canonical theme name list from oxi-tui-legacy so the setup wizard
     // and the `/settings` overlay always offer the same themes.
-    oxi_tui_legacy::THEME_NAMES
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    oxi_tui::THEME_NAMES.iter().map(|s| s.to_string()).collect()
 }
 
 // ── Save auth keys ──────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-// use oxi_tui_legacy::Theme; // unused — kept for future use
+// use oxi_tui::Theme; // unused — kept for future use
 use ratatui::{
     Frame,
     layout::Rect,
@@ -76,7 +76,7 @@ impl OverlayComponent for TextViewerOverlay {
         OverlayAction::None
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         let popup = centered_layout(area, 0.85, 0.85);
         let title_style = Style::default()
             .fg(theme.colors.primary)

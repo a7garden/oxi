@@ -24,7 +24,7 @@ path = "src/lib.rs"
 oxi-ai = { version = "0.60.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.60.0", path = "../oxi-agent" }
 oxi-sdk = { version = "0.60.0", path = "../oxi-sdk" }
-oxi-tui-legacy = { version = "0.60.0", path = "../oxi-tui-legacy" }
+oxi-tui = { version = "0.60.0", path = "../oxi-tui" }
 oxi-mnemopi = { version = "0.60.0", path = "../oxi-mnemopi", features = ["remote-embeddings"] }
 oxi-lsp = { version = "0.60.0", path = "../oxi-lsp" }
 lsp-types = "0.95"

@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_tui_legacy::widgets::routing::{
+use oxi_tui::widgets::routing::{
     RoutingStatus as RoutingStatusWidget, RoutingStatusData, RoutingStatusState,
 };
-use oxi_tui_legacy::widgets::stateful_list::StatefulList;
+use oxi_tui::widgets::stateful_list::StatefulList;
 
 use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
@@ -149,7 +149,7 @@ impl OverlayComponent for ModelSelectOverlay {
         OverlayAction::None
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::{
             style::{Modifier, Style},
             text::Span,
@@ -304,7 +304,7 @@ impl OverlayComponent for LogoutSelectOverlay {
         OverlayAction::None
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::{
             style::Style,
             text::Span,
@@ -417,7 +417,7 @@ impl OverlayComponent for ResumeSelectOverlay {
         OverlayAction::None
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::{
             style::{Modifier, Style},
             text::Span,
@@ -566,7 +566,7 @@ impl OverlayComponent for RoutingOverlay {
         }
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui_legacy::Theme) {
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::widgets::Clear;
         let panel_area = routing_panel_area(area);
         frame.render_widget(Clear, panel_area);
