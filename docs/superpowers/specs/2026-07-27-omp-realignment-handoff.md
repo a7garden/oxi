@@ -139,6 +139,7 @@ omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-
 | `plans/2026-07-27-p0-provider-redesign.md` | P0 실행 계획 (완료) |
 | `plans/2026-07-27-p1-agent-loop-realignment.md` | P1 agent 루프 상세 계획 |
 | `plans/2026-07-27-p2-tui-realignment.md` | P2 TUI 상세 계획 (다-월간) |
+| `plans/2026-07-28-remaining-work.md` | **남은 구현 전부** — 작업별 omp 파일·예상 규모·의존성·수락 기준 |
 
 ---
 
