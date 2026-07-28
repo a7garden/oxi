@@ -10,6 +10,7 @@ use std::path::PathBuf;
 // ── Re-exports ─────────────────────────────────────────────────────
 // Use the canonical ThinkingLevel from settings (None/Minimal/Standard/Thorough).
 pub use crate::store::settings::ThinkingLevel;
+pub mod commands;
 
 // ── Main CLI arguments ─────────────────────────────────────────────
 
