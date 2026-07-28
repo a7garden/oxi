@@ -1355,4 +1355,130 @@ mod tests {
             .count();
         assert_eq!(tool_exec, 0);
     }
+    // ═══════════════════════════════════════════════════════════════════
+    // Owned (in-band) dialect: a model with NO native tool support drives the
+    // loop by emitting tool calls as text (P1.1 acceptance criterion).
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Mock provider that emits in-band tool-call text (no native tool blocks)
+    /// and captures the request `Context` so tests can assert the wire shape.
+    struct InbandTextProvider {
+        texts: Vec<String>,
+        call_count: Arc<AtomicUsize>,
+        captured: Arc<parking_lot::Mutex<Vec<oxi_ai::Context>>>,
+    }
+
+    impl InbandTextProvider {
+        fn new(texts: Vec<String>) -> Self {
+            Self {
+                texts,
+                call_count: Arc::new(AtomicUsize::new(0)),
+                captured: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.call_count.load(Ordering::Relaxed)
+        }
+    }
+
+    impl Provider for InbandTextProvider {
+        fn stream<'a>(
+            &'a self,
+            _model: &'a oxi_ai::Model,
+            context: &'a oxi_ai::Context,
+            _options: Option<oxi_ai::StreamOptions>,
+        ) -> Pin<Box<dyn Future<Output = StreamResult> + Send + 'a>> {
+            let idx = self.call_count.fetch_add(1, Ordering::Relaxed);
+            let text = self.texts[idx.min(self.texts.len() - 1)].clone();
+            self.captured.lock().push(context.clone());
+            Box::pin(async move {
+                let mut assistant =
+                    AssistantMessage::new(oxi_ai::Api::OpenAiCompletions, "mock", "mock-model");
+                assistant.content = vec![ContentBlock::Text(TextContent::new(text))];
+                let stream = futures::stream::once(async move {
+                    ProviderEvent::Done {
+                        reason: StopReason::Stop,
+                        message: assistant,
+                    }
+                });
+                Ok(Box::pin(stream) as Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>)
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_owned_dialect_inband_tool_calling() {
+        use oxi_ai::dialect::Dialect;
+
+        // Build the in-band call text with the dialect's OWN renderer — this
+        // exercises the real render→parse contract end to end.
+        let echo_tool = oxi_ai::Tool::new(
+            "echo",
+            "Echoes back the input message",
+            serde_json::json!({
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"]
+            }),
+        );
+        let inband_call = Dialect::Xml.render_tool_calls(
+            &[ToolCall::new(
+                "c1",
+                "echo",
+                serde_json::json!({"message": "hi"}),
+            )],
+            std::slice::from_ref(&echo_tool),
+        );
+        let first_turn = format!("Let me echo that.\n{inband_call}");
+
+        let provider = Arc::new(InbandTextProvider::new(vec![
+            first_turn,
+            "Done echoing.".to_string(),
+        ]));
+        let captured = Arc::clone(&provider.captured);
+
+        let mut config = make_config();
+        config.dialect = Some(Dialect::Xml);
+        let tools = make_tools(); // registers EchoTool
+        let state = SharedState::new();
+        let agent_loop = AgentLoop::new(provider.clone(), config, tools, state);
+
+        let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let result = agent_loop
+            .run("Echo hi".to_string(), move |e| events_clone.lock().push(e))
+            .await;
+        assert!(result.is_ok());
+
+        let events = events.lock();
+
+        // The in-band text tool call was re-materialized and EXECUTED.
+        let tool_execs = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+            .count();
+        assert_eq!(tool_execs, 1, "in-band tool call must execute once");
+
+        // The loop continued past the tool call to a final text turn.
+        assert_eq!(
+            provider.call_count(),
+            2,
+            "loop must continue after the call"
+        );
+
+        // Request-side contract: the first request sent NO native tools and
+        // injected the tool catalog into the system prompt.
+        let first_ctx = &captured.lock()[0];
+        assert!(
+            first_ctx.tools.is_empty(),
+            "owned dialect must send no native tools"
+        );
+        let prompt = first_ctx.system_prompt.clone().unwrap_or_default();
+        assert!(prompt.contains("<tools>"), "catalog must be injected");
+        assert!(
+            prompt.contains("\"echo\""),
+            "catalog must list the echo tool"
+        );
+    }
 }

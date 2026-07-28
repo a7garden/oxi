@@ -52,23 +52,45 @@ pub(crate) async fn stream_assistant_response(
 
     let mut context = Context::new();
 
-    if let Some(ref system_prompt) = loop_ref.config.system_prompt {
-        context.set_system_prompt(system_prompt.clone());
-    }
-
-    for msg in messages.iter() {
-        context.add_message(msg.clone());
-    }
-
+    // Build the tool definitions once — used both for native tool calling and
+    // for the in-band (owned dialect) prompt catalog.
     let tool_defs = loop_ref.tools.definitions();
-    if !tool_defs.is_empty() {
-        let mut oxi_tools = Vec::with_capacity(tool_defs.len());
-        for def in &tool_defs {
-            let schema = serde_json::to_value(&def.input_schema)
-                .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
-            oxi_tools.push(OxTool::new(&def.name, &def.description, schema));
+    let mut oxi_tools: Vec<OxTool> = Vec::with_capacity(tool_defs.len());
+    for def in &tool_defs {
+        let schema = serde_json::to_value(&def.input_schema)
+            .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
+        oxi_tools.push(OxTool::new(&def.name, &def.description, schema));
+    }
+
+    if let Some(dialect) = loop_ref.config.dialect {
+        // Owned (in-band) tool calling: the model has no native tool support, so
+        // the tool catalog rides in the system prompt, prior tool calls/results
+        // are re-encoded as text, and NO native `tools` are sent. The model's
+        // text output is parsed back into tool calls at `Done` (below).
+        let base_prompt = loop_ref.config.system_prompt.clone().unwrap_or_default();
+        let catalog = oxi_ai::dialect::render_inband_tool_prompt(&oxi_tools, dialect);
+        let full_prompt = if base_prompt.trim().is_empty() {
+            catalog
+        } else {
+            format!("{base_prompt}\n\n{catalog}")
+        };
+        context.set_system_prompt(full_prompt);
+
+        for msg in oxi_ai::dialect::encode_inband_tool_history(messages, dialect, &oxi_tools) {
+            context.add_message(msg);
         }
-        context.set_tools(oxi_tools);
+        // Deliberately no `context.set_tools(...)` — owned dialects send no
+        // native tools (any `tool_choice` would error on a tools-less request).
+    } else {
+        if let Some(ref system_prompt) = loop_ref.config.system_prompt {
+            context.set_system_prompt(system_prompt.clone());
+        }
+        for msg in messages.iter() {
+            context.add_message(msg.clone());
+        }
+        if !oxi_tools.is_empty() {
+            context.set_tools(oxi_tools);
+        }
     }
 
     let stream_options = StreamOptions {
@@ -473,6 +495,45 @@ pub(crate) async fn stream_assistant_response(
                 } else {
                     messages.push(Message::Assistant(message.clone()));
                 }
+                // Owned dialect: re-materialize in-band tool calls (emitted as
+                // text) into native `ToolCall` blocks so the rest of the loop
+                // executes them unchanged. Persist into `messages` so the next
+                // turn's history encoding sees canonical tool calls.
+                if let Some(dialect) = loop_ref.config.dialect {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        let dialect_tools: Vec<OxTool> = tool_defs
+                            .iter()
+                            .map(|def| {
+                                let schema = serde_json::to_value(&def.input_schema)
+                                    .unwrap_or_else(
+                                        |_| serde_json::json!({"type": "object", "properties": {}}),
+                                    );
+                                OxTool::new(&def.name, &def.description, schema)
+                            })
+                            .collect();
+                        let parsed = dialect.parse_assistant_message(m, &dialect_tools);
+                        let found = parsed
+                            .content
+                            .iter()
+                            .filter(|b| b.as_tool_call().is_some())
+                            .count();
+                        if found > 0 {
+                            *m = parsed;
+                            // A clean stop with re-materialized calls must
+                            // continue the loop; a length/error stop is left as
+                            // is (the call may be truncated).
+                            if m.stop_reason == StopReason::Stop {
+                                m.stop_reason = StopReason::ToolUse;
+                            }
+                            tracing::info!(
+                                "Owned dialect: re-materialized {} in-band tool call(s)",
+                                found
+                            );
+                        }
+                    }
+                }
+
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageEnd {
                     message: last_msg.clone(),

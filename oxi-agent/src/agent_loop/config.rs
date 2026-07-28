@@ -107,6 +107,16 @@ pub struct AgentLoopConfig {
     /// steering message to break the loop. Default: threshold 5, with
     /// `read`/`ls`/`grep` exempt.
     pub tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions,
+    /// Owned (in-band) tool-calling dialect.
+    ///
+    /// When `Some`, the loop targets models **without native tool support**:
+    /// it sends no native `tools`, injects the tool catalog into the system
+    /// prompt, re-encodes prior tool calls/results as text in the history, and
+    /// parses the model's text output back into canonical tool calls. Mirrors
+    /// omp's `AgentLoopConfig.dialect` / `PI_DIALECT`.
+    ///
+    /// `None` (default) keeps provider-native tool calling.
+    pub dialect: Option<oxi_ai::dialect::Dialect>,
 }
 
 impl Default for AgentLoopConfig {
@@ -141,6 +151,7 @@ impl Default for AgentLoopConfig {
             subagent_runner: None,
             subagent_depth: 0,
             thinking_loop_detection: true,
+            dialect: None,
             tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions::default(
             ),
         }
