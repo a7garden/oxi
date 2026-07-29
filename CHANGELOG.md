@@ -15,6 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Deleted the v2 crate (~9.8K LOC). Renamed `oxi-tui-legacy` → `oxi-tui` as
   the single TUI crate. All `oxi_tui_legacy::*` imports updated to `oxi_tui::*`.
 
+### Added
+
+- **TUI: omp tape engine (P2.2)** — Standalone append-only native-scrollback
+  rendering engine in `oxi-tui/src/tape/`. Component trait with content_hash
+  memoization, TapeEngine with committed prefix / live region / differential
+  rendering (scroll-append fast path, chunk commit, in-window diff), ED3
+  scrollback clear for resize/session-replace, CSI 2026 synchronized output.
+  21 tests. Not wired into default render path (future: `OXI_TAPE_RENDER=1`).
+- **TUI: tape component implementations (P2.3)** — TextMessage (finalized
+  message), StreamingMessage (active streaming with finalized/live boundary),
+  ToolCallBlock (running/completed states). 22 tests.
+- **TUI: input system (P2.4)** — Kitty keyboard protocol parser
+  (`parse_kitty_key`), bracketed paste handler (`PasteBuffer`/`PasteEvent`),
+  kill ring (`KillRing` with yank/yank-pop). 37 tests.
+- **TUI: LaTeX-to-Unicode converter (P2.5)** — `latex_to_unicode()` with 145
+  symbol mappings (Greek letters, math operators, arrows, sets, subscripts/
+  superscripts, accents, `\frac`, `\sqrt`). 18 tests.
+- **TUI: theme/glyph verification (P2.6)** — Confirmed single-source theme
+  (`oxi-tui/src/theme.rs`) and glyph (`oxi-tui/src/symbols.rs`) systems.
+  Updated all remaining `oxi-tui-legacy` comment references to `oxi-tui`.
+
 ## [0.60.0] - 2026-07-27 — TUI bug fixes
 
 ### Fixed
