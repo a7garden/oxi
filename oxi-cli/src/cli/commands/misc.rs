@@ -89,6 +89,11 @@ pub async fn handle_update(check: bool) -> Result<()> {
 
 /// Handle `oxi commit [--push] [--dry-run] [-c <context>]`.
 pub async fn handle_commit(push: bool, dry_run: bool, context: Option<&str>) -> Result<()> {
+    use oxi_agent::AgentTool;
+    use oxi_agent::tools::ToolContext;
+    use oxi_agent::tools::commit::CommitTool;
+    use serde_json::json;
+
     // Check for staged changes
     let diff_output = tokio::process::Command::new("git")
         .args(["diff", "--cached"])
@@ -97,7 +102,6 @@ pub async fn handle_commit(push: bool, dry_run: bool, context: Option<&str>) -> 
         .with_context(|| "Failed to run git diff --cached")?;
 
     if diff_output.stdout.is_empty() && diff_output.stderr.is_empty() {
-        // No staged changes — check working tree
         let has_changes = tokio::process::Command::new("git")
             .args(["status", "--porcelain"])
             .output()
@@ -111,44 +115,74 @@ pub async fn handle_commit(push: bool, dry_run: bool, context: Option<&str>) -> 
         );
     }
 
-    // TODO: wire into the agent's commit tool for LLM-driven message generation
-    // For now, fall back to an editor-based commit
-    let ctx = context.unwrap_or("");
-    let mut args = vec!["commit".to_string()];
+    // Run CommitTool (deterministic-only in CLI mode — no agent context)
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    let ctx = ToolContext::new(cwd.clone());
+    let tool = CommitTool::unconfigured();
+    let params = json!({
+        "dry_run": dry_run,
+        "push": push,
+        "context": context.unwrap_or(""),
+    });
+    let result = tool
+        .execute("cli", params, None, &ctx)
+        .await
+        .map_err(|e| anyhow::anyhow!("Commit tool failed: {e}"))?;
+
     if dry_run {
-        args.push("--dry-run".to_string());
-    }
-    if !ctx.is_empty() {
-        args.push("-m".to_string());
-        args.push(format!("feat: {ctx}"));
-    }
-    if push {
-        args.push("--verbose".to_string());
+        println!("{}", result.output);
+        return Ok(());
     }
 
+    // Actual commit: run `git commit -m "<message>"`
+    let message = result
+        .output
+        .lines()
+        .find(|l| {
+            l.starts_with("feat")
+                || l.starts_with("fix")
+                || l.starts_with("chore")
+                || l.starts_with("docs")
+                || l.starts_with("refactor")
+                || l.starts_with("test")
+                || l.starts_with("perf")
+                || l.starts_with("build")
+                || l.starts_with("ci")
+                || l.starts_with("style")
+                || l.starts_with("revert")
+        })
+        .unwrap_or("feat: commit")
+        .to_string();
+
     let status = tokio::process::Command::new("git")
-        .args(&args)
+        .args(["commit", "-m", &message])
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status()
-        .await?;
+        .await
+        .with_context(|| "Failed to run git commit")?;
 
-    if status.success() {
-        if push {
-            let push_status = tokio::process::Command::new("git")
-                .args(["push"])
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()
-                .await?;
-            if !push_status.success() {
-                anyhow::bail!("Commit succeeded but push failed.");
-            }
-        }
-        Ok(())
-    } else {
-        anyhow::bail!("Commit failed.");
+    if !status.success() {
+        anyhow::bail!("Commit failed.\nProposed message was:\n{message}");
     }
+
+    println!("Committed: {message}");
+
+    if push {
+        let push_status = tokio::process::Command::new("git")
+            .args(["push"])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .await
+            .with_context(|| "Failed to run git push")?;
+        if !push_status.success() {
+            anyhow::bail!("Commit succeeded but push failed.");
+        }
+        println!("Pushed.");
+    }
+
+    Ok(())
 }
 
 /// Handle `oxi refresh` — force-refresh the model catalog from models.dev.

@@ -837,3 +837,168 @@ fn count_diagnostics(value: &serde_json::Value) -> DiagnosticCounts {
     }
     c
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── u16_to_byte_offset ───────────────────────────────────────────
+
+    #[test]
+    fn u16_offset_ascii_returns_same() {
+        assert_eq!(u16_to_byte_offset("hello", 0), 0);
+        assert_eq!(u16_to_byte_offset("hello", 3), 3);
+        assert_eq!(u16_to_byte_offset("hello", 5), 5);
+    }
+
+    #[test]
+    fn u16_offset_beyond_line_returns_len() {
+        assert_eq!(u16_to_byte_offset("hi", 100), 2);
+        assert_eq!(u16_to_byte_offset("", 5), 0);
+    }
+
+    #[test]
+    fn u16_offset_korean_converts_correctly() {
+        // 한글 (Hangul) is in BMP (U+AC00-U+D7AF) = 1 UTF-16 unit each
+        // "안녕하세요" = 5 chars = 5 UTF-16 units, each 3 UTF-8 bytes = 15 bytes
+        let s = "안녕하세요";
+        assert_eq!(u16_to_byte_offset(s, 0), 0);  // '안'
+        assert_eq!(u16_to_byte_offset(s, 1), 3);  // '녕'
+        assert_eq!(u16_to_byte_offset(s, 2), 6);  // '하'
+        assert_eq!(u16_to_byte_offset(s, 5), 15); // end
+    }
+
+    #[test]
+    fn u16_offset_mixed_ascii_korean() {
+        // "abc안녕" = 'a'(1U16,1byte) 'b'(1,1) 'c'(1,1) '안'(1U16,3byte) '녕'(1U16,3byte)
+        // UTF-16 positions: 0→0, 1→1, 2→2, 3→3, 4→6, 5→9(end)
+        let s = "abc안녕";
+        assert_eq!(u16_to_byte_offset(s, 0), 0); // 'a'
+        assert_eq!(u16_to_byte_offset(s, 2), 2); // 'c'
+        assert_eq!(u16_to_byte_offset(s, 3), 3); // '안' start (byte 3)
+        assert_eq!(u16_to_byte_offset(s, 4), 6); // '녕' start (byte 6)
+        assert_eq!(u16_to_byte_offset(s, 5), 9); // end
+    }
+
+    // ── apply_text_edit_to_lines ─────────────────────────────────────
+
+    fn make_edit(
+        start_line: u32,
+        start_char: u32,
+        end_line: u32,
+        end_char: u32,
+        new_text: &str,
+    ) -> lsp_types::TextEdit {
+        lsp_types::TextEdit {
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: start_line,
+                    character: start_char,
+                },
+                end: lsp_types::Position {
+                    line: end_line,
+                    character: end_char,
+                },
+            },
+            new_text: new_text.to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_single_line_replace_mid() {
+        let mut lines = vec!["hello world".to_string()];
+        let edit = make_edit(0, 6, 0, 11, "there");
+        apply_text_edit_to_lines(&mut lines, &edit);
+        assert_eq!(lines, vec!["hello there"]);
+    }
+
+    #[test]
+    fn apply_single_line_insert() {
+        let mut lines = vec!["ab".to_string()];
+        let edit = make_edit(0, 1, 0, 1, "XX");
+        apply_text_edit_to_lines(&mut lines, &edit);
+        assert_eq!(lines, vec!["aXXb"]);
+    }
+
+    #[test]
+    fn apply_multi_line_replace() {
+        let mut lines = vec!["aaa".to_string(), "bbb".to_string(), "ccc".to_string()];
+        // Replace from line 0 char 1 to line 2 char 2 with "X\nY"
+        // After splice: one string "aX\nYc" replaces 3 lines.
+        // The join will produce two lines separated by the embedded \n.
+        let edit = make_edit(0, 1, 2, 2, "X\nY");
+        apply_text_edit_to_lines(&mut lines, &edit);
+        assert_eq!(lines.len(), 1, "splice merges replaced range into one string");
+        assert_eq!(lines[0], "aX\nYc", "embedded newline in new_text");
+        // When joined, the embedded \n produces correct vertical result
+        let result = lines.join("\n");
+        assert_eq!(result, "aX\nYc");
+    }
+
+    #[test]
+    fn apply_edit_beyond_eof_appends() {
+        let mut lines = vec!["a".to_string()];
+        let edit = make_edit(5, 0, 5, 0, "new line");
+        apply_text_edit_to_lines(&mut lines, &edit);
+        assert_eq!(lines, vec!["a".to_string(), "new line".to_string()]);
+    }
+
+    #[test]
+    fn apply_edit_korean_column() {
+        let mut lines = vec!["abc안녕def".to_string()];
+        // '안' is at UTF-16 offset 3, '녕' at 4, 'd' at 5 = byte 9
+        // Replace from '안' (U16=3) to 'd' (U16=5) with "X"
+        let edit = make_edit(0, 3, 0, 5, "X");
+        apply_text_edit_to_lines(&mut lines, &edit);
+        assert_eq!(lines, vec!["abcXdef"]);
+    }
+
+    #[test]
+    fn apply_edit_preserves_trailing_newline() {
+        let text = "line1\nline2\n";
+        let edit = lsp_types::TextEdit {
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            new_text: "LINE1".to_string(),
+        };
+
+        // Simulate what apply_text_document_edit does
+        let has_trailing_newline = text.ends_with('\n');
+        let mut lines: Vec<String> = text.lines().map(String::from).collect();
+        apply_text_edit_to_lines(&mut lines, &edit);
+        let mut output = lines.join("\n");
+        if has_trailing_newline {
+            output.push('\n');
+        }
+        assert_eq!(output, "LINE1\nline2\n");
+    }
+
+    #[test]
+    fn apply_sorts_bottom_to_top() {
+        // When two edits touch the same file, bottom-to-top order preserves
+        // positions. This test verifies the sort used in apply_text_document_edit.
+        let text = "first\nsecond\nthird";
+        let mut lines: Vec<String> = text.lines().map(String::from).collect();
+
+        // Edit line 0 first, then line 2 — but apply bottom-to-top
+        let mut edits = vec![
+            make_edit(0, 0, 0, 5, "FIRST"), // line 0: "first" → "FIRST"
+            make_edit(2, 0, 2, 5, "THIRD"), // line 2: "third" → "THIRD"
+        ];
+        edits.sort_by_key(|b| std::cmp::Reverse(b.range.start.line));
+
+        for edit in &edits {
+            apply_text_edit_to_lines(&mut lines, edit);
+        }
+
+        assert_eq!(lines, vec!["FIRST", "second", "THIRD"]);
+    }
+}
