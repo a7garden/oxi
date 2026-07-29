@@ -155,6 +155,31 @@ impl MessageComponent {
                         info, width, &styles,
                     ));
                 }
+                ContentBlock::Advisory { body, severity, .. } => {
+                    // Severity-colored badge card. `AdvisorSeverity` is mirrored
+                    // in `oxi_tui::widgets::chat::types` to keep `oxi-tui` free
+                    // of `oxi-agent` deps; severity mapping matches the plan:
+                    // Nit -> muted, Concern -> warning, Blocker -> error.
+                    let (label, badge_style) = match severity {
+                        crate::widgets::chat::types::AdvisorSeverity::Nit => ("NIT", styles.muted),
+                        crate::widgets::chat::types::AdvisorSeverity::Concern => {
+                            ("CONCERN", styles.warning)
+                        }
+                        crate::widgets::chat::types::AdvisorSeverity::Blocker => {
+                            ("BLOCKER", styles.error)
+                        }
+                    };
+                    let prefix = format!("[{}] ", label);
+                    let body_style = match severity {
+                        crate::widgets::chat::types::AdvisorSeverity::Nit => styles.muted,
+                        crate::widgets::chat::types::AdvisorSeverity::Concern => styles.warning,
+                        crate::widgets::chat::types::AdvisorSeverity::Blocker => styles.error,
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, badge_style),
+                        Span::styled(body.clone(), body_style),
+                    ]));
+                }
             }
         }
         lines
@@ -259,7 +284,6 @@ impl Default for TranscriptRenderer {
         Self::new()
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +344,11 @@ mod tests {
                 mime_type: "image/png".into(),
                 base64_data: "YWJj".into(),
             },
+            ContentBlock::Advisory {
+                body: "consider revisiting tests".into(),
+                severity: crate::widgets::chat::types::AdvisorSeverity::Concern,
+                timestamp_ms: 1_700_000_000_000,
+            },
         ];
         let messages: Vec<_> = blocks.into_iter().map(msg).collect();
         let mut renderer = TranscriptRenderer::new();
@@ -332,7 +361,7 @@ mod tests {
         let (result, live) = renderer.compose(80);
         let text = result.lines.join("\n");
         assert_eq!(live, LiveRegion::None);
-        for needle in ["Thinking", "read", "bad", "image/png"] {
+        for needle in ["Thinking", "read", "bad", "image/png", "[CONCERN]"] {
             assert!(text.contains(needle), "missing {needle}");
         }
     }

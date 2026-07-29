@@ -915,14 +915,35 @@ pub fn handle_ui_event(
         UiEvent::SystemMessage(msg) => {
             state.add_notification(msg, NotificationKind::Info);
         }
-        // Persistent transcript card for advisor advice (aside/preserve
-        // channels). The actual `ContentBlock::Advisory` render and
-        // severity-coloured styling land in Task 8 (ContentBlock::Advisory +
-        // card render). Until then the event is delivered but not yet
-        // visualised — this keeps the dispatcher end-to-end functional
-        // without a half-rendered chat block.
-        UiEvent::AdvisorCard { .. } => {
-            // No-op until Task 8 wires the chat-widget render path.
+        // Persistent transcript card for advisor advice (aside/preserve channels).
+        // Routed through `ChatViewState::add_message` so the layout cache is
+        // invalidated and the new `Advisory` block is picked up by the next
+        // `compute_layout` / `TranscriptRenderer::sync` tick.
+        UiEvent::AdvisorCard {
+            body,
+            severity,
+            timestamp_ms,
+        } => {
+            use oxi_tui::widgets::chat::{AdvisorSeverity, ChatMessage, ContentBlock, MessageRole};
+            let severity = match severity {
+                oxi_agent::advisor::AdvisorSeverity::Nit => AdvisorSeverity::Nit,
+                oxi_agent::advisor::AdvisorSeverity::Concern => AdvisorSeverity::Concern,
+                oxi_agent::advisor::AdvisorSeverity::Blocker => AdvisorSeverity::Blocker,
+            };
+            let ts = if timestamp_ms > i64::MAX as u64 {
+                i64::MAX
+            } else {
+                timestamp_ms as i64
+            };
+            state.chat.add_message(ChatMessage {
+                role: MessageRole::System,
+                content_blocks: vec![ContentBlock::Advisory {
+                    body,
+                    severity,
+                    timestamp_ms,
+                }],
+                timestamp: ts,
+            });
         }
         UiEvent::TokenUsage {
             input_tokens,

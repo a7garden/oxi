@@ -377,6 +377,15 @@ fn block_to_layout_kind(
             }
         }
         ContentBlock::Dashboard { info } => LayoutKind::Dashboard { info: info.clone() },
+        // Advisor cards: the live render path is `tape/transcript.rs::styled_lines`,
+        // which paints the severity-colored badge. This stub reuses `LayoutKind::Text`
+        // so the legacy `ChatView` widget (used by overlays) still gets a non-empty
+        // entry — body is wrapped to width; severity/timestamp_ms intentionally
+        // ignored here to avoid duplicating badge rendering across two pipelines.
+        ContentBlock::Advisory { body, .. } => LayoutKind::Text {
+            lines: md_lines(body, width, styles),
+            is_user: false,
+        },
     }
 }
 

@@ -16,6 +16,34 @@ pub enum MessageRole {
     System,
 }
 
+/// Severity tag for advisor (read-only reviewer) notes that surface in the
+/// chat transcript as a persistent card. Presentation-layer mirror of
+/// `oxi_agent::advisor::AdvisorSeverity`; the conversion happens at the
+/// boundary in `oxi-cli/src/tui/handlers.rs` so `oxi-tui` keeps its
+/// "no oxi-* deps" rule (see AGENTS.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AdvisorSeverity {
+    /// Non-urgent cleanup / refactor / missed opportunity.
+    #[default]
+    Nit,
+    /// Agent may be going off-track or missed something material.
+    Concern,
+    /// Stop and reconsider.
+    Blocker,
+}
+
+impl AdvisorSeverity {
+    /// Short uppercase label rendered on the card (e.g. `[NIT]`).
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            AdvisorSeverity::Nit => "NIT",
+            AdvisorSeverity::Concern => "CONCERN",
+            AdvisorSeverity::Blocker => "BLOCKER",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ContentBlock {
     Text {
@@ -51,6 +79,13 @@ pub enum ContentBlock {
     /// Welcome dashboard panel with environment info.
     Dashboard {
         info: crate::widgets::chat::DashboardInfo,
+    },
+    /// Read-only advisor note surfaced as a severity-colored card.
+    /// Persistent transcript line for aside/preserve channel advice.
+    Advisory {
+        body: String,
+        severity: AdvisorSeverity,
+        timestamp_ms: u64,
     },
 }
 

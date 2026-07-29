@@ -28,7 +28,9 @@ pub use mouse::{
     detect_terminal,
 };
 pub use state::{ChatViewState, FollowMode};
-pub use types::{ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus};
+pub use types::{
+    AdvisorSeverity, ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus,
+};
 
 use ratatui::{
     buffer::Buffer,

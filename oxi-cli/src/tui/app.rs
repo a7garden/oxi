@@ -125,8 +125,7 @@ pub(crate) enum UiEvent {
     /// Advisor advice routed to a persistent transcript card (alongside the
     /// existing toast). Emitted by the session-event dispatcher for aside /
     /// preserve channel advice. Rendered into the chat transcript as an
-    /// `<advisory>` block by the chat widget (M7 wires the render path).
-    #[allow(dead_code)] // fields consumed in Task 8 / M7 (ContentBlock::Advisory)
+    /// `Advisory` content block by the chat widget.
     AdvisorCard {
         body: String,
         severity: oxi_agent::advisor::AdvisorSeverity,
