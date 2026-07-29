@@ -8,7 +8,12 @@ use crate::tui::completion::{CompletionItem, CompletionKind};
 use crate::tui::overlay;
 use crate::tui::slash::{SlashCtx, SlashOutcome};
 
-/// `/compact [instructions]` — manually compact session context.
+/// `/compact [soft|snapcompact] [instructions]` — manually compact session context.
+///
+/// Subcommands:
+///   `/compact`                — soft compaction (default)
+///   `/compact snapcompact`    — snapcompact PNG-frame compaction
+///   `/compact soft <text>`    — soft compaction with custom instructions
 pub(crate) struct CompactCommand;
 
 impl SlashCommand for CompactCommand {
@@ -19,21 +24,57 @@ impl SlashCommand for CompactCommand {
         "Manually compact the session context"
     }
     fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
-        let instructions = if args.trim().is_empty() {
-            None
+        let trimmed = args.trim();
+        let (is_snapcompact, instructions) = if trimmed.is_empty() {
+            (false, None)
+        } else if trimmed.starts_with("snapcompact") || trimmed.starts_with("snap") {
+            let rest = trimmed
+                .strip_prefix("snapcompact")
+                .or_else(|| trimmed.strip_prefix("snap"))
+                .unwrap_or("")
+                .trim();
+            (
+                true,
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest.to_string())
+                },
+            )
         } else {
-            Some(args.to_string())
+            // "soft" keyword or anything else = soft with instructions
+            let rest = trimmed.strip_prefix("soft").unwrap_or(trimmed).trim();
+            (
+                false,
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest.to_string())
+                },
+            )
         };
+
         let sh = ctx.session.clone_handle();
         let tx = ctx.ui_tx.clone();
-        // Compaction events (CompactionStart/CompactionEnd) are emitted by
-        // AgentSession::compact() and handled in handle_ui_event. We also send
-        // the result via SystemMessage as a fallback.
         tokio::spawn(async move {
+            // Save strategy, override for this compaction, restore after
+            let saved_strategy = sh.agent_ref().compaction_strategy();
+            if is_snapcompact {
+                sh.agent_ref()
+                    .set_compaction_strategy(oxi_sdk::CompactionStrategy::Snapcompact);
+            }
             let result = sh.compact(instructions).await;
+            // Restore original strategy (important: Snapcompact leak would
+            // affect all subsequent auto-compactions)
+            sh.agent_ref().set_compaction_strategy(saved_strategy);
             let _ = match &result {
                 Ok(r) => tx.send(crate::tui::app::UiEvent::SystemMessage(format!(
-                    "Compacted from {} tokens",
+                    "Compacted ({}) from {} tokens",
+                    if is_snapcompact {
+                        "snapcompact"
+                    } else {
+                        "soft"
+                    },
                     r.tokens_before
                 ))),
                 Err(e) => tx.send(crate::tui::app::UiEvent::SystemMessage(format!(

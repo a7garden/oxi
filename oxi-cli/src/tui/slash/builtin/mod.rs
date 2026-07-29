@@ -10,6 +10,7 @@
 mod advisor;
 mod agents;
 mod clipboard;
+mod commit;
 mod export_grp;
 mod issue;
 mod memory;
@@ -42,6 +43,7 @@ pub(crate) fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(tools_commands::SettingsCommand));
     registry.register(Box::new(tools_commands::McpCommand));
     registry.register(Box::new(tools_commands::ToolsCommand));
+    registry.register(Box::new(commit::CommitCommand));
     registry.register(Box::new(clipboard::CopyCommand));
     registry.register(Box::new(session_grp::NameCommand));
     registry.register(Box::new(session_grp::NewCommand));
