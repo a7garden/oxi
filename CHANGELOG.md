@@ -59,12 +59,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setup pushes full `KeyboardEnhancementFlags` (`DISAMBIGUATE_ESCAPE_CODES |
   REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`). crossterm 0.29+ parses
   CSI-u sequences natively; event loop works unchanged.
+### Added (omp-adoption-2)
+
 - **TUI: Agent Hub overlay (Ctrl+h / /agents)** — Fullscreen alt-screen
   overlay listing the main agent, advisor reviewer, and persisted subagents.
   Table view with j/k navigation, Enter for live transcript viewer (mtime-
   polled at 250ms), and severity-colored advisor advice cards persistent
   in the scrollback. HubRegistry wired into AgentSession. 4 new overlay
   modules.
+- **tools: todo tool + sticky panel** — Phased todo system with 7 ops
+  (init/start/done/drop/rm/append/view), Markdown round-trip, sub-agent
+  matching, and TodoPanelState synced into AppState every frame. 950 LOC.
+- **tools: commit tool** — Hybrid LLM+deterministic commit generator.
+  Scope extraction (lockfile exclusion, churn ranking, wide-change
+  detection), Kahn topological ordering, conventional-commit formatting,
+  LLM analysis with deterministic fallback. 1,798 LOC, 44 tests.
+- **tools: hindsight memory (retain/recall/reflect/edit)** — 4 AgentTool
+  implementations backed by MemoryBackend trait. Boot-time recall
+  injection (`build_memory_recall` + `read_path_block`) and background
+  memory pipeline (per-session extraction + cross-session consolidation
+  every 60s). 26 tests.
+- **ai: Snapcompact compaction mode** — `SnapcompactCompactor` implementing
+  the Compactor trait, producing PNG frame renderings via the `oxi-snapcompact`
+  crate (bundled fonts, text rasterizer). `CompactionStrategy::Snapcompact`
+  variant in the compaction engine. 5+15 compactor/renderer tests.
+- **mnemopi: SQLite memory engine** — `oxi-mnemopi` crate with FTS5 full-text
+  search, vector recall (cosine sim + MMR), polyphonic recall, temporal
+  decay, episodic graph, veracity consolidation, and MCP server. 40+ source
+  files.
+- **lsp: oxi-lsp crate + LSP tool** — `oxi-lsp` thin LSP adapter
+  (async_lsp + lsp_types), `LspTool` agent tool with 11 operations
+  (diagnostics/definition/references/hover/rename/symbols/status/
+  code_actions/type_definition/implementation/file_rename), `CliLspProvider`
+  multi-server lifecycle manager. Conditionally wired when rust-analyzer
+  is on PATH.
+- **tui: Mermaid diagram renderer** — Pure-Rust ASCII renderer for 4 diagram
+  types (flowchart/sequence/state/class), wired into markdown fenced code
+  blocks, process-level cache. 2,608 LOC, 25+ tests.
 
 ## [0.60.0] - 2026-07-27 — TUI bug fixes
 

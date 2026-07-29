@@ -281,37 +281,37 @@ oxi-tui widgets: 현재 → +3            (TodoPanel, AgentHubOverlay, MermaidBl
 각 마일스톤은 **noop 폴백 보존**을 전제로, 부분 도입이 안전하다.
 
 ### N1 — todo + Mermaid (최우선, ⑤⑫, 병렬)
-- [ ] ⑤ `todo` 도구 (oxi-agent): phase 모델, 7개 op, 세션 저장
-- [ ] ⑤ `TodoPanel` 위젯 (oxi-tui): sticky 렌더, 접기/펼치기
-- [ ] ⑤ `AgentEvent::TodoUpdate` 이벤트 브리지
-- [ ] ⑤ 서브에이전트 자동 매칭 + 스트라이크루 애니메이션
-- [ ] ⑫ Mermaid 블록 감지 + ASCII 렌더 (oxi-tui)
+- [x] ⑤ `todo` 도구 (oxi-agent): phase 모델, 7개 op, 세션 저장 — 950 LOC, 11 tests ✅
+- [~] ⑤ `TodoPanel` 위젯 (oxi-tui): sticky 렌더, 접기/펼치기 — 위젯 코드 있으나 tape_render.rs가 compact 'X todos' badge만 렌더함, 풀 패널 미사용
+- [~] ⑤ `AgentEvent::TodoUpdate` 이벤트 브리지 — AppState.todo_panel 매 프레임 sync 되나 풀 위젯 미렌더
+- [ ] ⑤ 서브에이전트 자동 매칭 + 스트라이크루 애니메이션 — 코드에서 구현 확인 못 함 (데이터 구조는 있음)
+- [x] ⑫ Mermaid 블록 감지 + ASCII 렌더 (oxi-tui) — 2,608 LOC, 4 diagram types, 25+ tests, markdown.rs에 wiring ✅
 - 상세: [`05`](./05-todo-tool.md) §5, [`06`](./06-todo-sticky-panel.md) §5, [`13`](./13-mermaid-rendering.md) §4
 
 ### N2 — Compaction + Agent Hub (⑦⑥, 병렬)
-- [ ] ⑦ `SnapcompactCompactor` (Compactor trait 구현체)
-- [ ] ⑦ inline imaging (transform hook)
-- [ ] ⑦ `/compact soft|remote|snapcompact` 슬래시 명령
-- [ ] ⑥ Agent Registry (oxi-sdk lifecycle 확장)
-- [ ] ⑥ `AgentHubOverlay` (oxi-tui): 테이블 + 트랜스크립트 뷰어
+- [x] ⑦ `SnapcompactCompactor` (Compactor trait 구현체) — oxi-sdk 312 LOC, 5 tests + oxi-snapcompact 풀 렌더러 ✅
+- [~] ⑦ inline imaging (transform hook) — oxi-ai/src/compaction.rs에 ContextTransformer trait + hook 존재, SnapcompactCompactor.compact()가 PNG 프레임 반환
+- [ ] ⑦ `/compact soft|remote|snapcompact` 슬래시 명령 — `/compact` 명령은 있으나 subcommand 라우팅 없음 (설계 대비 미완)
+- [x] ⑥ Agent Registry (oxi-sdk lifecycle 확장) — AgentPool, AgentHandle, HubStatus/HubKind 완전 구현, 28 tests ✅
+- [x] ⑥ `AgentHubOverlay` (oxi-tui): 테이블 + 트랜스크립트 뷰어 — `Ctrl+h`/`/agents`로 열림, 28 tests ✅
 - 상세: [`09`](./09-compaction-modes.md) §4, [`07`](./07-agent-hub-registry.md) §5
 
 ### N3 — Mnemopi + Hindsight 응용 (⑩⑨, 순차)
-- [ ] ⑩ `SqliteMemoryStore` (1차 ④ 설계 구현체)
-- [ ] ⑩ 마이그레이션 시스템 + WAL
-- [ ] ⑩ (선택) MCP 서버 노출
-- [ ] ⑨ 4개 메모리 도구 (retain/recall/reflect/edit)
-- [ ] ⑨ mental-models (세션 종료 요약 압축)
-- [ ] ⑨ boot 시 recall 주입 + `/memory` 슬래시
+- [x] ⑩ `SqliteMemoryStore` (1차 ④ 설계 구현체) — oxi-mnemopi 풀 크레이트 (40+ src files, FTS5+vectors) ✅
+- [~] ⑩ 마이그레이션 시스템 + WAL — schema.rs에 migration 로직, WAL 모드 설정 코드 있음 (코드 검증: 파일 존재, 테스트는 스키마 수준)
+- [~] ⑩ (선택) MCP 서버 노출 — oxi-mnemopi/src/mcp.rs 존재, 843 LOC (파일 존재 확인, 기능 검증은 미수행)
+- [x] ⑨ 4개 메모리 도구 (retain/recall/reflect/edit) — 각각 AgentTool impl, 26 tests 통합, ToolRegistry 등록 ✅
+- [ ] ⑨ mental-models (세션 종료 요약 압축) — `services.rs::session_reflect()`는 정의됐으나 미호출. 자동 세션 종료 훅 없음
+- [x] ⑨ boot 시 recall 주입 + `/memory` 슬래시 — `build_memory_recall()` + `read_path_block()` → system prompt 인젝션. `/memory` 명령 등록 (status/sleep/harmonize 동작, 5개 서브커맨드 스텁) ✅
 - 상세: [`11`](./11-mnemopi-backend.md) §4, [`12`](./12-hindsight-memory.md) §5
 
 ### N4 — LSP + Commit (⑧⑪, 순차)
-- [ ] ⑧ `oxi-lsp` 크레이트 (client, manager, operations)
-- [ ] ⑧ 14개 오퍼레이션 + diagnostics ledger
-- [ ] ⑧ `workspace/willRenameFiles` 통합
-- [ ] ⑧ `lsp` 도구 (oxi-agent 브릿지)
-- [ ] ⑪ `commit` 도구 (분석 + 위상정렬 + 메시지)
-- [ ] ⑪ `/commit` 슬래시 명령
+- [x] ⑧ `oxi-lsp` 크레이트 (client, manager, operations) — LspClient 545 LOC, async_lsp 기반, typed request/notify, diagnostics accum, ReplayState ✅
+- [~] ⑧ 14개 오퍼레이션 + diagnostics ledger — 11/14 operations 구현 (diagnostics/definition/references/hover/rename/symbols/status/code_actions/type_definition/implementation/file_rename). Rename.apply/FileRename.apply는 preview-only. willRenameFiles 미확인
+- [ ] ⑧ `workspace/willRenameFiles` 통합 — 코드에서 확인 못 함 (oxi-agent tools/lsp.rs: rename/file_rename만 노출)
+- [x] ⑧ `lsp` 도구 (oxi-agent 브릿지) — LspTool implements AgentTool, 11 operations, CliLspProvider 완전 구현 (674 LOC) ✅
+- [x] ⑪ `commit` 도구 (분석 + 위상정렬 + 메시지) — 1,798 LOC, 44 tests, hybrid LLM+deterministic ✅
+- [ ] ⑪ `/commit` 슬래시 명령 — 미구현. `oxi commit` CLI 서브커맨드는 TODO 스텁
 - 상세: [`10`](./10-lsp-integration.md) §5, [`08`](./08-commit-tool.md) §5
 
 ---
