@@ -862,9 +862,9 @@ mod tests {
         // 한글 (Hangul) is in BMP (U+AC00-U+D7AF) = 1 UTF-16 unit each
         // "안녕하세요" = 5 chars = 5 UTF-16 units, each 3 UTF-8 bytes = 15 bytes
         let s = "안녕하세요";
-        assert_eq!(u16_to_byte_offset(s, 0), 0);  // '안'
-        assert_eq!(u16_to_byte_offset(s, 1), 3);  // '녕'
-        assert_eq!(u16_to_byte_offset(s, 2), 6);  // '하'
+        assert_eq!(u16_to_byte_offset(s, 0), 0); // '안'
+        assert_eq!(u16_to_byte_offset(s, 1), 3); // '녕'
+        assert_eq!(u16_to_byte_offset(s, 2), 6); // '하'
         assert_eq!(u16_to_byte_offset(s, 5), 15); // end
     }
 
@@ -928,7 +928,11 @@ mod tests {
         // The join will produce two lines separated by the embedded \n.
         let edit = make_edit(0, 1, 2, 2, "X\nY");
         apply_text_edit_to_lines(&mut lines, &edit);
-        assert_eq!(lines.len(), 1, "splice merges replaced range into one string");
+        assert_eq!(
+            lines.len(),
+            1,
+            "splice merges replaced range into one string"
+        );
         assert_eq!(lines[0], "aX\nYc", "embedded newline in new_text");
         // When joined, the embedded \n produces correct vertical result
         let result = lines.join("\n");
