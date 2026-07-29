@@ -391,11 +391,17 @@ pub fn render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>
     }
 
     let mut lines = Vec::new();
+    let latex_inline = std::env::var("OXI_LATEX_INLINE").as_deref() == Ok("1");
     for seg in &segments {
         match seg {
             MarkdownSegment::Markdown(md) => {
+                let source = if latex_inline {
+                    crate::render::latex_unicode::latex_to_unicode(md)
+                } else {
+                    md.clone()
+                };
                 let text: ratatui::text::Text<'_> = tui_markdown::from_str_with_options(
-                    md,
+                    &source,
                     &tui_markdown::Options::new(
                         crate::markdown_styles::OxiStyleSheet::from_styles(styles),
                     ),
