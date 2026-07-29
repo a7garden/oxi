@@ -86,7 +86,8 @@ pub use event_bus::EventBus;
 pub use error::{SdkError, SdkResult};
 pub use lifecycle::{
     AgentHandle, AgentLifecycleEvent, AgentPool, AgentSnapshot, AgentStatus, AgentSupervisor,
-    FileSnapshotStore, RestartBackoff, SnapshotStore, SupervisorPolicy, ToolManifest,
+    FileSnapshotStore, HubKind, HubStatus, RestartBackoff, SnapshotStore, SupervisorPolicy,
+    ToolManifest,
 };
 pub use middleware::Middleware;
 pub use middleware::{
