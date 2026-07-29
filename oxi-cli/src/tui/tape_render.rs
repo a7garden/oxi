@@ -69,7 +69,7 @@ impl TapeRenderState {
                 app.slash_completions
                     .iter()
                     .take(6)
-                    .map(|item| format!("   /{}", item.name)),
+                    .map(|item| format!("   /{} — {}", item.name, item.description)),
             );
         }
         if app.file_completion_active {

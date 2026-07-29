@@ -420,12 +420,12 @@ write!(out, "{}", show_cursor_if_needed)?;
 ## 7. 성공 기준 (P2 전체)
 
 - [x] `oxi-tui` 단일 크레이트 (v2/legacy 이중 제거) — **P2.1**
-- [ ] Native scrollback + append-only tape 동작 — **P2.2**
-- [ ] Component 모델 기반 transcript 렌더링 — **P2.3**
-- [ ] Kitty/bracketed-paste/keybinding/mouse/kill-ring — **P2.4**
-- [ ] LaTeX/mermaid/image/autocomplete tape engine 통합 — **P2.5**
-- [ ] Theme/glyph 시스템 단일화 — **P2.6**
-- [ ] `cargo nextest run --workspace` + clippy green 전 단계
+- [x] Native scrollback + append-only tape 동작 — **P2.2 + production cutover**
+- [x] Component 모델 기반 transcript 렌더링 — **P2.3 + production cutover**
+- [x] Kitty/bracketed-paste/keybinding/mouse/kill-ring — **P2.4**
+- [x] LaTeX/mermaid/image/autocomplete tape engine 통합 — **P2.5 + production cutover**
+- [x] Theme/glyph 시스템 단일화 — **P2.6**
+- [x] `cargo nextest run --workspace` + clippy green 전 단계 (production cutover branch)
 
 ---
 

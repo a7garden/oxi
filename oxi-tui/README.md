@@ -14,11 +14,11 @@
 
 ## Overview
 
-`oxi-tui` is a **widget and theming library** built on top of
+`oxi-tui` is a **widget, theme, and tape-rendering library** built on top of
 [`ratatui`](https://docs.rs/ratatui) 0.30 + [`crossterm`](https://docs.rs/crossterm)
-0.29. It does **not** ship its own event loop or terminal driver — the host
-application owns its `ratatui::Terminal` (typically wrapped in our
-[`DiffBackend`](#differential-rendering)) and renders our widgets into it.
+0.29. It does **not** ship its own event loop. Production oxi-cli renders chat
+transcripts on the terminal main screen through `tape::TapeEngine`; ratatui
+remains for transient overlays and off-screen line formatting.
 
 It provides:
 
@@ -53,43 +53,28 @@ ratatui = "0.30"
 crossterm = "0.29"
 ```
 
-The host owns the terminal; `oxi-tui` contributes the backend, the theme, and
-widgets:
+The host owns the terminal. Ordinary chat output can be painted on the main
+screen through `TapeEngine`; ratatui remains useful for transient overlays:
 
 ```rust
-use oxi_tui::{Theme, ThemeManager};
-use oxi_tui::render::DiffBackend;
-use oxi_tui::widgets::chat::{ChatView, ChatViewState};
-use ratatui::{Terminal, backend::CrosstermBackend};
+use oxi_tui::tape::{LiveRegion, TapeEngine};
 use std::io::stdout;
 
 fn main() -> anyhow::Result<()> {
-    let backend = DiffBackend::new(CrosstermBackend::new(stdout()));
-    let mut terminal = Terminal::new(backend)?;
-
-    let manager = ThemeManager::dark();   // hot-reloadable theme manager
-    let mut state = ChatViewState::default();
-
-    loop {
-        // `manager.theme()` returns an owned `Theme` clone; re-fetch after a
-        // hot-reload (`manager.check_reload()`) to pick up the new colors.
-        let theme = manager.theme();
-        let mut frame = terminal.draw(|f| {
-            f.render_stateful_widget(ChatView::new(&theme), f.area(), &mut state);
-        })?;
-        // … read crossterm events, mutate `state`, break on quit …
-        # break;
-    }
+    let mut tape = TapeEngine::new(stdout());
+    let frame = vec!["finalized row".into(), "live row".into()];
+    tape.paint(&frame, LiveRegion::Mutable { start: 1 }, 80, 24)?;
     Ok(())
 }
 ```
 
 ## Architecture
 
-```
+```text
 oxi-tui
-├── render/      DiffBackend (line-diff + CSI 2026), capability probe,
-│                inline image, ANSI/diff coloring, Mermaid ASCII
+├── tape/        TapeEngine, memoized Container, TranscriptRenderer, ANSI style
+├── render/      DiffBackend (overlay), capability probe, inline image,
+│                ANSI/diff coloring, Mermaid ASCII
 ├── theme.rs     Theme, ColorScheme, Spacing, ThemeStyles, ThemeManager
 ├── symbols.rs   GlyphSet (Unicode/ASCII/Nerd) → Symbols table
 ├── widgets/     ratatui widgets (chat, input, completion, dashboard, …)

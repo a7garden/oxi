@@ -35,9 +35,9 @@ oxi/
 
 > The grok-inspired `oxi-tui` v2 crate was retired (P2.1, 2026-07-29).
 > The legacy crate was renamed to `oxi-tui` as the sole TUI crate.
-> Cursor dedup (`CursorState`) was ported from v2 to the legacy
-> `DiffBackend`, which already provided CSI 2026 sync, DECCARA, and
-> row-level diffing. See `docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`.
+> Production chat rendering now uses the main-screen `TapeEngine`
+> (`oxi-tui/src/tape/`); ratatui remains only for transient overlays and
+> off-screen line formatting.
 
 ### Dependency Flow
 
@@ -163,11 +163,10 @@ Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 ### oxi-tui — Terminal UI
 
 `oxi-tui` provides ratatui-based TUI widgets, theme system, glyph system,
-and event types. **No oxi-* dependencies** — pure widget library. The
-grok-inspired v2 pipeline crate was retired (P2.1, 2026-07-29); cursor
-dedup (`CursorState`) was ported to the `DiffBackend`, which already
-provided CSI 2026 sync, DECCARA, and row-level diffing. The next major
-evolution is the omp tape model (native scrollback) — see
+and the OMP-aligned tape engine. **No oxi-* dependencies** — pure widget
+library. Production oxi-cli renders chat transcripts on the terminal main
+screen through `tape::TapeEngine`; ratatui is retained for transient
+overlay sessions and off-screen line formatting. See
 `docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`.
 
 - Theme system with hot-reload from TOML/JSON files.
@@ -501,17 +500,12 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   - **`DashboardWidget` takes `&Theme`** (not `Theme::dark()`). The MCP dashboard overlay constructs it fresh in `render()` with the live theme. Do not re-introduce a hardcoded `Theme::dark()` in any widget — pass the theme through.
   - **`OxiStyleSheet` is theme-aware** — constructed via `OxiStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
 
-## oxi-tui v2 — RETIRED (2026-07-29, P2.1)
+## oxi-tui v2 — RETIRED; tape cutover — LIVE (2026-07-29)
 
 The grok-inspired `oxi-tui` v2 crate (terminal-first pipeline with
 `RetainedTree`, `draw_frame_closure`, cell-level `DiffBackend`) has been
-**retired and deleted**. Investigation showed it added only cursor dedup
-over the legacy `DiffBackend` (which already had CSI 2026 sync, DECCARA,
-and row-level diffing). Cursor dedup was ported to legacy as
-`render::CursorState`; the legacy crate was renamed to `oxi-tui`.
-
-The next major TUI evolution is the **omp tape model** (native scrollback,
-append-only rendering, Component → `string[]` model). See
-`docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md` for the
-full design and `docs/superpowers/plans/2026-07-29-p2-tui-v2-retirement.md`
-for the retirement plan.
+retired and deleted. The production TUI now renders chat transcripts on the
+main screen through `tape::TapeEngine` with memoized transcript components.
+Alternate screen is entered only for transient overlays. See
+`docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md` and
+`docs/superpowers/plans/2026-07-29-tui-tape-production-cutover.md`.

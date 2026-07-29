@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **TUI: production tape cutover** — Ordinary chat rendering now uses the
+  main-screen `TapeEngine` with memoized transcript components and pinned
+  sticky rows. Alternate screen is entered only for transient overlays.
+  The PTY acceptance test asserts no ordinary `1049h` entry and cursor
+  restoration on exit.
+
 - **TUI: v2 crate retirement + rename (P2.1)** — Retired the grok-inspired
   `oxi-tui` v2 crate. Ported cursor dedup (`CursorState`) from v2 to legacy
   `DiffBackend` (which already had CSI 2026 sync, DECCARA, row-level diffing).
@@ -22,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memoization, TapeEngine with committed prefix / live region / differential
   rendering (scroll-append fast path, chunk commit, in-window diff), ED3
   scrollback clear for resize/session-replace, CSI 2026 synchronized output.
-  21 tests. Not wired into default render path (future: `OXI_TAPE_RENDER=1`).
+  21 tests. Wired into the default render path in the production cutover.
 - **TUI: tape component implementations (P2.3)** — TextMessage (finalized
   message), StreamingMessage (active streaming with finalized/live boundary),
   ToolCallBlock (running/completed states). 22 tests.
@@ -38,10 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (P2 integration)
 
-- **TUI: PTY render verification test** — Guards the P2.1 render path
-  (`terminal.draw()` + `CursorState::reconcile()`) against regression. Spawns
-  the actual binary in a PTY, verifies alt-screen enter + cursor hide,
-  sends Ctrl+C, confirms clean exit. Permanent guardrail.
+- **TUI: PTY render verification test** — Guards the production tape path:
+  spawns the actual binary in a PTY, verifies synchronized main-screen tape
+  output without alternate-screen entry, sends Ctrl+C, confirms cursor
+  restoration and clean exit. Permanent guardrail.
 - **TUI: KillRing in input editor (OXI_KILL_RING=1)** — Emacs-style kill ring.
   Ctrl+Shift+k: kill to line end → push to ring. Ctrl+Shift+u: kill to
   line start. Ctrl+y: yank. Alt+y: yank-pop. Gated by env var; default

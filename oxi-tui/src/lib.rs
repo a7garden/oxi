@@ -27,8 +27,11 @@ pub mod text;
 pub mod theme;
 pub mod widgets;
 
-/// omp-aligned append-only tape rendering engine (standalone, not wired into
-/// default render path — future integration gated behind `OXI_TAPE_RENDER=1`).
+/// OMP-aligned append-only tape rendering engine.
+///
+/// Production oxi-cli renders chat transcripts on the terminal main screen
+/// through this engine; ratatui is retained for transient overlays and
+/// off-screen line formatting.
 pub mod tape;
 
 /// Color representation for TUI rendering.

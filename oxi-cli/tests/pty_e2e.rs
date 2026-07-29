@@ -54,17 +54,11 @@ fn test_pty_minimal_boot() {
     }
 }
 
-/// Boot the oxi TUI in a PTY and verify the P2.1 render path works end-to-end.
+/// Boot the oxi TUI in a PTY and verify the production tape path.
 ///
-/// This test guards against the failure mode flagged during P2 integration:
-/// P2.1 changed the render path from `draw_frame_closure` (v2) to
-/// `terminal.draw()` + `CursorState::reconcile()`. This test spawns the
-/// actual binary, waits for the TUI to render, and verifies:
-/// 1. Alt screen is entered (`\x1b[?1049h`) — proves the TUI is live
-/// 2. The TUI exits cleanly when sent a quit signal
-///
-/// If the TUI hangs, panics, or doesn't enter alt screen, the render path
-/// is broken and P2 changes are unsafe to ship.
+/// Ordinary chat renders on the main screen: startup must hide the cursor and
+/// produce tape output without entering alternate screen. Alternate screen is
+/// reserved for transient overlays.
 #[test]
 fn test_pty_tui_renders_and_exits() {
     if !oxi_binary_available() {
@@ -81,27 +75,23 @@ fn test_pty_tui_renders_and_exits() {
         }
     };
 
-    // Wait for alt-screen enter (proves TUI is rendering).
-    let alt_screen_marker = "\x1b[?1049h";
+    // Main-screen tape emits cursor-hide and synchronized output, but never
+    // alternate-screen enter during ordinary startup.
     let output = session
-        .read_until(alt_screen_marker, Duration::from_secs(5))
+        .read_until("\x1b[?2026l", Duration::from_secs(5))
         .expect("read should not error");
 
-    if !output.contains(alt_screen_marker) {
-        // No alt screen and no prompt in 5s — the TUI may not have booted.
+    if !output.contains("\x1b[?2026l") {
         let _ = session.kill();
-        panic!(
-            "TUI did not enter alt screen within 5s. Output so far:\n{output}\n\
-             This suggests the P2.1 render path is broken (terminal.draw() + \
-             CursorState::reconcile() may not be triggering)."
-        );
+        panic!("TUI did not paint a synchronized tape frame within 5s. Output:\n{output}");
     }
+    assert_output_contains(&output, "\x1b[?25l");
+    assert!(
+        !output.contains("\x1b[?1049h"),
+        "ordinary tape rendering must stay on main screen"
+    );
 
-    // Also verify we see some recognizable TUI output (raw mode + cursor hide).
-    assert_output_contains(&output, "\x1b[?25l"); // hide cursor
-
-    // TUI is alive (alt screen was entered). Send Ctrl+C twice:
-    // first cancels current op, second quits the TUI.
+    // Send Ctrl+C twice: first cancels, second quits.
     session.send_raw(&[0x03]).expect("send first ctrl-c");
     std::thread::sleep(Duration::from_millis(200));
     session.send_raw(&[0x03]).expect("send second ctrl-c");
@@ -121,16 +111,12 @@ fn test_pty_tui_renders_and_exits() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    // After exit, the TUI should have written the alt-screen leave sequence.
-    // Read with a short timeout — it may have already been consumed.
     let final_output = session
-        .read_until("\x1b[?1049l", Duration::from_secs(2))
+        .read_until("\x1b[?25h", Duration::from_secs(2))
         .unwrap_or_default();
     let all_output = format!("{output}\n{final_output}");
-    assert!(
-        all_output.contains("\x1b[?1049l") || !all_output.is_empty(),
-        "TUI should have produced output during its lifetime"
-    );
+    assert!(all_output.contains("\x1b[?25h"), "exit must restore cursor");
+    assert!(!all_output.contains("\x1b[?1049h"));
 }
 
 /// Verify the PTY harness itself can spawn any binary and read its output.
