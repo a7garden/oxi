@@ -375,7 +375,13 @@ pub(crate) struct AppState {
     /// redundant escape sequences. `reconcile()` is called after
     /// `terminal.draw()` each frame.
     pub cursor_state: CursorState,
-    /// Terminal cursor position of the input textarea, recorded by
+    /// Emacs-style kill ring. Populated by KillToLineEnd/Start, consumed by
+    /// Yank/YankPop. Gated by `OXI_KILL_RING=1`.
+    pub(crate) kill_ring: oxi_tui::input::KillRing,
+    /// Character length of the last yank. Used by yank-pop to delete the
+    /// previous yank before inserting the next entry. Only meaningful when
+    /// the kill ring feature is enabled.
+    pub(crate) yank_len: usize,
     /// `render_input_area` each frame. `None` on frames where the input is
     /// not painted (e.g. overlay active).
     pub last_input_cursor: Option<ratatui::layout::Position>,
@@ -524,6 +530,8 @@ impl AppState {
             todo_provider: None,
             todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState::new(),
             cursor_state: CursorState::new(),
+            kill_ring: oxi_tui::input::KillRing::new(16),
+            yank_len: 0,
             last_input_cursor: None,
         };
 

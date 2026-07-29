@@ -470,7 +470,61 @@ async fn dispatch_action(
             }
             None
         }
-
+        KAction::KillToLineEnd => {
+            if kill_ring_enabled() {
+                // Use the textarea's own cursor to get the line text, then
+                // delete via the public API. This avoids byte/char index
+                // confusion with multi-byte UTF-8.
+                let (_, col) = state.input.screen_cursor();
+                let line_text = line_at_col(&state.input.text(), col);
+                let tail: String = line_text.chars().skip(col).collect();
+                state.input.delete_to_line_end();
+                if !tail.is_empty() {
+                    state.kill_ring.kill(tail);
+                }
+            } else {
+                state.input.delete_to_line_end();
+            }
+            None
+        }
+        KAction::KillToLineStart => {
+            if kill_ring_enabled() {
+                let (_, col) = state.input.screen_cursor();
+                let line_text = line_at_col(&state.input.text(), col);
+                let head: String = line_text.chars().take(col).collect();
+                state.input.delete_to_line_start();
+                if !head.is_empty() {
+                    state.kill_ring.kill(head);
+                }
+            } else {
+                state.input.delete_to_line_start();
+            }
+            None
+        }
+        KAction::Yank => {
+            if kill_ring_enabled()
+                && let Some(text) = state.kill_ring.yank()
+            {
+                state.input.insert_str(text);
+                state.yank_len = text.chars().count();
+            }
+            None
+        }
+        KAction::YankPop => {
+            if kill_ring_enabled() {
+                // Yank-pop: delete the previously yanked text, then insert the
+                // previous kill ring entry. Falls back to the same entry if only
+                // one exists.
+                for _ in 0..state.yank_len {
+                    state.input.backspace();
+                }
+                if let Some(text) = state.kill_ring.yank_pop() {
+                    state.input.insert_str(text);
+                    state.yank_len = text.chars().count();
+                }
+            }
+            None
+        }
         // ── Actions not bound in main input mode ──────────────
         KAction::DeleteWordBackward => {
             state.input.delete_word_backward();
@@ -494,6 +548,21 @@ async fn dispatch_action(
         | KAction::CompletionDismiss
         | KAction::CompletionAccept => None,
     }
+}
+/// Check if the kill ring feature is enabled via env var.
+#[inline]
+fn kill_ring_enabled() -> bool {
+    std::env::var("OXI_KILL_RING").as_deref() == Ok("1")
+}
+
+/// Return the substring of `full` corresponding to the last line (the line
+/// the cursor is on). Char-based and safe for multi-byte UTF-8.
+fn line_at_col(full: &str, _col: usize) -> String {
+    let line_start = full.rfind('\n').map_or(0, |i| i + 1);
+    let line_end = full[line_start..]
+        .find('\n')
+        .map_or(full.len(), |i| line_start + i);
+    full[line_start..line_end].to_string()
 }
 
 /// Handle the Submit action (Enter key).

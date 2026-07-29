@@ -50,6 +50,14 @@ pub enum Action {
     DeleteToLineStart,
     /// Delete from cursor to line end.
     DeleteToLineEnd,
+    /// Kill (cut) from cursor to line end into the kill ring.
+    KillToLineEnd,
+    /// Kill (cut) from cursor to line start into the kill ring.
+    KillToLineStart,
+    /// Yank (paste) the most recent kill ring entry.
+    Yank,
+    /// Cycle to previous kill ring entry (Emacs yank-pop).
+    YankPop,
     /// Undo last edit.
     Undo,
 
@@ -232,6 +240,11 @@ impl KeybindingsManager {
             (DeleteWordForward, vec!["Ctrl+Delete"]),
             (DeleteToLineStart, vec!["Ctrl+u"]),
             (DeleteToLineEnd, vec!["Ctrl+k"]),
+            // Kill ring (Emacs-style, extends Ctrl+k / Ctrl+u with Shift)
+            (KillToLineEnd, vec!["Ctrl+Shift+k"]),
+            (KillToLineStart, vec!["Ctrl+Shift+u"]),
+            (Yank, vec!["Ctrl+y"]),
+            (YankPop, vec!["Alt+y"]),
             (Undo, vec!["Ctrl+z"]),
             // ── Input ──
             (Submit, vec!["Enter"]),
@@ -253,7 +266,7 @@ impl KeybindingsManager {
             (ToggleRouting, vec!["Ctrl+r"]),
             (ToggleQueue, vec!["Ctrl+q"]),
             (ToggleExpand, vec!["Ctrl+t"]),
-            (CopyCodeBlock, vec!["Ctrl+y"]),
+            (CopyCodeBlock, vec![]), // Ctrl+y reclaimed for Yank (kill ring paste)
             (OpenImage, vec!["Ctrl+i"]),
             // ── Completion ──
             (CompletionNext, vec![]), // Handled via dedicated Tab/Enter logic
@@ -293,6 +306,10 @@ fn parse_action(s: &str) -> Option<Action> {
         "deletewordforward" => Some(DeleteWordForward),
         "deletetolinestart" => Some(DeleteToLineStart),
         "deletetolineend" => Some(DeleteToLineEnd),
+        "killtolineend" => Some(KillToLineEnd),
+        "killtolinestart" => Some(KillToLineStart),
+        "yank" => Some(Yank),
+        "yankpop" => Some(YankPop),
         "undo" => Some(Undo),
         "submit" => Some(Submit),
         "newline" => Some(NewLine),
@@ -381,7 +398,28 @@ mod tests {
     fn test_primary_key_display() {
         let mgr = KeybindingsManager::new();
         let key = mgr.primary_key_for(Action::Quit);
-        assert!(key.is_some());
         assert_eq!(format!("{}", key.unwrap()), "Ctrl+c");
+    }
+
+    #[test]
+    fn test_kill_ring_bindings() {
+        let mgr = KeybindingsManager::new();
+        // Yank maps to Ctrl+y
+        let ctrl_y = parse_key_id("Ctrl+y").unwrap();
+        assert_eq!(mgr.match_action(&ctrl_y), Some(Action::Yank));
+        // YankPop maps to Alt+y
+        let alt_y = parse_key_id("Alt+y").unwrap();
+        assert_eq!(mgr.match_action(&alt_y), Some(Action::YankPop));
+        // KillToLineEnd maps to Ctrl+Shift+k
+        let csk = parse_key_id("Ctrl+Shift+k").unwrap();
+        assert_eq!(mgr.match_action(&csk), Some(Action::KillToLineEnd));
+    }
+
+    #[test]
+    fn test_parse_kill_actions() {
+        assert_eq!(parse_action("Yank"), Some(Action::Yank));
+        assert_eq!(parse_action("yank"), Some(Action::Yank));
+        assert_eq!(parse_action("YankPop"), Some(Action::YankPop));
+        assert_eq!(parse_action("KillToLineEnd"), Some(Action::KillToLineEnd));
     }
 }
