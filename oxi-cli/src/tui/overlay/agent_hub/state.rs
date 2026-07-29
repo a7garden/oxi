@@ -50,9 +50,14 @@ pub struct HubState {
     /// Currently informational — kept per the plan surface so future PRs
     /// don't break the contract.
     pub row_order: HashMap<String, usize>,
-    /// Line index at the top of the transcript viewport. `usize::MAX` is
-    /// the sentinel for "follow tail" — never passed to the slice directly.
-    pub transcript_scroll: usize,
+    /// Top-line offset for the transcript viewport, signed so handlers can
+    /// step from the tail without knowing the line count.
+    ///   `0`             — follow tail (the `FOLLOW_TAIL` sentinel)
+    ///   `> 0`           — lines from the head (top of history)
+    ///   `< 0`           — `|scroll|` lines below the tail (toward history)
+    ///   `isize::MAX`     — saturate to the top of history (`g`)
+    /// The renderer clamps to a valid window based on the current line count.
+    pub transcript_scroll: isize,
     /// When true, the transcript renderer pins to the last line on every
     /// poll so the user sees fresh output without manual scroll.
     pub transcript_follow: bool,

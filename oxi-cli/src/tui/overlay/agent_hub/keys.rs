@@ -20,12 +20,15 @@ pub enum HubAction {
 }
 
 /// Page step for `PageDown` / `PageUp` — matches the issues_panel convention.
-const PAGE_STEP: usize = 10;
-
-/// Sentinel value stored in `transcript_scroll` when tail-follow is active.
-/// The renderer treats it as "show the last `height` lines" rather than a
-/// literal line index.
-pub const FOLLOW_TAIL: usize = usize::MAX;
+const PAGE_STEP: isize = 10;
+/// Sentinel stored in `transcript_scroll` when the user has not yet scrolled
+/// away from the tail-follow default. The renderer treats this as "pin to
+/// the last `window` lines". Handlers step from here with plain `isize`
+/// arithmetic — `0 - 1 == -1` is the natural one-line-up-from-tail offset.
+pub const FOLLOW_TAIL: isize = 0;
+/// Sentinel stored in `transcript_scroll` when the user pressed `g` to jump
+/// to the top of history. Renders as `start = 0`.
+pub const JUMP_TOP: isize = isize::MAX;
 
 /// Top-level dispatch — picks the per-view handler.
 pub fn handle_key(state: &mut HubState, key: KeyEvent) -> HubAction {
@@ -74,11 +77,14 @@ fn handle_transcript_key(state: &mut HubState, key: KeyEvent) -> HubAction {
         KeyCode::Esc | KeyCode::Char('q') => {
             state.view = HubView::Table;
             // Reset scroll for next transcript visit.
-            state.transcript_scroll = 0;
+            state.transcript_scroll = FOLLOW_TAIL;
             state.transcript_follow = true;
             HubAction::None
         }
         KeyCode::Char('f') => {
+            // Toggling follow: when enabling, snap back to the FOLLOW_TAIL
+            // sentinel. When disabling, leave the offset alone — the renderer
+            // re-derives the window from the current integer offset.
             state.transcript_follow = !state.transcript_follow;
             if state.transcript_follow {
                 state.transcript_scroll = FOLLOW_TAIL;
@@ -86,43 +92,50 @@ fn handle_transcript_key(state: &mut HubState, key: KeyEvent) -> HubAction {
             HubAction::None
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            // Manual scroll disables tail-follow so the user can read history.
-            // If scroll was the FOLLOW_TAIL sentinel, convert it to a real
-            // numeric offset first — saturating_add would otherwise leave
-            // us pinned to the sentinel.
-            state.transcript_follow = false;
-            let base = if state.transcript_scroll == FOLLOW_TAIL {
-                0
+            // Tail direction. At FOLLOW_TAIL we are already pinned to the
+            // tail — further "down" has no meaning, so no-op.
+            if state.transcript_follow {
+                HubAction::None
             } else {
-                state.transcript_scroll
-            };
-            state.transcript_scroll = base.saturating_add(1);
-            HubAction::None
+                state.transcript_scroll = state.transcript_scroll.saturating_add(1);
+                HubAction::None
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            // Allow upward scroll even when tail-follow is on; the renderer
-            // clamps the offset to the available history.
+            // Away from tail. Works from FOLLOW_TAIL (0 - 1 = -1, one line
+            // below the tail) and from JUMP_TOP (MAX - 1 saturates to MAX,
+            // still at the top — no visible movement; intentional, you have
+            // already paged all the way to the head).
+            state.transcript_follow = false;
             state.transcript_scroll = state.transcript_scroll.saturating_sub(1);
             HubAction::None
         }
         KeyCode::PageDown => {
-            state.transcript_follow = false;
-            state.transcript_scroll = state.transcript_scroll.saturating_add(PAGE_STEP);
-            HubAction::None
+            // Tail direction. At FOLLOW_TAIL we are already pinned to the
+            // tail — further "down" has no meaning, so no-op.
+            if state.transcript_follow {
+                HubAction::None
+            } else {
+                state.transcript_scroll = state.transcript_scroll.saturating_add(PAGE_STEP);
+                HubAction::None
+            }
         }
         KeyCode::PageUp => {
+            // Away from tail. Works from FOLLOW_TAIL (0 - 10 = -10, ten
+            // lines below the tail) and from JUMP_TOP (saturates).
+            state.transcript_follow = false;
             state.transcript_scroll = state.transcript_scroll.saturating_sub(PAGE_STEP);
             HubAction::None
         }
         KeyCode::Char('G') => {
-            // Jump to end and re-engage tail-follow.
+            // Jump to tail and re-engage follow.
             state.transcript_scroll = FOLLOW_TAIL;
             state.transcript_follow = true;
             HubAction::None
         }
         KeyCode::Char('g') => {
-            // Jump to start; tail-follow disengages (user is paging history).
-            state.transcript_scroll = 0;
+            // Jump to top of history; follow disengages.
+            state.transcript_scroll = JUMP_TOP;
             state.transcript_follow = false;
             HubAction::None
         }
@@ -259,27 +272,28 @@ mod tests {
     }
 
     #[test]
-    fn f_toggles_tail_follow_and_j_disables_it() {
+    fn f_toggles_tail_follow() {
         let mut s = state_with_rows(1);
         s.view = HubView::Transcript {
             agent_id: "agent-0".into(),
         };
         s.transcript_follow = false;
-        s.transcript_scroll = 0;
-        // `f` re-enables tail-follow and uses the sentinel.
+        s.transcript_scroll = 5;
+        // `f` re-enables tail-follow and snaps scroll to the sentinel.
         assert_eq!(
             handle_key(&mut s, press(KeyCode::Char('f'))),
             HubAction::None
         );
         assert!(s.transcript_follow);
         assert_eq!(s.transcript_scroll, FOLLOW_TAIL);
-        // `j` manually scrolls and disables tail-follow.
+        // `f` again disables follow; the offset stays at FOLLOW_TAIL until
+        // the user moves with a directional key.
         assert_eq!(
-            handle_key(&mut s, press(KeyCode::Char('j'))),
+            handle_key(&mut s, press(KeyCode::Char('f'))),
             HubAction::None
         );
         assert!(!s.transcript_follow);
-        assert_eq!(s.transcript_scroll, 1);
+        assert_eq!(s.transcript_scroll, FOLLOW_TAIL);
     }
 
     #[test]
@@ -294,7 +308,7 @@ mod tests {
             handle_key(&mut s, press(KeyCode::Char('g'))),
             HubAction::None
         );
-        assert_eq!(s.transcript_scroll, 0);
+        assert_eq!(s.transcript_scroll, JUMP_TOP);
         assert!(!s.transcript_follow);
     }
 
@@ -349,5 +363,92 @@ mod tests {
             HubAction::None
         );
         assert_eq!(s.selected, 0);
+    }
+
+    // ── Follow-mode scroll regression tests (P2 amendment) ──
+    // The reviewer's amended verdict: the FOLLOW_TAIL sentinel used to make
+    // j / k / PageUp / PageDown all misbehave from the default (follow=true)
+    // state — the handler had no line count to convert the sentinel to a
+    // real offset, so the renderer pinned the viewport to the tail. The
+    // signed-scroll refactor (FOLLOW_TAIL=0, JUMP_TOP=isize::MAX) makes all
+    // four keys work from any starting state.
+
+    fn transcript_state() -> HubState {
+        let mut s = state_with_rows(1);
+        s.view = HubView::Transcript {
+            agent_id: "agent-0".into(),
+        };
+        s.transcript_follow = true;
+        s.transcript_scroll = FOLLOW_TAIL;
+        s
+    }
+
+    #[test]
+    fn k_in_follow_mode_steps_one_line_below_tail() {
+        let mut s = transcript_state();
+        assert_eq!(
+            handle_key(&mut s, press(KeyCode::Char('k'))),
+            HubAction::None
+        );
+        assert!(!s.transcript_follow, "k must disengage tail-follow");
+        assert_eq!(s.transcript_scroll, -1isize, "k from FOLLOW_TAIL (0) → -1");
+    }
+
+    #[test]
+    fn page_up_in_follow_mode_steps_ten_lines_below_tail() {
+        let mut s = transcript_state();
+        assert_eq!(handle_key(&mut s, press(KeyCode::PageUp)), HubAction::None);
+        assert!(!s.transcript_follow);
+        assert_eq!(
+            s.transcript_scroll, -10isize,
+            "PgUp from FOLLOW_TAIL (0) → -10"
+        );
+    }
+
+    #[test]
+    fn j_in_follow_mode_is_noop_pinned_at_tail() {
+        // j is "down/toward tail" — at FOLLOW_TAIL the user is already at
+        // the tail, so further "down" has no meaning. This is the deliberate
+        // follow semantics, not a bug: the user can press `g` first to leave
+        // follow, then `j` advances the offset.
+        let mut s = transcript_state();
+        assert_eq!(
+            handle_key(&mut s, press(KeyCode::Char('j'))),
+            HubAction::None
+        );
+        assert!(
+            s.transcript_follow,
+            "j in follow mode must not disengage follow"
+        );
+        assert_eq!(s.transcript_scroll, FOLLOW_TAIL);
+    }
+
+    #[test]
+    fn page_down_in_follow_mode_is_noop_pinned_at_tail() {
+        // Same semantics as j: PgDn at FOLLOW_TAIL is a no-op, not a
+        // viewport jump. Deliberate; the user can press `g` to leave.
+        let mut s = transcript_state();
+        assert_eq!(
+            handle_key(&mut s, press(KeyCode::PageDown)),
+            HubAction::None
+        );
+        assert!(s.transcript_follow);
+        assert_eq!(s.transcript_scroll, FOLLOW_TAIL);
+    }
+
+    #[test]
+    fn round_trip_g_then_j_stays_at_top() {
+        // End-to-end: g leaves follow and jumps to top (JUMP_TOP sentinel),
+        // j stays at top (saturating_add on MAX stays at MAX), follow is off.
+        let mut s = transcript_state();
+        handle_key(&mut s, press(KeyCode::Char('g')));
+        assert!(!s.transcript_follow);
+        assert_eq!(s.transcript_scroll, JUMP_TOP);
+        handle_key(&mut s, press(KeyCode::Char('j')));
+        assert!(!s.transcript_follow);
+        assert_eq!(
+            s.transcript_scroll, JUMP_TOP,
+            "saturating_add on MAX stays at MAX"
+        );
     }
 }

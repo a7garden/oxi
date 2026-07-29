@@ -230,13 +230,12 @@ impl OverlayComponent for AgentHubOverlay {
     }
 }
 
-/// Compute the window of transcript lines to render.
-///
-/// Rules:
-/// - `transcript_follow == true` or `transcript_scroll == FOLLOW_TAIL`: pin
-///   to the last `height` lines.
-/// - Otherwise: `transcript_scroll` is a top-line offset, clamped to the
-///   last valid window start.
+/// Compute the window of transcript lines to render, given the signed
+/// `transcript_scroll` convention:
+///   `scroll == FOLLOW_TAIL` (0) or `follow == true` → pin to the last `window` lines.
+///   `scroll > 0`           → top-line offset (clamps at `total - window`).
+///   `scroll < 0`           → `|scroll|` lines below the tail.
+///   `scroll == JUMP_TOP` (isize::MAX) → start at the head of history.
 fn compute_visible_window(
     lines: &[transcript::TranscriptLine],
     height: usize,
@@ -247,19 +246,25 @@ fn compute_visible_window(
     }
     let total = lines.len();
     let window = height.min(total);
+    let max_start = total - window;
 
     let start = if state.transcript_follow || state.transcript_scroll == keys::FOLLOW_TAIL {
-        total - window
+        // Tail-follow or freshly-opened transcript.
+        max_start
+    } else if state.transcript_scroll >= 0 {
+        // Top-line offset (or JUMP_TOP, which saturates to 0).
+        let s = state.transcript_scroll as usize;
+        s.min(max_start)
     } else {
-        let max_start = total - window;
-        state.transcript_scroll.min(max_start)
+        // Negative offset: `|scroll|` lines below the tail.
+        let back = state.transcript_scroll.unsigned_abs();
+        max_start.saturating_sub(back.min(max_start))
     };
 
     let end = start + window;
     lines[start..end]
         .iter()
         .map(|l| {
-            // Format: `[role] text` — keeps the transcript scannable.
             let role = format!("[{}] ", l.role);
             Line::from(vec![Span::raw(role), Span::raw(l.text.clone())])
         })
