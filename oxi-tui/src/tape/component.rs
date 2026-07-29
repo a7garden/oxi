@@ -68,6 +68,14 @@ pub trait Component: Send {
     /// Render to lines at the given width.
     fn render(&self, width: u16) -> RenderResult;
 
+    /// O(1) version of the component's rendered content.
+    ///
+    /// The value must change whenever `render` would produce different output.
+    /// Terminal width is tracked separately by the container cache.
+    fn revision(&self) -> u64 {
+        0
+    }
+
     /// The mutable suffix starts at this line index (within the component's
     /// own rendered lines). Rows above are FINAL — byte-stable at the current
     /// width — and commit to native scrollback. Rows at/after the boundary

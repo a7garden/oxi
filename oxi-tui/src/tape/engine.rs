@@ -576,4 +576,49 @@ mod tests {
             "unchanged rows should not be in diff"
         );
     }
+
+    #[test]
+    fn pinned_suffix_never_advances_committed_rows() {
+        let frame: Vec<String> = (0..30).map(|i| format!("row{i}")).collect();
+        let mut engine = TapeEngine::new(Vec::new());
+        engine.set_synchronized_output(false);
+        engine
+            .paint(&frame, LiveRegion::Pinned { start: 0 }, 80, 10)
+            .unwrap();
+        assert_eq!(engine.committed_rows, 0);
+    }
+
+    #[test]
+    fn finalized_commits_are_monotonic_until_replay_boundary() {
+        let mut engine = TapeEngine::new(Vec::new());
+        engine.set_synchronized_output(false);
+        let first: Vec<String> = (0..15).map(|i| format!("row{i}")).collect();
+        engine.paint(&first, LiveRegion::None, 80, 10).unwrap();
+        let committed = engine.committed_rows;
+        let second: Vec<String> = (0..20).map(|i| format!("row{i}")).collect();
+        engine.paint(&second, LiveRegion::None, 80, 10).unwrap();
+        assert!(engine.committed_rows >= committed);
+
+        engine.clear_scrollback();
+        engine
+            .paint(&frame(&["replacement"]), LiveRegion::None, 80, 10)
+            .unwrap();
+        assert_eq!(engine.committed_rows, 0, "replay starts a new commit epoch");
+    }
+
+    #[test]
+    fn synchronized_update_sequences_are_balanced() {
+        let mut engine = TapeEngine::new(Vec::new());
+        engine
+            .paint(&frame(&["one"]), LiveRegion::None, 80, 24)
+            .unwrap();
+        engine
+            .paint(&frame(&["changed"]), LiveRegion::None, 80, 24)
+            .unwrap();
+        let output = String::from_utf8_lossy(engine.writer());
+        assert_eq!(
+            output.matches(SYNC_BEGIN).count(),
+            output.matches(SYNC_END).count()
+        );
+    }
 }

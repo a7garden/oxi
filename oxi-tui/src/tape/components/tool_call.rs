@@ -20,6 +20,8 @@ pub struct ToolCallBlock {
     lines: Vec<String>,
     /// Cached hash.
     hash: u64,
+    /// O(1) cache revision, bumped by every output-affecting mutation.
+    revision: u64,
 }
 
 impl ToolCallBlock {
@@ -36,6 +38,7 @@ impl ToolCallBlock {
             result: None,
             lines,
             hash,
+            revision: 0,
         }
     }
 
@@ -57,6 +60,7 @@ impl ToolCallBlock {
             result: Some(result),
             lines,
             hash,
+            revision: 0,
         }
     }
 
@@ -66,6 +70,7 @@ impl ToolCallBlock {
         self.result = Some(result);
         self.lines = Self::build_lines(&self.name, &self.args_summary, self.result.as_deref());
         self.hash = RenderResult::new(self.lines.clone()).hash;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Whether the tool call has a result.
@@ -96,6 +101,14 @@ impl Component for ToolCallBlock {
             lines: self.lines.clone(),
             hash: self.hash,
         }
+    }
+
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn invalidate(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
     }
 
     fn live_region(&self) -> LiveRegion {

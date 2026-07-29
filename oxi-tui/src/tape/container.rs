@@ -7,9 +7,21 @@
 
 use super::component::{Component, LiveRegion, RenderResult};
 
+#[derive(Clone)]
+struct ChildCache {
+    revision: u64,
+    width: u16,
+    result: RenderResult,
+    live_region: LiveRegion,
+}
+
 /// A container that composes child components into a flat line array.
 pub struct Container {
     children: Vec<Box<dyn Component>>,
+    child_cache: Vec<Option<ChildCache>>,
+    aggregate: RenderResult,
+    aggregate_live: LiveRegion,
+    aggregate_dirty: bool,
 }
 
 impl Container {
@@ -18,23 +30,40 @@ impl Container {
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
+            child_cache: Vec::new(),
+            aggregate: RenderResult::empty(),
+            aggregate_live: LiveRegion::None,
+            aggregate_dirty: false,
         }
     }
 
     /// Create a container with pre-built children.
     #[must_use]
     pub fn with_children(children: Vec<Box<dyn Component>>) -> Self {
-        Self { children }
+        let child_cache = (0..children.len()).map(|_| None).collect();
+        Self {
+            children,
+            child_cache,
+            aggregate: RenderResult::empty(),
+            aggregate_live: LiveRegion::None,
+            aggregate_dirty: true,
+        }
     }
 
     /// Add a child component.
     pub fn add(&mut self, child: Box<dyn Component>) {
         self.children.push(child);
+        self.child_cache.push(None);
+        self.aggregate_dirty = true;
     }
 
     /// Remove all children.
     pub fn clear(&mut self) {
         self.children.clear();
+        self.child_cache.clear();
+        self.aggregate = RenderResult::empty();
+        self.aggregate_live = LiveRegion::None;
+        self.aggregate_dirty = false;
     }
 
     /// Number of children.
@@ -49,44 +78,62 @@ impl Container {
         self.children.is_empty()
     }
 
-    /// Compose all children into a single `RenderResult` + `LiveRegion`.
+    /// Compose all children, returning the memoized aggregate result.
     ///
-    /// This is the primary method — it renders each child, concatenates
-    /// the lines, and computes the aggregate live region (topmost child
-    /// with a live region wins).
-    pub fn compose(&self, width: u16) -> (RenderResult, LiveRegion) {
-        let mut lines = Vec::new();
-        let mut child_line_counts: Vec<usize> = Vec::with_capacity(self.children.len());
-        let mut aggregate_live = LiveRegion::None;
-        let mut offset = 0usize;
-
-        for child in &self.children {
-            let result = child.render(width);
-            let count = result.lines.len();
-            child_line_counts.push(count);
-
-            // First child with a live region wins (omp: "topmost defines boundary")
-            if matches!(aggregate_live, LiveRegion::None) {
-                match child.live_region() {
-                    LiveRegion::None => {}
-                    LiveRegion::Mutable { start } => {
-                        aggregate_live = LiveRegion::Mutable {
-                            start: offset + start,
-                        };
-                    }
-                    LiveRegion::Pinned { start } => {
-                        aggregate_live = LiveRegion::Pinned {
-                            start: offset + start,
-                        };
-                    }
-                }
+    /// Child renders are keyed by their O(1) revision and the terminal width.
+    /// A cache hit neither calls `render` nor clones the aggregate rows.
+    pub fn compose(&mut self, width: u16) -> (&RenderResult, LiveRegion) {
+        for (index, child) in self.children.iter().enumerate() {
+            let revision = child.revision();
+            let hit = self.child_cache[index]
+                .as_ref()
+                .is_some_and(|entry| entry.revision == revision && entry.width == width);
+            if hit {
+                continue;
             }
 
-            lines.extend(result.lines);
-            offset += count;
+            self.child_cache[index] = Some(ChildCache {
+                revision,
+                width,
+                result: child.render(width),
+                live_region: child.live_region(),
+            });
+            self.aggregate_dirty = true;
         }
 
-        (RenderResult::new(lines), aggregate_live)
+        if self.aggregate_dirty {
+            let line_count = self
+                .child_cache
+                .iter()
+                .flatten()
+                .map(|entry| entry.result.lines.len())
+                .sum();
+            let mut lines = Vec::with_capacity(line_count);
+            let mut live_region = LiveRegion::None;
+            let mut offset = 0usize;
+
+            for entry in self.child_cache.iter().flatten() {
+                if matches!(live_region, LiveRegion::None) {
+                    live_region = match entry.live_region {
+                        LiveRegion::None => LiveRegion::None,
+                        LiveRegion::Mutable { start } => LiveRegion::Mutable {
+                            start: offset + start,
+                        },
+                        LiveRegion::Pinned { start } => LiveRegion::Pinned {
+                            start: offset + start,
+                        },
+                    };
+                }
+                lines.extend(entry.result.lines.iter().cloned());
+                offset += entry.result.lines.len();
+            }
+
+            self.aggregate = RenderResult::new(lines);
+            self.aggregate_live = live_region;
+            self.aggregate_dirty = false;
+        }
+
+        (&self.aggregate, self.aggregate_live)
     }
 
     /// Invalidate all children.
@@ -94,6 +141,8 @@ impl Container {
         for child in &mut self.children {
             child.invalidate();
         }
+        self.child_cache.iter_mut().for_each(|entry| *entry = None);
+        self.aggregate_dirty = true;
     }
 }
 
@@ -107,6 +156,93 @@ impl Default for Container {
 mod tests {
     use super::*;
     use crate::tape::component::RenderResult;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+    };
+
+    struct CountingComponent {
+        renders: Arc<AtomicU32>,
+        revision: Arc<AtomicU64>,
+        live: LiveRegion,
+    }
+
+    impl Component for CountingComponent {
+        fn render(&self, width: u16) -> RenderResult {
+            self.renders.fetch_add(1, Ordering::Relaxed);
+            RenderResult::one(format!("rendered-{width}"))
+        }
+
+        fn revision(&self) -> u64 {
+            self.revision.load(Ordering::Relaxed)
+        }
+
+        fn live_region(&self) -> LiveRegion {
+            self.live
+        }
+    }
+
+    fn counting(live: LiveRegion) -> (Box<dyn Component>, Arc<AtomicU32>, Arc<AtomicU64>) {
+        let renders = Arc::new(AtomicU32::new(0));
+        let revision = Arc::new(AtomicU64::new(1));
+        (
+            Box::new(CountingComponent {
+                renders: Arc::clone(&renders),
+                revision: Arc::clone(&revision),
+                live,
+            }),
+            renders,
+            revision,
+        )
+    }
+
+    #[test]
+    fn compose_caches_by_revision_and_width() {
+        let (child, renders, revision) = counting(LiveRegion::Mutable { start: 0 });
+        let mut container = Container::with_children(vec![child]);
+
+        let (first, first_live) = container.compose(80);
+        assert_eq!(first.lines, vec!["rendered-80"]);
+        assert_eq!(first_live, LiveRegion::Mutable { start: 0 });
+        assert_eq!(renders.load(Ordering::Relaxed), 1);
+
+        let _ = container.compose(80);
+        assert_eq!(
+            renders.load(Ordering::Relaxed),
+            1,
+            "cache hit rendered child"
+        );
+
+        let _ = container.compose(100);
+        assert_eq!(
+            renders.load(Ordering::Relaxed),
+            2,
+            "width change missed cache"
+        );
+
+        revision.fetch_add(1, Ordering::Relaxed);
+        let _ = container.compose(100);
+        assert_eq!(
+            renders.load(Ordering::Relaxed),
+            3,
+            "revision change missed cache"
+        );
+    }
+
+    #[test]
+    fn cached_live_region_keeps_child_offset() {
+        let (child, renders, _) = counting(LiveRegion::Pinned { start: 0 });
+        let mut container = Container::new();
+        container.add(Box::new(StaticText {
+            text: "final".into(),
+            live: LiveRegion::None,
+        }));
+        container.add(child);
+
+        assert_eq!(container.compose(80).1, LiveRegion::Pinned { start: 1 });
+        assert_eq!(container.compose(80).1, LiveRegion::Pinned { start: 1 });
+        assert_eq!(renders.load(Ordering::Relaxed), 1);
+    }
 
     struct StaticText {
         text: String,
@@ -157,7 +293,7 @@ mod tests {
 
     #[test]
     fn compose_empty() {
-        let c = Container::new();
+        let mut c = Container::new();
         let (result, live) = c.compose(80);
         assert!(result.lines.is_empty());
         assert_eq!(live, LiveRegion::None);

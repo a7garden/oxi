@@ -18,8 +18,8 @@ pub struct StreamingMessage {
     finalized: Vec<String>,
     /// Live lines — may still change, repaint in-place.
     live: Vec<String>,
-    /// Cached hash of the full render (finalized + live).
-    cached_hash: u64,
+    /// O(1) cache revision, bumped by every output-affecting mutation.
+    revision: u64,
 }
 
 impl StreamingMessage {
@@ -29,7 +29,7 @@ impl StreamingMessage {
         Self {
             finalized: Vec::new(),
             live: Vec::new(),
-            cached_hash: 0,
+            revision: 0,
         }
     }
 
@@ -38,7 +38,7 @@ impl StreamingMessage {
     pub fn with_finalized(finalized: Vec<String>) -> Self {
         let mut msg = Self::new();
         msg.finalized = finalized;
-        msg.recompute_hash();
+        msg.bump_revision();
         msg
     }
 
@@ -46,19 +46,23 @@ impl StreamingMessage {
     /// Moves the line past the live region boundary.
     pub fn append_finalized(&mut self, line: impl Into<String>) {
         self.finalized.push(line.into());
-        self.recompute_hash();
+        self.bump_revision();
     }
 
     /// Promote all live lines to finalized. The live region becomes empty.
     pub fn finalize_live(&mut self) {
-        self.finalized.append(&mut self.live);
-        self.recompute_hash();
+        if !self.live.is_empty() {
+            self.finalized.append(&mut self.live);
+            self.bump_revision();
+        }
     }
 
     /// Set the live (mutable) portion. Replaces any existing live lines.
     pub fn set_live(&mut self, lines: Vec<String>) {
-        self.live = lines;
-        self.recompute_hash();
+        if self.live != lines {
+            self.live = lines;
+            self.bump_revision();
+        }
     }
 
     /// Append text to the last live line, or create a new live line.
@@ -71,7 +75,7 @@ impl StreamingMessage {
                 .expect("checked non-empty")
                 .push_str(token);
         }
-        self.recompute_hash();
+        self.bump_revision();
     }
 
     /// Whether the message has a non-empty live region.
@@ -92,10 +96,8 @@ impl StreamingMessage {
         self.finalized.len() + self.live.len()
     }
 
-    fn recompute_hash(&mut self) {
-        let mut all = self.finalized.clone();
-        all.extend(self.live.iter().cloned());
-        self.cached_hash = RenderResult::new(all).hash;
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
     }
 }
 
@@ -109,10 +111,15 @@ impl Component for StreamingMessage {
     fn render(&self, _width: u16) -> RenderResult {
         let mut lines = self.finalized.clone();
         lines.extend(self.live.iter().cloned());
-        RenderResult {
-            lines,
-            hash: self.cached_hash,
-        }
+        RenderResult::new(lines)
+    }
+
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn invalidate(&mut self) {
+        self.bump_revision();
     }
 
     fn live_region(&self) -> LiveRegion {

@@ -51,6 +51,10 @@ impl Component for TextMessage {
         }
     }
 
+    fn revision(&self) -> u64 {
+        self.hash
+    }
+
     fn live_region(&self) -> LiveRegion {
         LiveRegion::None
     }
