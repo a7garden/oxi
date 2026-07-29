@@ -1,7 +1,6 @@
 //! TUI interactive mode — module structure.
 //!
 //! Provides a flicker-free terminal chat interface using ratatui.
-
 mod app;
 mod completion;
 mod handlers;

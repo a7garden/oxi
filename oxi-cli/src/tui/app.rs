@@ -59,12 +59,24 @@ impl Tui {
         let mut stdout = io::stdout();
 
         if tty_ok {
+            // Kitty keyboard protocol: full flag set gated by OXI_KITTY_KEYBOARD=1.
+            // Default is REPORT_EVENT_TYPES only (matches pre-Kitty behavior).
+            // When the env var is set, also enable DISAMBIGUATE_ESCAPE_CODES
+            // (so e.g. Ctrl+I is distinct from Tab) and REPORT_ALTERNATE_KEYS
+            // (so e.g. Shift+Left is distinct from Left).
+            let flags = if std::env::var("OXI_KITTY_KEYBOARD").as_deref() == Ok("1") {
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            } else {
+                KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            };
             let _ = execute!(
                 stdout,
                 EnterAlternateScreen,
                 Hide,
                 EnableBracketedPaste,
-                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
+                PushKeyboardEnhancementFlags(flags)
             );
             // Enable mouse scroll tracking without drag tracking.
             // ?1000h = click/release/scroll, ?1006h = SGR extended coords.
