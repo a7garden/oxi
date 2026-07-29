@@ -25,6 +25,7 @@
 //!
 //! Translated to Rust from omp (oh-my-pi), MIT licensed.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -105,6 +106,7 @@ struct CatchupWaiter {
 pub struct AdvisorRuntime {
     agent: Arc<dyn AdvisorAgent>,
     host: Arc<dyn AdvisorRuntimeHost>,
+    transcript_path: Mutex<Option<PathBuf>>,
 
     state: Mutex<DrainState>,
     /// Bumped by every external reset/dispose. A drain iteration captures it
@@ -141,6 +143,7 @@ impl AdvisorRuntime {
         Self {
             agent,
             host,
+            transcript_path: Mutex::new(None),
             state: Mutex::new(DrainState::default()),
             epoch: AtomicU64::new(0),
             backlog: AtomicU64::new(0),
@@ -153,6 +156,17 @@ impl AdvisorRuntime {
             retry_delay,
             self_ref: Mutex::new(None),
         }
+    }
+
+    /// Attach the host-owned advisor transcript path.
+    pub fn set_transcript_path(&self, path: Option<PathBuf>) {
+        *self.transcript_path.lock() = path;
+    }
+
+    /// Path to the advisor transcript, when persistence is available.
+    #[must_use]
+    pub fn transcript_path(&self) -> Option<PathBuf> {
+        self.transcript_path.lock().clone()
     }
 
     /// Install the weak self-reference required for self-spawning the drain

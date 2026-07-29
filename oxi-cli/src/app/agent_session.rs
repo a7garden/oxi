@@ -163,6 +163,8 @@ pub struct AgentSession {
     agent: Arc<Agent>,
     settings: Arc<RwLock<Settings>>,
     session_manager: Arc<RwLock<SessionManager>>,
+    /// Display metadata for the Agent Hub overlay.
+    hub: super::agent_hub_registry::SharedHubRegistry,
 
     // ── Event listeners ──────────────────────────────────────────────
     #[allow(clippy::type_complexity)]
@@ -384,6 +386,12 @@ impl AgentSession {
         cwd: String,
     ) -> Self {
         let session_id = session_manager.get_session_id();
+        let hub = Arc::new(super::agent_hub_registry::HubRegistry::new());
+        if let Some(session_file) = session_manager.get_session_file()
+            && let Some(session_dir) = std::path::Path::new(&session_file).parent()
+        {
+            super::agent_hub_bridge::register_persisted_subagents(&hub, session_dir);
+        }
 
         // Seed the agent's conversation state from the resumed session so the
         // LLM sees prior user/assistant/tool history (issue #23). For a
@@ -405,6 +413,7 @@ impl AgentSession {
             agent,
             settings: Arc::new(RwLock::new(settings)),
             session_manager: Arc::new(RwLock::new(session_manager)),
+            hub,
             listeners: Arc::new(RwLock::new(Vec::new())),
             scoped_models: Arc::new(RwLock::new(Vec::new())),
             steering_messages: Arc::new(RwLock::new(VecDeque::new())),
@@ -429,6 +438,11 @@ impl AgentSession {
     // ══════════════════════════════════════════════════════════════════
     // Read-only state access
     // ══════════════════════════════════════════════════════════════════
+
+    /// Display metadata for the Agent Hub overlay.
+    pub fn hub(&self) -> &super::agent_hub_registry::HubRegistry {
+        &self.hub
+    }
 
     /// Get the current model ID (`provider/model`).
     pub fn model_id(&self) -> String {
@@ -1280,6 +1294,7 @@ impl AgentSession {
             agent: Arc::clone(&self.agent),
             settings: Arc::clone(&self.settings),
             session_manager: Arc::clone(&self.session_manager),
+            hub: Arc::clone(&self.hub),
             listeners: Arc::clone(&self.listeners),
             scoped_models: Arc::clone(&self.scoped_models),
             steering_messages: Arc::clone(&self.steering_messages),
@@ -1521,6 +1536,7 @@ impl AgentSession {
                          advisor role or the primary model"
                     )
                 })?;
+                super::agent_hub_bridge::register_advisor(&self.hub, rt.transcript_path());
                 *self.advisor.write() = Some(rt);
             }
             Ok(true)
@@ -1716,6 +1732,16 @@ impl AgentSession {
             host,
             std::time::Duration::from_millis(1000),
         ));
+        let transcript_path = self
+            .session_manager
+            .read()
+            .get_session_file()
+            .and_then(|file| {
+                std::path::Path::new(&file)
+                    .parent()
+                    .map(|dir| dir.join(crate::app::advisor_context::ADVISOR_TRANSCRIPT_FILENAME))
+            });
+        rt.set_transcript_path(transcript_path);
         rt.install_self(Arc::downgrade(&rt));
         // Seed the cursor so enabling mid-session doesn't replay all history.
         rt.seed_to(self.agent_ref().state().messages.len() as u64);
