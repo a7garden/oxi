@@ -384,6 +384,10 @@ pub fn read_path_block(home: &Path, cwd: &Path) -> Option<String> {
 }
 
 /// Store a session summary into the memory backend.
+///
+/// **NOTE: currently uncalled** — defined as a future hook point for
+/// session-end reflection. Nothing wires it to session lifecycle yet.
+/// See FINAL-ROADMAP.md §알려진 갭 (⑨ mental-models).
 pub async fn session_reflect(
     backend: &dyn oxi_agent::tools::MemoryBackend,
     subject: &str,

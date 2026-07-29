@@ -88,36 +88,31 @@ impl SlashCommand for MemoryCommand {
             }
 
             "view" => {
+                let info = backend.memory_info().unwrap_or_default();
                 ctx.state.add_notification(
-                    "Memory injection payload is delivered via `build_memory_recall`. \
-                     See `services::build_memory_recall` for the live block."
-                        .to_string(),
+                    format!("Memory status:\n{info}\n\nActive injection payload: `services::build_memory_recall` + `read_path_block` (memory_summary.md)"),
                     NotificationKind::Info,
                 );
                 SlashOutcome::Handled
             }
             "stats" => {
-                ctx.state.add_notification(
-                    "Per-backend stats live on `MemoryBackend::memory_info` and the \
-                     pipeline DB (`memory_workers::open_db`)."
-                        .to_string(),
-                    NotificationKind::Info,
-                );
+                let info = backend
+                    .memory_info()
+                    .unwrap_or_else(|| "No per-backend stats available from this backend.".into());
+                ctx.state.add_notification(info, NotificationKind::Info);
                 SlashOutcome::Handled
             }
             "diagnose" => {
+                let info = backend.memory_info().unwrap_or_default();
                 ctx.state.add_notification(
-                    "Diagnostics surface via `oxi_mnemopi::recall_diagnostics` and \
-                     the pipeline DB tables (memory_jobs / memory_stage1_outputs)."
-                        .to_string(),
+                    format!("Memory diagnostics:\n{info}\n\nFor deeper diagnostics:\n  • oxi_mnemopi FTS5: `SELECT count(*) FROM entities`\n  • Pipeline DB: `memory_jobs`, `memory_stage1_outputs` tables\n  • Vector index: `SELECT count(*) FROM oxi_vector_index`"),
                     NotificationKind::Info,
                 );
                 SlashOutcome::Handled
             }
             "clear" | "reset" => {
                 ctx.state.add_notification(
-                    "Memory clear/reset is wired through the pipeline DB — \
-                     pending `services::start_memory_pipeline` wiring."
+                    "Memory clear requires async backend access. To clear:\n  • Pipeline DB: manually delete `~/.oxi/memory/<project>.db`\n  • Mnemopi: `DROP TABLE IF EXISTS entities, oxi_vector_index`\n\nAuto-clear via async tool: use memory_edit tool with `delete` op."
                         .to_string(),
                     NotificationKind::Info,
                 );
@@ -125,8 +120,7 @@ impl SlashCommand for MemoryCommand {
             }
             "enqueue" | "rebuild" => {
                 ctx.state.add_notification(
-                    "Force-enqueue is dispatched by the Phase-2 worker; \
-                     see `services::start_memory_pipeline`."
+                    "Force-enqueue is dispatched by the Phase-2 worker.\nTo trigger:\n  1. Ensure `memory_backend = \"local\"` in settings\n  2. The background pipeline runs every 60s automatically\n  3. For immediate: restart the session with pipeline enabled\n\nAsync trigger pending: `services::start_memory_pipeline` → JoinHandle::abort + restart."
                         .to_string(),
                     NotificationKind::Info,
                 );

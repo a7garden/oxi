@@ -740,8 +740,34 @@ impl AgentTool for SubagentTool {
 
         // ── Single mode ──
         if has_single {
-            return execute_single_mode(effective_cwd, &agents, params, &binary, progress, signal)
-                .await;
+            // Auto-register a todo item for the subagent task
+            let desc = params["task"]
+                .as_str()
+                .map(|s| s.chars().take(80).collect::<String>())
+                .unwrap_or_else(|| "subagent task".into());
+            if let Some(todo) = &ctx.todo {
+                use crate::tools::todo::TodoOp;
+                let _ = todo
+                    .apply_ops(vec![TodoOp::Start {
+                        task: Some(desc.clone()),
+                        phase: Some("Subagents".into()),
+                    }])
+                    .await;
+            }
+            let result =
+                execute_single_mode(effective_cwd, &agents, params, &binary, progress, signal)
+                    .await;
+            // Mark done on completion (even on error — task was attempted)
+            if let Some(todo) = &ctx.todo {
+                use crate::tools::todo::TodoOp;
+                let _ = todo
+                    .apply_ops(vec![TodoOp::Done {
+                        task: Some(desc),
+                        phase: None,
+                    }])
+                    .await;
+            }
+            return result;
         }
 
         Ok(AgentToolResult::error("Invalid parameters".to_string()))

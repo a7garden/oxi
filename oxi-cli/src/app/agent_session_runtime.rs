@@ -745,7 +745,25 @@ impl AgentSessionRuntime {
 
     /// Teardown the current session.
     fn teardown_current(&mut self, _reason: SessionSwitchReason) {
+        // Capture session data before reset for memory reflection
+        let session_id = self.session.session_id();
+        let messages = self.session.messages();
+        let memory = self.session.agent_ref().get_config().memory.clone();
+
         self.session.reset();
+
+        // Fire-and-forget: store a session summary into the memory backend.
+        // Non-blocking — teardown does not wait for the write to complete.
+        if let Some(backend) = memory
+            && messages.len() >= 3
+        {
+            let sid = session_id.clone();
+            let msg_count = messages.len();
+            tokio::spawn(async move {
+                let summary = format!("Session {}: {} messages", sid, msg_count);
+                crate::services::session_reflect(&*backend, &sid, &summary).await;
+            });
+        }
     }
 
     /// Apply a new runtime result.
