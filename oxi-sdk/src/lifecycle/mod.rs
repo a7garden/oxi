@@ -12,12 +12,14 @@
 //! | `snapshot.rs`     | `AgentSnapshot`, `ToolManifest`, `SnapshotStore`, `FileSnapshotStore` |
 
 mod agent_pool;
+pub mod hub;
 mod snapshot;
 mod subagent_coordinator;
 mod supervisor;
 
 // ── Re-exports (thin facade) ─────────────────────────────────────────────
 pub use agent_pool::AgentPool;
+pub use hub::{HubKind, HubStatus};
 pub use snapshot::{AgentSnapshot, FileSnapshotStore, SnapshotStore, ToolManifest};
 pub use subagent_coordinator::{
     DEFAULT_MAX_SUBAGENT_DEPTH, SubagentCoordinator, SubagentCoordinatorError,

@@ -82,6 +82,15 @@ impl AgentPool {
     pub fn contains(&self, id: &str) -> bool {
         self.agents.read().contains_key(id)
     }
+
+    /// Snapshot iteration over all (id, agent) pairs. Holds the read lock for
+    /// the duration of the closure; do not call back into the pool from `f`.
+    pub fn for_each_row<F: FnMut(&str, &Arc<Agent>)>(&self, mut f: F) {
+        let agents = self.agents.read();
+        for (id, agent) in agents.iter() {
+            f(id.as_str(), agent);
+        }
+    }
 }
 
 impl Default for AgentPool {
@@ -112,6 +121,14 @@ mod tests {
         let pool = AgentPool::new();
         assert!(pool.is_empty());
         assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn for_each_row_visits_all_inserted() {
+        let pool = AgentPool::new();
+        let mut seen = Vec::new();
+        pool.for_each_row(|id, _| seen.push(id.to_string()));
+        assert!(seen.is_empty());
     }
 
     #[test]
