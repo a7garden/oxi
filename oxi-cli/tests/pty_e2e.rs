@@ -168,3 +168,54 @@ fn test_pty_harness_spawns_echo() {
     // Wait for child to exit.
     let _ = child.wait();
 }
+
+/// Open the Agent Hub overlay via `/agents`, verify the header, and close with `q`.
+#[test]
+fn test_pty_hub_opens_and_closes() {
+    if !oxi_binary_available() {
+        eprintln!("skipping: oxi binary not in PATH");
+        return;
+    }
+
+    let mut session = match PtySession::spawn(&["-i"]) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("skipping: failed to spawn oxi: {e}");
+            return;
+        }
+    };
+
+    // Wait for TUI to paint its first frame.
+    session
+        .read_until("\x1b[?2026l", Duration::from_secs(5))
+        .expect("read should not error");
+
+    // Send /agents to open the hub overlay.
+    session.send_line("/agents").expect("send /agents");
+
+    let hub_output = session
+        .read_until("Agent Hub", Duration::from_secs(3))
+        .expect("read should not error");
+
+    // The hub table header must appear in the output.
+    assert_output_contains(&hub_output, "Agent Hub");
+
+    // Close with q, then send Ctrl+C twice to exit.
+    session.send_raw(b"q").expect("send q to close hub");
+    std::thread::sleep(Duration::from_millis(200));
+    session.send_raw(&[0x03]).expect("send first ctrl-c");
+    std::thread::sleep(Duration::from_millis(200));
+    session.send_raw(&[0x03]).expect("send second ctrl-c");
+
+    let start = std::time::Instant::now();
+    loop {
+        if let Ok(Some(_code)) = session.try_wait() {
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            let _ = session.kill();
+            panic!("TUI did not exit within 5s after hub test");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
