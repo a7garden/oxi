@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-hashline oxi-ai oxi-tui oxi-tui-legacy oxi-mnemopi oxi-lsp oxi-snapcompact; do
+          for crate in oxi-catalog oxi-hashline oxi-ai oxi-tui oxi-mnemopi oxi-lsp oxi-snapcompact; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -103,7 +103,8 @@ jobs:
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces topological order: leaves first
-  # (hashline, ai, tui, tui-legacy, mnemopi, lsp, snapcompact) → agent → sdk → cli.
+  # (catalog, hashline, tui, mnemopi, lsp, snapcompact) → ai (dep catalog) →
+  # agent (dep ai) → sdk (dep agent) → cli (dep sdk).
   # Each crate waits for its dependency's crates.io index to
   # propagate (~30-60s) before publishing.
   publish:
@@ -117,13 +118,13 @@ jobs:
       max-parallel: 1
       matrix:
         crate:
+          - oxi-catalog
           - oxi-hashline
-          - oxi-ai
           - oxi-tui
-          - oxi-tui-legacy
           - oxi-mnemopi
           - oxi-lsp
           - oxi-snapcompact
+          - oxi-ai
           - oxi-agent
           - oxi-sdk
           - oxi-cli
@@ -138,10 +139,11 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxi-hashline|oxi-ai|oxi-tui|oxi-tui-legacy|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
+            oxi-catalog|oxi-hashline|oxi-tui|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
+            oxi-ai) WAITS="oxi-catalog" ;;
             oxi-agent) WAITS="oxi-ai oxi-hashline" ;;
             oxi-sdk) WAITS="oxi-agent oxi-snapcompact" ;;
-            oxi-cli) WAITS="oxi-sdk oxi-tui-legacy oxi-lsp" ;;
+            oxi-cli) WAITS="oxi-sdk" ;;
             *) exit 0 ;;
           esac
           for WAIT in $WAITS; do

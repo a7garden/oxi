@@ -177,6 +177,12 @@ mod tests {
 
     #[test]
     fn overlay_enters_alt_once_and_leaves_on_next_tape() {
+        // This test needs terminal dimensions (ioctl TIOCGWINSZ) from
+        // Viewport::Fullscreen. Headless CI runners don't have one.
+        if crossterm::terminal::size().is_err() {
+            eprintln!("skip: no terminal size (headless CI)");
+            return;
+        }
         let mut host = TerminalHost::with_writer(Vec::new());
         host.draw_overlay(|frame| {
             frame.render_widget(ratatui::widgets::Clear, frame.area());
