@@ -36,6 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`oxi-tui/src/theme.rs`) and glyph (`oxi-tui/src/symbols.rs`) systems.
   Updated all remaining `oxi-tui-legacy` comment references to `oxi-tui`.
 
+### Added (P2 integration)
+
+- **TUI: PTY render verification test** — Guards the P2.1 render path
+  (`terminal.draw()` + `CursorState::reconcile()`) against regression. Spawns
+  the actual binary in a PTY, verifies alt-screen enter + cursor hide,
+  sends Ctrl+C, confirms clean exit. Permanent guardrail.
+- **TUI: KillRing in input editor (OXI_KILL_RING=1)** — Emacs-style kill ring.
+  Ctrl+Shift+k: kill to line end → push to ring. Ctrl+Shift+u: kill to
+  line start. Ctrl+y: yank. Alt+y: yank-pop. Gated by env var; default
+  behavior (Ctrl+Shift+k = plain delete) preserved when unset.
+- **TUI: LaTeX-to-Unicode in markdown (OXI_LATEX_INLINE=1)** — Preprocesses
+  markdown segments through `latex_to_unicode()` (145 symbol mappings)
+  before parsing. Code blocks unaffected. Gated by env var.
+- **TUI: Kitty keyboard protocol (OXI_KITTY_KEYBOARD=1)** — When set, terminal
+  setup pushes full `KeyboardEnhancementFlags` (`DISAMBIGUATE_ESCAPE_CODES |
+  REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`). crosstorm 0.29+ parses
+  CSI-u sequences natively; event loop works unchanged.
+
 ## [0.60.0] - 2026-07-27 — TUI bug fixes
 
 ### Fixed
