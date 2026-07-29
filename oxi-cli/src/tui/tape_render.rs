@@ -1,10 +1,13 @@
 //! Projection of `AppState` into transcript plus pinned sticky tape rows.
 
+use std::cmp::min;
+
 use oxi_tui::{
     render::terminal::TerminalCapabilities,
     tape::{LiveRegion, TranscriptRenderer},
     theme::Theme,
     truncate_to_width,
+    widgets::todo_panel::{TodoPanelState, TodoPanelStatus},
 };
 
 use super::app::AppState;
@@ -44,9 +47,9 @@ impl TapeRenderState {
             self.rows
                 .push(format!(" queued: {}", app.steering_messages_snapshot.len()));
         }
-        if !app.todo_panel.phases.is_empty() {
-            self.rows
-                .push(format!(" {} todos", app.todo_panel.phases.len()));
+        if !app.todo_panel.is_empty() {
+            let todo_lines = render_todo_lines(&app.todo_panel, content_width);
+            self.rows.extend(todo_lines);
         }
         let status = if app.is_agent_busy {
             "working"
@@ -97,6 +100,68 @@ impl TapeRenderState {
     pub(crate) fn frame(&self) -> (&[String], LiveRegion) {
         (&self.rows, self.live)
     }
+}
+
+/// Render the todo panel into plain-text sticky lines (plain-text pipeline).
+///
+/// Uses ASCII status markers instead of styled text, consistent with
+/// the tape_render string pipeline (no ratatui Buffer support).
+fn render_todo_lines(panel: &TodoPanelState, width: u16) -> Vec<String> {
+    let _ = width; // used for future truncation
+    if panel.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    let indent = "  ";
+
+    // Header: "Todos"
+    lines.push(" ".to_string());
+    lines.push(" Todos".to_string());
+
+    let non_empty: Vec<_> = panel
+        .phases
+        .iter()
+        .filter(|p| !p.tasks.is_empty())
+        .collect();
+
+    if panel.expanded {
+        // Expanded mode: all phases with headers
+        for phase in &non_empty {
+            if non_empty.len() > 1 {
+                lines.push(format!("{indent}{}:", phase.name));
+            }
+            for task in &phase.tasks {
+                let marker = match task.status {
+                    TodoPanelStatus::Pending => "[ ]",
+                    TodoPanelStatus::InProgress => "[@]",
+                    TodoPanelStatus::Completed => "[x]",
+                    TodoPanelStatus::Abandoned => "[-]",
+                };
+                lines.push(format!("{indent}  {marker} {}", task.content));
+            }
+        }
+    } else {
+        // Collapsed mode: active phase only
+        if let Some(phase) = panel.active_phase() {
+            let visible = min(phase.tasks.len(), panel.max_visible);
+            let hidden = phase.tasks.len().saturating_sub(panel.max_visible);
+            for task in &phase.tasks[..visible] {
+                let marker = match task.status {
+                    TodoPanelStatus::Pending => "[ ]",
+                    TodoPanelStatus::InProgress => "[@]",
+                    TodoPanelStatus::Completed => "[x]",
+                    TodoPanelStatus::Abandoned => "[-]",
+                };
+                lines.push(format!("{indent}{marker} {}", task.content));
+            }
+            if hidden > 0 {
+                lines.push(format!("{indent}  ... {} more", hidden));
+            }
+        }
+    }
+
+    lines
 }
 
 #[cfg(test)]
