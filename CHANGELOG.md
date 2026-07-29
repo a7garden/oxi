@@ -59,6 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setup pushes full `KeyboardEnhancementFlags` (`DISAMBIGUATE_ESCAPE_CODES |
   REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`). crossterm 0.29+ parses
   CSI-u sequences natively; event loop works unchanged.
+- **TUI: Agent Hub overlay (Ctrl+h / /agents)** — Fullscreen alt-screen
+  overlay listing the main agent, advisor reviewer, and persisted subagents.
+  Table view with j/k navigation, Enter for live transcript viewer (mtime-
+  polled at 250ms), and severity-colored advisor advice cards persistent
+  in the scrollback. HubRegistry wired into AgentSession. 4 new overlay
+  modules.
 
 ## [0.60.0] - 2026-07-27 — TUI bug fixes
 
