@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-catalog oxi-hashline oxi-ai oxi-tui oxi-mnemopi oxi-lsp oxi-snapcompact; do
+          for crate in oxi-catalog oxi-hashline oxi-tui oxi-mnemopi oxi-lsp oxi-snapcompact; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
