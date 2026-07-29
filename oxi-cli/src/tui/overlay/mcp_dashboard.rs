@@ -1,7 +1,7 @@
 //! MCP dashboard overlay (Phase 2).
 //!
 //! Implements [`OverlayComponent`] for the `/mcp` command. Renders a
-//! generic sectioned dashboard (the `DashboardWidget` from oxi-tui-legacy) and
+//! generic sectioned dashboard (the `DashboardWidget` from oxi-tui) and
 //! translates key presses into [`OverlayAction::McpAction`] events for
 //! the TUI handler to act on.
 
@@ -25,7 +25,7 @@ use super::{OverlayAction, OverlayComponent, centered_layout};
 /// it belongs to and, for tools, the **original** (un-prefixed) name —
 /// which is the key consent is stored and enforced under (see
 /// `McpManager::call_tool` / `McpDirectTool`). We keep this parallel map
-/// keyed by item `id` so oxi-tui-legacy stays MCP-free.
+/// keyed by item `id` so oxi-tui stays MCP-free.
 #[derive(Clone, Debug)]
 struct ItemMeta {
     /// Server that owns this item. For a server item this is the

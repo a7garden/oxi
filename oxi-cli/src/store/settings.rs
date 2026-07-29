@@ -219,7 +219,7 @@ pub struct Settings {
     // ── Keybindings ────────────────────────────────────────────────────
     /// User-defined keybinding overrides.
     /// Format: `{ "ActionName": ["Ctrl+x", "Alt+y"] }`
-    /// Actions are matched case-insensitively to the Action enum in oxi-tui-legacy.
+    /// Actions are matched case-insensitively to the Action enum in oxi-tui.
     #[serde(default)]
     pub keybindings: HashMap<String, Vec<String>>,
 

@@ -892,7 +892,7 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
         SessionEvent::SessionInfoChanged => {}
         // Advisor notes (aside/preserve channel) — surfaced as a system
         // message toast so the user sees the advice. (A dedicated `<advisory>`
-        // chat card is a future oxi-tui-legacy enhancement; this makes aside advice
+        // chat card is a future oxi-tui enhancement; this makes aside advice
         // immediately visible. Steer-channel advice injects into the primary
         // directly and is not routed through here.)
         SessionEvent::Advisor { channel, body } => {

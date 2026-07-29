@@ -21,6 +21,8 @@ pub mod diff;
 pub mod image;
 #[allow(missing_docs)]
 pub(crate) mod latex;
+#[allow(missing_docs)]
+pub mod latex_unicode;
 pub mod mermaid;
 pub mod terminal;
 

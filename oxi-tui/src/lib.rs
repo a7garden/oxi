@@ -15,6 +15,8 @@
 
 pub mod cell;
 pub mod fuzzy;
+/// Input system: kitty keyboard protocol, bracketed paste, and kill ring.
+pub mod input;
 pub mod keybindings;
 pub mod markdown_styles;
 pub mod overlay_anchor;

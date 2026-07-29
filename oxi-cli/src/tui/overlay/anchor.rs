@@ -1,6 +1,6 @@
 //! Overlay anchor layout resolver for the CLI layer.
 //!
-//! Bridges the shared `OverlayLayout` / `OverlayAnchor` types from `oxi-tui-legacy`
+//! Bridges the shared `OverlayLayout` / `OverlayAnchor` types from `oxi-tui`
 //! with the CLI overlay rendering system.
 
 #[allow(unused_imports)]
