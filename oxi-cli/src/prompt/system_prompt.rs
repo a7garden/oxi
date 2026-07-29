@@ -274,7 +274,7 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     prompt.push_str(&append_section);
 
     // ── Hashline format specification (from oxi-hashline canonical source) ──
-    prompt.push_str(include_str!("../../../oxi-hashline/src/prompt.md"));
+    prompt.push_str(include_str!("../prompts/hashline_format.md"));
 
     // Append project context files
     if !options.context_files.is_empty() {
