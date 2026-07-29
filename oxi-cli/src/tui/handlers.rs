@@ -546,7 +546,14 @@ async fn dispatch_action(
         | KAction::CompletionNext
         | KAction::CompletionPrev
         | KAction::CompletionDismiss
-        | KAction::CompletionAccept => None,
+        | KAction::CompletionAccept
+        | KAction::ToggleAgentHub => {
+            // No-op for now; the overlay-opening body lands in Task 7
+            // once `AgentHubOverlay` exists. Kept here so the exhaustive
+            // `match action { … }` compiles after the `Action::ToggleAgentHub`
+            // variant was added in M5.
+            None
+        }
     }
 }
 /// Check if the kill ring feature is enabled via env var.
@@ -905,6 +912,15 @@ pub fn handle_ui_event(
         UiEvent::SystemMessage(msg) => {
             state.add_notification(msg, NotificationKind::Info);
         }
+        // Persistent transcript card for advisor advice (aside/preserve
+        // channels). The actual `ContentBlock::Advisory` render and
+        // severity-coloured styling land in Task 8 (ContentBlock::Advisory +
+        // card render). Until then the event is delivered but not yet
+        // visualised — this keeps the dispatcher end-to-end functional
+        // without a half-rendered chat block.
+        UiEvent::AdvisorCard { .. } => {
+            // No-op until Task 8 wires the chat-widget render path.
+        }
         UiEvent::TokenUsage {
             input_tokens,
             output_tokens,
@@ -960,16 +976,34 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
         }
         SessionEvent::SessionInfoChanged => {}
         // Advisor notes (aside/preserve channel) — surfaced as a system
-        // message toast so the user sees the advice. (A dedicated `<advisory>`
-        // chat card is a future oxi-tui enhancement; this makes aside advice
-        // immediately visible. Steer-channel advice injects into the primary
-        // directly and is not routed through here.)
+        // message toast so the user sees the advice, AND (for aside/preserve
+        // channels) emitted as a persistent `AdvisorCard` UI event that the
+        // chat renderer in M8 wires into the transcript. Steer-channel
+        // advice injects into the primary directly and is not routed through
+        // here. `SessionEvent::Advisor` does not yet carry `severity` —
+        // we default to `Nit` to match `AdviseTool`'s omitted-severity
+        // behaviour.
         SessionEvent::Advisor { channel, body } => {
             tracing::debug!(?channel, %body, "advisor note delivered");
             let _ = ui_tx.send(UiEvent::SystemMessage(format!(
                 " Advisor ({:?}): {body}",
                 channel
             )));
+            if matches!(
+                channel,
+                oxi_agent::advisor::AdvisorDeliveryChannel::Aside
+                    | oxi_agent::advisor::AdvisorDeliveryChannel::Preserve
+            ) {
+                let timestamp_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let _ = ui_tx.send(UiEvent::AdvisorCard {
+                    body: body.clone(),
+                    severity: oxi_agent::advisor::AdvisorSeverity::Nit,
+                    timestamp_ms,
+                });
+            }
         }
         SessionEvent::Agent(agent_event) => match &*agent_event {
             AgentEvent::Retry {

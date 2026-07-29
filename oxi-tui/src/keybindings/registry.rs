@@ -104,6 +104,9 @@ pub enum Action {
     CopyCodeBlock,
     /// Open last image in viewer.
     OpenImage,
+    /// Toggle the Agent Hub overlay (advisor + subagent monitor).
+    /// Bound to `Ctrl+h` — matches omp's `app.agents.hub` default.
+    ToggleAgentHub,
 
     // ── Completion ─────────────────────────────────────────────
     /// Navigate to next completion suggestion.
@@ -268,6 +271,7 @@ impl KeybindingsManager {
             (ToggleExpand, vec!["Ctrl+t"]),
             (CopyCodeBlock, vec![]), // Ctrl+y reclaimed for Yank (kill ring paste)
             (OpenImage, vec!["Ctrl+i"]),
+            (ToggleAgentHub, vec!["Ctrl+h"]),
             // ── Completion ──
             (CompletionNext, vec![]), // Handled via dedicated Tab/Enter logic
             (CompletionPrev, vec![]),
@@ -327,6 +331,7 @@ fn parse_action(s: &str) -> Option<Action> {
         "openprovidersetup" => Some(OpenProviderSetup),
         "togglerouting" => Some(ToggleRouting),
         "togglequeue" => Some(ToggleQueue),
+        "toggleagenthub" => Some(ToggleAgentHub),
         "copycodeblock" => Some(CopyCodeBlock),
         "openimage" => Some(OpenImage),
         "completionnext" => Some(CompletionNext),
@@ -421,5 +426,16 @@ mod tests {
         assert_eq!(parse_action("yank"), Some(Action::Yank));
         assert_eq!(parse_action("YankPop"), Some(Action::YankPop));
         assert_eq!(parse_action("KillToLineEnd"), Some(Action::KillToLineEnd));
+    }
+
+    #[test]
+    fn test_toggle_agent_hub_binding() {
+        let mgr = KeybindingsManager::new();
+        let ctrl_h = parse_key_id("Ctrl+h").unwrap();
+        assert_eq!(mgr.match_action(&ctrl_h), Some(Action::ToggleAgentHub));
+        // parse_action round-trip (case-insensitive — matches the existing
+        // canonical convention used for the other Action variants).
+        assert_eq!(parse_action("ToggleAgentHub"), Some(Action::ToggleAgentHub));
+        assert_eq!(parse_action("toggleagenthub"), Some(Action::ToggleAgentHub));
     }
 }
