@@ -8,6 +8,7 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use oxi_tui::Theme;
 use ratatui::{Frame, layout::Rect};
 
+pub mod agent_hub;
 pub mod anchor;
 pub mod ask;
 pub mod extensions;
