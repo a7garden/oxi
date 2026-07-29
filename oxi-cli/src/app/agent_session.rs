@@ -391,6 +391,17 @@ impl AgentSession {
             && let Some(session_dir) = std::path::Path::new(&session_file).parent()
         {
             super::agent_hub_bridge::register_persisted_subagents(&hub, session_dir);
+            // The current session's own .jsonl lives in the same per-CWD
+            // directory as persisted subagents. `register_persisted_subagents`
+            // cannot distinguish it from a subagent (the scan sees every
+            // `*.jsonl` in the dir), so unregister it here. The unregister is
+            // idempotent — if the file hasn't been flushed yet, it's a no-op.
+            if let Some(own_stem) = std::path::Path::new(&session_file)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+            {
+                hub.unregister(own_stem);
+            }
         }
 
         // Seed the agent's conversation state from the resumed session so the

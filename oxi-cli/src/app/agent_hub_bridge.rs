@@ -1,10 +1,35 @@
 //! Bridges `AgentSession` to the Agent Hub display registry.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use oxi_sdk::{HubKind, HubStatus};
+use regex::Regex;
 
 use super::agent_hub_registry::{HubEntry, HubRegistry, now_ms};
+
+/// Recognises the main session file stem produced by `SessionManager`.
+///
+/// Real naming pattern (from `oxi-cli/src/store/session.rs:2166-2170`):
+///   file_timestamp = RFC3339 with `:` `.` `T` `-` `+` replaced by `-`
+///   short_id       = first 8 chars of the session UUID
+///   stem           = `"{file_timestamp}_{short_id}"`
+///
+/// Examples that MUST match (from production data):
+///   `2026-07-29-14-30-00-00-00_a1b2c3d4`
+///   `2026-07-29-14-30-00-06-00_deadbeef`
+///
+/// Examples that MUST NOT match:
+///   `__advisor`, `sub-a`, `01HXY` (UUID-style alone is not a main file),
+///   `2026-07-29.jsonl` (no underscore + 8hex suffix).
+///
+/// The pattern is: 4-digit year, then any sequence of digits/dashes, then
+/// `_` + 8 lowercase hex chars. Stored as a `LazyLock` to avoid paying
+/// the compile cost on every call.
+static MAIN_SESSION_STEM_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[0-9]{4}.*_[0-9a-f]{8}$")
+        .expect("MAIN_SESSION_STEM_REGEX pattern is a literal; must compile")
+});
 
 /// Register persisted JSONL transcripts as parked subagents.
 pub fn register_persisted_subagents(hub: &HubRegistry, session_dir: &Path) {
@@ -67,8 +92,8 @@ pub fn register_advisor(hub: &HubRegistry, transcript_path: Option<PathBuf>) {
     );
 }
 
-fn is_main_session_stem(_stem: &str) -> bool {
-    false
+fn is_main_session_stem(stem: &str) -> bool {
+    MAIN_SESSION_STEM_REGEX.is_match(stem)
 }
 
 #[cfg(test)]
@@ -79,9 +104,19 @@ mod tests {
     #[test]
     fn registers_subagent_jsonl_excluding_main_and_advisor() {
         let dir = tempfile::tempdir().unwrap();
+        // Real main session file pattern: `{rfc3339-derived}_{8hex}`.
+        // See `oxi-cli/src/store/session.rs:2166-2170`.
+        std::fs::write(
+            dir.path().join("2026-07-29-14-30-00-00-00_a1b2c3d4.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        // Advisor transcript — reserved stem.
         std::fs::write(dir.path().join("__advisor.jsonl"), "{}\n").unwrap();
+        // Subagent transcripts (2).
         std::fs::write(dir.path().join("sub-a.jsonl"), "{}\n").unwrap();
         std::fs::write(dir.path().join("sub-b.jsonl"), "{}\n").unwrap();
+        // Non-JSONL fixture must be ignored.
         std::fs::write(dir.path().join("notes.txt"), "ignored\n").unwrap();
 
         let hub = HubRegistry::new();
@@ -101,6 +136,25 @@ mod tests {
             );
             assert!(entry.last_activity_ms > 0);
         }
+    }
+
+    #[test]
+    fn main_session_stem_heuristic_matches_real_pattern() {
+        // Real production names.
+        assert!(is_main_session_stem("2026-07-29-14-30-00-00-00_a1b2c3d4"));
+        assert!(is_main_session_stem("2026-07-29-14-30-00-06-00_deadbeef"));
+        // Subagent slugs MUST NOT match.
+        assert!(!is_main_session_stem("sub-a"));
+        assert!(!is_main_session_stem("sub-b"));
+        // Reserved advisor stem MUST NOT match (handled separately by the
+        // hard-coded `__advisor` check).
+        assert!(!is_main_session_stem("__advisor"));
+        // Bare UUID-style / ULID MUST NOT match — only the timestamped
+        // `{rfc3339}_{8hex}` pattern is recognised.
+        assert!(!is_main_session_stem("01HXY"));
+        assert!(!is_main_session_stem("01HXYABCDEFG"));
+        // No underscore + 8hex suffix → not a main session file.
+        assert!(!is_main_session_stem("2026-07-29"));
     }
 
     #[test]
