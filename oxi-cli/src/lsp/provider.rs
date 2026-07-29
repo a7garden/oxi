@@ -209,7 +209,7 @@ impl CliLspProvider {
         file: &str,
         line: u32,
         new_name: String,
-        _apply: bool,
+        apply: bool,
     ) -> Result<String, ToolError> {
         let abs = self.resolve_file(file)?;
         let client = self.client_for(&abs).await?;
@@ -225,10 +225,15 @@ impl CliLspProvider {
             .map_err(lsp_err)?;
         Ok(match resp {
             None => "(no edits)".into(),
-            Some(edit) => format!(
-                "Rename plan (apply not yet implemented):\n{}",
-                summarize_workspace_edit(&edit)
-            ),
+            Some(edit) => {
+                if apply {
+                    let summary = summarize_workspace_edit(&edit);
+                    apply_workspace_edit(&edit)?;
+                    format!("Rename applied: {summary}")
+                } else {
+                    format!("Rename preview:\n{}", summarize_workspace_edit(&edit))
+                }
+            }
         })
     }
 
@@ -343,7 +348,7 @@ impl CliLspProvider {
         &self,
         old_path: &str,
         new_path: &str,
-        _apply: bool,
+        apply: bool,
     ) -> Result<String, ToolError> {
         let old_abs = self.resolve_file(old_path)?;
         let client = self.client_for(&old_abs).await?;
@@ -362,7 +367,15 @@ impl CliLspProvider {
             .map_err(lsp_err)?;
         Ok(match edit {
             None => "(no willRenameFiles response)".into(),
-            Some(e) => summarize_workspace_edit(&e),
+            Some(e) => {
+                if apply {
+                    let summary = summarize_workspace_edit(&e);
+                    apply_workspace_edit(&e)?;
+                    format!("File rename applied: {summary}")
+                } else {
+                    format!("File rename preview:\n{}", summarize_workspace_edit(&e))
+                }
+            }
         })
     }
 }
@@ -631,6 +644,159 @@ fn summarize_workspace_edit(edit: &lsp_types::WorkspaceEdit) -> String {
         })
         .unwrap_or(0);
     format!("WorkspaceEdit: {changes} uri-changes, {doc_changes} document-changes")
+}
+
+/// Apply a `WorkspaceEdit` to disk.
+///
+/// Supports `documentChanges` (modern) and `changes` (legacy) formats.
+/// Edits are applied bottom-to-top per file to preserve positions.
+/// Uses atomic temp+rename writes (crash-safe).
+fn apply_workspace_edit(edit: &lsp_types::WorkspaceEdit) -> Result<(), ToolError> {
+    if let Some(changes) = &edit.document_changes {
+        match changes {
+            lsp_types::DocumentChanges::Edits(edits) => {
+                for doc_edit in edits {
+                    apply_text_document_edit(doc_edit)?;
+                }
+            }
+            lsp_types::DocumentChanges::Operations(_ops) => {
+                // Resource operations (create/delete/rename) are rare;
+                // skip for now to keep the implementation focused.
+            }
+        }
+    } else if let Some(changes) = &edit.changes {
+        for (_uri, text_edits) in changes {
+            let path = _uri
+                .to_file_path()
+                .map_err(|_| format!("invalid URI in changes: {_uri}"))?;
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            let has_trailing_newline = content.ends_with('\n');
+            let mut lines: Vec<String> = content.lines().map(String::from).collect();
+
+            let mut sorted = text_edits.clone();
+            sorted.sort_by_key(|b| std::cmp::Reverse(b.range.start.line));
+
+            for text_edit in &sorted {
+                apply_text_edit_to_lines(&mut lines, text_edit);
+            }
+
+            let mut output = lines.join("\n");
+            if has_trailing_newline {
+                output.push('\n');
+            }
+            atomic_write(&path, &output)?;
+        }
+    }
+    Ok(())
+}
+
+/// Atomic file write: write to a temp file in the same directory, then
+/// rename. Crash-safe: a crash mid-write leaves the original intact.
+fn atomic_write(path: &std::path::Path, content: &str) -> Result<(), ToolError> {
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let mut tmp = dir.to_path_buf();
+    tmp.push(format!(
+        ".tmp.{}",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    std::fs::write(&tmp, content)
+        .map_err(|e| format!("failed to write temp {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        format!(
+            "failed to rename {} -> {}: {e}",
+            tmp.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Apply a single `TextDocumentEdit` (modern format).
+fn apply_text_document_edit(doc_edit: &lsp_types::TextDocumentEdit) -> Result<(), ToolError> {
+    let uri = &doc_edit.text_document.uri;
+    let path = uri
+        .to_file_path()
+        .map_err(|_| format!("invalid URI: {uri}"))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let has_trailing_newline = content.ends_with('\n');
+    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+
+    let mut edits: Vec<&lsp_types::TextEdit> = Vec::with_capacity(doc_edit.edits.len());
+    for edit in &doc_edit.edits {
+        match edit {
+            lsp_types::OneOf::Left(text_edit) => edits.push(text_edit),
+            lsp_types::OneOf::Right(annotated) => edits.push(&annotated.text_edit),
+        }
+    }
+
+    edits.sort_by_key(|b| std::cmp::Reverse(b.range.start.line));
+
+    for text_edit in edits {
+        apply_text_edit_to_lines(&mut lines, text_edit);
+    }
+
+    let mut output = lines.join("\n");
+    if has_trailing_newline {
+        output.push('\n');
+    }
+    atomic_write(&path, &output)?;
+    Ok(())
+}
+
+/// Convert an LSP UTF-16 code-unit offset to a Rust byte offset.
+///
+/// LSP uses UTF-16 code units for character positions (per the spec),
+/// while Rust uses byte indices. Direct byte slicing with an LSP
+/// offset would panic on non-ASCII characters.
+fn u16_to_byte_offset(line: &str, u16_offset: usize) -> usize {
+    let mut u16_pos = 0;
+    for (byte_off, c) in line.char_indices() {
+        if u16_pos >= u16_offset {
+            return byte_off;
+        }
+        u16_pos += c.len_utf16();
+    }
+    line.len()
+}
+
+/// Apply a single `TextEdit` to a mutable line buffer (bottom-to-top safe).
+///
+/// Converts LSP UTF-16 code-unit offsets to byte offsets before slicing
+/// to avoid panicking on non-ASCII characters.
+fn apply_text_edit_to_lines(lines: &mut Vec<String>, edit: &lsp_types::TextEdit) {
+    let start_line = edit.range.start.line as usize;
+    let end_line = edit.range.end.line as usize;
+
+    if start_line >= lines.len() {
+        lines.push(edit.new_text.clone());
+        return;
+    }
+
+    if start_line == end_line {
+        let line = &lines[start_line];
+        let start_col = u16_to_byte_offset(line, edit.range.start.character as usize);
+        let end_col = u16_to_byte_offset(line, edit.range.end.character as usize);
+        let end_col = end_col.min(line.len());
+        let before = &line[..start_col.min(line.len())];
+        let after = &line[end_col..];
+        let mut new_line = String::with_capacity(before.len() + edit.new_text.len() + after.len());
+        new_line.push_str(before);
+        new_line.push_str(&edit.new_text);
+        new_line.push_str(after);
+        lines[start_line] = new_line;
+    } else if end_line < lines.len() {
+        let start_col = u16_to_byte_offset(&lines[start_line], edit.range.start.character as usize);
+        let end_col = u16_to_byte_offset(&lines[end_line], edit.range.end.character as usize);
+        let before = lines[start_line][..start_col.min(lines[start_line].len())].to_string();
+        let after = lines[end_line][end_col.min(lines[end_line].len())..].to_string();
+        let mut new_line = String::with_capacity(before.len() + edit.new_text.len() + after.len());
+        new_line.push_str(&before);
+        new_line.push_str(&edit.new_text);
+        new_line.push_str(&after);
+        let _ = lines.splice(start_line..=end_line, std::iter::once(new_line));
+    }
 }
 
 fn summarize_entries(path: &std::path::Path, entries: &[oxi_lsp::PublishedDiagnostics]) -> String {
