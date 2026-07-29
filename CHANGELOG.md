@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before parsing. Code blocks unaffected. Gated by env var.
 - **TUI: Kitty keyboard protocol (OXI_KITTY_KEYBOARD=1)** — When set, terminal
   setup pushes full `KeyboardEnhancementFlags` (`DISAMBIGUATE_ESCAPE_CODES |
-  REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`). crosstorm 0.29+ parses
+  REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`). crossterm 0.29+ parses
   CSI-u sequences natively; event loop works unchanged.
 
 ## [0.60.0] - 2026-07-27 — TUI bug fixes
