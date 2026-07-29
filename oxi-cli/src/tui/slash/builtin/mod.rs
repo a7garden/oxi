@@ -8,6 +8,7 @@
 //! legacy `match` arms are deleted from `super::mod.rs`.
 
 mod advisor;
+mod agents;
 mod clipboard;
 mod export_grp;
 mod issue;
@@ -29,6 +30,7 @@ use super::registry::SlashRegistry;
 ///
 /// Called by [`SlashRegistry::builtins`](super::registry::SlashRegistry::builtins).
 pub(crate) fn register_all(registry: &mut SlashRegistry) {
+    registry.register(Box::new(agents::AgentsCommand));
     registry.register(Box::new(quit::QuitCommand));
     registry.register(Box::new(roles::RolesCommand));
     registry.register(Box::new(overlay_commands::HelpCommand));
