@@ -234,6 +234,32 @@ pub struct Settings {
     #[serde(default)]
     pub edit_format: EditFormat,
 
+    // ── Feature flags (omp-adoption-2) ────────────────────────────────
+    /// Enable the sticky todo panel in the TUI.
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub todo_panel_enabled: bool,
+
+    /// Enable the Agent Hub overlay (Ctrl+h / /agents).
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub agent_hub_enabled: bool,
+
+    /// Enable the Snapcompact PNG-frame compactor.
+    /// Default: false (experimental).
+    #[serde(default = "default_false")]
+    pub snapcompact_enabled: bool,
+
+    /// Enable Mermaid diagram rendering in markdown.
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub mermaid_render_enabled: bool,
+
+    /// Enable the Commit tool with optional LLM analysis.
+    /// Default: false (opt-in, LLM cost).
+    #[serde(default = "default_false")]
+    pub commit_tool_enabled: bool,
+
     // ── Hindsight memory (④) ─────────────────────────────────────────
     /// Enable session-spanning memory tools (retain/recall/reflect/edit).
     /// Default: false (opt-in).
@@ -442,6 +468,11 @@ impl Default for Settings {
             embedding_base_url: None,
             embedding_api_key_env: default_embedding_api_key_env(),
             embedding_model: default_embedding_model(),
+            todo_panel_enabled: true,
+            agent_hub_enabled: true,
+            snapcompact_enabled: false,
+            mermaid_render_enabled: true,
+            commit_tool_enabled: false,
             ttsr_enabled: false,
             ttsr_interrupt_mode: default_ttsr_mode(),
             model_roles: HashMap::new(),
