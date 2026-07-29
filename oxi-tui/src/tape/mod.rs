@@ -29,8 +29,11 @@ pub mod components;
 pub mod container;
 pub mod engine;
 pub mod line;
+pub mod style;
+pub mod transcript;
 
 pub use component::{Component, LiveRegion, RenderResult};
 pub use container::Container;
 pub use engine::{FrameOutcome, PaintOptions, TapeEngine};
 pub use line::line_to_ansi;
+pub use transcript::TranscriptRenderer;
