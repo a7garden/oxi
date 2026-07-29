@@ -1,6 +1,6 @@
 # Remaining Work
 
-> 최종 갱신: 2026-07-29. 검증 기준: `cargo build --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo nextest run --workspace` (3,584 passed).
+> 최종 갱신: 2026-07-29. 검증 기준: `cargo build --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo nextest run --workspace` (**3,595 passed**, +11 new LSP unit tests).
 >
 > 각 항목은 **파일 위치 + 해결 방안 + 수용 기준**을 포함한다.
 
@@ -10,37 +10,49 @@
 
 | 항목 | 상태 | 확인 위치 |
 |---|---|---|
-| P0.2 CommitTool LLM 주입 | ✅ **완료** | `oxi-cli/src/bootstrap.rs:419-427` — `resolve_role_to_model(ModelRole::Commit)` → `CommitTool::new(model)` |
-| P1.3 `oxi commit` CLI 서브커맨드 | — | P1.2 (/commit slash)와 동일 설계에서 함께 처리 |
+| P0.2 CommitTool LLM 주입 | ✅ **완료** | `oxi-cli/src/bootstrap.rs:419-427` |
+| P1.3 `oxi commit` CLI | ✅ **완료** | `oxi-cli/src/cli/commands/misc.rs` — CommitTool::unconfigured() 기반, LLM fallback은 bootstrap에서 모델 설정 시 |
+| P3.1 Rename.apply | ✅ **완료** | `oxi-cli/src/lsp/provider.rs` — apply_workspace_edit, atomic_write, UTF-16→byte 변환, 11 tests |
+| P3.3 willRenameFiles | ✅ **완료** | FileRename.apply로 통합 (standalone variant는 FileRename preview와 중복) |
+| P4 Mnemopi MCP | ⏳ MCP 서버 파일은 있음 (`mcp.rs` 843 LOC) — E2E 검증은 별도 PR 필요 |
+| P4 Snapcompact E2E | ⏳ 완료 조건: `/compact snapcompact` 라우팅 + SnapcompactCompactor 연결 + 실제 compaction 실행 |
 
 ---
 
 ## P0 — 크리티컬 (사용자 가시성/안정성)
 
-### P0.1 TodoPanel 위젯을 tape_render에 연결
+## ✅ 완료 (아래 항목들은 커밋됨)
 
-| 항목 | 값 |
-|---|---|
-| **문제** | `oxi-tui/src/widgets/todo_panel.rs`에 `TodoPanel` StatefulWidget(ratatui render impl)이 완전히 구현되어 있지만, `tape_render.rs`는 compact `"X todos"` badge만 표시함 |
-| **위치** | `oxi-cli/src/tui/tape_render.rs:47-49` (현재 badge) |
-| **해결** | tape_render.rs에서 `TodoPanel` 위젯의 `render()`를 호출하도록 sticky 영역에 통합 |
-| **수용 기준** | 화면 상단에 todo 패널이 접힌/펼친 상태로 표시됨. `/todo` 명령으로 phase/items 조작 가능 |
+| 항목 | 상태 | 확인 |
+|---|---|---|
+| P0.1 TodoPanel tape render | ✅ 완료 | `tape_render.rs` — ASCII markers, collapsed/expanded |
+| P0.2 CommitTool LLM 주입 | ✅ 완료 | `bootstrap.rs:419-427` |
+| P1.1 /compact snapcompact | ✅ 완료 | `tools_commands.rs` — strategy subcommand + save/restore |
+| P1.2 /commit slash | ✅ 완료 | `commit.rs` — 등록 완료 |
+| P1.3 oxi commit CLI | ✅ 완료 | `misc.rs` — CommitTool::unconfigured() 기반 |
+| P1.4 Subagent-todo matching | ✅ 완료 | `subagent.rs` — spawn 시 phase 생성, 완료 시 done |
+| P1.5 session_reflect hook | ✅ 완료 | `agent_session_runtime.rs` — teardown 시 fire-and-forget |
+| P2.1 Settings flags 5개 | ✅ 완료 | `settings.rs` — 모두 추가 + serde(default) |
+| P3.1 Rename.apply | ✅ 완료 | `provider.rs` — UTF-16 safe, atomic write, 11 tests |
+| P3.2 /memory stubs | ✅ 완료 | `memory.rs` — 5개 stub에 backend 정보 표시 |
+| P3.3 willRenameFiles | ✅ 완료 | FileRename.apply로 대체 (preview 시 정보 표시) |
 
 ---
 
-## P1 — 기능 완성 (integration gap)
+## ⏳ 검증 필요 (E2E 테스트)
 
-### P1.1 `/compact snapcompact` 서브커맨드
+| 항목 | 상태 | 다음 스텝 |
+|---|---|---|
+| P4.1 Mnemopi MCP 서버 | `oxi-mnemopi/src/mcp.rs` (843 LOC) — 파일 존재, 기능 검증 안 됨 | 별도 PR: MCP 서버 기동 테스트 + LSP/MCP 연동 |
+| P4.2 Snapcompact E2E | `/compact snapcompact` 라우팅 완료, SnapcompactCompactor 연결 확인 | `session.compact()` 후 PNG 출력 검증 |
 
-| 항목 | 값 |
-|---|---|
-| **문제** | `CompactCommand`가 `/compact` slash 명령을 등록했지만, 설계 문서의 `soft\|snapcompact\|remote` subcommand 라우팅이 없음. snapcompact 모드를 TUI에서 선택할 방법 없음 |
-| **위치** | `oxi-cli/src/tui/slash/builtin/tools_commands.rs` — `CompactCommand.execute()` |
-| **해결** | `/compact snapcompact` argument를 파싱해 `CompactionStrategy::Snapcompact`로 session.compact() 호출 |
-| **참조** | 설계: `09-compaction-modes.md` §4 |
-| **수용 기준** | `/compact snapcompact` 입력 시 snapcompact PNG compaction 실행 |
+---
 
-### P1.2 `/commit` 슬래시 명령
+## P4 — 실험적/후순위
+
+위 P4 항목 참조.
+
+---
 
 | 항목 | 값 |
 |---|---|
