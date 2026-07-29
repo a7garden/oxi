@@ -18,14 +18,14 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use oxi_tui::render::DiffBackend;
 
 /// Main-screen terminal owner. Alternate screen is entered only by `draw_overlay`.
-pub(crate) struct TerminalHost {
-    tape: TapeEngine<io::Stdout>,
+pub(crate) struct TerminalHost<W: Write = io::Stdout> {
+    tape: TapeEngine<W>,
     tty_ok: bool,
     overlay_active: bool,
     restored: bool,
 }
 
-impl TerminalHost {
+impl TerminalHost<io::Stdout> {
     pub(crate) fn enter() -> Result<Self> {
         install_panic_hook();
         let tty_ok = enable_raw_mode().is_ok();
@@ -50,6 +50,23 @@ impl TerminalHost {
             overlay_active: false,
             restored: false,
         })
+    }
+}
+
+impl<W: Write> TerminalHost<W> {
+    #[cfg(test)]
+    fn with_writer(writer: W) -> Self {
+        Self {
+            tape: TapeEngine::new(writer),
+            tty_ok: false,
+            overlay_active: false,
+            restored: false,
+        }
+    }
+
+    #[cfg(test)]
+    fn output(&self) -> &W {
+        self.tape.writer()
     }
 
     pub(crate) fn paint_tape(
@@ -79,9 +96,14 @@ impl TerminalHost {
         }
         self.tape.flush()?;
         let backend = CrosstermBackend::new(self.tape.writer_mut());
-        let diff = DiffBackend::new(backend);
-        let mut terminal = Terminal::new(diff)?;
+        let mut terminal = Terminal::with_options(
+            DiffBackend::new(backend),
+            ratatui::TerminalOptions {
+                viewport: ratatui::Viewport::Fullscreen,
+            },
+        )?;
         terminal.draw(draw)?;
+        terminal.backend_mut().flush()?;
         Ok(())
     }
 
@@ -116,7 +138,7 @@ impl TerminalHost {
     }
 }
 
-impl Drop for TerminalHost {
+impl<W: Write> Drop for TerminalHost<W> {
     fn drop(&mut self) {
         let _ = self.restore();
     }
@@ -145,9 +167,33 @@ fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn ordinary_mode_sequence_has_no_alt_screen() {
         let ordinary = b"\x1b[?1000h\x1b[?1006h";
         assert!(!ordinary.windows(8).any(|w| w == b"\x1b[?1049"));
+    }
+
+    #[test]
+    fn overlay_enters_alt_once_and_leaves_on_next_tape() {
+        let mut host = TerminalHost::with_writer(Vec::new());
+        host.draw_overlay(|frame| {
+            frame.render_widget(ratatui::widgets::Clear, frame.area());
+        })
+        .unwrap();
+        host.draw_overlay(|frame| {
+            frame.render_widget(ratatui::widgets::Clear, frame.area());
+        })
+        .unwrap();
+        let output = String::from_utf8_lossy(host.output());
+        assert_eq!(output.matches("\x1b[?1049h").count(), 1);
+        assert_eq!(output.matches("\x1b[?1049l").count(), 0);
+
+        host.paint_tape(&["row".to_string()], LiveRegion::None, 80, 24)
+            .unwrap();
+        let output = String::from_utf8_lossy(host.output());
+        assert_eq!(output.matches("\x1b[?1049l").count(), 1);
+        assert!(output.contains("row"));
     }
 }
