@@ -546,12 +546,15 @@ async fn dispatch_action(
         | KAction::CompletionNext
         | KAction::CompletionPrev
         | KAction::CompletionDismiss
-        | KAction::CompletionAccept
-        | KAction::ToggleAgentHub => {
-            // No-op for now; the overlay-opening body lands in Task 7
-            // once `AgentHubOverlay` exists. Kept here so the exhaustive
-            // `match action { … }` compiles after the `Action::ToggleAgentHub`
-            // variant was added in M5.
+        | KAction::CompletionAccept => {
+            // No-op for keys still pending their primary bindings.
+            None
+        }
+        KAction::ToggleAgentHub => {
+            use crate::tui::overlay::agent_hub::AgentHubOverlay;
+            let session = session.clone_handle();
+            state.overlay = None;
+            state.overlay_state = Some(Box::new(AgentHubOverlay::new(session)));
             None
         }
     }

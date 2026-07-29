@@ -27,6 +27,8 @@ pub mod settings;
 pub mod text_viewer;
 pub mod tree_navigator;
 #[allow(unused_imports)]
+pub use agent_hub::AgentHubOverlay;
+#[allow(unused_imports)]
 pub use extensions::extensions_overlay;
 #[allow(unused_imports)]
 pub use factories::{logout_select, model_select, resume_select, routing_status};
