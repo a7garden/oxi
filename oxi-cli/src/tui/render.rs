@@ -175,23 +175,6 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 
     state.input.set_placeholder(None);
     f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
-    // Cursor bridge: record the textarea's screen cursor (relative to the
-    // rendered content area) translated to absolute terminal coordinates.
-    // The v2 pipeline reads `last_input_cursor` and calls `ctx.set_cursor` so
-    // CursorState positions the terminal cursor — the legacy Input widget
-    // paints into the buffer but never sets the cursor slot. The Input widget
-    // insets the textarea by one column of left padding (widgets/input.rs),
-    // so the content area origin is `input_row` + (1, 0).
-    let (row, col) = state.input.screen_cursor();
-    state.last_input_cursor = Some(ratatui::layout::Position {
-        x: input_row
-            .x
-            .saturating_add(1)
-            .saturating_add(u16::try_from(col).unwrap_or(u16::MAX)),
-        y: input_row
-            .y
-            .saturating_add(u16::try_from(row).unwrap_or(u16::MAX)),
-    });
 }
 
 /// Compact queue preview: dim numbered lines with message text.

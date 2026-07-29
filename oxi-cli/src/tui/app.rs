@@ -1,9 +1,8 @@
 //! Main TUI event loop and application state.
 
-use super::handlers;
-use super::render;
-use super::slash;
-use super::welcome;
+use super::{
+    handlers, render, slash, tape_render::TapeRenderState, terminal_host::TerminalHost, welcome,
+};
 use crate::app::agent_session::{AgentSession, SessionEvent};
 use crate::app::agent_session_runtime::{
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
@@ -12,6 +11,7 @@ use crate::app::agent_session_runtime::{
 use crate::context::auto_compaction::CompactionReason;
 use crate::store::session::SessionManager;
 use anyhow::Result;
+use crossterm::event;
 use oxi_agent::AgentEvent;
 use oxi_agent::tools::{
     TodoStateProvider,
@@ -24,130 +24,9 @@ use oxi_tui::widgets::{
     footer::FooterState,
     input::InputState,
 };
-use std::io::{self, Write};
-use std::panic;
+use std::io::Write;
 use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 use tokio::sync::mpsc;
-
-use crossterm::{
-    cursor::Hide,
-    event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-    },
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use oxi_tui::render::{CursorState, DiffBackend};
-use ratatui::{Terminal, backend::CrosstermBackend};
-
-// ── Terminal Lifecycle ───────────────────────────────────────────────────
-
-/// Terminal wrapper following ratatui best practices.
-/// Encapsulates setup/teardown, panic hook, and mouse tracking.
-struct Tui {
-    terminal: Terminal<DiffBackend<io::Stdout>>,
-    tty_ok: bool,
-}
-
-impl Tui {
-    fn enter() -> Result<Self> {
-        // Set panic hook first — ensures terminal is restored on panic
-        Self::set_panic_hook();
-
-        let tty_ok = enable_raw_mode().is_ok();
-        let mut stdout = io::stdout();
-
-        if tty_ok {
-            // Kitty keyboard protocol: full flag set gated by OXI_KITTY_KEYBOARD=1.
-            // Default is REPORT_EVENT_TYPES only (matches pre-Kitty behavior).
-            // When the env var is set, also enable DISAMBIGUATE_ESCAPE_CODES
-            // (so e.g. Ctrl+I is distinct from Tab) and REPORT_ALTERNATE_KEYS
-            // (so e.g. Shift+Left is distinct from Left).
-            let flags = if std::env::var("OXI_KITTY_KEYBOARD").as_deref() == Ok("1") {
-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-            } else {
-                KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-            };
-            let _ = execute!(
-                stdout,
-                EnterAlternateScreen,
-                Hide,
-                EnableBracketedPaste,
-                PushKeyboardEnhancementFlags(flags)
-            );
-            // Enable mouse scroll tracking without drag tracking.
-            // ?1000h = click/release/scroll, ?1006h = SGR extended coords.
-            // Intentionally skip ?1002h so terminal handles drag-to-select natively.
-            let _ = stdout.write_all(b"\x1b[?1000h\x1b[?1006h");
-            let _ = stdout.flush();
-        }
-
-        let backend = DiffBackend::new(CrosstermBackend::new(stdout));
-        let mut terminal = Terminal::new(backend)?;
-        if tty_ok {
-            let _ = terminal.clear();
-        }
-
-        Ok(Self { terminal, tty_ok })
-    }
-
-    fn exit(&mut self) -> Result<()> {
-        if self.tty_ok {
-            // Each cleanup step is independent — errors in earlier steps
-            // must NOT prevent later steps from running. Without this,
-            // disable_raw_mode() could be skipped if an execute!() fails,
-            // leaving the terminal in raw mode (no echo, no line editing).
-            let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
-            let _ = io::stdout().flush();
-            let _ = execute!(
-                self.terminal.backend_mut(),
-                PopKeyboardEnhancementFlags,
-                DisableBracketedPaste
-            );
-            let _ = self.terminal.show_cursor();
-            let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
-            // disable_raw_mode is the most critical — always attempt it.
-            disable_raw_mode()?;
-            // Mark as cleaned up so Drop doesn't re-enter this path.
-            self.tty_ok = false;
-        }
-        Ok(())
-    }
-
-    fn set_panic_hook() {
-        let original_hook = panic::take_hook();
-        panic::set_hook(Box::new(move |panic_info| {
-            // Restore terminal state before printing panic info
-            let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
-            let _ = io::stdout().flush();
-            let _ = execute!(io::stdout(), LeaveAlternateScreen);
-            let _ = disable_raw_mode();
-            original_hook(panic_info);
-        }));
-    }
-}
-
-impl std::ops::Deref for Tui {
-    type Target = Terminal<DiffBackend<io::Stdout>>;
-    fn deref(&self) -> &Self::Target {
-        &self.terminal
-    }
-}
-
-impl std::ops::DerefMut for Tui {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.terminal
-    }
-}
-
-impl Drop for Tui {
-    fn drop(&mut self) {
-        let _ = self.exit();
-    }
-}
 
 // ── UI Events (agent → TUI) ──────────────────────────────────────────────
 
@@ -383,10 +262,6 @@ pub(crate) struct AppState {
     /// Todo panel state — synced from the agent's `todo` tool via
     /// the `TodoStateProvider`. Rendered as a sticky panel above the input.
     pub todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState,
-    /// Cursor dedup state — tracks last cursor position/visibility to avoid
-    /// redundant escape sequences. `reconcile()` is called after
-    /// `terminal.draw()` each frame.
-    pub cursor_state: CursorState,
     /// Emacs-style kill ring. Populated by KillToLineEnd/Start, consumed by
     /// Yank/YankPop. Gated by `OXI_KILL_RING=1`.
     pub(crate) kill_ring: oxi_tui::input::KillRing,
@@ -394,9 +269,6 @@ pub(crate) struct AppState {
     /// previous yank before inserting the next entry. Only meaningful when
     /// the kill ring feature is enabled.
     pub(crate) yank_len: usize,
-    /// `render_input_area` each frame. `None` on frames where the input is
-    /// not painted (e.g. overlay active).
-    pub last_input_cursor: Option<ratatui::layout::Position>,
 }
 
 /// A toast notification to display temporarily.
@@ -541,10 +413,8 @@ impl AppState {
             catalog: None,
             todo_provider: None,
             todo_panel: oxi_tui::widgets::todo_panel::TodoPanelState::new(),
-            cursor_state: CursorState::new(),
             kill_ring: oxi_tui::input::KillRing::new(16),
             yank_len: 0,
-            last_input_cursor: None,
         };
 
         // Load user keybindings from settings
@@ -979,7 +849,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     }
 
     // ── Enter terminal ONCE ──
-    let mut tui = Tui::enter()?;
+    let mut tui = TerminalHost::enter()?;
     // ThemeRegistry layers custom themes (loaded from
     // `~/.oxi/themes/*.toml`,`*.json` and `<project>/.oxi/themes/*`)
     // over the six built-ins. Custom themes win when their lowercased
@@ -1370,6 +1240,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
         // ── Create state ──
         let mut state = AppState::new();
+        let mut tape_render = TapeRenderState::new();
         state.session_file_path = session_target.clone();
         // Share the local issue store with the TUI so `/issue` can open the
         // overlay. The store is opened read-write by `App::from_oxi`; cloning
@@ -1378,6 +1249,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Inject the catalog port so TUI overlays/slash commands can query
         // models without going through legacy global state.
         state.catalog = Some(std::sync::Arc::clone(app.oxi().catalog()));
+        tui.clear_scrollback();
         // Inject the todo state provider so the sticky panel syncs from
         // the same `Arc<RwLock<Vec<TodoPhase>>>` the agent's `todo` tool
         // mutates.
@@ -1577,19 +1449,15 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 );
             }
 
-            // Legacy direct render path. DiffBackend provides CSI 2026 sync,
-            // DECCARA background fills, and row-level diffing. CursorState
-            // provides cursor dedup (same position → 0 bytes).
-            let want_cursor = {
-                state.last_input_cursor = None;
-                tui.terminal.draw(|frame| {
-                    render::draw(frame, &mut state, &theme);
-                })?;
-                state.last_input_cursor
-            };
-            state
-                .cursor_state
-                .reconcile(want_cursor, &mut tui.terminal)?;
+            let caps = oxi_tui::render::terminal::TerminalCapabilities::detect();
+            if state.overlay.is_some() || state.overlay_state.is_some() {
+                tui.draw_overlay(|frame| render::draw(frame, &mut state, &theme))?;
+            } else {
+                let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+                tape_render.sync(&state, &theme, &caps, width);
+                let (rows, live) = tape_render.frame();
+                tui.paint_tape(rows, live, width, height)?;
+            }
             let draw_dur = draw_start.elapsed();
             if draw_dur > std::time::Duration::from_millis(100) {
                 tracing::warn!(
@@ -1775,10 +1643,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 handlers::handle_session_event(session_event, &ui_tx).await;
             }
 
-            let chat_visible_height = {
-                let size = tui.size()?;
-                size.height.saturating_sub(5)
-            };
+            let chat_visible_height = crossterm::terminal::size()
+                .map(|(_, height)| height.saturating_sub(5))
+                .unwrap_or(19);
             state.ensure_auto_scroll(chat_visible_height);
         }
 
@@ -1853,15 +1720,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         }
     }
 
-    tracing::debug!("[TUI] About to call tui.exit()");
-    if let Err(e) = tui.exit() {
-        tracing::error!("[TUI] tui.exit() failed: {:?}", e);
+    tracing::debug!("[TUI] About to restore terminal");
+    if let Err(e) = tui.restore() {
+        tracing::error!("[TUI] terminal restore failed: {:?}", e);
     }
-    tracing::debug!("[TUI] tui.exit() done, exiting process");
+    tracing::debug!("[TUI] terminal restored, exiting process");
 
-    // Force process exit to ensure background threads (agent worker, forwarder)
-    // don't keep the process alive. The terminal is already restored by
-    // tui.exit() above, and all critical cleanup is done.
+    // Force process exit only after TerminalHost restored every terminal mode.
     std::process::exit(0);
 }
 

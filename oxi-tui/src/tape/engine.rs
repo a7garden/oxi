@@ -118,6 +118,11 @@ impl<W: Write> TapeEngine<W> {
         &self.out
     }
 
+    /// Get a mutable reference to the underlying writer.
+    pub fn writer_mut(&mut self) -> &mut W {
+        &mut self.out
+    }
+
     /// Paint one frame.
     pub fn paint(
         &mut self,

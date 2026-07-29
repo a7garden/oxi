@@ -7,6 +7,8 @@ mod handlers;
 mod overlay;
 mod render;
 pub(crate) mod slash;
+mod tape_render;
+mod terminal_host;
 mod welcome;
 
 pub use app::run_tui_interactive;
