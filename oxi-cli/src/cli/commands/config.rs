@@ -241,7 +241,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
         "glyph" | "glyph_set" => {
             settings.glyph_set = value
                 .parse()
-                .map_err(|e: oxi_tui::symbols::UnknownGlyphSet| anyhow::anyhow!("{e}"))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
         }
         _ => {
             anyhow::bail!(

@@ -394,7 +394,7 @@ impl RpcActor {
                 Some(serde_json::json!({ "messages": self.session.messages() })),
             )),
             RpcCommand::GetCommands { id } => {
-                let registry = crate::tui::slash::registry::SlashRegistry::builtins();
+                let registry = crate::tui_vt::slash::registry::SlashRegistry;
                 let commands: Vec<_> = registry
                     .builtin_commands()
                     .into_iter()

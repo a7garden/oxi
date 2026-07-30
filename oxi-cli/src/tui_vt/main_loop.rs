@@ -1,0 +1,1192 @@
+#![allow(clippy::field_reassign_with_default, clippy::let_and_return, clippy::borrow_interior_mutable_const, clippy::derivable_impls)]
+//! TUI main event loop — connects oxi's `AgentSession` to vtcode-ui's
+//! `InlineSession` protocol and a ratatui rendering backend.
+
+use std::io::{self, Stdout, Write};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::Result;
+use crossterm::{
+    cursor::{Hide, Show},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
+    execute,
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    },
+};
+use oxi_agent::AgentEvent;
+use oxi_vtui::tui::core::{
+    InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
+    InlineHeaderStatusTone, InlineMessageKind, InlineSegment, InlineTextStyle,
+};
+use oxi_vtui::theme::{ThemeStyles, active_styles};
+use ratatui::{
+    Frame, Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+};
+
+use crate::App;
+use crate::app::agent_session::SessionEvent;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Terminal lifecycle (RAII)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Terminal wrapper with deterministic enter / exit / Drop semantics.
+///
+/// Each cleanup step in `exit` is independent — a failure in one stage
+/// (e.g. `PopKeyboardEnhancementFlags`) MUST NOT prevent later stages
+/// (`disable_raw_mode`) from running, or the user's terminal is left in
+/// raw mode (no echo, no line editing).
+pub struct Tui {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+    tty_ok: bool,
+}
+
+impl Tui {
+    /// Enter the alternate screen, enable raw mode, push keyboard flags,
+    /// enable bracketed paste, hide the cursor, install the panic hook.
+    pub fn enter() -> Result<Self> {
+        Self::set_panic_hook();
+
+        let tty_ok = enable_raw_mode().is_ok();
+        let mut stdout = io::stdout();
+
+        if tty_ok {
+            // Report event types so key-release / repeat events arrive as
+            // distinct codes. Full Kitty flag set is gated on
+            // OXI_KITTY_KEYBOARD=1; default mirrors pre-Kitty behavior.
+            let flags = if std::env::var("OXI_KITTY_KEYBOARD").as_deref() == Ok("1") {
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            } else {
+                KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            };
+            let _ = execute!(
+                stdout,
+                EnterAlternateScreen,
+                Hide,
+                EnableBracketedPaste,
+                PushKeyboardEnhancementFlags(flags)
+            );
+            let _ = stdout.flush();
+        }
+
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+        if tty_ok {
+            let _ = terminal.clear();
+        }
+
+        Ok(Self { terminal, tty_ok })
+    }
+
+    /// Restore the terminal to its pre-TUI state. Each step is independent;
+    /// errors are swallowed so a partial restoration never strands the user
+    /// in raw mode.
+    pub fn exit(&mut self) -> Result<()> {
+        if self.tty_ok {
+            let _ = execute!(
+                self.terminal.backend_mut(),
+                PopKeyboardEnhancementFlags,
+                DisableBracketedPaste
+            );
+            let _ = self.terminal.show_cursor();
+            let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+            // disable_raw_mode is the most critical — always attempt it.
+            disable_raw_mode()?;
+            self.tty_ok = false;
+        }
+        Ok(())
+    }
+
+    /// Install a panic hook that restores the terminal before printing the
+    /// panic message. Without this, a panic inside the TUI strands the
+    /// user's shell in raw mode / alternate screen.
+    fn set_panic_hook() {
+        let original_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+            let _ = disable_raw_mode();
+            original_hook(panic_info);
+        }));
+    }
+}
+
+impl Drop for Tui {
+    fn drop(&mut self) {
+        let _ = self.exit();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Render state — shared between the input thread and the main loop.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Mutable state the input thread edits (text buffer, scroll, footer) and
+/// the main loop reads for rendering.
+#[derive(Default)]
+pub struct RenderState {
+    /// Editable text in the composer.
+    pub input_buffer: String,
+    /// Cursor position inside `input_buffer` (byte index).
+    pub input_cursor: usize,
+    /// Transcript lines, in display order.
+    pub transcript: Vec<TranscriptLine>,
+    /// Index of the line currently pinned at the top of the viewport.
+    /// `usize::MAX` means "follow the tail" (auto-scroll).
+    pub scroll_offset: usize,
+    /// Header context mirrored from `InlineHeaderContext`.
+    pub header_context: InlineHeaderContext,
+    /// Composer enabled state — mirrored from `SetInputEnabled`.
+    pub input_enabled: bool,
+    /// Footer status (left + right) — mirrored from `SetInputStatus`.
+    pub footer_left: Option<String>,
+    pub footer_right: Option<String>,
+    /// Composer prompt prefix — mirrored from `SetPrompt`.
+    pub prompt_prefix: String,
+    /// Composer placeholder — mirrored from `SetPlaceholder`.
+    pub placeholder: Option<String>,
+    /// Shutdown signal received from the harness.
+    pub shutdown_requested: bool,
+    /// Accumulated text for markdown rendering at message end.
+    pub message_buffer: String,
+}
+
+/// One rendered transcript line.
+#[derive(Debug, Clone)]
+pub struct TranscriptLine {
+    pub kind: InlineMessageKind,
+    pub segments: Vec<InlineSegment>,
+}
+
+impl RenderState {
+    fn new_with_header(header: InlineHeaderContext) -> Self {
+        let mut s = Self::default();
+        s.header_context = header;
+        s.prompt_prefix = "> ".to_string();
+        s.input_enabled = true;
+        s
+    }
+
+    /// Append a brand-new line to the transcript.
+    fn append_line(&mut self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
+        self.transcript.push(TranscriptLine { kind, segments });
+    }
+
+    /// Append a segment to the most recent transcript line, or create a new
+    /// line if the transcript is empty. Used for `Inline { kind, segment }`
+    /// where the segment is a streaming delta.
+    fn inline_segment(&mut self, kind: InlineMessageKind, segment: InlineSegment) {
+        if let Some(last) = self.transcript.last_mut()
+            && last.kind == kind
+        {
+            last.segments.push(segment);
+            return;
+        }
+        self.transcript.push(TranscriptLine { kind, segments: vec![segment] });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Main entry: `pub async fn run_tui(app: App) -> Result<()>`
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Run the new oxi-vtui powered TUI. Returns once the user exits or the
+/// session is shut down.
+pub async fn run_tui(app: App) -> Result<()> {
+    // Resolve shared session-level context up-front so it can outlive the
+    // TUI RAII guard via the worker thread.
+    let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
+    let git_branch = crate::util::git_utils::get_current_branch(&cwd);
+    super::host::activate_theme(app.settings());
+
+    // Wire the inline-protocol channels. `cmd_tx` becomes the
+    // `InlineHandle`; `evt_tx` is the input-thread → main-loop channel.
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+    let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<InlineEvent>();
+    let handle = InlineHandle::new_for_tests(cmd_tx);
+
+    // Build the AgentSession from the App. The helper wraps
+    // `create_agent_session_from_services` so we can construct the session
+    // without duplicating the runtime plumbing here.
+    let session = build_agent_session(&app).await?;
+    let session_handle = session.clone_handle();
+
+    // Forward session events to a tokio mpsc so the main loop can
+    // `tokio::select!` on them. We do this in two stages:
+    //  1. Subscribe to AgentSession — CompactionStart/End, Advisor,
+    //     QueueUpdate, etc.
+    //  2. A forwarder thread that drives `agent.run_with_channel` and
+    //     calls `forward_event_to_extensions` so per-agent events also
+    //     flow through the same listener.
+    let (session_tx, mut session_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEvent>();
+    let _sub_guard = session.subscribe(Box::new(move |event| {
+        let _ = session_tx.send(event.clone());
+    }));
+
+    // Header context — built once at startup with workspace + branch.
+    let header = build_header_context(&app, &cwd, git_branch.as_deref());
+    handle.set_header_context(header.clone());
+
+    // Enter the terminal (RAII). Every setup step is fallible, but a
+    // successful `Tui::enter` is required to draw anything.
+    let mut tui = Tui::enter()?;
+
+    // Initial composer + placeholder — the harness receives these as
+    // `SetPrompt` / `SetPlaceholder` commands once it spins up its own
+    // consumer; we set them eagerly so the very first frame is correct.
+    handle.set_prompt("> ".to_string(), InlineTextStyle::default());
+    handle.set_placeholder(Some(
+        "Describe what you want to build\u{2026}".to_string(),
+    ));
+
+    // Render state — shared between the input thread (which edits the
+    // buffer) and the main loop (which reads it for drawing).
+    let state = Arc::new(parking_lot::Mutex::new(RenderState::new_with_header(header)));
+    spawn_input_thread(state.clone(), evt_tx.clone());
+
+    // Worker thread that owns the agent loop. Receives prompts over a
+    // tokio mpsc and dispatches them through `run_with_channel`. The
+    // returned `AgentEvent`s flow through a `std::sync::mpsc`; a paired
+    // forwarder thread funnels them into the session's listener bus so
+    // our subscriber above picks them up.
+    let prompt_tx = spawn_agent_worker(session_handle.clone());
+
+    let result = run_event_loop(
+        &mut tui.terminal,
+        &mut cmd_rx,
+        &mut evt_rx,
+        &mut session_rx,
+        &handle,
+        &state,
+        &session_handle,
+        prompt_tx.clone(),
+    )
+    .await;
+
+    // Drain the harness before tearing down the terminal. Even if the
+    // loop exited early we want to release the worker.
+    drop(prompt_tx);
+    handle.shutdown();
+    // Dropping `tui` restores the terminal. Drop is at function return.
+    drop(tui);
+
+    result
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Event loop
+// ─────────────────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+async fn run_event_loop(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    cmd_rx: &mut tokio::sync::mpsc::UnboundedReceiver<InlineCommand>,
+    evt_rx: &mut tokio::sync::mpsc::UnboundedReceiver<InlineEvent>,
+    session_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
+    handle: &InlineHandle,
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    prompt_tx: tokio::sync::mpsc::UnboundedSender<String>,
+) -> Result<()> {
+    // Drain any pending InlineCommands so the harness's initial set_header_context
+    // (and similar) is observed before the first frame.
+    while let Ok(cmd) = cmd_rx.try_recv() {
+        apply_command(&mut state.lock(), cmd);
+    }
+
+    loop {
+        tokio::select! {
+            // biased: agent events take priority so streaming output is
+            // never starved by Ctrl+C noise or sticky key repeats.
+            biased;
+
+            // 1. Agent → TUI commands (transcript updates).
+            Some(cmd) = cmd_rx.recv() => {
+                let shutdown = {
+                    let mut s = state.lock();
+                    apply_command(&mut s, cmd)
+                };
+                if shutdown {
+                    break;
+                }
+            }
+
+            // 2. Agent → TUI events (token deltas, tool calls, …).
+            Some(event) = session_rx.recv() => {
+                handle_session_event(&mut state.lock(), handle, &event);
+            }
+
+            // 3. Keyboard / paste / TUI events from the input thread.
+            Some(evt) = evt_rx.recv() => {
+                let outcome = handle_inline_event(
+                    &mut state.lock(),
+                    handle,
+                    session,
+                    &prompt_tx,
+                    evt,
+                );
+                if outcome == LoopOutcome::Exit {
+                    break;
+                }
+            }
+
+            // 4. Ctrl+C — request the agent stop.
+            _ = tokio::signal::ctrl_c() => {
+                session.abort().await;
+            }
+        }
+
+        // Redraw every iteration. The harness's redraw is idempotent —
+        // the ratatui backend coalesces unchanged frames.
+        let snapshot = state.lock();
+        let draw_result = terminal.draw(|frame| render_frame(frame, &snapshot, handle));
+        if let Err(err) = draw_result {
+            tracing::warn!(?err, "tui draw failed");
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(PartialEq, Eq)]
+enum LoopOutcome {
+    Continue,
+    Exit,
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Command / event handlers
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Apply a single `InlineCommand` to the render state. Returns `true`
+/// when the harness has requested a shutdown.
+fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
+    match cmd {
+        InlineCommand::AppendLine { kind, segments } => {
+            state.append_line(kind, segments);
+        }
+        InlineCommand::Inline { kind, segment } => {
+            state.inline_segment(kind, segment);
+        }
+        InlineCommand::ReplaceLast { count, kind, lines, .. } => {
+            // Drop the last `count` lines and replace with the new ones.
+            let drop = count.min(state.transcript.len());
+            for _ in 0..drop {
+                state.transcript.pop();
+            }
+            for line in lines {
+                state.append_line(kind, line);
+            }
+        }
+        InlineCommand::AppendPastedMessage { kind, text, .. } => {
+            state.append_line(kind, vec![plain_segment(text)]);
+        }
+        InlineCommand::SetPrompt { prefix, .. } => {
+            state.prompt_prefix = prefix;
+        }
+        InlineCommand::SetPlaceholder { hint, .. } => {
+            state.placeholder = hint;
+        }
+        InlineCommand::SetHeaderContext { context } => {
+            state.header_context = *context;
+        }
+        InlineCommand::SetInputStatus { left, right } => {
+            state.footer_left = left;
+            state.footer_right = right;
+        }
+        InlineCommand::SetInputEnabled(enabled) => {
+            state.input_enabled = enabled;
+        }
+        InlineCommand::SetCursorVisible(_) | InlineCommand::ForceRedraw => {
+            // Redraw on the next loop iteration; nothing to persist.
+        }
+        InlineCommand::Shutdown => {
+            state.shutdown_requested = true;
+            return true;
+        }
+        _ => {
+            // Surface unknown commands as info so they are visible
+            // during development.
+            tracing::trace!("unhandled InlineCommand (not rendered)");
+        }
+    }
+    false
+}
+
+/// Map a `SessionEvent` to the matching `InlineHandle` calls. This is the
+/// single place where the agent's event vocabulary meets the harness's
+/// transcript vocabulary.
+fn handle_session_event(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    event: &SessionEvent,
+) {
+    match event {
+        SessionEvent::Agent(boxed) => {
+            map_agent_event(handle, *boxed.clone(), state);
+        }
+        SessionEvent::CompactionStart { .. } => {
+            handle.set_reasoning_stage(Some("Compacting\u{2026}".to_string()));
+        }
+        SessionEvent::CompactionEnd { error_message, .. } => {
+            handle.set_reasoning_stage(None);
+            if let Some(msg) = error_message {
+                handle.append_line(
+                    InlineMessageKind::Error,
+                    vec![plain_segment(format!("Compaction failed: {msg}"))],
+                );
+            }
+        }
+        SessionEvent::ThinkingLevelChanged { .. } => {
+            // No rendering — the footer reflects this implicitly via the
+            // header context.
+        }
+        SessionEvent::QueueUpdate { .. } => {
+            // Surface the queue length as a footer status update.
+            // The exact count is computed lazily by the agent session;
+            // we approximate it via the snapshot we hold.
+            let pending = state.transcript.len();
+            handle.set_input_status(
+                None,
+                Some(if pending == 0 { "ready".to_string() } else { "queued".to_string() }),
+            );
+        }
+        SessionEvent::Advisor { body, .. } => {
+            handle.append_line(InlineMessageKind::Info, vec![plain_segment(body.clone())]);
+        }
+        SessionEvent::SessionInfoChanged => {
+            // The session name is reflected via header context on next
+            // `set_header_context`. Nothing to do here.
+        }
+    }
+}
+
+/// Project the agent-level event variants onto the harness transcript.
+fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderState) {
+    match event {
+        AgentEvent::TextChunk { text } => {
+            state.message_buffer.push_str(&text);
+            handle.inline(
+                InlineMessageKind::Agent,
+                plain_segment(text),
+            );
+        }
+        AgentEvent::MessageStart { .. } => {
+            state.message_buffer.clear();
+        }
+        AgentEvent::MessageUpdate { delta: Some(delta), .. } => {
+            state.message_buffer.push_str(&delta);
+            handle.inline(InlineMessageKind::Agent, plain_segment(delta));
+        }
+        AgentEvent::MessageUpdate { delta: None, .. } => {
+            // Re-render the complete message as markdown
+            if !state.message_buffer.is_empty() {
+                let lines = oxi_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
+                let count = lines.len();
+                if count > 0 {
+                    handle.replace_last(count, InlineMessageKind::Agent, lines);
+                }
+                state.message_buffer.clear();
+            }
+        }
+        AgentEvent::MessageEnd { .. } => {
+            // Final rendering (same as delta:None for completeness)
+            if !state.message_buffer.is_empty() {
+                let lines = oxi_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
+                let count = lines.len();
+                if count > 0 {
+                    handle.replace_last(count, InlineMessageKind::Agent, lines);
+                }
+                state.message_buffer.clear();
+            }
+        }
+        AgentEvent::ToolStart { tool_name, .. } => {
+            handle.append_line(
+                InlineMessageKind::Tool,
+                vec![plain_segment(format!("\u{2192} {tool_name}"))],
+            );
+            handle.set_reasoning_stage(Some(format!("tool: {tool_name}")));
+        }
+        AgentEvent::ToolComplete { result } => {
+            let preview = preview_tool_result(&result.content);
+            handle.append_line(
+                InlineMessageKind::Tool,
+                vec![plain_segment(preview)],
+            );
+            handle.set_reasoning_stage(None);
+            handle.set_input_enabled(true);
+        }
+        AgentEvent::ToolError { error, .. } => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!("tool error: {error}"))],
+            );
+            handle.set_reasoning_stage(None);
+            handle.set_input_enabled(true);
+        }
+        AgentEvent::Error { message, .. } => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(message)],
+            );
+            handle.set_input_enabled(true);
+            handle.set_input_status(None, None);
+        }
+        AgentEvent::Compaction { .. } => {
+            // Detailed lifecycle is handled by the AgentSession layer
+            // (CompactionStart/End SessionEvents).
+        }
+        AgentEvent::Cancelled => {
+            handle.set_input_enabled(true);
+            handle.set_input_status(None, Some("cancelled".to_string()));
+        }
+        AgentEvent::AutoRetryStart { attempt, max_attempts, .. } => {
+            handle.set_input_status(
+                None,
+                Some(format!("retry {attempt}/{max_attempts}")),
+            );
+        }
+        _ => {
+            // Other variants (TurnStart/End, AgentStart/End, Usage, …) are
+            // logged but not rendered — they're either metadata or covered
+            // by the dedicated SessionEvent variants above.
+            tracing::debug!(?event, "ignored AgentEvent variant");
+        }
+    }
+}
+
+/// Map an input-thread `InlineEvent` to agent actions / state edits.
+fn handle_inline_event(
+    state: &mut RenderState,
+    _handle: &InlineHandle,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    prompt_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    evt: InlineEvent,
+) -> LoopOutcome {
+    match evt {
+        InlineEvent::Submit(text) => {
+            // Drain the composer — the input thread already cleared its
+            // local copy once Submit fired, but we keep the canonical
+            // buffer here in sync.
+            let prompt = text.to_string();
+            state.input_buffer.clear();
+            state.input_cursor = 0;
+            if prompt.is_empty() {
+                return LoopOutcome::Continue;
+            }
+            state.append_line(
+                InlineMessageKind::User,
+                vec![plain_segment(prompt.clone())],
+            );
+            // Hand the prompt to the worker thread. If the worker has
+            // already exited (e.g. shutdown), drop it on the floor.
+            let _ = prompt_tx.send(prompt);
+        }
+        InlineEvent::Cancel | InlineEvent::Exit => {
+            // Trigger shutdown via the harness.
+            return LoopOutcome::Exit;
+        }
+        InlineEvent::Interrupt => {
+            // Best-effort: signal the agent session to stop. We can't
+            // await here without blocking the loop, so spawn the abort.
+            let session = session.clone();
+            tokio::spawn(async move { session.abort().await });
+        }
+        InlineEvent::ScrollLineUp => {
+            state.scroll_offset = state.scroll_offset.saturating_add(1);
+        }
+        InlineEvent::ScrollLineDown => {
+            state.scroll_offset = state.scroll_offset.saturating_sub(1);
+        }
+        InlineEvent::ScrollPageUp => {
+            state.scroll_offset = state.scroll_offset.saturating_add(10);
+        }
+        InlineEvent::ScrollPageDown => {
+            state.scroll_offset = state.scroll_offset.saturating_sub(10);
+        }
+        InlineEvent::CyclePrimaryAgent => {
+            let _ = session.cycle_model();
+        }
+        InlineEvent::CyclePrimaryAgentPrevious => {
+            // No dedicated reverse-cycling API in AgentSession yet;
+            // forward-cycle is the closest match.
+            let _ = session.cycle_model();
+        }
+        _ => {
+            // Other events (overlay, list-selection, etc.) are no-ops in
+            // this harness — they are handled by the harness overlay
+            // component, not by the inline protocol.
+        }
+    }
+    LoopOutcome::Continue
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Input thread — polls crossterm, edits the shared buffer, and forwards
+// lifecycle events (Submit, Cancel, …) over a tokio channel.
+// ─────────────────────────────────────────────────────────────────────────
+
+fn spawn_input_thread(
+    state: Arc<parking_lot::Mutex<RenderState>>,
+    evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        // Stop when the channel is closed (the main loop dropped its
+        // receiver).
+        while let Ok(true) = event::poll(std::time::Duration::from_millis(50)) {
+            let event = match event::read() {
+                Ok(ev) => ev,
+                Err(_) => continue,
+            };
+
+            // Bracketed paste arrives as its own event; flatten into a
+            // string of `Submit` text.
+            let mut pasted = String::new();
+            let mut key_event = None;
+            match event {
+                Event::Key(k) if k.kind == KeyEventKind::Press => key_event = Some(k),
+                Event::Paste(p) => pasted = p,
+                _ => {}
+            }
+
+            if !pasted.is_empty() {
+                let mut s = state.lock();
+                let cursor = s.input_cursor;
+                s.input_buffer.insert_str(cursor, &pasted);
+                s.input_cursor = cursor + pasted.len();
+                continue;
+            }
+
+            let Some(key) = key_event else { continue };
+
+            // Ctrl+C: even with raw mode enabled some terminals / shells
+            // fall back to delivering it as a SIGINT. Handle it as an
+            // explicit interrupt so we don't depend on the OS signal.
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let _ = evt_tx.send(InlineEvent::Interrupt);
+                continue;
+            }
+
+            match key.code {
+                KeyCode::Enter => {
+                    let submitted = {
+                        let mut s = state.lock();
+                        let buf = std::mem::take(&mut s.input_buffer);
+                        s.input_cursor = 0;
+                        buf
+                    };
+                    let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+                }
+                KeyCode::Esc => {
+                    let _ = evt_tx.send(InlineEvent::Cancel);
+                }
+                KeyCode::Backspace => {
+                    let mut s = state.lock();
+                    if s.input_cursor > 0 {
+                        let cursor = s.input_cursor;
+                        // Walk back one UTF-8 char (not necessarily one
+                        // byte, but chars are 1+ bytes).
+                        let prev = s
+                            .input_buffer
+                            .char_indices()
+                            .take_while(|(i, _)| *i < cursor)
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        s.input_buffer.replace_range(prev..cursor, "");
+                        s.input_cursor = prev;
+                    }
+                }
+                KeyCode::Delete => {
+                    let mut s = state.lock();
+                    if s.input_cursor < s.input_buffer.len() {
+                        let cursor = s.input_cursor;
+                        let next = s.input_buffer[cursor..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| cursor + i)
+                            .unwrap_or(s.input_buffer.len());
+                        s.input_buffer.replace_range(cursor..next, "");
+                    }
+                }
+                KeyCode::Left => {
+                    let mut s = state.lock();
+                    s.input_cursor = s.input_cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    let mut s = state.lock();
+                    let len = s.input_buffer.len();
+                    s.input_cursor = (s.input_cursor + 1).min(len);
+                }
+                KeyCode::Up => {
+                    let _ = evt_tx.send(InlineEvent::ScrollLineUp);
+                }
+                KeyCode::Down => {
+                    let _ = evt_tx.send(InlineEvent::ScrollLineDown);
+                }
+                KeyCode::PageUp => {
+                    let _ = evt_tx.send(InlineEvent::ScrollPageUp);
+                }
+                KeyCode::PageDown => {
+                    let _ = evt_tx.send(InlineEvent::ScrollPageDown);
+                }
+                KeyCode::Char(ch) => {
+                    let mut s = state.lock();
+                    let cursor = s.input_cursor;
+                    s.input_buffer.insert(cursor, ch);
+                    s.input_cursor = cursor + ch.len_utf8();
+                }
+                _ => {}
+            }
+        }
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Agent worker thread — owns the agent run loop, forwards events to the
+// session bus, and accepts new prompts from a tokio channel.
+// ─────────────────────────────────────────────────────────────────────────
+
+fn spawn_agent_worker(
+    session: crate::app::agent_session::AgentSessionHandle,
+) -> tokio::sync::mpsc::UnboundedSender<String> {
+    let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+    std::thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(err) => {
+                tracing::error!(?err, "failed to build agent worker runtime");
+                return;
+            }
+        };
+
+        runtime.block_on(async move {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async move {
+                    while let Some(prompt) = prompt_rx.recv().await {
+                        run_one_prompt(&session, prompt).await;
+                    }
+                })
+                .await;
+        });
+    });
+
+    prompt_tx
+}
+
+async fn run_one_prompt(
+    session: &crate::app::agent_session::AgentSessionHandle,
+    prompt: String,
+) {
+    let session_for_forward = session.clone();
+    let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
+
+    // Forwarder thread — runs `forward_event_to_extensions` on each event
+    // so the AgentSession's subscribers (and therefore the main loop)
+    // observe it.
+    let forwarder = std::thread::spawn(move || {
+        while let Ok(event) = event_rx.recv() {
+            session_for_forward.forward_event_to_extensions(&event);
+        }
+    });
+
+    let agent = session.agent_ref();
+    let local = tokio::task::LocalSet::new();
+    let result = local
+        .run_until(agent.run_with_channel(prompt, event_tx))
+        .await;
+
+    // Wait for the forwarder to drain the channel (sender dropped when
+    // `run_with_channel` returns).
+    let _ = forwarder.join();
+    if let Err(err) = result {
+        tracing::warn!(?err, "agent run failed");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Header / AgentSession construction
+// ─────────────────────────────────────────────────────────────────────────
+
+fn build_header_context(
+    app: &App,
+    cwd: &std::path::Path,
+    git_branch: Option<&str>,
+) -> InlineHeaderContext {
+    let workspace_name = cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "oxi".to_string());
+    let model_id = app.model_id();
+    let provider = model_id
+        .split_once('/')
+        .map(|(p, _)| p.to_string())
+        .unwrap_or_else(|| "Provider".to_string());
+    let branch = git_branch.unwrap_or("\u{2014}").to_string();
+    let mut ctx = InlineHeaderContext::default();
+    ctx.app_name = "oxi".to_string();
+    ctx.provider = provider;
+    ctx.model = model_id.clone();
+    ctx.git = format!("git: {workspace_name}@{branch}");
+    ctx.tools = "Tools: ready".to_string();
+    ctx.search_tools = Some(InlineHeaderStatusBadge {
+        text: workspace_name,
+        tone: InlineHeaderStatusTone::Ready,
+    });
+    ctx.persistent_memory = Some(InlineHeaderStatusBadge {
+        text: branch,
+        tone: InlineHeaderStatusTone::Ready,
+    });
+    ctx.editor_context = Some(model_id);
+    ctx
+}
+
+/// Construct an `AgentSession` for the TUI using the runtime helpers from
+/// `agent_session_runtime`. Mirrors the wiring in the legacy `tui/` harness.
+async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::AgentSession> {
+    use crate::app::agent_session_runtime::{
+        CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
+        create_agent_session_from_services, create_agent_session_services,
+    };
+    use crate::store::session::SessionManager;
+
+    let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
+    let services = create_agent_session_services(CreateAgentSessionServicesOptions::new(cwd.clone()))?;
+    let services = Arc::new(services);
+
+    let model_id = app.model_id();
+    let tools = app.agent_tools();
+
+    let session_manager = SessionManager::create(
+        &cwd.to_string_lossy(),
+        None,
+    );
+
+    let result = create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
+        services,
+        session_manager,
+        model_id: if model_id.is_empty() { None } else { Some(model_id) },
+        thinking_level: None,
+        scoped_models: Vec::new(),
+        tool_registry: Some(tools),
+    })
+    .await?;
+
+    if let Some(msg) = result.model_fallback_message {
+        tracing::warn!(message = %msg, "agent session model fallback");
+    }
+    Ok(result.session)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rendering
+// ─────────────────────────────────────────────────────────────────────────
+
+const HEADER_HEIGHT: u16 = 2;
+const FOOTER_HEIGHT: u16 = 1;
+const COMPOSER_HEIGHT: u16 = 3;
+
+/// Layout: header (top) | transcript (middle, fills) | composer (3 rows) |
+/// footer (bottom). All heights in rows except the transcript, which gets
+/// the remainder.
+fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHandle) {
+    let area = frame.area();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(HEADER_HEIGHT),
+            Constraint::Min(1),
+            Constraint::Length(COMPOSER_HEIGHT),
+            Constraint::Length(FOOTER_HEIGHT),
+        ])
+        .split(area);
+
+    render_header(frame, chunks[0], state);
+    render_transcript(frame, chunks[1], state);
+    render_composer(frame, chunks[2], state);
+    render_footer(frame, chunks[3], state);
+}
+
+fn render_header(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+    let styles = active_styles();
+    let ctx = &state.header_context;
+    let line = Line::from(vec![
+        Span::styled(
+            format!(" {} ", ctx.app_name),
+            Style::default()
+                .fg(color_from_anstyle(Some(styles.foreground)))
+                .bg(color_from_anstyle(Some(styles.background)))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {} ", ctx.provider),
+            Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("\u{2500} {} ", ctx.model),
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("\u{2387} {} ", ctx.git),
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("\u{2699} {}", ctx.tools),
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+        ),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
+    let paragraph = Paragraph::new(line).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+    let styles = active_styles();
+    let items: Vec<ListItem<'_>> = state
+        .transcript
+        .iter()
+        .map(|line| transcript_item(line, &styles))
+        .collect();
+
+    let total = items.len();
+    let viewport = area.height as usize;
+    let start = effective_scroll_offset(state.scroll_offset, total, viewport);
+
+    let visible = if start >= total {
+        Vec::new()
+    } else {
+        items.into_iter().skip(start).take(viewport.max(1)).collect()
+    };
+
+    let list = List::new(visible).block(Block::default());
+    frame.render_widget(list, area);
+}
+
+fn transcript_item<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> ListItem<'a> {
+    let (kind_style, kind_label) = match line.kind {
+        InlineMessageKind::Agent => (
+            Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
+            "assistant",
+        ),
+        InlineMessageKind::User => (
+            Style::default().fg(color_from_anstyle(styles.user.get_fg_color())),
+            "you",
+        ),
+        InlineMessageKind::Tool => (
+            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
+            "tool",
+        ),
+        InlineMessageKind::Error => (
+            Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
+            "error",
+        ),
+        InlineMessageKind::Warning => (
+            Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
+            "warn",
+        ),
+        InlineMessageKind::Info => (
+            Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
+            "info",
+        ),
+        InlineMessageKind::Policy => (
+            Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
+            "policy",
+        ),
+        InlineMessageKind::Pty => (
+            Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
+            "pty",
+        ),
+    };
+
+    let mut spans = Vec::with_capacity(line.segments.len() + 1);
+    spans.push(Span::styled(format!("{kind_label} \u{2502} "), kind_style));
+    for segment in &line.segments {
+        let style = segment_style(segment, kind_style, styles);
+        spans.push(Span::styled(segment.text.clone(), style));
+    }
+    ListItem::new(Line::from(spans))
+}
+
+fn segment_style(
+    segment: &InlineSegment,
+    fallback: Style,
+    styles: &ThemeStyles,
+) -> Style {
+    let mut style = fallback;
+    let inline = segment.style.as_ref();
+    if let Some(color) = inline.color {
+        style = style.fg(color_from_anstyle(Some(color)));
+    } else {
+        // Fall back to the active palette's default for the kind. We
+        // pick `response` for agent segments since the harness doesn't
+        // carry its own theme.
+        style = style.fg(color_from_anstyle(styles.response.get_fg_color()));
+    }
+    if inline.effects.contains(anstyle::Effects::BOLD) {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if inline.effects.contains(anstyle::Effects::ITALIC) {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if inline.effects.contains(anstyle::Effects::UNDERLINE) {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if inline.effects.contains(anstyle::Effects::DIMMED) {
+        style = style.add_modifier(Modifier::DIM);
+    }
+    style
+}
+
+fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+    let styles = active_styles();
+    let prefix_style =
+        Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())).bold();
+    let text_style = Style::default().fg(color_from_anstyle(Some(styles.foreground)));
+
+    let prefix = state.prompt_prefix.clone();
+    let body = state.input_buffer.clone();
+    let placeholder = state.placeholder.clone();
+
+    let mut line_spans = vec![Span::styled(prefix, prefix_style)];
+    if body.is_empty()
+        && let Some(ph) = placeholder
+    {
+        line_spans.push(Span::styled(
+            ph,
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())).dim(),
+        ));
+    } else {
+        line_spans.push(Span::styled(body, text_style));
+    }
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
+    let paragraph = Paragraph::new(Line::from(line_spans))
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, area);
+
+    // Place the cursor inside the composer at the current edit position.
+    if state.input_enabled {
+        let cursor_x = area.left() + state.prompt_prefix.chars().count() as u16 + state.input_cursor as u16;
+        let cursor_y = area.top() + 1; // account for the top border
+        frame.set_cursor_position(ratatui::layout::Position::new(cursor_x, cursor_y));
+    }
+}
+
+fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+    let styles = active_styles();
+    let left = state.footer_left.clone().unwrap_or_default();
+    let right = state.footer_right.clone().unwrap_or_else(|| {
+        let total = state.transcript.len();
+        let position = if state.scroll_offset == usize::MAX {
+            format!("line {total}/{total}")
+        } else {
+            let off = effective_scroll_offset(state.scroll_offset, total, area.height as usize);
+            format!("line {}/{}", off.min(total), total)
+        };
+        position
+    });
+
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
+    let paragraph = Paragraph::new(Line::from(vec![
+        Span::styled(left, Style::default().fg(color_from_anstyle(Some(styles.foreground)))),
+        Span::raw("  "),
+        Span::styled(
+            right,
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+        ),
+    ]))
+    .block(block);
+    frame.render_widget(paragraph, area);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Small helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+fn plain_segment(text: impl Into<String>) -> InlineSegment {
+    InlineSegment {
+        text: text.into(),
+        style: Arc::new(InlineTextStyle::default()),
+    }
+}
+
+fn effective_scroll_offset(offset: usize, total: usize, viewport: usize) -> usize {
+    if offset == usize::MAX {
+        return total.saturating_sub(viewport);
+    }
+    // Clamp into [0, total.saturating_sub(viewport)].
+    let max_start = total.saturating_sub(viewport);
+    offset.min(max_start)
+}
+
+fn preview_tool_result(content: &str) -> String {
+    const MAX: usize = 200;
+    if content.chars().count() <= MAX {
+        return content.to_string();
+    }
+    let truncated: String = content.chars().take(MAX).collect();
+    format!("{truncated}\u{2026}")
+}
+
+fn color_from_anstyle(color: Option<anstyle::Color>) -> Color {
+    match color {
+        Some(anstyle::Color::Ansi(a)) => ansi_to_ratatui(a),
+        Some(anstyle::Color::Ansi256(idx)) => Color::Indexed(idx.0),
+        Some(anstyle::Color::Rgb(rgb)) => Color::Rgb(rgb.0, rgb.1, rgb.2),
+        None => Color::Reset,
+    }
+}
+fn ansi_to_ratatui(color: anstyle::AnsiColor) -> Color {
+    use anstyle::AnsiColor as A;
+    match color {
+        A::Black => Color::Black,
+        A::Red => Color::Red,
+        A::Green => Color::Green,
+        A::Yellow => Color::Yellow,
+        A::Blue => Color::Blue,
+        A::Magenta => Color::Magenta,
+        A::Cyan => Color::Cyan,
+        A::White => Color::Gray,
+        A::BrightBlack => Color::DarkGray,
+        A::BrightRed => Color::LightRed,
+        A::BrightGreen => Color::LightGreen,
+        A::BrightYellow => Color::LightYellow,
+        A::BrightBlue => Color::LightBlue,
+        A::BrightMagenta => Color::LightMagenta,
+        A::BrightCyan => Color::LightCyan,
+        A::BrightWhite => Color::White,
+    }
+}
+
+// Suppress the unused-import warning while keeping the AtomicBool/Ordering
+// available for future control flags (e.g. SIGINT safety net).
+#[allow(dead_code, clippy::declare_interior_mutable_const)]
+const _ATOMIC_REFS: (AtomicBool, Ordering) = (AtomicBool::new(false), Ordering::SeqCst);

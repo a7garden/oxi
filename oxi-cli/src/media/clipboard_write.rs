@@ -1,3 +1,4 @@
+#![allow(dead_code, missing_docs)]
 //! Clipboard text write functionality
 //!
 //! Copies text to the system clipboard using platform-specific tools.

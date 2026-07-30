@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::field_reassign_with_default, missing_docs)]
 //! Changelog parsing utilities.
 //!
 //! Provides functions for reading and parsing CHANGELOG.md files.

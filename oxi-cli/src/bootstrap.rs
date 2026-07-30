@@ -235,11 +235,7 @@ pub async fn dispatch_run_mode(args: &CliArgs, app: crate::App) -> Result<i32> {
     }
 
     if prompt.is_empty() || args.interactive {
-        if args.continue_session {
-            crate::tui::run_tui_interactive_with_continue(app, true).await?;
-        } else {
-            crate::tui::run_tui_interactive(app).await?;
-        }
+        crate::tui_vt::run_tui(app).await?;
         return Ok(0);
     }
 
