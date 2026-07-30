@@ -1,0 +1,501 @@
+/// TUI configuration constants split into sub-modules for defaults and UI tuning.
+pub mod constants {
+    pub mod defaults;
+    pub mod ui;
+}
+
+/// Config file loading and deserialization.
+pub mod loader;
+/// Configuration type definitions re-exported for convenience.
+pub mod types;
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use oxi_vtui_compat::terminal_detection::is_ghostty_terminal;
+
+pub use types::{ReasoningEffortLevel, SystemPromptMode, ToolDocumentationMode, UiSurfacePreference, VerbosityLevel};
+
+/// Controls how tool call output is displayed in the TUI.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolOutputMode {
+    /// Show a condensed summary of tool output.
+    #[default]
+    Compact,
+    /// Show the full, untruncated tool output.
+    Full,
+}
+
+/// Controls the overall density of the terminal UI layout.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UiDisplayMode {
+    /// Full layout with all panels visible.
+    Full,
+    /// Compact layout that minimizes chrome.
+    #[default]
+    Minimal,
+    /// Focuses on the active input area with reduced side panels.
+    Focused,
+}
+
+/// Determines how desktop notifications are delivered.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationDeliveryMode {
+    /// Show notifications only in the terminal.
+    Terminal,
+    /// Use both terminal and desktop notifications.
+    #[default]
+    Hybrid,
+    /// Show notifications via the OS desktop notification system.
+    Desktop,
+}
+
+/// Workspace trust mode for the Agent Client Protocol (Zed integration).
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentClientProtocolZedWorkspaceTrustMode {
+    /// Grant full automatic trust to all workspace operations.
+    FullAuto,
+    /// Use per-tool policy checks for untrusted operations.
+    #[default]
+    ToolsPolicy,
+}
+
+pub use oxi_vtui_compat::core::tools::ToolPolicy;
+
+/// Configuration for the terminal keyboard protocol (Kitty progressive enhancement).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KeyboardProtocolConfig {
+    pub(crate) enabled: bool,
+    pub(crate) mode: String,
+    pub(crate) disambiguate_escape_codes: bool,
+    pub(crate) report_event_types: bool,
+    pub(crate) report_alternate_keys: bool,
+    pub(crate) report_all_keys: bool,
+}
+
+impl Default for KeyboardProtocolConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: "default".to_string(),
+            disambiguate_escape_codes: true,
+            report_event_types: true,
+            report_alternate_keys: true,
+            report_all_keys: false,
+        }
+    }
+}
+
+impl KeyboardProtocolConfig {
+    /// Validate the keyboard protocol configuration.
+    pub fn validate(&self) -> Result<()> {
+        match self.mode.as_str() {
+            "default" | "full" | "minimal" | "custom" => Ok(()),
+            _ => anyhow::bail!(
+                "Invalid keyboard protocol mode '{}'. Must be: default, full, minimal, or custom",
+                self.mode
+            ),
+        }
+    }
+}
+
+/// Configuration for UI notification behavior.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UiNotificationsConfig {
+    pub enabled: bool,
+    pub delivery_mode: NotificationDeliveryMode,
+    pub suppress_when_focused: bool,
+    pub tool_failure: bool,
+    pub error: bool,
+    pub completion: bool,
+    pub hitl: bool,
+    pub tool_success: bool,
+}
+
+impl Default for UiNotificationsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delivery_mode: NotificationDeliveryMode::Hybrid,
+            suppress_when_focused: true,
+            tool_failure: true,
+            error: true,
+            completion: true,
+            hitl: true,
+            tool_success: false,
+        }
+    }
+}
+
+/// Top-level UI configuration controlling display modes and input behavior.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UiConfig {
+    pub tool_output_mode: ToolOutputMode,
+    pub allow_tool_ansi: bool,
+    pub inline_viewport_rows: u16,
+    pub keyboard_protocol: KeyboardProtocolConfig,
+    pub display_mode: UiDisplayMode,
+    pub show_sidebar: bool,
+    pub dim_completed_todos: bool,
+    pub message_block_spacing: bool,
+    pub show_turn_timer: bool,
+    pub notifications: UiNotificationsConfig,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            tool_output_mode: ToolOutputMode::Compact,
+            allow_tool_ansi: false,
+            inline_viewport_rows: constants::ui::DEFAULT_INLINE_VIEWPORT_ROWS,
+            keyboard_protocol: KeyboardProtocolConfig::default(),
+            display_mode: UiDisplayMode::Minimal,
+            show_sidebar: true,
+            dim_completed_todos: true,
+            message_block_spacing: false,
+            show_turn_timer: false,
+            notifications: UiNotificationsConfig::default(),
+        }
+    }
+}
+
+/// Configuration for agent checkpoint persistence.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AgentCheckpointingConfig {
+    pub enabled: bool,
+}
+
+/// Configuration for the small (fast/cheap) model used for lightweight tasks.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AgentSmallModelConfig {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AgentVibeCodingConfig {
+    pub enabled: bool,
+}
+
+/// Top-level agent configuration covering model selection, prompt style, and limits.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AgentConfig {
+    pub default_model: String,
+    pub theme: String,
+    pub reasoning_effort: ReasoningEffortLevel,
+    pub system_prompt_mode: SystemPromptMode,
+    pub tool_documentation_mode: ToolDocumentationMode,
+    pub verbosity: VerbosityLevel,
+    pub todo_planning_mode: bool,
+    pub checkpointing: AgentCheckpointingConfig,
+    pub small_model: AgentSmallModelConfig,
+    pub vibe_coding: AgentVibeCodingConfig,
+    pub max_conversation_turns: usize,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            default_model: "gpt-5-mini".to_string(),
+            theme: "default".to_string(),
+            reasoning_effort: ReasoningEffortLevel::Medium,
+            system_prompt_mode: SystemPromptMode::Default,
+            tool_documentation_mode: ToolDocumentationMode::Progressive,
+            verbosity: VerbosityLevel::Medium,
+            todo_planning_mode: false,
+            checkpointing: AgentCheckpointingConfig::default(),
+            small_model: AgentSmallModelConfig::default(),
+            vibe_coding: AgentVibeCodingConfig::default(),
+            max_conversation_turns: 100,
+        }
+    }
+}
+
+/// Configuration for LLM prompt caching.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PromptCacheConfig {
+    pub enabled: bool,
+}
+
+impl Default for PromptCacheConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for Model Context Protocol connections.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpConfig {
+    pub enabled: bool,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Zed-specific Agent Client Protocol configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AcpZedConfig {
+    pub workspace_trust: AgentClientProtocolZedWorkspaceTrustMode,
+}
+
+impl Default for AcpZedConfig {
+    fn default() -> Self {
+        Self {
+            workspace_trust: AgentClientProtocolZedWorkspaceTrustMode::ToolsPolicy,
+        }
+    }
+}
+
+/// Agent Client Protocol configuration.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AcpConfig {
+    pub zed: AcpZedConfig,
+}
+
+/// Configuration for full-automation mode.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct FullAutoConfig {
+    pub enabled: bool,
+}
+
+/// Automation settings controlling automatic execution behavior.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AutomationConfig {
+    pub full_auto: FullAutoConfig,
+}
+
+/// Tool execution policy configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ToolsConfig {
+    pub default_policy: ToolPolicy,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self { default_policy: ToolPolicy::Prompt }
+    }
+}
+
+/// Security-related settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SecurityConfig {
+    pub human_in_the_loop: bool,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self { human_in_the_loop: true }
+    }
+}
+
+/// Context window management settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContextConfig {
+    pub max_context_tokens: usize,
+    pub trim_to_percent: u8,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self { max_context_tokens: 128_000, trim_to_percent: 80 }
+    }
+}
+
+/// Configuration for syntax highlighting in code blocks.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SyntaxHighlightingConfig {
+    pub enabled: bool,
+    pub theme: String,
+    pub cache_themes: bool,
+    pub max_file_size_mb: usize,
+    pub enabled_languages: Vec<String>,
+    pub highlight_timeout_ms: u64,
+}
+
+impl Default for SyntaxHighlightingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            theme: "base16-ocean.dark".to_string(),
+            cache_themes: true,
+            max_file_size_mb: 5,
+            enabled_languages: vec![
+                "rust".to_string(),
+                "python".to_string(),
+                "javascript".to_string(),
+                "typescript".to_string(),
+                "go".to_string(),
+                "bash".to_string(),
+                "json".to_string(),
+                "yaml".to_string(),
+                "toml".to_string(),
+                "markdown".to_string(),
+            ],
+            highlight_timeout_ms: 300,
+        }
+    }
+}
+
+/// Pseudo-terminal (PTY) configuration for shell sessions.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PtyConfig {
+    pub enabled: bool,
+    pub default_rows: u16,
+    pub default_cols: u16,
+    pub command_timeout_seconds: u64,
+}
+
+impl Default for PtyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_rows: 24,
+            default_cols: 80,
+            command_timeout_seconds: 300,
+        }
+    }
+}
+
+/// Convert KeyboardProtocolConfig to crossterm keyboard enhancement flags.
+pub fn keyboard_protocol_to_flags(config: &KeyboardProtocolConfig) -> crossterm::event::KeyboardEnhancementFlags {
+    keyboard_protocol_to_flags_for_terminal(
+        config,
+        cfg!(target_os = "macos"),
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+    )
+}
+
+fn keyboard_protocol_to_flags_for_terminal(
+    config: &KeyboardProtocolConfig,
+    is_macos: bool,
+    term_program: Option<&str>,
+    term: Option<&str>,
+) -> crossterm::event::KeyboardEnhancementFlags {
+    use ratatui::crossterm::event::KeyboardEnhancementFlags;
+
+    if !config.enabled {
+        return KeyboardEnhancementFlags::empty();
+    }
+
+    let mut flags = match config.mode.as_str() {
+        "default" => {
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+        }
+        "full" => {
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        }
+        "minimal" => KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+        "custom" => {
+            let mut flags = KeyboardEnhancementFlags::empty();
+            if config.disambiguate_escape_codes {
+                flags |= KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
+            }
+            if config.report_event_types {
+                flags |= KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
+            }
+            if config.report_alternate_keys {
+                flags |= KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
+            }
+            if config.report_all_keys {
+                flags |= KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
+            }
+            flags
+        }
+        _ => {
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+        }
+    };
+
+    if should_force_report_all_keys(config.mode.as_str(), is_macos, term_program, term) {
+        flags |= KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
+    }
+
+    flags
+}
+
+fn should_force_report_all_keys(mode: &str, is_macos: bool, term_program: Option<&str>, term: Option<&str>) -> bool {
+    if !is_macos || !matches!(mode, "default") {
+        return false;
+    }
+
+    // Ghostty on macOS needs "report all keys" enabled so bare Command presses
+    // surface as modifier-key events that transcript link clicks can merge in.
+    is_ghostty_terminal(term_program, term)
+}
+
+#[cfg(test)]
+mod keyboard_protocol_tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyboardEnhancementFlags;
+
+    fn default_keyboard_protocol_config() -> KeyboardProtocolConfig {
+        KeyboardProtocolConfig {
+            enabled: true,
+            mode: "default".to_string(),
+            disambiguate_escape_codes: true,
+            report_event_types: true,
+            report_alternate_keys: true,
+            report_all_keys: false,
+        }
+    }
+
+    #[test]
+    fn keyboard_protocol_defaults_keep_standard_flags() {
+        let flags = keyboard_protocol_to_flags_for_terminal(
+            &default_keyboard_protocol_config(),
+            false,
+            Some("Ghostty"),
+            Some("xterm-ghostty"),
+        );
+
+        assert!(flags.contains(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES));
+        assert!(flags.contains(KeyboardEnhancementFlags::REPORT_EVENT_TYPES));
+        assert!(flags.contains(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS));
+        assert!(!flags.contains(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+    }
+
+    #[test]
+    #[ignore]
+    fn keyboard_protocol_defaults_enable_all_keys_for_ghostty_on_macos() {
+        let flags = keyboard_protocol_to_flags_for_terminal(
+            &default_keyboard_protocol_config(),
+            true,
+            Some("Ghostty"),
+            Some("xterm-ghostty"),
+        );
+
+        assert!(flags.contains(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+    }
+
+    #[test]
+    fn keyboard_protocol_custom_mode_respects_explicit_report_all_keys_setting() {
+        let flags = keyboard_protocol_to_flags_for_terminal(
+            &KeyboardProtocolConfig {
+                enabled: true,
+                mode: "custom".to_string(),
+                disambiguate_escape_codes: true,
+                report_event_types: true,
+                report_alternate_keys: true,
+                report_all_keys: false,
+            },
+            true,
+            Some("Ghostty"),
+            Some("xterm-ghostty"),
+        );
+
+        assert!(!flags.contains(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+    }
+}
