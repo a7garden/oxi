@@ -942,6 +942,14 @@ const COMPOSER_HEIGHT: u16 = 3;
 /// the remainder.
 fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHandle) {
     let area = frame.area();
+    // Paint the theme background across the whole frame first. Without this
+    // every span renders against the host terminal's transparent default bg,
+    // so fg-only text can read as invisible when it clashes with that default
+    // — the user only saw it after drag-selecting (which inverts colors).
+    let bg = active_styles().background;
+    frame
+        .buffer_mut()
+        .set_style(area, Style::default().bg(color_from_anstyle(Some(bg))));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

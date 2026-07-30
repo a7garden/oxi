@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   poll timeouts (exit only on a read error), (2) drawing an initial frame
   before the loop blocks, and (3) adding a 50 ms render tick so typed input
   is echoed without each keystroke needing to send an event.
+- **TUI: invisible text / wrong colors (oxi-vtui)** — Text rendered
+  near-black on a dark background and was invisible until the user
+  drag-selected it (which inverts colors). Root cause: the
+  `oxi-vtui-compat` color-constant block was a garbled copy of the
+  authoritative values — the RGB blend clamp was `[0,1]` instead of
+  `[0,255]` (collapsing almost every blend to `(1,1,1)`), "white" was set
+  to the luminance coefficients `0.299/0.587/0.114` instead of `1.0`, and
+  the relative-luminance constants used NTSC luma rather than sRGB/WCAG.
+  The theme pipeline ran every palette through this broken math, so every
+  computed color degenerated to near-black. Fixed by correcting the
+  constants to the WCAG/sRGB values already used by `oxi-vtui`'s own
+  `ui.rs`. Also paint the theme background across the whole frame so
+  fg-only text always sits on the intended surface.
 
 ## [0.62.0] - 2026-07-30
 

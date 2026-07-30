@@ -140,3 +140,52 @@ fn style_rgb(style: Style) -> Option<RgbColor> {
         _ => None,
     }
 }
+
+#[test]
+fn test_mix_blends_in_byte_space() {
+    // Regression: mix() clamped each blended channel to [0,1] instead of
+    // [0,255], collapsing almost every blend to (1,1,1). A 50/50 blend of
+    // two grays must land mid-way in byte space.
+    use crate::theme::color_math::{lighten, mix};
+    let blended = mix(RgbColor(100, 100, 100), RgbColor(200, 200, 200), 0.5);
+    assert_eq!(
+        blended,
+        RgbColor(150, 150, 150),
+        "mid-blend must be ~(150,150,150), got {blended:?}"
+    );
+    // lighten() mixes toward white (255,255,255), not a muddy green.
+    let lit = lighten(RgbColor(100, 100, 100), 0.5);
+    assert_eq!(
+        lit,
+        RgbColor(178, 178, 178),
+        "lighten toward white @0.5 must be ~(178,178,178), got {lit:?}"
+    );
+}
+
+#[test]
+fn test_default_theme_foreground_is_readable() {
+    // Regression: the broken blend/luminance constants collapsed every theme
+    // color to near-black (1,1,1), making the whole TUI invisible until the
+    // user drag-selected text (which inverts colors). The default theme
+    // foreground must be visibly lighter than its dark background, meet the
+    // minimum contrast ratio, and not be degenerate near-black.
+    use crate::theme::active_styles;
+    let styles = active_styles();
+    let fg = match styles.foreground {
+        Color::Rgb(c) => c,
+        ref other => panic!("foreground must be Rgb, got {other:?}"),
+    };
+    let bg = match styles.background {
+        Color::Rgb(c) => c,
+        ref other => panic!("background must be Rgb, got {other:?}"),
+    };
+    let fg_lum = relative_luminance(fg);
+    let bg_lum = relative_luminance(bg);
+    assert!(
+        fg_lum > bg_lum + 0.3,
+        "fg must be much lighter than bg: fg_lum={fg_lum} bg_lum={bg_lum}"
+    );
+    let ratio = contrast_ratio(fg, bg);
+    assert!(ratio >= 3.0, "fg/bg contrast must meet min ratio 3.0, got {ratio}");
+    assert!(fg.0 > 50 && fg.1 > 50 && fg.2 > 50, "fg collapsed to near-black: {fg:?}");
+}
