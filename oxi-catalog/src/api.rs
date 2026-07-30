@@ -7,9 +7,12 @@
 //! registry, mirroring omp's three-way split: transport / auth-login /
 //! model-host metadata).
 //!
-//! Variants without a wired transport yet route to `None` in the provider
-//! factory's `_` match arm — they land as P0.5 ports each provider's stream
-//! function (Ollama, Cursor, Devin, GitLab Duo are the remote-AGENT protocols).
+//! Each enum variant maps to a concrete dispatch in
+//! `oxi-ai/src/providers/register_builtins::build_builtin_transport`. The
+//! two remaining gap variants are `Api::OpenAiCodexResponses` and
+//! `Api::GoogleGeminiCli`: Codex reuses the OpenAI Responses transport, and
+//! Gemini CLI is a typed stub (`GeminiCliProvider` returning
+//! `ProviderError::NotImplemented`) until a real protocol is integrated.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

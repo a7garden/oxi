@@ -8,6 +8,7 @@ mod bedrock;
 mod cursor;
 mod devin;
 mod event;
+mod gemini_cli;
 mod gitlab_duo;
 mod gitlab_duo_agent;
 mod google;
@@ -47,6 +48,7 @@ pub use azure::AzureProvider;
 pub use bedrock::BedrockProvider;
 pub use event::ProviderEvent;
 #[allow(unused_imports)]
+pub use gemini_cli::GeminiCliProvider;
 pub use google::GoogleProvider;
 #[allow(unused_imports)]
 pub use ollama::OllamaProvider;
@@ -77,8 +79,8 @@ const DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 /// Shared client singleton.
 ///
-/// All eight built-in providers (`AnthropicProvider`, `OpenAiProvider`,
-/// `GoogleProvider`, etc.) construct their `reqwest::Client` via this
+/// All built-in providers (`AnthropicProvider`, `OpenAiProvider`,
+/// `GoogleProvider`, `GeminiCliProvider`, etc.) construct their
 /// accessor. A bare `reqwest::Client::new()` would have **no timeout**,
 /// which means a stalled TCP/TLS handshake or a silent upstream hang
 /// would freeze the CLI indefinitely. With `panic = "abort"` in the

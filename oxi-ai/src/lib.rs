@@ -112,7 +112,12 @@ pub use providers::OpenAiResponsesProvider;
 
 /// AWS Bedrock provider implementation.
 pub use providers::BedrockProvider;
-/// Google (Gemini) provider implementation.
+/// Google Gemini CLI transport — typed unsupported-provider error path.
+/// `Api::GoogleGeminiCli` dispatches here; `stream()` returns
+/// `ProviderError::NotImplemented` because no dedicated CLI transport
+/// exists in-tree (upstream collapses `google-gemini-cli → google-generative-ai`).
+pub use providers::GeminiCliProvider;
+/// Google Generative AI (Gemini) provider implementation.
 pub use providers::GoogleProvider;
 /// Ollama (local NDJSON server) provider implementation.
 pub use providers::OllamaProvider;

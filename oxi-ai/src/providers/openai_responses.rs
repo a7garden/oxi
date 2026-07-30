@@ -1058,4 +1058,51 @@ data: [DONE]"#;
             }
         )));
     }
+
+    /// Codex Responses fixture parse — proves a representative Responses-API
+    /// SSE sample parses into the expected `ProviderEvent` sequence when
+    /// driven through the same parser as `openai-codex-responses`. The
+    /// upstream openclaw port (`scripts/catalog/port-openclaw.py:43`) maps
+    /// `openai-codex → openai-responses`, so the Responses parser is the
+    /// canonical parser for both dialects.
+    #[test]
+    fn test_codex_responses_fixture_parses_to_provider_events() {
+        let sse = "\
+data: {\"response\":{\"id\":\"resp_abc\",\"status\":\"in_progress\",\"model\":\"gpt-5-codex\"}}
+
+data: {\"output_item\":{\"index\":0,\"id\":\"msg_1\",\"type\":\"message\",\"status\":\"in_progress\"}}
+
+data: {\"output_text\":{\"content_index\":0,\"slice\":\"Hello\"}}
+
+data: {\"output_text\":{\"content_index\":0,\"slice\":\" from Codex\"}}
+
+data: {\"response\":{\"id\":\"resp_abc\",\"status\":\"completed\",\"usage\":{\"input_tokens\":12,\"output_tokens\":7,\"total_tokens\":19}}}
+";
+        let events = parse_sse_events(sse, "openai-codex", "gpt-5-codex");
+        // NOTE: the Responses parser does not emit Start for a plain
+        // output_item.type="message" without a preceding reasoning entry.
+        // Start is only emitted for specific output_item.type values
+        // (reasoning, output_item_type code path). This fixture proves
+        // the parser accepts an openai-codex dialect data sequence
+        // through the same openai-responses code path and correctly
+        // extracts text content and a Done(Stop) event.
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ProviderEvent::TextDelta { delta, .. } => Some(delta.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "Hello from Codex");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                ProviderEvent::Done {
+                    reason: StopReason::Stop,
+                    ..
+                }
+            )),
+            "missing Done(Stop) event in {events:?}"
+        );
+    }
 }
