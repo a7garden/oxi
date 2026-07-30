@@ -4,6 +4,12 @@
 > **Git 커밋**: `cb8fb96` (Phase 4 — GitLab Duo Workflow full impl)
 > **테스트**: 664/664 (oxi-ai), clippy clean, consumer check clean
 
+> **현재 상태 (2026-07-30):** P0.5 remote-AGENT transport는 아래 기록대로
+> 완료되었고, P2 production tape cutover도 이후 완료되었습니다. P2
+> rich-content는 부분 완료입니다. Codex Responses와 Gemini CLI도 explicit
+> dispatch arm이 있어 backlog가 아닙니다 — Codex는 `OpenAiResponsesProvider`를
+> 재사용하고, Gemini CLI는 의도된 `NotImplemented` stub입니다.
+
 ---
 
 ## Current State (ALL COMPLETE)
@@ -73,7 +79,7 @@ P0.5 진행 중 발견되어 함께 처리한 작업들 (별도 문서 참조):
 
 ---
 
-## 유일하게 남은 작업
+## 이후 상태
 
-- **P2 — TUI omp realignment** (별도 트랙, ~3–6개월) — `docs/superpowers/plans/2026-07-27-p2-tui-realignment.md`
-- 아직 시작되지 않음
+- **P2 production tape cutover** — 완료
+- **P2 rich-content** — 부분 완료

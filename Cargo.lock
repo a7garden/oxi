@@ -4728,6 +4728,7 @@ dependencies = [
  "glob",
  "oxi-agent",
  "oxi-ai",
+ "oxi-hashline",
  "oxi-snapcompact",
  "oxibrowser-core 0.17.0",
  "parking_lot",

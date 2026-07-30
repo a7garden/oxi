@@ -5,6 +5,14 @@
 > **목적**: 다음 세션에서 P0.5 (remote-AGENT providers) + P2 (TUI 재정렬) + P4.2 후속 작업을 이어하기 위한 자세한 인수인계
 > **현재 작업 위치**: main 브랜치, 미커밋 (git status는 아래 참조)
 
+> **현재 상태 (2026-07-30):** 이 session-5 인계의 작업 목록은 superseded
+> 되었습니다. P0/P0.5/P1/P3/P4 구조 작업과 P2 tape production cutover는
+> 완료되었습니다. P2 rich-content는 부분 완료이며, 모든 dialect transport는
+> explicit dispatch arm을 가지고 있습니다. Codex Responses는 OpenAI Responses
+> transport를 재사용하고, Gemini CLI는 의도적으로
+> `ProviderError::NotImplemented`를 반환하는 stub입니다 — backlog가 아닙니다.
+> 아래 내용은 2026-07-28 당시의 historical evidence로 보존합니다.
+
 ---
 
 ## 0. 현재 상태 (5초 요약)
@@ -19,10 +27,10 @@
 | **fmt** | clean |
 | **마지막 커밋** | `6bda2f9f docs: update RESUMING.md for session 3` |
 
-**남은 우선순위 (다음 세션이 시작할 곳)**:
-1. **P0.5** remote-AGENT providers — Cursor / Devin / GitLab Duo (~2000 lines)
-2. **P2** TUI 재정렬 — `oxi-tui-legacy` (22499 lines) → omp `tui.ts` (4270 lines) 모델 (~10000 lines 작업)
-3. **P4.2 후속** — `RuntimeConfig` / `ProjectPluginOverrides` / `Doctor` 추가 (P0.5와 함께 또는 별도)
+**당시 남은 우선순위 (superseded)**:
+1. **P0.5** remote-AGENT providers — 이후 완료
+2. **P2** TUI 재정렬 — production tape cutover 완료, rich-content 부분 완료
+3. **P4.2 후속** — 구조 작업 완료
 
 ---
 
@@ -121,7 +129,7 @@
 
 ---
 
-## 2. 다음 세션: P0.5 — remote-AGENT providers (~2000 lines)
+## 2. 다음 세션 계획 (superseded): P0.5 remote-AGENT providers
 
 ### 2.1 목표
 
@@ -509,7 +517,7 @@ cargo fmt --all -- --check
 | CLI commands | `oxi-cli/src/cli/commands/` (P3.3 완료) |
 | Debug tool | `oxi-agent/src/tools/debug_tool.rs` (P1.6a 재등록 완료) |
 | TUI v2 | `oxi-tui/src/` (작동 중) |
-| TUI legacy | `oxi-tui-legacy/src/` (P2 미착수) |
+| TUI legacy | `oxi-tui-legacy/src/` (2026-07-28 당시 P2 미착수; 현재 retired) |
 | omp plugins | `/tmp/omp/packages/coding-agent/src/extensibility/plugins/` |
 | omp tui | `/tmp/omp/packages/tui/src/` |
 | omp providers | `/tmp/omp/packages/coding-agent/src/providers/` (remote-agent/ 하위) |

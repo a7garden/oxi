@@ -7,6 +7,12 @@
 > **완료**: P0 + P1 + P2 + P3.1 + P3.2 + **P3.3** + P4.3 + P4.4 + **P4.1** + **P4.2** + **P1.6a**
 > **기준선**: 1907 tests passing (oxi-cli 763, oxi-agent 746, oxi-sdk 398), clippy clean, fmt clean
 
+> **현재 상태 (2026-07-30):** 이 문서의 잔여 작업 설명은 superseded 되었습니다.
+> 모든 dialect transport는 explicit dispatch arm이 있습니다. P2 rich-content는
+> 부분 완료이며, Codex Responses는 OpenAI Responses transport를 재사용하고,
+> Gemini CLI는 의도적으로 `ProviderError::NotImplemented`를 반환하는 stub입니다.
+> backlog gap이 아닙니다.
+
 ---
 
 ## 1. 완료된 작업 요약

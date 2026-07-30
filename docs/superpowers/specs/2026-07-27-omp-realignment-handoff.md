@@ -2,15 +2,22 @@
 
 - **최종 갱신**: 2026-07-28
 - **브랜치**: `main` (P0 + Step 2 + P1.1 owned dialect 완료 병합)
-- **상태**: **P0 완료 + Step 2 완료 + P1.1 owned dialect 완료**(엔진+루프 wiring+수락 테스트). P1 나머지·P2–P4 미착수.
+- **상태**: **SUPERSEDED (2026-07-30 current-status note below).** 이 줄의 P1/P2–P4 상태는 2026-07-28 snapshot입니다.
 
 > **이 문서를 가장 먼저 읽으세요.** 완료된 작업·남은 작업·실행 방법·존중할 결정이 한 곳에 있습니다.
+
+> **현재 상태 (2026-07-30):** 이 인계 문서의 미완료 목록은 superseded 되었습니다.
+> P0/P0.5/P1/P3/P4 구조 작업과 P2 tape production cutover는 완료되었습니다.
+> P2 rich-content는 부분 완료입니다. 모든 dialect transport는 explicit
+> dispatch arm을 가지고 있고, backlog gap은 없습니다. Codex Responses는
+> OpenAI Responses transport를 재사용하며, Gemini CLI는
+> `GeminiCliProvider`(`ProviderError::NotImplemented`) 의도된 stub입니다.
 
 ---
 
 ## 0. 한 줄 요약
 
-P0(Provider/AI 재설계)와 Step 2(Provider trait `name()` 제거)가 **완료**되었습니다. 프로바이더 정체성 붕괴 수정, catalog 분리, KnownApi 14 정렬, complexity machinery 제거(−4791 lines), Ollama provider, 완전한 3-way identity 분리가 main에 있습니다. **P1.1 owned dialect 엔진의 foundation도 완료**(`5584ee46`): `oxi-ai/src/dialect/`에 11종 dialect enum + 3-piece 계약 + XML dialect 완전 구현(24 tests). 남은 작업은 P1 나머지(루프 wiring·intent tracing·도구 16개)·P2(TUI)·P3(프롬프트/CLI)·P4(oxi-original)와 P0.5 remote-AGENT provider 3개입니다.
+2026-07-28 snapshot: P0(Provider/AI 재설계), Step 2, P1.1 owned dialect foundation이 완료된 시점의 요약입니다. 이후 P0.5/P1/P3/P4 구조 작업과 P2 tape production cutover까지 완료되었습니다.
 
 ---
 
@@ -42,7 +49,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 | 커밋 | 단계 | 내용 |
 |---|---|---|
 | `4836a17b` | **P0.1** | `oxi-catalog` 별도 leaf 크레이트 추출. `Api` + `catalog/` + `product_env` + `data/catalog/` 이관. 의존성 단방향 복원. |
-| `7532a22e` | **P0.3** | **정체성 붕괴 수정 (사용자 핵심 pain)**. `NamedProvider` 래퍼 → `deepseek.name()=="deepseek"`. |
+| `7532a22e` | **P0.3** | **정체성 붕괴 수정 (당시 단계)**. `NamedProvider`로 identity를 transport와 분리; 이후 Step 2에서 `Provider::name()`과 래퍼 모두 제거. |
 | `8410bc73` | P0.4 | `ImageStart`/`ImageDelta`/`ImageEnd` 스트리밍 이벤트. |
 | `f408672c` | P0.4 | `Api` → omp `KnownApi` 14개 확장 + `Mistral` 제거. |
 | `2bd2ccdd` | P0.4 | `HttpErrorDetail{status,body,provider,request_id}` 구조화. |
@@ -64,17 +71,17 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 ---
 
-## 3. 남은 작업 (권장 순서)
+## 3. 2026-07-28 당시 남은 작업 (superseded)
 
-### Step 1 — P0.5 remote-AGENT provider (Cursor/Devin/GitLab Duo)
-omp 고유 프로토콜. 각각 다-일 작업. `Api` enum에 variant 이미 존재(`CursorAgent`, `DevinAgent`, `GitLabDuoAgent`), transport만 `_ => None`.
-- omp 소스: `packages/ai/src/providers/{cursor,devin,gitlab-duo}.ts`
-- 우선순위 낮음 — 사용자가 직접 요청할 때 진행.
+### Step 1 — P0.5 remote-AGENT provider (현재 완료)
+두 dialect 모두 explicit dispatch arm이 있습니다: Codex Responses는
+`OpenAiResponsesProvider`를 재사용하고, Gemini CLI는 의도적으로
+`ProviderError::NotImplemented`를 반환하는 stub입니다.
 
 ### Step 2 — P0.3 후속: Provider trait에서 `name()` 제거 [완료]
 `Provider::name()`을 trait에서 제거하고 `NamedProvider` 래퍼를 폐기함. identity는 이제 registry key와 `Model.provider` 필드에만 존재. factory 함수(`create_builtin_provider*`)는 transport를 직접 반환. P0.3 정체성 회귀 테스트는 `is_some()` + registry-key 기반으로 마이그레이션됨.
 
-### Step 3 — P1: Agent 루프 재정렬 [진행 중]
+### Step 3 — P1: Agent 루프 재정렬 [현재 완료]
 omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-p1-agent-loop-realignment.md`.
 
 **P1.1 owned dialect — 완료** (`5584ee46` 엔진 + `414f2036` 루프 wiring):
@@ -84,28 +91,14 @@ omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-
 - **남은 강화(선택)**: 배치 파서 → 증분 streaming scanner(omp `owned-stream.ts`의 `InbandStreamProjector`, fabrication abort). 토큰 단위 UX 개선, 기능 필수 아님.
 
 
-남은 P1:
-- intent tracing(`i` 필드), append-only context
-- approval/tier, soft tool requirements, Harmony leak 감지
-- 누락 도구 16개 포팅: `ast_grep`, `ast_edit`, `debug`, `eval`, `computer`, `checkpoint`, `rewind`, `hub`, `learn`, `manage_skill`, `inspect_image`, `yield`, `goal`, `review`, `tts`, `vibe`
+2026-07-28 당시 P1 잔여 목록(현재 완료): intent tracing, append-only
+context, approval/tier, soft requirements, Harmony leak 감지, 누락 도구 포팅.
 
-### Step 4 — P3: 프롬프트 & CLI
-- `.md` 기반 시스템 프롬프트 (`include_str!()`)
-- personality 시스템, tool-specific prompt `.md` (~45개)
-- 환경 정보 주입, 누락 CLI 명령 포팅
-- `bootstrap.rs`/`lib.rs` 경계 정리 + F-5 (main.rs inline subcommand → `cli/commands/*.rs`)
-
-### Step 5 — P4: oxi-original 처리
-- issue 시스템: 유지하되 agent 루프/session 모델에서 격리
-- package manager → omp 플러그인 모델로 재정렬
-- language policy 제거/단순화
-
-### Step 6 — P2: TUI 재정렬 (가장 큼, 다-월간)
-`oxi-tui-legacy` → `oxi-tui` rename, 현 v2 폐기. 상세: `plans/2026-07-27-p2-tui-realignment.md`.
-- omp 3-전략 차등 렌더링 + append-only tape 계약
-- 전체 입력 시스템 (Kitty/bracketed paste/keybinding/mouse/kill ring)
-- LaTeX/mermaid/image, glyph 단일화
-- omp `packages/tui/src/tui.ts`(173KB) 기준
+### Step 4–6 — P3/P4/P2 [현재 상태]
+- P3 프롬프트/CLI 구조 작업 완료.
+- P4 oxi-original 구조 작업 및 language policy 제거 완료.
+- P2 production tape cutover 완료; rich-content는 부분 완료.
+  위 P2 상태가 현재 기준입니다. 당시 세부 목표 목록은 historical plan에 보존되어 있습니다.
 
 ---
 
@@ -114,10 +107,8 @@ omp `packages/agent/src/agent-loop.ts`(102KB) 기준. 상세: `plans/2026-07-27-
 사용자가 승인한 방침 (design doc §2):
 
 - **B: omp-정렬 Rust-native** — 견고한 oxi-original(`oxi-sdk` port system, `oxi-lsp`, issue 시스템)은 유지, 표류한 핵심 층을 omp 설계에 정렬.
-- **T1: TUI legacy→omp tape 진화, v2 폐기** (현 `oxi-tui` v2는 grok-inspired, legacy가 omp에 더 가까움).
-- **issue 시스템**: 유지하되 agent 루프/session 모델에서 격리.
-- **package manager**: omp 플러그인 모델로 재정렬.
-- **language policy**: 제거/단순화.
+- **T1 (historical direction)**: legacy→omp tape 진화, v2 폐기.
+- **issue/package/language policy (historical direction)**: 격리·재정렬·제거.
 
 이미 구현된 architectural 결정:
 - **Provider identity ≠ transport**: `Provider::name()` trait 제거 완료. identity는 registry key / `Model.provider`에만 존재 (Step 2).
