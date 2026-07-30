@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Types of resources a package can contribute
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
     /// extension variant.
@@ -22,6 +22,15 @@ pub enum ResourceKind {
     Prompt,
     /// theme variant.
     Theme,
+}
+impl ResourceKind {
+    /// All resource kinds, iteration order is stable.
+    pub const ALL: [ResourceKind; 4] = [
+        ResourceKind::Extension,
+        ResourceKind::Skill,
+        ResourceKind::Prompt,
+        ResourceKind::Theme,
+    ];
 }
 
 impl std::fmt::Display for ResourceKind {

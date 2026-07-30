@@ -219,3 +219,238 @@ pub(super) fn parse_git_source(source: &str) -> ParsedSource {
         ref_,
     }
 }
+
+/// Shell metacharacter rejection. The package system spawns external
+/// processes (`npm pack`, `git clone`) with fields from `ParsedSource`
+/// as arguments. Anything outside the strict whitelist below can become
+/// a shell injection vector through arg-splitting differences and
+/// packaging-tool escaping bugs.
+///
+/// Policy:
+/// - npm `name`/`spec`: letters, digits, `.`, `_`, `-`, `/`, `@`, `~`,
+///   `=`, `+`, leading dot, internal spaces are NOT allowed.
+/// - git `repo`/`host`/`path`/`ref_`: alphanumerics, `.`, `_`, `-`, `:`,
+///   `/`, `+`, `=`, `@`, `#`, `~` (no spaces, no backticks, no $).
+/// - URL: any URL is treated as opaque — we never spawn `Command::new`
+///   on it directly (the HTTP client takes the URL as a single
+///   structured argument), so URLs are exempt from the same rule.
+const NPM_SAFE_CHARS: &str = r"@a-zA-Z0-9._/+=~";
+const GIT_SAFE_CHARS: &str = r"a-zA-Z0-9._:/=+@#-~";
+
+/// Validate a shell-safe npm package spec string (the `name` or full
+/// `spec` portion after stripping `npm:`).
+pub(crate) fn validate_npm_spec(spec: &str) -> Result<(), String> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return Err("npm spec must not be empty".to_string());
+    }
+    if trimmed.chars().any(|c| !is_safe_npm_char(c)) {
+        return Err(format!(
+            "npm spec '{trimmed}' contains shell metacharacters; \
+             only {NPM_SAFE_CHARS} are permitted"
+        ));
+    }
+    if trimmed.starts_with('.') {
+        return Err(format!("npm spec '{trimmed}' must not start with '.'"));
+    }
+    Ok(())
+}
+
+/// Validate shell-safe fields on a git source.
+pub(crate) fn validate_git_source(
+    repo: &str,
+    host: &str,
+    path: &str,
+    ref_: Option<&str>,
+) -> Result<(), String> {
+    fn check(field: &str, label: &str) -> Result<(), String> {
+        if field.is_empty() {
+            return Err(format!("git {label} must not be empty"));
+        }
+        if field.chars().any(|c| !is_safe_git_char(c)) {
+            return Err(format!(
+                "git {label} '{field}' contains shell metacharacters; \
+                 only {GIT_SAFE_CHARS} are permitted"
+            ));
+        }
+        Ok(())
+    }
+    check(repo, "repo")?;
+    check(host, "host")?;
+    check(path, "path")?;
+    if let Some(r) = ref_ {
+        check(r, "ref")?;
+    }
+    Ok(())
+}
+
+/// Reject a `ParsedSource` outright if any of its component fields that
+/// are about to be passed to `Command::new` (or to `git_clone`'s args)
+/// contain shell metacharacters. URLs are exempt because they always go
+/// through `reqwest` which takes the URL as one structured argument.
+pub(crate) fn validate_parsed_source(parsed: &ParsedSource) -> Result<(), String> {
+    match parsed {
+        ParsedSource::Npm { spec, name, .. } => {
+            validate_npm_spec(spec)?;
+            validate_npm_spec(name)?;
+        }
+        ParsedSource::Git {
+            repo,
+            host,
+            path,
+            ref_,
+        } => {
+            validate_git_source(repo, host, path, ref_.as_deref())?;
+        }
+        ParsedSource::Local { .. } | ParsedSource::Url { .. } => {}
+    }
+    Ok(())
+}
+
+fn is_safe_npm_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '@' | '+' | '=' | '~')
+}
+
+fn is_safe_git_char(c: char) -> bool {
+    c.is_ascii_alphanumeric()
+        || matches!(c, '.' | '_' | '-' | ':' | '/' | '+' | '=' | '@' | '#' | '~')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_safe_npm_specs() {
+        for s in [
+            "express",
+            "express@4.18.0",
+            "@scope/pkg",
+            "@scope/pkg@1.2.3",
+            "lodash-es@4.17.21+esm",
+        ] {
+            validate_npm_spec(s).unwrap_or_else(|e| panic!("{s}: {e}"));
+        }
+    }
+
+    #[test]
+    fn rejects_npm_specs_with_metachars() {
+        for s in [
+            "ex press",
+            "$(rm -rf)",
+            ";ls",
+            "ex&press",
+            "ex|press",
+            "`ls`",
+            "ex\npress",
+            ".hidden-start",
+            "@scope/pkg@1; rm",
+            "npm:foo", // prefix is stripped before validate; just name
+        ] {
+            assert!(validate_npm_spec(s).is_err(), "{s} should be rejected");
+        }
+    }
+
+    #[test]
+    fn accepts_safe_git_fields() {
+        validate_git_source(
+            "https://github.com/org/repo.git",
+            "github.com",
+            "org/repo",
+            Some("v1.2.3"),
+        )
+        .unwrap();
+        validate_git_source(
+            "https://github.com/org/repo.git",
+            "github.com",
+            "org/repo",
+            None,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_git_fields_with_metachars() {
+        assert!(
+            validate_git_source(
+                "https://github.com/org/repo;rm.git",
+                "github.com",
+                "org/repo",
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            validate_git_source(
+                "https://github.com/org/repo.git",
+                "github.com|xx",
+                "org/repo",
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            validate_git_source(
+                "https://github.com/org/repo.git",
+                "github.com",
+                "org/$(rm)repo",
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            validate_git_source(
+                "https://github.com/org/repo.git",
+                "github.com",
+                "org/repo",
+                Some("v1; ls"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parsed_source_validation_picks_correct_branch() {
+        validate_parsed_source(&ParsedSource::Npm {
+            spec: "express".into(),
+            name: "express".into(),
+            pinned: false,
+        })
+        .unwrap();
+        assert!(
+            validate_parsed_source(&ParsedSource::Npm {
+                spec: "ex;rm".into(),
+                name: "express".into(),
+                pinned: false,
+            })
+            .is_err()
+        );
+
+        validate_parsed_source(&ParsedSource::Git {
+            repo: "https://github.com/o/r.git".into(),
+            host: "github.com".into(),
+            path: "o/r".into(),
+            ref_: None,
+        })
+        .unwrap();
+        assert!(
+            validate_parsed_source(&ParsedSource::Git {
+                repo: "https://github.com/o/r.git".into(),
+                host: "github.com".into(),
+                path: "o/r;ls".into(),
+                ref_: None,
+            })
+            .is_err()
+        );
+
+        // URL & Local short-circuit (no spawn-time fields).
+        validate_parsed_source(&ParsedSource::Url {
+            url: "https://example.com/x.tar.gz?query=`whoami`".into(),
+        })
+        .unwrap();
+        validate_parsed_source(&ParsedSource::Local {
+            path: "/tmp/pkg;rm".into(),
+        })
+        .unwrap();
+    }
+}

@@ -310,6 +310,13 @@ impl PackageManager {
         scope: SourceScope,
     ) -> Result<PackageManifest> {
         let parsed = ParsedSource::parse(source);
+        if let Err(reason) = super::source::validate_parsed_source(&parsed) {
+            bail!(
+                "refusing to install '{source}': {reason}; \
+                 the install command would forward this string to npm/git, \
+                 so metacharacters are rejected at the boundary"
+            );
+        }
         self.emit_progress(ProgressEvent {
             event_type: ProgressEventType::Start,
             action: ProgressAction::Install,
@@ -686,6 +693,9 @@ impl PackageManager {
 
     /// Install from npm using `npm pack` (legacy sync method)
     pub fn install_npm(&mut self, name: &str) -> Result<PackageManifest> {
+        if let Err(reason) = super::source::validate_npm_spec(name) {
+            bail!("refusing to install npm package '{name}': {reason}");
+        }
         self.install_npm_pack(name, SourceScope::User)
     }
 
@@ -800,6 +810,12 @@ impl PackageManager {
 
         if let Some(entry) = lock_entry {
             let parsed = ParsedSource::parse(&entry.source);
+            if let Err(reason) = super::source::validate_parsed_source(&parsed) {
+                bail!(
+                    "refusing to update '{name}': lockfile source '{}' {reason}",
+                    entry.source
+                );
+            }
             return match &parsed {
                 ParsedSource::Npm { spec, .. } => {
                     self.emit_progress(ProgressEvent {
@@ -1067,8 +1083,65 @@ impl PackageManager {
         Ok(counts)
     }
 
-    /// Resolve all resources from all installed packages, producing ResolvedPaths
+    /// Resolve all resources from all installed packages, producing ResolvedPaths.
+    ///
+    /// Unchanged behaviour: every resource defaults to `enabled = true`.
+    /// Use [`Self::resolve_with_config`] to apply runtime + project
+    /// overrides.
     pub fn resolve(&self) -> ResolvedPaths {
+        self.resolve_inner(None, None)
+    }
+
+    /// Resolve with the layered enabled-state policy: project forces
+    /// first, then user-level `RuntimeConfig`, then default-on.
+    /// `overrides_path` and `runtime_path` are read from disk if Some.
+    /// Passing both `None` is identical to [`Self::resolve`].
+    pub fn resolve_with_config(
+        &self,
+        runtime_path: Option<&Path>,
+        overrides_path: Option<&Path>,
+    ) -> ResolvedPaths {
+        let runtime = runtime_path.and_then(|p| {
+            let pp = p.to_path_buf();
+            super::runtime_config::RuntimeConfig::read(&pp).ok()
+        });
+        let overrides =
+            overrides_path.and_then(|p| super::overrides::ProjectPluginOverrides::read(p).ok());
+        self.resolve_inner(runtime.as_ref(), overrides.as_ref())
+    }
+
+    /// Canonical path the doctor uses for the runtime config file.
+    /// Exposed so callers can pass the right path into
+    /// `resolve_with_config`.
+    pub fn runtime_config_path(&self) -> PathBuf {
+        // Same location as `~/.oxi/runtime.json` regardless of
+        // `packages_dir`, matching `RuntimeConfig::global_path`.
+        match dirs::home_dir() {
+            Some(h) => h
+                .join(".oxi")
+                .join(super::runtime_config::RUNTIME_CONFIG_FILE),
+            None => self
+                .packages_dir
+                .join("..")
+                .join(super::runtime_config::RUNTIME_CONFIG_FILE),
+        }
+    }
+
+    /// Canonical path for the project overrides file given the
+    /// manager's current `project_dir`.
+    pub fn project_overrides_path(&self) -> PathBuf {
+        super::overrides::ProjectPluginOverrides::project_path(&self.project_dir)
+    }
+
+    /// Internal resolve helper. Public `resolve` and `resolve_with_config`
+    /// funnel through this single function so the lifecycle logic
+    /// (which resources exist, what their metadata is) lives in one
+    /// place.
+    fn resolve_inner(
+        &self,
+        runtime: Option<&super::runtime_config::RuntimeConfig>,
+        overrides: Option<&super::overrides::ProjectPluginOverrides>,
+    ) -> ResolvedPaths {
         let mut extensions = Vec::new();
         let mut skills = Vec::new();
         let mut prompts = Vec::new();
@@ -1082,35 +1155,29 @@ impl PackageManager {
 
             let metadata = PathMetadata {
                 source: name.clone(),
-                scope: SourceScope::User,
+                scope: self
+                    .lockfile
+                    .get(name)
+                    .map(|e| e.scope)
+                    .unwrap_or(SourceScope::User),
                 origin: ResourceOrigin::Package,
                 base_dir: Some(install_dir.clone()),
             };
 
-            // Use discover_resources logic
             if let Ok(resources) = self.discover_resources(name) {
                 for r in resources {
+                    let enabled =
+                        super::overrides::resolve_enabled(name, r.kind, overrides, runtime);
+                    let entry = ResolvedResource {
+                        path: r.path,
+                        enabled,
+                        metadata: metadata.clone(),
+                    };
                     match r.kind {
-                        ResourceKind::Extension => extensions.push(ResolvedResource {
-                            path: r.path,
-                            enabled: true,
-                            metadata: metadata.clone(),
-                        }),
-                        ResourceKind::Skill => skills.push(ResolvedResource {
-                            path: r.path,
-                            enabled: true,
-                            metadata: metadata.clone(),
-                        }),
-                        ResourceKind::Prompt => prompts.push(ResolvedResource {
-                            path: r.path,
-                            enabled: true,
-                            metadata: metadata.clone(),
-                        }),
-                        ResourceKind::Theme => themes.push(ResolvedResource {
-                            path: r.path,
-                            enabled: true,
-                            metadata: metadata.clone(),
-                        }),
+                        ResourceKind::Extension => extensions.push(entry),
+                        ResourceKind::Skill => skills.push(entry),
+                        ResourceKind::Prompt => prompts.push(entry),
+                        ResourceKind::Theme => themes.push(entry),
                     }
                 }
             }
@@ -1122,6 +1189,13 @@ impl PackageManager {
             prompts,
             themes,
         }
+    }
+
+    /// Doctor-facing manifest reader. Public on the manager only so
+    /// `doctor.rs` can read a manifest without exposing the
+    /// `read_manifest` private helper to the rest of the codebase.
+    pub(crate) fn read_manifest_for_doctor(path: &Path) -> Result<PackageManifest> {
+        Self::read_manifest(path)
     }
 
     // ── Dependency resolution ─────────────────────────────────────────

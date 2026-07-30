@@ -54,11 +54,14 @@
 //! - `manager` — `PackageManager` facade + tests
 
 mod discovery;
+mod doctor;
 mod fs;
 mod git_ops;
 mod lockfile;
 mod manager;
 mod npm;
+mod overrides;
+mod runtime_config;
 mod source;
 mod types;
 
@@ -72,12 +75,12 @@ pub(super) const LOCKFILE_NAME: &str = "oxi-lock.json";
 pub(super) const MANIFEST_NAME: &str = "oxi-package.toml";
 pub(super) const NPM_MANIFEST_NAME: &str = "package.json";
 
-// Public re-exports preserve the original `crate::storage::packages::*`
-// surface so existing callers (`use oxi::storage::packages::*`) keep
-// working without churn.
+pub use doctor::{DoctorCheck, DoctorReport, EnabledSummary, Health, run as run_doctor};
 pub use lockfile::{LockEntry, Lockfile, ResourceCounts};
 pub use manager::PackageManager;
 pub use npm::{NpmPackageInfo, get_latest_npm_version};
+pub use overrides::{ForceMap, ForceState, ProjectPluginOverrides, resolve_enabled};
+pub use runtime_config::{RUNTIME_CONFIG_FILE, RUNTIME_CONFIG_VERSION, RuntimeConfig};
 pub use source::ParsedSource;
 pub use types::{
     ConfiguredPackage, DiscoveredResource, PackageManifest, PackageUpdateInfo, PathMetadata,
