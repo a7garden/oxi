@@ -255,6 +255,18 @@ impl MemoryBackend for ExtractingMemoryBackend {
         self.inner.delete(id)
     }
 
+    fn clear_all<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<usize, ToolError>> + Send + 'a>> {
+        self.inner.clear_all()
+    }
+
+    fn enqueue_consolidation<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>> {
+        self.inner.enqueue_consolidation()
+    }
+
     fn memory_info(&self) -> Option<String> {
         self.inner.memory_info()
     }

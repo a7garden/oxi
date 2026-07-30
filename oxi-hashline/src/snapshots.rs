@@ -70,7 +70,7 @@ pub struct Snapshot {
 ///
 /// [`head`]: SnapshotStore::head
 /// [`by_hash`]: SnapshotStore::by_hash
-pub trait SnapshotStore: Send + Sync {
+pub trait SnapshotStore: Send + Sync + std::fmt::Debug {
     /// Most-recently recorded version for `path`, or `None` if none.
     fn head(&self, _path: &str) -> Option<Snapshot> {
         None
@@ -160,6 +160,13 @@ impl InMemorySnapshotStore {
 impl Default for InMemorySnapshotStore {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for InMemorySnapshotStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InMemorySnapshotStore")
+            .finish_non_exhaustive()
     }
 }
 

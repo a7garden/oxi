@@ -126,7 +126,10 @@ impl MemoryBackend for MnemopiMemoryBackend {
                 .await
                 .map_err(|e| format!("mnemopi put: {e}"))?;
 
-            if self.engine.blocking_should_auto_sleep(200)
+            // block_in_place allows blocking_lock inside Mnemopi
+            // from an async context on multi-thread tokio runtimes.
+            if tokio::runtime::Handle::try_current().is_ok()
+                && tokio::task::block_in_place(|| self.engine.blocking_should_auto_sleep(200))
                 && let Err(e) = self.engine.sleep(24, false).await
             {
                 tracing::debug!("mnemopi auto-sleep failed: {e}");
@@ -202,6 +205,65 @@ impl MemoryBackend for MnemopiMemoryBackend {
         })
     }
 
+    /// Bulk erase via the underlying SQLite connection: working_memory,
+    /// episodic_memory, and memory_embeddings. The FTS5 indices are
+    /// rebuilt by their existing triggers when rows are removed.
+    /// Uses `Mnemopi::spawn_blocking` so the call is safe from any
+    /// async context (the closure runs on the blocking pool; the
+    fn clear_all<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<usize, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.engine
+                .spawn_blocking(|conn| {
+                    let wm = conn
+                        .execute("DELETE FROM working_memory", [])
+                        .map_err(|e| {
+                            oxi_mnemopi::MnemopiError::Other(format!("clear working_memory: {e}"))
+                        })?;
+                    let em = conn
+                        .execute("DELETE FROM episodic_memory", [])
+                        .map_err(|e| {
+                            oxi_mnemopi::MnemopiError::Other(format!("clear episodic_memory: {e}"))
+                        })?;
+                    let me = conn
+                        .execute("DELETE FROM memory_embeddings", [])
+                        .map_err(|e| {
+                            oxi_mnemopi::MnemopiError::Other(format!(
+                                "clear memory_embeddings: {e}"
+                            ))
+                        })?;
+                    Ok::<usize, oxi_mnemopi::MnemopiError>(wm + em + me)
+                })
+                .await
+                .map_err(|e| format!("mnemopi clear_all: {e}"))
+        })
+    }
+
+    /// Real consolidation trigger: run a synchronous sleep pass through
+    /// the engine. The Mnemopi facade already owns the SQLite handle,
+    /// so this is the correct level for the operation — no separate
+    /// pipeline DB is needed for an immediate consolidation pass.
+    fn enqueue_consolidation<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.engine
+                .sleep(24, false)
+                .await
+                .map(|result| {
+                    format!(
+                        "consolidated {} → {} summaries (tier1→2={}, tier2→3={})",
+                        result.items_consolidated,
+                        result.summaries_created,
+                        result.degradation.tier1_to_tier2,
+                        result.degradation.tier2_to_tier3,
+                    )
+                })
+                .map_err(|e| format!("mnemopi enqueue_consolidation: {e}"))
+        })
+    }
+
     fn memory_info(&self) -> Option<String> {
         let stats = self.engine.blocking_session_stats();
         let db = self
@@ -227,7 +289,11 @@ impl MemoryBackend for MnemopiMemoryBackend {
     }
 
     fn trigger_consolidation(&self) -> Option<String> {
-        let result = self.engine.blocking_sleep(24, false);
+        let result = if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| self.engine.blocking_sleep(24, false))
+        } else {
+            self.engine.blocking_sleep(24, false)
+        };
         if result.summaries_created > 0 || result.status == "consolidated" {
             Some(format!(
                 "✓ Consolidated {} memories → {} summaries. Degraded: tier1→2={}, tier2→3={}",
@@ -242,7 +308,11 @@ impl MemoryBackend for MnemopiMemoryBackend {
     }
 
     fn trigger_harmonize(&self) -> Option<String> {
-        let stats = self.engine.blocking_harmonize();
+        let stats = if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| self.engine.blocking_harmonize())
+        } else {
+            self.engine.blocking_harmonize()
+        };
         Some(format!(
             "✓ Harmonized: clusters={}, beliefs={}, contradictions={}, harmony={:.4}, status={}",
             stats.clusters_found,
@@ -251,5 +321,138 @@ impl MemoryBackend for MnemopiMemoryBackend {
             stats.harmony_score_avg,
             stats.status,
         ))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_backend() -> (MnemopiMemoryBackend, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let backend =
+            MnemopiMemoryBackend::open(&dir.path().join("mnemopi.db"), "default", None, "")
+                .unwrap();
+        (backend, dir)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_list_search_delete_roundtrip() {
+        let (backend, _dir) = tmp_backend();
+        let id = backend
+            .put("alice prefers rust ownership", "fact", "alice")
+            .await
+            .unwrap();
+        assert!(!id.is_empty());
+
+        let items = backend.list("alice").await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].content, "alice prefers rust ownership");
+        assert_eq!(items[0].subject, "alice");
+        assert_eq!(items[0].kind, "fact");
+
+        let results = backend.search("rust", 5).await.unwrap();
+        assert!(
+            !results.is_empty(),
+            "FTS5 recall must surface the just-stored memory"
+        );
+
+        backend.delete(&id).await.unwrap();
+        assert!(backend.list("alice").await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_scopes_per_subject() {
+        let (backend, _dir) = tmp_backend();
+        let a = backend.put("a1", "fact", "alice").await.unwrap();
+        let b = backend.put("b1", "fact", "bob").await.unwrap();
+
+        assert_eq!(backend.list("alice").await.unwrap().len(), 1);
+        assert_eq!(backend.list("bob").await.unwrap().len(), 1);
+        assert!(backend.list("nobody").await.unwrap().is_empty());
+
+        backend.delete(&a).await.unwrap();
+        backend.delete(&b).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn memory_info_describes_engine_state() {
+        let (backend, _dir) = tmp_backend();
+        // Sync call enters `parking_lot::Mutex::blocking_lock`; hop
+        // to the blocking pool so it doesn't panic inside the runtime.
+        let info = tokio::task::spawn_blocking(move || backend.memory_info())
+            .await
+            .unwrap()
+            .expect("Mnemopi backend reports info");
+        assert!(
+            info.contains("Mnemopi"),
+            "memory_info should advertise Mnemopi: {info}"
+        );
+        assert!(info.contains("Working:"));
+        assert!(info.contains("Episodic:"));
+        assert!(info.contains("DB:"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn clear_all_wipes_working_memory_and_embeddings() {
+        let (backend, _dir) = tmp_backend();
+        backend.put("a1", "fact", "alice").await.unwrap();
+        backend.put("a2", "fact", "alice").await.unwrap();
+        backend.put("b1", "fact", "bob").await.unwrap();
+
+        let removed = backend.clear_all().await.unwrap();
+        assert!(removed >= 3, "expected >=3 rows cleared, got {removed}");
+        assert!(backend.list("alice").await.unwrap().is_empty());
+        assert!(backend.list("bob").await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn clear_all_is_idempotent_on_empty_backend() {
+        let (backend, _dir) = tmp_backend();
+        let removed = backend.clear_all().await.unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn enqueue_consolidation_runs_real_sleep_pass() {
+        let (backend, _dir) = tmp_backend();
+        // Pre-populate so sleep has something to do.
+        for i in 0..4 {
+            backend
+                .put(&format!("note-{i}"), "fact", "alice")
+                .await
+                .unwrap();
+        }
+        let msg = backend
+            .enqueue_consolidation()
+            .await
+            .expect("enqueue_consolidation should succeed");
+        assert!(!msg.is_empty());
+        assert!(
+            msg.contains("consolidated") || msg.contains("summaries"),
+            "expected a sleep result message, got: {msg}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trigger_consolidation_returns_status_string() {
+        let (backend, _dir) = tmp_backend();
+        backend.put("seed", "fact", "alice").await.unwrap();
+        let msg = backend
+            .trigger_consolidation()
+            .expect("Mnemopi backend exposes trigger_consolidation");
+        assert!(!msg.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trigger_harmonize_returns_status_string() {
+        let (backend, _dir) = tmp_backend();
+        backend.put("seed", "fact", "alice").await.unwrap();
+        let msg = backend
+            .trigger_harmonize()
+            .expect("Mnemopi backend exposes trigger_harmonize");
+        assert!(
+            msg.contains("Harmonized"),
+            "trigger_harmonize should report the SHMR outcome: {msg}"
+        );
     }
 }
