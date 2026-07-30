@@ -183,6 +183,9 @@ pub struct App {
     /// `issue_store` is available.
     #[allow(dead_code)]
     liveness_guard: Option<crate::store::issues::liveness::AliveGuard>,
+    /// Cached `default` persona body, resolved once in `from_oxi` so
+    /// synchronous prompt rebuilds can reuse it without awaiting the port.
+    persona_body: RwLock<Option<String>>,
 }
 
 /// Context for compaction operations, passed to extension hooks
@@ -190,6 +193,7 @@ pub struct App {
 fn build_system_prompt(
     thinking_level: crate::store::settings::ThinkingLevel,
     skill_contents: &[String],
+    persona_body: Option<&str>,
 ) -> String {
     let skills: Vec<prompt::system_prompt::Skill> = skill_contents
         .iter()
@@ -206,6 +210,7 @@ fn build_system_prompt(
         cwd: std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
+        persona_prompt: persona_body.map(|s| s.to_string()),
         ..Default::default()
     };
 
@@ -228,14 +233,29 @@ impl App {
     /// [`crate::store::issues::liveness::TUI_OWNERSHIP_ID`] so the panel and
     /// agent see the same flock holder. In print / RPC mode, a stable
     /// process-scoped id (e.g. `proc-<pid>-<uuid>`) is appropriate.
-    /// When `issue_store` is available, an `flock` is acquired under this
-    /// id for the lifetime of the returned `App`.
     pub async fn from_oxi(
         oxi: oxi_sdk::Oxi,
         settings: Settings,
         ownership_session_id: String,
     ) -> Result<Self> {
-        let model_id = settings.effective_model(None).unwrap_or_default();
+        // Resolve the default persona once from the wired
+        // PersonaProvider port. The body flows into the system prompt;
+        // `preferred_model` overrides the settings default when no
+        // other override exists.
+        let persona = match oxi.ports().personas.get("default").await {
+            Ok(Some(p)) if !p.system_prompt.trim().is_empty() => Some(p),
+            Ok(_) => None,
+            Err(e) => {
+                tracing::warn!(error = %e, "default persona lookup failed");
+                None
+            }
+        };
+
+        let model_id = persona
+            .as_ref()
+            .and_then(|p| p.preferred_model.clone())
+            .or_else(|| settings.effective_model(None))
+            .unwrap_or_default();
         // Provider-name and api_key lookups removed in 0.55.0 — the SDK
         // resolver consults the wired AuthProvider port directly.
 
@@ -250,7 +270,8 @@ impl App {
             SkillManager::new()
         });
 
-        let system_prompt = build_system_prompt(settings.thinking_level, &[]);
+        let body_str = persona.as_ref().map(|p| p.system_prompt.clone());
+        let system_prompt = build_system_prompt(settings.thinking_level, &[], body_str.as_deref());
         let compaction_strategy = if settings.auto_compaction {
             oxi_sdk::CompactionStrategy::Threshold(0.8)
         } else {
@@ -343,6 +364,7 @@ impl App {
             issue_store,
             ownership_session_id,
             liveness_guard: None, // set below once issue_store is known
+            persona_body: RwLock::new(persona.as_ref().map(|p| p.system_prompt.clone())),
         })
         .map(|mut app| {
             // Acquire the process-wide liveness flock now that issue_store exists.
@@ -459,7 +481,12 @@ impl App {
             .iter()
             .filter_map(|name| skills.get(name).map(|s| s.content.clone()))
             .collect();
-        let prompt = build_system_prompt(self.settings.thinking_level, &contents);
+        // The persona body was resolved once in `from_oxi` and cached
+        // on `self.persona_body` so this sync rebuild can include it
+        // without re-awaiting the async PersonaProvider port.
+        let persona = self.persona_body.read().clone();
+        let prompt =
+            build_system_prompt(self.settings.thinking_level, &contents, persona.as_deref());
         self.agent.set_system_prompt(prompt);
     }
 

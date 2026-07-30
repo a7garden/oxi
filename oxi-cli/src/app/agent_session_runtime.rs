@@ -106,6 +106,14 @@ pub struct AgentSessionServices {
     /// Resource loader (skills, extensions, themes, context files).
     #[allow(dead_code)]
     pub resource_loader: Arc<ResourceLoader>,
+    /// Persona provider backing the TUI/session system prompt.
+    ///
+    /// The provider's `default` persona (if present) is resolved at
+    /// session construction and threaded into the system prompt as a
+    /// body fragment. `preferred_model` is applied to model resolution;
+    /// `allowed_tools` is intentionally non-applied (no per-session
+    /// allow-list hook on `ToolRegistry`).
+    pub persona_provider: Arc<dyn oxi_sdk::PersonaProvider>,
     /// Diagnostics collected during service creation.
     #[allow(dead_code)]
     pub diagnostics: Vec<AgentSessionRuntimeDiagnostic>,
@@ -125,6 +133,9 @@ pub struct CreateAgentSessionServicesOptions {
     pub model_registry: Option<Arc<ModelRegistry>>,
     /// Override resource loader (default: created from cwd + agent_dir).
     pub resource_loader: Option<Arc<ResourceLoader>>,
+    /// Override persona provider (default: `FilePersonaProvider` rooted
+    /// at `<agent_dir>/personas`).
+    pub persona_provider: Option<Arc<dyn oxi_sdk::PersonaProvider>>,
 }
 
 impl CreateAgentSessionServicesOptions {
@@ -137,6 +148,7 @@ impl CreateAgentSessionServicesOptions {
             settings: None,
             model_registry: None,
             resource_loader: None,
+            persona_provider: None,
         }
     }
 }
@@ -181,6 +193,17 @@ pub fn create_agent_session_services(
         .resource_loader
         .unwrap_or_else(|| Arc::new(ResourceLoader::with_paths(agent_dir.clone(), cwd.clone())));
 
+    // Persona provider — file-based by default, rooted at
+    // `<agent_dir>/personas`. The TUI/session system prompt
+    // construction reads the `default` persona (when present) and
+    // threads its body into the prompt builder.
+    let persona_provider: Arc<dyn oxi_sdk::PersonaProvider> =
+        options.persona_provider.unwrap_or_else(|| {
+            Arc::new(oxi_sdk::fs::FilePersonaProvider::new(
+                agent_dir.join("personas"),
+            ))
+        });
+
     Ok(AgentSessionServices {
         cwd,
         agent_dir,
@@ -188,6 +211,7 @@ pub fn create_agent_session_services(
         settings,
         model_registry,
         resource_loader,
+        persona_provider,
         diagnostics: Vec::new(),
     })
 }
@@ -233,8 +257,19 @@ pub async fn create_agent_session_from_services(
     let settings = services.settings.as_ref();
     let cwd = services.cwd.to_string_lossy().to_string();
 
+    // Resolve the default persona once. The body flows into the
+    // system prompt; `preferred_model` overrides the settings default
+    // when no explicit CLI/model-id override is supplied. We resolve
+    // it before the model_id branch so both branches can share it.
+    let persona = resolve_default_persona(services.persona_provider.as_ref()).await;
+
     // Resolve model — no hardcoded default, must be configured
-    let model_id = match options.model_id.or_else(|| settings.effective_model(None)) {
+    // unless the active persona declares one.
+    let model_id = match options
+        .model_id
+        .or_else(|| persona.as_ref().and_then(|p| p.preferred_model.clone()))
+        .or_else(|| settings.effective_model(None))
+    {
         Some(id) if !id.is_empty() => {
             tracing::debug!(
                 "Model resolved: {} (last_used={:?})",
@@ -296,6 +331,7 @@ pub async fn create_agent_session_from_services(
                 thinking_level,
                 memory_opt,
                 crate::services::read_path_block(&services.agent_dir, &services.cwd),
+                persona.as_ref(),
             )),
             timeout_seconds: settings.tool_timeout_seconds,
             temperature: settings.effective_temperature(),
@@ -374,6 +410,7 @@ pub async fn create_agent_session_from_services(
         thinking_level,
         memory_block_opt,
         crate::services::read_path_block(&services.agent_dir, &services.cwd),
+        persona.as_ref(),
     );
     let compaction_strategy = if settings.auto_compaction {
         oxi_sdk::CompactionStrategy::Threshold(0.8)
@@ -858,7 +895,32 @@ fn parse_model_id(model_id: &str) -> (String, String) {
 ///
 /// Delegates to [`crate::prompt::system_prompt::build_system_prompt`].
 pub(crate) fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
-    build_system_prompt_with_memory(thinking_level, None, None)
+    build_system_prompt_with_memory(thinking_level, None, None, None)
+}
+
+/// Resolve the `default` persona from a [`oxi_sdk::PersonaProvider`].
+///
+/// Returns `None` when the provider has no `default.md`, when the file
+/// exists but the body is blank, or when the provider errors out — in
+/// every case the session prompt falls back to the no-persona default.
+/// Errors are logged at `warn`; persona resolution is non-fatal.
+///
+/// This is the single entry point that the TUI/session path uses to
+/// bridge the registered `PersonaProvider` port to the
+/// [`build_system_prompt_with_memory`] builder. Callers that already
+/// hold a `Persona` (e.g. tests, or non-default selection paths) can
+/// pass it directly.
+pub(crate) async fn resolve_default_persona(
+    provider: &dyn oxi_sdk::PersonaProvider,
+) -> Option<oxi_sdk::Persona> {
+    match provider.get("default").await {
+        Ok(Some(p)) if !p.system_prompt.trim().is_empty() => Some(p),
+        Ok(_) => None,
+        Err(e) => {
+            tracing::warn!(error = %e, "default persona lookup failed");
+            None
+        }
+    }
 }
 
 /// Combine memory block with tool usage guidance for system prompt.
@@ -887,10 +949,18 @@ fn append_memory_and_tool_guidance(memory_block: Option<String>) -> Option<Strin
 /// read-path block (`read_path_block`) generated from
 /// `<memory-root>/memory_summary.md` (omp `read-path.md` port).
 /// Both are appended after the standard system prompt body.
+///
+/// `persona`, when `Some`, contributes its `system_prompt` body to
+/// the rendered prompt via `BuildSystemPromptOptions::persona_prompt`.
+/// `preferred_model` is **not** consumed here — it's applied at the
+/// composition root (`create_agent_session_from_services`) before
+/// the agent is built. `allowed_tools` is intentionally non-applied
+/// (no per-session allow-list hook on `ToolRegistry`).
 pub(crate) fn build_system_prompt_with_memory(
     thinking_level: ThinkingLevel,
     memory_block: Option<String>,
     read_path_block: Option<String>,
+    persona: Option<&oxi_sdk::Persona>,
 ) -> String {
     // Concatenate the two optional blocks in order (raw recall
     // first, then the autonomous read-path guidance).
@@ -908,6 +978,7 @@ pub(crate) fn build_system_prompt_with_memory(
         selected_tools: crate::prompt::system_prompt::default_tool_names(),
         tool_snippets: crate::prompt::system_prompt::default_tool_snippets(),
         append_system_prompt: append_memory_and_tool_guidance(combined),
+        persona_prompt: persona.map(|p| p.system_prompt.clone()),
         ..Default::default()
     };
 
@@ -939,6 +1010,7 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
             settings: None,
             model_registry: None,
             resource_loader: None,
+            persona_provider: None,
         })?;
         let services = Arc::new(services);
 
@@ -1081,5 +1153,49 @@ mod tests {
             dst.mcp_manager().is_some(),
             "set_mcp_manager propagates the live manager"
         );
+    }
+
+    /// Persona is loaded from a temp `FilePersonaProvider` and the
+    /// resolved body reaches `build_system_prompt_with_memory` —
+    /// the deterministic end-to-end proof required by the persona
+    /// integration acceptance.
+    #[tokio::test]
+    async fn default_persona_body_reaches_session_prompt() {
+        use oxi_sdk::fs::FilePersonaProvider;
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("default.md"),
+            "You are a reviewer focused on security.",
+        )
+        .unwrap();
+
+        let provider: Arc<dyn oxi_sdk::PersonaProvider> =
+            Arc::new(FilePersonaProvider::new(tmp.path()));
+        let resolved = resolve_default_persona(provider.as_ref())
+            .await
+            .expect("default.md should resolve");
+        assert!(resolved.system_prompt.contains("security"));
+        assert!(resolved.preferred_model.is_none());
+
+        let prompt =
+            build_system_prompt_with_memory(ThinkingLevel::Medium, None, None, Some(&resolved));
+        assert!(
+            prompt.contains("# Persona"),
+            "persona block must be rendered when persona is provided"
+        );
+        assert!(
+            prompt.contains("You are a reviewer focused on security."),
+            "persona body must reach the session prompt end-to-end"
+        );
+        // Persona metadata is NOT echoed as model-visible prose.
+        assert!(!prompt.contains("Preferred model:"));
+        assert!(!prompt.contains("Allowed tools:"));
+
+        // Negative case: no persona → no persona block.
+        let no_persona = build_system_prompt_with_memory(ThinkingLevel::Medium, None, None, None);
+        assert!(!no_persona.contains("# Persona"));
     }
 }
