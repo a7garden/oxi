@@ -372,6 +372,14 @@ mod tests {
     }
 
     #[test]
+    fn split_start_and_end_with_payload_preserve_all_bytes() {
+        let mut buf = PasteBuffer::new(1024);
+        assert_eq!(buf.feed(b"\x1b["), PasteEvent::NotPaste);
+        assert_eq!(buf.feed(b"200~a\x1b[2"), PasteEvent::Started);
+        assert_eq!(buf.feed(b"01~"), PasteEvent::Completed("a".into()));
+    }
+
+    #[test]
     fn byte_limit_force_completes() {
         let mut buf = PasteBuffer::new(16);
         assert_eq!(buf.feed(b"\x1b[200~"), PasteEvent::Started);

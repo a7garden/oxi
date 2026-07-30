@@ -29,27 +29,10 @@ fn share_state(state: &mut crate::tui::app::AppState) -> SharedAppState {
 // ─────────────────────────────────────────────────────────────────────────
 
 enum SettingsItem {
-    Toggle {
-        label: String,
-        value: bool,
-    },
-    Choice {
-        label: String,
-        value: String,
-        /// When `true`, the item is rendered greyed-out and Enter/Space
-        /// are blocked (no cycling, optional warning notification).
-        /// Used to gate the per-channel language Choice items behind
-        /// the `language_policy` master toggle.
-        disabled: bool,
-    },
-    ReadOnly {
-        label: String,
-        value: String,
-    },
-    Action {
-        label: String,
-        id: &'static str,
-    },
+    Toggle { label: String, value: bool },
+    Choice { label: String, value: String },
+    ReadOnly { label: String, value: String },
+    Action { label: String, id: &'static str },
 }
 
 impl SettingsItem {
@@ -77,9 +60,6 @@ impl SettingsItem {
     }
     fn is_editable(&self) -> bool {
         !matches!(self, SettingsItem::ReadOnly { .. })
-    }
-    fn is_disabled(&self) -> bool {
-        matches!(self, SettingsItem::Choice { disabled: true, .. })
     }
 }
 
@@ -120,10 +100,8 @@ struct SettingsOverlay {
     session: AgentSessionHandle,
     app_state: SharedAppState,
     changed: bool,
-    /// Labels of items the user toggled/cycled in this session. Used to
-    /// guard side-effecting live-apply steps (extensions reload,
-    /// language policy rebuild) so they only fire when the user actually
-    /// touched the relevant toggle — not on every save.
+    /// guard side-effecting live-apply steps so they only fire when the user
+    /// actually touched the relevant setting — not on every save.
     changed_labels: std::collections::HashSet<String>,
     /// Snapshot of the theme registry at overlay-open time. The
     /// choice list for the `theme` item is built from this: custom
@@ -173,47 +151,31 @@ impl SettingsOverlay {
                         "auto_compaction" => settings.auto_compaction = *value,
                         _ => {}
                     },
-                    SettingsItem::Choice {
-                        label,
-                        value,
-                        disabled,
-                    } => {
-                        // Gated Choices (disabled — `language_policy` is
-                        // OFF) are skipped on persist. Since the live
-                        // re-gate keeps `disabled` in sync with the master
-                        // toggle, a disabled channel was never editable this
-                        // session, so its in-overlay value equals the disk
-                        // original. Skipping preserves that original rather
-                        // than redundantly rewriting it.
-                        if *disabled {
-                            continue;
+                    SettingsItem::Choice { label, value } => match label.as_str() {
+                        "thinking" => {
+                            settings.thinking_level = match value.as_str() {
+                                "Off" => crate::store::settings::ThinkingLevel::Off,
+                                "Minimal" => crate::store::settings::ThinkingLevel::Minimal,
+                                "Low" => crate::store::settings::ThinkingLevel::Low,
+                                "Medium" => crate::store::settings::ThinkingLevel::Medium,
+                                "High" => crate::store::settings::ThinkingLevel::High,
+                                "XHigh" => crate::store::settings::ThinkingLevel::XHigh,
+                                _ => settings.thinking_level,
+                            };
                         }
-                        match label.as_str() {
-                            "thinking" => {
-                                settings.thinking_level = match value.as_str() {
-                                    "Off" => crate::store::settings::ThinkingLevel::Off,
-                                    "Minimal" => crate::store::settings::ThinkingLevel::Minimal,
-                                    "Low" => crate::store::settings::ThinkingLevel::Low,
-                                    "Medium" => crate::store::settings::ThinkingLevel::Medium,
-                                    "High" => crate::store::settings::ThinkingLevel::High,
-                                    "XHigh" => crate::store::settings::ThinkingLevel::XHigh,
-                                    _ => settings.thinking_level,
-                                };
-                            }
-                            "theme" => settings.theme = value.clone(),
-                            "glyph" => {
-                                // Cycle value is the preset label ("Unicode" /
-                                // "ASCII" / "Nerd Font"); resolve via the label
-                                // table so the spaced "Nerd Font" label matches.
-                                settings.glyph_set = GlyphSet::ALL
-                                    .iter()
-                                    .find(|g| g.label() == value)
-                                    .copied()
-                                    .unwrap_or(GlyphSet::Unicode);
-                            }
-                            _ => {}
+                        "theme" => settings.theme = value.clone(),
+                        "glyph" => {
+                            // Cycle value is the preset label ("Unicode" /
+                            // "ASCII" / "Nerd Font"); resolve via the label
+                            // table so the spaced "Nerd Font" label matches.
+                            settings.glyph_set = GlyphSet::ALL
+                                .iter()
+                                .find(|g| g.label() == value)
+                                .copied()
+                                .unwrap_or(GlyphSet::Unicode);
                         }
-                    }
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
@@ -265,46 +227,8 @@ impl OverlayComponent for SettingsOverlay {
                         *value = !*value;
                         self.changed = true;
                         self.changed_labels.insert(label.clone());
-                        // Live re-gate: flipping `language_policy`
-                        // immediately enables/disables all `language.*`
-                        // channel Choices in the same overlay session.
-                        // Without this the channels stay greyed-out and
-                        // blocked until the overlay is closed and reopened
-                        // (the `disabled` field was a build-time snapshot).
-                        if label == "language_policy" {
-                            let gated = !*value;
-                            for other in &mut self.all_items {
-                                if let SettingsItem::Choice {
-                                    label: l, disabled, ..
-                                } = other
-                                    && l.starts_with("language.")
-                                {
-                                    *disabled = gated;
-                                }
-                            }
-                        }
                     }
-                    SettingsItem::Choice {
-                        label,
-                        value,
-                        disabled,
-                    } => {
-                        // Disabled Choices (gated by language_policy=OFF)
-                        // surface a guidance notification and block the cycle.
-                        if *disabled {
-                            if let Ok(ptr) = self.app_state.lock() {
-                                // SAFETY: Mutex lock guarantees exclusive access.
-                                unsafe {
-                                    if let Some(ref mut app) = (*ptr).as_mut() {
-                                        app.add_notification(
-                                            "Enable language_policy first.".to_string(),
-                                            crate::tui::app::NotificationKind::Warning,
-                                        );
-                                    }
-                                }
-                            }
-                            return OverlayAction::None;
-                        }
+                    SettingsItem::Choice { label, value } => {
                         let options = get_choice_options(label, &self.theme_registry);
                         if let Some(pos) = options.iter().position(|o| o == value) {
                             let next = (pos + 1) % options.len();
@@ -479,14 +403,7 @@ impl OverlayComponent for SettingsOverlay {
                 let item = &self.all_items[idx];
                 let label = format!("{:<22}", item.label());
                 let value = format!("{:<20}", item.value_str());
-                // Disabled Choices (gated by language_policy=OFF) render
-                // dimmer than the muted ReadOnly color to signal that
-                // the value is gated, not just informational.
-                let style = if item.is_disabled() {
-                    Style::default()
-                        .fg(theme.colors.muted)
-                        .add_modifier(Modifier::DIM)
-                } else if item.is_editable() {
+                let style = if item.is_editable() {
                     styles.normal
                 } else {
                     Style::default().fg(theme.colors.muted)
@@ -638,18 +555,15 @@ fn build_settings_items(
     let mut items = vec![SettingsItem::Choice {
         label: "thinking".to_string(),
         value: thinking_str.to_string(),
-        disabled: false,
     }];
 
     items.push(SettingsItem::Choice {
         label: "theme".to_string(),
         value: settings.get_theme_name(),
-        disabled: false,
     });
     items.push(SettingsItem::Choice {
         label: "glyph".to_string(),
         value: settings.glyph_set.label().to_string(),
-        disabled: false,
     });
 
     items.push(SettingsItem::Toggle {

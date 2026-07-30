@@ -25,11 +25,8 @@ impl SlashCommand for ReloadCommand {
         // `settings.toml` theme changes are picked up without a restart.
         state.appearance_needs_reload = true;
         session.set_thinking_level(reloaded.thinking_level);
-        // Rebuild the system prompt to pick up the latest TUI language
-        // policy (`output_languages`). The App-side `set_thinking_level`
-        // above handles the thinking-level half; the language policy is
-        // a separate concern (see `Settings::output_languages` docs and
-        // `AgentSession::rebuild_system_prompt`).
+        // Rebuild the system prompt from freshly loaded settings so the next
+        // turn observes hot-applied prompt inputs.
         session.rebuild_system_prompt();
         // Apply model change to the active agent session
         if let Some(m) = reloaded.effective_model(None)

@@ -28,6 +28,17 @@ pub struct ContextFile {
 pub struct BuildSystemPromptOptions {
     /// Custom system prompt (replaces default).
     pub custom_prompt: Option<String>,
+    /// Optional persona body to append after the prompt body. Honored
+    /// **after** the custom/base prompt so persona content remains
+    /// authoritative even when `custom_prompt` is `Some`.
+    ///
+    /// The persona's `preferred_model` and `allowed_tools` are applied
+    /// by the composition root before this builder is called
+    /// (preferred_model → `AgentConfig::model_id` resolution; allowed_tools
+    /// is non-applied today because the `ToolRegistry` is shared/global
+    /// and has no per-session allow-list hook — see
+    /// `app::agent_session_runtime`).
+    pub persona_prompt: Option<String>,
     /// Tools to include in prompt. Default: ["read", "bash", "edit", "write"].
     pub selected_tools: Vec<String>,
     /// Optional one-line tool snippets keyed by tool name.
@@ -121,6 +132,7 @@ impl Default for BuildSystemPromptOptions {
     fn default() -> Self {
         Self {
             custom_prompt: None,
+            persona_prompt: None,
             selected_tools: vec!["read".into(), "bash".into(), "edit".into(), "write".into()],
             tool_snippets: std::collections::HashMap::new(),
             prompt_guidelines: Vec::new(),
@@ -147,6 +159,29 @@ fn format_skills_for_prompt(skills: &[Skill]) -> String {
     out
 }
 
+/// Render the resolved persona body for inclusion in the system prompt.
+/// Returns an empty string when no persona body was resolved.
+///
+/// The persona block is appended **after** the prompt body so the
+/// persona's instructions can override or supplement the base prompt
+/// without duplicating prompt builders elsewhere in the composition
+/// root.
+///
+/// Persona metadata (`preferred_model`, `allowed_tools`) is **not**
+/// rendered as model-visible prose. `preferred_model` is applied by
+/// the composition root to model-id resolution; `allowed_tools` is
+/// not enforced today (no per-session registry allow-list) and would
+/// be misleading if echoed to the model.
+pub fn format_persona_for_prompt(body: Option<&str>) -> String {
+    let body = match body {
+        Some(b) if !b.trim().is_empty() => b,
+        _ => return String::new(),
+    };
+    let mut out = String::from("\n\n# Persona\n\n");
+    out.push_str(body.trim_end());
+    out.push('\n');
+    out
+}
 pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     let prompt_cwd = options.cwd.replace('\\', "/");
     let date = Local::now().format("%Y-%m-%d").to_string();
@@ -162,6 +197,12 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         let mut prompt = custom.clone();
 
         prompt.push_str(&append_section);
+
+        // Append persona body (after custom + append section so the
+        // persona's instructions remain authoritative).
+        prompt.push_str(&format_persona_for_prompt(
+            options.persona_prompt.as_deref(),
+        ));
 
         // Append project context files
         if !options.context_files.is_empty() {
@@ -270,8 +311,13 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         include_str!("../prompts/identity.md"),
         tools_list, guidelines_text, readme_path, docs_path, examples_path,
     );
-
     prompt.push_str(&append_section);
+
+    // Append persona block (after append section so persona content
+    // remains authoritative over base + append text).
+    prompt.push_str(&format_persona_for_prompt(
+        options.persona_prompt.as_deref(),
+    ));
 
     // ── Hashline format specification (from oxi-hashline canonical source) ──
     prompt.push_str(include_str!("../prompts/hashline_format.md"));
@@ -354,5 +400,61 @@ mod tests {
         };
         let prompt = build_system_prompt(&opts);
         assert!(prompt.contains("Extra rules"));
+    }
+    #[test]
+    fn persona_body_appended() {
+        let opts = BuildSystemPromptOptions {
+            persona_prompt: Some("You are a security reviewer.".into()),
+            cwd: "/tmp".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.contains("# Persona"));
+        assert!(prompt.contains("You are a security reviewer."));
+        // Persona metadata is **not** rendered into model-visible
+        // prose; only the body is.
+        assert!(!prompt.contains("Preferred model:"));
+        assert!(!prompt.contains("Allowed tools:"));
+    }
+
+    #[test]
+    fn persona_body_only_appends_when_present() {
+        let opts = BuildSystemPromptOptions {
+            cwd: "/tmp".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(!prompt.contains("# Persona"));
+    }
+    #[test]
+    fn persona_body_appended_after_custom_prompt() {
+        let opts = BuildSystemPromptOptions {
+            custom_prompt: Some("Base custom.".into()),
+            persona_prompt: Some("Persona override.".into()),
+            cwd: "/tmp".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        let base_idx = prompt.find("Base custom.").expect("base present");
+        let persona_idx = prompt.find("Persona override.").expect("persona present");
+        assert!(persona_idx > base_idx);
+        assert!(prompt.contains("# Persona"));
+        // No metadata prose — preferred_model / allowed_tools never
+        // appear in the prompt.
+        assert!(!prompt.contains("Preferred model:"));
+        assert!(!prompt.contains("Allowed tools:"));
+    }
+
+    #[test]
+    fn empty_persona_body_is_ignored() {
+        let opts = BuildSystemPromptOptions {
+            persona_prompt: Some("   \n  ".into()),
+            cwd: "/tmp".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        // Whitespace-only body ⇒ no persona block at all (metadata
+        // without body would be misleading).
+        assert!(!prompt.contains("# Persona"));
     }
 }

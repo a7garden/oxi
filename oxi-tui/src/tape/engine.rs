@@ -4,8 +4,8 @@
 //! writes finalized rows to the terminal's native scrollback (immutable),
 //! and repaints only the live region (mutable suffix) in-place.
 //!
-//! **Standalone module** — not wired into the default render path. Future
-//! integration will be gated behind `OXI_TAPE_RENDER=1`.
+//! Production oxi-cli uses this engine for main-screen chat rendering; transient
+//! overlays temporarily use ratatui on the alternate screen.
 
 use std::io::{self, Write};
 
@@ -68,11 +68,10 @@ pub struct PaintOptions {
 
 /// Append-only tape rendering engine.
 ///
-/// Writes to any `io::Write` implementor. The caller is responsible for
-/// terminal mode management (raw mode, alt screen enter/exit).
+/// Writes to any `io::Write` implementor. The caller owns terminal mode
+/// management; production overlays may temporarily enter the alternate screen.
 ///
-/// **Not wired into the default render path.** Future integration gated
-/// behind `OXI_TAPE_RENDER=1`.
+/// Production callers use this engine for the main-screen render path.
 pub struct TapeEngine<W: Write> {
     out: W,
     committed_rows: usize,

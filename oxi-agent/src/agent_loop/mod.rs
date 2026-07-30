@@ -6,6 +6,14 @@
 //! state management. Handles streaming, tool execution, retry logic,
 //! and compaction events.
 
+/// Template for the `<system-interrupt>` body injected when a TTSR
+/// rule fires. The `{}` placeholders are filled by `format!` at
+/// interrupt time (`{name}` = `rule.name`, `{content}` =
+/// `rule.content`). Single source of truth for the on-the-wire
+/// interrupt message; `prompts/ttsr-interrupt.md` mirrors this content
+/// verbatim so design docs and live behavior stay aligned.
+const TTSR_INTERRUPT_TEMPLATE: &str = include_str!("../prompts/ttsr-interrupt.md");
+
 /// Append-only context for stable prefix caching.
 pub mod append_only;
 /// Agent-loop configuration.
@@ -862,13 +870,13 @@ impl AgentLoop {
                             session_id: self.session_id.clone(),
                         });
                         messages.push(Message::Assistant(partial));
-                        let interrupt_body = format!(
-                            "<system-interrupt reason=\"rule_violation\" rule=\"{name}\">\n\
-                             Your output was interrupted because it violated a project rule.\n\
-                             Comply with: {content}\n</system-interrupt>",
-                            name = rule.name,
-                            content = rule.content
-                        );
+                        // Render the interrupt message from the
+                        // shared `TTSR_INTERRUPT_TEMPLATE` so the
+                        // `prompts/ttsr-interrupt.md` file is the
+                        // single source of truth (no inline drift).
+                        let interrupt_body = TTSR_INTERRUPT_TEMPLATE
+                            .replace("{name}", &rule.name)
+                            .replace("{content}", &rule.content);
                         messages.push(Message::user(interrupt_body));
                         continue;
                     }

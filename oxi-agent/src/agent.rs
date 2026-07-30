@@ -598,6 +598,7 @@ impl Agent {
             agent_pool: self.config().config.agent_pool.clone(),
             url_resolver: self.config().config.url_resolver.clone(),
             lsp: self.config().config.lsp.clone(),
+            snapshot_store: self.config().config.snapshot_store.clone(),
             max_tool_result_bytes: self.config().config.max_tool_result_bytes,
             subagent_runner: self.config().config.subagent_runner.clone(),
             subagent_depth: self.config().config.subagent_depth,
@@ -1029,6 +1030,12 @@ impl Agent {
             max_tool_result_bytes: inner.config.max_tool_result_bytes,
             subagent_runner: inner.config.subagent_runner.clone(),
             subagent_depth: inner.config.subagent_depth,
+            memory: inner.config.memory.clone(),
+            todo: inner.config.todo.clone(),
+            agent_pool: inner.config.agent_pool.clone(),
+            url_resolver: inner.config.url_resolver.clone(),
+            lsp: inner.config.lsp.clone(),
+            snapshot_store: inner.config.snapshot_store.clone(),
             ..Default::default()
         };
 

@@ -69,6 +69,43 @@ pub trait MemoryBackend: Send + Sync + std::fmt::Debug + 'static {
     fn trigger_harmonize(&self) -> Option<String> {
         None
     }
+
+    /// Delete every memory item in the backend. Returns the number of
+    /// items removed.
+    ///
+    /// The default implementation is **unsupported**: it returns an
+    /// honest error rather than silently deleting zero rows. Backends
+    /// that can perform a true bulk erase must override this method;
+    /// backends without a list-all subject primitive must surface
+    /// that limitation rather than guess.
+    ///
+    /// This is a destructive operation; the `/memory clear` slash
+    /// command requires an explicit confirmation flag before invoking.
+    fn clear_all<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<usize, ToolError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(
+                "clear_all not supported by this backend (no list-all subject primitive)"
+                    .to_string(),
+            )
+        })
+    }
+
+    /// Force a consolidation (rebuild) job. Returns a status message
+    /// describing what was dispatched, or `Err` when the backend has
+    /// no in-process capability to enqueue work.
+    ///
+    /// Default: `Err` ("not supported"). Backends that expose
+    /// consolidation via the engine (e.g. Mnemopi sleep) should
+    /// override and run the real operation.
+    fn enqueue_consolidation<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>> {
+        Box::pin(
+            async move { Err("enqueue_consolidation not supported by this backend".to_string()) },
+        )
+    }
 }
 
 /// Content resolved from an internal protocol URL (e.g. `skill://`, `issue://`).

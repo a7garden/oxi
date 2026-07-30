@@ -224,6 +224,14 @@ pub struct AgentConfig {
     /// child config to cap recursion.
     #[serde(skip, default)]
     pub subagent_depth: u8,
+    /// Snapshot store for hashline line-anchored edit mode.
+    ///
+    /// When `Some`, the `read` tool records file snapshots and emits
+    /// `[path#TAG]` headers, and the `edit` tool validates edits against
+    /// them. When `None` (default), hashline anchoring is disabled and the
+    /// edit tool falls back to plain text replacement.
+    #[serde(skip, default)]
+    pub snapshot_store: Option<std::sync::Arc<dyn oxi_hashline::SnapshotStore>>,
 }
 
 impl Default for AgentConfig {
@@ -252,6 +260,7 @@ impl Default for AgentConfig {
             max_tool_result_bytes: None,
             subagent_runner: None,
             subagent_depth: 0,
+            snapshot_store: None,
         }
     }
 }
@@ -303,6 +312,16 @@ impl AgentConfig {
     /// reject ownership-gated operations (defensive default).
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Set the hashline snapshot store — enables line-anchored edit mode in
+    /// the `read`/`edit` tools (emits `[path#TAG]` headers, validates edits).
+    pub fn with_snapshot_store(
+        mut self,
+        store: std::sync::Arc<dyn oxi_hashline::SnapshotStore>,
+    ) -> Self {
+        self.snapshot_store = Some(store);
         self
     }
 }

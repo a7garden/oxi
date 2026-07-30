@@ -1,8 +1,7 @@
 //! Tape component implementations — chat message types as `Component`s.
 //!
-//! These are building blocks for the tape engine. They are NOT wired into
-//! the default render path (which uses ratatui Frame rendering). Future
-//! integration will be gated behind `OXI_TAPE_RENDER=1`.
+//! These are the tape engine's production transcript building blocks; oxi-cli
+//! composes them into main-screen rows while ratatui remains overlay-only.
 
 pub mod streaming;
 pub mod text;

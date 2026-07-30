@@ -141,6 +141,11 @@ impl MessageComponent {
                     mime_type,
                     base64_data,
                 } => {
+                    // Tape rows are ANSI-terminated and width-measured as text. Raw
+                    // Kitty/iTerm2 escapes here would be counted as cells and their
+                    // protocol terminators would collide with LINE_TERMINATOR.
+                    // Keep this safe placeholder; the post-paint image writer and
+                    // overlay viewer remain the raw-output paths.
                     lines.push(Line::from(Span::styled(
                         format!(
                             "{} image {mime_type} ({} bytes)",
@@ -364,5 +369,75 @@ mod tests {
         for needle in ["Thinking", "read", "bad", "image/png", "[CONCERN]"] {
             assert!(text.contains(needle), "missing {needle}");
         }
+    }
+
+    #[test]
+    fn transcript_renders_mermaid_fence_as_diagram() {
+        let mut renderer = TranscriptRenderer::new();
+        renderer.sync(
+            &[msg(ContentBlock::Text {
+                content: "```mermaid\ngraph TD\n  A --> B\n```".into(),
+            })],
+            None,
+            &Theme::dark(),
+            &TerminalCapabilities::default(),
+        );
+        let (result, _) = renderer.compose(80);
+        let text = result.lines.join("\n");
+        assert!(text.contains("A"));
+        assert!(text.contains("B"));
+        assert!(!text.contains("```mermaid"));
+    }
+
+    #[test]
+    fn transcript_renders_inline_and_display_latex() {
+        let mut renderer = TranscriptRenderer::new();
+        renderer.sync(
+            &[msg(ContentBlock::Text {
+                content: "inline $\\alpha^2$\n\n$$\\sum_{i=0}^n$$".into(),
+            })],
+            None,
+            &Theme::dark(),
+            &TerminalCapabilities::default(),
+        );
+        let (result, _) = renderer.compose(80);
+        let text = result.lines.join("\n");
+        assert!(text.contains("α²"), "rendered: {text}");
+        assert!(text.contains("∑ᵢ₌₀ⁿ"), "rendered: {text}");
+        assert!(!text.contains("\\alpha"));
+    }
+
+    #[test]
+    fn transcript_image_is_safe_placeholder_even_when_protocol_is_available() {
+        let mut renderer = TranscriptRenderer::new();
+        let caps = TerminalCapabilities {
+            image_protocol: Some(crate::render::terminal::ImageProtocol::Kitty),
+            ..TerminalCapabilities::default()
+        };
+        renderer.sync(
+            &[msg(ContentBlock::Image {
+                mime_type: "image/png".into(),
+                base64_data: "YWJj".into(),
+            })],
+            None,
+            &Theme::dark(),
+            &caps,
+        );
+        let (result, _) = renderer.compose(80);
+        let text = result.lines.join("\n");
+        assert!(text.contains("image/png"));
+        // The placeholder text IS styled (has SGR ANSI codes from
+        // `styled_line_to_ansi`), which is safe. What we must not see
+        // is raw Kitty protocol escapes that would corrupt the tape
+        // row structure. SGR sequences like `\x1b[38;5;240m` are
+        // harmless and expected.
+        assert!(
+            !text.contains("\x1b_G"),
+            "must not contain raw Kitty escapes in tape rows"
+        );
+        assert!(
+            !text.contains("\x1b\\"),
+            "must not contain raw image terminators"
+        );
     }
 }
