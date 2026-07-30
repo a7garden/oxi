@@ -7,14 +7,14 @@
 //!
 //! ## Submodules
 //!
-//! - [`kitty`] — Kitty keyboard protocol (CSI-u) parser and legacy xterm
-//!   fallback matcher. Produces [`kitty::ParsedKey`] values with full
+//! - `kitty` — Kitty keyboard protocol (CSI-u) parser and legacy xterm
+//!   fallback matcher. Produces `kitty::ParsedKey` values with full
 //!   modifier and press/repeat/release semantics.
-//! - [`paste`] — Bracketed-paste-mode handler that buffers bytes between
-//!   `\x1b[200~` and `\x1b[201~` markers, emitting [`paste::PasteEvent`]s
+//! - `paste` — Bracketed-paste-mode handler that buffers bytes between
+//!   `\x1b[200~` and `\x1b[201~` markers, emitting `paste::PasteEvent`s
 //!   for state transitions. Tolerates markers split across reads and
 //!   caps memory at a configurable byte limit.
-//! - [`kill_ring`] — Emacs-style kill ring for `yank` / `yank-pop` text
+//! - `kill_ring` — Emacs-style kill ring for `yank` / `yank-pop` text
 //!   cycling in editors. Bounded FIFO ring with configurable capacity.
 
 pub mod kill_ring;

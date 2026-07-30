@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-07-30
+
+### Added
+
+- **CLI: persona provider integration** — `PersonaProvider` port wired into
+  `App` and session prompt construction, enabling persona-based system prompt
+  fragments.
+- **SDK: `PortMemoryBackend` bridge** — New `port_memory_backend` module
+  bridges the SDK's `MemoryStore` + `EmbeddingProvider` ports into the
+  `memory_*` agent tools. SDK consumers can now make memory functional
+  end-to-end via `AgentBuilder::with_port_memory()`.
+- **Packages: `RuntimeConfig`, `ProjectPluginOverrides`, `Doctor`** — Built-in
+  package manager with runtime configuration, project-scoped plugin overrides,
+  and a `Doctor` diagnostic command for validating the extension setup.
+- **Providers: explicit Codex Responses + Gemini CLI dispatch** — Added
+  dedicated transport dispatching for `openai-codex` and `google-gemini-cli`
+  dialects, enabling proper provider routing for these model families.
+
+### Fixed
+
+- **Memory: tokio `blocking_lock` safety** — Wrapped `blocking_lock` calls in
+  `tokio::task::block_in_place` to prevent async-runtime hangs when the
+  memory store uses a synchronous lock.
+
+### Changed
+
+- **TUI: stale docs cleanup** — Removed outdated `tape/engine` documentation
+  and dead language-policy UI code from the TUI crate.
+
 ## [0.61.0] - 2026-07-29
 
 ### Changed
@@ -2302,8 +2331,9 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
 [0.39.0]: https://github.com/a7garden/oxi/compare/v0.38.0...v0.39.0
-[0.53.0]: https://github.com/a7garden/oxi/compare/v0.52.1...v0.53.0
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.53.0...HEAD
+[0.62.0]: https://github.com/a7garden/oxi/compare/v0.61.0...v0.62.0
+[0.61.0]: https://github.com/a7garden/oxi/compare/v0.60.0...v0.61.0
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.62.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 

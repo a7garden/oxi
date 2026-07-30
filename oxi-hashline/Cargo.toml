@@ -1,6 +1,6 @@
 [package]
 name = "oxi-hashline"
-version = "0.61.0"
+version = "0.62.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Line-anchored patch format for AI-assisted code editing"

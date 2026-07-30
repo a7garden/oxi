@@ -1,6 +1,6 @@
 [package]
 name = "oxi-ai"
-version = "0.61.0"
+version = "0.62.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Unified LLM API — multi-provider streaming interface for AI coding assistants"
@@ -17,7 +17,7 @@ exclude = ["target/"]
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 # Catalog (extracted leaf crate — model data, identity, descriptors)
-oxi-catalog = { version = "0.61.0", path = "../oxi-catalog" }
+oxi-catalog = { version = "0.62.0", path = "../oxi-catalog" }
 
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls"] }

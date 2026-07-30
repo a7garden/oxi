@@ -116,7 +116,7 @@ impl<'a> AgentBuilder<'a> {
     }
 
     /// Bridge the engine's registered `MemoryStore` (+ `EmbeddingProvider`)
-    /// ports into this agent's `memory_*` tools via [`PortMemoryBackend`].
+    /// ports into this agent's `memory_*` tools via [`crate::PortMemoryBackend`].
     ///
     /// This is how a pure-SDK consumer makes memory functional end-to-end:
     /// register the ports on [`OxiBuilder`](crate::OxiBuilder)

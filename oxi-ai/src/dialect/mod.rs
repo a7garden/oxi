@@ -8,17 +8,17 @@
 //!
 //! # Architecture (omp three-piece contract)
 //!
-//! 1. **Prompt injection** — [`render_inband_tool_prompt`] appends the tool
+//! 1. **Prompt injection** — `render_inband_tool_prompt` appends the tool
 //!    catalog plus the dialect's format guide to the system prompt.
-//! 2. **History encoding** — [`encode_inband_tool_history`] rewrites prior
+//! 2. **History encoding** — `encode_inband_tool_history` rewrites prior
 //!    assistant tool calls and tool results into the dialect's text form so the
 //!    model sees a coherent transcript (and prefix caching stays stable).
-//! 3. **Output parsing** — [`Dialect::parse`] turns the model's text back into
-//!    [`ScanSegment`]s (text / thinking / tool calls) the loop can execute.
+//! 3. **Output parsing** — `Dialect::parse` turns the model's text back into
+//!    `ScanSegment`s (text / thinking / tool calls) the loop can execute.
 //!
 //! # Dialects
 //!
-//! [`Dialect`] enumerates the 11 wire dialects omp knows. This first delivery
+//! `Dialect` enumerates the 11 wire dialects omp knows. This first delivery
 //! implements the **XML** dialect fully (the documented fallback,
 //! `FALLBACK_DIALECT` in omp). Dialects without a dedicated implementation
 //! fall back to XML — this mirrors omp's fallback semantics rather than being a

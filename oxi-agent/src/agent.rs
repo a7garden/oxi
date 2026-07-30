@@ -511,7 +511,7 @@ impl Agent {
             .await
     }
 
-    /// Run with an explicit user [`Message`] (supports image content blocks).
+    /// Run with an explicit user `Message` (supports image content blocks).
     /// Used by RPC `prompt` with images. The running-guard logic lives here;
     /// [`run_with_channel`](Self::run_with_channel) delegates after converting
     /// its String prompt into a text-only user message.
