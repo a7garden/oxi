@@ -71,3 +71,8 @@ pub use crate::workflow_dsl::{WorkflowDefinition, WorkflowStepDef};
 
 // ── Runtime routing control ──────────────────────────────────────────────
 pub use crate::routing::RoutingControl;
+
+// ── Port→agent capability adapters + traits ────────────────────────────
+/// Bridge `MemoryStore`+`EmbeddingProvider` ports into the `memory_*` tools.
+pub use crate::port_memory_backend::PortMemoryBackend;
+pub use oxi_agent::tools::{MemoryBackend, MemoryItem, ResolvedContent, UrlResolver};

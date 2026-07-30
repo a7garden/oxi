@@ -72,6 +72,140 @@ async fn agent_with_custom_tool() {
     assert!(tool_names.contains(&"echo_tool".to_string()));
 }
 
+// ── Port → agent-tool bridging (single-dependency consumer flow) ─────
+
+/// Registering a `MemoryStore` port + `.with_port_memory()` must make the
+/// four `memory_*` tools present AND wire the SAME port store into the
+/// agent's `MemoryBackend`. Regression for the gap where `with_memory`
+/// stored a port the agent loop never read.
+#[tokio::test]
+async fn with_port_memory_bridges_port_store_into_agent_tools() {
+    use oxi_sdk::inmem::InMemoryMemoryStore;
+    use oxi_sdk::ports::{MemoryEntry, MemoryStore};
+
+    let store = Arc::new(InMemoryMemoryStore::new());
+    let oxi = OxiBuilder::new()
+        .provider("mock", common::MockProvider)
+        .model(common::mock_model())
+        .with_memory(store.clone())
+        .build();
+
+    let agent = oxi
+        .agent(AgentConfig {
+            model_id: "mock/model".into(),
+            ..Default::default()
+        })
+        .workspace("/tmp")
+        .with_port_memory()
+        .build()
+        .expect("build should succeed");
+
+    // The four memory tools are registered.
+    let names = agent.tools().names();
+    for tool in [
+        "memory_recall",
+        "memory_reflect",
+        "memory_retain",
+        "memory_edit",
+    ] {
+        assert!(
+            names.iter().any(|n| n == tool),
+            "with_port_memory must register `{tool}`"
+        );
+    }
+
+    // ToolContext.memory is wired through to the config.
+    let backend = agent
+        .get_config()
+        .memory
+        .expect("config.memory must be set after with_port_memory");
+
+    // The bridge is LIVE: a write through the port store is visible to the
+    // agent's backend (proves they share storage, not just type-shape).
+    store
+        .put(MemoryEntry {
+            id: "m1".into(),
+            subject: "s".into(),
+            kind: "fact".into(),
+            embedding: None,
+            content: serde_json::Value::String("port-bridged fact".into()),
+            created_at: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
+    let listed = backend.list("s").await.unwrap();
+    assert!(
+        listed.iter().any(|m| m.content == "port-bridged fact"),
+        "agent backend must read the port store"
+    );
+}
+
+/// `.with_port_url_resolver()` wires the engine's `InternalUrlRouter` port
+/// into `ToolContext.url_resolver`.
+#[test]
+fn with_port_url_resolver_wires_resolver() {
+    let oxi = common::mock_oxi();
+    let agent = oxi
+        .agent(AgentConfig {
+            model_id: "mock/model".into(),
+            ..Default::default()
+        })
+        .workspace("/tmp")
+        .with_port_url_resolver()
+        .build()
+        .expect("build should succeed");
+    assert!(
+        agent.get_config().url_resolver.is_some(),
+        "config.url_resolver must be set after with_port_url_resolver"
+    );
+}
+
+/// `.with_snapshot_store()` threads the hashline store into config, enabling
+/// line-anchored edit mode (previously unreachable: AgentConfig had no field).
+#[test]
+fn with_snapshot_store_threads_into_config() {
+    let oxi = common::mock_oxi();
+    let store = std::sync::Arc::new(oxi_sdk::oxi_hashline::InMemorySnapshotStore::new());
+    let agent = oxi
+        .agent(AgentConfig {
+            model_id: "mock/model".into(),
+            ..Default::default()
+        })
+        .workspace("/tmp")
+        .with_snapshot_store(store)
+        .build()
+        .expect("build should succeed");
+    assert!(
+        agent.get_config().snapshot_store.is_some(),
+        "config.snapshot_store must be set after with_snapshot_store"
+    );
+}
+
+/// `.with_port_subagent()` registers the `subagent` tool and wires the
+/// in-process runner (previously the tool + runner had no SDK wiring path).
+#[test]
+fn with_port_subagent_registers_tool_and_runner() {
+    let oxi = common::mock_oxi();
+    let agent = oxi
+        .agent(AgentConfig {
+            model_id: "mock/model".into(),
+            ..Default::default()
+        })
+        .workspace("/tmp")
+        .with_port_subagent()
+        .build()
+        .expect("build should succeed");
+    let names = agent.tools().names();
+    assert!(
+        names.iter().any(|n| n == "subagent"),
+        "with_port_subagent must register the `subagent` tool"
+    );
+    assert!(
+        agent.get_config().subagent_runner.is_some(),
+        "config.subagent_runner must be set after with_port_subagent"
+    );
+}
+
 // ── Security ───────────────────────────────────────────────────────
 
 #[test]

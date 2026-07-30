@@ -32,6 +32,7 @@ pub mod ports;
 
 // Reference implementations bundled with the SDK.
 pub use ports::{fs, inmem};
+pub mod port_memory_backend;
 /// Convenience re-exports: `oxi_sdk::fs::*`, `oxi_sdk::inmem::*`.
 pub mod prelude;
 pub mod routing;
@@ -208,6 +209,40 @@ pub use oxi_agent::advisor::{
 // ── Todo tool types (agent-scoped, observable by SDK consumers) ──────
 pub use oxi_agent::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, TodoUpdateResult};
 pub use oxi_agent::{TodoStateProvider, TodoTool};
+
+// ── Capability traits + agent tools (single-dependency pattern) ───────
+//
+// A pure-`oxi-sdk` consumer (no `oxi-agent` direct dep) can implement these
+// capability traits to wire the agent's tools, and register the tool structs
+// directly. Without these re-exports the single-dependency pattern
+// (`oxios → oxi-sdk`) is incomplete: implementing a custom memory backend,
+// URL resolver, LSP provider, subagent runner, or agent-pool source would
+// otherwise force a direct `oxi-agent` dependency.
+
+/// `MemoryBackend` backed by the SDK `MemoryStore` + `EmbeddingProvider` ports.
+pub use crate::port_memory_backend::PortMemoryBackend;
+/// `BashTool` (read/write/edit/grep/find/ls are already re-exported above and
+/// bundled by `coding_tools()`).
+pub use oxi_agent::BashTool;
+/// In-process subagent runner trait (see [`crate::SdkSubagentRunner`]).
+pub use oxi_agent::SubagentRunner;
+/// Memory backend trait + item — implement to back the `memory_*` tools, or
+/// use [`PortMemoryBackend`] to bridge the SDK's `MemoryStore` port.
+pub use oxi_agent::tools::{MemoryBackend, MemoryItem};
+/// The `memory_*` + `subagent` tool structs (register directly if desired).
+pub use oxi_agent::tools::{
+    MemoryEditTool, MemoryRecallTool, MemoryReflectTool, MemoryRetainTool, SubagentTool,
+};
+/// URL resolver trait + resolved content — implement for internal-URL dispatch.
+pub use oxi_agent::tools::{ResolvedContent, UrlResolver};
+/// Agent-pool source for Hub display + todo sub-agent matching.
+pub use oxi_agent::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
+/// LSP capability — implement to back the `lsp` tool.
+pub use oxi_agent::{LspAction, LspProvider};
+
+// Re-export the hashline crate so consumers can implement `SnapshotStore`
+// (enables line-anchored edit mode) without a direct `oxi-hashline` dep.
+pub use oxi_hashline;
 
 // ── Concrete provider re-exports ─────────────────────────────────────────
 //

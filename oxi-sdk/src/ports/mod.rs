@@ -728,6 +728,18 @@ pub trait MemoryStore: Send + Sync + 'static {
         &self,
         subject: &str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryEntry>, SdkError>> + Send + '_>>;
+    /// Delete the entry with the given id.
+    ///
+    /// Default returns [`SdkError::PortNotConfigured`] — stores that cannot
+    /// delete (e.g. append-only audit logs) keep this default. Backends that
+    /// support deletion override it.
+    fn delete(&self, _id: &str) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
+        Box::pin(async {
+            Err(SdkError::PortNotConfigured {
+                port: "MemoryStore",
+            })
+        })
+    }
 }
 
 /// Noop store: `put` errors, `list` and `search` return empty.
@@ -856,7 +868,7 @@ impl ResourceMonitor for NoopResourceMonitor {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Port 12 — InternalUrlRouter: protocol-scheme virtual path resolution.
+// Port 13 — InternalUrlRouter: protocol-scheme virtual path resolution.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// A resolved virtual URL result. Consumed by `read`/`search` tools.
@@ -965,7 +977,7 @@ pub struct LineMap {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Port 13 — RuleRegistry: TTSR rules source.
+// Port 14 — RuleRegistry: TTSR rules source.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// A TTSR rule. Condition is a regex matched against streaming output.
@@ -1056,7 +1068,7 @@ impl RuleRegistry for NoopRuleRegistry {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Port 14 — EmbeddingProvider: text → vector for semantic search.
+// Port 15 — EmbeddingProvider: text → vector for semantic search.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Produces dense vector embeddings for semantic memory search.

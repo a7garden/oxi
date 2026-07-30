@@ -78,6 +78,10 @@ impl MemoryStore for InMemoryMemoryStore {
         let result: Vec<MemoryEntry> = scored.into_iter().take(k).map(|(e, _)| e.clone()).collect();
         Box::pin(async { Ok(result) })
     }
+    fn delete(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<(), SdkError>> + Send + '_>> {
+        self.inner.lock().remove(id);
+        Box::pin(async { Ok(()) })
+    }
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {

@@ -96,6 +96,114 @@ impl<'a> AgentBuilder<'a> {
         self
     }
 
+    /// Register a [`MemoryBackend`](oxi_agent::tools::MemoryBackend) and the
+    /// four `memory_*` tools (`memory_recall`, `memory_reflect`,
+    /// `memory_retain`, `memory_edit`).
+    ///
+    /// Generic entry point: pass any `MemoryBackend`. For the common case of
+    /// bridging the engine's registered `MemoryStore` port, use
+    /// [`Self::with_port_memory`] instead.
+    pub fn with_memory_backend(
+        mut self,
+        backend: std::sync::Arc<dyn oxi_agent::tools::MemoryBackend>,
+    ) -> Self {
+        self.config.memory = Some(backend);
+        self.tools.register(oxi_agent::tools::MemoryRecallTool);
+        self.tools.register(oxi_agent::tools::MemoryReflectTool);
+        self.tools.register(oxi_agent::tools::MemoryRetainTool);
+        self.tools.register(oxi_agent::tools::MemoryEditTool);
+        self
+    }
+
+    /// Bridge the engine's registered `MemoryStore` (+ `EmbeddingProvider`)
+    /// ports into this agent's `memory_*` tools via [`PortMemoryBackend`].
+    ///
+    /// This is how a pure-SDK consumer makes memory functional end-to-end:
+    /// register the ports on [`OxiBuilder`](crate::OxiBuilder)
+    /// (`with_memory` / `with_embeddings`), then call this on the agent.
+    /// Without an `EmbeddingProvider`, `put` / `list` / `delete` work but
+    /// semantic `search` returns an error.
+    ///
+    /// Without this call (or [`Self::with_memory_backend`]), the
+    /// `memory_*` tools are absent and `ToolContext.memory` stays `None` —
+    /// the registered `MemoryStore` port is unused by the agent loop.
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use oxi_sdk::{OxiBuilder, inmem::InMemoryMemoryStore};
+    ///
+    /// let oxi = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .with_memory(Arc::new(InMemoryMemoryStore::new()))
+    ///     .build();
+    /// let agent = oxi.agent(oxi_agent::AgentConfig {
+    ///     model_id: "anthropic/claude-sonnet-4-20250514".into(),
+    ///     ..Default::default()
+    /// })
+    /// .with_port_memory()
+    /// .build()
+    /// .unwrap();
+    /// ```
+    pub fn with_port_memory(self) -> Self {
+        let ports = self.oxi.ports().clone();
+        let backend = crate::port_memory_backend::PortMemoryBackend::from_ports(
+            ports.memory.clone(),
+            Some(ports.embeddings.clone()),
+        );
+        self.with_memory_backend(std::sync::Arc::new(backend))
+    }
+
+    /// Set the URL resolver — enables internal-URL dispatch (`issue://`,
+    /// `skill://`, `memory://`, …) in the `read`/`grep`/`find` tools.
+    pub fn with_url_resolver(
+        mut self,
+        resolver: std::sync::Arc<dyn oxi_agent::tools::UrlResolver>,
+    ) -> Self {
+        self.config.url_resolver = Some(resolver);
+        self
+    }
+
+    /// Bridge the engine's registered `InternalUrlRouter` port into this
+    /// agent's `read`/`grep`/`find` tools via [`SdkUrlResolver`](crate::SdkUrlResolver).
+    ///
+    /// This is how a pure-SDK consumer enables protocol-scheme URL
+    /// resolution: register scheme handlers on the router port, then call
+    /// this. Without it (or [`Self::with_url_resolver`]), URL-prefixed
+    /// paths are treated as regular file paths.
+    pub fn with_port_url_resolver(self) -> Self {
+        let resolver = std::sync::Arc::new(crate::SdkUrlResolver::new(
+            self.oxi.ports().url_router.clone(),
+        ));
+        self.with_url_resolver(resolver)
+    }
+
+    /// Set the hashline snapshot store — enables line-anchored edit mode
+    /// (`read` emits `[path#TAG]` headers, `edit` validates against them).
+    ///
+    /// Without this, the `edit` tool falls back to plain text replacement.
+    /// Use [`oxi_hashline::InMemorySnapshotStore`] for an ephemeral store, or
+    /// implement [`oxi_hashline::SnapshotStore`] for persistence.
+    pub fn with_snapshot_store(
+        mut self,
+        store: std::sync::Arc<dyn oxi_hashline::SnapshotStore>,
+    ) -> Self {
+        self.config.snapshot_store = Some(store);
+        self
+    }
+
+    /// Bridge the engine into an in-process subagent runner and register the
+    /// `subagent` tool.
+    ///
+    /// Uses [`SdkSubagentRunner`](crate::SdkSubagentRunner) so the `subagent`
+    /// tool runs isolated agents in-process (no CLI binary). Without this, the
+    /// `subagent` tool is absent from the agent's toolset.
+    pub fn with_port_subagent(mut self) -> Self {
+        let runner = std::sync::Arc::new(crate::SdkSubagentRunner::new(self.oxi.clone()));
+        self.config.subagent_runner = Some(runner);
+        self.tools.register(oxi_agent::tools::SubagentTool::new());
+        self
+    }
+
     /// Register the standard coding tools (read, write, edit, bash, grep, find, ls, ...).
     pub fn coding_tools(self) -> Self {
         let cwd = self
