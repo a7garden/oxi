@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **TUI: black screen on launch (oxi-vtui)** — The event loop drew its first
+  frame only *after* the first event arrived, and the keyboard input thread
+  exited within ~50 ms of startup: it used `while let Ok(true) =
+  event::poll(...)`, which treats the `Ok(false)` poll timeout as loop
+  termination, dropping its event sender. With no input thread and no
+  initial draw, the TUI rendered nothing until Ctrl+C, then flashed a single
+  frame and re-blocked. Fixed by (1) keeping the input thread alive across
+  poll timeouts (exit only on a read error), (2) drawing an initial frame
+  before the loop blocks, and (3) adding a 50 ms render tick so typed input
+  is echoed without each keystroke needing to send an event.
+
 ## [0.62.0] - 2026-07-30
 
 ### Added

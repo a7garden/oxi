@@ -306,6 +306,25 @@ async fn run_event_loop(
         apply_command(&mut state.lock(), cmd);
     }
 
+    // Draw the initial frame *before* blocking on the first event. The
+    // `select!` below parks until an event arrives, and the per-iteration
+    // redraw only runs after it resolves — so without this eager draw the
+    // screen stays black until the user presses a key.
+    {
+        let snapshot = state.lock();
+        if let Err(err) = terminal.draw(|frame| render_frame(frame, &snapshot, handle)) {
+            tracing::warn!(?err, "initial tui draw failed");
+        }
+    }
+
+    // Render tick. The input thread edits shared state (typing, cursor
+    // movement, backspace, …) *without* sending an event, so without a
+    // periodic wake the composer would never repaint what the user types.
+    // The ratatui diff backend coalesces unchanged frames, so a steady tick
+    // is cheap and also drives future spinner animation.
+    let mut render_tick = tokio::time::interval(std::time::Duration::from_millis(50));
+    render_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             // biased: agent events take priority so streaming output is
@@ -346,6 +365,10 @@ async fn run_event_loop(
             _ = tokio::signal::ctrl_c() => {
                 session.abort().await;
             }
+
+            // 5. Periodic repaint — echoes typed input and drives animation
+            //    even when no other event is ready.
+            _ = render_tick.tick() => {}
         }
 
         // Redraw every iteration. The harness's redraw is idempotent —
@@ -644,9 +667,19 @@ fn spawn_input_thread(
     evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        // Stop when the channel is closed (the main loop dropped its
-        // receiver).
-        while let Ok(true) = event::poll(std::time::Duration::from_millis(50)) {
+        // Poll stdin in a tight loop. `event::poll` returns `Ok(false)` on
+        // timeout (no key within the window) — that is NOT a reason to exit,
+        // only to poll again. The previous `while let Ok(true) = poll(...)`
+        // treated the first timeout as loop termination, killing this thread
+        // ~50ms after launch, dropping `evt_tx`, and leaving the TUI unable
+        // to receive keyboard input — a black screen that only redrew on
+        // Ctrl+C. Exit only on a genuine read error (stdin closed).
+        loop {
+            match event::poll(std::time::Duration::from_millis(50)) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(_) => break,
+            }
             let event = match event::read() {
                 Ok(ev) => ev,
                 Err(_) => continue,
