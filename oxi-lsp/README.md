@@ -1,6 +1,6 @@
 # oxi-lsp
 
-Thin LSP protocol adapter for the [oxi](https://github.com/a7garden/oxi) workspace.
+Thin LSP protocol adapter for the [oxi](https://github.com/project-oxi/oxicode) workspace.
 
 Provides JSON-RPC framing, an `lsp-types` wrapper, and an `async-process` +
 `async-lsp` runtime. Multi-server lifecycle (spawn, register, route) lives in

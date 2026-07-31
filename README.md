@@ -9,13 +9,13 @@
 A Rust port of [pi](https://github.com/earendil-works/pi) by Mario Zechner.
 Multi-provider · Streaming-first · Extensible · Session persistence
 
-[![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
-[![Test](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/test.yml?style=flat-square&label=tests)](https://github.com/a7garden/oxi/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/project-oxi/oxicode/ci.yml?style=flat-square&label=CI)](https://github.com/project-oxi/oxicode/actions)
+[![Test](https://img.shields.io/github/actions/workflow/status/project-oxi/oxicode/test.yml?style=flat-square&label=tests)](https://github.com/project-oxi/oxicode/actions)
 [![Crates.io](https://img.shields.io/crates/v/oxi-cli?style=flat-square&label=crates.io)](https://crates.io/crates/oxi-cli)
 [![docs.rs](https://img.shields.io/docsrs/oxi-cli?style=flat-square&label=docs.rs)](https://docs.rs/oxi-cli)
-[![GitHub release](https://img.shields.io/github/v/release/a7garden/oxi?style=flat-square&include_prereleases&label=release)](https://github.com/a7garden/oxi/releases)
+[![GitHub release](https://img.shields.io/github/v/release/project-oxi/oxicode?style=flat-square&include_prereleases&label=release)](https://github.com/project-oxi/oxicode/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
-[![GitHub stars](https://img.shields.io/github/stars/a7garden/oxi?style=flat-square)](https://github.com/a7garden/oxi/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/project-oxi/oxicode?style=flat-square)](https://github.com/project-oxi/oxicode/stargazers)
 [![Rust](https://img.shields.io/badge/Rust-1.96%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/))
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-1.5-blue?style=flat-square)](docs/rfcs/RFC-005-CI-CD-INFRA.md)
 
@@ -61,15 +61,15 @@ cargo binstall oxi-cli
 **Pre-built binary** (macOS Apple Silicon):
 ```bash
 # aarch64-apple-darwin
-curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/aarch64-apple-darwin.tar.gz \
+curl -fsSL https://github.com/project-oxi/oxicode/releases/latest/download/aarch64-apple-darwin.tar.gz \
   | tar xz -C /usr/local/bin
 ```
-Or download from the [Releases page](https://github.com/a7garden/oxi/releases).
+Or download from the [Releases page](https://github.com/project-oxi/oxicode/releases).
 Each release ships with `SHA256SUMS` for integrity verification.
 
 **Build from source** (last resort):
 ```bash
-git clone https://github.com/a7garden/oxi.git
+git clone https://github.com/project-oxi/oxicode.git
 cd oxi && cargo build --release
 cp target/release/oxi /usr/local/bin/
 ```
@@ -77,7 +77,7 @@ cp target/release/oxi /usr/local/bin/
 ### Verify a downloaded binary
 
 ```bash
-curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/SHA256SUMS -o SHA256SUMS
+curl -fsSL https://github.com/project-oxi/oxicode/releases/latest/download/SHA256SUMS -o SHA256SUMS
 sha256sum -c SHA256SUMS 2>/dev/null | grep aarch64-apple-darwin
 ```
 

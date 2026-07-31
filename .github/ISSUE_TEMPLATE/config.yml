@@ -4,5 +4,5 @@ contact_links:
     url: mailto:a7garden@icloud.com
     about: Report security vulnerabilities via email. Do NOT file public issues.
   - name: Question / Discussion
-    url: https://github.com/a7garden/oxi/discussions
+    url: https://github.com/project-oxi/oxicode/discussions
     about: Ask questions and discuss ideas in GitHub Discussions.

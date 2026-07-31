@@ -42,7 +42,7 @@ LSP 통합 · DAP 디버거 · 코드 실행 커널(Python+Bun) · ACP(Zed) · b
 ```
 pi (badlogic/pi-mono)
 ├── omp (can1357/oh-my-pi) — "완제품": TS+Bun 하이브리드, 모든 기능 내장, v16.1.1
-└── oxi (a7garden/oxi)     — "엔진": 순수 Rust, 포트 계약, 임베더블, 초기 단계
+└── oxi (project-oxi/oxicode)     — "엔진": 순수 Rust, 포트 계약, 임베더블, 초기 단계
 ```
 
 oxi는 pi의 **Rust 포트**로 출발했으나, omp는 pi의 **포크 + 대폭 확장**으로 이미 성숙한 제품이다. omp가 검증한 엔지니어링(경계 복구, 드리프트 복구, 스냅샷 스토어, 룰 인터럽트 등)은 oxi가 독자적으로 재발견하기엔 비용이 큰 검증 지식이다.
