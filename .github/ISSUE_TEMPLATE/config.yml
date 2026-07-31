@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security Vulnerability
-    url: mailto:security@a7garden.dev
+    url: mailto:a7garden@icloud.com
     about: Report security vulnerabilities via email. Do NOT file public issues.
   - name: Question / Discussion
     url: https://github.com/a7garden/oxi/discussions

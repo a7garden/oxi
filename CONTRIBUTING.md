@@ -218,7 +218,7 @@ When filing an issue, please include:
 
 **Do NOT file public issues for security vulnerabilities.**
 
-Instead, email [security@a7garden.dev](mailto:security@a7garden.dev) with:
+Instead, email [a7garden@icloud.com](mailto:a7garden@icloud.com) with:
 
 - Description of the vulnerability
 - Steps to reproduce
