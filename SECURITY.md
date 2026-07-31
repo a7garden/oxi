@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-**Email:** [security@a7garden.dev](mailto:security@a7garden.dev)
+**Email:** [a7garden@icloud.com](mailto:a7garden@icloud.com)
 
 **Do NOT file a public issue for security vulnerabilities.**
 
