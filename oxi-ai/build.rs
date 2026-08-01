@@ -17,36 +17,55 @@
 //! Re-generation is gated on `cargo:rerun-if-changed` for the proto file and
 //! this script, so incremental builds skip recompilation when neither moved.
 
-use std::env;
-use std::path::PathBuf;
+// When the `protobuf` feature is off, `prost-build` and `protoc-bin-vendored`
+// are not in the build script's dependency closure, so any reference to them
+// is a hard compile error. We isolate the proto-compilation path in a
+// #[cfg]-gated inline module so the compiler never even sees the symbols
+// when the feature is off.
+#[cfg(feature = "protobuf")]
+mod proto_build {
+    use std::env;
+    use std::path::PathBuf;
+
+    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+        let proto_dir = manifest_dir.join("proto/cursor");
+        let proto_file = proto_dir.join("agent.proto");
+
+        assert!(
+            proto_file.exists(),
+            "Cursor agent.proto missing at {}",
+            proto_file.display()
+        );
+
+        // Bundle protoc so the build is hermetic (no system protoc required).
+        // prost-build honours the `PROTOC` env var to locate the protoc binary.
+        let protoc_path = protoc_bin_vendored::protoc_bin_path()
+            .expect("protoc-bin-vendored failed to locate bundled protoc");
+        // SAFETY: build scripts are single-threaded; no concurrent env access.
+        unsafe {
+            env::set_var("PROTOC", &protoc_path);
+        }
+
+        let mut config = prost_build::Config::new();
+        // proto3 optional needs the experimental flag on older protoc; harmless on new.
+        config.protoc_arg("--experimental_allow_proto3_optional");
+
+        config.compile_protos(&[&proto_file], &[&proto_dir])?;
+
+        println!("cargo:rerun-if-changed={}", proto_file.display());
+        Ok(())
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    let proto_dir = manifest_dir.join("proto/cursor");
-    let proto_file = proto_dir.join("agent.proto");
+    // Always rerun if this script changes.
+    println!("cargo:rerun-if-changed=build.rs");
 
-    assert!(
-        proto_file.exists(),
-        "Cursor agent.proto missing at {}",
-        proto_file.display()
-    );
-
-    // Bundle protoc so the build is hermetic (no system protoc required).
-    // prost-build honours the `PROTOC` env var to locate the protoc binary.
-    let protoc_path = protoc_bin_vendored::protoc_bin_path()
-        .expect("protoc-bin-vendored failed to locate bundled protoc");
-    // SAFETY: build scripts are single-threaded; no concurrent env access.
-    unsafe {
-        env::set_var("PROTOC", &protoc_path);
+    #[cfg(feature = "protobuf")]
+    {
+        proto_build::run()?;
     }
 
-    let mut config = prost_build::Config::new();
-    // proto3 optional needs the experimental flag on older protoc; harmless on new.
-    config.protoc_arg("--experimental_allow_proto3_optional");
-
-    config.compile_protos(&[&proto_file], &[&proto_dir])?;
-
-    println!("cargo:rerun-if-changed={}", proto_file.display());
-    println!("cargo:rerun-if-changed=build.rs");
     Ok(())
 }

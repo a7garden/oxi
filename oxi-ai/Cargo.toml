@@ -62,16 +62,19 @@ signature = "2"
 pkcs8 = "0.10"
 rsa = { version = "0.9", features = ["pem"] }
 
-# Protobuf (Devin, Cursor)
-prost = "0.14"
+# Protobuf (Devin, Cursor) — feature-gated
+prost = { version = "0.14", optional = true }
 tokio-stream = "0.1"
 
 # WebSocket (GitLab Duo Workflow)
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
 [build-dependencies]
-prost-build = "0.14"
-protoc-bin-vendored = "3.0"
+prost-build = { version = "0.14", optional = true }
+protoc-bin-vendored = { version = "3.0", optional = true }
+
+[features]
+protobuf = ["dep:prost", "dep:prost-build", "dep:protoc-bin-vendored"]
 
 [dev-dependencies]
 mockito = "1"

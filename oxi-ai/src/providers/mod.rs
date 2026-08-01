@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 mod anthropic;
 mod azure;
 mod bedrock;
+#[cfg(feature = "protobuf")]
 mod cursor;
+#[cfg(feature = "protobuf")]
 mod devin;
 mod event;
 mod gemini_cli;

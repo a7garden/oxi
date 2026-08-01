@@ -380,7 +380,9 @@ fn build_builtin_transport(builtin: &'static BuiltinProvider) -> Option<Box<dyn 
         // ── Remote-AGENT providers (WebSocket/protobuf) ─────────────────
         // These providers require additional infra (HTTP/2, protobuf,
         // WebSocket) that oxi-ai does not currently bundle.
+        #[cfg(feature = "protobuf")]
         Api::CursorAgent => Some(Box::new(super::cursor::CursorProvider::new())),
+        #[cfg(feature = "protobuf")]
         Api::DevinAgent => Some(Box::new(super::devin::DevinProvider::new())),
         Api::GitLabDuo => Some(Box::new(super::gitlab_duo::GitLabDuoProvider::new())),
         Api::GitLabDuoAgent => Some(Box::new(
