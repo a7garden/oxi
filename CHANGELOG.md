@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **oxi-sdk: unstable re-export surface moved behind opt-in cargo features.**
+  Every `#[oxi_unstable]` re-export now carries a matching
+  `#[cfg(feature = "...")]` gate (completes R3 follow-up D). The
+  previously always-compiled unstable surface — `router`,
+  `role-routing`, `role-switching`, `advisor`, `memory`, `subagent`,
+  `agent-hub`, `lsp`, `browser`, `delegation`, `url-resolver`,
+  `workflow-dsl` — is now opt-in. Consumers that name these via the
+  `oxi_sdk::` path must enable the matching feature (or the `unstable`
+  umbrella); enable all twelve at once with
+  `oxi-sdk = { features = ["unstable"] }`. Internal callers reach the
+  underlying types via their definition paths
+  (`crate::url_resolver::*`, `crate::delegation::*`), so builder
+  methods stay available in default builds. oxi-cli enables the four
+  features it consumes (`router`, `role-routing`, `role-switching`,
+  `url-resolver`). See `docs/release-process.md` §Stability Tier.
+- **oxi-ai: `OAuthError` is now `#[non_exhaustive]`.** Completes the R7
+  error-stability policy for the OAuth subsystem. Consumers MUST add a
+  catch-all `_ =>` arm when matching `OAuthError`; a new variant
+  `InvalidAuthorizationEndpoint` was added in the same change.
+
+### Deprecated
+
+- **oxi-ai: `oauth::build_authorization_url` is deprecated** (since
+  0.64.0; removal slated for 0.66.0). It panics on a malformed
+  authorization endpoint. Use the non-panicking
+  `build_authorization_url_result` instead, which returns
+  `Result<PkceState, OAuthError>`. The legacy function delegates to the
+  new one and preserves its historical panic behavior.
+
+### Added
+
+- **oxi-ai: `oauth::build_authorization_url_result`** — non-panicking
+  PKCE URL builder returning `Result<PkceState, OAuthError>`, plus a new
+  `OAuthError::InvalidAuthorizationEndpoint` variant for malformed
+  endpoint URLs (R4 follow-up C).
+
 ## [0.64.0] - 2026-08-01 (retrospective)
 
 ### Breaking (retrospective — 0.61.0, 0.63.0)

@@ -24,6 +24,7 @@ use std::path::PathBuf;
 
 /// Errors produced by the OAuth subsystem.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OAuthError {
     #[error("IO error: {0}")]
     /// io variant.
@@ -64,6 +65,10 @@ pub enum OAuthError {
     #[error("Invalid state: {0}")]
     /// invalid state variant.
     InvalidState(String),
+
+    /// Authorization endpoint URL is malformed.
+    #[error("Invalid authorization endpoint URL: {0}")]
+    InvalidAuthorizationEndpoint(#[from] url::ParseError),
 }
 
 type Result<T> = std::result::Result<T, OAuthError>;
@@ -274,20 +279,19 @@ pub struct PkceState {
     pub state: String,
 }
 
-/// Build a PKCE authorization URL for the given provider config.
-pub fn build_authorization_url(config: &OAuthConfig) -> PkceState {
+/// Build a PKCE authorization URL, returning [`OAuthError`] instead of
+/// panicking when the configured authorization endpoint is not a valid URL.
+///
+/// This is the non-panicking variant; new code should prefer it over
+/// [`build_authorization_url`]. The legacy function delegates here and
+/// preserves its historical panic-on-malformed-URL behavior for backward
+/// compatibility.
+pub fn build_authorization_url_result(config: &OAuthConfig) -> Result<PkceState> {
     let code_verifier = generate_code_verifier();
     let code_challenge = derive_code_challenge(&code_verifier);
     let state = generate_state_token();
 
-    // SAFETY: the authorization endpoint is a REQUIRED resource — a malformed
-    // URL means the provider config is broken. Failing fast surfaces the config
-    // error at setup time. This is a recoverable config error that deserves a
-    // `Result` return; changing the pub signature is a breaking change, so it
-    // is flagged for the additive `build_authorization_url_result` follow-up.
-    #[allow(clippy::expect_used)]
-    let mut url =
-        url::Url::parse(&config.authorization_endpoint).expect("invalid authorization endpoint");
+    let mut url = url::Url::parse(&config.authorization_endpoint)?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &config.client_id)
@@ -300,12 +304,31 @@ pub fn build_authorization_url(config: &OAuthConfig) -> PkceState {
         url.query_pairs_mut().append_pair("scope", &config.scopes);
     }
 
-    PkceState {
+    Ok(PkceState {
         code_verifier,
         code_challenge,
         authorization_url: url.to_string(),
         state,
-    }
+    })
+}
+
+/// Build a PKCE authorization URL for the given provider config.
+///
+/// **Panics** if the configured authorization endpoint is not a valid URL.
+/// This is a recoverable config error; prefer [`build_authorization_url_result`].
+///
+/// Deprecated: retained for backward compatibility; delegates to
+/// [`build_authorization_url_result`] and panics on the error path to
+/// preserve the historical behavior. Will be removed in a future release.
+#[deprecated(
+    since = "0.64.0",
+    note = "use build_authorization_url_result instead; will be removed in 0.66.0"
+)]
+pub fn build_authorization_url(config: &OAuthConfig) -> PkceState {
+    // LEGACY: preserve the historical panic-on-malformed-URL behavior. The
+    // recoverable, non-panicking path lives in `build_authorization_url_result`.
+    #[allow(clippy::expect_used)]
+    build_authorization_url_result(config).expect("invalid authorization endpoint")
 }
 
 /// Generate an opaque state parameter (22 random base64url chars).
@@ -830,7 +853,7 @@ mod tests {
             redirect_uri: "http://localhost:8787/callback".into(),
             scopes: "read write".into(),
         };
-        let pkce = build_authorization_url(&config);
+        let pkce = build_authorization_url_result(&config).expect("valid config should parse");
 
         assert!(pkce.authorization_url.contains("code_challenge="));
         assert!(
@@ -842,6 +865,23 @@ mod tests {
         assert!(pkce.authorization_url.contains("state="));
         assert!(pkce.authorization_url.contains("scope="));
         assert_eq!(pkce.code_verifier.len(), 43);
+    }
+
+    #[test]
+    fn test_build_authorization_url_result_rejects_malformed_endpoint() {
+        let config = OAuthConfig {
+            authorization_endpoint: "http://[".into(),
+            token_endpoint: "https://example.com/token".into(),
+            client_id: "my-client".into(),
+            redirect_uri: "http://localhost:8787/callback".into(),
+            scopes: "".into(),
+        };
+        let err = build_authorization_url_result(&config)
+            .expect_err("malformed endpoint must not produce a URL");
+        assert!(
+            matches!(err, OAuthError::InvalidAuthorizationEndpoint(_)),
+            "expected InvalidAuthorizationEndpoint, got {err:?}"
+        );
     }
 
     #[test]

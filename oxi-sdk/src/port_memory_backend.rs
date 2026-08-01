@@ -2,7 +2,7 @@
 //! [`MemoryStore`] + optional [`EmbeddingProvider`] ports into the agent's
 //! `memory_*` tools.
 //!
-//! This is the memory analog of [`crate::SdkUrlResolver`]: the SDK ships a
+//! This is the memory analog of [`crate::url_resolver::SdkUrlResolver`]: the SDK ships a
 //! standard adapter so a *pure*-`oxi-sdk` consumer (one that does not write a
 //! bespoke `MemoryBackend`, as oxi-cli does with its Mnemopi backend) can
 //! make the agent's memory tools functional simply by registering the ports.

@@ -65,10 +65,34 @@ unstable = [
     "circuit-breaker",
     "mcp-spawn-validator",
     "mcp-transport",
+    "delegation",
+    "url-resolver",
+    "workflow-dsl",
+    "role-routing",
+    "role-switching",
+    "router",
+    "advisor",
+    "memory",
+    "subagent",
+    "agent-hub",
+    "lsp",
+    "browser",
 ]
 circuit-breaker = []
 mcp-spawn-validator = []
 mcp-transport = []
+delegation = []
+url-resolver = []
+workflow-dsl = []
+role-routing = []
+role-switching = []
+router = []
+advisor = []
+memory = []
+subagent = []
+agent-hub = []
+lsp = []
+browser = []
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

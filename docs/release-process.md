@@ -113,18 +113,23 @@ Two signals are layered for surface that may change between minor releases:
 doesn't deliver the contract). See `docs/oxi-sdk-ownership.md` §6.1 for
 the full rationale.
 
-**Current unstable surface (oxi-sdk):** `circuit-breaker`,
-`mcp-spawn-validator`, `mcp-transport` — all enabled by the umbrella
-`unstable` feature, all off by default.
+**Current unstable surface (oxi-sdk):** the `unstable` umbrella feature
+enables all of these, each off by default — `circuit-breaker`,
+`mcp-spawn-validator`, `mcp-transport`, `delegation`, `url-resolver`,
+`workflow-dsl`, `role-routing`, `role-switching`, `router`, `advisor`,
+`memory`, `subagent`, `agent-hub`, `lsp`, `browser`. oxi-cli enables the
+subset it consumes (`router`, `role-routing`, `role-switching`,
+`url-resolver`); external consumers (oxios) opt in via
+`oxi-sdk = { features = ["unstable"] }`.
 
-The CI `cargo-public-api` diff gate
-(`.github/workflows/api-diff.yml`) currently **captures** the public API
-surface per crate as a workflow artifact and fails the job on toolchain
-or system-dep mismatches, but does **not** yet diff against a baseline
-or fail on undocumented removals. A future iteration will close this
-gap (commented in the workflow's preamble). Until then, the breaking
-change convention above relies on the `## Breaking` entry being
-authored manually for every removal.
+The CI `cargo-public-api` gate
+(`.github/workflows/api-diff.yml`) captures the public API surface per
+crate as a workflow artifact and, on pull requests, **enforces** the
+breaking-change policy: the PR surface is diffed against `origin/main`,
+and any removed symbol fails the job unless `CHANGELOG.md` carries a
+`### Breaking` or `### Removed` heading under `## [Unreleased]`.
+Baseline capture is fail-safe — a per-crate main baseline that cannot be
+built is skipped with a warning rather than false-positive failing the job.
 
 ### Deprecation Window
 

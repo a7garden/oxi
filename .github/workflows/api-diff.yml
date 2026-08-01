@@ -1,24 +1,19 @@
 name: Public API Snapshot
 
-# Public-API surface observation job.  Runs `cargo public-api list`
-# against each workspace crate that ships a stable API surface
-# (oxi-ai, oxi-agent, oxi-sdk) and uploads the rendered output as a
-# workflow artifact for manual review.
+# Public-API surface job.  Runs `cargo public-api list` against each
+# workspace crate that ships a stable API surface (oxi-ai, oxi-agent,
+# oxi-sdk).  On every run it captures the surface and uploads it as a
+# workflow artifact.  On pull requests it additionally ENFORCES the
+# breaking-change policy: the PR surface is diffed against `origin/main`
+# and any removed symbol fails the job unless CHANGELOG.md carries a
+# `### Breaking` or `### Removed` heading under `## [Unreleased]`.
 #
-# This is the initial pass — it OBSERVES the surface, it does not
-# yet ENFORCE removals against a baseline (no baseline is checked
-# in yet).  However, snapshot capture is itself strict: any failed
-# or empty per-crate snapshot fails the job, so a system-dep or
-# rustdoc-JSON toolchain mismatch cannot silently capture zero
-# baselines.  Future iterations (per the SDK Stability program
-# brief) will:
-
-#   1. diff the captured list against the `main` branch baseline,
-#   2. fail the build if any symbol disappears without a `Breaking`
-#      marker in CHANGELOG.md (e.g. `### Removed — oxi-ai (Breaking
-#      Changes)` or `## Breaking (retrospective ...)`).
-# See .superpowers/sdd/2026-08-01-sdk-stability-ownership-program/
-# for the full program brief.
+# Snapshot capture is itself strict: a failed or empty per-crate
+# snapshot fails the job, so a system-dep or rustdoc-JSON toolchain
+# mismatch cannot silently capture zero baselines.  The enforcement
+# step is fail-safe: if a per-crate `main` baseline cannot be captured,
+# that crate is skipped with a warning rather than false-positive
+# failing the job.
 
 on:
   push:
@@ -121,3 +116,52 @@ jobs:
           name: public-api-snapshots
           path: api-snapshots/
           if-no-files-found: warn
+      - name: Enforce no undocumented API removals (PR only)
+        # On pull requests, diff the PR surface (captured above in
+        # api-snapshots/) against origin/main. Any symbol present on main
+        # but absent on the PR is a REMOVAL. Removals are allowed only when
+        # CHANGELOG.md carries a `### Breaking` or `### Removed` heading
+        # under `## [Unreleased]`. Fail-safe: if a per-crate main baseline
+        # cannot be captured (empty), that crate is skipped with a warning
+        # rather than false-positive failing the job.
+        if: github.event_name == 'pull_request'
+        run: |
+          set -uo pipefail
+          if ! git fetch origin main --depth=50; then
+            echo "::warning::Could not fetch origin/main (transient network issue); skipping API-removal enforcement on this run."
+            exit 0
+          fi
+          if ! git worktree add "$RUNNER_TEMP/main-baseline" origin/main; then
+            echo "::warning::Could not create worktree of origin/main; skipping API-removal enforcement on this run."
+            exit 0
+          fi
+          mkdir -p api-snapshots-main
+          removed_any=0
+          for crate in oxi-ai oxi-agent oxi-sdk; do
+            ( cd "$RUNNER_TEMP/main-baseline" && cargo public-api list -p "$crate" ) \
+              > "api-snapshots-main/${crate}.txt" 2> "api-snapshots-main/${crate}.stderr" || true
+            lines=$( wc -l < "api-snapshots-main/${crate}.txt" | tr -d ' ' )
+            if [ "$lines" = "0" ]; then
+              echo "::warning::main baseline for ${crate} is empty; skipping enforcement for this crate. See api-snapshots-main/${crate}.stderr."
+              continue
+            fi
+            removed=$( comm -23 \
+              <( sort "api-snapshots-main/${crate}.txt" ) \
+              <( sort "api-snapshots/${crate}.txt" ) )
+            if [ -n "$removed" ]; then
+              echo "::error::${crate}: public-API symbols removed relative to main:"
+              printf '%s\n' "$removed" | sed 's/^/    - /'
+              removed_any=1
+            fi
+          done
+          git worktree remove "$RUNNER_TEMP/main-baseline" --force || true
+          if [ "$removed_any" -ne 0 ]; then
+            if awk '/^## \[Unreleased\]/{f=1;next} f&&/^## \[/{exit} f' CHANGELOG.md \
+                | grep -qE '^### (Breaking|Removed)'; then
+              echo "::notice::API removals detected and covered by a Breaking/Removed entry under [Unreleased] in CHANGELOG.md."
+            else
+              echo "::error::Public-API symbols were removed without a '### Breaking' or '### Removed' entry under '## [Unreleased]' in CHANGELOG.md."
+              echo "::error::Document each removed symbol and its replacement there, or restore the symbols."
+              exit 1
+            fi
+          fi

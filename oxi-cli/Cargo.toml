@@ -23,7 +23,7 @@ path = "src/lib.rs"
 [dependencies]
 oxi-ai = { version = "0.63.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.63.0", path = "../oxi-agent" }
-oxi-sdk = { version = "0.63.0", path = "../oxi-sdk" }
+oxi-sdk = { version = "0.63.0", path = "../oxi-sdk", features = ["router", "role-routing", "role-switching", "url-resolver"] }
 oxi-vtui = { version = "0.63.0", path = "../oxi-vtui" }
 oxi-vtui-compat = { version = "0.63.0", path = "../oxi-vtui-compat" }
 oxi-mnemopi = { version = "0.63.0", path = "../oxi-mnemopi", features = ["remote-embeddings"] }

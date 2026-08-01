@@ -29,7 +29,11 @@
 // Stability tier attribute macros. Renamed to avoid shadowing the (nightly-only,
 // but rustc-resolved) builtin `#[stable]/#[unstable]/#[deprecated]`. The proc-
 // macro crate's own rustdoc recommends this rename pattern.
-use oxi_api_stability::{internal as oxi_internal, stable as oxi_stable, unstable as oxi_unstable};
+use oxi_api_stability::{internal as oxi_internal, stable as oxi_stable};
+// `oxi_unstable` is only referenced on feature-gated re-export blocks; in the
+// default (no-feature) build none survive, so the import is conditionally unused.
+#[allow(unused_imports)]
+use oxi_api_stability::unstable as oxi_unstable;
 
 pub mod agent_builder;
 pub mod agent_definition;
@@ -70,10 +74,13 @@ pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 #[oxi_stable(since = "0.63.0")]
 pub use builder::{Oxi, OxiBuilder};
+#[cfg(feature = "delegation")]
 #[oxi_unstable(feature = "delegation")]
 pub use delegation::SdkSubagentRunner;
+#[cfg(feature = "url-resolver")]
 #[oxi_unstable(feature = "url-resolver")]
 pub use url_resolver::SdkUrlResolver;
+#[cfg(feature = "workflow-dsl")]
 #[oxi_unstable(feature = "workflow-dsl")]
 pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
 
@@ -174,10 +181,13 @@ pub use oxi_ai::{
     ProviderRegistry, StreamOptions, UserMessage,
 };
 // Model roles + role switching (ported from omp)
+#[cfg(feature = "role-routing")]
 #[oxi_unstable(feature = "role-routing")]
 pub use oxi_ai::role_routing::RoleRoutingProvider;
+#[cfg(feature = "role-switching")]
 #[oxi_unstable(feature = "role-switching")]
 pub use oxi_ai::role_switcher::{RoleSignals, decide_role, resolve_role_to_model, role_for_tool};
+#[cfg(feature = "role-routing")]
 #[oxi_unstable(feature = "role-routing")]
 pub use oxi_ai::roles::{ModelRole, RoleRegistry, live_role_registry, set_live_role_registry};
 
@@ -228,6 +238,7 @@ pub use oxi_ai::{
 };
 
 // Complexity-based routing and the router module
+#[cfg(feature = "router")]
 #[oxi_unstable(feature = "router")]
 pub use oxi_ai::router;
 
@@ -257,6 +268,7 @@ pub use oxi_agent::{
 // SDK consumers can construct a full advisor: build a second `Agent` with the
 // advisor model role + read-only tools + an `AdviseTool` (carrying an
 // `EnqueueAdviceFn`), then drive it with `AdvisorRuntime`. The emission guard
+#[cfg(feature = "advisor")]
 #[oxi_unstable(feature = "advisor")]
 pub use oxi_agent::advisor::{
     ADVISOR_GUIDANCE, ADVISOR_READONLY_TOOL_NAMES, ADVISOR_SYSTEM_PROMPT, AdviseTool, AdvisorAgent,
@@ -281,20 +293,24 @@ pub use oxi_agent::{TodoStateProvider, TodoTool};
 // otherwise force a direct `oxi-agent` dependency.
 
 /// `MemoryBackend` backed by the SDK `MemoryStore` + `EmbeddingProvider` ports.
+#[cfg(feature = "memory")]
 #[oxi_unstable(feature = "memory")]
 pub use crate::port_memory_backend::PortMemoryBackend;
 /// `BashTool` (read/write/edit/grep/find/ls are already re-exported above and
 /// bundled by `coding_tools()`).
 #[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::BashTool;
-/// In-process subagent runner trait (see [`crate::SdkSubagentRunner`]).
+/// In-process subagent runner trait (see [`crate::delegation::SdkSubagentRunner`]).
+#[cfg(feature = "subagent")]
 #[oxi_unstable(feature = "subagent")]
 pub use oxi_agent::SubagentRunner;
 /// Memory backend trait + item — implement to back the `memory_*` tools, or
 /// use [`PortMemoryBackend`] to bridge the SDK's `MemoryStore` port.
+#[cfg(feature = "memory")]
 #[oxi_unstable(feature = "memory")]
 pub use oxi_agent::tools::{MemoryBackend, MemoryItem};
 /// The `memory_*` + `subagent` tool structs (register directly if desired).
+#[cfg(feature = "memory")]
 #[oxi_unstable(feature = "memory")]
 pub use oxi_agent::tools::{
     MemoryEditTool, MemoryRecallTool, MemoryReflectTool, MemoryRetainTool, SubagentTool,
@@ -303,9 +319,11 @@ pub use oxi_agent::tools::{
 #[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::tools::{ResolvedContent, UrlResolver};
 /// Agent-pool source for Hub display + todo sub-agent matching.
+#[cfg(feature = "agent-hub")]
 #[oxi_unstable(feature = "agent-hub")]
 pub use oxi_agent::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
 /// LSP capability — implement to back the `lsp` tool.
+#[cfg(feature = "lsp")]
 #[oxi_unstable(feature = "lsp")]
 pub use oxi_agent::{LspAction, LspProvider};
 
@@ -328,9 +346,11 @@ pub use oxi_ai::OpenAiResponsesProvider;
 // ── Browser engine re-exports ────────────────────────────────────────────────
 //
 // The browser trait layer (BrowserEngine, BrowserTab, config, error types)
-// is always available so SDK consumers can implement custom backends.
-// The native oxibrowser-core backend requires the `native-browser` feature.
+// is available behind the `browser` feature so SDK consumers can implement
+// custom backends. The native oxibrowser-core backend additionally requires
+// the `native-browser` feature.
 
+#[cfg(feature = "browser")]
 #[oxi_unstable(feature = "browser")]
 pub use oxi_agent::tools::browse::{
     BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine, BrowserError, BrowserTab,

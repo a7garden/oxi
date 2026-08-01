@@ -164,14 +164,14 @@ impl<'a> AgentBuilder<'a> {
     }
 
     /// Bridge the engine's registered `InternalUrlRouter` port into this
-    /// agent's `read`/`grep`/`find` tools via [`SdkUrlResolver`](crate::SdkUrlResolver).
+    /// agent's `read`/`grep`/`find` tools via [`SdkUrlResolver`](crate::url_resolver::SdkUrlResolver).
     ///
     /// This is how a pure-SDK consumer enables protocol-scheme URL
     /// resolution: register scheme handlers on the router port, then call
     /// this. Without it (or [`Self::with_url_resolver`]), URL-prefixed
     /// paths are treated as regular file paths.
     pub fn with_port_url_resolver(self) -> Self {
-        let resolver = std::sync::Arc::new(crate::SdkUrlResolver::new(
+        let resolver = std::sync::Arc::new(crate::url_resolver::SdkUrlResolver::new(
             self.oxi.ports().url_router.clone(),
         ));
         self.with_url_resolver(resolver)
@@ -194,11 +194,12 @@ impl<'a> AgentBuilder<'a> {
     /// Bridge the engine into an in-process subagent runner and register the
     /// `subagent` tool.
     ///
-    /// Uses [`SdkSubagentRunner`](crate::SdkSubagentRunner) so the `subagent`
+    /// Uses [`SdkSubagentRunner`](crate::delegation::SdkSubagentRunner) so the `subagent`
     /// tool runs isolated agents in-process (no CLI binary). Without this, the
     /// `subagent` tool is absent from the agent's toolset.
     pub fn with_port_subagent(mut self) -> Self {
-        let runner = std::sync::Arc::new(crate::SdkSubagentRunner::new(self.oxi.clone()));
+        let runner =
+            std::sync::Arc::new(crate::delegation::SdkSubagentRunner::new(self.oxi.clone()));
         self.config.subagent_runner = Some(runner);
         self.tools.register(oxi_agent::tools::SubagentTool::new());
         self
