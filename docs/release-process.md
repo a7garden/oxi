@@ -83,6 +83,55 @@ cargo install oxi-cli --version X.Y.Z
 oxi --version
 ```
 
+
+## Governance Conventions
+
+### Breaking Change Policy
+
+Any root-level `pub` symbol removal, signature change, or semantic change MUST
+appear under `## Breaking` in the CHANGELOG with:
+
+1. **Full symbol path** — e.g. `oxi_sdk::ProviderCircuitBreaker`
+2. **Replacement API or migration path** — what consumers should use instead
+3. **Minimum deprecation window** — how many releases before physical removal
+4. **Known affected consumers** — from GitHub code search
+
+The CI `cargo-public-api` diff gate (see `.github/workflows/ci.yml`) fails PRs
+that remove public symbols without a matching `## Breaking` entry.
+
+### Deprecation Window
+
+A public symbol marked for removal gets **≥1 release** (ideally 2) of:
+
+```rust
+#[deprecated(since = "0.XX.0", note = "use X instead; will be removed in 0.YY.0")]
+```
+
+During the deprecation window:
+- The API signature is frozen (no signature changes).
+- The semantics are frozen (no behavioral changes).
+- `cargo build` on consumer code produces a deprecation warning.
+
+### Error Variant Stability
+
+Public error enums (`SdkError`, `ProviderError`, `BreakerError`) are
+`#[non_exhaustive]`:
+- **New variants** may be added freely (consumers need a catch-all `_ =>` arm).
+- **Existing named variants are frozen** — changing what a variant means is a
+  silent break, even if the name stays the same.
+- **Semantic changes** require a rename (new variant) + deprecation of the old.
+- `ToolError` is a type alias for `String` — stable by construction, no variants.
+
+### Heavy Dependency Policy
+
+Adding a heavy build dependency (>50 transitive crates, or requires a vendored
+binary) requires:
+
+1. A CHANGELOG `## Changed` entry noting build impact (e.g.
+   `+~120 crates, +~150s cold build time`).
+2. Feature-gating behind an off-by-default cargo feature so consumers who don't
+   need it pay no build cost.
+
 ## Quick Checklist
 
 ```bash
