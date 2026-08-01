@@ -7,7 +7,7 @@
 //! caller can place the transcript and composer into `scrollback` / `prompt`.
 //!
 //! All keyboard hints advertised by the shortcuts bar are verified against the
-//! real key dispatch in [`super::main_loop::spawn_input_thread`] — a hint that
+//! real key dispatch in `super::main_loop::spawn_input_thread` — a hint that
 //! does not match a real handler is a misleading-UI defect.
 
 use oxi_vtui::design::layout::{

@@ -1,13 +1,13 @@
 //! Slash command registry for the VT TUI harness.
 //!
-//! Parsed in [`crate::tui_vt::main_loop::handle_inline_event`] when the
+//! Parsed in `crate::tui_vt::main_loop::handle_inline_event` when the
 //! submitted text begins with `/`. Each command owns its name, aliases, and
-//! execution. Adding a command = implement [`SlashCommand`] + register it in
+//! execution. Adding a command = implement `SlashCommand` + register it in
 //! [`SlashRegistry::builtins`].
 //!
 //! This is the new-harness counterpart of the legacy ratatui-based slash
 //! system (deleted with the old `tui/` crate). Only commands that map onto
-//! [`crate::app::agent_session::AgentSessionHandle`] + the inline protocol
+//! `crate::app::agent_session::AgentSessionHandle` + the inline protocol
 //! are wired here; overlay-driving commands (`/model` picker, `/issue`,
 //! `/settings`, …) are deferred until those overlays are rebuilt against
 //! `InlineCommand::ShowOverlay`.

@@ -26,6 +26,7 @@ ignore = [
     "RUSTSEC-2026-0095",
     "RUSTSEC-2026-0096",
     "RUSTSEC-2026-0114",
+    "RUSTSEC-2026-0222",
     # rsa ~0.9.10 — transitive via jsonschema → referencing → referencing
     # No safe upgrade; rsa is only used server-side in schema validation.
     # Network timing attack requires attacker on the same network path.

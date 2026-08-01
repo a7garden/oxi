@@ -46,6 +46,9 @@ ignore = [
     "RUSTSEC-2026-0085",
     # OOB write transcoding component model strings (medium)
     "RUSTSEC-2026-0091",
+    # wasmtime 41.0.4 — type-index mixup between engines (medium).
+    # Same extism 1.21 pin as the entries above.
+    "RUSTSEC-2026-0222",
 
     # ── transitive dependencies (no fix available) ──────────────────
 
