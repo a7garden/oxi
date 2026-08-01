@@ -83,21 +83,48 @@ cargo install oxi-cli --version X.Y.Z
 oxi --version
 ```
 
+### Heavy Dependency Policy
 
-## Governance Conventions
+Adding a heavy build dependency (>50 transitive crates, or requires a vendored
+binary) requires:
 
-### Breaking Change Policy
+1. A CHANGELOG `## Changed` entry noting build impact (e.g.
+   `+~120 crates, +~150s cold build time`).
+2. Feature-gating behind an off-by-default cargo feature so consumers who don't
+   need it pay no build cost.
 
-Any root-level `pub` symbol removal, signature change, or semantic change MUST
-appear under `## Breaking` in the CHANGELOG with:
+### Stability Tier + Feature-Gate Convention
 
-1. **Full symbol path** — e.g. `oxi_sdk::ProviderCircuitBreaker`
-2. **Replacement API or migration path** — what consumers should use instead
-3. **Minimum deprecation window** — how many releases before physical removal
-4. **Known affected consumers** — from GitHub code search
+Two signals are layered for surface that may change between minor releases:
 
-The CI `cargo-public-api` diff gate (see `.github/workflows/ci.yml`) fails PRs
-that remove public symbols without a matching `## Breaking` entry.
+1. **Tier annotation** — `#[oxi_unstable(feature = "...")]` (from
+   `oxi-api-stability`) renders a colored badge in `cargo doc` for
+   discoverability. This is **documentation only** — a proc-macro attribute
+   cannot register a custom lint, so consumers cannot turn on a
+   `#![warn(unstable_used)]` that fails builds on tier annotations.
+2. **Cargo feature gate** — the same `#[cfg(feature = "...")]` wrapper that
+   the doc badge references is the **real** machine-enforced signal. A
+   consumer that doesn't enable the feature cannot accidentally build on the
+   surface; the symbols don't exist in their dependency.
+
+**Rule:** every `#[oxi_unstable]` re-export MUST also carry a matching
+`#[cfg(feature = "...")]` gate. The badge alone is a known failure mode
+(the original R3 spec asked for it, and the doc-only implementation
+doesn't deliver the contract). See `docs/oxi-sdk-ownership.md` §6.1 for
+the full rationale.
+
+**Current unstable surface (oxi-sdk):** `circuit-breaker`,
+`mcp-spawn-validator`, `mcp-transport` — all enabled by the umbrella
+`unstable` feature, all off by default.
+
+The CI `cargo-public-api` diff gate
+(`.github/workflows/api-diff.yml`) currently **captures** the public API
+surface per crate as a workflow artifact and fails the job on toolchain
+or system-dep mismatches, but does **not** yet diff against a baseline
+or fail on undocumented removals. A future iteration will close this
+gap (commented in the workflow's preamble). Until then, the breaking
+change convention above relies on the `## Breaking` entry being
+authored manually for every removal.
 
 ### Deprecation Window
 
@@ -121,16 +148,6 @@ Public error enums (`SdkError`, `ProviderError`, `BreakerError`) are
   silent break, even if the name stays the same.
 - **Semantic changes** require a rename (new variant) + deprecation of the old.
 - `ToolError` is a type alias for `String` — stable by construction, no variants.
-
-### Heavy Dependency Policy
-
-Adding a heavy build dependency (>50 transitive crates, or requires a vendored
-binary) requires:
-
-1. A CHANGELOG `## Changed` entry noting build impact (e.g.
-   `+~120 crates, +~150s cold build time`).
-2. Feature-gating behind an off-by-default cargo feature so consumers who don't
-   need it pay no build cost.
 
 ## Quick Checklist
 
