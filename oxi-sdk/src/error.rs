@@ -11,7 +11,12 @@ pub type SdkResult<T> = Result<T, SdkError>;
 ///
 /// SDK consumers can use `match` to handle specific error cases.
 /// Internal implementations may still use `anyhow`, converted at public API boundaries.
+/// `#[non_exhaustive]` — consumers MUST add a catch-all `_ =>` arm in their
+/// `match` expressions so that new variants added in future minor releases do
+/// not break compilation. Existing named variants are frozen; their meaning
+/// does not change between releases (see `docs/release-process.md`).
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SdkError {
     // ── Model/Provider ────────────────────────────────────────────────────────
     /// The requested model could not be resolved by any configured provider.

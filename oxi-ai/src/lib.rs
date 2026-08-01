@@ -45,6 +45,11 @@ mod providers;
 pub mod register_builtins {
     pub use crate::providers::register_builtins::*;
 }
+/// Circuit-breaker behavior trait + SDK reference implementation.
+///
+/// See [`crate::circuit_breaker::CircuitBreaker`] and
+/// [`crate::circuit_breaker::DefaultCircuitBreaker`].
+pub mod circuit_breaker;
 pub mod router;
 pub mod secret;
 mod tools;

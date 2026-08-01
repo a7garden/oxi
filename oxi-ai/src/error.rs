@@ -57,8 +57,12 @@ impl std::fmt::Display for HttpErrorDetail {
     }
 }
 
-/// Provider-specific errors
+/// Provider-specific errors. `#[non_exhaustive]` — consumers MUST add a
+/// catch-all `_ =>` arm in their `match` expressions. Existing named variants
+/// are frozen; their meaning does not change between releases (see
+/// `docs/release-process.md`).
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ProviderError {
     /// API key is missing.
     #[error("Missing API key")]
