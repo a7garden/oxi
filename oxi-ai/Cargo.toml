@@ -13,6 +13,8 @@ categories = ["api-bindings", "asynchronous"]
 exclude = ["target/"]
 
 [dependencies]
+# Stability tier attribute macros
+oxi-api-stability = { version = "0.63.0", path = "../oxi-api-stability" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"

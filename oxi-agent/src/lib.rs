@@ -14,6 +14,9 @@
 //!
 //! Provides the core agent loop, tool execution, state management,
 //! and streaming event pipeline for the oxi coding agent.
+// Stability tier attribute macros (renamed import — see oxi-sdk for rationale).
+#[allow(unused_imports)]
+use oxi_api_stability::{internal as oxi_internal, stable as oxi_stable, unstable as oxi_unstable};
 
 /// Advisor subsystem — read-only reviewer that shadows the primary agent.
 pub mod advisor;
@@ -47,14 +50,18 @@ pub mod tools;
 /// Shared type aliases and helpers.
 pub mod types;
 
+#[oxi_stable(since = "0.63.0")]
 pub use agent::Agent;
 pub use agent::ProviderResolver;
+#[oxi_stable(since = "0.63.0")]
 pub use agent_definition::{
     AgentDefinition, AgentDiscovery, AgentScope, DefaultContext, current_subagent_depth,
     max_subagent_depth, validate_agent_name,
 };
+#[oxi_stable(since = "0.63.0")]
 pub use agent_loop::{AgentLoop, AgentLoopConfig};
 
+#[oxi_unstable(feature = "advisor")]
 pub use advisor::{
     ADVISOR_GUIDANCE, ADVISOR_READONLY_TOOL_NAMES, ADVISOR_SYSTEM_PROMPT, AdviseTool, AdvisorAgent,
     AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote, AdvisorRuntime, AdvisorRuntimeHost,
@@ -63,6 +70,7 @@ pub use advisor::{
     resolve_delivery_channel,
 };
 /// Agent configuration, hooks, and tool execution mode.
+#[oxi_stable(since = "0.63.0")]
 pub use config::{
     AfterToolCallContext, AfterToolCallResult, AgentConfig, AgentHooks, BeforeToolCallContext,
     BeforeToolCallResult, ShouldStopAfterTurnContext, ToolExecutionMode,
@@ -71,6 +79,7 @@ pub use error::AgentError;
 pub use events::{AgentEvent, ToolCallContext, VisitReason};
 pub use tools::browse::{BrowseProgress, BrowseProgressCallback};
 
+#[oxi_stable(since = "0.63.0")]
 pub use agent_loop::config::CompactionHook;
 pub use compaction::{CompactedContext, CompactionEvent};
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
@@ -79,7 +88,11 @@ pub use recovery::PartialResponse;
 pub use state::{AgentState, SharedState};
 pub use structured_output::{OutputMode, StructuredOutput, StructuredOutputError};
 
+#[oxi_stable(since = "0.63.0")]
 pub use mcp::{McpConfig, McpManager, McpTool};
+/// In-process subagent runner trait (see [`SdkSubagentRunner`] in oxi-sdk).
+#[oxi_unstable(feature = "subagent")]
+pub use tools::SubagentRunner;
 pub use tools::ask::{AskBridge, AskTool};
 pub use tools::commit::{
     CommitGroup, CommitTool, CommitType, ConventionalAnalysis, ConventionalDetail, NumstatEntry,
@@ -96,18 +109,23 @@ pub use tools::search_cache::{GetSearchResultsTool, SearchCache};
 pub use tools::subagent::SubagentTool;
 pub use tools::web_search::WebSearchTool;
 /// Built-in tool implementations and registry.
+#[oxi_stable(since = "0.63.0")]
 pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, ForkResult, GrepTool, LsTool,
-    ReadTool, SubagentRunner, ToolContext, ToolError, ToolRegistry, WriteTool,
+    ReadTool, ToolContext, ToolError, ToolRegistry, WriteTool,
 };
 
+#[oxi_unstable(feature = "todo")]
 pub use tools::TodoStateProvider;
+#[oxi_unstable(feature = "todo")]
 pub use tools::todo::{
     InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus, TodoTool,
     TodoUpdateResult,
 };
 
+#[oxi_unstable(feature = "agent-pool")]
 pub use tools::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
+#[oxi_unstable(feature = "lsp")]
 pub use tools::{LspAction, LspProvider};
 
 /// Standard imports for oxi-agent usage.

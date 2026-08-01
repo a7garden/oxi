@@ -14,9 +14,13 @@
 //! This crate provides a unified interface for interacting with multiple LLM providers.
 //! It handles streaming, tool calling, context management, and cross-provider handoffs.
 
+// Stability tier attribute macros (renamed import — see oxi-sdk for rationale).
+#[allow(unused_imports)]
+use oxi_api_stability::{internal as oxi_internal, stable as oxi_stable, unstable as oxi_unstable};
 // Catalog moved to the `oxi-catalog` crate (omp aligns `pi-catalog` as a
 // separate package). Re-exported here for backward compatibility during the
 // migration; new code should depend on `oxi-catalog` directly.
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_catalog::catalog;
 pub mod compaction;
 pub mod compaction_seam;
@@ -65,6 +69,7 @@ pub mod prelude {
 // Re-export main types
 
 /// Provider-specific error type for LLM operations.
+#[oxi_stable(since = "0.63.0")]
 pub use crate::error::ProviderError;
 
 /// Structured HTTP error detail (status/body/provider/request-id) carried by
@@ -73,18 +78,22 @@ pub use crate::error::ProviderError;
 pub use crate::error::HttpErrorDetail;
 
 /// Shared conversation context.
+#[oxi_stable(since = "0.63.0")]
 pub use context::Context;
 
 /// Result type alias for oxi-ai operations.
 pub use error::{Error, Result};
 
 /// Message types for constructing conversations.
+#[oxi_stable(since = "0.63.0")]
 pub use messages::*;
 
 /// Cache retention control for provider requests.
+#[oxi_stable(since = "0.63.0")]
 pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
+#[oxi_stable(since = "0.63.0")]
 pub use providers::{
     Provider, ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions, StreamResult,
     custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider,
@@ -129,10 +138,12 @@ pub use providers::VertexProvider;
 pub use providers::normalize_messages;
 
 /// Tool definition and argument validation.
+#[oxi_stable(since = "0.63.0")]
 pub use tools::{ProgressCallback, Tool, ToolValidationError, progress_callback, validate_args};
 
 pub use compaction::generate_branch_summary;
 /// Core type definitions (tokens, cost, etc.).
+#[oxi_stable(since = "0.63.0")]
 pub use types::*;
 
 // High-level API

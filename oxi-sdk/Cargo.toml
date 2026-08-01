@@ -16,6 +16,7 @@ exclude = ["target/"]
 oxi-ai = { version = "0.63.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.63.0", path = "../oxi-agent" }
 oxi-hashline = { version = "0.63.0", path = "../oxi-hashline" }
+oxi-api-stability = { version = "0.63.0", path = "../oxi-api-stability" }
 async-trait = "0.1"
 # Re-exported under the `native-browser` feature so downstream consumers
 # can match on `BrowserEvent` variants without depending on oxibrowser-core

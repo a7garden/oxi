@@ -11,6 +11,10 @@
 //! }).build().unwrap();
 //! ```
 #![warn(missing_docs)]
+// Stability tier attribute macros. Renamed to avoid shadowing the (nightly-only,
+// but rustc-resolved) builtin `#[stable]/#[unstable]/#[deprecated]`. The proc-
+// macro crate's own rustdoc recommends this rename pattern.
+use oxi_api_stability::{internal as oxi_internal, stable as oxi_stable, unstable as oxi_unstable};
 
 pub mod agent_builder;
 pub mod agent_definition;
@@ -31,6 +35,7 @@ pub mod observability;
 pub mod ports;
 
 // Reference implementations bundled with the SDK.
+#[oxi_internal]
 pub use ports::{fs, inmem};
 pub mod port_memory_backend;
 /// Convenience re-exports: `oxi_sdk::fs::*`, `oxi_sdk::inmem::*`.
@@ -44,11 +49,17 @@ pub mod workflow_dsl;
 pub mod workflow_engine;
 
 // Re-export core SDK types
+#[oxi_stable(since = "0.63.0")]
 pub use agent_builder::AgentBuilder;
+#[oxi_stable(since = "0.63.0")]
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
+#[oxi_stable(since = "0.63.0")]
 pub use builder::{Oxi, OxiBuilder};
+#[oxi_unstable(feature = "delegation")]
 pub use delegation::SdkSubagentRunner;
+#[oxi_unstable(feature = "url-resolver")]
 pub use url_resolver::SdkUrlResolver;
+#[oxi_unstable(feature = "workflow-dsl")]
 pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
 
 // Re-export port types — products implement these traits.
@@ -56,13 +67,21 @@ pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
 // module, `MemoryEntry` is also in `coordination`). We rename on import to
 // avoid ambiguity; users can still access the trait via the explicit path
 // `oxi_sdk::ports::EventBus` if they need to disambiguate.
+#[oxi_stable(since = "0.63.0")]
 pub use closure_tool::ClosureTool;
+#[oxi_internal]
 pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
+#[oxi_stable(since = "0.63.0")]
 pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishResult};
+#[oxi_stable(since = "0.63.0")]
 pub use metrics::{AgentMetrics, MetricsSnapshot};
+#[oxi_stable(since = "0.63.0")]
 pub use ports::AccessGate as AccessGatePort;
+#[oxi_stable(since = "0.63.0")]
 pub use ports::EventBus as EventBusPort;
+#[oxi_stable(since = "0.63.0")]
 pub use ports::MemoryEntry as MemoryEntryPort;
+#[oxi_stable(since = "0.63.0")]
 pub use ports::{
     AccessDecision, AuthMethod, AuthProvider, CapabilityResolver, ConfigStore, CronJob,
     CronScheduler, EventPayload, EventTopic, InMemoryEventBus, MemoryStore, NoopAuthProvider,
@@ -73,28 +92,36 @@ pub use ports::{
 };
 
 // Catalog port (Port 12).
+#[oxi_stable(since = "0.63.0")]
 pub use ports::catalog::{
     CatalogEvent, CatalogModelEntry, CatalogProtocol, CatalogProviderEntry, CatalogSource,
     ModelCatalog, NoopModelCatalog, RefreshOutcome,
 };
 // File-backed reference impl for the catalog port.
+#[oxi_internal]
 pub use ports::fs::catalog::{CatalogConfig, FileModelCatalog};
 
 // Composition Layer — EventBus
+#[oxi_stable(since = "0.63.0")]
 pub use event_bus::EventBus;
 
 // Foundation Layer
+#[oxi_stable(since = "0.63.0")]
 pub use error::{SdkError, SdkResult};
+#[oxi_stable(since = "0.63.0")]
 pub use lifecycle::{
     AgentHandle, AgentLifecycleEvent, AgentPool, AgentSnapshot, AgentStatus, AgentSupervisor,
     FileSnapshotStore, HubKind, HubStatus, RestartBackoff, SnapshotStore, SupervisorPolicy,
     ToolManifest,
 };
+#[oxi_stable(since = "0.63.0")]
 pub use middleware::Middleware;
+#[oxi_stable(since = "0.63.0")]
 pub use middleware::{
     MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline, MiddlewareResult,
     build_hooks,
 };
+#[oxi_stable(since = "0.63.0")]
 pub use observability::{
     AuditAction, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPersistence, AuditTrail,
     CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, EventQuery, EventStore,
@@ -102,6 +129,7 @@ pub use observability::{
     SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, Tracer, TrailEntry,
 };
 
+#[oxi_stable(since = "0.63.0")]
 // Composition Layer — Security
 pub use security::{
     AccessDenied, AccessGate, Action, AgentContext, AgentPermissions, AllowlistMode,
@@ -111,6 +139,7 @@ pub use security::{
     Role, SecurityMiddleware, StringPattern, Subject, TracingAuditSink, TrailAuditSink,
 };
 
+#[oxi_stable(since = "0.63.0")]
 // Composition Layer — Coordination
 pub use coordination::{
     Consensus, CoordinatedGroup, CoordinatedGroupBuilder, MemoryEntry, MemoryEvent, MemoryKey,
@@ -118,24 +147,30 @@ pub use coordination::{
     WorkResult, WorkStatus,
 };
 
+#[oxi_stable(since = "0.63.0")]
 // Runtime routing control
 pub use routing::RoutingControl;
 
+#[oxi_stable(since = "0.63.0")]
 // Re-export from oxi-ai
 pub use oxi_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, MessageContent,
     Model, ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions,
     ProviderRegistry, StreamOptions, UserMessage,
 };
-
 // Model roles + role switching (ported from omp)
+#[oxi_unstable(feature = "role-routing")]
 pub use oxi_ai::role_routing::RoleRoutingProvider;
+#[oxi_unstable(feature = "role-switching")]
 pub use oxi_ai::role_switcher::{RoleSignals, decide_role, resolve_role_to_model, role_for_tool};
+#[oxi_unstable(feature = "role-routing")]
 pub use oxi_ai::roles::{ModelRole, RoleRegistry, live_role_registry, set_live_role_registry};
 
+#[oxi_stable(since = "0.63.0")]
 // Credential management (oauth + env key resolution)
 pub use oxi_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key, has_env_key};
 
+#[oxi_internal]
 // Model database — provider catalog, model metadata
 pub use oxi_ai::model_db::{
     ModelEntry, builtin_model_count_sentinel, get_all_models, get_cheapest_models, get_model_entry,
@@ -146,6 +181,7 @@ pub use oxi_ai::model_db::{
 // Catalog — models.dev-backed dynamic catalog (SNAP/LIVE/override/LOCAL).
 // The catalog module exposes the full surface; `model_db` (above) is the
 // legacy compatibility shim that integrates all layers and converts
+#[oxi_stable(since = "0.63.0")]
 // BuiltinModelEntry → ModelEntry.
 pub use oxi_ai::catalog::{
     BuiltinModelEntry, BuiltinProviderEntry, OverrideFile, apply_model_overrides,
@@ -153,12 +189,14 @@ pub use oxi_ai::catalog::{
     discover_all_authenticated, discover_all_local, discover_models, find_override_files,
     load_builtin_providers, load_overrides,
 };
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::oauth::{
     AuthStore, OAuthError, TokenBundle, default_auth_path, load_auth_store, load_token,
     remove_token, save_auth_store, save_token,
 };
 
 // Provider registry — built-in providers (Layer 1 of the catalog) and
+#[oxi_stable(since = "0.63.0")]
 // the runtime functions that surface them to consumers.
 pub use oxi_ai::register_builtins::{
     BuiltinProvider, get_all_provider_aliases, get_all_provider_names, get_api_mappings,
@@ -250,6 +288,7 @@ pub use oxi_hashline;
 // `oxi-ai`. This enables the single-dependency pattern:
 //   oxios → oxi-sdk  (no oxi-ai, no oxi-agent direct dep)
 
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::OpenAiProvider;
 pub use oxi_ai::OpenAiResponsesProvider;
 
@@ -259,12 +298,14 @@ pub use oxi_ai::OpenAiResponsesProvider;
 // is always available so SDK consumers can implement custom backends.
 // The native oxibrowser-core backend requires the `native-browser` feature.
 
+#[oxi_unstable(feature = "browser")]
 pub use oxi_agent::tools::browse::{
     BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine, BrowserError, BrowserTab,
     ElementInfo, LinkInfo, PageContent, TabGuard,
 };
 
 #[cfg(feature = "native-browser")]
+#[oxi_unstable(feature = "native-browser")]
 pub use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxiBrowserEngine};
 
 /// Re-export the browser event type from oxibrowser-core. Surfaced through
@@ -274,6 +315,7 @@ pub use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxiBrows
 /// Gated by the `native-browser` feature because it depends on
 /// `oxibrowser-core` types.
 #[cfg(feature = "native-browser")]
+#[oxi_unstable(feature = "native-browser")]
 pub use oxibrowser_core::BrowserEvent;
 
 // ── MCP (Model Context Protocol) re-exports ───────────────────────────
@@ -283,6 +325,7 @@ pub use oxibrowser_core::BrowserEvent;
 // injects a programmatic config; `mcp_tools()` auto-discovers from
 // standard config files. See `oxi_sdk::tool_factory::mcp_tools`.
 
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::mcp::{
     ConsentManager, ConsentState, DirectToolDef, DirectToolsConfig, LifecycleMode, McpCallResult,
     McpConfig, McpConnectionStatus, McpContent, McpDashboardData, McpDirectTool, McpManager,
