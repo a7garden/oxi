@@ -57,7 +57,9 @@ fn can_join(left: &CompactToolSummaryCall, right: &CompactToolSummaryCall) -> bo
         && left.stable_arguments == right.stable_arguments
 }
 
-pub fn adjacent_compact_summary_groups(calls: Vec<CompactToolSummaryCall>) -> Vec<CompactToolSummaryGroup> {
+pub fn adjacent_compact_summary_groups(
+    calls: Vec<CompactToolSummaryCall>,
+) -> Vec<CompactToolSummaryGroup> {
     let mut groups = Vec::new();
     let mut current: Option<CompactToolSummaryGroup> = None;
 
@@ -180,8 +182,10 @@ mod tests {
 
     #[test]
     fn stable_argument_changes_split_groups() {
-        let groups =
-            adjacent_compact_summary_groups(vec![call("{\"path\":\"a\"}", "30"), call("{\"path\":\"b\"}", "30")]);
+        let groups = adjacent_compact_summary_groups(vec![
+            call("{\"path\":\"a\"}", "30"),
+            call("{\"path\":\"b\"}", "30"),
+        ]);
         assert_eq!(groups.len(), 2);
     }
 
@@ -189,7 +193,8 @@ mod tests {
     fn non_adjacent_compatible_calls_remain_separate() {
         let mut other_tool = call("{}", "30");
         other_tool.canonical_tool_name = "list_files".to_string();
-        let groups = adjacent_compact_summary_groups(vec![call("{}", "30"), other_tool, call("{}", "100")]);
+        let groups =
+            adjacent_compact_summary_groups(vec![call("{}", "30"), other_tool, call("{}", "100")]);
         assert_eq!(groups.len(), 3);
         assert_eq!(groups[0].calls.len(), 1);
         assert_eq!(groups[2].calls.len(), 1);
@@ -199,7 +204,8 @@ mod tests {
     fn output_boundaries_split_groups() {
         let mut boundary = call("{}", "30");
         boundary.output_boundary = true;
-        let groups = adjacent_compact_summary_groups(vec![call("{}", "30"), boundary, call("{}", "100")]);
+        let groups =
+            adjacent_compact_summary_groups(vec![call("{}", "30"), boundary, call("{}", "100")]);
         assert_eq!(groups.len(), 3);
     }
 
@@ -207,17 +213,25 @@ mod tests {
     fn failures_split_groups_and_remain_visible() {
         let mut failure = call("{}", "30");
         failure.status = CompactToolSummaryStatus::Failure;
-        let groups = adjacent_compact_summary_groups(vec![call("{}", "30"), failure, call("{}", "100")]);
+        let groups =
+            adjacent_compact_summary_groups(vec![call("{}", "30"), failure, call("{}", "100")]);
         assert_eq!(groups.len(), 3);
         assert!(groups[1].calls[0].status == CompactToolSummaryStatus::Failure);
     }
 
     #[test]
     fn warnings_and_cancellations_split_groups() {
-        for status in [CompactToolSummaryStatus::Warning, CompactToolSummaryStatus::Cancelled] {
+        for status in [
+            CompactToolSummaryStatus::Warning,
+            CompactToolSummaryStatus::Cancelled,
+        ] {
             let mut non_success = call("{}", "30");
             non_success.status = status;
-            let groups = adjacent_compact_summary_groups(vec![call("{}", "30"), non_success, call("{}", "100")]);
+            let groups = adjacent_compact_summary_groups(vec![
+                call("{}", "30"),
+                non_success,
+                call("{}", "100"),
+            ]);
             assert_eq!(groups.len(), 3);
             assert_eq!(groups[1].calls[0].status, status);
         }
@@ -225,15 +239,22 @@ mod tests {
 
     #[test]
     fn distinct_detail_values_are_capped_deterministically() {
-        let calls = (0..5).map(|value| call("{}", &value.to_string())).collect::<Vec<_>>();
+        let calls = (0..5)
+            .map(|value| call("{}", &value.to_string()))
+            .collect::<Vec<_>>();
         let groups = adjacent_compact_summary_groups(calls);
-        assert_eq!(compact_detail_values(&groups[0])[0].value, "0, 1, 2, +2 more");
+        assert_eq!(
+            compact_detail_values(&groups[0])[0].value,
+            "0, 1, 2, +2 more"
+        );
     }
 
     #[test]
     fn stable_arguments_ignore_pagination_only_values() {
-        let first = stable_arguments_json(&json!({"query": "foo", "max_results": 30, "cursor": "a"}));
-        let second = stable_arguments_json(&json!({"query": "foo", "max_results": 100, "cursor": "b"}));
+        let first =
+            stable_arguments_json(&json!({"query": "foo", "max_results": 30, "cursor": "a"}));
+        let second =
+            stable_arguments_json(&json!({"query": "foo", "max_results": 100, "cursor": "b"}));
         assert_eq!(first, second);
     }
 }

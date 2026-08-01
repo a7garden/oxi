@@ -1,5 +1,15 @@
-#![allow(missing_docs, clippy::expect_used, dead_code, unused_imports, unexpected_cfgs)]
-#![allow(clippy::let_and_return, clippy::borrow_interior_mutable_const, clippy::derivable_impls)]
+#![allow(
+    missing_docs,
+    clippy::expect_used,
+    dead_code,
+    unused_imports,
+    unexpected_cfgs
+)]
+#![allow(
+    clippy::let_and_return,
+    clippy::borrow_interior_mutable_const,
+    clippy::derivable_impls
+)]
 // oxi-vtui-compat — Compatibility stubs replacing vtcode-config + vtcode-commons
 // for the vendored vtcode-ui.
 //
@@ -20,7 +30,8 @@ pub mod constants {
         pub const INLINE_PTY_STATUS_DONE: &str = "DONE";
         pub const HEADER_UNKNOWN_PLACEHOLDER: &str = "\u{2014}";
         pub const HEADER_GIT_DIRTY_SUFFIX: &str = "*";
-        pub const CHAT_INPUT_PLACEHOLDER_BOOTSTRAP: &str = "Describe what you want to build\u{2026}";
+        pub const CHAT_INPUT_PLACEHOLDER_BOOTSTRAP: &str =
+            "Describe what you want to build\u{2026}";
         pub const CHAT_INPUT_PLACEHOLDER_FOLLOW_UP: &str = "Follow-up\u{2026}";
         pub const WELCOME_TEXT_WIDTH: usize = 72;
         pub const WELCOME_SHORTCUT_SECTION_TITLE: &str = "Shortcuts";
@@ -68,7 +79,6 @@ pub mod constants {
         pub const THEME_PRIMARY_STATUS_LIGHTEN_RATIO: f32 = 0.3;
         pub const THEME_LOGO_ACCENT_BANNER_RATIO: f32 = 0.15;
 
-
         pub const HEADER_STATUS_LABEL: &str = "Status";
         pub const HEADER_STATUS_ACTIVE: &str = "Active";
         pub const HEADER_STATUS_PAUSED: &str = "Paused";
@@ -82,7 +92,9 @@ pub mod constants {
         pub const SLASH_PALETTE_MIN_HEIGHT: u16 = 9;
         pub const DEFAULT_INLINE_VIEWPORT_ROWS: u16 = 16;
         // Agent mode hue resolution (oxi has no concept of agent modes — return None)
-        pub fn agent_mode_hue(_token: &str) -> Option<&str> { None }
+        pub fn agent_mode_hue(_token: &str) -> Option<&str> {
+            None
+        }
         // Additional constants sometimes referenced
         pub const AGENT_COLOR_AUTO: &str = "auto";
         pub const AGENT_COLOR_BUILD: &str = "build";
@@ -91,14 +103,18 @@ pub mod constants {
     }
 
     pub mod defaults {
-        pub fn default_provider() -> String { "openai".into() }
-        pub fn default_model() -> String { "gpt-4o".into() }
+        pub fn default_provider() -> String {
+            "openai".into()
+        }
+        pub fn default_model() -> String {
+            "gpt-4o".into()
+        }
         pub const DEFAULT_THEME: &str = "ciapre-dark";
     }
 
     pub mod tools {
         pub const GREP_FILE: &str = "grep_file";
-        pub const LIST_FILES: &str = "list_files";  
+        pub const LIST_FILES: &str = "list_files";
         pub const READ_FILE: &str = "read_file";
         pub const EDIT_FILE: &str = "edit_file";
         pub const WRITE_FILE: &str = "write_file";
@@ -114,7 +130,9 @@ pub mod constants {
 pub mod core {
     pub mod tools {
         /// Policy for whether a tool requires user approval.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
+        )]
         pub enum ToolPolicy {
             #[default]
             Allow,
@@ -135,7 +153,7 @@ pub mod types {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum ToolDocumentationMode {
+    pub enum ToolDocumentationMode {
         #[default]
         Full,
         Compact,
@@ -144,7 +162,7 @@ pub enum ToolDocumentationMode {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum VerbosityLevel {
+    pub enum VerbosityLevel {
         #[default]
         Quiet,
         Normal,
@@ -156,7 +174,7 @@ pub enum VerbosityLevel {
 // ── Common utility stubs ───────────────────────────────────────────────────
 pub mod reasoning {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum ReasoningEffortLevel {
+    pub enum ReasoningEffortLevel {
         #[default]
         Low,
         Medium,
@@ -170,7 +188,9 @@ pub mod stop_hints {
 }
 
 pub mod terminal_detection {
-    pub fn is_ghostty_terminal(_term_program: Option<&str>, _term: Option<&str>) -> bool { false }
+    pub fn is_ghostty_terminal(_term_program: Option<&str>, _term: Option<&str>) -> bool {
+        false
+    }
 }
 
 pub mod trace_flush {
@@ -178,15 +198,21 @@ pub mod trace_flush {
 }
 
 pub mod exclusions {
-    pub fn is_sensitive_file(_file_name: &str) -> bool { false }
+    pub fn is_sensitive_file(_file_name: &str) -> bool {
+        false
+    }
 }
 
 pub mod color_policy {
-    pub fn no_color_env_active() -> bool { false }
+    pub fn no_color_env_active() -> bool {
+        false
+    }
 }
 
 pub mod formatting {
-    pub fn clean_reasoning_text(text: &str) -> String { text.to_string() }
+    pub fn clean_reasoning_text(text: &str) -> String {
+        text.to_string()
+    }
 }
 
 pub mod ansi_codes {
@@ -194,8 +220,12 @@ pub mod ansi_codes {
 }
 
 pub mod editor {
-    pub fn normalize_editor_hash_fragment(_text: &str) -> String { String::new() }
-    pub fn parse_editor_target(_s: &str) -> Option<EditorTarget> { None }
+    pub fn normalize_editor_hash_fragment(_text: &str) -> String {
+        String::new()
+    }
+    pub fn parse_editor_target(_s: &str) -> Option<EditorTarget> {
+        None
+    }
 
     #[derive(Debug, Clone)]
     pub struct EditorTarget {
@@ -204,12 +234,16 @@ pub mod editor {
         pub col: Option<usize>,
     }
     impl EditorTarget {
-        pub fn path(&self) -> &std::path::Path { std::path::Path::new(&self.path) }
+        pub fn path(&self) -> &std::path::Path {
+            std::path::Path::new(&self.path)
+        }
         pub fn canonical_string(&self) -> String {
             let mut s = self.path.clone();
             if let Some(line) = self.line {
                 s.push_str(&format!(":{}", line));
-                if let Some(col) = self.col { s.push_str(&format!(":{}", col)); }
+                if let Some(col) = self.col {
+                    s.push_str(&format!(":{}", col));
+                }
             }
             s
         }
@@ -225,7 +259,9 @@ pub mod editor {
 
 pub mod color256_theme {
     use anstyle::RgbColor;
-    pub fn rgb_to_ansi256_for_theme(_rgb: RgbColor, _light: bool) -> Option<u8> { None }
+    pub fn rgb_to_ansi256_for_theme(_rgb: RgbColor, _light: bool) -> Option<u8> {
+        None
+    }
 }
 
 pub mod errors {
@@ -240,14 +276,22 @@ pub mod ansi {
         let re = regex::Regex::new("\x1b\\[[0-9;]*[a-zA-Z]").unwrap();
         re.replace_all(s, "").to_string()
     }
-    pub fn strip_ansi_codes(s: &str) -> String { strip_ansi(s) }
+    pub fn strip_ansi_codes(s: &str) -> String {
+        strip_ansi(s)
+    }
 }
 
 // ── ansi_capabilities ──────────────────────────────────────────────────────
 pub mod ansi_capabilities {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum ColorScheme { Light, Dark, Unknown }
-    pub fn detect_color_scheme() -> ColorScheme { ColorScheme::Dark }
+    pub enum ColorScheme {
+        Light,
+        Dark,
+        Unknown,
+    }
+    pub fn detect_color_scheme() -> ColorScheme {
+        ColorScheme::Dark
+    }
 }
 
 // ── colors ─────────────────────────────────────────────────────────────────
@@ -263,47 +307,118 @@ pub mod colors {
 // ── diff modules (minimal stubs) ───────────────────────────────────────────
 pub mod diff {
     #[derive(Clone, Debug)]
-        pub struct DiffOptions { pub context: usize, pub old_label: Option<String>, pub new_label: Option<String>, pub missing_newline_hint: Option<String> }
-    impl Default for DiffOptions { fn default() -> Self { Self { context: 3, old_label: None, new_label: None, missing_newline_hint: None } } }
-    #[derive(Clone, Debug)]
-    pub enum DiffLineKind { Context, Addition, Deletion }
-    #[derive(Clone, Debug)]
-    pub struct DiffLine { pub kind: DiffLineKind, pub text: String, pub content: String }
-    #[derive(Clone, Debug)]
-    pub struct DiffHunk { pub old_start: usize, pub new_start: usize, pub old_lines: Vec<DiffLine>, pub new_lines: Vec<DiffLine>, pub lines: Vec<DiffLine> }
-    #[derive(Clone, Debug)]
-    pub struct DiffBundle { pub old_path: Option<String>, pub new_path: Option<String>, pub hunks: Vec<DiffHunk>, pub formatted: String }
-    #[derive(Clone, Debug)]
-    pub struct Chunk { pub lines: Vec<DiffLine> }
-    pub fn compute_diff(old: &[String], new: &[String], opts: &DiffOptions) -> DiffBundle {
-    let _ = (old, new, opts);
-        DiffBundle { old_path: None, new_path: None, hunks: vec![], formatted: String::new() }
+    pub struct DiffOptions {
+        pub context: usize,
+        pub old_label: Option<String>,
+        pub new_label: Option<String>,
+        pub missing_newline_hint: Option<String>,
     }
-    pub fn compute_diff_chunks(_old: &[String], _new_lines: &[String], _opts: &DiffOptions) -> Vec<Chunk> { vec![] }
+    impl Default for DiffOptions {
+        fn default() -> Self {
+            Self {
+                context: 3,
+                old_label: None,
+                new_label: None,
+                missing_newline_hint: None,
+            }
+        }
+    }
+    #[derive(Clone, Debug)]
+    pub enum DiffLineKind {
+        Context,
+        Addition,
+        Deletion,
+    }
+    #[derive(Clone, Debug)]
+    pub struct DiffLine {
+        pub kind: DiffLineKind,
+        pub text: String,
+        pub content: String,
+    }
+    #[derive(Clone, Debug)]
+    pub struct DiffHunk {
+        pub old_start: usize,
+        pub new_start: usize,
+        pub old_lines: Vec<DiffLine>,
+        pub new_lines: Vec<DiffLine>,
+        pub lines: Vec<DiffLine>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct DiffBundle {
+        pub old_path: Option<String>,
+        pub new_path: Option<String>,
+        pub hunks: Vec<DiffHunk>,
+        pub formatted: String,
+    }
+    #[derive(Clone, Debug)]
+    pub struct Chunk {
+        pub lines: Vec<DiffLine>,
+    }
+    pub fn compute_diff(old: &[String], new: &[String], opts: &DiffOptions) -> DiffBundle {
+        let _ = (old, new, opts);
+        DiffBundle {
+            old_path: None,
+            new_path: None,
+            hunks: vec![],
+            formatted: String::new(),
+        }
+    }
+    pub fn compute_diff_chunks(
+        _old: &[String],
+        _new_lines: &[String],
+        _opts: &DiffOptions,
+    ) -> Vec<Chunk> {
+        vec![]
+    }
 }
 
 pub mod diff_paths {
-    pub fn is_diff_addition_line(_line: &str) -> bool { false }
-    pub fn is_diff_deletion_line(_line: &str) -> bool { false }
-    pub fn language_hint_from_path(_path: &str) -> Option<&'static str> { None }
-    pub fn is_diff_header_line(_line: &str) -> bool { false }
-    pub fn is_diff_new_file_marker_line(_line: &str) -> bool { false }
-    pub fn looks_like_diff_content(_text: &str) -> bool { false }
-    pub fn parse_diff_git_path(_line: &str) -> Option<String> { None }
-    pub fn parse_diff_marker_path(_line: &str) -> Option<String> { None }
-    pub fn format_start_only_hunk_header(_old: usize, _new: usize) -> String { String::new() }
+    pub fn is_diff_addition_line(_line: &str) -> bool {
+        false
+    }
+    pub fn is_diff_deletion_line(_line: &str) -> bool {
+        false
+    }
+    pub fn language_hint_from_path(_path: &str) -> Option<&'static str> {
+        None
+    }
+    pub fn is_diff_header_line(_line: &str) -> bool {
+        false
+    }
+    pub fn is_diff_new_file_marker_line(_line: &str) -> bool {
+        false
+    }
+    pub fn looks_like_diff_content(_text: &str) -> bool {
+        false
+    }
+    pub fn parse_diff_git_path(_line: &str) -> Option<String> {
+        None
+    }
+    pub fn parse_diff_marker_path(_line: &str) -> Option<String> {
+        None
+    }
+    pub fn format_start_only_hunk_header(_old: usize, _new: usize) -> String {
+        String::new()
+    }
 }
 
 pub mod diff_preview {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum DiffDisplayKind { Unified, Split }
-    pub fn count_diff_changes(_lines: &[String]) -> (usize, usize) { (0, 0) }
-    pub fn display_lines_from_hunks(_hunks: &[()], _kind: DiffDisplayKind) -> Vec<String> { vec![] }
+    pub enum DiffDisplayKind {
+        Unified,
+        Split,
+    }
+    pub fn count_diff_changes(_lines: &[String]) -> (usize, usize) {
+        (0, 0)
+    }
+    pub fn display_lines_from_hunks(_hunks: &[()], _kind: DiffDisplayKind) -> Vec<String> {
+        vec![]
+    }
 }
 
 pub mod diff_theme {
     use crate::styling::DiffColorPalette;
-    use anstyle::{Color, AnsiColor};
+    use anstyle::{AnsiColor, Color};
 
     #[derive(Clone, Debug)]
     pub struct DiffTheme {
@@ -334,15 +449,32 @@ pub mod diff_theme {
     }
 
     #[derive(Clone, Copy, Debug)]
-    pub enum DiffColorLevel { Full, Ansi256, Ansi16, None }
+    pub enum DiffColorLevel {
+        Full,
+        Ansi256,
+        Ansi16,
+        None,
+    }
 
-    pub fn diff_add_bg(_level: DiffColorLevel) -> Color { DiffTheme::default().add_bg }
-    pub fn diff_del_bg(_level: DiffColorLevel) -> Color { DiffTheme::default().del_bg }
-    pub fn diff_gutter_bg_add_light(_level: DiffColorLevel) -> Color { DiffTheme::default().gutter_add_bg_light }
-    pub fn diff_gutter_bg_del_light(_level: DiffColorLevel) -> Color { DiffTheme::default().gutter_del_bg_light }
-    pub fn diff_gutter_fg_light(_level: DiffColorLevel) -> Color { DiffTheme::default().gutter_fg_light }
+    pub fn diff_add_bg(_level: DiffColorLevel) -> Color {
+        DiffTheme::default().add_bg
+    }
+    pub fn diff_del_bg(_level: DiffColorLevel) -> Color {
+        DiffTheme::default().del_bg
+    }
+    pub fn diff_gutter_bg_add_light(_level: DiffColorLevel) -> Color {
+        DiffTheme::default().gutter_add_bg_light
+    }
+    pub fn diff_gutter_bg_del_light(_level: DiffColorLevel) -> Color {
+        DiffTheme::default().gutter_del_bg_light
+    }
+    pub fn diff_gutter_fg_light(_level: DiffColorLevel) -> Color {
+        DiffTheme::default().gutter_fg_light
+    }
 
-    pub fn default_diff_palette() -> DiffColorPalette { DiffColorPalette::default() }
+    pub fn default_diff_palette() -> DiffColorPalette {
+        DiffColorPalette::default()
+    }
 }
 
 // ── styling ────────────────────────────────────────────────────────────────
@@ -403,7 +535,10 @@ pub mod styling {
 pub mod fs {
     use std::path::Path;
 
-    pub fn read_file_with_context_sync(path: &Path, _context_lines: usize) -> anyhow::Result<String> {
+    pub fn read_file_with_context_sync(
+        path: &Path,
+        _context_lines: usize,
+    ) -> anyhow::Result<String> {
         Ok(std::fs::read_to_string(path)?)
     }
 
@@ -415,11 +550,17 @@ pub mod fs {
         Ok(())
     }
 
-    pub fn is_image_path(_path: &str) -> bool { false }
+    pub fn is_image_path(_path: &str) -> bool {
+        false
+    }
 
-    pub fn trim_trailing_image_path_str(_s: &str) -> String { _s.to_string() }
+    pub fn trim_trailing_image_path_str(_s: &str) -> String {
+        _s.to_string()
+    }
 
-    pub fn unescape_whitespace(s: &str) -> String { s.replace("\\n", "\n").replace("\\t", "\t") }
+    pub fn unescape_whitespace(s: &str) -> String {
+        s.replace("\\n", "\n").replace("\\t", "\t")
+    }
 }
 
 // ── lr_map ─────────────────────────────────────────────────────────────────
@@ -431,20 +572,32 @@ pub mod lr_map {
     }
 
     impl<'a, K, V> LrMap<'a, K, V> {
-        pub fn new() -> Self { Self { _phantom: std::marker::PhantomData } }
+        pub fn new() -> Self {
+            Self {
+                _phantom: std::marker::PhantomData,
+            }
+        }
         pub fn insert(&self, _key: K, _value: V) {}
         pub fn refresh(&self) {}
     }
     impl<'a, K, V> LrMap<'a, K, V> {
-        pub fn get(&self, _key: &K) -> Option<&V> { None }
+        pub fn get(&self, _key: &K) -> Option<&V> {
+            None
+        }
     }
 
     impl<'a, K, V> Default for LrMap<'a, K, V> {
-        fn default() -> Self { Self::new() }
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl<'a, K, V> Clone for LrMap<'a, K, V> {
-        fn clone(&self) -> Self { Self { _phantom: std::marker::PhantomData } }
+        fn clone(&self) -> Self {
+            Self {
+                _phantom: std::marker::PhantomData,
+            }
+        }
     }
 }
 

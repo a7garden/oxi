@@ -22,7 +22,10 @@ pub struct SlashCommandItem {
 
 impl SlashCommandItem {
     pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
-        Self { name: name.into(), description: description.into() }
+        Self {
+            name: name.into(),
+            description: description.into(),
+        }
     }
 }
 
@@ -181,7 +184,8 @@ impl PlanContent {
             // (`## Summary`) and sparse section labels (`Summary`). Treat
             // either form as a section marker so the label itself is not
             // displayed as the plan summary.
-            if trimmed.eq_ignore_ascii_case("summary") || trimmed.eq_ignore_ascii_case("## summary") {
+            if trimmed.eq_ignore_ascii_case("summary") || trimmed.eq_ignore_ascii_case("## summary")
+            {
                 reading_summary = true;
                 continue;
             }
@@ -238,7 +242,10 @@ impl PlanContent {
                 continue;
             }
 
-            if let Some(rest) = trimmed.strip_prefix("[x] ").or_else(|| trimmed.strip_prefix("[X] ")) {
+            if let Some(rest) = trimmed
+                .strip_prefix("[x] ")
+                .or_else(|| trimmed.strip_prefix("[X] "))
+            {
                 total_steps += 1;
                 completed_steps += 1;
                 if let Some(ref mut phase) = current_phase {
