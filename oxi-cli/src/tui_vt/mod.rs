@@ -1,4 +1,5 @@
 #![allow(missing_docs, dead_code)]
+pub mod frame_layout;
 pub mod host;
 pub mod main_loop;
 pub mod slash;

@@ -1,10 +1,10 @@
 //! Host adapter implementation — connects oxi's application state to vtcode-ui's HostAdapter.
 
-use std::sync::Arc;
-use parking_lot::RwLock;
 use oxi_vtui::tui::host::{
     HostAdapter, HostSessionDefaults, NotificationProvider, ThemeProvider, WorkspaceInfoProvider,
 };
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// Adapts oxi's application state to vtcode-ui's host contract.
 pub struct OxiHostAdapter {
@@ -23,7 +23,11 @@ impl OxiHostAdapter {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "oxi".to_string());
-        Self { workspace_name, workspace_root, settings }
+        Self {
+            workspace_name,
+            workspace_root,
+            settings,
+        }
     }
 }
 
@@ -70,6 +74,10 @@ impl HostAdapter for OxiHostAdapter {
 /// Resolve and activate the theme from settings.
 pub fn activate_theme(settings: &crate::store::settings::Settings) {
     let theme_id = settings.get_theme_name();
-    let theme_id = if theme_id.is_empty() { "ciapre-dark" } else { theme_id.as_str() };
+    let theme_id = if theme_id.is_empty() {
+        "ciapre-dark"
+    } else {
+        theme_id.as_str()
+    };
     let _ = oxi_vtui::theme::set_active_theme(theme_id);
 }

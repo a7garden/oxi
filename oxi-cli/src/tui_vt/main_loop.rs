@@ -1,4 +1,9 @@
-#![allow(clippy::field_reassign_with_default, clippy::let_and_return, clippy::borrow_interior_mutable_const, clippy::derivable_impls)]
+#![allow(
+    clippy::field_reassign_with_default,
+    clippy::let_and_return,
+    clippy::borrow_interior_mutable_const,
+    clippy::derivable_impls
+)]
 //! TUI main event loop — connects oxi's `AgentSession` to vtcode-ui's
 //! `InlineSession` protocol and a ratatui rendering backend.
 
@@ -11,24 +16,23 @@ use anyhow::Result;
 use crossterm::{
     cursor::{Hide, Show},
     event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use oxi_agent::AgentEvent;
+use oxi_vtui::theme::{ThemeStyles, active_styles};
 use oxi_vtui::tui::core::{
     InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
     InlineHeaderStatusTone, InlineMessageKind, InlineSegment, InlineTextStyle,
 };
-use oxi_vtui::theme::{ThemeStyles, active_styles};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -36,6 +40,7 @@ use ratatui::{
 
 use crate::App;
 use crate::app::agent_session::SessionEvent;
+use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
 
 // ─────────────────────────────────────────────────────────────────────────
 // Terminal lifecycle (RAII)
@@ -194,7 +199,10 @@ impl RenderState {
             last.segments.push(segment);
             return;
         }
-        self.transcript.push(TranscriptLine { kind, segments: vec![segment] });
+        self.transcript.push(TranscriptLine {
+            kind,
+            segments: vec![segment],
+        });
     }
 }
 
@@ -221,6 +229,7 @@ pub async fn run_tui(app: App) -> Result<()> {
     // `create_agent_session_from_services` so we can construct the session
     // without duplicating the runtime plumbing here.
     let session = build_agent_session(&app).await?;
+    session.install_runtime_hooks();
     let session_handle = session.clone_handle();
 
     // Forward session events to a tokio mpsc so the main loop can
@@ -247,13 +256,13 @@ pub async fn run_tui(app: App) -> Result<()> {
     // `SetPrompt` / `SetPlaceholder` commands once it spins up its own
     // consumer; we set them eagerly so the very first frame is correct.
     handle.set_prompt("> ".to_string(), InlineTextStyle::default());
-    handle.set_placeholder(Some(
-        "Describe what you want to build\u{2026}".to_string(),
-    ));
+    handle.set_placeholder(Some("Describe what you want to build\u{2026}".to_string()));
 
     // Render state — shared between the input thread (which edits the
     // buffer) and the main loop (which reads it for drawing).
-    let state = Arc::new(parking_lot::Mutex::new(RenderState::new_with_header(header)));
+    let state = Arc::new(parking_lot::Mutex::new(RenderState::new_with_header(
+        header,
+    )));
     spawn_input_thread(state.clone(), evt_tx.clone());
 
     // Worker thread that owns the agent loop. Receives prompts over a
@@ -361,9 +370,17 @@ async fn run_event_loop(
                 }
             }
 
-            // 4. Ctrl+C — request the agent stop.
+            // 4. External SIGINT — route through the same idle-vs-streaming
+            //    policy as the key path (some terminals deliver Ctrl+C both
+            //    as a key event AND raise SIGINT; `kill -INT` also lands here).
             _ = tokio::signal::ctrl_c() => {
-                session.abort().await;
+                let outcome = {
+                    let mut s = state.lock();
+                    handle_interrupt(&mut s, session, handle)
+                };
+                if outcome == LoopOutcome::Exit {
+                    break;
+                }
             }
 
             // 5. Periodic repaint — echoes typed input and drives animation
@@ -404,7 +421,9 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         InlineCommand::Inline { kind, segment } => {
             state.inline_segment(kind, segment);
         }
-        InlineCommand::ReplaceLast { count, kind, lines, .. } => {
+        InlineCommand::ReplaceLast {
+            count, kind, lines, ..
+        } => {
             // Drop the last `count` lines and replace with the new ones.
             let drop = count.min(state.transcript.len());
             for _ in 0..drop {
@@ -452,11 +471,7 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
 /// Map a `SessionEvent` to the matching `InlineHandle` calls. This is the
 /// single place where the agent's event vocabulary meets the harness's
 /// transcript vocabulary.
-fn handle_session_event(
-    state: &mut RenderState,
-    handle: &InlineHandle,
-    event: &SessionEvent,
-) {
+fn handle_session_event(state: &mut RenderState, handle: &InlineHandle, event: &SessionEvent) {
     match event {
         SessionEvent::Agent(boxed) => {
             map_agent_event(handle, *boxed.clone(), state);
@@ -484,7 +499,11 @@ fn handle_session_event(
             let pending = state.transcript.len();
             handle.set_input_status(
                 None,
-                Some(if pending == 0 { "ready".to_string() } else { "queued".to_string() }),
+                Some(if pending == 0 {
+                    "ready".to_string()
+                } else {
+                    "queued".to_string()
+                }),
             );
         }
         SessionEvent::Advisor { body, .. } => {
@@ -502,15 +521,14 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
     match event {
         AgentEvent::TextChunk { text } => {
             state.message_buffer.push_str(&text);
-            handle.inline(
-                InlineMessageKind::Agent,
-                plain_segment(text),
-            );
+            handle.inline(InlineMessageKind::Agent, plain_segment(text));
         }
         AgentEvent::MessageStart { .. } => {
             state.message_buffer.clear();
         }
-        AgentEvent::MessageUpdate { delta: Some(delta), .. } => {
+        AgentEvent::MessageUpdate {
+            delta: Some(delta), ..
+        } => {
             state.message_buffer.push_str(&delta);
             handle.inline(InlineMessageKind::Agent, plain_segment(delta));
         }
@@ -545,10 +563,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         }
         AgentEvent::ToolComplete { result } => {
             let preview = preview_tool_result(&result.content);
-            handle.append_line(
-                InlineMessageKind::Tool,
-                vec![plain_segment(preview)],
-            );
+            handle.append_line(InlineMessageKind::Tool, vec![plain_segment(preview)]);
             handle.set_reasoning_stage(None);
             handle.set_input_enabled(true);
         }
@@ -561,10 +576,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             handle.set_input_enabled(true);
         }
         AgentEvent::Error { message, .. } => {
-            handle.append_line(
-                InlineMessageKind::Error,
-                vec![plain_segment(message)],
-            );
+            handle.append_line(InlineMessageKind::Error, vec![plain_segment(message)]);
             handle.set_input_enabled(true);
             handle.set_input_status(None, None);
         }
@@ -576,11 +588,12 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             handle.set_input_enabled(true);
             handle.set_input_status(None, Some("cancelled".to_string()));
         }
-        AgentEvent::AutoRetryStart { attempt, max_attempts, .. } => {
-            handle.set_input_status(
-                None,
-                Some(format!("retry {attempt}/{max_attempts}")),
-            );
+        AgentEvent::AutoRetryStart {
+            attempt,
+            max_attempts,
+            ..
+        } => {
+            handle.set_input_status(None, Some(format!("retry {attempt}/{max_attempts}")));
         }
         _ => {
             // Other variants (TurnStart/End, AgentStart/End, Usage, …) are
@@ -594,7 +607,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
 /// Map an input-thread `InlineEvent` to agent actions / state edits.
 fn handle_inline_event(
     state: &mut RenderState,
-    _handle: &InlineHandle,
+    handle: &InlineHandle,
     session: &crate::app::agent_session::AgentSessionHandle,
     prompt_tx: &tokio::sync::mpsc::UnboundedSender<String>,
     evt: InlineEvent,
@@ -610,10 +623,29 @@ fn handle_inline_event(
             if prompt.is_empty() {
                 return LoopOutcome::Continue;
             }
-            state.append_line(
-                InlineMessageKind::User,
-                vec![plain_segment(prompt.clone())],
-            );
+            // Slash commands: dispatch locally instead of forwarding to
+            // the agent. The echoed line is appended before dispatch so
+            // every command output appears after the prompt.
+            if prompt.trim_start().starts_with('/') {
+                state.append_line(InlineMessageKind::User, vec![plain_segment(prompt.clone())]);
+                let mut ctx = SlashCtx {
+                    session,
+                    handle,
+                    state,
+                };
+                return match SlashRegistry::builtins().dispatch(&prompt, &mut ctx) {
+                    SlashOutcome::Quit => LoopOutcome::Exit,
+                    SlashOutcome::Handled => LoopOutcome::Continue,
+                    SlashOutcome::NotHandled => {
+                        ctx.reply(
+                            InlineMessageKind::Error,
+                            format!("Unknown command: {}", prompt.trim()),
+                        );
+                        LoopOutcome::Continue
+                    }
+                };
+            }
+            state.append_line(InlineMessageKind::User, vec![plain_segment(prompt.clone())]);
             // Hand the prompt to the worker thread. If the worker has
             // already exited (e.g. shutdown), drop it on the floor.
             let _ = prompt_tx.send(prompt);
@@ -623,10 +655,7 @@ fn handle_inline_event(
             return LoopOutcome::Exit;
         }
         InlineEvent::Interrupt => {
-            // Best-effort: signal the agent session to stop. We can't
-            // await here without blocking the loop, so spawn the abort.
-            let session = session.clone();
-            tokio::spawn(async move { session.abort().await });
+            return handle_interrupt(state, session, handle);
         }
         InlineEvent::ScrollLineUp => {
             state.scroll_offset = state.scroll_offset.saturating_add(1);
@@ -655,6 +684,51 @@ fn handle_inline_event(
         }
     }
     LoopOutcome::Continue
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Ctrl+C policy / streaming guard
+// ─────────────────────────────────────────────────────────────────────────
+
+/// RAII guard that clears the streaming flag on drop (normal exit, error,
+/// or panic cancellation). Wired in [`run_one_prompt`] around each run.
+struct StreamingGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for StreamingGuard<'_> {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Central Ctrl+C policy.
+///
+/// - **Agent streaming** → abort the current run and tell the user to press
+///   again to quit. The abort is effective because [`install_runtime_hooks`]
+///   wires the session's `should_stop` flag into the agent loop.
+/// - **Agent idle** → exit the application.
+///
+/// Both the input-thread key event (`InlineEvent::Interrupt`) and the OS
+/// signal handler (`tokio::signal::ctrl_c()`) route through here so
+/// behavior is identical regardless of how the interrupt arrives.
+///
+/// [`install_runtime_hooks`]: crate::app::agent_session::AgentSession::install_runtime_hooks
+fn handle_interrupt(
+    state: &mut RenderState,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    _handle: &InlineHandle,
+) -> LoopOutcome {
+    if session.is_streaming() {
+        // Interrupt the current run; a subsequent press (once idle) quits.
+        let s = session.clone();
+        tokio::spawn(async move {
+            s.abort().await;
+        });
+        state.footer_left = Some("Stopping\u{2026} press Ctrl+C again to quit".to_string());
+        LoopOutcome::Continue
+    } else {
+        LoopOutcome::Exit
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -825,10 +899,7 @@ fn spawn_agent_worker(
     prompt_tx
 }
 
-async fn run_one_prompt(
-    session: &crate::app::agent_session::AgentSessionHandle,
-    prompt: String,
-) {
+async fn run_one_prompt(session: &crate::app::agent_session::AgentSessionHandle, prompt: String) {
     let session_for_forward = session.clone();
     let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
 
@@ -840,6 +911,15 @@ async fn run_one_prompt(
             session_for_forward.forward_event_to_extensions(&event);
         }
     });
+
+    // Reset the stop flag (a previous Ctrl+C may have left it set) and
+    // mark streaming so the Ctrl+C policy can distinguish "interrupt"
+    // from "quit". The guard clears the flag on any exit path.
+    use std::sync::atomic::Ordering;
+    session.reset_should_stop();
+    let streaming = session.streaming_flag();
+    streaming.store(true, Ordering::SeqCst);
+    let _stream_guard = StreamingGuard(&streaming);
 
     let agent = session.agent_ref();
     let local = tokio::task::LocalSet::new();
@@ -854,6 +934,10 @@ async fn run_one_prompt(
         tracing::warn!(?err, "agent run failed");
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Header / AgentSession construction
+// ─────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────
 // Header / AgentSession construction
@@ -902,21 +986,23 @@ async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::Age
     use crate::store::session::SessionManager;
 
     let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
-    let services = create_agent_session_services(CreateAgentSessionServicesOptions::new(cwd.clone()))?;
+    let services =
+        create_agent_session_services(CreateAgentSessionServicesOptions::new(cwd.clone()))?;
     let services = Arc::new(services);
 
     let model_id = app.model_id();
     let tools = app.agent_tools();
 
-    let session_manager = SessionManager::create(
-        &cwd.to_string_lossy(),
-        None,
-    );
+    let session_manager = SessionManager::create(&cwd.to_string_lossy(), None);
 
     let result = create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
         services,
         session_manager,
-        model_id: if model_id.is_empty() { None } else { Some(model_id) },
+        model_id: if model_id.is_empty() {
+            None
+        } else {
+            Some(model_id)
+        },
         thinking_level: None,
         scoped_models: Vec::new(),
         tool_registry: Some(tools),
@@ -933,13 +1019,11 @@ async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::Age
 // Rendering
 // ─────────────────────────────────────────────────────────────────────────
 
-const HEADER_HEIGHT: u16 = 2;
-const FOOTER_HEIGHT: u16 = 1;
-const COMPOSER_HEIGHT: u16 = 3;
-
-/// Layout: header (top) | transcript (middle, fills) | composer (3 rows) |
-/// footer (bottom). All heights in rows except the transcript, which gets
-/// the remainder.
+/// Compose one frame using the agent view layout (grok-build-style):
+/// StatusBar (top) → Scrollback (dominant) → Prompt → ShortcutsBar (bottom).
+/// Chrome geometry and the status/shortcuts bars are rendered by
+/// [`frame_layout::render_chrome`]; the transcript and composer are placed
+/// into the returned layout rects.
 fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHandle) {
     let area = frame.area();
     // Paint the theme background across the whole frame first. Without this
@@ -950,59 +1034,12 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     frame
         .buffer_mut()
         .set_style(area, Style::default().bg(color_from_anstyle(Some(bg))));
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(HEADER_HEIGHT),
-            Constraint::Min(1),
-            Constraint::Length(COMPOSER_HEIGHT),
-            Constraint::Length(FOOTER_HEIGHT),
-        ])
-        .split(area);
-
-    render_header(frame, chunks[0], state);
-    render_transcript(frame, chunks[1], state);
-    render_composer(frame, chunks[2], state);
-    render_footer(frame, chunks[3], state);
-}
-
-fn render_header(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
-    let styles = active_styles();
-    let ctx = &state.header_context;
-    let line = Line::from(vec![
-        Span::styled(
-            format!(" {} ", ctx.app_name),
-            Style::default()
-                .fg(color_from_anstyle(Some(styles.foreground)))
-                .bg(color_from_anstyle(Some(styles.background)))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {} ", ctx.provider),
-            Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("\u{2500} {} ", ctx.model),
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("\u{2387} {} ", ctx.git),
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("\u{2699} {}", ctx.tools),
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-        ),
-    ]);
-
-    let block = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
-    let paragraph = Paragraph::new(line).block(block);
-    frame.render_widget(paragraph, area);
+    // Agent view layout (grok-build-style pure geometry). `render_chrome`
+    // computes the layout and paints the top StatusBar + bottom ShortcutsBar;
+    // the transcript and composer are placed into the returned rects.
+    let layout = super::frame_layout::render_chrome(frame, area, state);
+    render_transcript(frame, layout.scrollback, state);
+    render_composer(frame, layout.prompt, state);
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
@@ -1020,7 +1057,11 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let visible = if start >= total {
         Vec::new()
     } else {
-        items.into_iter().skip(start).take(viewport.max(1)).collect()
+        items
+            .into_iter()
+            .skip(start)
+            .take(viewport.max(1))
+            .collect()
     };
 
     let list = List::new(visible).block(Block::default());
@@ -1072,11 +1113,7 @@ fn transcript_item<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> Lis
     ListItem::new(Line::from(spans))
 }
 
-fn segment_style(
-    segment: &InlineSegment,
-    fallback: Style,
-    styles: &ThemeStyles,
-) -> Style {
+fn segment_style(segment: &InlineSegment, fallback: Style, styles: &ThemeStyles) -> Style {
     let mut style = fallback;
     let inline = segment.style.as_ref();
     if let Some(color) = inline.color {
@@ -1104,8 +1141,9 @@ fn segment_style(
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let styles = active_styles();
-    let prefix_style =
-        Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())).bold();
+    let prefix_style = Style::default()
+        .fg(color_from_anstyle(styles.primary.get_fg_color()))
+        .bold();
     let text_style = Style::default().fg(color_from_anstyle(Some(styles.foreground)));
 
     let prefix = state.prompt_prefix.clone();
@@ -1118,7 +1156,9 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     {
         line_spans.push(Span::styled(
             ph,
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())).dim(),
+            Style::default()
+                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+                .dim(),
         ));
     } else {
         line_spans.push(Span::styled(body, text_style));
@@ -1133,53 +1173,25 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 
     // Place the cursor inside the composer at the current edit position.
     if state.input_enabled {
-        let cursor_x = area.left() + state.prompt_prefix.chars().count() as u16 + state.input_cursor as u16;
+        let cursor_x =
+            area.left() + state.prompt_prefix.chars().count() as u16 + state.input_cursor as u16;
         let cursor_y = area.top() + 1; // account for the top border
         frame.set_cursor_position(ratatui::layout::Position::new(cursor_x, cursor_y));
     }
-}
-
-fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
-    let styles = active_styles();
-    let left = state.footer_left.clone().unwrap_or_default();
-    let right = state.footer_right.clone().unwrap_or_else(|| {
-        let total = state.transcript.len();
-        let position = if state.scroll_offset == usize::MAX {
-            format!("line {total}/{total}")
-        } else {
-            let off = effective_scroll_offset(state.scroll_offset, total, area.height as usize);
-            format!("line {}/{}", off.min(total), total)
-        };
-        position
-    });
-
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
-    let paragraph = Paragraph::new(Line::from(vec![
-        Span::styled(left, Style::default().fg(color_from_anstyle(Some(styles.foreground)))),
-        Span::raw("  "),
-        Span::styled(
-            right,
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-        ),
-    ]))
-    .block(block);
-    frame.render_widget(paragraph, area);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Small helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-fn plain_segment(text: impl Into<String>) -> InlineSegment {
+pub(crate) fn plain_segment(text: impl Into<String>) -> InlineSegment {
     InlineSegment {
         text: text.into(),
         style: Arc::new(InlineTextStyle::default()),
     }
 }
 
-fn effective_scroll_offset(offset: usize, total: usize, viewport: usize) -> usize {
+pub(super) fn effective_scroll_offset(offset: usize, total: usize, viewport: usize) -> usize {
     if offset == usize::MAX {
         return total.saturating_sub(viewport);
     }
