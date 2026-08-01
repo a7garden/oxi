@@ -403,13 +403,51 @@ members = [
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn, ItemStruct, ItemEnum, ItemTrait, ItemMod};
+use syn::{parse2, MetaNameValue};
+
+/// Parsed `since = "0.XX.0"` argument shared by `#[stable]` and `#[deprecated]`.
+struct SinceArg {
+    since: String,
+}
+impl syn::parse::Parse for SinceArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // Accept: `since = "0.XX.0"`
+        let nv: MetaNameValue = input.parse()?;
+        if !matches!(nv.path.get_ident(), Some(id) if id == "since") {
+            return Err(syn::Error::new_spanned(&nv.path, "expected `since = \"...\"`"));
+        }
+        let since = match nv.value {
+            syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => s.value(),
+            other => return Err(syn::Error::new_spanned(other, "expected string literal")),
+        };
+        Ok(Self { since })
+    }
+}
+
+/// Parsed `feature = "name"` argument for `#[unstable]`.
+struct FeatureArg {
+    feature: String,
+}
+impl syn::parse::Parse for FeatureArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let nv: MetaNameValue = input.parse()?;
+        if !matches!(nv.path.get_ident(), Some(id) if id == "feature") {
+            return Err(syn::Error::new_spanned(&nv.path, "expected `feature = \"...\"`"));
+        }
+        let feature = match nv.value {
+            syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => s.value(),
+            other => return Err(syn::Error::new_spanned(other, "expected string literal")),
+        };
+        Ok(Self { feature })
+    }
+}
 
 /// Attribute applied to any item to mark it semver-stable.
 #[proc_macro_attribute]
 pub fn stable(args: TokenStream, input: TokenStream) -> TokenStream {
-    let since: syn::LitStr = syn::parse(args).expect("expected since = \"version\"");
-    let since_val = since.value();
+    let parsed = parse2::<SinceArg>(args.into())
+        .expect("expected `since = \"0.XX.0\"`");
+    let since_val = parsed.since;
     // Pass through the item unchanged, add a doc badge.
     let input: proc_macro2::TokenStream = input.into();
     quote! {
@@ -422,8 +460,9 @@ pub fn stable(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Attribute applied to any item to mark it unstable/experimental.
 #[proc_macro_attribute]
 pub fn unstable(args: TokenStream, input: TokenStream) -> TokenStream {
-    let feature: syn::LitStr = syn::parse(args).expect("expected feature = \"name\"");
-    let feature_val = feature.value();
+    let parsed = parse2::<FeatureArg>(args.into())
+        .expect("expected `feature = \"name\"`");
+    let feature_val = parsed.feature;
     let input: proc_macro2::TokenStream = input.into();
     quote! {
         #[doc = concat!(" <div class=\"stab unstable\"><strong>Unstable</strong> (feature: ", #feature_val, ") — may change or be removed</div>")]
@@ -447,10 +486,12 @@ pub fn internal(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// Wraps the native #[deprecated] attribute.
 #[proc_macro_attribute]
 pub fn deprecated(args: TokenStream, input: TokenStream) -> TokenStream {
-    // Parse since = "0.64.0", note = "..."
-    let since: syn::LitStr = syn::parse_macro_input!(args as syn::LitStr);
+    // Accept: `since = "0.64.0"` (the native note is forwarded via the
+    // adjacent `#[deprecated(note = "...")]` attribute on the same item).
+    let parsed = parse2::<SinceArg>(args.into())
+        .expect("expected `since = \"0.XX.0\"`");
+    let since_val = parsed.since;
     let input: proc_macro2::TokenStream = input.into();
-    let since_val = since.value();
     quote! {
         #[deprecated(since = #since_val)]
         #[doc = concat!(" <div class=\"stab deprecated\"><strong>Deprecated</strong> since ", #since_val, "</div>")]
