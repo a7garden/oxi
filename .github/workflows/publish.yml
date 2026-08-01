@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-catalog oxi-hashline oxi-tui oxi-mnemopi oxi-lsp oxi-snapcompact; do
+          for crate in oxi-catalog oxi-hashline oxi-vtui-compat oxi-mnemopi oxi-lsp oxi-snapcompact; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -103,10 +103,10 @@ jobs:
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces topological order: leaves first
-  # (catalog, hashline, tui, mnemopi, lsp, snapcompact) → ai (dep catalog) →
-  # agent (dep ai) → sdk (dep agent) → cli (dep sdk).
+  # (catalog, hashline, vtui-compat, mnemopi, lsp, snapcompact) → vtui (dep
+  # vtui-compat) → ai (dep catalog) → agent (dep ai) → sdk (dep agent) →
+  # cli (dep sdk, vtui, vtui-compat).
   # Each crate waits for its dependency's crates.io index to
-  # propagate (~30-60s) before publishing.
   publish:
     name: publish ${{ matrix.crate }}
     needs: [tag-check, package-check, verify]
@@ -120,7 +120,8 @@ jobs:
         crate:
           - oxi-catalog
           - oxi-hashline
-          - oxi-tui
+          - oxi-vtui-compat
+          - oxi-vtui
           - oxi-mnemopi
           - oxi-lsp
           - oxi-snapcompact
@@ -139,11 +140,12 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxi-catalog|oxi-hashline|oxi-tui|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
+            oxi-catalog|oxi-hashline|oxi-vtui-compat|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
+            oxi-vtui) WAITS="oxi-vtui-compat" ;;
             oxi-ai) WAITS="oxi-catalog" ;;
             oxi-agent) WAITS="oxi-ai oxi-hashline" ;;
             oxi-sdk) WAITS="oxi-agent oxi-snapcompact" ;;
-            oxi-cli) WAITS="oxi-sdk" ;;
+            oxi-cli) WAITS="oxi-sdk oxi-vtui oxi-vtui-compat" ;;
             *) exit 0 ;;
           esac
           for WAIT in $WAITS; do

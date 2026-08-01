@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Compatibility stubs for vendored vtcode-ui"
 license = "MIT"
-repository = "https://github.com/earendil-works/oxi"
+repository.workspace = true
 
 [dependencies]
 anstyle   = "1.0"

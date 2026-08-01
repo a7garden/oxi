@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Terminal UI framework for oxi, based on vtcode-ui"
 license = "MIT"
-repository = "https://github.com/earendil-works/oxi"
+repository.workspace = true
 keywords = ["tui", "terminal", "ratatui"]
 
 [dependencies]
@@ -46,5 +46,5 @@ human-panic         = "2.0"
 ratatui-cheese      = "0.7"
 tracing-subscriber  = { version = "0.3", features = ["env-filter", "fmt"] }
 tui-shimmer         = "0.1"
-oxi-vtui-compat      = { path = "../oxi-vtui-compat" }
+oxi-vtui-compat      = { version = "0.62.0", path = "../oxi-vtui-compat" }
 
