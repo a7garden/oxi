@@ -394,18 +394,17 @@ impl RpcActor {
                 Some(serde_json::json!({ "messages": self.session.messages() })),
             )),
             RpcCommand::GetCommands { id } => {
-                let registry = crate::tui_vt::slash::registry::SlashRegistry;
-                let commands: Vec<_> = registry
-                    .builtin_commands()
-                    .into_iter()
-                    .map(|(name, description, aliases)| {
-                        serde_json::json!({
-                            "name": name,
-                            "description": description,
-                            "aliases": aliases,
+                let commands: Vec<_> =
+                    crate::tui_vt::slash::registry::SlashRegistry::builtin_commands()
+                        .into_iter()
+                        .map(|(name, description, aliases)| {
+                            serde_json::json!({
+                                "name": name,
+                                "description": description,
+                                "aliases": aliases,
+                            })
                         })
-                    })
-                    .collect();
+                        .collect();
                 self.respond(success_response(
                     id,
                     "get_commands",

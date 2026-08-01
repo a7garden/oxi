@@ -18,8 +18,8 @@
 // need to change together. For now we keep the enum import but
 // acknowledge the layering violation in this comment so a future
 // contributor doesn't assume the dependency is intentional.
-use anyhow::{Context, Result};
 use crate::symbols::GlyphSet;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;

@@ -13,7 +13,9 @@ pub enum GlyphSet {
 }
 
 impl Default for GlyphSet {
-    fn default() -> Self { GlyphSet::Unicode }
+    fn default() -> Self {
+        GlyphSet::Unicode
+    }
 }
 
 impl std::fmt::Display for GlyphSet {

@@ -484,7 +484,10 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
 // ── Load theme list ─────────────────────────────────────────────────────────
 
 fn load_themes() -> Vec<String> {
-    oxi_vtui::theme::available_themes().into_iter().map(|s| s.to_string()).collect()
+    oxi_vtui::theme::available_themes()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 // ── Save auth keys ──────────────────────────────────────────────────────────

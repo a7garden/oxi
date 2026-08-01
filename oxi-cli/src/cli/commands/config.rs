@@ -239,9 +239,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
                 .map_err(|_| anyhow::anyhow!("Invalid session_history_size: '{}'", value))?;
         }
         "glyph" | "glyph_set" => {
-            settings.glyph_set = value
-                .parse()
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            settings.glyph_set = value.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
         }
         _ => {
             anyhow::bail!(

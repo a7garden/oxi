@@ -1,8 +1,16 @@
 // oxi: CLI coding harness
 // Migrating to oxi-vtui: relaxed linting for vendored code compatibility.
-#![allow(missing_docs, dead_code, clippy::field_reassign_with_default, clippy::unwrap_used, clippy::let_and_return, clippy::borrow_interior_mutable_const, clippy::derivable_impls, clippy::new_without_default, unknown_lints)]
-#![cfg_attr(test, allow(clippy::field_reassign_with_default))]
-
+#![allow(
+    missing_docs,
+    dead_code,
+    clippy::field_reassign_with_default,
+    clippy::unwrap_used,
+    clippy::let_and_return,
+    clippy::borrow_interior_mutable_const,
+    clippy::derivable_impls,
+    clippy::new_without_default,
+    unknown_lints
+)]
 //! oxi: CLI coding harness
 //!
 //! This crate provides the main application logic for the oxi CLI.
@@ -620,5 +628,5 @@ mod tests {
         );
     }
 }
-pub mod tui_vt;
 pub mod symbols;
+pub mod tui_vt;
