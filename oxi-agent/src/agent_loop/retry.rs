@@ -43,10 +43,12 @@ pub(crate) async fn stream_with_retry(
 
     let provider = loop_ref.provider.as_ref();
     let max_delay = loop_ref.config.max_retry_delay_ms;
+    let breaker = loop_ref.config.circuit_breaker.as_deref();
 
-    let result =
-        stream_retry::stream_with_retry_core(provider, model, context, options, &cb, max_delay)
-            .await;
+    let result = stream_retry::stream_with_retry_core_with_breaker(
+        provider, model, context, options, &cb, max_delay, breaker,
+    )
+    .await;
 
     result.map_err(Into::into)
 }

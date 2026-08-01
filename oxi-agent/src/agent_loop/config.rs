@@ -138,6 +138,20 @@ pub struct AgentLoopConfig {
     ///
     /// `None` (default) keeps provider-native tool calling.
     pub dialect: Option<oxi_ai::dialect::Dialect>,
+
+    /// Optional circuit breaker for provider calls. When `Some`, the agent
+    /// loop's retry path consults the breaker before each provider attempt
+    /// (`breaker.check()`); an open circuit short-circuits the retry loop
+    /// and returns immediately (the breaker's whole purpose is to stop
+    /// hammering a failing upstream). On every successful call the breaker
+    /// records success; on every error it records failure. When `None`, no
+    /// circuit breaking occurs (default — preserves existing behavior).
+    ///
+    /// This is the SDK-owned behavior trait + reference impl; consumers
+    /// implement [`oxi_ai::CircuitBreaker`] for their domain profile
+    /// (A2A, HTTP, etc.) and pass the impl here. See
+    /// `docs/oxi-sdk-ownership.md` §3.
+    pub circuit_breaker: Option<oxi_ai::circuit_breaker::SharedBreaker>,
 }
 
 impl Default for AgentLoopConfig {
@@ -176,6 +190,7 @@ impl Default for AgentLoopConfig {
             soft_requirements: Vec::new(),
             harmony_leak_detection: false,
             dialect: None,
+            circuit_breaker: None,
             tool_call_loop_guard: oxi_ai::utils::tool_call_loop::ToolCallLoopGuardOptions::default(
             ),
         }
