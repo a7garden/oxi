@@ -1,8 +1,8 @@
 use anstyle::{Color, RgbColor, Style};
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
 use oxi_vtui_compat::constants::ui;
+use parking_lot::RwLock;
 
 use crate::theme::color_math::{contrast_ratio, ensure_contrast, lighten};
 use crate::theme::registry::theme_definition;
@@ -25,8 +25,13 @@ fn current_color_config() -> impl std::ops::Deref<Target = ColorAccessibilityCon
 
 static ACTIVE: Lazy<RwLock<ActiveTheme>> = Lazy::new(|| {
     let default = theme_definition(DEFAULT_THEME_ID).expect("default theme must exist");
-    let styles = default.palette.build_styles_with_accessibility(&current_color_config());
-    RwLock::new(ActiveTheme { definition: default, styles })
+    let styles = default
+        .palette
+        .build_styles_with_accessibility(&current_color_config());
+    RwLock::new(ActiveTheme {
+        definition: default,
+        styles,
+    })
 });
 
 /// Preview state: when set, `active_styles()` returns the preview styles
@@ -57,9 +62,12 @@ pub fn is_safe_colors_only() -> bool {
 /// Activate a built-in theme by identifier.
 pub fn set_active_theme(theme_id: &str) -> Result<()> {
     let id_lc = theme_id.trim().to_lowercase();
-    let theme = theme_definition(id_lc.as_str()).ok_or_else(|| anyhow!("Unknown theme '{theme_id}'"))?;
+    let theme =
+        theme_definition(id_lc.as_str()).ok_or_else(|| anyhow!("Unknown theme '{theme_id}'"))?;
 
-    let styles = theme.palette.build_styles_with_accessibility(&current_color_config());
+    let styles = theme
+        .palette
+        .build_styles_with_accessibility(&current_color_config());
     let mut guard = ACTIVE.write();
     guard.definition = theme;
     guard.styles = styles;
@@ -89,9 +97,15 @@ pub fn active_styles() -> ThemeStyles {
 /// `active_styles()` until `clear_preview_theme()` is called.
 pub fn set_preview_theme(theme_id: &str) -> Result<()> {
     let id_lc = theme_id.trim().to_lowercase();
-    let theme = theme_definition(id_lc.as_str()).ok_or_else(|| anyhow!("Unknown theme '{theme_id}'"))?;
-    let styles = theme.palette.build_styles_with_accessibility(&current_color_config());
-    *PREVIEW.write() = Some(ActiveTheme { definition: theme, styles });
+    let theme =
+        theme_definition(id_lc.as_str()).ok_or_else(|| anyhow!("Unknown theme '{theme_id}'"))?;
+    let styles = theme
+        .palette
+        .build_styles_with_accessibility(&current_color_config());
+    *PREVIEW.write() = Some(ActiveTheme {
+        definition: theme,
+        styles,
+    });
     Ok(())
 }
 
@@ -121,7 +135,10 @@ pub fn banner_color() -> RgbColor {
         min_contrast,
         &[
             lighten(accent, ui::THEME_PRIMARY_STATUS_SECONDARY_LIGHTEN_RATIO),
-            lighten(secondary, ui::THEME_LOGO_ACCENT_BANNER_SECONDARY_LIGHTEN_RATIO),
+            lighten(
+                secondary,
+                ui::THEME_LOGO_ACCENT_BANNER_SECONDARY_LIGHTEN_RATIO,
+            ),
             accent,
         ],
     )

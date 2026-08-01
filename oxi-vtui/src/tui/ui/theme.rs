@@ -1,5 +1,5 @@
-use ratatui::style::Style;
 use crate::theme::ThemeDefinition;
+use ratatui::style::Style;
 
 #[derive(Default)]
 pub struct ThemeStyles {
@@ -28,9 +28,13 @@ pub struct ThemeStyles {
     pub action: Style,
 }
 
-
-
-pub fn available_theme_suites() -> Vec<()> { vec![] }
-pub fn theme_suite_id(_: &()) -> &'static str { "default" }
-pub fn theme_suite_label(_: &()) -> &'static str { "Default" }
+pub fn available_theme_suites() -> Vec<()> {
+    vec![]
+}
+pub fn theme_suite_id(_: &()) -> &'static str {
+    "default"
+}
+pub fn theme_suite_label(_: &()) -> &'static str {
+    "Default"
+}
 pub type DiffColorPalette = oxi_vtui_compat::styling::DiffColorPalette;

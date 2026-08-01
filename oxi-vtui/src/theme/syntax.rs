@@ -35,7 +35,9 @@ pub fn get_syntax_theme_for_ui_theme(ui_theme: &str) -> &'static str {
         "atom-one-dark" => "OneDark",
         "atom-one-light" => "OneLight",
         "atom" => "base16-ocean.dark",
-        "spacegray" | "spacegray-bright" | "spacegray-eighties" | "spacegray-eighties-dull" => "base16-ocean.dark",
+        "spacegray" | "spacegray-bright" | "spacegray-eighties" | "spacegray-eighties-dull" => {
+            "base16-ocean.dark"
+        }
         "material-ocean" | "material-dark" | "material" => "Material Dark",
         "dracula" => "Dracula",
         "monokai-classic" => "monokai-classic",

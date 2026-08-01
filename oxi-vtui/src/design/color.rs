@@ -113,52 +113,118 @@ mod tests {
 
     #[test]
     fn standard_ansi_colors() {
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Black)), Color::Black);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Red)), Color::Red);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Green)), Color::Green);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Yellow)), Color::Yellow);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Blue)), Color::Blue);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Cyan)), Color::Cyan);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::White)), Color::White);
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Black)),
+            Color::Black
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Red)),
+            Color::Red
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Green)),
+            Color::Green
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Yellow)),
+            Color::Yellow
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Blue)),
+            Color::Blue
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Cyan)),
+            Color::Cyan
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::White)),
+            Color::White
+        );
     }
 
     #[test]
     fn magenta_maps_to_magenta_not_dark_gray() {
         // Regression test: previous implementations incorrectly mapped
         // Magenta to DarkGray.
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Magenta)), Color::Magenta);
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::Magenta)),
+            Color::Magenta
+        );
     }
 
     #[test]
     fn bright_ansi_colors() {
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightBlack)), Color::DarkGray);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightRed)), Color::LightRed);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightGreen)), Color::LightGreen);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightYellow)), Color::LightYellow);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightBlue)), Color::LightBlue);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightMagenta)), Color::LightMagenta);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightCyan)), Color::LightCyan);
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightWhite)), Color::White);
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightBlack)),
+            Color::DarkGray
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightRed)),
+            Color::LightRed
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightGreen)),
+            Color::LightGreen
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightYellow)),
+            Color::LightYellow
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightBlue)),
+            Color::LightBlue
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightMagenta)),
+            Color::LightMagenta
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightCyan)),
+            Color::LightCyan
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightWhite)),
+            Color::White
+        );
     }
 
     #[test]
     fn bright_magenta_maps_to_light_magenta() {
         // Regression test: previous implementations incorrectly mapped
         // BrightMagenta to DarkGray.
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightMagenta)), Color::LightMagenta);
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi(AnsiColor::BrightMagenta)),
+            Color::LightMagenta
+        );
     }
 
     #[test]
     fn ansi256_color() {
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(42))), Color::Indexed(42));
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(0))), Color::Indexed(0));
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(255))), Color::Indexed(255));
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(42))),
+            Color::Indexed(42)
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(0))),
+            Color::Indexed(0)
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(255))),
+            Color::Indexed(255)
+        );
     }
 
     #[test]
     fn rgb_color() {
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Rgb(RgbColor(255, 128, 0))), Color::Rgb(255, 128, 0));
-        assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Rgb(RgbColor(0, 0, 0))), Color::Rgb(0, 0, 0));
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Rgb(RgbColor(255, 128, 0))),
+            Color::Rgb(255, 128, 0)
+        );
+        assert_eq!(
+            anstyle_to_ratatui_color(AnstyleColor::Rgb(RgbColor(0, 0, 0))),
+            Color::Rgb(0, 0, 0)
+        );
     }
 
     #[test]
@@ -184,7 +250,11 @@ mod tests {
             (AnsiColor::BrightWhite, Color::White),
         ];
         for (input, expected) in colors {
-            assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi(input)), expected, "mismatch for {input:?}");
+            assert_eq!(
+                anstyle_to_ratatui_color(AnstyleColor::Ansi(input)),
+                expected,
+                "mismatch for {input:?}"
+            );
         }
     }
 }

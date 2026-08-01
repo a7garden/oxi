@@ -24,17 +24,26 @@ pub fn prev_char_boundary(content: &str, mut pos: usize) -> usize {
 
 pub(crate) fn vim_current_line_bounds(content: &str, cursor: usize) -> (usize, usize) {
     let start = vim_line_start(content, cursor);
-    let end = content[start..].find('\n').map(|idx| start + idx).unwrap_or(content.len());
+    let end = content[start..]
+        .find('\n')
+        .map(|idx| start + idx)
+        .unwrap_or(content.len());
     (start, end)
 }
 
 pub(crate) fn vim_line_start(content: &str, cursor: usize) -> usize {
-    content[..cursor.min(content.len())].rfind('\n').map(|idx| idx + 1).unwrap_or(0)
+    content[..cursor.min(content.len())]
+        .rfind('\n')
+        .map(|idx| idx + 1)
+        .unwrap_or(0)
 }
 
 pub(crate) fn vim_line_end(content: &str, cursor: usize) -> usize {
     let start = vim_line_start(content, cursor);
-    content[start..].find('\n').map(|idx| start + idx).unwrap_or(content.len())
+    content[start..]
+        .find('\n')
+        .map(|idx| start + idx)
+        .unwrap_or(content.len())
 }
 
 pub(crate) fn vim_line_first_non_ws(content: &str, cursor: usize) -> usize {
@@ -97,7 +106,12 @@ pub(crate) fn vim_end_word(content: &str, cursor: usize) -> usize {
         Some(ch) if vim_is_word_char(ch) => cursor,
         _ => vim_next_word_start(content, cursor),
     };
-    if start >= content.len() || !content[start..].chars().next().is_some_and(vim_is_word_char) {
+    if start >= content.len()
+        || !content[start..]
+            .chars()
+            .next()
+            .is_some_and(vim_is_word_char)
+    {
         return content.len();
     }
     let mut last = start;
@@ -110,7 +124,11 @@ pub(crate) fn vim_end_word(content: &str, cursor: usize) -> usize {
     last
 }
 
-pub(crate) fn vim_motion_range(content: &str, cursor: usize, motion: Motion) -> Option<(usize, usize)> {
+pub(crate) fn vim_motion_range(
+    content: &str,
+    cursor: usize,
+    motion: Motion,
+) -> Option<(usize, usize)> {
     let target = match motion {
         Motion::WordForward => vim_next_word_start(content, cursor),
         Motion::EndWord => vim_end_word(content, cursor),
@@ -118,7 +136,9 @@ pub(crate) fn vim_motion_range(content: &str, cursor: usize, motion: Motion) -> 
     };
     match motion {
         Motion::WordBackward => (target < cursor).then_some((target, cursor)),
-        Motion::EndWord => (target >= cursor).then_some((cursor, next_char_boundary(content, target))),
+        Motion::EndWord => {
+            (target >= cursor).then_some((cursor, next_char_boundary(content, target)))
+        }
         Motion::WordForward => (target > cursor).then_some((cursor, target)),
     }
 }
@@ -135,10 +155,17 @@ pub(crate) fn vim_current_line_full_range(content: &str, cursor: usize) -> (usiz
 }
 
 pub(crate) fn vim_is_linewise_range(content: &str, start: usize, end: usize) -> bool {
-    start == vim_line_start(content, start) && (end == content.len() || content.get(end - 1..end) == Some("\n"))
+    start == vim_line_start(content, start)
+        && (end == content.len() || content.get(end - 1..end) == Some("\n"))
 }
 
-pub(crate) fn vim_find_char(content: &str, cursor: usize, ch: char, forward: bool, till: bool) -> Option<usize> {
+pub(crate) fn vim_find_char(
+    content: &str,
+    cursor: usize,
+    ch: char,
+    forward: bool,
+    till: bool,
+) -> Option<usize> {
     let (start, end) = vim_current_line_bounds(content, cursor);
     if forward {
         let search_start = next_char_boundary(content, cursor);
@@ -163,11 +190,19 @@ pub(crate) fn vim_find_char(content: &str, cursor: usize, ch: char, forward: boo
     }
 }
 
-pub(crate) fn vim_text_object_range(content: &str, cursor: usize, object: TextObjectSpec) -> Option<(usize, usize)> {
+pub(crate) fn vim_text_object_range(
+    content: &str,
+    cursor: usize,
+    object: TextObjectSpec,
+) -> Option<(usize, usize)> {
     match object {
         TextObjectSpec::Word { around, big } => {
             let classify = |ch: char| {
-                if big { !ch.is_whitespace() } else { vim_is_word_char(ch) }
+                if big {
+                    !ch.is_whitespace()
+                } else {
+                    vim_is_word_char(ch)
+                }
             };
 
             let current_byte = cursor.min(content.len());
@@ -225,7 +260,11 @@ pub(crate) fn vim_text_object_range(content: &str, cursor: usize, object: TextOb
 
             Some((byte_start, byte_end))
         }
-        TextObjectSpec::Delimited { around, open, close } => {
+        TextObjectSpec::Delimited {
+            around,
+            open,
+            close,
+        } => {
             let left = content[..cursor].rfind(open)?;
             let right = content[cursor..].find(close).map(|idx| cursor + idx)?;
             if left >= right {

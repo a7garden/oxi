@@ -5,8 +5,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::ContentPart;
 use super::overlay::{ListOverlayRequest, ModalOverlayRequest, OverlayEvent, OverlayRequest};
-use super::selection::{InlineListItem, InlineListSearchConfig, InlineListSelection, SecurePromptConfig};
-use super::style::{InlineHeaderContext, InlineLinkRange, InlineSegment, InlineTextStyle, InlineTheme};
+use super::selection::{
+    InlineListItem, InlineListSearchConfig, InlineListSelection, SecurePromptConfig,
+};
+use super::style::{
+    InlineHeaderContext, InlineLinkRange, InlineSegment, InlineTextStyle, InlineTheme,
+};
 // [oxi: removed session import]
 
 pub use oxi_vtui_compat::ui_protocol::InlineMessageKind;
@@ -19,7 +23,10 @@ pub struct SubmittedInput {
 
 impl SubmittedInput {
     pub fn new(text: impl Into<String>, attachments: Vec<ContentPart>) -> Self {
-        Self { text: text.into(), attachments }
+        Self {
+            text: text.into(),
+            attachments,
+        }
     }
 
     fn text_only(text: impl Into<String>) -> Self {
@@ -222,7 +229,8 @@ pub enum InlineEvent {
 
 pub type InlineEventCallback = Arc<dyn Fn(&InlineEvent) + Send + Sync + 'static>;
 pub type FocusChangeCallback = Arc<dyn Fn(bool) + Send + Sync + 'static>;
-pub type PreviewCallback = Arc<dyn Fn(Option<&InlineListSelection>) -> anyhow::Result<()> + Send + Sync + 'static>;
+pub type PreviewCallback =
+    Arc<dyn Fn(Option<&InlineListSelection>) -> anyhow::Result<()> + Send + Sync + 'static>;
 
 #[derive(Clone)]
 pub struct InlineHandle {
@@ -246,15 +254,29 @@ impl InlineHandle {
     }
 
     pub fn append_pasted_message(&self, kind: InlineMessageKind, text: String, line_count: usize) {
-        self.send_command(InlineCommand::AppendPastedMessage { kind, text, line_count });
+        self.send_command(InlineCommand::AppendPastedMessage {
+            kind,
+            text,
+            line_count,
+        });
     }
 
     pub fn inline(&self, kind: InlineMessageKind, segment: InlineSegment) {
         self.send_command(InlineCommand::Inline { kind, segment });
     }
 
-    pub fn replace_last(&self, count: usize, kind: InlineMessageKind, lines: Vec<Vec<InlineSegment>>) {
-        self.send_command(InlineCommand::ReplaceLast { count, kind, lines, link_ranges: None });
+    pub fn replace_last(
+        &self,
+        count: usize,
+        kind: InlineMessageKind,
+        lines: Vec<Vec<InlineSegment>>,
+    ) {
+        self.send_command(InlineCommand::ReplaceLast {
+            count,
+            kind,
+            lines,
+            link_ranges: None,
+        });
     }
 
     pub fn replace_last_with_links(
@@ -264,7 +286,12 @@ impl InlineHandle {
         lines: Vec<Vec<InlineSegment>>,
         link_ranges: Vec<Vec<InlineLinkRange>>,
     ) {
-        self.send_command(InlineCommand::ReplaceLast { count, kind, lines, link_ranges: Some(link_ranges) });
+        self.send_command(InlineCommand::ReplaceLast {
+            count,
+            kind,
+            lines,
+            link_ranges: Some(link_ranges),
+        });
     }
 
     pub fn suspend_event_loop(&self) {
@@ -304,7 +331,9 @@ impl InlineHandle {
     }
 
     pub fn set_header_context(&self, context: InlineHeaderContext) {
-        self.send_command(InlineCommand::SetHeaderContext { context: Box::new(context) });
+        self.send_command(InlineCommand::SetHeaderContext {
+            context: Box::new(context),
+        });
     }
 
     pub fn set_input_status(&self, left: Option<String>, right: Option<String>) {
@@ -376,7 +405,10 @@ impl InlineHandle {
     }
 
     pub fn set_inline_prompt_suggestion(&self, suggestion: String, llm_generated: bool) {
-        self.send_command(InlineCommand::SetInlinePromptSuggestion { suggestion, llm_generated });
+        self.send_command(InlineCommand::SetInlinePromptSuggestion {
+            suggestion,
+            llm_generated,
+        });
     }
 
     pub fn clear_inline_prompt_suggestion(&self) {
@@ -396,11 +428,22 @@ impl InlineHandle {
     }
 
     pub fn show_overlay(&self, request: OverlayRequest) {
-        self.send_command(InlineCommand::ShowOverlay { request: Box::new(request) });
+        self.send_command(InlineCommand::ShowOverlay {
+            request: Box::new(request),
+        });
     }
 
-    pub fn show_modal(&self, title: String, lines: Vec<String>, secure_prompt: Option<SecurePromptConfig>) {
-        self.show_overlay(OverlayRequest::Modal(ModalOverlayRequest { title, lines, secure_prompt }));
+    pub fn show_modal(
+        &self,
+        title: String,
+        lines: Vec<String>,
+        secure_prompt: Option<SecurePromptConfig>,
+    ) {
+        self.show_overlay(OverlayRequest::Modal(ModalOverlayRequest {
+            title,
+            lines,
+            secure_prompt,
+        }));
     }
 
     pub fn show_list_modal(
@@ -458,7 +501,9 @@ impl InlineSession {
     }
 
     pub fn clone_inline_handle(&self) -> InlineHandle {
-        InlineHandle { sender: self.handle.sender.clone() }
+        InlineHandle {
+            sender: self.handle.sender.clone(),
+        }
     }
 }
 pub type AppearanceConfig = ();

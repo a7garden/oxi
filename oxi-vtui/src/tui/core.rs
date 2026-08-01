@@ -2,18 +2,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub use crate::tui::config::KeyboardProtocolConfig;
-pub use crate::tui::core_tui::types::{
-    ContentPart, FocusChangeCallback, InlineEventCallback, InlineHeaderContext, InlineHeaderHighlight,
-    InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineLinkRange, InlineLinkTarget, InlineListItem,
-    InlineListSearchConfig, InlineListSelection, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme,
-    ListOverlayRequest, ModalOverlayRequest, OverlayEvent, OverlayHotkey, OverlayHotkeyAction, OverlayHotkeyKey,
-    OverlayRequest, OverlaySelectionChange, OverlaySubmission, RewindAction, SecurePromptConfig,
-    SubmittedInput, WizardModalMode, WizardOverlayRequest, WizardStep,
-};
 pub use crate::tui::core_tui::types::protocol::{
     InlineCommand, InlineEvent, InlineHandle, InlineSession,
 };
-pub use crate::tui::options::{FullscreenInteractionSettings, KeyboardProtocolSettings, SessionSurface};
+pub use crate::tui::core_tui::types::{
+    ContentPart, FocusChangeCallback, InlineEventCallback, InlineHeaderContext,
+    InlineHeaderHighlight, InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineLinkRange,
+    InlineLinkTarget, InlineListItem, InlineListSearchConfig, InlineListSelection,
+    InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, ListOverlayRequest,
+    ModalOverlayRequest, OverlayEvent, OverlayHotkey, OverlayHotkeyAction, OverlayHotkeyKey,
+    OverlayRequest, OverlaySelectionChange, OverlaySubmission, RewindAction, SecurePromptConfig,
+    SubmittedInput, WizardModalMode, WizardOverlayRequest, WizardStep,
+};
+pub use crate::tui::options::{
+    FullscreenInteractionSettings, KeyboardProtocolSettings, SessionSurface,
+};
 
 pub type CoreCommand = InlineCommand;
 pub type CoreEvent = InlineEvent;
@@ -53,7 +56,10 @@ impl Default for CoreSessionOptions {
 pub fn spawn_core_session(
     _theme: InlineTheme,
     _options: CoreSessionOptions,
-) -> anyhow::Result<(InlineHandle, tokio::sync::mpsc::UnboundedReceiver<InlineEvent>)> {
+) -> anyhow::Result<(
+    InlineHandle,
+    tokio::sync::mpsc::UnboundedReceiver<InlineEvent>,
+)> {
     // The real implementation lives in oxi-cli's TUI harness.
     // This is a placeholder that the harness replaces.
     unimplemented!("spawn_core_session is implemented in oxi-cli's TUI harness")
@@ -64,11 +70,10 @@ pub mod prelude {
     pub use super::{
         CoreCommand, CoreEvent, CoreHandle, CoreSession, CoreSessionOptions,
         FullscreenInteractionSettings, InlineHeaderContext, InlineHeaderHighlight,
-        InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineMessageKind,
-        InlineSegment, InlineTextStyle, InlineTheme, KeyboardProtocolSettings,
-        ListOverlayRequest, ModalOverlayRequest, OverlayEvent, OverlayHotkey,
-        OverlayHotkeyAction, OverlayHotkeyKey, OverlayRequest, OverlaySelectionChange,
-        OverlaySubmission, SessionSurface, WizardModalMode, WizardOverlayRequest, WizardStep,
-        spawn_core_session,
+        InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineMessageKind, InlineSegment,
+        InlineTextStyle, InlineTheme, KeyboardProtocolSettings, ListOverlayRequest,
+        ModalOverlayRequest, OverlayEvent, OverlayHotkey, OverlayHotkeyAction, OverlayHotkeyKey,
+        OverlayRequest, OverlaySelectionChange, OverlaySubmission, SessionSurface, WizardModalMode,
+        WizardOverlayRequest, WizardStep, spawn_core_session,
     };
 }

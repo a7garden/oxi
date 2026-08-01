@@ -1,10 +1,10 @@
 //! Minimal markdown → InlineSegment renderer with full inline styling.
-use std::sync::Arc;
-use anstyle::{Color as AnsiColorEnum, RgbColor, Effects};
+use anstyle::{Color as AnsiColorEnum, Effects, RgbColor};
 use oxi_vtui_compat::ui_protocol::{InlineSegment, InlineTextStyle};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use syntect::parsing::SyntaxSet;
+use std::sync::Arc;
 use syntect::easy::HighlightLines;
+use syntect::parsing::SyntaxSet;
 
 /// Parse markdown text into styled InlineSegment lines.
 pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
@@ -16,7 +16,7 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
     let mut lines: Vec<Vec<InlineSegment>> = Vec::new();
     let mut cur: Vec<InlineSegment> = Vec::new();
     let effects: Effects = Effects::default();
-    
+
     let mut code_buf: Option<CodeBlockState> = None;
     let ss = SyntaxSet::load_defaults_newlines();
 
@@ -46,7 +46,10 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
                     CodeBlockKind::Fenced(l) => Some(l.to_string()),
                     CodeBlockKind::Indented => None,
                 };
-                code_buf = Some(CodeBlockState { code: String::new(), lang });
+                code_buf = Some(CodeBlockState {
+                    code: String::new(),
+                    lang,
+                });
             }
 
             // ── Block-level ────────────────────────────────────────────
@@ -54,21 +57,41 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
 
             Event::Start(Tag::Heading { level, .. }) => {
                 flush_line(&mut cur, &mut lines);
-                { let _ = effects.insert(Effects::BOLD); };
-                { let _ = effects.insert(if level == HeadingLevel::H1 { Effects::UNDERLINE } else { Effects::default() }); }
+                {
+                    let _ = effects.insert(Effects::BOLD);
+                };
+                {
+                    let _ = effects.insert(if level == HeadingLevel::H1 {
+                        Effects::UNDERLINE
+                    } else {
+                        Effects::default()
+                    });
+                }
             }
             Event::End(TagEnd::Heading(_)) => {
-                { let _ = effects.remove(Effects::BOLD | Effects::UNDERLINE); };
+                {
+                    let _ = effects.remove(Effects::BOLD | Effects::UNDERLINE);
+                };
                 flush_line(&mut cur, &mut lines);
             }
 
-            Event::Start(Tag::BlockQuote(_)) => { { let _ = effects.insert(Effects::DIMMED); }; }
-            Event::End(TagEnd::BlockQuote(_)) => { { let _ = effects.remove(Effects::DIMMED); }; }
+            Event::Start(Tag::BlockQuote(_)) => {
+                {
+                    let _ = effects.insert(Effects::DIMMED);
+                };
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                {
+                    let _ = effects.remove(Effects::DIMMED);
+                };
+            }
 
             Event::End(TagEnd::Paragraph) | Event::End(TagEnd::Item) => {
                 flush_line(&mut cur, &mut lines);
             }
-            Event::End(TagEnd::List(_)) => { lines.push(Vec::new()); }
+            Event::End(TagEnd::List(_)) => {
+                lines.push(Vec::new());
+            }
 
             Event::Rule => {
                 flush_line(&mut cur, &mut lines);
@@ -79,28 +102,57 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
             }
 
             // ── Inline formatting ──────────────────────────────────────
-            Event::Start(Tag::Emphasis) => { { let _ = effects.insert(Effects::ITALIC); }; }
-            Event::End(TagEnd::Emphasis) => { { let _ = effects.remove(Effects::ITALIC); }; }
+            Event::Start(Tag::Emphasis) => {
+                {
+                    let _ = effects.insert(Effects::ITALIC);
+                };
+            }
+            Event::End(TagEnd::Emphasis) => {
+                {
+                    let _ = effects.remove(Effects::ITALIC);
+                };
+            }
 
-            Event::Start(Tag::Strong) => { { let _ = effects.insert(Effects::BOLD); }; }
-            Event::End(TagEnd::Strong) => { { let _ = effects.remove(Effects::BOLD); }; }
+            Event::Start(Tag::Strong) => {
+                {
+                    let _ = effects.insert(Effects::BOLD);
+                };
+            }
+            Event::End(TagEnd::Strong) => {
+                {
+                    let _ = effects.remove(Effects::BOLD);
+                };
+            }
 
-            Event::Start(Tag::Strikethrough) => { { let _ = effects.insert(Effects::STRIKETHROUGH); }; }
-            Event::End(TagEnd::Strikethrough) => { { let _ = effects.remove(Effects::STRIKETHROUGH); }; }
+            Event::Start(Tag::Strikethrough) => {
+                {
+                    let _ = effects.insert(Effects::STRIKETHROUGH);
+                };
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                {
+                    let _ = effects.remove(Effects::STRIKETHROUGH);
+                };
+            }
 
             Event::Start(Tag::Link { .. }) => {
-                
-                { let _ = effects.insert(Effects::UNDERLINE); };
+                {
+                    let _ = effects.insert(Effects::UNDERLINE);
+                };
             }
             Event::End(TagEnd::Link) => {
-                
-                { let _ = effects.remove(Effects::UNDERLINE); };
+                {
+                    let _ = effects.remove(Effects::UNDERLINE);
+                };
             }
 
             // ── Text content ───────────────────────────────────────────
             Event::Text(t) | Event::Html(t) => {
                 let style = apply_effects(InlineTextStyle::default(), effects);
-                let seg = InlineSegment { text: t.to_string(), style: Arc::new(style) };
+                let seg = InlineSegment {
+                    text: t.to_string(),
+                    style: Arc::new(style),
+                };
                 merge_or_push(&mut cur, seg);
             }
 
@@ -133,7 +185,11 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
 }
 
 /// Render a code block with syntect syntax highlighting.
-pub fn render_code_block(code: &str, lang: Option<&str>, ss: &SyntaxSet) -> Vec<Vec<InlineSegment>> {
+pub fn render_code_block(
+    code: &str,
+    lang: Option<&str>,
+    ss: &SyntaxSet,
+) -> Vec<Vec<InlineSegment>> {
     let syntax = lang
         .and_then(|l| ss.find_syntax_by_token(l))
         .unwrap_or_else(|| ss.find_syntax_plain_text());
@@ -144,15 +200,19 @@ pub fn render_code_block(code: &str, lang: Option<&str>, ss: &SyntaxSet) -> Vec<
 
     for line in syntect::util::LinesWithEndings::from(code) {
         if let Ok(ranges) = h.highlight_line(line, ss) {
-            let segs: Vec<InlineSegment> = ranges.into_iter().map(|(s, t)| {
-                let fg = s.foreground;
-                InlineSegment {
-                    text: t.to_string(),
-                    style: Arc::new(InlineTextStyle::default().with_color(
-                        Some(AnsiColorEnum::Rgb(RgbColor(fg.r, fg.g, fg.b)))
-                    )),
-                }
-            }).collect();
+            let segs: Vec<InlineSegment> = ranges
+                .into_iter()
+                .map(|(s, t)| {
+                    let fg = s.foreground;
+                    InlineSegment {
+                        text: t.to_string(),
+                        style: Arc::new(
+                            InlineTextStyle::default()
+                                .with_color(Some(AnsiColorEnum::Rgb(RgbColor(fg.r, fg.g, fg.b)))),
+                        ),
+                    }
+                })
+                .collect();
             lines.push(segs);
         } else {
             lines.push(vec![InlineSegment {
@@ -166,10 +226,15 @@ pub fn render_code_block(code: &str, lang: Option<&str>, ss: &SyntaxSet) -> Vec<
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-struct CodeBlockState { code: String, lang: Option<String> }
+struct CodeBlockState {
+    code: String,
+    lang: Option<String>,
+}
 
 fn flush_line(cur: &mut Vec<InlineSegment>, lines: &mut Vec<Vec<InlineSegment>>) {
-    if !cur.is_empty() { lines.push(std::mem::take(cur)); }
+    if !cur.is_empty() {
+        lines.push(std::mem::take(cur));
+    }
 }
 
 fn merge_or_push(cur: &mut Vec<InlineSegment>, seg: InlineSegment) {
@@ -183,10 +248,20 @@ fn merge_or_push(cur: &mut Vec<InlineSegment>, seg: InlineSegment) {
 }
 
 fn apply_effects(mut style: InlineTextStyle, effects: Effects) -> InlineTextStyle {
-    if effects.contains(Effects::BOLD) { style = style.bold(); }
-    if effects.contains(Effects::ITALIC) { style = style.italic(); }
-    if effects.contains(Effects::UNDERLINE) { style = style.underline(); }
-    if effects.contains(Effects::DIMMED) { style = style.dim(); }
-    if effects.contains(Effects::STRIKETHROUGH) { style.effects |= Effects::STRIKETHROUGH; }
+    if effects.contains(Effects::BOLD) {
+        style = style.bold();
+    }
+    if effects.contains(Effects::ITALIC) {
+        style = style.italic();
+    }
+    if effects.contains(Effects::UNDERLINE) {
+        style = style.underline();
+    }
+    if effects.contains(Effects::DIMMED) {
+        style = style.dim();
+    }
+    if effects.contains(Effects::STRIKETHROUGH) {
+        style.effects |= Effects::STRIKETHROUGH;
+    }
     style
 }

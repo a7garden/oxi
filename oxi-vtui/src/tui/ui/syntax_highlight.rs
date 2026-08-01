@@ -7,11 +7,16 @@ impl SyntaxHighlighter {
     }
 }
 
-pub fn highlight_line_to_anstyle_segments(_line: &str, _lang: &str) -> Vec<(anstyle::Style, String)> {
+pub fn highlight_line_to_anstyle_segments(
+    _line: &str,
+    _lang: &str,
+) -> Vec<(anstyle::Style, String)> {
     vec![]
 }
 
 pub fn get_active_syntax_theme() -> anstyle::Style {
     anstyle::Style::default()
 }
-pub fn find_syntax_by_token(_token: &str) -> Option<&'static syntect::parsing::SyntaxReference> { None }
+pub fn find_syntax_by_token(_token: &str) -> Option<&'static syntect::parsing::SyntaxReference> {
+    None
+}

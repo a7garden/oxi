@@ -1,6 +1,8 @@
 // [oxi: cut app module]
+use crate::tui::options::{
+    FullscreenInteractionSettings, KeyboardProtocolSettings, SessionSurface,
+};
 use oxi_vtui_compat::ui_protocol::SlashCommandItem;
-use crate::tui::options::{FullscreenInteractionSettings, KeyboardProtocolSettings, SessionSurface};
 
 /// Provides high-level workspace metadata for header rendering.
 pub trait WorkspaceInfoProvider {

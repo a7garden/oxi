@@ -10,10 +10,13 @@ pub mod loader;
 pub mod types;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use oxi_vtui_compat::terminal_detection::is_ghostty_terminal;
+use serde::{Deserialize, Serialize};
 
-pub use types::{ReasoningEffortLevel, SystemPromptMode, ToolDocumentationMode, UiSurfacePreference, VerbosityLevel};
+pub use types::{
+    ReasoningEffortLevel, SystemPromptMode, ToolDocumentationMode, UiSurfacePreference,
+    VerbosityLevel,
+};
 
 /// Controls how tool call output is displayed in the TUI.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -277,7 +280,9 @@ pub struct ToolsConfig {
 
 impl Default for ToolsConfig {
     fn default() -> Self {
-        Self { default_policy: ToolPolicy::Prompt }
+        Self {
+            default_policy: ToolPolicy::Prompt,
+        }
     }
 }
 
@@ -289,7 +294,9 @@ pub struct SecurityConfig {
 
 impl Default for SecurityConfig {
     fn default() -> Self {
-        Self { human_in_the_loop: true }
+        Self {
+            human_in_the_loop: true,
+        }
     }
 }
 
@@ -302,7 +309,10 @@ pub struct ContextConfig {
 
 impl Default for ContextConfig {
     fn default() -> Self {
-        Self { max_context_tokens: 128_000, trim_to_percent: 80 }
+        Self {
+            max_context_tokens: 128_000,
+            trim_to_percent: 80,
+        }
     }
 }
 
@@ -362,7 +372,9 @@ impl Default for PtyConfig {
 }
 
 /// Convert KeyboardProtocolConfig to crossterm keyboard enhancement flags.
-pub fn keyboard_protocol_to_flags(config: &KeyboardProtocolConfig) -> crossterm::event::KeyboardEnhancementFlags {
+pub fn keyboard_protocol_to_flags(
+    config: &KeyboardProtocolConfig,
+) -> crossterm::event::KeyboardEnhancementFlags {
     keyboard_protocol_to_flags_for_terminal(
         config,
         cfg!(target_os = "macos"),
@@ -426,7 +438,12 @@ fn keyboard_protocol_to_flags_for_terminal(
     flags
 }
 
-fn should_force_report_all_keys(mode: &str, is_macos: bool, term_program: Option<&str>, term: Option<&str>) -> bool {
+fn should_force_report_all_keys(
+    mode: &str,
+    is_macos: bool,
+    term_program: Option<&str>,
+    term: Option<&str>,
+) -> bool {
     if !is_macos || !matches!(mode, "default") {
         return false;
     }

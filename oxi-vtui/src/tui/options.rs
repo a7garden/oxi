@@ -5,8 +5,13 @@ pub struct FullscreenInteractionSettings {}
 pub struct KeyboardProtocolSettings {}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SessionSurface { #[default] Full }
+pub enum SessionSurface {
+    #[default]
+    Full,
+}
 
 impl From<SessionSurface> for crate::tui::config::types::UiSurfacePreference {
-    fn from(_: SessionSurface) -> Self { crate::tui::config::types::UiSurfacePreference::default() }
+    fn from(_: SessionSurface) -> Self {
+        crate::tui::config::types::UiSurfacePreference::default()
+    }
 }

@@ -1,4 +1,10 @@
-#![allow(missing_docs, clippy::expect_used, dead_code, unused_imports, clippy::collapsible_if)]
+#![allow(
+    missing_docs,
+    clippy::expect_used,
+    dead_code,
+    unused_imports,
+    clippy::collapsible_if
+)]
 //! Unified UI crate for VT Code: design system, theme registry, and TUI framework.
 //!
 //! # Module layout
