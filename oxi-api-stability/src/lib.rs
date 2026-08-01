@@ -101,10 +101,17 @@ impl syn::parse::Parse for DeprecArg {
     }
 }
 
-/// Attribute applied to any item to mark it semver-stable.
+/// Attribute that marks an item as semver-stable.
+///
+/// The macro name shadows the built-in `#[stable]` (rustdoc-only)
+/// inside the same use-scope — use the qualified path
+/// `#[oxi_api_stability::stable(...)]` if you also need the built-in.
 #[proc_macro_attribute]
 pub fn stable(args: TokenStream, input: TokenStream) -> TokenStream {
-    let parsed = parse2::<SinceArg>(args.into()).expect("expected `since = \"0.XX.0\"`");
+    let parsed = match parse2::<SinceArg>(args.into()) {
+        Ok(p) => p,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let since_val = parsed.since;
     let input: proc_macro2::TokenStream = input.into();
     quote! {
@@ -114,10 +121,17 @@ pub fn stable(args: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
-/// Attribute applied to any item to mark it unstable/experimental.
+/// Attribute that marks an item as semver-unstable.
+///
+/// The macro name shadows the built-in `#[unstable]` (rustdoc-only)
+/// inside the same use-scope — use the qualified path
+/// `#[oxi_api_stability::unstable(...)]` if you also need the built-in.
 #[proc_macro_attribute]
 pub fn unstable(args: TokenStream, input: TokenStream) -> TokenStream {
-    let parsed = parse2::<FeatureArg>(args.into()).expect("expected `feature = \"name\"`");
+    let parsed = match parse2::<FeatureArg>(args.into()) {
+        Ok(p) => p,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let feature_val = parsed.feature;
     let input: proc_macro2::TokenStream = input.into();
     quote! {
@@ -148,8 +162,10 @@ pub fn internal(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// Accepts: `since = "0.XX.0"` (required), `note = "..."` (optional).
 #[proc_macro_attribute]
 pub fn deprecated(args: TokenStream, input: TokenStream) -> TokenStream {
-    let parsed =
-        parse2::<DeprecArg>(args.into()).expect("expected `since = \"0.XX.0\", note = \"...\"`");
+    let parsed = match parse2::<DeprecArg>(args.into()) {
+        Ok(p) => p,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let since_val = parsed.since;
     let note_lit = parsed.note.as_deref().unwrap_or("");
     let input: proc_macro2::TokenStream = input.into();
