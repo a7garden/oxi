@@ -149,7 +149,7 @@ jobs:
             *) exit 0 ;;
           esac
           for WAIT in $WAITS; do
-            TARGET=$(grep -E "^${WAIT} = \{ version = " "$CRATE/Cargo.toml" \
+            TARGET=$(grep -E "^${WAIT} *= \{ version = " "$CRATE/Cargo.toml" \
               | head -1 | sed -E 's/.*version = "([^"]+)".*/\1/')
             [ -z "$TARGET" ] && echo "::error::Could not determine required version of $WAIT" && exit 1
             echo "Waiting for $WAIT $TARGET on crates.io..."
