@@ -57,7 +57,18 @@ wiremock = "0.6"
 [features]
 default = []
 native-browser = ["oxi-agent/native-browser", "dep:oxibrowser-core"]
-
+# Opt-in gates for surface that the R3 tier annotations flag as `#[unstable]`.
+# These are REAL machine-enforced signals (the consumer cannot reach the
+# symbols without enabling the feature) — not just doc cosmetics.
+# The `unstable` umbrella enables all of them at once.
+unstable = [
+    "circuit-breaker",
+    "mcp-spawn-validator",
+    "mcp-transport",
+]
+circuit-breaker = []
+mcp-spawn-validator = []
+mcp-transport = []
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

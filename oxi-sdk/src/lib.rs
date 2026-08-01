@@ -333,6 +333,31 @@ pub use oxi_agent::mcp::{
     McpToolInfo, MetadataCache, ServerEntry, ToolMetadata, ToolPrefix,
 };
 
+// Transport layer — re-exported so consumers can implement custom transports
+// without a direct `oxi-agent` dependency. See
+// `docs/oxi-sdk-ownership.md` §2 (MCP transport is SDK-owned behavior).
+#[cfg(feature = "mcp-transport")]
+#[oxi_unstable(feature = "mcp-transport")]
+pub use oxi_agent::mcp::transport::{
+    McpTransport, http::StreamableHttpTransport, stdio::StdioTransport,
+};
+
+// Spawn validation policy — composable trait. SDK owns the trait + noop impl;
+// consumers (oxi-cli, oxios) register their own policy. See
+// `docs/oxi-sdk-ownership.md` §2.
+#[cfg(feature = "mcp-spawn-validator")]
+#[oxi_unstable(feature = "mcp-spawn-validator")]
+pub use oxi_agent::mcp::{NoopSpawnValidator, SpawnValidator};
+
+// Circuit-breaker behavior trait + reference impl. SDK owns the trait;
+// consumers implement for their domain (A2A, HTTP, etc.). See
+// `docs/oxi-sdk-ownership.md` §3.
+#[cfg(feature = "circuit-breaker")]
+#[oxi_unstable(feature = "circuit-breaker")]
+pub use oxi_ai::circuit_breaker::{
+    BreakerError, BreakerState, CircuitBreaker, DefaultCircuitBreaker, SharedBreaker,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
