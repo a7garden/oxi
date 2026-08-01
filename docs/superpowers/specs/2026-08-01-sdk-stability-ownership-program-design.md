@@ -275,9 +275,14 @@ pub enum BreakerError {
 }
 ```
 
-**Wiring:** pluggable via provider/agent construction. A provider or agent can
-accept `Arc<dyn CircuitBreaker>`; if none is provided, `DefaultCircuitBreaker`
-is used. oxios can pass its own `A2ACircuitBreaker` impl.
+**Wiring:** `AgentLoopConfig.circuit_breaker: Option<Arc<dyn CircuitBreaker>>`
+(Option b). The agent loop's existing retry logic in `stream_retry.rs` calls
+`breaker.check()` before each provider attempt and `record_success()` /
+`record_failure()` after. This co-locates circuit-breaking with retry (which
+already tracks provider failures) and follows the existing
+`Option<Arc<dyn Trait>>` pattern used by `memory`, `lsp`, `subagent_runner`,
+etc. If `None`, no circuit breaking occurs (default). oxios can pass its own
+`A2ACircuitBreaker` impl.
 
 **Re-export:** `oxi_sdk::CircuitBreaker`, `oxi_sdk::DefaultCircuitBreaker`,
 `oxi_sdk::BreakerError`.
@@ -290,44 +295,54 @@ to `#[stable]` after it proves useful in production.
 - [ ] `oxi-sdk` re-exports all three.
 - [ ] A consumer can construct a provider/agent with a custom `CircuitBreaker` impl.
 - [ ] Unit tests for the default impl (open/half-open/closed transitions).
+### 5.2 McpTransport (re-export existing trait + add SpawnValidator)
 
-### 5.2 McpTransport (extract from oxi-agent::mcp)
+**The `McpTransport` trait ALREADY EXISTS** at
+`oxi-agent/src/mcp/transport/mod.rs:48` with a v2 `request`/`notify`/
+`set_inbound_handler`/`close`/`is_connected` API, plus `StdioTransport`
+(v2.0) and `StreamableHttpTransport` (v2.1) reference impls. This was a
+deliberate redesign that replaced the old v1 `send`/`recv` model. **Do not
+re-create the trait.**
 
-**Goal:** separate the transport interface (SDK-owned) from spawn validation
-(consumer-owned policy).
+The actual R6 work is two items:
 
-Current `oxi_agent::mcp` bundles transport (stdio/sse/http message I/O) with
-spawn validation (`validate_mcp_command`, `sanitize_env`). oxios has its own
-stricter spawn validation and bypasses the SDK's MCP client entirely.
+**1. Re-export through oxi-sdk.** The current MCP re-export block
+(`oxi-sdk/src/lib.rs:286-291`) omits `McpTransport`, `StdioTransport`, and
+`StreamableHttpTransport`. Add them so consumers can implement custom
+transports without depending on `oxi-agent` directly.
 
-**Refactor:**
+**2. Add `SpawnValidator` trait** (NEW). oxi's MCP module currently has no
+spawn validation — it spawns child processes with no command/env scrutiny.
+oxios added its own `validate_mcp_command` / `sanitize_env` in
+`crates/oxios-mcp/`. The `SpawnValidator` trait gives consumers a formal
+injection point for spawn-time policy:
 
 ```rust
-// oxi-agent/src/mcp/transport.rs — SDK-owned behavior trait
-#[async_trait]
-pub trait McpTransport: Send + Sync {
-    async fn send(&self, msg: &jsonrpc::Request) -> Result<(), McpError>;
-    async fn recv(&self) -> Result<Option<jsonrpc::Response>, McpError>;
-    async fn close(&self) -> Result<(), McpError>;
+// oxi-agent/src/mcp/spawn.rs — consumer-owned policy hook (NEW)
+pub trait SpawnValidator: Send + Sync {
+    /// Validate the command before spawn. Return Err to block.
+    fn validate_command(&self, cmd: &str, args: &[String]) -> Result<(), McpError>;
+    /// Sanitize or strip dangerous environment variables before spawn.
+    fn sanitize_env(&self, env: &mut std::collections::HashMap<String, String>);
 }
 
-// Reference impls: StdioTransport, SseTransport, HttpTransport
-
-// oxi-agent/src/mcp/spawn.rs — consumer-owned policy hook
-pub trait SpawnValidator: Send + Sync {
-    fn validate_command(&self, cmd: &str, args: &[String]) -> Result<(), McpError>;
-    fn sanitize_env(&self, env: &mut HashMap<String, String>);
+/// Default: no validation (preserves current behavior).
+pub struct NoopSpawnValidator;
+impl SpawnValidator for NoopSpawnValidator {
+    fn validate_command(&self, _: &str, _: &[String]) -> Result<(), McpError> { Ok(()) }
+    fn sanitize_env(&self, _: &mut std::collections::HashMap<String, String>) {}
 }
 ```
 
-The SDK provides a `DefaultSpawnValidator` (basic safety checks). oxi-cli and
-oxios provide their own stricter impls.
+`McpManager::spawn_with_paths()` accepts an optional `Arc<dyn SpawnValidator>`;
+when provided, it validates before spawning each server. oxi-cli registers a
+basic `DefaultSpawnValidator`; oxios registers its strict impl.
 
 **Acceptance criteria:**
-- [ ] `McpTransport` trait extracted with stdio reference impl.
-- [ ] `SpawnValidator` trait with `DefaultSpawnValidator`.
+- [ ] `McpTransport`, `StdioTransport`, `StreamableHttpTransport` re-exported from `oxi-sdk`.
+- [ ] `SpawnValidator` trait + `NoopSpawnValidator` in `oxi-agent/src/mcp/spawn.rs`.
+- [ ] `McpManager::spawn_with_paths()` accepts optional `Arc<dyn SpawnValidator>`.
 - [ ] Existing MCP functionality preserved (no behavioral regression).
-- [ ] `oxi-sdk` re-exports both traits.
 
 ### 5.3 MemoryStore reconciliation
 
@@ -361,15 +376,17 @@ directly for a custom tool-facing interface.
 |---|---|---|---|---|---|
 | oxi-ai | `#![warn]` (line 9) — CI `-D warnings` enforces | 0 | 0 | 0 | 0 |
 | oxi-agent | `#![warn]` (line 9) — CI `-D warnings` enforces | 0 | 0 | 0 | **3** |
-| oxi-sdk | **none** (only `warn(missing_docs)`) | **3** | 0 | 0 | 0 |
+| oxi-sdk | **none** (only `warn(missing_docs)`) | 0 (3 in doc comments — not linted) | 0 | 0 | 0 |
 
 oxi-ai and oxi-agent already enforce unwrap-free shipped code via
 `#![warn(clippy::unwrap_used)]` + CI's `-D warnings`. The raw ≈1769 `.unwrap()`
 count is entirely inside `#[cfg(test)]` modules (exempted by
 `#![cfg_attr(test, allow(...))]`). `.expect()` was already eliminated by the
-F-3 fix in 0.59.
+F-3 fix in 0.59. oxi-sdk's 3 `.unwrap()` hits are in `///` doc-comment code
+examples (`agent_builder.rs:85,145,257`) — not actual code, not linted by
+clippy.
 
-**This is a lint-level promotion + 6 targeted spot-fixes, not a sweep.**
+**This is a lint-level promotion + 3 targeted spot-fixes, not a sweep.**
 
 **Lint policy changes:**
 
@@ -400,20 +417,19 @@ F-3 fix in 0.59.
        clippy::field_reassign_with_default,
    ))]
    ```
-   Fix the 3 non-test `.unwrap()` sites.
+   No code changes needed — the 3 `.unwrap()` hits are in `///` doc comments.
 
-**Spot-fixes (6 sites total):**
+**Spot-fixes (3 sites total — all `unreachable!` in oxi-agent):**
 
-The 3 `unreachable!` in oxi-agent (all post-validation match arms):
-- `mcp/mod.rs:437` — `LifecycleMode::Lazy => unreachable!()`. Convert to a
-  proper error return or handle the Lazy case explicitly.
-- `tools/debug_tool.rs:392` — `_ => unreachable!("action was already validated")`.
-  The action is validated earlier; convert to a typed error or tighten the match.
-- `tools/eval_tool.rs:142` — `_ => unreachable!()`. Same pattern; convert to
-  a typed error.
-
-The 3 `.unwrap()` in oxi-sdk (non-test): locate and convert to `?` /
-`unwrap_or` / proper error variant.
+- `mcp/mod.rs:437` — `LifecycleMode::Lazy => unreachable!()`. Inside
+  `start_eager_servers()` which pre-filters for non-Lazy modes; the arm is
+  unreachable by construction. Convert to a `continue` or no-op `()` with a
+  debug_assert + comment.
+- `tools/debug_tool.rs:392` — `_ => unreachable!("action was already
+  validated against the supported set")`. Post-validation exhaustive match.
+  Return `Ok(())` for the catch-all (the action was already validated).
+- `tools/eval_tool.rs:142` — `_ => unreachable!()`. Language match only
+  handles `"py"` and `"js"`. Return a `ToolError` for unsupported languages.
 
 If a site represents a true invariant where continuing is genuinely unsafe, a
 scoped `#[allow(clippy::panic)]` with a `// SAFETY:` justification comment is
@@ -424,7 +440,7 @@ acceptable — but this is the exception, not the default.
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` passes clean.
 - [ ] `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` passes clean.
 - [ ] Every remaining `#[allow(...)]` for panic lints has a justification comment.
-- [ ] The 3 `unreachable!` + 3 `.unwrap()` sites are resolved (converted to `Result` or justified `#[allow]`).
+- [ ] The 3 `unreachable!` sites in oxi-agent are resolved (converted to `Result`/no-op or justified `#[allow]`).
 
 ### 6.2 R7 — Error type stability
 
@@ -488,9 +504,9 @@ flow of leaf crates that don't need stability annotations.
 | Change | Risk | Mitigation |
 |---|---|---|
 | `#[non_exhaustive]` on `SdkError`/`ProviderError` | Consumer/internal match arms without catch-all fail to compile | Add catch-all arms in oxi-cli + oxi crates first; consumers (oxios) need the same. This IS the point — it forces explicit handling. |
-| `deny(unwrap_used, expect_used, panic)` promotion | Minimal: oxi-ai/oxi-agent already clean; only 6 spot-fixes total (3 `unreachable!` + 3 oxi-sdk `.unwrap()`) | Fix the 6 sites; verify with full clippy + test suite. |
-| `CircuitBreaker` trait introduction | Adding a new trait surface that must be maintained | Keep it minimal (3 methods); initially `#[unstable]`. |
-| `McpTransport` extraction | Could break existing MCP functionality | Extract incrementally; keep `McpManager` API stable; add trait behind the existing types. |
+| `deny(unwrap_used, expect_used, panic)` promotion | Minimal: oxi-ai/oxi-agent already clean; only 3 `unreachable!` spot-fixes in oxi-agent; oxi-sdk has zero non-doc unwraps | Fix the 3 sites; verify with full clippy + test suite. |
+| `CircuitBreaker` trait introduction | Adding a new trait surface that must be maintained | Keep it minimal (3 methods); wired via `AgentLoopConfig.circuit_breaker`; initially `#[unstable]`. |
+| `McpTransport` re-export + `SpawnValidator` | Re-export is additive (trait already exists); `SpawnValidator` is a new injection point on `McpManager::spawn_with_paths()` | Re-export is zero-risk; `SpawnValidator` defaults to `NoopSpawnValidator` (no behavioral change). |
 | `protobuf` feature-gate | Consumers using Devin/Cursor must enable the feature | Document in CHANGELOG `## Changed`; provide migration note. |
 | New proc-macro crate | Adds build-time dependency (syn/quote/proc-macro2) | These are already in the build tree (many deps use them); negligible incremental cost. |
 
@@ -505,8 +521,8 @@ flow of leaf crates that don't need stability annotations.
 | 1 | `xtask` or CI workflow for breaking-change detection | CI |
 | 2 | `oxi-api-stability/` (new crate) | New crate |
 | 2 | `oxi-ai/src/lib.rs`, `oxi-agent/src/lib.rs`, `oxi-sdk/src/lib.rs` + public modules | Annotations |
-| 3 | `oxi-ai/src/circuit_breaker.rs` (new), `oxi-agent/src/mcp/transport.rs` (new), `oxi-agent/src/mcp/spawn.rs` (new) | New traits |
-| 4 | All lib crate roots (lint attrs), 6 panic/unwrap sites, `oxi-sdk/src/error.rs`, `oxi-ai/src/error.rs` | Code |
+| 3 | `oxi-ai/src/circuit_breaker.rs` (new), `oxi-agent/src/mcp/spawn.rs` (new), `oxi-sdk/src/lib.rs` (McpTransport re-export) | New traits + re-export |
+| 4 | All lib crate roots (lint attrs), 3 `unreachable!` sites in oxi-agent, `oxi-sdk/src/error.rs`, `oxi-ai/src/error.rs` | Code |
 
 ---
 
