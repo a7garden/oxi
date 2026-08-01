@@ -77,6 +77,13 @@ println!("{}", response.content);
 - **Composable** — agents combine into groups with different orchestration strategies
 - **Observable** — tracing, audit, cost tracking, and event sourcing built in
 
+## Ownership Contract
+
+See [`docs/oxi-sdk-ownership.md`](../docs/oxi-sdk-ownership.md) for the
+canonical "who owns what" table. The SDK owns behavior (interfaces + reference
+impls); consumers own policy (domain thresholds, validation, tiering).
+
+## Feature Flags
 ## Features
 
 ### Security

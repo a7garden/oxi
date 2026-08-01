@@ -90,6 +90,10 @@ and `oxi-sdk/src/ports/inmem/` (in-memory). See `docs/PORT_GUIDE.md`
 for the full contract, the noop-fallback semantics, and patterns for
 writing new impls.
 
+> See also [`docs/oxi-sdk-ownership.md`](docs/oxi-sdk-ownership.md) for the
+> behavior↔policy ownership contract that prevents parallel evolution between
+> the SDK and consumers (oxios).
+
 ## Architecture Overview
 
 ### oxi-ai — Unified LLM API
