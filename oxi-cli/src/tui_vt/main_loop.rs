@@ -21,7 +21,7 @@ use crossterm::{
         PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate, disable_raw_mode, enable_raw_mode},
 };
 use oxi_agent::AgentEvent;
 use oxi_vtui::theme::{ThemeStyles, active_styles};
@@ -35,10 +35,11 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
 use crate::App;
+use crate::app::agent_hub_registry::HubEntry;
 use crate::app::agent_session::SessionEvent;
 use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
 
@@ -79,7 +80,6 @@ impl Tui {
             };
             let _ = execute!(
                 stdout,
-                EnterAlternateScreen,
                 Hide,
                 EnableBracketedPaste,
                 PushKeyboardEnhancementFlags(flags)
@@ -107,7 +107,6 @@ impl Tui {
                 DisableBracketedPaste
             );
             let _ = self.terminal.show_cursor();
-            let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
             // disable_raw_mode is the most critical — always attempt it.
             disable_raw_mode()?;
             self.tty_ok = false;
@@ -121,7 +120,7 @@ impl Tui {
     fn set_panic_hook() {
         let original_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic_info| {
-            let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+            let _ = execute!(io::stdout(), Show);
             let _ = disable_raw_mode();
             original_hook(panic_info);
         }));
@@ -166,6 +165,12 @@ pub struct RenderState {
     pub shutdown_requested: bool,
     /// Accumulated text for markdown rendering at message end.
     pub message_buffer: String,
+    /// Agent Hub overlay open.
+    pub agent_hub_open: bool,
+    /// Hub entries snapshotted when the overlay was opened (`/agents`).
+    pub hub_entries: Vec<(String, HubEntry)>,
+    /// First Ctrl+C armed a quit; a second press exits (two-press quit).
+    pub pending_quit: bool,
 }
 
 /// One rendered transcript line.
@@ -321,9 +326,11 @@ async fn run_event_loop(
     // screen stays black until the user presses a key.
     {
         let snapshot = state.lock();
+        let _ = execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
         if let Err(err) = terminal.draw(|frame| render_frame(frame, &snapshot, handle)) {
             tracing::warn!(?err, "initial tui draw failed");
         }
+        let _ = execute!(terminal.backend_mut(), EndSynchronizedUpdate);
     }
 
     // Render tick. The input thread edits shared state (typing, cursor
@@ -391,8 +398,12 @@ async fn run_event_loop(
         // Redraw every iteration. The harness's redraw is idempotent —
         // the ratatui backend coalesces unchanged frames.
         let snapshot = state.lock();
-        let draw_result = terminal.draw(|frame| render_frame(frame, &snapshot, handle));
-        if let Err(err) = draw_result {
+        let _ = execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
+        let draw_err = terminal
+            .draw(|frame| render_frame(frame, &snapshot, handle))
+            .err();
+        let _ = execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+        if let Some(err) = draw_err {
             tracing::warn!(?err, "tui draw failed");
             break;
         }
@@ -623,6 +634,7 @@ fn handle_inline_event(
             if prompt.is_empty() {
                 return LoopOutcome::Continue;
             }
+            state.pending_quit = false;
             // Slash commands: dispatch locally instead of forwarding to
             // the agent. The echoed line is appended before dispatch so
             // every command output appears after the prompt.
@@ -718,17 +730,23 @@ fn handle_interrupt(
     session: &crate::app::agent_session::AgentSessionHandle,
     _handle: &InlineHandle,
 ) -> LoopOutcome {
+    // A second consecutive Ctrl+C (no intervening submit) quits.
+    if state.pending_quit {
+        return LoopOutcome::Exit;
+    }
+    // First Ctrl+C: abort any running stream and arm the quit flag so the
+    // next press exits. A single accidental press never kills the session.
     if session.is_streaming() {
-        // Interrupt the current run; a subsequent press (once idle) quits.
         let s = session.clone();
         tokio::spawn(async move {
             s.abort().await;
         });
         state.footer_left = Some("Stopping\u{2026} press Ctrl+C again to quit".to_string());
-        LoopOutcome::Continue
     } else {
-        LoopOutcome::Exit
+        state.footer_left = Some("Press Ctrl+C again to quit".to_string());
     }
+    state.pending_quit = true;
+    LoopOutcome::Continue
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -852,9 +870,13 @@ fn spawn_input_thread(
                 }
                 KeyCode::Char(ch) => {
                     let mut s = state.lock();
-                    let cursor = s.input_cursor;
-                    s.input_buffer.insert(cursor, ch);
-                    s.input_cursor = cursor + ch.len_utf8();
+                    if s.agent_hub_open && ch == 'q' {
+                        s.agent_hub_open = false;
+                    } else {
+                        let cursor = s.input_cursor;
+                        s.input_buffer.insert(cursor, ch);
+                        s.input_cursor = cursor + ch.len_utf8();
+                    }
                 }
                 _ => {}
             }
@@ -1040,6 +1062,50 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     let layout = super::frame_layout::render_chrome(frame, area, state);
     render_transcript(frame, layout.scrollback, state);
     render_composer(frame, layout.prompt, state);
+    if state.agent_hub_open {
+        render_agent_hub(frame, area, state);
+    }
+}
+
+/// Render the Agent Hub overlay — a centered panel listing every registered
+/// agent (kind, name, status). Populated from `RenderState::hub_entries`,
+/// snapshotted when `/agents` fired. `q` (input thread Char arm) closes it.
+fn render_agent_hub(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+    let rows = state.hub_entries.len() as u16;
+    let height = rows.saturating_add(4).min(area.height.saturating_sub(1));
+    let width = area.width.clamp(30, 80);
+    let rect = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, rect);
+
+    let title = Line::from(Span::styled(
+        " Agent Hub ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    let block = Block::default().borders(Borders::ALL).title(title);
+
+    let items: Vec<ListItem<'_>> = if state.hub_entries.is_empty() {
+        vec![ListItem::new(Line::from(Span::raw(
+            "No agents registered.",
+        )))]
+    } else {
+        state
+            .hub_entries
+            .iter()
+            .map(|(id, e)| {
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:?} ", e.kind)),
+                    Span::raw(e.display_name.clone()),
+                    Span::raw(format!("  — {:?} ({})", e.status, id)),
+                ]))
+            })
+            .collect()
+    };
+    frame.render_widget(List::new(items).block(block), rect);
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {

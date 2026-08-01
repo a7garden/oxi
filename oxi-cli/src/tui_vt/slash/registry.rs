@@ -158,6 +158,27 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(ModelCommand));
     registry.register(Box::new(CancelCommand));
     registry.register(Box::new(StatusCommand));
+    registry.register(Box::new(AgentsCommand));
+}
+
+/// `/agents` — open the Agent Hub overlay. Alias: `/hub`.
+struct AgentsCommand;
+
+impl SlashCommand for AgentsCommand {
+    fn name(&self) -> &'static str {
+        "agents"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["hub"]
+    }
+    fn description(&self) -> &'static str {
+        "Open the Agent Hub overlay (alias: /hub)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        ctx.state.agent_hub_open = true;
+        ctx.state.hub_entries = ctx.session.hub().snapshot();
+        SlashOutcome::Handled
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
