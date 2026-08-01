@@ -4795,6 +4795,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxi-api-stability"
+version = "0.63.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "oxi-catalog"
 version = "0.63.0"
 dependencies = [

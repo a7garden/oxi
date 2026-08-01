@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxi-catalog", "oxi-ai", "oxi-agent", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-vtui", "oxi-vtui-compat"]
+members = ["oxi-catalog", "oxi-ai", "oxi-agent", "oxi-cli", "oxi-sdk", "oxi-hashline", "oxi-lsp", "oxi-mnemopi", "oxi-snapcompact", "oxi-vtui", "oxi-vtui-compat", "oxi-api-stability"]
 exclude = ["scripts"]
 
 # Shared defaults inherited by every workspace member. Members can override
@@ -8,6 +8,7 @@ exclude = ["scripts"]
 # `rust-version` in sync — `rust-version` is the source of truth for the
 # Cargo 2024-edition resolver, the MSRV job in CI, and `cargo install`.
 [workspace.package]
+version = "0.63.0"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT"

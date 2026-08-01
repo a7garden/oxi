@@ -1,0 +1,15 @@
+[package]
+name = "oxi-api-stability"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+description = "Stability tier attribute macros for oxi workspace crates"
+publish = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+syn = { version = "2", features = ["full", "parsing"] }
+quote = "1"
