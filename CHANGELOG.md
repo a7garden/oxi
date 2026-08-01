@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-08-01
+
+### Added
+
+- **VT-based TUI framework** — New `oxi-vtui` and `oxi-vtui-compat` crates
+  providing a terminal UI framework based on vtcode-ui, with theme pipeline,
+  design system, and full TUI widget support.
+- **grok-build layout system** — Ported the agent view layout system from
+  grok-build as the structural foundation for the new TUI.
+- **Slash command registry** — VT TUI slash command system with layout bridge
+  for CLI integration.
+- **UI protocol compatibility layer** — `oxi-vtui-compat` bridges the VT UI
+  protocol with oxi's agent/UI types.
+
+### Changed
+
+- **CLI: VT TUI cutover** — Replaced the legacy ratatui-based TUI with the
+  new VT-based TUI framework across all CLI modules.
+
 ### Fixed
 
 - **TUI: black screen on launch (oxi-vtui)** — The event loop drew its first

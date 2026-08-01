@@ -4722,7 +4722,7 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "oxi-agent"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4752,7 +4752,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-ai"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4796,7 +4796,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-catalog"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "dirs",
  "filetime",
@@ -4814,7 +4814,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -4871,7 +4871,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-hashline"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "async-trait",
  "lru",
@@ -4887,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-lsp"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "async-lsp",
  "async-process",
@@ -4904,7 +4904,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-mnemopi"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -4929,7 +4929,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4965,7 +4965,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-snapcompact"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "fontdue",
  "png 0.17.16",
@@ -4977,7 +4977,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-vtui"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -5021,7 +5021,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-vtui-compat"
-version = "0.62.0"
+version = "0.63.0"
 dependencies = [
  "anstyle",
  "anyhow",
