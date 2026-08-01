@@ -205,6 +205,7 @@ pub use oxi_ai::register_builtins::{
 };
 
 // Provider instance registry (custom + built-in at runtime)
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::{
     create_builtin_provider, create_builtin_provider_with_options, custom_provider_names,
     dynamic_models, fetch_models_async, fetch_models_blocking, get_model, get_models, get_provider,
@@ -212,18 +213,22 @@ pub use oxi_ai::{
 };
 
 // Complexity-based routing and the router module
+#[oxi_unstable(feature = "router")]
 pub use oxi_ai::router;
 
 // Tool-related types (oxi-cli's main.rs uses ToolCall, ToolResult, ToolCallType)
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::{
     ProgressCallback, Tool, ToolCall, ToolCallType, ToolResult, ToolValidationError, validate_args,
 };
 
 // Thinking level (re-exported from oxi_ai::types, since oxi-ai's top-level
 // re-exports it via `pub use types::*` but not as a named item).
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::types::ThinkingLevel;
 
 // Re-export from oxi-agent
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
     AgentTool, AgentToolResult, BrowseProgress, BrowseProgressCallback, CompactedContext,
@@ -237,6 +242,7 @@ pub use oxi_agent::{
 // SDK consumers can construct a full advisor: build a second `Agent` with the
 // advisor model role + read-only tools + an `AdviseTool` (carrying an
 // `EnqueueAdviceFn`), then drive it with `AdvisorRuntime`. The emission guard
+#[oxi_unstable(feature = "advisor")]
 pub use oxi_agent::advisor::{
     ADVISOR_GUIDANCE, ADVISOR_READONLY_TOOL_NAMES, ADVISOR_SYSTEM_PROMPT, AdviseTool, AdvisorAgent,
     AdvisorDeliveryChannel, AdvisorEmissionGuard, AdvisorNote, AdvisorRuntime, AdvisorRuntimeHost,
@@ -245,7 +251,9 @@ pub use oxi_agent::advisor::{
     resolve_delivery_channel,
 };
 // ── Todo tool types (agent-scoped, observable by SDK consumers) ──────
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, TodoUpdateResult};
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::{TodoStateProvider, TodoTool};
 
 // ── Capability traits + agent tools (single-dependency pattern) ───────
@@ -258,28 +266,37 @@ pub use oxi_agent::{TodoStateProvider, TodoTool};
 // otherwise force a direct `oxi-agent` dependency.
 
 /// `MemoryBackend` backed by the SDK `MemoryStore` + `EmbeddingProvider` ports.
+#[oxi_unstable(feature = "memory")]
 pub use crate::port_memory_backend::PortMemoryBackend;
 /// `BashTool` (read/write/edit/grep/find/ls are already re-exported above and
 /// bundled by `coding_tools()`).
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::BashTool;
 /// In-process subagent runner trait (see [`crate::SdkSubagentRunner`]).
+#[oxi_unstable(feature = "subagent")]
 pub use oxi_agent::SubagentRunner;
 /// Memory backend trait + item — implement to back the `memory_*` tools, or
 /// use [`PortMemoryBackend`] to bridge the SDK's `MemoryStore` port.
+#[oxi_unstable(feature = "memory")]
 pub use oxi_agent::tools::{MemoryBackend, MemoryItem};
 /// The `memory_*` + `subagent` tool structs (register directly if desired).
+#[oxi_unstable(feature = "memory")]
 pub use oxi_agent::tools::{
     MemoryEditTool, MemoryRecallTool, MemoryReflectTool, MemoryRetainTool, SubagentTool,
 };
 /// URL resolver trait + resolved content — implement for internal-URL dispatch.
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_agent::tools::{ResolvedContent, UrlResolver};
 /// Agent-pool source for Hub display + todo sub-agent matching.
+#[oxi_unstable(feature = "agent-hub")]
 pub use oxi_agent::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};
 /// LSP capability — implement to back the `lsp` tool.
+#[oxi_unstable(feature = "lsp")]
 pub use oxi_agent::{LspAction, LspProvider};
 
 // Re-export the hashline crate so consumers can implement `SnapshotStore`
 // (enables line-anchored edit mode) without a direct `oxi-hashline` dep.
+#[oxi_internal]
 pub use oxi_hashline;
 
 // ── Concrete provider re-exports ─────────────────────────────────────────
@@ -290,6 +307,7 @@ pub use oxi_hashline;
 
 #[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::OpenAiProvider;
+#[oxi_stable(since = "0.63.0")]
 pub use oxi_ai::OpenAiResponsesProvider;
 
 // ── Browser engine re-exports ────────────────────────────────────────────────
