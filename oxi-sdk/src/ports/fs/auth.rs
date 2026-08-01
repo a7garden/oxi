@@ -59,6 +59,9 @@ impl AuthFile {
             std::fs::create_dir_all(parent)?;
         }
         let tmp = path.with_extension("json.tmp");
+        // SAFETY: `AuthFile` derives `Serialize` with only plain fields; no
+        // custom serializer returns Err, so serialization cannot fail.
+        #[allow(clippy::expect_used)]
         let text = serde_json::to_string_pretty(self).expect("serializable");
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, path)?;

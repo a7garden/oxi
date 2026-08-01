@@ -339,7 +339,12 @@ async fn run_single_agent(
         }
     };
 
+    // SAFETY: the command was spawned with `Stdio::piped()` for stdout/stderr
+    // and the spawn succeeded (we returned early on error), so both `take()`
+    // calls cannot return None.
+    #[allow(clippy::expect_used)]
     let stdout = child.stdout.take().expect("stdout piped but missing");
+    #[allow(clippy::expect_used)]
     let stderr = child.stderr.take().expect("stderr piped but missing");
 
     // Spawn stdout reader → channel

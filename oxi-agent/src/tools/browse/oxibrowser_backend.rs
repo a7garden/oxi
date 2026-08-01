@@ -165,7 +165,14 @@ impl Default for OxiBrowserEngine {
     fn default() -> Self {
         // Default cannot be async, so use blocking runtime.
         // Prefer `OxiBrowserEngine::new().await` in async contexts.
+        // SAFETY: `Runtime::new()` cannot fail with default config; and
+        // `block_on(Self::new())` panics rather than returning a half-built
+        // engine because `Default` has no Result channel. A failing browser
+        // init is an environment error (no Chrome/backend) that the caller
+        // should handle via `OxiBrowserEngine::new().await` instead.
+        #[allow(clippy::expect_used)]
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        #[allow(clippy::expect_used)]
         rt.block_on(Self::new())
             .expect("Failed to create default OxiBrowserEngine")
     }

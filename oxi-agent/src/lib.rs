@@ -1,13 +1,26 @@
 #![allow(unused_doc_comments)]
 #![warn(missing_docs)]
-// Relax two test-idiom lints under `cfg(test)` so `cargo clippy --all-targets`
+// Relax test-idiom lints under `cfg(test)` so `cargo clippy --all-targets`
 // stays clean without weakening the shipped library:
-//   - `clippy::unwrap_used` — `unwrap()`/`unwrap_err()` are idiomatic in tests;
-//     shipped (non-test) code still `warn`s on it (see the line below).
+//   - `clippy::unwrap_used` — `unwrap()`/`unwrap_err()` are idiomatic in tests.
+//   - `clippy::expect_used` — `expect("reason")` is idiomatic in tests.
+//   - `clippy::panic` — `panic!("Expected X")` match-arm assertions in tests.
 //   - `clippy::field_reassign_with_default` — the `let mut x = X::default();
 //     x.f = ..;` test-setup pattern.
-#![warn(clippy::unwrap_used)]
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::field_reassign_with_default))]
+// Shipped (non-test) code DENIES all three panic-family lints (see below).
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::field_reassign_with_default,
+        clippy::expect_used,
+        clippy::panic,
+    )
+)]
 #![allow(unknown_lints)]
 
 //! oxi-agent: Agent runtime for oxi

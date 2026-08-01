@@ -383,6 +383,10 @@ impl AgentTool for ReadTool {
             _ => {}
         }
 
+        // SAFETY: a poisoned lock means the previous holder panicked while
+        // holding it — a real bug that must surface, not be swallowed. The
+        // tool fails closed rather than proceeding with inconsistent state.
+        #[allow(clippy::expect_used)]
         let progress_cb = self
             .progress_callback
             .lock()
@@ -404,6 +408,9 @@ impl AgentTool for ReadTool {
 
     fn on_progress(&self, callback: ProgressCallback) {
         let cb = self.progress_callback.clone();
+        // SAFETY: a poisoned lock means the previous holder panicked while
+        // holding it — a real bug that must surface, not be swallowed.
+        #[allow(clippy::expect_used)]
         let mut guard = cb.lock().expect("progress callback lock poisoned");
         *guard = Some(callback);
     }

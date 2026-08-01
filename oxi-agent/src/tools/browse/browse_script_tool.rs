@@ -138,6 +138,9 @@ fn parse_steps(yaml: &str) -> Result<Vec<Step>, ToolError> {
                 mapping.len()
             ));
         }
+        // SAFETY: `mapping.len() == 1` is checked above, so `next()` must
+        // return `Some`. Infallible by construction.
+        #[allow(clippy::expect_used)]
         let (variant_key, payload) = mapping
             .iter()
             .next()

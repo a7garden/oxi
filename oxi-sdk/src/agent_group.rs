@@ -189,11 +189,17 @@ impl AgentGroup {
             let sem = Arc::clone(&semaphore);
 
             handles.push(tokio::task::spawn_blocking(move || {
+                // SAFETY: `new_current_thread().enable_all()` cannot fail to
+                // build a runtime — no configuration that errors is involved.
+                #[allow(clippy::expect_used)]
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime");
                 rt.block_on(async move {
+                    // SAFETY: the semaphore is `Arc`-cloned into this closure, so
+                    // it cannot be closed (dropped) while the permit is awaited.
+                    #[allow(clippy::expect_used)]
                     let _permit = sem.acquire().await.expect("semaphore closed");
                     match agent.run(prompt).await {
                         Ok((response, _events)) => AgentGroupOutput {

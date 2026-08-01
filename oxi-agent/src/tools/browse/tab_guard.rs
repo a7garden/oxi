@@ -44,6 +44,10 @@ impl TabGuard {
     ///
     /// Panics if the guard has already been consumed (via `close` or `into_inner`).
     pub fn tab(&self) -> &dyn BrowserTab {
+        // SAFETY: `as_ref().map(...)` returns None only after this guard was
+        // already consumed (a use-after-consume bug); the guard contract
+        // forbids it.
+        #[allow(clippy::expect_used)]
         self.tab
             .as_ref()
             .map(|t| t.as_ref() as &dyn BrowserTab)
@@ -70,6 +74,9 @@ impl TabGuard {
     /// (e.g., multi-step script execution).
     pub fn into_inner(mut self) -> Box<dyn BrowserTab> {
         self.explicitly_consumed = true;
+        // SAFETY: `take()` returns None only after this guard was already
+        // consumed (a use-after-consume bug); the guard contract forbids it.
+        #[allow(clippy::expect_used)]
         self.tab.take().expect("TabGuard: tab already consumed")
     }
 }

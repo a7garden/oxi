@@ -139,7 +139,12 @@ impl AgentTool for EvalTool {
                     .unwrap_or(false);
                 if has_bun { "bun" } else { "node" }
             }
-            _ => unreachable!(),
+            other => {
+                return Ok(AgentToolResult::error(format!(
+                    "Unsupported language: '{}'. Supported: py, js",
+                    other
+                )));
+            }
         };
 
         let output = match tokio::process::Command::new(runner)

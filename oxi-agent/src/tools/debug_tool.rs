@@ -389,7 +389,11 @@ fn validate_action_params(action: &str, params: &Value) -> Result<(), ToolError>
         "terminate" | "threads" | "sessions" => {
             // No required params beyond `action`.
         }
-        _ => unreachable!("action was already validated against the supported set"),
+        // Unreachable by construction: `action` is validated against the
+        // supported set before this match runs. No-op instead of panicking
+        // so a future supported action added to the validator but forgotten
+        // here degrades to a no-op rather than crashing the agent.
+        _ => {}
     }
 
     Ok(())

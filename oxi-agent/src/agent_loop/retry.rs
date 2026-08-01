@@ -65,6 +65,10 @@ pub fn is_retryable_error(message: &oxi_ai::AssistantMessage) -> bool {
 
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
+        // SAFETY: the auto-retry regex is a compile-time literal that is
+        // verified valid by `regex::Regex::new`; a panic here is a programming
+        // error in the literal itself, not a runtime condition.
+        #[allow(clippy::expect_used)]
         Regex::new(
             r"(?i)overloaded|provider.?returned.?error|rate.?limit|too many requests\
              |429|500|502|503|504|service.?unavailable|server.?error|internal.?error\

@@ -272,6 +272,9 @@ impl McpManager {
         // `describe` work before the first live connection.
         {
             let prefix_mode = effective_prefix_mode(manager.config.read().settings.as_ref());
+            // SAFETY: inside `Arc::new_cyclic` the manager is freshly constructed
+            // and nothing else holds the mutex, so `try_lock` cannot fail.
+            #[allow(clippy::expect_used)]
             let mut inner = manager.inner.try_lock().expect("freshly constructed");
             for server in &cached_servers {
                 let tools = manager.cache.get_tools(server, &prefix_mode);
@@ -436,7 +439,10 @@ impl McpManager {
                         });
                     }
                 }
-                LifecycleMode::Lazy => unreachable!(),
+                // Unreachable by construction: the `eager_servers` filter_map
+                // above drops `LifecycleMode::Lazy` before this loop runs. A
+                // no-op arm degrades gracefully if that filter ever changes.
+                LifecycleMode::Lazy => {}
             }
         }
     }

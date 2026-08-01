@@ -177,9 +177,9 @@ impl Provider for OpenAiResponsesProvider {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", api_key)
-                    .parse()
-                    .expect("valid bearer header"),
+                format!("Bearer {}", api_key).parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid bearer header: {e}"))
+                })?,
             );
             headers.insert(
                 reqwest::header::CONTENT_TYPE,

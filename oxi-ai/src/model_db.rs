@@ -203,6 +203,12 @@ static ALL_PROVIDER_MODELS: OnceLock<Vec<(&'static str, &'static [ModelEntry])>>
 fn all_provider_models() -> &'static [(&'static str, &'static [ModelEntry])] {
     ALL_PROVIDER_MODELS
         .get_or_init(|| {
+            // SAFETY: the embedded catalog snapshot is a REQUIRED resource — if
+            // it is missing or corrupt, oxi cannot resolve any model and the
+            // process is broken regardless of error handling. Failing fast with
+            // a clear message is the designed behavior (see the fn doc). This
+            // is not a recoverable error path.
+            #[allow(clippy::expect_used)]
             try_materialize_from_snapshot().expect(
                 "Failed to materialize from embedded snapshot. \
              The catalog snapshot is required for oxi to function.",

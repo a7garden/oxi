@@ -289,6 +289,10 @@ fn expand_env_placeholders(input: &str) -> String {
             i += 2 + end_rel + 1;
             continue;
         }
+        // SAFETY: `i` is advanced only by complete UTF-8 char boundaries, so
+        // `input[i..]` starts at a valid boundary while `i < bytes.len()` —
+        // `chars().next()` cannot return None.
+        #[allow(clippy::expect_used)]
         let ch = input[i..].chars().next().expect("valid UTF-8 boundary");
         out.push(ch);
         i += ch.len_utf8();

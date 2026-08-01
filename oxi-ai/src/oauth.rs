@@ -280,6 +280,12 @@ pub fn build_authorization_url(config: &OAuthConfig) -> PkceState {
     let code_challenge = derive_code_challenge(&code_verifier);
     let state = generate_state_token();
 
+    // SAFETY: the authorization endpoint is a REQUIRED resource — a malformed
+    // URL means the provider config is broken. Failing fast surfaces the config
+    // error at setup time. This is a recoverable config error that deserves a
+    // `Result` return; changing the pub signature is a breaking change, so it
+    // is flagged for the additive `build_authorization_url_result` follow-up.
+    #[allow(clippy::expect_used)]
     let mut url =
         url::Url::parse(&config.authorization_endpoint).expect("invalid authorization endpoint");
     url.query_pairs_mut()

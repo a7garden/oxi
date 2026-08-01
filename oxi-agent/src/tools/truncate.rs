@@ -187,6 +187,8 @@ pub fn truncate_tail(content: &str, options: &TruncationOptions) -> TruncationRe
     // If still over byte limit, trim from the front
     let mut last_line_partial = false;
     while output_bytes > max_bytes && !output_lines_vec.is_empty() {
+        // SAFETY: guarded by the `is_empty()` check immediately above.
+        #[allow(clippy::expect_used)]
         let first = output_lines_vec
             .first()
             .expect("output_lines_vec non-empty after is_empty check");

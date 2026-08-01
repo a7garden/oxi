@@ -93,6 +93,10 @@ const DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECS: u64 = 10;
 pub fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
+        // SAFETY: `reqwest::Client::builder()` with only connect/timeout settings
+        // cannot fail to build — no TLS backend misconfiguration or invalid
+        // proxy is involved. Infallible by construction.
+        #[allow(clippy::expect_used)]
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(
                 DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECS,

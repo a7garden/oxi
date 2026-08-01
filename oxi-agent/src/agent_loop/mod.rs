@@ -541,6 +541,9 @@ impl AgentLoop {
         // Recover the state. After run_inner completes, emit_fn is dropped,
         // releasing the last Arc clone. Arc::try_unwrap should succeed since
         // only our `state_arc` reference remains.
+        // SAFETY: the doc comment above proves single-ownership after run;
+        // a failure here means a real reference leak that must not be masked.
+        #[allow(clippy::expect_used)]
         let mutex = Arc::try_unwrap(state_arc)
             .expect("run_mut: state Arc still has multiple owners after run");
         Ok((events, mutex.into_inner()))

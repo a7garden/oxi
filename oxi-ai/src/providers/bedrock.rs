@@ -285,6 +285,11 @@ impl Default for BedrockProvider {
 /// AWS timestamp format: YYYYMMDDTHHMMSSZ using chrono
 fn format_timestamp(timestamp: u64) -> String {
     use chrono::TimeZone;
+    // SAFETY: `timestamp` is derived from `SystemTime::now().duration_since(UNIX_EPOCH)`
+    // (always >= 0 in practice). A value outside chrono's representable range would
+    // be a clock/formatting bug in this crate, not a caller error — refusing to
+    // sign would hide the real failure. Infallible by construction.
+    #[allow(clippy::expect_used)]
     let datetime = chrono::Utc
         .timestamp_opt(timestamp as i64, 0)
         .single()
@@ -350,6 +355,10 @@ fn build_canonical_request(
 
 /// HMAC-SHA256 sign
 fn hmac_sign(msg: &str, key: &[u8]) -> Vec<u8> {
+    // SAFETY: HMAC-SHA256 accepts keys of any length (RFC 2104); `new_from_slice`
+    // only fails if the digest rejects the key size, which is not the case for
+    // any fixed HMAC-SHA256 instance. Infallible by construction.
+    #[allow(clippy::expect_used)]
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(msg.as_bytes());
     mac.finalize().into_bytes().to_vec()
@@ -357,6 +366,9 @@ fn hmac_sign(msg: &str, key: &[u8]) -> Vec<u8> {
 
 /// HMAC-SHA256 sign with pre-computed key
 fn hmac_sign_n(msg: &[u8], key: &[u8]) -> Vec<u8> {
+    // SAFETY: same as `hmac_sign` — any-size keys are always accepted by
+    // HMAC-SHA256. Infallible by construction.
+    #[allow(clippy::expect_used)]
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(msg);
     mac.finalize().into_bytes().to_vec()

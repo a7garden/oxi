@@ -212,6 +212,9 @@ impl WorkQueue {
         }
 
         if let Some((id, _)) = best {
+            // SAFETY: `id` was picked from `items.iter()` above, so the key is
+            // present in the map. Infallible by construction.
+            #[allow(clippy::unwrap_used)]
             let item = items.get_mut(&id).unwrap();
             item.status = WorkStatus::Claimed;
             item.claimed_by = Some(agent_id.to_string());

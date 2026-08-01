@@ -204,9 +204,9 @@ impl Provider for OpenAiProvider {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", api_key)
-                    .parse()
-                    .expect("valid bearer header"),
+                format!("Bearer {}", api_key).parse().map_err(|e| {
+                    ProviderError::InvalidResponse(format!("invalid bearer header: {e}"))
+                })?,
             );
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
@@ -938,6 +938,10 @@ pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) 
                 Message::User(u) => {
                     let filtered = filter_empty_content(&u.content);
                     filtered.as_ref()?;
+                    // SAFETY: the `as_ref()?` above already returned `None` for
+                    // empty content, so `filtered` is `Some` here. Infallible by
+                    // construction — the early return is the proof.
+                    #[allow(clippy::expect_used)]
                     Some(Message::User(crate::UserMessage {
                         role: u.role,
                         content: filtered.expect("checked above"),

@@ -888,17 +888,25 @@ impl Provider for GitLabDuoAgentProvider {
                     .into_client_request()
                     .map_err(|e| ProviderError::InvalidResponse(format!("WS request: {e}")))?;
                 let ws_headers = ws_request.headers_mut();
+                // SAFETY: the four header values below are compile-time string
+                // literals ("Bearer ...", "cli", "8.104.0", a fixed UA).
+                // `HeaderValue::parse` fails only on invalid characters, which
+                // the literals provably do not contain. Infallible by construction.
+                #[allow(clippy::expect_used)]
                 ws_headers.insert(
                     tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
                     format!("Bearer {}", conn.token)
                         .parse()
                         .expect("static Bearer token is valid header"),
                 );
+                #[allow(clippy::expect_used)]
                 ws_headers.insert("x-gitlab-client-type", "cli".parse().expect("static value"));
+                #[allow(clippy::expect_used)]
                 ws_headers.insert(
                     "x-gitlab-language-server-version",
                     "8.104.0".parse().expect("static value"),
                 );
+                #[allow(clippy::expect_used)]
                 ws_headers.insert(
                     tokio_tungstenite::tungstenite::http::header::USER_AGENT,
                     "gitlab-language-server/8.104.0".parse().expect("static UA"),

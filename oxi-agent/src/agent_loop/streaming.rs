@@ -157,6 +157,10 @@ pub(crate) async fn stream_assistant_response(
                         if let Message::Assistant(ref mut m) = messages[last_idx] {
                             m.stop_reason = StopReason::Aborted;
                         }
+                        // SAFETY: the enclosing `if added_partial` block only runs
+                        // when an Assistant message was already pushed, so
+                        // `messages` is non-empty here. Infallible by construction.
+                        #[allow(clippy::expect_used)]
                         let last_msg = messages.last().expect("non-empty").clone();
                         emit(super::AgentEvent::MessageEnd {
                             message: last_msg.clone(),
@@ -224,6 +228,10 @@ pub(crate) async fn stream_assistant_response(
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
                     m.stop_reason = StopReason::Aborted;
                 }
+                // SAFETY: the enclosing `if added_partial` block only runs when
+                // an Assistant message was already pushed, so `messages` is
+                // non-empty here. Infallible by construction.
+                #[allow(clippy::expect_used)]
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageEnd {
                     message: last_msg.clone(),
@@ -245,6 +253,8 @@ pub(crate) async fn stream_assistant_response(
                 tracing::info!("Stream event #{}: Start", event_count);
                 messages.push(Message::Assistant((*partial).clone()));
                 added_partial = true;
+                // SAFETY: the push on the previous line guarantees non-empty.
+                #[allow(clippy::expect_used)]
                 emit(super::AgentEvent::MessageStart {
                     message: messages.last().expect("non-empty after push").clone(),
                 });
@@ -257,6 +267,9 @@ pub(crate) async fn stream_assistant_response(
                         *m = (*partial).clone();
                     }
                 }
+                // SAFETY: `added_partial` guarantees an Assistant message was
+                // pushed before the first TextDelta, so `messages` is non-empty.
+                #[allow(clippy::expect_used)]
                 let last_msg = messages.last().expect("non-empty").clone();
                 let delta_clone = delta.clone();
                 emit(super::AgentEvent::MessageUpdate {
@@ -287,6 +300,8 @@ pub(crate) async fn stream_assistant_response(
                                 )
                             });
                         partial_msg.stop_reason = StopReason::Aborted;
+                        // SAFETY: guarded by `!violations.is_empty()` above.
+                        #[allow(clippy::expect_used)]
                         return StreamOutcome::RuleInterrupt {
                             partial: partial_msg,
                             rule: violations.into_iter().next().expect("non-empty"),
@@ -365,6 +380,9 @@ pub(crate) async fn stream_assistant_response(
                         *m = (*partial).clone();
                     }
                 }
+                // SAFETY: `added_partial` guarantees an Assistant message was
+                // pushed before any ThinkingDelta, so `messages` is non-empty.
+                #[allow(clippy::expect_used)]
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::ThinkingDelta {
                     text: delta.clone(),
@@ -443,6 +461,9 @@ pub(crate) async fn stream_assistant_response(
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
                     m.content.push(ContentBlock::ToolCall(tool_call));
                 }
+                // SAFETY: `added_partial` guarantees an Assistant message was
+                // pushed before any ToolCallEnd, so `messages` is non-empty.
+                #[allow(clippy::expect_used)]
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageUpdate {
                     message: last_msg,
@@ -570,6 +591,9 @@ pub(crate) async fn stream_assistant_response(
                     }
                 }
 
+                // SAFETY: `added_partial` guarantees an Assistant message was
+                // pushed before any Done event, so `messages` is non-empty.
+                #[allow(clippy::expect_used)]
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageEnd {
                     message: last_msg.clone(),
@@ -706,6 +730,10 @@ fn detect_harmony_leak(text: &str) -> bool {
 
     // Harmony function routing marker: `to=functions.xxx`
     static MARKER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        // SAFETY: the marker regex is a compile-time literal that is verified
+        // valid by `regex::Regex::new`; a panic here is a programming error in
+        // the literal itself, not a runtime condition.
+        #[allow(clippy::expect_used)]
         regex::Regex::new(r"\bto=functions\.[A-Za-z_]\w*\b").expect("valid harmony marker regex")
     });
     if MARKER_RE.is_match(text) {
@@ -714,6 +742,10 @@ fn detect_harmony_leak(text: &str) -> bool {
 
     // Harmony block markers: `<|start|>`, `<|end|>`, `<|channel|>`, etc.
     static BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        // SAFETY: the block regex is a compile-time literal that is verified
+        // valid by `regex::Regex::new`; a panic here is a programming error in
+        // the literal itself, not a runtime condition.
+        #[allow(clippy::expect_used)]
         regex::Regex::new(r"<\|\s*(?:start|end|channel|message|call|return)\s*\|>")
             .expect("valid harmony block regex")
     });

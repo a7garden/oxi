@@ -106,6 +106,9 @@ impl StreamableHttpTransport {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "Accept",
+            // SAFETY: the Accept value is a compile-time literal with no
+            // invalid header characters; `parse` cannot fail.
+            #[allow(clippy::expect_used)]
             "application/json, text/event-stream"
                 .parse()
                 .expect("static Accept header is valid"),

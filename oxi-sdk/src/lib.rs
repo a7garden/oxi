@@ -11,6 +11,21 @@
 //! }).build().unwrap();
 //! ```
 #![warn(missing_docs)]
+// Shipped (non-test) code denies the panic-family lints; test code keeps
+// idiomatic `unwrap()`/`expect()`/`panic!("Expected X")` match-arm assertions.
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::field_reassign_with_default,
+        clippy::expect_used,
+        clippy::panic,
+    )
+)]
 // Stability tier attribute macros. Renamed to avoid shadowing the (nightly-only,
 // but rustc-resolved) builtin `#[stable]/#[unstable]/#[deprecated]`. The proc-
 // macro crate's own rustdoc recommends this rename pattern.

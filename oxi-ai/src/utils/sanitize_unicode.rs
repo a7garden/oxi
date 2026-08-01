@@ -38,6 +38,9 @@ pub fn sanitize_surrogates(text: &str) -> String {
                 if (0xDC00..=0xDFFF).contains(&next_code) {
                     // Properly paired surrogate - keep both
                     result.push(ch);
+                    // SAFETY: `peek()` above returned `Some(&next_ch)`, so the
+                    // iterator is not exhausted; `next()` cannot return None.
+                    #[allow(clippy::expect_used)]
                     result.push(chars.next().expect("peeked char exists"));
                     continue;
                 }

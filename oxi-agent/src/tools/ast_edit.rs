@@ -244,7 +244,12 @@ async fn run_sg_for_op(
         Err(e) => return Err(format!("Failed to invoke `sg`: {e}")),
     };
 
+    // SAFETY: the command was spawned with `Stdio::piped()` for stdout/stderr
+    // and the spawn succeeded (we returned early on error), so both `take()`
+    // calls cannot return None.
+    #[allow(clippy::expect_used)]
     let mut stdout = child.stdout.take().expect("piped stdout");
+    #[allow(clippy::expect_used)]
     let mut stderr = child.stderr.take().expect("piped stderr");
 
     let mut stdout_buf = Vec::new();

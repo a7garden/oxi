@@ -13,6 +13,10 @@ use std::sync::OnceLock;
 pub fn shared_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
+        // SAFETY: `reqwest::Client::builder()` with only timeout/pool settings
+        // cannot fail to build — no TLS misconfiguration or invalid proxy
+        // is involved. Infallible by construction.
+        #[allow(clippy::expect_used)]
         reqwest::Client::builder()
             .pool_max_idle_per_host(4)
             .pool_idle_timeout(std::time::Duration::from_secs(30))

@@ -14,10 +14,15 @@ use crate::middleware::{
 };
 
 fn current_time_ms() -> u64 {
-    std::time::SystemTime::now()
+    // SAFETY: a system clock before the Unix epoch is a hardware/OS
+    // misconfiguration that breaks the entire runtime, not a per-call
+    // recoverable condition. Failing loudly surfaces it instead of silently
+    // recording a nonsense timestamp.
+    #[allow(clippy::unwrap_used)]
+    let since_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
+        .unwrap();
+    since_epoch.as_millis() as u64
 }
 
 fn truncate(s: &str, max: usize) -> String {
