@@ -95,7 +95,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oxi-tui` v2 crate. Ported cursor dedup (`CursorState`) from v2 to legacy
   `DiffBackend` (which already had CSI 2026 sync, DECCARA, row-level diffing).
   Deleted the v2 crate (~9.8K LOC). Renamed `oxi-tui-legacy` → `oxi-tui` as
-  the single TUI crate. All `oxi_tui_legacy::*` imports updated to `oxi_tui::*`.
+
+### Removed — oxi-ai (Breaking Changes — retrospective, 0.61.0)
+
+- **ai: P0.2 multi-provider/circuit-breaker modules** (retrospective entry
+  per the Breaking Change Policy — these were removed in 0.61.0 without
+  adequate advance warning; documenting here so SDK consumers can audit
+  impact):
+  - `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed
+    (`provider_pool` module, 203 LOC). No direct replacement; the router
+    pipeline (`RouterPipeline`) supersedes multi-provider routing.
+  - `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` —
+    removed (`circuit_breaker` module, 944 LOC). A minimal
+    `CircuitBreaker` trait will be re-introduced (see R6).
+  - `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
+    `oxi_ai::MultiProviderConfig` — removed (`multi_provider` module,
+    1283+359 LOC). Superseded by `RouterPipeline` + `router://local`
+    provider.
 
 ### Added
 

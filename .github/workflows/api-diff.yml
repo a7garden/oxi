@@ -1,0 +1,123 @@
+name: Public API Snapshot
+
+# Public-API surface observation job.  Runs `cargo public-api list`
+# against each workspace crate that ships a stable API surface
+# (oxi-ai, oxi-agent, oxi-sdk) and uploads the rendered output as a
+# workflow artifact for manual review.
+#
+# This is the initial pass — it OBSERVES the surface, it does not
+# yet ENFORCE removals against a baseline (no baseline is checked
+# in yet).  However, snapshot capture is itself strict: any failed
+# or empty per-crate snapshot fails the job, so a system-dep or
+# rustdoc-JSON toolchain mismatch cannot silently capture zero
+# baselines.  Future iterations (per the SDK Stability program
+# brief) will:
+
+#   1. diff the captured list against the `main` branch baseline,
+#   2. fail the build if any symbol disappears without a `Breaking`
+#      marker in CHANGELOG.md (e.g. `### Removed — oxi-ai (Breaking
+#      Changes)` or `## Breaking (retrospective ...)`).
+# See .superpowers/sdd/2026-08-01-sdk-stability-ownership-program/
+# for the full program brief.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # The workspace `rust-toolchain.toml` pins `channel = "1.96"`; the
+  # toolchain override below installs matching components so cargo can
+  # actually use it.  ci.yml has the same RUST_VERSION_MSRV env entry
+  # and the same justification comment.
+  RUST_VERSION_MSRV: "1.96"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-diff:
+    name: Public API Snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
+      # cargo-public-api builds rustdoc JSON internally, which is
+      # still nightly-only.  The README pins nightly-2025-08-02 as
+      # the minimum compatible with the current cargo-public-api
+      # release; each release of cargo-public-api understands only
+      # a window of nightly rustdoc JSON outputs (see the
+      # compatibility matrix in cargo-public-api/README.md), so
+      # pinning a specific date keeps the job reproducible across
+      # CI runs.  The nightly install coexists with the 1.96 MSRV
+      # install above: cargo-public-api invokes `cargo +nightly`
+      # internally, so the workspace rust-toolchain.toml 1.96
+      # override does not interfere.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-08-02
+      - name: Install system dependencies
+        # `oxi-agent` pulls in `oxibrowser`, and Cargo.lock still
+        # contains `openssl` / `openssl-sys` entries (3 hits as of
+        # this commit).  cargo-public-api compiles each crate's
+        # rustdoc JSON, which performs a full build, so any
+        # transitive openssl-sys link step needs the system libssl.
+        # ci.yml's smoke-test (L93) and msrv (L143) install the
+        # same package for the same reason.
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "api-diff"
+      - name: Install cargo-public-api
+        # `taiki-e/install-action` does not list cargo-public-api in
+        # its supported-tools manifest, so we install via `cargo
+        # install --locked` (matches the brief).  This is the slow
+        # path; revisit if it dominates job time.
+        run: cargo install cargo-public-api --locked
+      - name: Snapshot public API surface
+        # Capture stdout per crate; route stderr to a sibling file so
+        # a tool warning does not pollute the API listing.
+        # Failure handling is intentionally strict: a missing or
+        # empty snapshot is a `::error` (not `::warning`) so the job
+        # cannot silently capture zero baselines and we cannot
+        # proceed with a false-positive "DONE".  The three target
+        # crates are stable-API-bearing and MUST produce a non-empty
+        # snapshot; if any one is missing, treat that as a build
+        # failure (most often a system-dep or rustdoc-JSON toolchain
+        # mismatch).  Per-crate .stderr artifacts are uploaded for
+        # triage.
+        run: |
+          mkdir -p api-snapshots
+          failed=0
+          for crate in oxi-ai oxi-agent oxi-sdk; do
+            if cargo public-api list -p "$crate" \
+                > "api-snapshots/${crate}.txt" \
+                2> "api-snapshots/${crate}.stderr"; then
+              lines=$(wc -l < "api-snapshots/${crate}.txt" | tr -d ' ')
+              if [ "$lines" = "0" ]; then
+                echo "::error::cargo public-api list for ${crate} succeeded but produced 0 lines — likely a rustdoc-JSON toolchain or system-dep mismatch; see api-snapshots/${crate}.stderr"
+                failed=1
+              else
+                echo "captured ${crate}: ${lines} lines"
+              fi
+            else
+              echo "::error::cargo public-api list failed for ${crate}; see api-snapshots/${crate}.stderr"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::One or more snapshots failed; refusing to upload empty baselines."
+            exit 1
+          fi
+      - name: Upload snapshots as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-api-snapshots
+          path: api-snapshots/
+          if-no-files-found: warn
