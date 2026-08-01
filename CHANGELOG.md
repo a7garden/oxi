@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-08-01 (retrospective)
+
+### Breaking (retrospective — 0.61.0, 0.63.0)
+
+The following symbols were removed in 0.61.0 / 0.63.0 without adequate
+warning. This entry documents them retroactively per the new Breaking
+Change Policy (see `docs/release-process.md`). All are now classified as
+`#[unstable]`/consumer-owned, and the SDK provides behavior traits
+(`CircuitBreaker`, `SpawnValidator`) plus reference impls that consumers
+can wire without depending on the removed types.
+
+- `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed in 0.61.0
+  (`provider_pool` module, 203 LOC). No direct replacement; superseded by
+  the `RouterPipeline` in `oxi_ai::router`. Affected consumer: oxios
+  built resilience on `ProviderPool` without knowing it was opt-in.
+- `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` —
+  removed in 0.61.0 (`circuit_breaker` module, 944 LOC). A minimal
+  `CircuitBreaker` behavior trait + `DefaultCircuitBreaker` reference
+  impl are reintroduced in 0.64.0 (R6). Consumers implement the trait
+  for their domain (e.g. oxios's `A2ACircuitBreaker`).
+- `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
+  `oxi_ai::MultiProviderConfig` — removed in 0.61.0 (`multi_provider`
+  module, 1283 + 359 LOC). Superseded by `RouterPipeline` + the
+  `router://local` provider. Affected consumer: oxios's 0.58→0.63
+  migration saw 5 compile errors.
+
+### Added
+
+- **SDK: behavior↔policy ownership contract** (`docs/oxi-sdk-ownership.md`)
+  — R0/R5 of the SDK Stability & Ownership Program. Pinned
+  behavior/policy split between SDK and consumers (oxios, oxi-cli, etc.).
+- **SDK: `oxi-api-stability` proc-macro crate** — `#[stable]` /
+  `#[unstable]` / `#[internal]` / `#[deprecated]` attribute macros
+  for stability tier documentation in `cargo doc` (R3, scope-narrowed
+  from original spec — see `docs/oxi-sdk-ownership.md` §6.1).
+- **oxi-ai: `CircuitBreaker` trait + `DefaultCircuitBreaker`** (R6) —
+  composable behavior trait for circuit-breaking resilience with
+  threshold + half-open state machine. `BreakerError::Open` is
+  non-retryable by design (the breaker's whole purpose is to stop
+  hammering a failing upstream).
+- **oxi-agent: `SpawnValidator` trait + `NoopSpawnValidator`** (R6) —
+  composable policy hook for MCP server spawn validation. Consumers
+  register their own `validate_command` / `sanitize_env` policy;
+  oxi-cli's default wires a permissive policy, oxios can wire its
+  strict impl. The SDK keeps a hardcoded `BLOCKED_ENV_VARS` floor
+  (loader-injection vectors) that always applies.
+- **oxi-sdk / oxi-ai: `#[non_exhaustive]` on `SdkError` and
+  `ProviderError`** (R7) — error type stability. Existing named
+  variants are frozen; new variants may be added freely. Consumers
+  MUST add a catch-all `_ =>` arm in their matches.
+
+### Changed
+
+- **oxi-ai: feature-gated protobuf providers** — Devin + Cursor
+  providers moved behind a new `protobuf` cargo feature (R8). Default
+  builds no longer pull `prost` / `prost-build` / `protoc-bin-vendored`
+  (~120 transitive crates). Consumers using those providers enable
+  with `--features protobuf`.
+
 ## [0.63.0] - 2026-08-01
 
 ### Added

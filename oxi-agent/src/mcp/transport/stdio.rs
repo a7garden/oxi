@@ -12,6 +12,7 @@
 //! server→client requests to the installed [`InboundHandler`] inline.
 
 use super::{InboundHandler, McpTransport};
+use crate::mcp::spawn::SpawnValidator;
 use crate::mcp::types::RawJsonRpcMessage;
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -57,13 +58,31 @@ impl std::fmt::Debug for StdioTransport {
 
 impl StdioTransport {
     /// Spawn a child process and return a connected transport.
+    ///
+    /// `validator`, when `Some`, is invoked BEFORE the spawn with
+    /// [`SpawnValidator::validate_command`]; an `Err` is converted to
+    /// `anyhow::Error` and short-circuits the spawn. After the SDK's
+    /// hardcoded `BLOCKED_ENV_VARS` filter is applied, the validator's
+    /// [`SpawnValidator::sanitize_env`] runs over the remaining env so
+    /// consumers can apply additional policy (path normalization, custom
+    /// blocked vars, etc.).
+    ///
+    /// `None` preserves the pre-validator behavior: only the SDK's
+    /// `BLOCKED_ENV_VARS` floor applies. Existing call sites pass `None`.
     pub fn spawn(
         command: &str,
         args: &[String],
         env: &std::collections::HashMap<String, String>,
         cwd: Option<&str>,
         debug: bool,
+        validator: Option<&dyn SpawnValidator>,
     ) -> Result<Self> {
+        // Consumer-supplied validation runs first.
+        if let Some(v) = validator {
+            v.validate_command(command, args)
+                .map_err(|reason| anyhow::anyhow!("MCP spawn validation failed: {reason}"))?;
+        }
+
         let mut cmd = tokio::process::Command::new(command);
         cmd.args(args)
             .stdin(Stdio::piped())
@@ -76,12 +95,26 @@ impl StdioTransport {
             cmd.stderr(Stdio::null());
         }
 
-        for (key, value) in env {
-            let upper = key.to_uppercase();
-            if BLOCKED_ENV_VARS.iter().any(|blocked| upper == *blocked) {
-                tracing::warn!("MCP: blocked dangerous env override: {}", key);
-                continue;
-            }
+        // SDK hardcoded floor: loader-injection vectors.
+        let mut filtered_env: std::collections::HashMap<String, String> = env
+            .iter()
+            .filter(|(key, _)| {
+                let upper = key.to_uppercase();
+                let blocked = BLOCKED_ENV_VARS.iter().any(|b| upper == *b);
+                if blocked {
+                    tracing::warn!("MCP: blocked dangerous env override: {}", key);
+                }
+                !blocked
+            })
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        // Consumer-supplied env scrub on top of the SDK floor.
+        if let Some(v) = validator {
+            v.sanitize_env(&mut filtered_env);
+        }
+
+        for (key, value) in &filtered_env {
             cmd.env(key, value);
         }
 

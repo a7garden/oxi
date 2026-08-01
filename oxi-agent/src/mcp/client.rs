@@ -130,7 +130,7 @@ impl McpClient {
         debug: bool,
     ) -> Result<Self> {
         let transport: Box<dyn McpTransport> =
-            Box::new(StdioTransport::spawn(command, args, env, cwd, debug)?);
+            Box::new(StdioTransport::spawn(command, args, env, cwd, debug, None)?);
         Self::connect_with_transport(transport).await
     }
 

@@ -52,6 +52,7 @@ pub mod content;
 pub mod direct_tool;
 pub mod error;
 pub mod lifecycle;
+pub mod spawn;
 pub mod tool;
 pub mod transport;
 pub mod types;
@@ -62,6 +63,7 @@ pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument, McpSampli
 pub use consent::ConsentManager;
 pub use direct_tool::McpDirectTool;
 pub use error::McpError;
+pub use spawn::{NoopSpawnValidator, SpawnValidator};
 pub use tool::McpTool;
 pub use transport::{McpTransport, http::StreamableHttpTransport, stdio::StdioTransport};
 pub use types::{
@@ -631,7 +633,7 @@ impl McpManager {
         }
         let transport: Box<dyn McpTransport> = match (command, url) {
             (Some(cmd), _) => Box::new(
-                StdioTransport::spawn(&cmd, &args, &env, cwd.as_deref(), debug)
+                StdioTransport::spawn(&cmd, &args, &env, cwd.as_deref(), debug, None)
                     .with_context(|| format!("Failed to spawn MCP server '{}'", server_name))?,
             ),
             (None, Some(endpoint)) => Box::new(

@@ -216,21 +216,63 @@ See `docs/release-process.md` for the full variant-stability policy.
 
 ## 6. Where This Contract Is Enforced
 
-- **Tier annotations** (Phase 2, `oxi-api-stability`): every public symbol gets
-  `#[stable]`, `#[unstable]`, or `#[internal]`. Stable symbols must remain
-  stable per SemVer; unstable ones may change at any release.
+The four enforcement mechanisms below are listed in the order consumers will
+encounter them (and in order of compile-time strictness, from weakest to
+strongest). Each is a layer of defense, not a substitute for the others.
+
+- **Tier annotations** (`oxi-api-stability`): every public symbol gets
+  `#[stable]`, `#[unstable]`, or `#[internal]`. These render as colored
+  badges in `cargo doc` and are **discoverability aids, not compile signals**
+  — a proc-macro attribute cannot register a custom lint, so consumers cannot
+  turn on a `#![warn(unstable_used)]` that fires on tier annotations. The
+  badge exists to make the API surface self-documenting; it does not gate
+  builds. **This is a scope-narrowing from the original R3 proposal** (see
+  `docs/superpowers/specs/2026-08-01-sdk-stability-ownership-program-design.md`
+  §4.1 for the original spec). The real machine-enforced signals are the
+  `#[cfg(feature = "...")]` gates, the deprecation convention, and the
+  `cargo-public-api` CI gate below.
 - **Deprecation convention** (`docs/release-process.md`): a public symbol
-  marked for removal gets ≥1 release of `#[deprecated(since, note)]` with a
-  migration path before physical removal. During the window the API signature
-  and semantics are frozen.
-- **CHANGELOG enforcement** (R1, Phase 1): every root-level `pub` symbol
-  removal, signature change, or semantic change MUST appear under `## Breaking`
-  with full symbol path, replacement API, deprecation window, and known
-  affected consumers. A `cargo-public-api` CI gate fails PRs that remove
-  symbols without a matching `## Breaking` entry.
-- **Lint policy** (Phase 4, R4): library crates deny `unwrap_used`,
-  `expect_used`, and `panic` outside `#[cfg(test)]` — the SDK can't ship a
-  panicking reference impl that consumers would silently rely on.
+  marked for removal gets ≥1 release of `#[deprecated(since, note)]` (emitted
+  natively by the `oxi-api-stability::deprecated` macro) with a migration
+  path before physical removal. During the window the API signature and
+  semantics are frozen. This is the first **compile signal** a consumer
+  hits.
+- **CHANGELOG enforcement** (R1): every root-level `pub` symbol removal,
+  signature change, or semantic change MUST appear under `## Breaking` with
+  full symbol path, replacement API, deprecation window, and known affected
+  consumers. The `.github/workflows/api-diff.yml` job captures the public API
+  surface on every PR; the gate is currently observational and a future
+  iteration will diff against `main` and fail the build on undocumented
+  removals.
+- **Lint policy** (R4): library crates deny `clippy::unwrap_used`,
+  `clippy::expect_used`, and `clippy::panic` outside `#[cfg(test)]` so the
+  SDK can't ship a panicking reference impl that consumers would silently
+  rely on. Test code keeps its idiomatic match-arm panics via an expanded
+  `cfg_attr(test, allow(...))` list.
+
+### 6.1 Why the tier annotations alone are insufficient
+
+The original R3 spec asked for a consumer-enforceable signal — oxios turns
+on `#![warn(unstable_used)]` and its build fails if it builds on an
+unstable SDK symbol. That intent is correct; the implemented mechanism
+(doc badges) does not deliver it. The **real** gates consumers have today
+are:
+
+1. `#[cfg(feature = "...")]` on the SDK side (e.g. `oxi-sdk` re-exports
+   `BrowseTool` / `BrowserEngine` only with `oxi-sdk = { features =
+   ["unstable"] }`). A consumer that doesn't enable the feature cannot
+   accidentally build on it.
+2. `#[deprecated(since, note)]` from the `oxi-api-stability::deprecated`
+   macro, which the compiler treats as a regular deprecation warning. A
+   consumer that ignores the warning keeps the old behavior; a consumer
+   that turns on `#![deny(deprecated)]` will fail to compile.
+3. The `cargo-public-api` CI gate (observational today, enforcing in a
+   future iteration).
+
+When you add a tier annotation, ask: **does the consumer have a way to
+turn this signal into a compile failure?** If not, the annotation is
+purely cosmetic. The mechanism that *does* work is a `#[cfg(feature)]`
+gate plus a CHANGELOG `## Breaking` entry.
 
 ---
 
