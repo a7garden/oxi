@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-catalog oxi-hashline oxi-vtui-compat oxi-mnemopi oxi-lsp oxi-snapcompact; do
+          for crate in oxi-catalog oxi-hashline oxi-api-stability oxi-vtui-compat oxi-mnemopi oxi-lsp oxi-snapcompact; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -103,8 +103,8 @@ jobs:
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces topological order: leaves first
-  # (catalog, hashline, vtui-compat, mnemopi, lsp, snapcompact) → vtui (dep
-  # vtui-compat) → ai (dep catalog) → agent (dep ai) → sdk (dep agent) →
+  # (catalog, hashline, api-stability, vtui-compat, mnemopi, lsp, snapcompact) → vtui (dep
+  # vtui-compat) → ai (dep catalog, api-stability) → agent (dep ai) → sdk (dep agent) →
   # cli (dep sdk, vtui, vtui-compat).
   # Each crate waits for its dependency's crates.io index to
   publish:
@@ -120,6 +120,7 @@ jobs:
         crate:
           - oxi-catalog
           - oxi-hashline
+          - oxi-api-stability
           - oxi-vtui-compat
           - oxi-vtui
           - oxi-mnemopi
@@ -140,9 +141,9 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxi-catalog|oxi-hashline|oxi-vtui-compat|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
+            oxi-catalog|oxi-hashline|oxi-api-stability|oxi-vtui-compat|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
             oxi-vtui) WAITS="oxi-vtui-compat" ;;
-            oxi-ai) WAITS="oxi-catalog" ;;
+            oxi-ai) WAITS="oxi-catalog oxi-api-stability" ;;
             oxi-agent) WAITS="oxi-ai oxi-hashline" ;;
             oxi-sdk) WAITS="oxi-agent oxi-snapcompact" ;;
             oxi-cli) WAITS="oxi-sdk oxi-vtui oxi-vtui-compat" ;;
