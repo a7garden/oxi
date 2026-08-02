@@ -1,6 +1,5 @@
 //! OxiBuilder and Oxi — SDK entry point
 
-use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -8,6 +7,7 @@ use oxi_agent::{ProviderResolver, ToolRegistry};
 use oxi_ai::{Model, ModelRegistry, Provider, ProviderRegistry};
 
 use crate::agent_builder::AgentBuilder;
+use crate::error::{SdkError, SdkResult};
 use crate::lifecycle::{AgentSupervisor, FileSnapshotStore, SupervisorPolicy};
 use crate::ports::PortRegistry;
 
@@ -110,7 +110,7 @@ impl Oxi {
     /// catalog/static lookups — `set_enabled(false)` / `exclude_model`
     /// / `unexclude_model` on the shared `RoutingControl` instance
     /// take effect on the next resolution.
-    pub fn resolve_model(&self, model_id: &str) -> Result<Model> {
+    pub fn resolve_model(&self, model_id: &str) -> SdkResult<Model> {
         // Live routing exclusion: ONLY active when is_enabled().
         // `set_enabled(false)` is an explicit opt-out — it means
         // "skip routing rules, resolve normally," NOT "refuse to
@@ -119,9 +119,9 @@ impl Oxi {
         // host explicitly disabled routing.
         if self.routing.is_enabled() && self.routing.excluded_models().iter().any(|m| m == model_id)
         {
-            return Err(anyhow::anyhow!(
-                "Model '{model_id}' is in RoutingControl::excluded_models"
-            ));
+            return Err(SdkError::ModelExcluded {
+                model_id: model_id.to_string(),
+            });
         }
 
         let parts: Vec<&str> = model_id.splitn(2, '/').collect();
@@ -139,7 +139,9 @@ impl Oxi {
         // 2. Static model registry fallback.
         self.models
             .lookup(provider, model)
-            .ok_or_else(|| anyhow::anyhow!("Model '{}' not found", model_id))
+            .ok_or_else(|| SdkError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })
     }
 
     /// 1. Custom providers registered via `OxiBuilder::provider()`
@@ -159,7 +161,7 @@ impl Oxi {
     /// `AgentConfig.api_key` field and the `api_key` params on
     /// `Agent::switch_model` / `Agent::refresh_api_key` are vestigial after
     /// this wiring and are removed in a follow-up. See issues #39 and #40.
-    pub fn create_provider(&self, name: &str) -> Result<Arc<dyn Provider>> {
+    pub fn create_provider(&self, name: &str) -> SdkResult<Arc<dyn Provider>> {
         // 1. Check custom providers registered via OxiBuilder::provider()
         if let Some(p) = self.providers.get_custom(name) {
             return Ok(p);
@@ -187,7 +189,9 @@ impl Oxi {
                 return Ok(Arc::from(p));
             }
         }
-        Err(anyhow::anyhow!("Provider '{}' not found", name))
+        Err(SdkError::ProviderNotFound {
+            provider: name.to_string(),
+        })
     }
 
     /// Get the provider registry (Arc clone).

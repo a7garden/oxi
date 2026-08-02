@@ -725,13 +725,15 @@ impl AgentSupervisor {
     ///
     /// Records the restart in the restart log and applies backoff delay.
     /// Returns the new handle on success.
-    pub async fn restart(&self, agent_id: &str) -> anyhow::Result<AgentHandle> {
+    pub async fn restart(&self, agent_id: &str) -> SdkResult<AgentHandle> {
         if !self.can_restart(agent_id) {
-            return Err(anyhow::anyhow!(
-                "Agent '{}' exceeded max restarts ({})",
-                agent_id,
-                self.policy.max_restarts
-            ));
+            return Err(SdkError::InvalidState {
+                entity: "agent".into(),
+                reason: format!(
+                    "agent '{}' exceeded max restarts ({})",
+                    agent_id, self.policy.max_restarts
+                ),
+            });
         }
 
         // Get the old handle's config
@@ -741,8 +743,7 @@ impl AgentSupervisor {
             None => {
                 return Err(SdkError::SnapshotNotFound {
                     agent_id: agent_id.to_string(),
-                }
-                .into());
+                });
             }
         };
 
@@ -762,7 +763,7 @@ impl AgentSupervisor {
         self.agents.write().remove(agent_id);
 
         // Spawn fresh agent with the same config
-        self.spawn(config)
+        self.spawn(config).map_err(SdkError::from)
     }
 
     /// Compute backoff duration for a given agent based on restart history.

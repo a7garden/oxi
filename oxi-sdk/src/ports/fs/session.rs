@@ -139,9 +139,7 @@ impl FileStateStore {
             let lock = self.lock_for(id);
             let _guard = lock.lock();
             if path.exists() {
-                return Err(SdkError::Internal(anyhow::anyhow!(
-                    "entry already exists: {id}"
-                )));
+                return Err(SdkError::AlreadyExists { key: id.clone() });
             }
         }
         let bytes = serde_json::to_vec(&entry).map_err(encode_to_sdk)?;
@@ -154,15 +152,21 @@ impl FileStateStore {
 }
 
 fn io_to_sdk(e: std::io::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!(e))
+    SdkError::Io(e)
 }
 
 fn encode_to_sdk(e: serde_json::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!("encode: {e}"))
+    SdkError::Serialization {
+        context: "encode",
+        source: e,
+    }
 }
 
 fn decode_to_sdk(e: serde_json::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!("decode: {e}"))
+    SdkError::Serialization {
+        context: "decode",
+        source: e,
+    }
 }
 
 #[cfg(test)]

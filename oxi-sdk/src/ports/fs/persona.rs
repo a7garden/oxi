@@ -131,10 +131,10 @@ fn parse_persona(name: &str, path: &std::path::Path) -> Result<Persona, SdkError
 }
 
 fn read_err(e: std::io::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!(e))
+    SdkError::Io(e)
 }
 fn scan_err(e: std::io::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!(e))
+    SdkError::Io(e)
 }
 
 #[cfg(test)]

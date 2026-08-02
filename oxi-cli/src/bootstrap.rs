@@ -87,7 +87,13 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     }
 
     // Build the wired Oxi engine + Agent via the SDK composition root.
-    let oxi = crate::build_oxi_engine().await?;
+    // Build embedding port from settings (mnemopi → SDK async bridge).
+    let embedding_provider = crate::services::build_embedding_provider(&settings).map(|p| {
+        std::sync::Arc::new(crate::services::MnemopiEmbeddingBridge::new(p))
+            as std::sync::Arc<dyn oxi_sdk::ports::EmbeddingProvider>
+    });
+
+    let oxi = crate::build_oxi_engine(embedding_provider).await?;
 
     // Per-process liveness identity for issue-system ownership. In TUI mode
     // we use the canonical "tui" id so the agent tool, the TUI panel, and

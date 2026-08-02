@@ -134,10 +134,10 @@ fn strip_frontmatter(text: &str) -> String {
 }
 
 fn read_err(e: std::io::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!(e))
+    SdkError::Io(e)
 }
 fn scan_err(e: std::io::Error) -> SdkError {
-    SdkError::Internal(anyhow::anyhow!(e))
+    SdkError::Io(e)
 }
 
 #[cfg(test)]

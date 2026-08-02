@@ -40,6 +40,13 @@ pub enum SdkError {
         attempts: usize,
     },
 
+    /// The model exists but is excluded from resolution by routing control.
+    #[error("model '{model_id}' excluded by routing control")]
+    ModelExcluded {
+        /// Identifier of the excluded model.
+        model_id: String,
+    },
+
     // ── Agent Lifecycle ────────────────────────────────────────────────────────
     /// The agent exists but cannot run in its current lifecycle status.
     #[error("agent {agent_id} not runnable (status: {status})")]
@@ -116,6 +123,15 @@ pub enum SdkError {
         vote_id: String,
     },
 
+    /// A state-machine precondition was violated (wrong status for the operation).
+    #[error("invalid state for {entity}: {reason}")]
+    InvalidState {
+        /// The entity whose state was invalid.
+        entity: String,
+        /// Why the transition was rejected.
+        reason: String,
+    },
+
     // ── Middleware ───────────────────────────────────────────────────────────
     /// A middleware intercepted and blocked the request.
     #[error("middleware blocked: {middleware}: {reason}")]
@@ -190,6 +206,27 @@ pub enum SdkError {
     UnknownScheme {
         /// The unrecognized URL scheme.
         scheme: String,
+    },
+
+    /// A file-system or device I/O error in a port adapter.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// A serialization or deserialization failure.
+    #[error("{context}: {source}")]
+    Serialization {
+        /// "encode" or "decode".
+        context: &'static str,
+        /// The underlying serde error.
+        #[source]
+        source: serde_json::Error,
+    },
+
+    /// An entry with the same key or path already exists.
+    #[error("already exists: {key}")]
+    AlreadyExists {
+        /// The duplicate key or path.
+        key: String,
     },
 
     // ── Catalog ─────────────────────────────────────────────────────────────

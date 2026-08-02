@@ -58,13 +58,15 @@ pub(crate) mod util;
 /// ```no_run
 /// use oxi::build_oxi_engine;
 /// # async fn _example() -> anyhow::Result<()> {
-/// let oxi = build_oxi_engine().await?;
+/// let oxi = build_oxi_engine(None).await?;
 /// println!("providers: {}", oxi.providers().names().len());
 /// # Ok(()) }
 /// ```
-pub async fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
+pub async fn build_oxi_engine(
+    embedding_provider: Option<std::sync::Arc<dyn oxi_sdk::ports::EmbeddingProvider>>,
+) -> anyhow::Result<oxi_sdk::Oxi> {
     let paths = services::OxiPaths::default_paths()?;
-    services::build_oxi(&paths).await
+    services::build_oxi(&paths, embedding_provider).await
 }
 
 /// Self-check the wired port implementations. Prints a one-line summary
@@ -74,7 +76,7 @@ pub async fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
 /// `oxi-cli/src/main.rs`. Useful for verifying the new composition root
 /// without disturbing the legacy `App::new` path.
 pub async fn run_port_check() -> anyhow::Result<()> {
-    let oxi = build_oxi_engine().await?;
+    let oxi = build_oxi_engine(None).await?;
     let ports = oxi.ports();
 
     // State

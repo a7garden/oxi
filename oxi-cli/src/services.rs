@@ -10,6 +10,7 @@
 //! - Both paths coexist; new run modes consume `build_oxi(...)` here.
 
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -75,8 +76,11 @@ impl OxiPaths {
 /// This is the **composition root** for oxi-cli. The catalog port
 /// performs network I/O during `init()`. Errors there fall back to
 /// a noop catalog so the user can re-run `oxi refresh` later.
-pub async fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
-    build_oxi_with_catalog(paths, build_catalog_config(paths)).await
+pub async fn build_oxi(
+    paths: &OxiPaths,
+    embedding_provider: Option<Arc<dyn oxi_sdk::ports::EmbeddingProvider>>,
+) -> Result<Oxi> {
+    build_oxi_with_catalog(paths, build_catalog_config(paths), embedding_provider).await
 }
 
 /// Build an `Oxi` engine with a custom catalog config. Useful for
@@ -84,6 +88,7 @@ pub async fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
 pub async fn build_oxi_with_catalog(
     paths: &OxiPaths,
     catalog_config: CatalogConfig,
+    embedding_provider: Option<Arc<dyn oxi_sdk::ports::EmbeddingProvider>>,
 ) -> Result<Oxi> {
     ensure_parent(&paths.auth)?;
     ensure_parent(&paths.config)?;
@@ -104,7 +109,7 @@ pub async fn build_oxi_with_catalog(
     let agent_artifact_store = crate::internal_urls::agent_handler::AgentArtifactStore::new();
     let local_root = paths.home.join("local-artifacts");
 
-    let oxi = oxi_sdk::OxiBuilder::new()
+    let mut builder = oxi_sdk::OxiBuilder::new()
         .with_builtins()
         .with_state(Arc::new(FileStateStore::new(&paths.sessions)))
         .with_auth(crate::store::auth_storage::shared_auth_storage())
@@ -130,8 +135,13 @@ pub async fn build_oxi_with_catalog(
             rule_registry,
             agent_artifact_store,
             local_root,
-        ))
-        .build();
+        ));
+
+    if let Some(ep) = embedding_provider {
+        builder = builder.with_embeddings(ep);
+    }
+
+    let oxi = builder.build();
 
     Ok(oxi)
 }
@@ -286,6 +296,45 @@ fn build_remote_embedding_provider(
     Some(Arc::new(oxi_mnemopi::RemoteEmbeddingProvider::new(
         base_url, &api_key, &model,
     )))
+}
+
+// ── Embedding port bridge (mnemopi → SDK async port) ──────────────────
+
+/// Bridges oxi-mnemopi's synchronous [`EmbeddingProvider`] to the SDK's
+/// async [`oxi_sdk::ports::EmbeddingProvider`] port trait. Each `embed()`
+/// call runs on the blocking thread pool via `spawn_blocking`.
+pub struct MnemopiEmbeddingBridge {
+    inner: Arc<dyn oxi_mnemopi::EmbeddingProvider>,
+}
+
+impl MnemopiEmbeddingBridge {
+    /// Wrap a mnemopi embedding provider into the SDK port trait.
+    pub fn new(inner: Arc<dyn oxi_mnemopi::EmbeddingProvider>) -> Self {
+        Self { inner }
+    }
+}
+
+impl oxi_sdk::ports::EmbeddingProvider for MnemopiEmbeddingBridge {
+    fn embed<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<f32>, oxi_sdk::SdkError>> + Send + 'a>> {
+        Box::pin(async move {
+            let inner = Arc::clone(&self.inner);
+            let text = text.to_string();
+            let result = tokio::task::spawn_blocking(move || inner.embed(&[text]))
+                .await
+                .map_err(|e| {
+                    oxi_sdk::SdkError::Internal(anyhow::anyhow!("embedding task panicked: {e}"))
+                })?;
+            let mut vectors = result.map_err(|e| {
+                oxi_sdk::SdkError::Internal(anyhow::anyhow!("embedding failed: {e}"))
+            })?;
+            vectors.pop().ok_or_else(|| {
+                oxi_sdk::SdkError::Internal(anyhow::anyhow!("embedding returned no vectors"))
+            })
+        })
+    }
 }
 
 // ── Memory backend helpers (Hindsight ④) ──────────────────────────────
@@ -535,7 +584,7 @@ mod tests {
     async fn build_oxi_succeeds() {
         let tmp = tempfile::TempDir::new().unwrap();
         let paths = OxiPaths::from_home(tmp.path());
-        let oxi = build_oxi(&paths).await.unwrap();
+        let oxi = build_oxi(&paths, None).await.unwrap();
         let _ = oxi.ports().state;
     }
 }

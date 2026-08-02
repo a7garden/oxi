@@ -231,7 +231,7 @@ impl WorkQueue {
     }
 
     /// Transition claimed item to in-progress.
-    pub fn start(&self, item_id: &str) -> anyhow::Result<()> {
+    pub fn start(&self, item_id: &str) -> crate::error::SdkResult<()> {
         let mut items = self.items.write();
         let item =
             items
@@ -240,7 +240,10 @@ impl WorkQueue {
                     item_id: item_id.to_string(),
                 })?;
         if item.status != WorkStatus::Claimed {
-            return Err(anyhow::anyhow!("Item {} not in Claimed state", item_id));
+            return Err(crate::error::SdkError::InvalidState {
+                entity: "work_item".into(),
+                reason: format!("item {} not in Claimed state", item_id),
+            });
         }
         item.status = WorkStatus::InProgress;
         let _ = self.tx.send(WorkEvent::Started {
@@ -250,7 +253,7 @@ impl WorkQueue {
     }
 
     /// Mark item as completed with result.
-    pub fn complete(&self, item_id: &str, result: WorkResult) -> anyhow::Result<()> {
+    pub fn complete(&self, item_id: &str, result: WorkResult) -> crate::error::SdkResult<()> {
         let mut items = self.items.write();
         let item =
             items

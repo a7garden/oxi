@@ -533,8 +533,8 @@ fn routing_live_excludes_model_at_resolution_time() {
         .resolve_model(&model_id)
         .expect_err("resolution should fail when model is excluded");
     assert!(
-        err.to_string().contains("excluded_models"),
-        "exclusion error must mention the exclusion list, got: {err}"
+        matches!(err, oxi_sdk::SdkError::ModelExcluded { .. }),
+        "exclusion must return ModelExcluded, got: {err}"
     );
 
     // Reverse the mutation: resolution succeeds again.

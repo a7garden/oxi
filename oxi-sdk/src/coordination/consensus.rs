@@ -58,7 +58,12 @@ impl Consensus {
     /// Cast a vote. Returns the updated result.
     ///
     /// If the threshold is reached, `decided` becomes `true`.
-    pub fn vote(&self, vote_id: &str, voter: &str, value: String) -> anyhow::Result<VoteResult> {
+    pub fn vote(
+        &self,
+        vote_id: &str,
+        voter: &str,
+        value: String,
+    ) -> crate::error::SdkResult<VoteResult> {
         let mut sessions = self.sessions.write();
         let session =
             sessions
@@ -69,7 +74,10 @@ impl Consensus {
 
         // Verify voter is eligible
         if !session.voters.iter().any(|v| v == voter) {
-            return Err(anyhow::anyhow!("Voter '{}' not in voter list", voter));
+            return Err(crate::error::SdkError::InvalidState {
+                entity: "vote".into(),
+                reason: format!("voter '{}' not in voter list", voter),
+            });
         }
 
         session.votes.insert(voter.to_string(), value);

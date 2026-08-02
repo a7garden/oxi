@@ -81,7 +81,7 @@ or `with_ports(PortRegistry)`.
 | `InternalUrlRouter` | Resolve internal URIs (`skill://`, `issue://`, …) | ✅ wired | 🔜 TBD |
 | `ProtocolHandler` | Handle internal-protocol requests | ✅ wired (7 impls: issue, pr, memory, skill, rule, agent, local in `services.rs`) | 🔜 TBD |
 | `RuleRegistry` | Project steering rules (TTSR) | ✅ wired | 🔜 TBD |
-| `EmbeddingProvider` | Vector embeddings for memory | 🔜 TBD | 🔜 TBD |
+| `EmbeddingProvider` | Vector embeddings for memory | ✅ `MnemopiEmbeddingBridge` | 🔜 TBD |
 
 (Plus `ModelCatalog` in `ports/catalog.rs` for catalog/model-data access.) See `oxi-sdk/src/ports/mod.rs` for the canonical trait list.
 

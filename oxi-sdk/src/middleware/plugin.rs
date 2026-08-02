@@ -57,9 +57,13 @@ impl PluginLoader {
     }
 
     /// Load a plugin from its manifest file, registering it by name.
-    pub async fn load(&self, manifest_path: &Path) -> anyhow::Result<String> {
-        let manifest = PluginManifest::from_file(manifest_path)
-            .map_err(|e| anyhow::anyhow!("Failed to load manifest: {}", e))?;
+    pub async fn load(&self, manifest_path: &Path) -> crate::error::SdkResult<String> {
+        let manifest = PluginManifest::from_file(manifest_path).map_err(|e| {
+            crate::error::SdkError::InvalidState {
+                entity: "plugin".into(),
+                reason: format!("failed to load manifest: {}", e),
+            }
+        })?;
         let name = manifest.name.clone();
         let mut manifests = self.manifests.write();
         manifests.insert(name.clone(), manifest);
