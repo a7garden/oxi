@@ -148,7 +148,7 @@ pub struct AgentLoopConfig {
     /// circuit breaking occurs (default — preserves existing behavior).
     ///
     /// This is the SDK-owned behavior trait + reference impl; consumers
-    /// implement [`oxi_ai::CircuitBreaker`] for their domain profile
+    /// implement [`oxi_ai::circuit_breaker::CircuitBreaker`] for their domain profile
     /// (A2A, HTTP, etc.) and pass the impl here. See
     /// `docs/oxi-sdk-ownership.md` §3.
     pub circuit_breaker: Option<oxi_ai::circuit_breaker::SharedBreaker>,

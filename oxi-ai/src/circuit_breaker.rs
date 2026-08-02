@@ -1,7 +1,7 @@
 //! Circuit-breaker behavior trait + reference implementation.
 //!
-//! SDK owns the [`CircuitBreaker`] trait + [`DefaultCircuitBreaker`] (this
-//! module). Consumers implement [`CircuitBreaker`] for domain-specific traffic
+//! SDK owns the `CircuitBreaker` trait + `DefaultCircuitBreaker` (this
+//! module). Consumers implement `CircuitBreaker` for domain-specific traffic
 //! classes (A2A, HTTP, LLM calls) where the SDK's reference thresholds do not
 //! match the consumer's profile.
 //!
@@ -18,12 +18,12 @@
 //!      +---success---- HalfOpen <-- first check()
 //! ```
 //!
-//! - **Closed**: every [`CircuitBreaker::check`] returns `Ok`.
-//!   [`CircuitBreaker::record_failure`] increments the failure count; when it
+//! - **Closed**: every `CircuitBreaker::check` returns `Ok`.
+//!   `CircuitBreaker::record_failure` increments the failure count; when it
 //!   reaches the threshold the breaker trips to `Open`.
-//! - **Open**: [`CircuitBreaker::check`] returns `Err(BreakerError::Open)` until
+//! - **Open**: `CircuitBreaker::check` returns `Err(BreakerError::Open)` until
 //!   `reset_timeout` has elapsed since the last failure.
-//! - **HalfOpen**: the first [`CircuitBreaker::check`] after the reset timeout
+//! - **HalfOpen**: the first `CircuitBreaker::check` after the reset timeout
 //!   returns `Ok` (a trial call). A success closes the breaker; a failure
 //!   re-opens it.
 

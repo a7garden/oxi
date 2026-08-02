@@ -300,7 +300,7 @@ fn build_remote_embedding_provider(
 
 // ── Embedding port bridge (mnemopi → SDK async port) ──────────────────
 
-/// Bridges oxi-mnemopi's synchronous [`EmbeddingProvider`] to the SDK's
+/// Bridges oxi-mnemopi's synchronous [`oxi_mnemopi::EmbeddingProvider`] to the SDK's
 /// async [`oxi_sdk::ports::EmbeddingProvider`] port trait. Each `embed()`
 /// call runs on the blocking thread pool via `spawn_blocking`.
 pub struct MnemopiEmbeddingBridge {
