@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(nothing yet)_
+
+## [0.64.0] - 2026-08-02
+
 ### Breaking
 
 - **oxi-sdk: unstable re-export surface moved behind opt-in cargo features.**
@@ -28,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error-stability policy for the OAuth subsystem. Consumers MUST add a
   catch-all `_ =>` arm when matching `OAuthError`; a new variant
   `InvalidAuthorizationEndpoint` was added in the same change.
+- **Retrospective — symbols removed in 0.61.0 / 0.63.0 without adequate
+  warning.** Documented retroactively per the Breaking Change Policy
+  (see `docs/release-process.md`). All are now classified as
+  `#[unstable]`/consumer-owned, and the SDK provides behavior traits
+  (`CircuitBreaker`, `SpawnValidator`) plus reference impls that
+  consumers can wire without depending on the removed types:
+  - `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed in 0.61.0
+    (`provider_pool` module, 203 LOC). No direct replacement; superseded by
+    the `RouterPipeline` in `oxi_ai::router`.
+  - `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` —
+    removed in 0.61.0 (`circuit_breaker` module, 944 LOC). A minimal
+    `CircuitBreaker` behavior trait + `DefaultCircuitBreaker` reference
+    impl are reintroduced in this release (R6).
+  - `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
+    `oxi_ai::MultiProviderConfig` — removed in 0.61.0 (`multi_provider`
+    module, 1283 + 359 LOC). Superseded by `RouterPipeline` + the
+    `router://local` provider.
 
 ### Deprecated
 
@@ -37,55 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `build_authorization_url_result` instead, which returns
   `Result<PkceState, OAuthError>`. The legacy function delegates to the
   new one and preserves its historical panic behavior.
-
-### Added
-
-- **oxi-ai: `oauth::build_authorization_url_result`** — non-panicking
-  PKCE URL builder returning `Result<PkceState, OAuthError>`, plus a new
-  `OAuthError::InvalidAuthorizationEndpoint` variant for malformed
-  endpoint URLs (R4 follow-up C).
-- **oxi-cli (TUI): `/agents` Agent Hub overlay** — `/agents` (alias
-  `/hub`) opens a centered panel listing every registered agent
-  (kind/name/status) from the live `AgentSession` hub registry; `q`
-  closes it. Completes the VT-TUI cutover (item A).
-- **oxi-cli (TUI): synchronized-output tape rendering** — each frame
-  flush is wrapped in Begin/End Synchronized Update
-  (`\x1b[?2026h` / `\x1b[?2026l`), eliminating mid-frame tearing on the
-  main-screen tape.
-
-### Changed
-
-- **oxi-cli (TUI): ordinary chat renders on the main screen** — the TUI
-  no longer enters alternate screen (`\x1b[?1049h`) for ordinary chat;
-  alt screen is reserved for transient overlays, matching the main-screen
-  tape design. Ctrl+C now uses a two-press quit (first press arms, second
-  exits) so a single accidental press never kills the session.
-
-## [0.64.0] - 2026-08-01 (retrospective)
-
-### Breaking (retrospective — 0.61.0, 0.63.0)
-
-The following symbols were removed in 0.61.0 / 0.63.0 without adequate
-warning. This entry documents them retroactively per the new Breaking
-Change Policy (see `docs/release-process.md`). All are now classified as
-`#[unstable]`/consumer-owned, and the SDK provides behavior traits
-(`CircuitBreaker`, `SpawnValidator`) plus reference impls that consumers
-can wire without depending on the removed types.
-
-- `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed in 0.61.0
-  (`provider_pool` module, 203 LOC). No direct replacement; superseded by
-  the `RouterPipeline` in `oxi_ai::router`. Affected consumer: oxios
-  built resilience on `ProviderPool` without knowing it was opt-in.
-- `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` —
-  removed in 0.61.0 (`circuit_breaker` module, 944 LOC). A minimal
-  `CircuitBreaker` behavior trait + `DefaultCircuitBreaker` reference
-  impl are reintroduced in 0.64.0 (R6). Consumers implement the trait
-  for their domain (e.g. oxios's `A2ACircuitBreaker`).
-- `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
-  `oxi_ai::MultiProviderConfig` — removed in 0.61.0 (`multi_provider`
-  module, 1283 + 359 LOC). Superseded by `RouterPipeline` + the
-  `router://local` provider. Affected consumer: oxios's 0.58→0.63
-  migration saw 5 compile errors.
 
 ### Added
 
@@ -111,6 +83,27 @@ can wire without depending on the removed types.
   `ProviderError`** (R7) — error type stability. Existing named
   variants are frozen; new variants may be added freely. Consumers
   MUST add a catch-all `_ =>` arm in their matches.
+- **oxi-ai: `oauth::build_authorization_url_result`** — non-panicking
+  PKCE URL builder returning `Result<PkceState, OAuthError>`, plus a new
+  `OAuthError::InvalidAuthorizationEndpoint` variant for malformed
+  endpoint URLs (R4 follow-up C).
+- **oxi-agent: CircuitBreaker wired into retry path** — `AgentLoopConfig`
+  now accepts an optional `SharedBreaker`; the retry loop short-circuits
+  when the breaker is open (R6).
+- **oxi-sdk: stability tier annotations on all 17 re-export blocks**
+  (R3) — every public re-export now carries `#[stable]` / `#[unstable]` /
+  `#[internal]`.
+- **oxi-cli (TUI): `/agents` Agent Hub overlay** — `/agents` (alias
+  `/hub`) opens a centered panel listing every registered agent
+  (kind/name/status) from the live `AgentSession` hub registry; `q`
+  closes it. Completes the VT-TUI cutover (item A).
+- **oxi-cli (TUI): synchronized-output tape rendering** — each frame
+  flush is wrapped in Begin/End Synchronized Update
+  (`\x1b[?2026h` / `\x1b[?2026l`), eliminating mid-frame tearing on the
+  main-screen tape.
+- **ci: cargo-public-api diff gate** — `api-diff.yml` workflow captures
+  public API snapshots and enforces no undocumented API removals on PRs
+  (R1).
 
 ### Changed
 
@@ -119,6 +112,23 @@ can wire without depending on the removed types.
   builds no longer pull `prost` / `prost-build` / `protoc-bin-vendored`
   (~120 transitive crates). Consumers using those providers enable
   with `--features protobuf`.
+- **oxi-cli (TUI): ordinary chat renders on the main screen** — the TUI
+  no longer enters alternate screen (`\x1b[?1049h`) for ordinary chat;
+  alt screen is reserved for transient overlays, matching the main-screen
+  tape design. Ctrl+C now uses a two-press quit (first press arms, second
+  exits) so a single accidental press never kills the session.
+
+### Fixed
+
+- **oxi-sdk: structured error promotion + embedding port bridge + smoke
+  tests** — promoted string errors to typed `SdkError` variants, added
+  real example code, and wired `MnemopiEmbeddingBridge` to bridge
+  oxi-mnemopi to the SDK async `EmbeddingProvider` port.
+- **oxi-ai / oxi-agent / oxi-sdk: R4 zero-panic enforcement** — audited
+  and replaced `unwrap()` / `expect()` calls that could panic on
+  external input with proper error propagation.
+- **docs: broken intra-doc links** — resolved all `cargo doc -D warnings`
+  failures across oxi-ai, oxi-agent, oxi-sdk, and oxi-cli.
 
 ## [0.63.0] - 2026-08-01
 

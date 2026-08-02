@@ -1,6 +1,6 @@
 [package]
 name = "oxi-vtui"
-version = "0.63.0"
+version = "0.64.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Terminal UI framework for oxi, based on vtcode-ui"
@@ -46,5 +46,5 @@ human-panic         = "2.0"
 ratatui-cheese      = "0.7"
 tracing-subscriber  = { version = "0.3", features = ["env-filter", "fmt"] }
 tui-shimmer         = "0.1"
-oxi-vtui-compat      = { version = "0.63.0", path = "../oxi-vtui-compat" }
+oxi-vtui-compat      = { version = "0.64.0", path = "../oxi-vtui-compat" }
 
