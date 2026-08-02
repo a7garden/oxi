@@ -44,6 +44,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PKCE URL builder returning `Result<PkceState, OAuthError>`, plus a new
   `OAuthError::InvalidAuthorizationEndpoint` variant for malformed
   endpoint URLs (R4 follow-up C).
+- **oxi-cli (TUI): `/agents` Agent Hub overlay** — `/agents` (alias
+  `/hub`) opens a centered panel listing every registered agent
+  (kind/name/status) from the live `AgentSession` hub registry; `q`
+  closes it. Completes the VT-TUI cutover (item A).
+- **oxi-cli (TUI): synchronized-output tape rendering** — each frame
+  flush is wrapped in Begin/End Synchronized Update
+  (`\x1b[?2026h` / `\x1b[?2026l`), eliminating mid-frame tearing on the
+  main-screen tape.
+
+### Changed
+
+- **oxi-cli (TUI): ordinary chat renders on the main screen** — the TUI
+  no longer enters alternate screen (`\x1b[?1049h`) for ordinary chat;
+  alt screen is reserved for transient overlays, matching the main-screen
+  tape design. Ctrl+C now uses a two-press quit (first press arms, second
+  exits) so a single accidental press never kills the session.
 
 ## [0.64.0] - 2026-08-01 (retrospective)
 

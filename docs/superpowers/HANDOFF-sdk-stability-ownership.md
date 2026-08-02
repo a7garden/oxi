@@ -1,11 +1,11 @@
 # SDK Stability & Ownership Program — Handoff
 
-> **Status:** R0–R8 구현 완료 (핸드오프 문서). 다음 세션은 아래 "남은 작업" 섹션부터 시작.
+> **Status:** R0–R8 + 후속 A–E 전부 완료 (2026-08-02). 후속 해결 커밋: `58659744` (B/C/D), `0aa72529` (A). §3 참조.
 > **소스 요청서:** `oxios/docs/production-audit/2026-08-01-ideal-oxi-sdk-proposal.html`
 > **설계:** `docs/superpowers/specs/2026-08-01-sdk-stability-ownership-program-design.md`
 > **계획:** `docs/superpowers/plans/2026-08-01-sdk-stability-ownership-program.md`
 > **브랜치:** `main`
-> **마지막 커밋:** `25fcd522` (fix: R4 zero-panic enforcement)
+> **마지막 커밋:** `0aa72529` (feat(tui_vt): sync-output tape + /agents Agent Hub overlay + two-press quit)
 > **작성일:** 2026-08-01
 
 ---
@@ -60,66 +60,25 @@ cargo fmt --all -- --check                     # clean
 
 ---
 
-## 3. 남은 작업 (다음 세션 후보)
+## 3. 후속 작업 — 전부 해결됨 (2026-08-02)
 
-### 🔴 A. oxi-cli PTY 테스트 2건 실패 — VT TUI cutover 미완성 (blocked, 사용자 WIP와 충돌)
+핸드오프 당시 "남은 작업" 후보 A–E가 다음 세션에서 모두 해결됐다.
 
-**진단 완료 (이번 세션).** 두 실패 모두 **oxios SDK 프로그램과 무관**하며, 사용자가 진행 중인
-VT TUI cutover 작업(스태시 WIP)이 완료돼야 해결됨.
+| 항목 | 내용 | 해결 | 커밋 |
+|------|------|------|------|
+| 🟢 E | R4 `unreachable!` 3개(`mcp/mod.rs`, `debug_tool.rs`, `eval_tool.rs`) 회귀 확인 | `cargo nextest run -p oxi-agent --lib` = 572/572 통과 확인 | (검증만) |
+| 🟡 D | `#[oxi_unstable]` 블록 전수(15개)에 `#[cfg(feature)]` 게이트 + 12 feature 추가; oxi-cli는 소비 4개(`router`,`role-routing`,`role-switching`,`url-resolver`) 활성화 | 완료 | `58659744` |
+| 🟡 B | api-diff.yml PR enforcement — `origin/main` 대비 심볼 제거 시 `### Breaking`/`### Removed` 없으면 fail (fail-safe: infra 실패는 warning skip) | 완료 | `58659744` |
+| 🟡 C | `build_authorization_url_result` additive + `OAuthError` `#[non_exhaustive]` + `InvalidAuthorizationEndpoint` variant + legacy 함수 deprecated(0.64→0.66) | 완료 | `58659744` |
+| 🔴 A | PTY 2건 = VT-TUI cutover 미구현. **스태시가 아니라 직접 구현으로 해결** — synchronized output(`\x1b[?2026l`), `/agents` Agent Hub 오버레이, 두-누르기 종료, alt-screen 제거. 스태시 4개는 무관 사용자 WIP이라 건드리지 않음 | 완료 | `0aa72529` |
 
-| 테스트 | 실패 | 근본 원인 |
-|--------|------|-----------|
-| `oxi-cli/tests/pty_e2e.rs::test_pty_tui_renders_and_exits` | `\x1b[?2026l` (tape sync end)가 5초 내 안 나옴 | TUI가 시작하지만 테이프 첫 프레임을 안 그림. 스태시의 render-loop watchdog WIP (`8d69fc37`)와 연결 |
-| `oxi-cli/tests/pty_e2e.rs::test_pty_hub_opens_and_closes` | `/agents` → `Unknown command: /agents` | `/agents`가 **VT slash registry에 등록된 적이 없음** (`git log -S agents` 빈 결과). Agent Hub `OverlayRequest` 타입도 oxi-vtui에 없음 (`oxi-vtui/src/tui/core_tui/types/overlay.rs` — Modal/List/Wizard만 존재) |
+**최종 검증 (2026-08-02):** `cargo nextest run --workspace` = **3051/3051 통과** (4 skip), `cargo fmt --check`·`cargo clippy --workspace --all-targets -D warnings` clean.
 
-**관련 stash WIP (사용자 소유, pop 금지 — 충돌 위험):**
-- `stash@{0}` HubRegistry (d114da70) — `/agents` 커맨드 + Hub 오버레이 예정
-- `stash@{1}` render-loop watchdog (8d69fc37)
-- `stash@{3}` MiniMax-M3 model_registry (사용자 작업)
-
-**해결 경로 (사용자 결정 필요):** VT cutover 완료 시 테스트가 자연히 통과. 이 프로그램에서
-임의로 `/agents` + Hub 오버레이를 만들면 진행 중 WIP와 충돌.
-
-### 🟡 B. cargo-public-api CI gate — observational → enforcing (R1 후속)
-
-**현재:** `.github/workflows/api-diff.yml`이 public API 스냅샷을 capture + artifact 업로드만 함.
-workflow preamble에 "does not yet ENFORCE removals against a baseline" 명시.
-
-**할 일:** `main` baseline과 PR diff를 비교해, `## Breaking` CHANGELOG 항목 없이 심볼이
-사라지면 실패시키는 enforcement 단계 추가. 설계는 이미 release-process.md §Stability Tier에 문서화됨.
-
-### 🟡 C. oauth.rs PKCE URL parse — recoverable이지만 pub signature (R4 follow-up)
-
-**위치:** `oxi-ai/src/oauth.rs:284` — `url::Url::parse(&config.authorization_endpoint).expect(...)`
-`build_authorization_url(config) -> PkceState`가 `pub`이라 Result 반환은 breaking change.
-
-**현재:** scoped `#[allow(clippy::expect_used)]` + SAFETY 주석으로 처리 (recoverable임을 명시).
-
-**할 일:** additive `build_authorization_url_result(config) -> Result<PkceState, ProviderError>`
-추가 → 기존 함수는 delegate → deprecation window (R2 규약) → 다음 breaking release에서 전환.
-
-### 🟡 D. cfg-gating 확장 — 8개 `oxi_unstable` 블록에 실제 `#[cfg]` 게이트 (R3 follow-up)
-
-**현재:** `c23aeccc`가 8개 블록에 `#[oxi_unstable(feature = ...)]` **doc badge만** 추가.
-release-process.md 규약: "every `#[oxi_unstable]` MUST also carry a matching `#[cfg(feature = ...)]`."
-
-**미완성 블록** (`oxi-sdk/src/lib.rs`):
-`router`, `advisor`, `memory` (PortMemoryBackend + MemoryBackend + memory tool structs),
-`subagent` (SubagentRunner), `agent-hub`, `lsp`.
-
-**할 일:** 각 feature를 `oxi-sdk/Cargo.toml` [features]에 추가 + `#[cfg(feature = "...")]` 래핑
-(e28e0477의 circuit-breaker/mcp-* 패턴 그대로). **주의:** 이 re-exports 중 일부는 oxi-cli가
-기본 의존하므로 (`Agent`, `MemoryBackend` 등), 게이트 추가 전에 호출부 확인 필수 — 기본 빌드에서
-심볼이 사라지면 oxi-cli 빌드가 깨짐. **이 때문에 이번 세션에서 보류.**
-
-### 🟢 E. 3개 unreachable! 수정 후 회귀 확인 (R4 테일)
-
-이번 세션 `25fcd522`가 수정: `mcp/mod.rs:437`, `debug_tool.rs:392`, `eval_tool.rs:142`.
-다음 세션 시작 시 `cargo nextest run -p oxi-agent`로 해당 모듈 테스트 정상 확인만 하면 됨.
+> ⚠ **PTY 검증 주의:** harness가 `oxi`를 PATH로만 찾는다 (`Command::new("oxi")`). 로컬 검증 시 `PATH=target/debug:$PATH` 후 빌드 필요. CI(ci.yml/test.yml)는 `oxi`를 PATH에 올리지 않아 PTY 테스트가 **skip**됨 (실패 아님) — TUI 회귀는 로컬에서만 검출.
 
 ---
 
-## 4. 다음 세션 시작 방법
+## 4. (참고) 검증 명령
 
 ```bash
 cd /Volumes/MERCURY/PROJECTS/oxi
@@ -165,4 +124,4 @@ oxi-ai/src/error.rs, oxi-sdk/src/error.rs  # R7 #[non_exhaustive]
 
 ---
 
-End of handoff. 다음 세션은 §3 (남은 작업) → §4 (시작 방법) 순서로 진행.
+End of handoff. 프로그램(R0–R8) 및 후속(A–E) 전부 완료. §3은 해결 이력.
