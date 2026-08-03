@@ -1,33 +1,33 @@
-# oxi-sdk Consumer Requirements for Clean Integration
+# oxicode-sdk Consumer Requirements for Clean Integration
 
 **Author:** oxios project  
 **Date:** 2026-05-16  
 **Status:** Draft — Codebase-verified  
-**Target:** oxi-sdk (oxi project)
+**Target:** oxicode-sdk (oxicode project)
 
 ---
 
 ## Background
 
-oxios is an Agent OS that uses oxi-sdk as its execution engine. Our stated architecture depends on oxi-sdk as the **single** integration surface — everything oxios needs should flow through that one crate.
+oxios is an Agent OS that uses oxicode-sdk as its execution engine. Our stated architecture depends on oxicode-sdk as the **single** integration surface — everything oxios needs should flow through that one crate.
 
-In practice, oxios today depends on **three** oxi crates directly:
+In practice, oxios today depends on **three** oxicode crates directly:
 
 ```toml
 # workspace Cargo.toml — current state
-oxi-sdk    = { path = "../oxi/oxi-sdk" }
-oxi-ai     = { path = "../oxi/oxi-ai" }
-oxi-agent  = { path = "../oxi/oxi-agent" }
+oxicode-sdk    = { path = "../oxicode/oxicode-sdk" }
+oxicode-ai     = { path = "../oxicode/oxicode-ai" }
+oxicode-agent  = { path = "../oxicode/oxicode-agent" }
 ```
 
-This violates the SDK abstraction and creates tight coupling to oxi's internal crate structure. If oxi reorganizes `oxi-ai` or `oxi-agent`, oxios breaks.
+This violates the SDK abstraction and creates tight coupling to oxicode's internal crate structure. If oxicode reorganizes `oxicode-ai` or `oxicode-agent`, oxios breaks.
 
 The root causes are two:
 
-1. **Missing re-exports** — types that consumers need are not surfaced through `oxi-sdk`.
+1. **Missing re-exports** — types that consumers need are not surfaced through `oxicode-sdk`.
 2. **`!Send` future** — `AgentLoop::run()` returns a non-`Send` future due to internal boxed futures missing `+ Send`, forcing consumers into `spawn_blocking`.
 
-Both are fixable within oxi-sdk without changing public semantics. This document details each request, with root causes **verified against the actual codebase**.
+Both are fixable within oxicode-sdk without changing public semantics. This document details each request, with root causes **verified against the actual codebase**.
 
 ---
 
@@ -38,83 +38,83 @@ Both are fixable within oxi-sdk without changing public semantics. This document
 
 ### Problem
 
-oxios imports the following types directly from `oxi-ai` and `oxi-agent` because `oxi-sdk` does not re-export them:
+oxios imports the following types directly from `oxicode-ai` and `oxicode-agent` because `oxicode-sdk` does not re-export them:
 
 | Import | Source crate | Used in (oxios) |
 |--------|-------------|-----------------|
-| `SearchCache` | `oxi-agent` | `kernel_bridge.rs` |
-| `CompactionEvent` | `oxi-agent::prelude` | `agent_runtime.rs` |
-| `UserMessage` | `oxi-ai` | `ouroboros_engine.rs` |
-| `Context` | `oxi-ai` | `supervisor.rs`, `ouroboros_engine.rs` |
-| `Message` | `oxi-ai` | `ouroboros_engine.rs` |
-| `Model` | `oxi-ai` | `supervisor.rs`, `ouroboros_engine.rs` |
-| `ProviderError` | `oxi-ai` | `supervisor.rs` |
-| `ProviderEvent` | `oxi-ai` | `supervisor.rs` |
-| `StreamOptions` | `oxi-ai` | `supervisor.rs` |
-| `CompactionStrategy` | `oxi-ai` | `agent_runtime.rs` |
-| `Provider` | `oxi-ai` | `agent_runtime.rs`, `ouroboros_engine.rs` |
-| `tools::ToolError` | `oxi-agent` | `a2a_tools.rs` |
+| `SearchCache` | `oxicode-agent` | `kernel_bridge.rs` |
+| `CompactionEvent` | `oxicode-agent::prelude` | `agent_runtime.rs` |
+| `UserMessage` | `oxicode-ai` | `ouroboros_engine.rs` |
+| `Context` | `oxicode-ai` | `supervisor.rs`, `ouroboros_engine.rs` |
+| `Message` | `oxicode-ai` | `ouroboros_engine.rs` |
+| `Model` | `oxicode-ai` | `supervisor.rs`, `ouroboros_engine.rs` |
+| `ProviderError` | `oxicode-ai` | `supervisor.rs` |
+| `ProviderEvent` | `oxicode-ai` | `supervisor.rs` |
+| `StreamOptions` | `oxicode-ai` | `supervisor.rs` |
+| `CompactionStrategy` | `oxicode-ai` | `agent_runtime.rs` |
+| `Provider` | `oxicode-ai` | `agent_runtime.rs`, `ouroboros_engine.rs` |
+| `tools::ToolError` | `oxicode-agent` | `a2a_tools.rs` |
 
-Some of these (`Context`, `Model`, `Provider`, `StreamOptions`, `CompactionStrategy`) are already re-exported in oxi-sdk. However, the re-export alone isn't enough — when a consumer also needs types from the *same* module that aren't re-exported (e.g., `ProviderError` lives alongside `Provider`), they must reach through to the source crate, pulling in the transitive dependency.
+Some of these (`Context`, `Model`, `Provider`, `StreamOptions`, `CompactionStrategy`) are already re-exported in oxicode-sdk. However, the re-export alone isn't enough — when a consumer also needs types from the *same* module that aren't re-exported (e.g., `ProviderError` lives alongside `Provider`), they must reach through to the source crate, pulling in the transitive dependency.
 
 ### Current state (consumer code)
 
 ```rust
 // oxios-kernel/Cargo.toml
-oxi-ai     = { workspace = true }
-oxi-agent  = { workspace = true }
+oxicode-ai     = { workspace = true }
+oxicode-agent  = { workspace = true }
 
 // agent_runtime.rs
-use oxi_agent::{AgentEvent, AgentLoop, AgentLoopConfig, SearchCache, SharedState, ToolRegistry};
-use oxi_agent::agent_loop::config::ToolExecutionMode;
-use oxi_agent::prelude::CompactionEvent;
-use oxi_ai::{CompactionStrategy, Provider};
+use oxicode_agent::{AgentEvent, AgentLoop, AgentLoopConfig, SearchCache, SharedState, ToolRegistry};
+use oxicode_agent::agent_loop::config::ToolExecutionMode;
+use oxicode_agent::prelude::CompactionEvent;
+use oxicode_ai::{CompactionStrategy, Provider};
 
 // ouroboros_engine.rs
-use oxi_ai::{Context, Message, Model, Provider, UserMessage};
+use oxicode_ai::{Context, Message, Model, Provider, UserMessage};
 
 // a2a_tools.rs
-use oxi_agent::{AgentTool, AgentToolResult, ToolContext, tools::ToolError};
+use oxicode_agent::{AgentTool, AgentToolResult, ToolContext, tools::ToolError};
 ```
 
 ### Desired state
 
 ```rust
 // oxios-kernel/Cargo.toml
-// (only oxi-sdk — remove oxi-ai and oxi-agent)
+// (only oxicode-sdk — remove oxicode-ai and oxicode-agent)
 
 // agent_runtime.rs
-use oxi_sdk::{
+use oxicode_sdk::{
     AgentEvent, AgentLoop, AgentLoopConfig, SearchCache, SharedState,
     ToolRegistry, ToolExecutionMode, CompactionEvent,
     CompactionStrategy, Provider,
 };
 
 // ouroboros_engine.rs
-use oxi_sdk::{Context, Message, Model, Provider, UserMessage};
+use oxicode_sdk::{Context, Message, Model, Provider, UserMessage};
 
 // a2a_tools.rs
-use oxi_sdk::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use oxicode_sdk::{AgentTool, AgentToolResult, ToolContext, ToolError};
 ```
 
-### What oxi-sdk needs to add
+### What oxicode-sdk needs to add
 
-> **Verified against `oxi-sdk/src/lib.rs` as of 2026-05-16.**
+> **Verified against `oxicode-sdk/src/lib.rs` as of 2026-05-16.**
 
 The initial draft listed 5 missing types. After codebase verification, only **3 are genuinely missing**:
 
-| Type | Source crate | Location | Currently in oxi-sdk? | Action |
+| Type | Source crate | Location | Currently in oxicode-sdk? | Action |
 |------|-------------|----------|----------------------|--------|
-| `UserMessage` | `oxi-ai` | `messages.rs:200` | ❌ No | **Add** |
-| `SearchCache` | `oxi-agent` | `tools/search_cache.rs:37` | ❌ No | **Add** |
-| `CompactionEvent` | `oxi-agent` | `compaction.rs:8` | ❌ No | **Add** |
-| `ProviderError` | `oxi-ai` | `error.rs` | ✅ Already exported | None |
-| `ProviderEvent` | `oxi-ai` | `providers/` | ✅ Already exported | None |
+| `UserMessage` | `oxicode-ai` | `messages.rs:200` | ❌ No | **Add** |
+| `SearchCache` | `oxicode-agent` | `tools/search_cache.rs:37` | ❌ No | **Add** |
+| `CompactionEvent` | `oxicode-agent` | `compaction.rs:8` | ❌ No | **Add** |
+| `ProviderError` | `oxicode-ai` | `error.rs` | ✅ Already exported | None |
+| `ProviderEvent` | `oxicode-ai` | `providers/` | ✅ Already exported | None |
 
 > **Correction:** `ProviderError` and `ProviderEvent` were incorrectly listed as missing.
-> They are already in the `oxi_ai` re-export block:
+> They are already in the `oxicode_ai` re-export block:
 > ```rust
-> pub use oxi_ai::{
+> pub use oxicode_ai::{
 >     Provider, ProviderRegistry, Model, ModelRegistry, Context, Message, ContentBlock,
 >     ProviderEvent, StreamOptions, CompactionStrategy,
 >     ProviderError, Api, Cost, InputModality,
@@ -124,21 +124,21 @@ The initial draft listed 5 missing types. After codebase verification, only **3 
 Only 3 `pub use` lines need adding:
 
 ```rust
-// In oxi-sdk/src/lib.rs — additions to existing re-export blocks
+// In oxicode-sdk/src/lib.rs — additions to existing re-export blocks
 
-// From oxi-ai (messages module)
-pub use oxi_ai::UserMessage;
+// From oxicode-ai (messages module)
+pub use oxicode_ai::UserMessage;
 
-// From oxi-agent
-pub use oxi_agent::SearchCache;
-pub use oxi_agent::compaction::CompactionEvent;
+// From oxicode-agent
+pub use oxicode_agent::SearchCache;
+pub use oxicode_agent::compaction::CompactionEvent;
 ```
 
 ### Acceptance criteria
 
-- [ ] oxios can remove `oxi-ai` and `oxi-agent` from its `Cargo.toml` workspace dependencies
-- [ ] All `use oxi_ai::` and `use oxi_agent::` imports in oxios-kernel and oxios-ouroboros are replaced with `use oxi_sdk::`
-- [ ] `cargo check -p oxios-kernel` passes with only `oxi-sdk` as a dependency
+- [ ] oxios can remove `oxicode-ai` and `oxicode-agent` from its `Cargo.toml` workspace dependencies
+- [ ] All `use oxicode_ai::` and `use oxicode_agent::` imports in oxios-kernel and oxios-ouroboros are replaced with `use oxicode_sdk::`
+- [ ] `cargo check -p oxios-kernel` passes with only `oxicode-sdk` as a dependency
 
 ---
 
@@ -193,7 +193,7 @@ let result = handle.await??;  // or just .await? if we don't need JoinError sepa
 
 ### Root cause — verified by codebase audit
 
-The `!Send` bound was traced to a **specific location** in `oxi-agent/src/agent_loop/tool_exec.rs`:
+The `!Send` bound was traced to a **specific location** in `oxicode-agent/src/agent_loop/tool_exec.rs`:
 
 ```rust
 // tool_exec.rs:20 — FinalizedToolCallEntry enum
@@ -236,7 +236,7 @@ let mut pending_futures: Vec<(usize,
 ```
 
 ```rust
-// In oxi-agent tests — compile-time assertion to prevent regression
+// In oxicode-agent tests — compile-time assertion to prevent regression
 #[test]
 fn agent_loop_future_is_send() {
     use std::future::Future;
@@ -248,7 +248,7 @@ fn agent_loop_future_is_send() {
 
 ### Acceptance criteria
 
-- [ ] `AgentLoop::run()` returns a `Send` future (verified by compile-time assertion in oxi-agent)
+- [ ] `AgentLoop::run()` returns a `Send` future (verified by compile-time assertion in oxicode-agent)
 - [ ] oxios can replace `spawn_blocking` with `tokio::spawn` in `agent_runtime.rs`
 - [ ] No behavioral change in agent execution semantics
 
@@ -256,12 +256,12 @@ fn agent_loop_future_is_send() {
 
 ## Impact Analysis
 
-### For oxi project
+### For oxicode project
 
 | Change | Risk | Scope | Lines |
 |--------|------|-------|-------|
-| Add 3 re-exports (`UserMessage`, `SearchCache`, `CompactionEvent`) | **Low** — additive only | `oxi-sdk/src/lib.rs` | ~3 lines |
-| Add `+ Send` to boxed futures | **Low** — no semantic change | `oxi-agent/src/agent_loop/tool_exec.rs` | 2 lines + 1 test |
+| Add 3 re-exports (`UserMessage`, `SearchCache`, `CompactionEvent`) | **Low** — additive only | `oxicode-sdk/src/lib.rs` | ~3 lines |
+| Add `+ Send` to boxed futures | **Low** — no semantic change | `oxicode-agent/src/agent_loop/tool_exec.rs` | 2 lines + 1 test |
 
 > **Risk note on `+ Send` fix:** This is safe because every type flowing through the tool dispatch path is already `Send`-safe (verified above). If non-`Send` types are ever introduced, the compiler will catch it — which is the desired safety property.
 
@@ -269,21 +269,21 @@ fn agent_loop_future_is_send() {
 
 | Change | Benefit |
 |--------|---------|
-| Remove `oxi-ai` + `oxi-agent` deps | Single dependency surface, immune to oxi internal reorganization |
+| Remove `oxicode-ai` + `oxicode-agent` deps | Single dependency surface, immune to oxicode internal reorganization |
 | Replace `spawn_blocking` | Cleaner code, better performance, proper error propagation |
 
 ### Migration path
 
-1. **oxi-sdk** adds 3 re-exports (`UserMessage`, `SearchCache`, `CompactionEvent`) — ships immediately.
+1. **oxicode-sdk** adds 3 re-exports (`UserMessage`, `SearchCache`, `CompactionEvent`) — ships immediately.
 2. **oxios** switches imports and removes workspace deps (same PR or follow-up).
-3. **oxi-agent** adds `+ Send` to `FinalizedToolCallEntry::Future` and `pending_futures` + compile-time test (lands independently).
-4. **oxios** removes `spawn_blocking` workaround (after oxi release with Send-safe future).
+3. **oxicode-agent** adds `+ Send` to `FinalizedToolCallEntry::Future` and `pending_futures` + compile-time test (lands independently).
+4. **oxios** removes `spawn_blocking` workaround (after oxicode release with Send-safe future).
 
 Steps 1–2 and 3–4 are independent — they can proceed in parallel.
 
 ### Potential follow-up
 
-After both changes land, add an **SDK surface integration test** to `oxi-sdk` that compiles a minimal consumer using *only* `oxi-sdk` as a dependency. This catches future re-export regressions automatically.
+After both changes land, add an **SDK surface integration test** to `oxicode-sdk` that compiles a minimal consumer using *only* `oxicode-sdk` as a dependency. This catches future re-export regressions automatically.
 
 ---
 
@@ -291,7 +291,7 @@ After both changes land, add an **SDK surface integration test** to `oxi-sdk` th
 
 | # | Request | Priority | Effort | Files | Blocking |
 |---|---------|----------|--------|-------|----------|
-| 1 | Re-export `SearchCache`, `CompactionEvent`, `UserMessage` | High | Low (~3 lines) | `oxi-sdk/src/lib.rs` | No |
-| 2 | Add `+ Send` to boxed futures in `tool_exec.rs` | Medium-High | Low (~2 lines + test) | `oxi-agent/src/agent_loop/tool_exec.rs` | No |
+| 1 | Re-export `SearchCache`, `CompactionEvent`, `UserMessage` | High | Low (~3 lines) | `oxicode-sdk/src/lib.rs` | No |
+| 2 | Add `+ Send` to boxed futures in `tool_exec.rs` | Medium-High | Low (~2 lines + test) | `oxicode-agent/src/agent_loop/tool_exec.rs` | No |
 
-Both changes are additive or internal — no public API breakage. They allow oxios to depend solely on `oxi-sdk` as the integration contract, which was the original design intent.
+Both changes are additive or internal — no public API breakage. They allow oxios to depend solely on `oxicode-sdk` as the integration contract, which was the original design intent.

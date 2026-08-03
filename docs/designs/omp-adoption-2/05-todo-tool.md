@@ -15,7 +15,7 @@
 
 omp의 **todo 도구**는 에이전트가 다단계 작업을 phase로 구조화하고, 진행 상태를 세션에 영속하며, TUI sticky panel에 실시간 반영하는 계층이다. **phase → task → status** 3단계 모델로, 7개 오퍼레이션(`init`/`start`/`done`/`drop`/`rm`/`append`/`view`)을 통해 변경한다.
 
-oxi는 현재 todo 도구가 **완전히 부재**다. AGENTS.md가 omp와 동일한 스펙을 서술하지만 구현이 없다. 본 설계는 oxi-agent에 todo 도구를 추가하고, 세션 영속 + TUI 이벤트 브리지를 정의한다. **렌더링(sticky panel)은 `06`이 담당**한다.
+oxicode는 현재 todo 도구가 **완전히 부재**다. AGENTS.md가 omp와 동일한 스펙을 서술하지만 구현이 없다. 본 설계는 oxicode-agent에 todo 도구를 추가하고, 세션 영속 + TUI 이벤트 브리지를 정의한다. **렌더링(sticky panel)은 `06`이 담당**한다.
 
 ### omp가 검증한 가치
 - **진행 가시성** — 에이전트가 "지금 5단계 중 3단계"임을 사용자에게 보임.
@@ -76,9 +76,9 @@ todo phase는 세션 엔트리로 저장 (`getLatestTodoPhasesFromEntries`, `tod
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
-### 2.1 도구 위치: `oxi-agent/src/tools/todo.rs`
+### 2.1 도구 위치: `oxicode-agent/src/tools/todo.rs`
 
 ```rust
 pub struct TodoTool {
@@ -436,7 +436,7 @@ fn format_summary(phases: &[TodoPhase], errors: &[String], read_only: bool) -> S
 
 ### 3.1 세션 엔트리 확장
 
-`oxi-cli/src/store/session.rs`의 `SessionEntry`에 todo 타입 추가:
+`oxicode-cli/src/store/session.rs`의 `SessionEntry`에 todo 타입 추가:
 
 ```rust
 pub enum SessionEntry {
@@ -481,7 +481,7 @@ pub fn latest_todo_phases(entries: &[SessionEntry]) -> Vec<TodoPhase> {
 todo 도구와 sticky panel이 공유하는 인터페이스. `ToolContext`의 기존 패턴(`MemoryBackend`, `UrlResolver`)을 따른다:
 
 ```rust
-// oxi-agent/src/tools.rs — 능력 특성 추가
+// oxicode-agent/src/tools.rs — 능력 특성 추가
 
 /// Todo 상태 접근 능력. todo 도구가 호출하고, TUI sticky panel이 소비.
 pub trait TodoStateProvider: Send + Sync {
@@ -551,13 +551,13 @@ impl AgentTool for TodoTool {
 }
 ```
 
-> **TUI 갱신**: `TodoStateProvider`의 구현체(oxi-cli)가 내부적으로 `Arc<TodoState>`를 보유하고, `apply_ops` 후 채널로 TUI에 알림. `AgentEvent::TodoUpdate`는 사용하지 않음 — 능력 특성 구현체가 직접 TUI 채널에 전송.
+> **TUI 갱신**: `TodoStateProvider`의 구현체(oxicode-cli)가 내부적으로 `Arc<TodoState>`를 보유하고, `apply_ops` 후 채널로 TUI에 알림. `AgentEvent::TodoUpdate`는 사용하지 않음 — 능력 특성 구현체가 직접 TUI 채널에 전송.
 
 ### 4.3 서브에이전트 자동 매칭 (⑥ Agent Hub와 연동)
 서브에이전트 완료 시, `AgentPoolProvider`(⑥) 능력이 todo 자동 체크 훅을 호출:
 
 ```rust
-// TodoStateProvider 구현체 (oxi-cli) 내부
+// TodoStateProvider 구현체 (oxicode-cli) 내부
 pub fn reconcile_with_subagents(&self, pool: &dyn AgentPoolProvider) {
     let completed_descs: Vec<String> = pool.list_agents()
         .into_iter()
@@ -605,7 +605,7 @@ pub fn reconcile_with_subagents(&self, pool: &dyn AgentPoolProvider) {
 
 ## 6. 시스템 프롬프트 가이드
 
-todo 도구 추가 시, 시스템 프롬프트에 사용 가이드 주입 (`oxi-cli/src/prompt/system_prompt.rs`):
+todo 도구 추가 시, 시스템 프롬프트에 사용 가이드 주입 (`oxicode-cli/src/prompt/system_prompt.rs`):
 
 ```markdown
 ## Task Management
@@ -630,7 +630,7 @@ Do NOT create todos for trivial single-step requests.
 
 ### `/todo` 명령 그룹
 
-`oxi-cli/src/tui/slash/builtin/todo.rs` (신규):
+`oxicode-cli/src/tui/slash/builtin/todo.rs` (신규):
 
 | 서브명령 | 동작 |
 |---|---|
@@ -650,7 +650,7 @@ Do NOT create todos for trivial single-step requests.
 | `TodoState` 소유권 (AgentSession vs ToolRegistry) | 🟢 결정됨 | `AgentSession`이 `Arc<TodoState>` 소유, `TodoTool`은 참조. 세션 스코프 보장 |
 | 동시성 (여러 도구가 동시에 todo 변경) | 🟢 해결됨 | `parking_lot::RwLock`으로 직렬화. 가드는 `.await` 전 drop |
 | 세션 영속 포맷 (JSONL 내 vs 별도 파일) | 🟢 결정됨 | JSONL 내 append (omp 방식) |
-| `abandoned` 상태 표시 (취소선 vs 별도 아이콘) | 🟡 미결정 | omp는 취소선. oxi는 `✗` 아이콘 제안 |
+| `abandoned` 상태 표시 (취소선 vs 별도 아이콘) | 🟡 미결정 | omp는 취소선. oxicode는 `✗` 아이콘 제안 |
 | todo 사용 강제 여부 | 🟢 결정됨 | 권장만. AGENTS.md "multi-step plan" 규칙만 의무화 |
 | `notes` 필드 (HUD 노트) | 🔴 후순위 | omp의 todo notes 기능. N1 이후 별도 검토 |
 | `user_todo_edit` 커스텀 이벤트 | 🟢 결정됨 | `/todo edit` 시 `AgentEvent::TodoUpdate`로 동일 이벤트 사용 |
@@ -733,17 +733,17 @@ mod tests {
 
 ---
 
-## 10. 부록: omp → oxi 매핑
+## 10. 부록: omp → oxicode 매핑
 
-| omp 파일 | oxi 위치 |
+| omp 파일 | oxicode 위치 |
 |---|---|
-| `tools/todo.ts` (938줄) | `oxi-agent/src/tools/todo.rs` |
-| `tools/todo.ts` (TodoItem/TodoPhase 타입) | `oxi-agent/src/tools/todo.rs` (동일 타입) |
-| `tools/todo.ts` (applyEntry/normalizeInProgress) | `oxi-agent/src/tools/todo.rs` (apply_entry/normalize_in_progress) |
-| `tools/todo.ts` (phasesToMarkdown/markdownToPhases) | `oxi-agent/src/tools/todo.rs` (phases_to_markdown/markdown_to_phases) |
-| `tools/todo.ts` (todoToolRenderer) | `oxi-tui/src/widgets/todo_panel.rs` (⑥ 참조) |
-| `tools/todo.ts` (selectStickyTodoWindow) | `oxi-tui/src/widgets/todo_panel.rs` (⑥ 참조) |
-| `modes/components/todo-reminder.ts` | `oxi-cli/src/tui/overlay/todo_reminder.rs` (후순위) |
-| `modes/controllers/todo-command-controller.ts` | `oxi-cli/src/tui/slash/builtin/todo.rs` |
-| `slash-commands/helpers/todo.ts` | `oxi-cli/src/tui/slash/builtin/todo.rs` (통합) |
-| `session/agent-session.ts` (getTodoPhases/setTodoPhases) | `oxi-cli/src/app/agent_session.rs` |
+| `tools/todo.ts` (938줄) | `oxicode-agent/src/tools/todo.rs` |
+| `tools/todo.ts` (TodoItem/TodoPhase 타입) | `oxicode-agent/src/tools/todo.rs` (동일 타입) |
+| `tools/todo.ts` (applyEntry/normalizeInProgress) | `oxicode-agent/src/tools/todo.rs` (apply_entry/normalize_in_progress) |
+| `tools/todo.ts` (phasesToMarkdown/markdownToPhases) | `oxicode-agent/src/tools/todo.rs` (phases_to_markdown/markdown_to_phases) |
+| `tools/todo.ts` (todoToolRenderer) | `oxicode-tui/src/widgets/todo_panel.rs` (⑥ 참조) |
+| `tools/todo.ts` (selectStickyTodoWindow) | `oxicode-tui/src/widgets/todo_panel.rs` (⑥ 참조) |
+| `modes/components/todo-reminder.ts` | `oxicode-cli/src/tui/overlay/todo_reminder.rs` (후순위) |
+| `modes/controllers/todo-command-controller.ts` | `oxicode-cli/src/tui/slash/builtin/todo.rs` |
+| `slash-commands/helpers/todo.ts` | `oxicode-cli/src/tui/slash/builtin/todo.rs` (통합) |
+| `session/agent-session.ts` (getTodoPhases/setTodoPhases) | `oxicode-cli/src/app/agent_session.rs` |

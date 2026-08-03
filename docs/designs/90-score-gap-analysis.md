@@ -1,4 +1,4 @@
-# oxi 90점 달성 — 누락된 작업 분석
+# oxicode 90점 달성 — 누락된 작업 분석
 
 > **작성일**: 2026-05-06
 > **전제**: production-readiness-upgrade-design.md + upgrade-to-v0.6.md 모두 완료 후
@@ -12,25 +12,25 @@
 
 ---
 
-## GAP 1: oxi-cli 분해 (아키텍처 +3점)
+## GAP 1: oxicode-cli 분해 (아키텍처 +3점)
 
-**현재**: oxi-cli 48,224줄, 70개 파일 — 단일 크레이트가 너무 큼
+**현재**: oxicode-cli 48,224줄, 70개 파일 — 단일 크레이트가 너무 큼
 **목표**: 3개 크레이트로 분리
 
 ```
-oxi-cli (48K줄) → 분해
-├── oxi-cli        (~15K줄)  메인 진입점, CLI 파싱, 설정
-├── oxi-session    (~12K줄)  세션 관리, JSONL, 분기, 내보내기
-└── oxi-ext        (~8K줄)   확장 시스템, 패키지 매니저, 리소스 로더
+oxicode-cli (48K줄) → 분해
+├── oxicode-cli        (~15K줄)  메인 진입점, CLI 파싱, 설정
+├── oxicode-session    (~12K줄)  세션 관리, JSONL, 분기, 내보내기
+└── oxicode-ext        (~8K줄)   확장 시스템, 패키지 매니저, 리소스 로더
 ```
 
 ### 분해 기준
 
 | 새 크레이트 | 이동할 파일 | 의존성 |
 |------------|-----------|--------|
-| `oxi-session` | session.rs, session_navigation.rs, export.rs, branch_summarization.rs, auto_compaction.rs, compaction_utils.rs | oxi-ai |
-| `oxi-ext` | extensions/*, packages.rs, resource_loader.rs, resource_loader_compat.rs | oxi-agent |
-| `oxi-cli` | main.rs, lib.rs, settings.rs, keybindings.rs, theme.rs, auth_storage.rs, agent_session*.rs, rpc_mode.rs, model_registry.rs, model_resolver.rs, error_recovery.rs, templates.rs, footer_data.rs, skills/*, tui/* | oxi-session, oxi-ext |
+| `oxicode-session` | session.rs, session_navigation.rs, export.rs, branch_summarization.rs, auto_compaction.rs, compaction_utils.rs | oxicode-ai |
+| `oxicode-ext` | extensions/*, packages.rs, resource_loader.rs, resource_loader_compat.rs | oxicode-agent |
+| `oxicode-cli` | main.rs, lib.rs, settings.rs, keybindings.rs, theme.rs, auth_storage.rs, agent_session*.rs, rpc_mode.rs, model_registry.rs, model_resolver.rs, error_recovery.rs, templates.rs, footer_data.rs, skills/*, tui/* | oxicode-session, oxicode-ext |
 
 ### 워크스페이스 변경
 
@@ -38,12 +38,12 @@ oxi-cli (48K줄) → 분해
 [workspace]
 resolver = "2"
 members = [
-    "oxi-ai",
-    "oxi-agent",
-    "oxi-tui",
-    "oxi-session",   # NEW
-    "oxi-ext",       # NEW
-    "oxi-cli",
+    "oxicode-ai",
+    "oxicode-agent",
+    "oxicode-tui",
+    "oxicode-session",   # NEW
+    "oxicode-ext",       # NEW
+    "oxicode-cli",
 ]
 ```
 
@@ -57,7 +57,7 @@ members = [
 **목표**: Agent = thin wrapper over AgentLoop
 
 ```rust
-// oxi-agent/src/agent.rs (710줄 → ~120줄)
+// oxicode-agent/src/agent.rs (710줄 → ~120줄)
 
 /// Agent는 AgentLoop의 편의 래퍼.
 /// mpsc 채널 기반 인터페이스를 제공한다.
@@ -269,7 +269,7 @@ trait ErrorHooks {
   │
   │  ── 여기까지가 기존 두 설계의 한계 (~85) ──
   │
-  ├── GAP 1: oxi-cli 분해 (3일) → 86점
+  ├── GAP 1: oxicode-cli 분해 (3일) → 86점
   ├── GAP 2: Agent 통합 (2일) → 87점
   ├── GAP 3: unwrap 전면 제거 (6일) → 88점
   ├── GAP 4: 실증 안정성 (4일) → 89점

@@ -1,20 +1,20 @@
-# Session B: oxi-cli 렌더링 마이그레이션 (전체)
+# Session B: oxicode-cli 렌더링 마이그레이션 (전체)
 
 > **독립 세션용 문서.** 이 문서만 읽고 작업할 수 있도록 작성됨.
-> **수정 파일**: `oxi-cli/src/tui/`, `oxi-cli/Cargo.toml`, workspace `Cargo.toml`
-> **금지 파일**: `oxi-tui/src/` (Session A가 작업 중), `oxi-tui/tests/`, `oxi-tui/benches/`
+> **수정 파일**: `oxicode-cli/src/tui/`, `oxicode-cli/Cargo.toml`, workspace `Cargo.toml`
+> **금지 파일**: `oxicode-tui/src/` (Session A가 작업 중), `oxicode-tui/tests/`, `oxicode-tui/benches/`
 
 ## 전제 상태
 
-브랜치 `oxi-tui-v2-plan-a` (44+ commits).
+브랜치 `oxicode-tui-v2-plan-a` (44+ commits).
 
 ### 현재 아키텍처
 
 ```
-oxi-cli main loop
+oxicode-cli main loop
     ↓
 draw_frame_closure(term, cursor, focus, theme, caps, |ctx| {
-    if OXI_V2_RENDER=1 {
+    if OXICODE_V2_RENDER=1 {
         v2_render::draw_v2(ctx, state)   ← 새 ChatView 렌더링 (채팅 영역만)
     } else {
         ctx.with_frame(|frame| render::draw(frame, state, theme))  ← legacy 전체
@@ -27,21 +27,21 @@ draw_frame_closure(term, cursor, focus, theme, caps, |ctx| {
 ### v2 라이브러리에서 사용 가능한 위젯
 
 ```rust
-oxi_tui::widget::chat::ChatView         // 채팅 (이미 v2_render에서 사용 중)
-oxi_tui::widget::panel::Footer          // 상태 바 (model, tokens, cost, spinner)
-oxi_tui::widget::panel::Sticky          // 상단/하단 고정 패널
-oxi_tui::widget::panel::Overlay         // 모달 컨테이너
-oxi_tui::input::InputArea               // 텍스트 입력 (stock ratatui-textarea)
-oxi_tui::widget::primitive::{Border, List, Scrollbar, Text}
+oxicode_tui::widget::chat::ChatView         // 채팅 (이미 v2_render에서 사용 중)
+oxicode_tui::widget::panel::Footer          // 상태 바 (model, tokens, cost, spinner)
+oxicode_tui::widget::panel::Sticky          // 상단/하단 고정 패널
+oxicode_tui::widget::panel::Overlay         // 모달 컨테이너
+oxicode_tui::input::InputArea               // 텍스트 입력 (stock ratatui-textarea)
+oxicode_tui::widget::primitive::{Border, List, Scrollbar, Text}
 ```
 
 ### AppState의 v2 필드 (이미 존재)
 
 ```rust
-// oxi-cli/src/tui/app.rs
-pub v2_chat: oxi_tui::content::ChatLog,              // dual-write 대상
-pub v2_chat_view: oxi_tui::widget::chat::ChatView,   // ChatView 위젯
-pub cursor_state: oxi_tui::pipeline::CursorState,    // 커서 dedup 상태
+// oxicode-cli/src/tui/app.rs
+pub v2_chat: oxicode_tui::content::ChatLog,              // dual-write 대상
+pub v2_chat_view: oxicode_tui::widget::chat::ChatView,   // ChatView 위젯
+pub cursor_state: oxicode_tui::pipeline::CursorState,    // 커서 dedup 상태
 ```
 
 ---
@@ -54,15 +54,15 @@ pub cursor_state: oxi_tui::pipeline::CursorState,    // 커서 dedup 상태
 
 ### 파일
 
-- `oxi-cli/src/tui/app.rs` — `v2_footer: oxi_tui::widget::panel::Footer` 필드 추가
-- `oxi-cli/src/tui/v2_render.rs` — Footer 렌더링 추가
-- `oxi-cli/src/tui/handlers.rs` — agent 이벤트에서 Footer 데이터 동기화
+- `oxicode-cli/src/tui/app.rs` — `v2_footer: oxicode_tui::widget::panel::Footer` 필드 추가
+- `oxicode-cli/src/tui/v2_render.rs` — Footer 렌더링 추가
+- `oxicode-cli/src/tui/handlers.rs` — agent 이벤트에서 Footer 데이터 동기화
 
 ### 구현
 
 **app.rs**: 필드 추가
 ```rust
-pub v2_footer: oxi_tui::widget::panel::Footer,
+pub v2_footer: oxicode_tui::widget::panel::Footer,
 // 초기화: v2_footer: Footer::new(),
 ```
 
@@ -116,14 +116,14 @@ pub fn draw_v2(ctx: &mut RenderCtx, state: &mut AppState) {
 
 ### 파일
 
-- `oxi-cli/src/tui/app.rs` — `v2_input: oxi_tui::input::InputArea` 필드 추가
-- `oxi-cli/src/tui/v2_render.rs` — InputArea 렌더링 + 커서 브로커
+- `oxicode-cli/src/tui/app.rs` — `v2_input: oxicode_tui::input::InputArea` 필드 추가
+- `oxicode-cli/src/tui/v2_render.rs` — InputArea 렌더링 + 커서 브로커
 
 ### 구현
 
 **app.rs**:
 ```rust
-pub v2_input: oxi_tui::input::InputArea,
+pub v2_input: oxicode_tui::input::InputArea,
 // 초기화: v2_input: InputArea::new(),
 ```
 
@@ -147,7 +147,7 @@ InputArea::render가 `ctx.set_cursor(Position { x, y })`를 호출하면:
 3. `CursorState::reconcile(Some(pos), term)` → `show_cursor + set_cursor_position` emit
 4. ★ 커서가 화면에 보임 + 깜빡임 보존 (같은 위치면 0 bytes)
 
-InputArea의 render 구현에서 (oxi-tui/src/input/textarea.rs):
+InputArea의 render 구현에서 (oxicode-tui/src/input/textarea.rs):
 ```rust
 fn render(&mut self, area: Rect, ctx: &mut RenderCtx) {
     // ... textarea를 buffer에 그림 ...
@@ -160,7 +160,7 @@ fn render(&mut self, area: Rect, ctx: &mut RenderCtx) {
 }
 ```
 
-이것이 `OXI_V2_RENDER=1`일 때 커서가 보이게 만드는 핵심 수정.
+이것이 `OXICODE_V2_RENDER=1`일 때 커서가 보이게 만드는 핵심 수정.
 
 ---
 
@@ -172,11 +172,11 @@ fn render(&mut self, area: Rect, ctx: &mut RenderCtx) {
 
 ### 파일
 
-- `oxi-cli/src/tui/v2_render.rs` — overlay 렌더링 추가
+- `oxicode-cli/src/tui/v2_render.rs` — overlay 렌더링 추가
 
 ### 현재 상태
 
-`LegacyOverlayAdapter`는 이미 `oxi-cli/src/tui/v2_overlay_adapter.rs`에 구현되어 있음. `Renderable`을 구현하며, 내부적으로 `ctx.with_frame(|frame| overlay.render(frame, area, theme))`을 호출.
+`LegacyOverlayAdapter`는 이미 `oxicode-cli/src/tui/v2_overlay_adapter.rs`에 구현되어 있음. `Renderable`을 구현하며, 내부적으로 `ctx.with_frame(|frame| overlay.render(frame, area, theme))`을 호출.
 
 ### 구현
 
@@ -196,9 +196,9 @@ pub fn draw_v2(ctx: &mut RenderCtx, state: &mut AppState) {
 
 ### 주의
 
-- overlay의 theme 타입이 legacy `oxi_tui_legacy::Theme` → v2 `oxi_tui::theme::Theme` 변환 필요
+- overlay의 theme 타입이 legacy `oxicode_tui_legacy::Theme` → v2 `oxicode_tui::theme::Theme` 변환 필요
 - `LegacyOverlayAdapter::content_hash`가 매 프레임 다른 값을 반환하므로 항상 재렌더링됨 (overlay는 volatile하므로 OK)
-- 18개 overlay 각각에 대해 렌더링이 정상 동작하는지 `OXI_V2_RENDER=1` 상태에서 시각 확인 필요
+- 18개 overlay 각각에 대해 렌더링이 정상 동작하는지 `OXICODE_V2_RENDER=1` 상태에서 시각 확인 필요
 
 ---
 
@@ -208,17 +208,17 @@ pub fn draw_v2(ctx: &mut RenderCtx, state: &mut AppState) {
 
 ### 목표
 
-`OXI_V2_RENDER` 환경변수 체크를 제거하고 v2를 기본 렌더링 경로로 설정.
+`OXICODE_V2_RENDER` 환경변수 체크를 제거하고 v2를 기본 렌더링 경로로 설정.
 
 ### 파일
 
-- `oxi-cli/src/tui/app.rs` — 환경변수 체크 제거
+- `oxicode-cli/src/tui/app.rs` — 환경변수 체크 제거
 
 ### 구현
 
 ```rust
 // BEFORE:
-let use_v2_render = std::env::var("OXI_V2_RENDER").as_deref() == Ok("1");
+let use_v2_render = std::env::var("OXICODE_V2_RENDER").as_deref() == Ok("1");
 |ctx| {
     if use_v2_render { v2_render::draw_v2(ctx, state) }
     else { ctx.with_frame(|f| render::draw(f, state, &theme)) }
@@ -233,42 +233,42 @@ let use_v2_render = std::env::var("OXI_V2_RENDER").as_deref() == Ok("1");
 ### 주의
 
 - 작업 1-3이 모두 완료되지 않으면 footer/input/overlay가 안 보임
-- `cargo run --bin oxi`로 직접 실행하여 시각 확인 필수
-- 문제 발생 시 `OXI_V2_RENDER=0` 환경변수로 legacy 폴백 유지 (안전망)
+- `cargo run --bin oxicode`로 직접 실행하여 시각 확인 필수
+- 문제 발생 시 `OXICODE_V2_RENDER=0` 환경변수로 legacy 폴백 유지 (안전망)
 
 ---
 
-## 작업 5: oxi-tui-legacy 제거 (Plan D)
+## 작업 5: oxicode-tui-legacy 제거 (Plan D)
 
 ### 전제 조건: 작업 4 완료 (v2 기본 활성화)
 
 ### 목표
 
-workspace에서 `oxi-tui-legacy` 크레이트 제거.
+workspace에서 `oxicode-tui-legacy` 크레이트 제거.
 
 ### 파일
 
-- workspace `Cargo.toml` — members에서 `oxi-tui-legacy` 제거
-- `oxi-cli/Cargo.toml` — `oxi-tui-legacy` 의존성 제거
-- `oxi-cli/src/` — 모든 `oxi_tui_legacy::` 참조 제거 또는 `oxi_tui::`로 교체
-- `oxi-tui-legacy/` 디렉토리 — 삭제
+- workspace `Cargo.toml` — members에서 `oxicode-tui-legacy` 제거
+- `oxicode-cli/Cargo.toml` — `oxicode-tui-legacy` 의존성 제거
+- `oxicode-cli/src/` — 모든 `oxicode_tui_legacy::` 참조 제거 또는 `oxicode_tui::`로 교체
+- `oxicode-tui-legacy/` 디렉토리 — 삭제
 
 ### 순서
 
-1. `grep -rn 'oxi_tui_legacy' --include='*.rs' oxi-cli/src/ | wc -l` — 남은 참조 카운트
-2. 각 참조를 `oxi_tui::` 또는 로컬 타입으로 교체
-3. `oxi-cli/Cargo.toml`에서 legacy 의존성 제거
+1. `grep -rn 'oxicode_tui_legacy' --include='*.rs' oxicode-cli/src/ | wc -l` — 남은 참조 카운트
+2. 각 참조를 `oxicode_tui::` 또는 로컬 타입으로 교체
+3. `oxicode-cli/Cargo.toml`에서 legacy 의존성 제거
 4. workspace `Cargo.toml`에서 members 제거
-5. `rm -rf oxi-tui-legacy/`
+5. `rm -rf oxicode-tui-legacy/`
 6. `cargo check --workspace` 통과 확인
 7. `cargo nextest run --workspace` 통과 확인
 
 ### 주의
 
 - 이 작업은 가장 파괴적 — 신중하게 진행
-- 각 파일을 하나씩 마이그레이션하면서 `cargo check -p oxi-cli`로 확인
-- legacy 타입(`oxi_tui_legacy::Theme`, `oxi_tui_legacy::widgets::*`)을 v2 타입으로 교체해야 함
-- 일부 legacy 타입에 대응하는 v2 타입이 없을 수 있음 → 필요시 v2에 추가하거나 oxi-cli 내부에 로컬 타입 정의
+- 각 파일을 하나씩 마이그레이션하면서 `cargo check -p oxicode-cli`로 확인
+- legacy 타입(`oxicode_tui_legacy::Theme`, `oxicode_tui_legacy::widgets::*`)을 v2 타입으로 교체해야 함
+- 일부 legacy 타입에 대응하는 v2 타입이 없을 수 있음 → 필요시 v2에 추가하거나 oxicode-cli 내부에 로컬 타입 정의
 
 ---
 
@@ -278,7 +278,7 @@ workspace에서 `oxi-tui-legacy` 크레이트 제거.
 작업 1 (Footer) → 작업 2 (Input + 커서) → 작업 3 (Overlay) → 작업 4 (기본 활성화) → 작업 5 (legacy 제거)
 ```
 
-각 작업 후 `cargo run --bin oxi`로 시각 확인. 문제 시 `OXI_V2_RENDER=0`으로 폴백.
+각 작업 후 `cargo run --bin oxicode`로 시각 확인. 문제 시 `OXICODE_V2_RENDER=0`으로 폴백.
 
 ## 체크리스트
 
@@ -286,5 +286,5 @@ workspace에서 `oxi-tui-legacy` 크레이트 제거.
 - [ ] 작업 2: Input v2 마이그레이션 + ★ 커서 브로커
 - [ ] 작업 3: Overlay LegacyOverlayAdapter (18개)
 - [ ] 작업 4: v2_render 기본 활성화
-- [ ] 작업 5: oxi-tui-legacy 제거 (Plan D)
+- [ ] 작업 5: oxicode-tui-legacy 제거 (Plan D)
 - [ ] 최종: `cargo nextest run --workspace` + `cargo clippy --workspace -- -D warnings` + `cargo fmt --all -- --check`

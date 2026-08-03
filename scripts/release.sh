@@ -7,7 +7,7 @@ VERSION_TYPE="${1:-patch}"
 cargo install cargo-workspaces --locked 2>/dev/null || true
 cargo ws version "$VERSION_TYPE" --no-git-commit || {
   # Fallback: manual version bump
-  CURRENT=$(grep '^version' oxi-cli/Cargo.toml | head -1 | cut -d'"' -f2)
+  CURRENT=$(grep '^version' oxicode-cli/Cargo.toml | head -1 | cut -d'"' -f2)
   IFS='.' read -r major minor patch <<< "$CURRENT"
   case "$VERSION_TYPE" in
     major) NEW_VERSION="$((major+1)).0.0" ;;
@@ -15,11 +15,11 @@ cargo ws version "$VERSION_TYPE" --no-git-commit || {
     *) NEW_VERSION="${major}.${minor}.$((patch+1))" ;;
   esac
   echo "Would bump version: $CURRENT -> $NEW_VERSION"
-  echo "Run manually: sed -i 's/version = \"$CURRENT\"/version = \"$NEW_VERSION\"/' Cargo.toml oxi-*/Cargo.toml"
+  echo "Run manually: sed -i 's/version = \"$CURRENT\"/version = \"$NEW_VERSION\"/' Cargo.toml oxicode-*/Cargo.toml"
   exit 1
 }
 
-NEW_VERSION=$(grep '^version' oxi-cli/Cargo.toml | head -1 | cut -d'"' -f2)
+NEW_VERSION=$(grep '^version' oxicode-cli/Cargo.toml | head -1 | cut -d'"' -f2)
 echo "New version: $NEW_VERSION"
 
 cargo generate-lockfile

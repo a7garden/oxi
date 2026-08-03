@@ -37,7 +37,7 @@ Context (messages)
 ### 2.1 VisionSignal 추가
 
 ```rust
-// oxi-ai/src/router/signals.rs
+// oxicode-ai/src/router/signals.rs
 
 /// Signals derived from multimodal content in the conversation.
 #[derive(Debug, Clone, Default)]
@@ -101,7 +101,7 @@ impl VisionSignal {
 ### 2.2 ScoringWeights 확장
 
 ```rust
-// oxi-ai/src/router/types.rs
+// oxicode-ai/src/router/types.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringWeights {
@@ -122,7 +122,7 @@ fn default_vision() -> f64 { 0.10 }
 ### 2.3 scoring에 VisionSignal 통합
 
 ```rust
-// oxi-ai/src/router/scoring.rs
+// oxicode-ai/src/router/scoring.rs
 
 pub fn compute_score(
     structural: &StructuralSignal,
@@ -187,7 +187,7 @@ impl VisionSignal {
 비전을 지원하는 모델로 강제 전환**.
 
 ```rust
-// oxi-ai/src/router/mod.rs — RouterProvider::stream() 내부
+// oxicode-ai/src/router/mod.rs — RouterProvider::stream() 내부
 
 // 2. Vision signal 추출
 let vision = VisionSignal::extract(&context.messages, 10);
@@ -321,7 +321,7 @@ impl RouterPipeline {
 ### 2.7 RoutingDecision에 vision 정보 추가
 
 ```rust
-// oxi-ai/src/router/types.rs
+// oxicode-ai/src/router/types.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingDecision {
@@ -415,7 +415,7 @@ low.model = "google/gemini-2.0-flash"          # vision ✅
 이미 `Model.supports_vision()`이 구현되어 있음:
 
 ```rust
-// oxi-ai/src/types.rs
+// oxicode-ai/src/types.rs
 impl Model {
     pub fn supports_vision(&self) -> bool {
         self.input.contains(&InputModality::Image)
@@ -430,13 +430,13 @@ vision 지원 여부가 이미 정의되어 있으므로 추가 작업 불필요
 
 | 파일 | 변경 | 설명 |
 |------|------|------|
-| `oxi-ai/src/router/signals.rs` | **수정** | `VisionSignal` 추가 |
-| `oxi-ai/src/router/scoring.rs` | **수정** | `compute_score()`에 vision 파라미터 추가 |
-| `oxi-ai/src/router/types.rs` | **수정** | `ScoringWeights.vision` 추가, `RoutingDecision`에 vision 필드 |
-| `oxi-ai/src/router/mod.rs` | **수정** | `RouterPipeline::route_with_vision()`, `ensure_vision_model()` |
-| `oxi-store/src/router_config.rs` | **수정** | `ScoringWeights.vision` 필드 파싱 |
-| `oxi-ai/src/router/profiles.rs` | 변경 없음 | |
-| `oxi-ai/src/router/classifier.rs` | 변경 없음 | |
+| `oxicode-ai/src/router/signals.rs` | **수정** | `VisionSignal` 추가 |
+| `oxicode-ai/src/router/scoring.rs` | **수정** | `compute_score()`에 vision 파라미터 추가 |
+| `oxicode-ai/src/router/types.rs` | **수정** | `ScoringWeights.vision` 추가, `RoutingDecision`에 vision 필드 |
+| `oxicode-ai/src/router/mod.rs` | **수정** | `RouterPipeline::route_with_vision()`, `ensure_vision_model()` |
+| `oxicode-store/src/router_config.rs` | **수정** | `ScoringWeights.vision` 필드 파싱 |
+| `oxicode-ai/src/router/profiles.rs` | 변경 없음 | |
+| `oxicode-ai/src/router/classifier.rs` | 변경 없음 | |
 
 ## 7. 호환성
 
@@ -459,7 +459,7 @@ vision 신호가 없으면 normalize에서 0점이 되므로 기존 동작과 �
 ## 8. 테스트 계획
 
 ```
-oxi-ai/src/router/signals.rs
+oxicode-ai/src/router/signals.rs
 ├── test_vision_signal_no_images
 ├── test_vision_signal_user_image
 ├── test_vision_signal_tool_result_image
@@ -468,18 +468,18 @@ oxi-ai/src/router/signals.rs
 ├── test_vision_signal_normalized_single_image
 └── test_vision_signal_normalized_multiple_images
 
-oxi-ai/src/router/scoring.rs
+oxicode-ai/src/router/scoring.rs
 ├── test_compute_score_with_vision_zero (기존 동작과 동일)
 ├── test_compute_score_with_vision_present (score 상향)
 └── test_compute_score_vision_weights_zero (vision=0.0이면 영향 없음)
 
-oxi-ai/src/router/mod.rs
+oxicode-ai/src/router/mod.rs
 ├── test_ensure_vision_model_already_supports
 ├── test_ensure_vision_model_fallback_used
 ├── test_ensure_vision_model_tier_upgrade
 └── test_ensure_vision_model_no_vision_model_warns
 
-oxi-store/src/router_config.rs
+oxicode-store/src/router_config.rs
 └── test_parse_weights_with_vision_field
 ```
 

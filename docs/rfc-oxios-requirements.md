@@ -1,7 +1,7 @@
-# RFC: oxi-sdk 단일 의존 + Agent OS 브라우저 요구사항
+# RFC: oxicode-sdk 단일 의존 + Agent OS 브라우저 요구사항
 
 > **From**: oxios (Agent OS)
-> **To**: oxi-sdk / oxi-agent / oxibrowser-core
+> **To**: oxicode-sdk / oxicode-agent / oxibrowser-core
 
 ---
 
@@ -9,31 +9,31 @@
 
 ### 원칙
 
-oxios는 **`oxi-sdk`만을 유일한 oxi 의존성**으로 가져야 한다. `oxi-ai`, `oxi-agent`, `oxibrowser-core`는 모두 SDK를 통해서만 접근.
+oxios는 **`oxicode-sdk`만을 유일한 oxicode 의존성**으로 가져야 한다. `oxicode-ai`, `oxicode-agent`, `oxibrowser-core`는 모두 SDK를 통해서만 접근.
 
 ```
 # 목표
-oxios → oxi-sdk    ← 끝
+oxios → oxicode-sdk    ← 끝
 
 # 현재 (제거해야 할 것)
-oxios → oxi-sdk
-      → oxi-ai          ← 제거
+oxios → oxicode-sdk
+      → oxicode-ai          ← 제거
       → oxibrowser-core ← 제거
 ```
 
 ### 요청 1: Provider 구현체 re-export
 
-`oxi-ai`의 concrete provider 타입을 SDK에서 re-export.
+`oxicode-ai`의 concrete provider 타입을 SDK에서 re-export.
 
 ```rust
-// oxi-sdk/src/lib.rs 에 추가:
-pub use oxi_ai::providers::{
+// oxicode-sdk/src/lib.rs 에 추가:
+pub use oxicode_ai::providers::{
     AnthropicProvider, OpenAiProvider, GoogleProvider, DeepSeekProvider,
     MistralProvider, VertexProvider, BedrockProvider, AzureProvider,
 };
 ```
 
-**이유**: `oxios-ouroboros` 테스트에서 `oxi_ai::OpenAiProvider::with_base_url_and_key()` 직접 사용. `oxi-ai` 의존 없이 `oxi_sdk::OpenAiProvider`로 교체해야 함.
+**이유**: `oxios-ouroboros` 테스트에서 `oxicode_ai::OpenAiProvider::with_base_url_and_key()` 직접 사용. `oxicode-ai` 의존 없이 `oxicode_sdk::OpenAiProvider`로 교체해야 함.
 
 ---
 
@@ -211,14 +211,14 @@ impl<'a> AgentBuilder<'a> {
 
 | # | 요청 | 중요도 | 범위 |
 |---|------|--------|------|
-| 1 | Provider 구현체 re-export | **필수** | oxi-sdk |
-| 2 | `BrowseSessionTool` 구현 | **필수** | oxi-agent |
-| 3 | `BrowserTab` trait 확장 (back/forward/reload/select/check/uncheck) | **필수** | oxi-agent, oxibrowser-core |
-| 4 | `BrowserError::NoActiveSession` | **필수** | oxi-agent |
-| 5 | `BrowseConfig` 확장 (user_agent, obey_robots, js_timeout_ms) | 권장 | oxi-agent |
-| 6 | `AgentBuilder` 편의 메서드 | 권장 | oxi-sdk |
+| 1 | Provider 구현체 re-export | **필수** | oxicode-sdk |
+| 2 | `BrowseSessionTool` 구현 | **필수** | oxicode-agent |
+| 3 | `BrowserTab` trait 확장 (back/forward/reload/select/check/uncheck) | **필수** | oxicode-agent, oxibrowser-core |
+| 4 | `BrowserError::NoActiveSession` | **필수** | oxicode-agent |
+| 5 | `BrowseConfig` 확장 (user_agent, obey_robots, js_timeout_ms) | 권장 | oxicode-agent |
+| 6 | `AgentBuilder` 편의 메서드 | 권장 | oxicode-sdk |
 
 필수 항목이 모두 구현되면 oxios에서:
-- `oxi-ai`, `oxibrowser-core` 직접 의존 제거
+- `oxicode-ai`, `oxibrowser-core` 직접 의존 제거
 - `tools/browser/` 제거 → SDK 툴로 교체
 - `BrowserApi` → `Arc<dyn BrowserEngine>` 전환

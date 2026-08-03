@@ -1,8 +1,8 @@
-# oxi-sdk Stability & Ownership Program — Implementation Plan
+# oxicode-sdk Stability & Ownership Program — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the full R0–R8 governance program for oxi-sdk, addressing the oxios P0.2 incident through ownership contracts, stability annotations, composable traits, and robustness hardening.
+**Goal:** Implement the full R0–R8 governance program for oxicode-sdk, addressing the oxios P0.2 incident through ownership contracts, stability annotations, composable traits, and robustness hardening.
 
 **Architecture:** 4 phases — (1) ownership docs + governance + protobuf feature-gate, (2) proc-macro stability annotations, (3) composable traits (CircuitBreaker, SpawnValidator, McpTransport re-export), (4) zero-panic lints + non_exhaustive errors. Phase 1 gates everything.
 
@@ -15,9 +15,9 @@
 - Rust 2024 edition; workspace MSRV 1.96
 - `cargo fmt` before every commit — no exceptions
 - `cargo clippy --workspace --all-targets -- -D warnings` must pass clean
-- `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` must pass
+- `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` must pass
 - `parking_lot::RwLock` not `std::sync::RwLock`; drop guards before `.await`
-- Library crates: typed error enums with `thiserror`; oxi-cli: `anyhow::Result`
+- Library crates: typed error enums with `thiserror`; oxicode-cli: `anyhow::Result`
 - Test code may `allow(clippy::unwrap_used, clippy::field_reassign_with_default)`; shipped code denies
 - Atomic I/O: temp + rename pattern
 - Every `pub` symbol gets exactly one stability tier annotation (Phase 2)
@@ -26,24 +26,24 @@
 
 | File | Responsibility | Phase |
 |---|---|---|
-| `docs/oxi-sdk-ownership.md` (new) | Behavior↔policy ownership contract | 1 |
+| `docs/oxicode-sdk-ownership.md` (new) | Behavior↔policy ownership contract | 1 |
 | `docs/release-process.md` | Governance conventions (Breaking/deprecation/variant/deps) | 1 |
-| `oxi-ai/Cargo.toml` | protobuf feature-gate | 1 |
-| `oxi-ai/build.rs` | Conditional proto compilation | 1 |
-| `oxi-ai/src/providers/{cursor,devin}.rs` | `#[cfg(feature = "protobuf")]` | 1 |
-| `oxi-ai/src/providers/mod.rs` | Conditional module declarations | 1 |
-| `oxi-ai/src/providers/register_builtins.rs` | Conditional provider registration | 1 |
-| `oxi-api-stability/` (new crate) | Stability tier proc-macro attributes | 2 |
-| `oxi-{ai,agent,sdk}/src/lib.rs` | Tier annotations on root re-exports | 2 |
-| `oxi-ai/src/circuit_breaker.rs` (new) | CircuitBreaker trait + DefaultCircuitBreaker | 3 |
-| `oxi-agent/src/agent_loop/config.rs` | `circuit_breaker` field on AgentLoopConfig | 3 |
-| `oxi-agent/src/agent_loop/stream_retry.rs` | Breaker check/record alongside retry | 3 |
-| `oxi-agent/src/mcp/spawn.rs` (new) | SpawnValidator trait + NoopSpawnValidator | 3 |
-| `oxi-agent/src/mcp/mod.rs` | SpawnValidator injection on spawn | 3 |
-| `oxi-sdk/src/lib.rs` | McpTransport/CircuitBreaker re-exports | 3 |
-| `oxi-{ai,agent,sdk}/src/lib.rs` | deny(expect_used, panic, unwrap_used) | 4 |
-| `oxi-sdk/src/error.rs` | `#[non_exhaustive]` on SdkError | 4 |
-| `oxi-ai/src/error.rs` | `#[non_exhaustive]` on ProviderError | 4 |
+| `oxicode-ai/Cargo.toml` | protobuf feature-gate | 1 |
+| `oxicode-ai/build.rs` | Conditional proto compilation | 1 |
+| `oxicode-ai/src/providers/{cursor,devin}.rs` | `#[cfg(feature = "protobuf")]` | 1 |
+| `oxicode-ai/src/providers/mod.rs` | Conditional module declarations | 1 |
+| `oxicode-ai/src/providers/register_builtins.rs` | Conditional provider registration | 1 |
+| `oxicode-api-stability/` (new crate) | Stability tier proc-macro attributes | 2 |
+| `oxicode-{ai,agent,sdk}/src/lib.rs` | Tier annotations on root re-exports | 2 |
+| `oxicode-ai/src/circuit_breaker.rs` (new) | CircuitBreaker trait + DefaultCircuitBreaker | 3 |
+| `oxicode-agent/src/agent_loop/config.rs` | `circuit_breaker` field on AgentLoopConfig | 3 |
+| `oxicode-agent/src/agent_loop/stream_retry.rs` | Breaker check/record alongside retry | 3 |
+| `oxicode-agent/src/mcp/spawn.rs` (new) | SpawnValidator trait + NoopSpawnValidator | 3 |
+| `oxicode-agent/src/mcp/mod.rs` | SpawnValidator injection on spawn | 3 |
+| `oxicode-sdk/src/lib.rs` | McpTransport/CircuitBreaker re-exports | 3 |
+| `oxicode-{ai,agent,sdk}/src/lib.rs` | deny(expect_used, panic, unwrap_used) | 4 |
+| `oxicode-sdk/src/error.rs` | `#[non_exhaustive]` on SdkError | 4 |
+| `oxicode-ai/src/error.rs` | `#[non_exhaustive]` on ProviderError | 4 |
 
 ---
 
@@ -52,14 +52,14 @@
 ### Task 1: Write the ownership contract (R0/R5)
 
 **Files:**
-- Create: `docs/oxi-sdk-ownership.md`
-- Modify: `oxi-sdk/README.md`
+- Create: `docs/oxicode-sdk-ownership.md`
+- Modify: `oxicode-sdk/README.md`
 - Modify: `AGENTS.md` (Port System section)
 
 **Interfaces:**
 - Produces: the canonical ownership table referenced by all subsequent tasks
 
-- [ ] **Step 1: Write `docs/oxi-sdk-ownership.md`**
+- [ ] **Step 1: Write `docs/oxicode-sdk-ownership.md`**
 
 Create the file with the behavior↔policy two-column table from spec §3.1. Include:
 - The principle statement ("SDK owns behavior + reference impl; consumer owns policy")
@@ -68,13 +68,13 @@ Create the file with the behavior↔policy two-column table from spec §3.1. Inc
 - The MemoryStore three-layer documentation (spec §5.3)
 - The `ToolError = String` stability note ("stable by construction — type alias, no variants to break")
 
-- [ ] **Step 2: Link from `oxi-sdk/README.md`**
+- [ ] **Step 2: Link from `oxicode-sdk/README.md`**
 
 Add a top-level section:
 ```markdown
 ## Ownership Contract
 
-See [`docs/oxi-sdk-ownership.md`](../docs/oxi-sdk-ownership.md) for the
+See [`docs/oxicode-sdk-ownership.md`](../docs/oxicode-sdk-ownership.md) for the
 canonical "who owns what" table. The SDK owns behavior (interfaces + reference
 impls); consumers own policy (domain thresholds, validation, tiering).
 ```
@@ -83,7 +83,7 @@ impls); consumers own policy (domain thresholds, validation, tiering).
 
 In the Port System section, add after the port table:
 ```markdown
-> See also [`docs/oxi-sdk-ownership.md`](docs/oxi-sdk-ownership.md) for the
+> See also [`docs/oxicode-sdk-ownership.md`](docs/oxicode-sdk-ownership.md) for the
 > behavior↔policy ownership contract that prevents parallel evolution between
 > the SDK and consumers (oxios).
 ```
@@ -91,7 +91,7 @@ In the Port System section, add after the port table:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/oxi-sdk-ownership.md oxi-sdk/README.md AGENTS.md
+git add docs/oxicode-sdk-ownership.md oxicode-sdk/README.md AGENTS.md
 git commit -m "docs: SDK ownership contract — behavior↔policy split (R0/R5)"
 ```
 
@@ -112,7 +112,7 @@ After the CHANGELOG Update section (step 2), add a subsection:
 Any root-level `pub` symbol removal, signature change, or semantic change MUST
 appear under `## Breaking` in the CHANGELOG with:
 
-1. **Full symbol path** — e.g. `oxi_sdk::ProviderCircuitBreaker`
+1. **Full symbol path** — e.g. `oxicode_sdk::ProviderCircuitBreaker`
 2. **Replacement API or migration path** — what consumers should use instead
 3. **Minimum deprecation window** — how many releases before physical removal
 4. **Known affected consumers** — from GitHub code search
@@ -178,19 +178,19 @@ git commit -m "docs: governance conventions — Breaking/deprecation/variant/dep
 ### Task 3: Feature-gate protobuf providers (R8)
 
 **Files:**
-- Modify: `oxi-ai/Cargo.toml`
-- Modify: `oxi-ai/build.rs`
-- Modify: `oxi-ai/src/providers/mod.rs`
-- Modify: `oxi-ai/src/providers/register_builtins.rs`
-- Test: `cargo build -p oxi-ai` (default features must not pull prost)
+- Modify: `oxicode-ai/Cargo.toml`
+- Modify: `oxicode-ai/build.rs`
+- Modify: `oxicode-ai/src/providers/mod.rs`
+- Modify: `oxicode-ai/src/providers/register_builtins.rs`
+- Test: `cargo build -p oxicode-ai` (default features must not pull prost)
 
 **Interfaces:**
-- Produces: `protobuf` cargo feature on `oxi-ai`
+- Produces: `protobuf` cargo feature on `oxicode-ai`
 - Consumes: existing `cursor.rs`, `devin.rs` provider modules
 
 - [ ] **Step 1: Make prost deps optional in Cargo.toml**
 
-In `oxi-ai/Cargo.toml`, change the prost dependencies to optional:
+In `oxicode-ai/Cargo.toml`, change the prost dependencies to optional:
 
 ```toml
 # Protobuf (Devin, Cursor) — feature-gated
@@ -224,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - [ ] **Step 3: Gate provider modules behind the feature**
 
-In `oxi-ai/src/providers/mod.rs`, wrap the module declarations:
+In `oxicode-ai/src/providers/mod.rs`, wrap the module declarations:
 
 ```rust
 #[cfg(feature = "protobuf")]
@@ -249,30 +249,30 @@ entries.push(BuiltinProvider { /* devin */ });
 - [ ] **Step 5: Verify default build doesn't pull prost**
 
 ```bash
-cargo build -p oxi-ai
-cargo tree -p oxi-ai | grep prost
+cargo build -p oxicode-ai
+cargo tree -p oxicode-ai | grep prost
 # Expected: no output (prost not in dependency tree)
 ```
 
 - [ ] **Step 6: Verify protobuf feature still compiles**
 
 ```bash
-cargo build -p oxi-ai --features protobuf
+cargo build -p oxicode-ai --features protobuf
 # Expected: compiles successfully
 ```
 
 - [ ] **Step 7: Run clippy on both configs**
 
 ```bash
-cargo clippy -p oxi-ai -- -D warnings
-cargo clippy -p oxi-ai --features protobuf -- -D warnings
+cargo clippy -p oxicode-ai -- -D warnings
+cargo clippy -p oxicode-ai --features protobuf -- -D warnings
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add oxi-ai/
-git commit -m "feat(oxi-ai): feature-gate protobuf providers behind 'protobuf' feature (R8)
+git add oxicode-ai/
+git commit -m "feat(oxicode-ai): feature-gate protobuf providers behind 'protobuf' feature (R8)
 
 Default build no longer pulls prost/prost-build/protoc-bin-vendored (~120 crates).
 Consumers using Devin/Cursor providers enable with --features protobuf."
@@ -296,14 +296,14 @@ Add to the 0.61.0 section (or a new retrospective block at top of Unreleased):
 The following symbols were removed in 0.61.0 without adequate warning. This
 entry documents them retroactively per the new Breaking Change Policy.
 
-- `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed (`provider_pool`
+- `oxicode_ai::ProviderPool`, `oxicode_ai::RateLimitPolicy` — removed (`provider_pool`
   module, 203 LOC). No direct replacement; the router pipeline
   (`RouterPipeline`) supersedes multi-provider routing.
-- `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` — removed
+- `oxicode_ai::CircuitBreakerConfig`, `oxicode_ai::ProviderCircuitBreaker` — removed
   (`circuit_breaker` module, 944 LOC). A minimal `CircuitBreaker` trait will be
   re-introduced (see R6).
-- `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
-  `oxi_ai::MultiProviderConfig` — removed (`multi_provider` module, 1283+359
+- `oxicode_ai::MultiProviderBuilder`, `oxicode_ai::RoutingConfig`,
+  `oxicode_ai::MultiProviderConfig` — removed (`multi_provider` module, 1283+359
   LOC). Superseded by `RouterPipeline` + `router://local` provider.
 ```
 
@@ -327,9 +327,9 @@ Add a job to `.github/workflows/ci.yml` (or create `.github/workflows/api-diff.y
           # Compare public API surface between base and HEAD
           BASE_REF="${{ github.base_ref }}"
           if [ -z "$BASE_REF" ]; then exit 0; fi  # skip on non-PR pushes
-          # Build a simple check: if any oxi-sdk/oxi-ai/oxi-agent public item
+          # Build a simple check: if any oxicode-sdk/oxicode-ai/oxicode-agent public item
           # disappears, fail unless CHANGELOG has a ## Breaking entry
-          for crate in oxi-ai oxi-agent oxi-sdk; do
+          for crate in oxicode-ai oxicode-agent oxicode-sdk; do
             cargo public-api diff "$BASE_REF..HEAD" -p "$crate" 2>/dev/null || true
           done
 ```
@@ -350,11 +350,11 @@ git commit -m "ci: cargo-public-api diff gate + retrospective Breaking entry (R1
 
 ## Phase 2 — Stability Annotations
 
-### Task 5: Create `oxi-api-stability` proc-macro crate (R3)
+### Task 5: Create `oxicode-api-stability` proc-macro crate (R3)
 
 **Files:**
-- Create: `oxi-api-stability/Cargo.toml`
-- Create: `oxi-api-stability/src/lib.rs`
+- Create: `oxicode-api-stability/Cargo.toml`
+- Create: `oxicode-api-stability/src/lib.rs`
 - Modify: root `Cargo.toml` (workspace members)
 
 **Interfaces:**
@@ -365,11 +365,11 @@ git commit -m "ci: cargo-public-api diff gate + retrospective Breaking entry (R1
 
 ```toml
 [package]
-name = "oxi-api-stability"
+name = "oxicode-api-stability"
 version.workspace = true
 edition = "2024"
 license = "MIT"
-description = "Stability tier attribute macros for oxi workspace crates"
+description = "Stability tier attribute macros for oxicode workspace crates"
 publish = true
 
 [lib]
@@ -384,7 +384,7 @@ quote = "1"
 Add to root `Cargo.toml` `[workspace] members`:
 ```toml
 members = [
-    "oxi-api-stability",
+    "oxicode-api-stability",
     # ... existing members
 ]
 ```
@@ -392,8 +392,8 @@ members = [
 - [ ] **Step 2: Write the proc-macro library**
 
 ```rust
-// oxi-api-stability/src/lib.rs
-//! Stability tier attribute macros for the oxi workspace.
+// oxicode-api-stability/src/lib.rs
+//! Stability tier attribute macros for the oxicode workspace.
 //!
 //! Provides four attributes that render as colored badges in `cargo doc`:
 //! - `#[stable(since = "0.63.0")]` — green badge, semver-stable
@@ -509,7 +509,7 @@ the native attribute alongside.
 - [ ] **Step 3: Verify it compiles**
 
 ```bash
-cargo build -p oxi-api-stability
+cargo build -p oxicode-api-stability
 ```
 
 - [ ] **Step 4: Write a basic test**
@@ -543,8 +543,8 @@ mod tests {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-api-stability/ Cargo.toml
-git commit -m "feat: oxi-api-stability proc-macro crate — #[stable]/#[unstable]/#[internal] (R3)"
+git add oxicode-api-stability/ Cargo.toml
+git commit -m "feat: oxicode-api-stability proc-macro crate — #[stable]/#[unstable]/#[internal] (R3)"
 ```
 
 ---
@@ -552,42 +552,42 @@ git commit -m "feat: oxi-api-stability proc-macro crate — #[stable]/#[unstable
 ### Task 6: Annotate the public API surface (R3)
 
 **Files:**
-- Modify: `oxi-ai/Cargo.toml`, `oxi-agent/Cargo.toml`, `oxi-sdk/Cargo.toml` (add dep)
-- Modify: `oxi-sdk/src/lib.rs` (annotate root re-exports)
-- Modify: `oxi-ai/src/lib.rs` (annotate key types)
-- Modify: `oxi-agent/src/lib.rs` (annotate key types)
+- Modify: `oxicode-ai/Cargo.toml`, `oxicode-agent/Cargo.toml`, `oxicode-sdk/Cargo.toml` (add dep)
+- Modify: `oxicode-sdk/src/lib.rs` (annotate root re-exports)
+- Modify: `oxicode-ai/src/lib.rs` (annotate key types)
+- Modify: `oxicode-agent/src/lib.rs` (annotate key types)
 
 **Interfaces:**
-- Consumes: `oxi-api-stability` crate from Task 5
+- Consumes: `oxicode-api-stability` crate from Task 5
 - Produces: tier-annotated public API
 
-- [ ] **Step 1: Add oxi-api-stability dependency to all three lib crates**
+- [ ] **Step 1: Add oxicode-api-stability dependency to all three lib crates**
 
 In each `Cargo.toml`:
 ```toml
 [dependencies]
-oxi-api-stability = { path = "../oxi-api-stability" }
+oxicode-api-stability = { path = "../oxicode-api-stability" }
 ```
 
-- [ ] **Step 2: Annotate oxi-sdk root re-exports**
+- [ ] **Step 2: Annotate oxicode-sdk root re-exports**
 
-In `oxi-sdk/src/lib.rs`, add `use oxi_api_stability::*;` and annotate the major
+In `oxicode-sdk/src/lib.rs`, add `use oxicode_api_stability::*;` and annotate the major
 re-export groups. Examples:
 
 ```rust
-use oxi_api_stability::*;
+use oxicode_api_stability::*;
 
 #[stable(since = "0.63.0")]
-pub use oxi_ai::{Provider, ProviderRegistry, Model, Context, Message};
+pub use oxicode_ai::{Provider, ProviderRegistry, Model, Context, Message};
 
 #[stable(since = "0.63.0")]
-pub use oxi_agent::{Agent, AgentConfig, AgentTool, AgentToolResult, ToolRegistry, ToolError};
+pub use oxicode_agent::{Agent, AgentConfig, AgentTool, AgentToolResult, ToolRegistry, ToolError};
 
 #[unstable(feature = "browser")]
-pub use oxi_agent::tools::browse::{BrowseConfig, BrowseTool, BrowserEngine, BrowserError};
+pub use oxicode_agent::tools::browse::{BrowseConfig, BrowseTool, BrowserEngine, BrowserError};
 
 #[unstable(feature = "advisor")]
-pub use oxi_agent::advisor::{AdvisorRuntime, AdviseTool};
+pub use oxicode_agent::advisor::{AdvisorRuntime, AdviseTool};
 
 #[unstable(feature = "workflow-dsl")]
 pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
@@ -595,9 +595,9 @@ pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
 
 Focus on the ~50 root-level re-exports. Use tier guidance from spec §4.1.
 
-- [ ] **Step 3: Annotate oxi-ai key public types**
+- [ ] **Step 3: Annotate oxicode-ai key public types**
 
-In `oxi-ai/src/lib.rs`, annotate the core types:
+In `oxicode-ai/src/lib.rs`, annotate the core types:
 - `Provider` trait → `#[stable]`
 - `ProviderRegistry` → `#[stable]`
 - `Model`, `Context`, `Message`, `ContentBlock` → `#[stable]`
@@ -605,9 +605,9 @@ In `oxi-ai/src/lib.rs`, annotate the core types:
 - `catalog` module → `#[stable]`
 - `dialect` module → `#[unstable(feature = "dialect")]`
 
-- [ ] **Step 4: Annotate oxi-agent key public types**
+- [ ] **Step 4: Annotate oxicode-agent key public types**
 
-In `oxi-agent/src/lib.rs`:
+In `oxicode-agent/src/lib.rs`:
 - `Agent`, `AgentConfig`, `AgentEvent` → `#[stable]`
 - `AgentTool` trait → `#[stable]`
 - `ToolRegistry` → `#[stable]`
@@ -619,7 +619,7 @@ In `oxi-agent/src/lib.rs`:
 
 ```bash
 cargo build --workspace
-cargo doc -p oxi-sdk --no-deps
+cargo doc -p oxicode-sdk --no-deps
 # Check that stability badges render in the generated docs
 ```
 
@@ -632,17 +632,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-ai/ oxi-agent/ oxi-sdk/
+git add oxicode-ai/ oxicode-agent/ oxicode-sdk/
 git commit -m "feat: stability tier annotations on public API surface (R3)"
 ```
 
 ---
 
-### Task 7: Add `unstable` cargo feature to oxi-sdk (R3)
+### Task 7: Add `unstable` cargo feature to oxicode-sdk (R3)
 
 **Files:**
-- Modify: `oxi-sdk/Cargo.toml`
-- Modify: `oxi-sdk/src/lib.rs`
+- Modify: `oxicode-sdk/Cargo.toml`
+- Modify: `oxicode-sdk/src/lib.rs`
 
 - [ ] **Step 1: Add the feature to Cargo.toml**
 
@@ -654,14 +654,14 @@ native-browser = ["dep:oxibrowser-core"]
 
 - [ ] **Step 2: Gate sensitive unstable items behind the feature**
 
-In `oxi-sdk/src/lib.rs`, wrap the most volatile re-exports:
+In `oxicode-sdk/src/lib.rs`, wrap the most volatile re-exports:
 
 ```rust
 /// Unstable API surface — may change or be removed between minor releases.
-/// Enable with `oxi-sdk = { features = ["unstable"] }`.
+/// Enable with `oxicode-sdk = { features = ["unstable"] }`.
 #[cfg(feature = "unstable")]
 pub mod unstable_api {
-    pub use oxi_agent::advisor::*;
+    pub use oxicode_agent::advisor::*;
     pub use crate::workflow_engine::*;
     pub use crate::workflow_dsl::*;
 }
@@ -675,15 +675,15 @@ that requires a deprecation cycle.
 - [ ] **Step 3: Verify**
 
 ```bash
-cargo build -p oxi-sdk                    # default: no unstable_api
-cargo build -p oxi-sdk --features unstable # unstable_api available
+cargo build -p oxicode-sdk                    # default: no unstable_api
+cargo build -p oxicode-sdk --features unstable # unstable_api available
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-sdk/
-git commit -m "feat(oxi-sdk): 'unstable' cargo feature for opt-in API surface (R3)"
+git add oxicode-sdk/
+git commit -m "feat(oxicode-sdk): 'unstable' cargo feature for opt-in API surface (R3)"
 ```
 
 ---
@@ -693,13 +693,13 @@ git commit -m "feat(oxi-sdk): 'unstable' cargo feature for opt-in API surface (R
 ### Task 8: CircuitBreaker trait + DefaultCircuitBreaker + AgentLoopConfig wiring (R6)
 
 **Files:**
-- Create: `oxi-ai/src/circuit_breaker.rs`
-- Modify: `oxi-ai/src/lib.rs` (module declaration + re-export)
-- Modify: `oxi-agent/src/agent_loop/config.rs` (add field)
-- Modify: `oxi-agent/src/agent_loop/config.rs` (Default impl)
-- Modify: `oxi-agent/src/stream_retry.rs` (wire check/record)
-- Modify: `oxi-sdk/src/lib.rs` (re-export)
-- Test: `oxi-ai/src/circuit_breaker.rs` (unit tests)
+- Create: `oxicode-ai/src/circuit_breaker.rs`
+- Modify: `oxicode-ai/src/lib.rs` (module declaration + re-export)
+- Modify: `oxicode-agent/src/agent_loop/config.rs` (add field)
+- Modify: `oxicode-agent/src/agent_loop/config.rs` (Default impl)
+- Modify: `oxicode-agent/src/stream_retry.rs` (wire check/record)
+- Modify: `oxicode-sdk/src/lib.rs` (re-export)
+- Test: `oxicode-ai/src/circuit_breaker.rs` (unit tests)
 
 **Interfaces:**
 - Produces: `CircuitBreaker` trait, `DefaultCircuitBreaker` struct, `BreakerError` enum
@@ -708,7 +708,7 @@ git commit -m "feat(oxi-sdk): 'unstable' cargo feature for opt-in API surface (R
 - [ ] **Step 1: Write the failing test**
 
 ```rust
-// oxi-ai/src/circuit_breaker.rs (bottom of file)
+// oxicode-ai/src/circuit_breaker.rs (bottom of file)
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,19 +758,19 @@ mod tests {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cargo nextest run -p oxi-ai circuit_breaker
+cargo nextest run -p oxicode-ai circuit_breaker
 # Expected: FAIL — module doesn't exist
 ```
 
 - [ ] **Step 3: Implement CircuitBreaker trait + DefaultCircuitBreaker**
 
 ```rust
-// oxi-ai/src/circuit_breaker.rs
+// oxicode-ai/src/circuit_breaker.rs
 //! Circuit-breaker behavior trait + reference implementation.
 //!
 //! SDK owns this trait + [`DefaultCircuitBreaker`]; consumers implement it
 //! for domain-specific traffic classes (A2A, HTTP, LLM calls).
-//! See `docs/oxi-sdk-ownership.md`.
+//! See `docs/oxicode-sdk-ownership.md`.
 
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -882,13 +882,13 @@ impl CircuitBreaker for DefaultCircuitBreaker {
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cargo nextest run -p oxi-ai circuit_breaker
+cargo nextest run -p oxicode-ai circuit_breaker
 # Expected: PASS (all 4 tests)
 ```
 
-- [ ] **Step 5: Add module declaration + re-export in oxi-ai**
+- [ ] **Step 5: Add module declaration + re-export in oxicode-ai**
 
-In `oxi-ai/src/lib.rs`:
+In `oxicode-ai/src/lib.rs`:
 ```rust
 pub mod circuit_breaker;
 pub use circuit_breaker::{BreakerError, CircuitBreaker, DefaultCircuitBreaker};
@@ -896,9 +896,9 @@ pub use circuit_breaker::{BreakerError, CircuitBreaker, DefaultCircuitBreaker};
 
 - [ ] **Step 6: Add `circuit_breaker` field to `AgentLoopConfig`**
 
-In `oxi-agent/src/agent_loop/config.rs`:
+In `oxicode-agent/src/agent_loop/config.rs`:
 ```rust
-use oxi_ai::circuit_breaker::CircuitBreaker;
+use oxicode_ai::circuit_breaker::CircuitBreaker;
 
 pub struct AgentLoopConfig {
     // ... existing fields ...
@@ -914,7 +914,7 @@ In the `Default` impl, add: `circuit_breaker: None,`
 
 - [ ] **Step 7: Wire into the retry logic**
 
-In `oxi-agent/src/agent_loop/stream_retry.rs` (or wherever the provider's
+In `oxicode-agent/src/agent_loop/stream_retry.rs` (or wherever the provider's
 `stream()` is called with retry), add breaker calls:
 
 ```rust
@@ -936,25 +936,25 @@ if let Some(breaker) = &config.circuit_breaker {
 }
 ```
 
-- [ ] **Step 8: Re-export from oxi-sdk**
+- [ ] **Step 8: Re-export from oxicode-sdk**
 
-In `oxi-sdk/src/lib.rs`:
+In `oxicode-sdk/src/lib.rs`:
 ```rust
-pub use oxi_ai::circuit_breaker::{BreakerError, CircuitBreaker, DefaultCircuitBreaker};
+pub use oxicode_ai::circuit_breaker::{BreakerError, CircuitBreaker, DefaultCircuitBreaker};
 ```
 
 - [ ] **Step 9: Verify full workspace builds**
 
 ```bash
 cargo build --workspace
-cargo nextest run -p oxi-ai circuit_breaker
+cargo nextest run -p oxicode-ai circuit_breaker
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add oxi-ai/src/circuit_breaker.rs oxi-ai/src/lib.rs oxi-agent/src/agent_loop/ oxi-sdk/src/lib.rs
+git add oxicode-ai/src/circuit_breaker.rs oxicode-ai/src/lib.rs oxicode-agent/src/agent_loop/ oxicode-sdk/src/lib.rs
 git commit -m "feat: CircuitBreaker trait + DefaultCircuitBreaker + AgentLoopConfig wiring (R6)"
 ```
 
@@ -963,28 +963,28 @@ git commit -m "feat: CircuitBreaker trait + DefaultCircuitBreaker + AgentLoopCon
 ### Task 9: McpTransport re-export + SpawnValidator trait (R6)
 
 **Files:**
-- Modify: `oxi-sdk/src/lib.rs` (re-export existing McpTransport)
-- Create: `oxi-agent/src/mcp/spawn.rs`
-- Modify: `oxi-agent/src/mcp/mod.rs` (add module + inject SpawnValidator)
-- Modify: `oxi-agent/src/lib.rs` (re-export)
+- Modify: `oxicode-sdk/src/lib.rs` (re-export existing McpTransport)
+- Create: `oxicode-agent/src/mcp/spawn.rs`
+- Modify: `oxicode-agent/src/mcp/mod.rs` (add module + inject SpawnValidator)
+- Modify: `oxicode-agent/src/lib.rs` (re-export)
 
 **Interfaces:**
-- Consumes: existing `McpTransport` trait at `oxi-agent/src/mcp/transport/mod.rs:48`
+- Consumes: existing `McpTransport` trait at `oxicode-agent/src/mcp/transport/mod.rs:48`
 - Produces: `SpawnValidator` trait, `NoopSpawnValidator`, re-exported `McpTransport`
 
-- [ ] **Step 1: Add McpTransport re-exports to oxi-sdk**
+- [ ] **Step 1: Add McpTransport re-exports to oxicode-sdk**
 
-In `oxi-sdk/src/lib.rs`, add to the existing MCP re-export block (line 286-291):
+In `oxicode-sdk/src/lib.rs`, add to the existing MCP re-export block (line 286-291):
 
 ```rust
-pub use oxi_agent::mcp::{
+pub use oxicode_agent::mcp::{
     // ... existing exports ...
     // Transport layer (re-export for consumers implementing custom transports)
 };
-pub use oxi_agent::mcp::transport::{McpTransport, InboundHandler};
+pub use oxicode_agent::mcp::transport::{McpTransport, InboundHandler};
 // StdioTransport and StreamableHttpTransport are in transport::{stdio, http}
-pub use oxi_agent::mcp::transport::stdio::StdioTransport;
-pub use oxi_agent::mcp::transport::http::StreamableHttpTransport;
+pub use oxicode_agent::mcp::transport::stdio::StdioTransport;
+pub use oxicode_agent::mcp::transport::http::StreamableHttpTransport;
 ```
 
 Verify the exact paths by reading `transport/mod.rs` — `StdioTransport` is in
@@ -993,11 +993,11 @@ Verify the exact paths by reading `transport/mod.rs` — `StdioTransport` is in
 - [ ] **Step 2: Create SpawnValidator trait**
 
 ```rust
-// oxi-agent/src/mcp/spawn.rs
+// oxicode-agent/src/mcp/spawn.rs
 //! Spawn validation policy hook for MCP servers.
 //!
-//! The SDK owns the trait; consumers (oxi-cli, oxios) own the policy impl.
-//! See `docs/oxi-sdk-ownership.md`.
+//! The SDK owns the trait; consumers (oxicode-cli, oxios) own the policy impl.
+//! See `docs/oxicode-sdk-ownership.md`.
 
 /// Validates MCP server spawn commands and environment.
 ///
@@ -1044,18 +1044,18 @@ if let Some(validator) = &self.spawn_validator {
 ```
 
 The field defaults to `None` (no validation) to preserve existing behavior.
-oxi-cli can register a `DefaultSpawnValidator` later.
+oxicode-cli can register a `DefaultSpawnValidator` later.
 
-- [ ] **Step 5: Re-export SpawnValidator from oxi-sdk**
+- [ ] **Step 5: Re-export SpawnValidator from oxicode-sdk**
 
 ```rust
-pub use oxi_agent::mcp::{NoopSpawnValidator, SpawnValidator};
+pub use oxicode_agent::mcp::{NoopSpawnValidator, SpawnValidator};
 ```
 
 - [ ] **Step 6: Verify MCP tests still pass**
 
 ```bash
-cargo nextest run -p oxi-agent mcp
+cargo nextest run -p oxicode-agent mcp
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
@@ -1063,7 +1063,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-agent/src/mcp/ oxi-sdk/src/lib.rs
+git add oxicode-agent/src/mcp/ oxicode-sdk/src/lib.rs
 git commit -m "feat: McpTransport re-export + SpawnValidator trait (R6)"
 ```
 
@@ -1074,14 +1074,14 @@ git commit -m "feat: McpTransport re-export + SpawnValidator trait (R6)"
 ### Task 10: Promote deny lints + fix 3 unreachable! (R4)
 
 **Files:**
-- Modify: `oxi-ai/src/lib.rs` (promote warn→deny)
-- Modify: `oxi-agent/src/lib.rs` (promote warn→deny)
-- Modify: `oxi-sdk/src/lib.rs` (add deny)
-- Modify: `oxi-agent/src/mcp/mod.rs:437` (fix unreachable!)
-- Modify: `oxi-agent/src/tools/debug_tool.rs:392` (fix unreachable!)
-- Modify: `oxi-agent/src/tools/eval_tool.rs:142` (fix unreachable!)
+- Modify: `oxicode-ai/src/lib.rs` (promote warn→deny)
+- Modify: `oxicode-agent/src/lib.rs` (promote warn→deny)
+- Modify: `oxicode-sdk/src/lib.rs` (add deny)
+- Modify: `oxicode-agent/src/mcp/mod.rs:437` (fix unreachable!)
+- Modify: `oxicode-agent/src/tools/debug_tool.rs:392` (fix unreachable!)
+- Modify: `oxicode-agent/src/tools/eval_tool.rs:142` (fix unreachable!)
 
-- [ ] **Step 1: Promote lint in oxi-ai/src/lib.rs**
+- [ ] **Step 1: Promote lint in oxicode-ai/src/lib.rs**
 
 Replace lines 9-10:
 ```rust
@@ -1101,11 +1101,11 @@ With:
 ))]
 ```
 
-- [ ] **Step 2: Promote lint in oxi-agent/src/lib.rs**
+- [ ] **Step 2: Promote lint in oxicode-agent/src/lib.rs**
 
 Same replacement as Step 1.
 
-- [ ] **Step 3: Add deny lints to oxi-sdk/src/lib.rs**
+- [ ] **Step 3: Add deny lints to oxicode-sdk/src/lib.rs**
 
 After the existing `#![warn(missing_docs)]` (line 13), add:
 ```rust
@@ -1161,7 +1161,7 @@ If the enclosing code uses `?`, the error return may need to be an `Err(...)`.
 
 ```bash
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 ```
 
 - [ ] **Step 8: Run full test suite**
@@ -1173,7 +1173,7 @@ cargo nextest run --workspace
 - [ ] **Step 9: Commit**
 
 ```bash
-git add oxi-ai/src/lib.rs oxi-agent/src/lib.rs oxi-sdk/src/lib.rs oxi-agent/src/mcp/mod.rs oxi-agent/src/tools/debug_tool.rs oxi-agent/src/tools/eval_tool.rs
+git add oxicode-ai/src/lib.rs oxicode-agent/src/lib.rs oxicode-sdk/src/lib.rs oxicode-agent/src/mcp/mod.rs oxicode-agent/src/tools/debug_tool.rs oxicode-agent/src/tools/eval_tool.rs
 git commit -m "fix: promote deny(expect_used,panic,unwrap_used) + fix 3 unreachable! (R4)"
 ```
 
@@ -1182,13 +1182,13 @@ git commit -m "fix: promote deny(expect_used,panic,unwrap_used) + fix 3 unreacha
 ### Task 11: Add `#[non_exhaustive]` to public error types (R7)
 
 **Files:**
-- Modify: `oxi-sdk/src/error.rs`
-- Modify: `oxi-ai/src/error.rs`
+- Modify: `oxicode-sdk/src/error.rs`
+- Modify: `oxicode-ai/src/error.rs`
 - Fix: all internal `match` expressions on these types (add `_ =>` arms)
 
 - [ ] **Step 1: Add `#[non_exhaustive]` to `SdkError`**
 
-In `oxi-sdk/src/error.rs`, add `#[non_exhaustive]` before `pub enum SdkError`:
+In `oxicode-sdk/src/error.rs`, add `#[non_exhaustive]` before `pub enum SdkError`:
 
 ```rust
 #[derive(Debug, Error)]
@@ -1198,7 +1198,7 @@ pub enum SdkError {
 
 - [ ] **Step 2: Add `#[non_exhaustive]` to `ProviderError`**
 
-In `oxi-ai/src/error.rs`, add `#[non_exhaustive]` before `pub enum ProviderError`:
+In `oxicode-ai/src/error.rs`, add `#[non_exhaustive]` before `pub enum ProviderError`:
 
 ```rust
 #[derive(Error, Debug)]
@@ -1231,7 +1231,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-sdk/src/error.rs oxi-ai/src/error.rs
+git add oxicode-sdk/src/error.rs oxicode-ai/src/error.rs
 git commit -m "feat: #[non_exhaustive] on SdkError + ProviderError (R7)"
 ```
 

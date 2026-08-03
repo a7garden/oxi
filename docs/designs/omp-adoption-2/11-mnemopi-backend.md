@@ -211,14 +211,14 @@ type MnemopiScoping = "global" | "per-project" | "per-project-tagged";
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
 ### 2.1 크레이트 구조
 
 omp의 `packages/mnemopi/`를 Rust 포팅:
 
 ```
-oxi-mnemopi/  (독립 라이브러리 크레이트, oxi-cli이 의존)
+oxicode-mnemopi/  (독립 라이브러리 크레이트, oxicode-cli이 의존)
 ├── Cargo.toml          의존: rusqlite, serde, tokio, parking_lot, reqwest (API 임베딩)
 ├── src/
 │   ├── lib.rs          공개 API (Mnemopi 파사드)
@@ -718,15 +718,15 @@ fn validate_bank_name(name: &str) -> anyhow::Result<()> {
 
 ## 3. MemoryBackend 구현 (v2 — 도구 연동)
 
-> **v2 수정**: oxi-agent에는 이미 `MemoryBackend` 특성이 있다 (`tools.rs:31-51`). v1은 `MemoryStore` SDK 포트만 참조했으나, 도구 연동은 `MemoryBackend` 구현이 필요. [`00-design-revisions.md`](./00-design-revisions.md) §4 참조.
+> **v2 수정**: oxicode-agent에는 이미 `MemoryBackend` 특성이 있다 (`tools.rs:31-51`). v1은 `MemoryStore` SDK 포트만 참조했으나, 도구 연동은 `MemoryBackend` 구현이 필요. [`00-design-revisions.md`](./00-design-revisions.md) §4 참조.
 
 ### 3.1 이중 구현 구조
 
-``+oxi-sdk MemoryStore 포트 (SDK 소비자용)
+``+oxicode-sdk MemoryStore 포트 (SDK 소비자용)
         ↑ 구현 (별개 — SDK 직접 사용자)
-oxi-mnemopi Mnemopi (백엔드)
-        ↑ 브리지 (oxi-cli)
-oxi-agent MemoryBackend (도구용 — 기존 특성)
+oxicode-mnemopi Mnemopi (백엔드)
+        ↑ 브리지 (oxicode-cli)
+oxicode-agent MemoryBackend (도구용 — 기존 특성)
         ↑ 사용
 memory_retain/recall/reflect/edit 도구 (⑨)
 +```
@@ -734,8 +734,8 @@ memory_retain/recall/reflect/edit 도구 (⑨)
 ### 3.2 MnemopiMemoryBackend 브릿지
 
 ```rust
-// oxi-cli/src/store/memory_bridge.rs
-use oxi_agent::tools::{MemoryBackend, MemoryItem, ToolError};
+// oxicode-cli/src/store/memory_bridge.rs
+use oxicode_agent::tools::{MemoryBackend, MemoryItem, ToolError};
 
 pub struct MnemopiMemoryBackend {
     mnemopi: Arc<Mnemopi>,
@@ -805,7 +805,7 @@ impl MemoryBackend for MnemopiMemoryBackend {
 ### 3.3 bootstrap.rs 주입
 
 ```rust
-// oxi-cli/src/bootstrap.rs
+// oxicode-cli/src/bootstrap.rs
 if settings.memory_enabled {
     let mnemopi = Mnemopi::open(&memory_db_path, embedder).await?;
     let backend = Arc::new(MnemopiMemoryBackend::new(Arc::new(mnemopi)));
@@ -815,19 +815,19 @@ if settings.memory_enabled {
 
 ### 3.4 (별개) MemoryStore 포트 구현
 
-`MemoryStore` 포트(oxi-sdk)는 SDK 직접 소비자용. Mnemopi가 별도로 구현하되, oxi-cli의 도구 연동은 `MemoryBackend`를 사용:
+`MemoryStore` 포트(oxicode-sdk)는 SDK 직접 소비자용. Mnemopi가 별도로 구현하되, oxicode-cli의 도구 연동은 `MemoryBackend`를 사용:
 
 ```rust
-// oxi-mnemopi (SDK 소비자용 — 별개 impl 블록)
+// oxicode-mnemopi (SDK 소비자용 — 별개 impl 블록)
 #[async_trait]
 impl MemoryStore for Mnemopi { ... }
 ```
 ## 4. (선택) MCP 서버
 
-omp는 24개 MCP 도구를 stdio JSON-RPC로 노출한다. oxi는:
+omp는 24개 MCP 도구를 stdio JSON-RPC로 노출한다. oxicode는:
 
-- **옵션 A**: `oxi-mnemopi`에 MCP 서버 내장 (`mcp.rs`). 별도 프로세스로 실행 가능.
-- **옵션 B**: MCP 서버 생략. oxi의 MCP 클라이언트(`oxi-agent/src/mcp/`)로 외부 mnemopi에 연결.
+- **옵션 A**: `oxicode-mnemopi`에 MCP 서버 내장 (`mcp.rs`). 별도 프로세스로 실행 가능.
+- **옵션 B**: MCP 서버 생략. oxicode의 MCP 클라이언트(`oxicode-agent/src/mcp/`)로 외부 mnemopi에 연결.
 
 > **결정 필요**: N3에서 합의. 초기는 옵션 B (MCP 서버 생략, 인프로세스 직접 호출).
 
@@ -863,7 +863,7 @@ pub struct MnemopiConfig {
 ```
 
 환경변수 (omp 호환):
-- `MNEMOPI_DATA_DIR` — 데이터 디렉토리 (기본 `~/.oxi/mnemopi/`)
+- `MNEMOPI_DATA_DIR` — 데이터 디렉토리 (기본 `~/.oxicode/mnemopi/`)
 - `MNEMOPI_NO_EMBEDDINGS` — 임베딩 비활성화
 - `MNEMOPI_EMBEDDING_MODEL` — 임베딩 모델
 - `MNEMOPI_VEC_WEIGHT` / `MNEMOPI_FTS_WEIGHT` / `MNEMOPI_IMPORTANCE_WEIGHT`
@@ -874,7 +874,7 @@ pub struct MnemopiConfig {
 
 | 서브태스크 | 산출물 | 의존 |
 |:-:|---|---|
-| N3.1 | `oxi-mnemopi` 크레이트 스캐폴드 | — |
+| N3.1 | `oxicode-mnemopi` 크레이트 스캐폴드 | — |
 | N3.2 | `db.rs` (SQLite + 중첩 트랜잭션 + PRAGMA) | N3.1 |
 | N3.3 | `schema.rs` (idempotent 스키마 + 트리거) | N3.2 |
 | N3.4 | `types.rs` (MemoryRow, RecallResult, Veracity) | N3.1 |
@@ -903,7 +903,7 @@ pub struct MnemopiConfig {
 
 | 항목 | 상태 | 논의 |
 |---|:-:|---|
-| `rusqlite` 동기 + `tokio::sync::Mutex` 성능 | 🟡 모니터 | omp는 bun:sqlite (동기). oxi는 tokio::sync::Mutex로 async-safe |
+| `rusqlite` 동기 + `tokio::sync::Mutex` 성능 | 🟡 모니터 | omp는 bun:sqlite (동기). oxicode는 tokio::sync::Mutex로 async-safe |
 | FTS5 CJK 처리 (bigram LIKE 폴백) | 🟠 구현 필요 | omp의 `cjkLikeSearch` 이식. 다국어 지원 시 필수 |
 | sqlite-vec 확장 로드 | 🟢 폴백 있음 | 미로드 시 인메모리 brute-force. 대규모는 성능 저하 |
 | 임베딩 의존 (API vs 로컬) | 🟡 결정 필요 | API 기본 + 로컬 fastembed 선택 feature |
@@ -913,23 +913,23 @@ pub struct MnemopiConfig {
 
 ---
 
-## 8. 부록: omp → oxi 매핑
+## 8. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `packages/mnemopi/src/core/memory.ts` (651) | `oxi-mnemopi/src/lib.rs` |
-| `packages/mnemopi/src/core/beam/index.ts` (356) | `oxi-mnemopi/src/lib.rs` (통합) |
-| `packages/mnemopi/src/core/beam/schema.ts` (424) | `oxi-mnemopi/src/schema.rs` |
-| `packages/mnemopi/src/core/beam/store.ts` (922) | `oxi-mnemopi/src/store.rs` |
-| `packages/mnemopi/src/core/beam/recall.ts` (1,174) | `oxi-mnemopi/src/recall.rs` |
-| `packages/mnemopi/src/core/beam/consolidate.ts` (1,069) | `oxi-mnemopi/src/consolidate.rs` |
-| `packages/mnemopi/src/core/beam/helpers.ts` (971) | `oxi-mnemopi/src/helpers.rs` |
-| `packages/mnemopi/src/core/vector-math.ts` (25) | `oxi-mnemopi/src/vector_math.rs` |
-| `packages/mnemopi/src/db.ts` (165) | `oxi-mnemopi/src/db.rs` |
-| `packages/mnemopi/src/core/banks.ts` (150) | `oxi-mnemopi/src/banks.rs` |
-| `packages/mnemopi/src/core/embeddings.ts` (440) | `oxi-mnemopi/src/embeddings.rs` |
-| `packages/mnemopi/src/config.ts` (349) | `oxi-mnemopi/src/config.rs` |
-| `packages/mnemopi/src/types.ts` (135) | `oxi-mnemopi/src/types.rs` |
-| `packages/mnemopi/src/mcp-server.ts` (140) | `oxi-mnemopi/src/mcp.rs` (선택) |
-| `packages/mnemopi/src/mcp-tools.ts` (971) | `oxi-mnemopi/src/mcp.rs` (선택) |
-| `packages/coding-agent/src/mnemopi/` (래퍼) | `oxi-cli/src/` (통합) |
+| `packages/mnemopi/src/core/memory.ts` (651) | `oxicode-mnemopi/src/lib.rs` |
+| `packages/mnemopi/src/core/beam/index.ts` (356) | `oxicode-mnemopi/src/lib.rs` (통합) |
+| `packages/mnemopi/src/core/beam/schema.ts` (424) | `oxicode-mnemopi/src/schema.rs` |
+| `packages/mnemopi/src/core/beam/store.ts` (922) | `oxicode-mnemopi/src/store.rs` |
+| `packages/mnemopi/src/core/beam/recall.ts` (1,174) | `oxicode-mnemopi/src/recall.rs` |
+| `packages/mnemopi/src/core/beam/consolidate.ts` (1,069) | `oxicode-mnemopi/src/consolidate.rs` |
+| `packages/mnemopi/src/core/beam/helpers.ts` (971) | `oxicode-mnemopi/src/helpers.rs` |
+| `packages/mnemopi/src/core/vector-math.ts` (25) | `oxicode-mnemopi/src/vector_math.rs` |
+| `packages/mnemopi/src/db.ts` (165) | `oxicode-mnemopi/src/db.rs` |
+| `packages/mnemopi/src/core/banks.ts` (150) | `oxicode-mnemopi/src/banks.rs` |
+| `packages/mnemopi/src/core/embeddings.ts` (440) | `oxicode-mnemopi/src/embeddings.rs` |
+| `packages/mnemopi/src/config.ts` (349) | `oxicode-mnemopi/src/config.rs` |
+| `packages/mnemopi/src/types.ts` (135) | `oxicode-mnemopi/src/types.rs` |
+| `packages/mnemopi/src/mcp-server.ts` (140) | `oxicode-mnemopi/src/mcp.rs` (선택) |
+| `packages/mnemopi/src/mcp-tools.ts` (971) | `oxicode-mnemopi/src/mcp.rs` (선택) |
+| `packages/coding-agent/src/mnemopi/` (래퍼) | `oxicode-cli/src/` (통합) |

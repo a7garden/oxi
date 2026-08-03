@@ -1,6 +1,6 @@
 # Theme Guide
 
-oxi's terminal UI supports **28 customizable color slots**, 3 glyph sets
+oxicode's terminal UI supports **28 customizable color slots**, 3 glyph sets
 (Unicode / ASCII / Nerd), and spacing configuration. Themes load from TOML
 or JSON files with hot-reload.
 
@@ -8,25 +8,25 @@ or JSON files with hot-reload.
 
 ### Using a built-in theme
 
-Set in `~/.oxi/settings.toml`:
+Set in `~/.oxicode/settings.toml`:
 
 ```toml
 theme = "catppuccin"
 ```
 
-Built-in names: `oxi_dark`, `oxi_light`, `nord`, `catppuccin`, `github_dark`,
+Built-in names: `oxicode_dark`, `oxicode_light`, `nord`, `catppuccin`, `github_dark`,
 `monokai`. Or cycle via `/settings` overlay → `theme` row → Enter.
 
 ### Creating a custom theme
 
-Place a `.toml` or `.json` file in `~/.oxi/themes/` or `<project>/.oxi/themes/`:
+Place a `.toml` or `.json` file in `~/.oxicode/themes/` or `<project>/.oxicode/themes/`:
 
 ```bash
-mkdir -p ~/.oxi/themes
+mkdir -p ~/.oxicode/themes
 ```
 
 ```toml
-# ~/.oxi/themes/my_theme.toml
+# ~/.oxicode/themes/my_theme.toml
 name = "My Theme"
 
 [colors]
@@ -115,7 +115,7 @@ Your theme file only needs the colors you want to override.
 ## Glyph Sets
 
 ```toml
-# ~/.oxi/settings.toml
+# ~/.oxicode/settings.toml
 glyph_set = "unicode"   # "unicode" (default) | "ascii" | "nerd"
 ```
 
@@ -128,14 +128,14 @@ glyph_set = "unicode"   # "unicode" (default) | "ascii" | "nerd"
 The TUI polls `settings.toml` every 1 second. Editing the file externally
 and saving triggers an automatic theme reload — no restart needed.
 
-Custom theme files in `~/.oxi/themes/` are also hot-reloaded when their
+Custom theme files in `~/.oxicode/themes/` are also hot-reloaded when their
 mtime changes.
 
 ## File Locations
 
 | Path | Purpose |
 |---|---|
-| `~/.oxi/settings.toml` | `theme` / `glyph_set` settings |
-| `~/.oxi/themes/*.toml` | Global custom themes |
-| `~/.oxi/themes/*.json` | Global custom themes (JSON format) |
-| `<project>/.oxi/themes/*.json` | Project-local themes |
+| `~/.oxicode/settings.toml` | `theme` / `glyph_set` settings |
+| `~/.oxicode/themes/*.toml` | Global custom themes |
+| `~/.oxicode/themes/*.json` | Global custom themes (JSON format) |
+| `<project>/.oxicode/themes/*.json` | Project-local themes |

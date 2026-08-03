@@ -1,6 +1,6 @@
 # 02. 보안/샌드박스 (Capability-Based Security)
 
-모듈 경로: `oxi-sdk/src/security/`
+모듈 경로: `oxicode-sdk/src/security/`
 
 ---
 
@@ -292,7 +292,7 @@ Capability 추론 매핑:
 ## 2.7 사용 예시
 
 ```rust
-use oxi_sdk::security::*;
+use oxicode_sdk::security::*;
 
 let audit = Arc::new(AuditLog::new(1024));
 let authorizer = Arc::new(Authorizer::new(audit.clone()));
@@ -306,7 +306,7 @@ authorizer.bind_role("coder-001", "coder");
 authorizer.bind_role("reader-001", "reviewer");
 
 // AgentBuilder에 통합 (§5.5 bridge가 자동 처리)
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .workspace("/workspace")
     .coding_tools()
     .authorizer(authorizer.clone())

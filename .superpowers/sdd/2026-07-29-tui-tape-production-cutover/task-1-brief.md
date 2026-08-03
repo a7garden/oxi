@@ -3,12 +3,12 @@
 Plan: `docs/superpowers/plans/2026-07-29-tui-tape-production-cutover.md`
 
 ## Files
-- Modify `oxi-tui/src/tape/component.rs`
-- Modify `oxi-tui/src/tape/container.rs`
-- Modify `oxi-tui/src/tape/engine.rs`
-- Modify `oxi-tui/src/tape/components/text.rs`
-- Modify `oxi-tui/src/tape/components/streaming.rs`
-- Modify `oxi-tui/src/tape/components/tool_call.rs`
+- Modify `oxicode-tui/src/tape/component.rs`
+- Modify `oxicode-tui/src/tape/container.rs`
+- Modify `oxicode-tui/src/tape/engine.rs`
+- Modify `oxicode-tui/src/tape/components/text.rs`
+- Modify `oxicode-tui/src/tape/components/streaming.rs`
+- Modify `oxicode-tui/src/tape/components/tool_call.rs`
 
 ## Required behavior
 1. Add `Component::revision(&self) -> u64`. Contract: O(1), stable between output-affecting mutations, changes for every output-affecting mutation; width is a separate cache key.
@@ -21,8 +21,8 @@ Plan: `docs/superpowers/plans/2026-07-29-tui-tape-production-cutover.md`
 ## TDD requirements
 - First add counting component tests proving first render, cache hit, width miss, revision miss, and live-region offset preservation. Run and record the expected RED failure.
 - Add engine tests for resize replay, explicit ED3 replacement, idle zero-byte output, monotonic finalized commits between replay boundaries, and pinned rows not committed. Record RED before implementation where behavior is absent.
-- Then implement minimally and run `cargo nextest run -p oxi-tui tape`.
-- Also run `cargo clippy -p oxi-tui --all-targets -- -D warnings` and `cargo fmt --all -- --check`.
+- Then implement minimally and run `cargo nextest run -p oxicode-tui tape`.
+- Also run `cargo clippy -p oxicode-tui --all-targets -- -D warnings` and `cargo fmt --all -- --check`.
 
 ## Constraints
 - No CLI integration in this task.

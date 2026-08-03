@@ -1,28 +1,28 @@
-# oxi-vtui Agent View Layout — Design Spec
+# oxicode-vtui Agent View Layout — Design Spec
 
 - **Date**: 2026-08-01
 - **Status**: Implemented (library committed; production wiring integrated)
 - **Source of truth (reference)**: `github.com/xai-org/grok-build` — `xai-grok-pager/src/views/agent.rs`
-- **Target crate**: `oxi-vtui` (the **live** TUI crate). `oxi-tui` is orphaned —
-  not a workspace member, not depended on by `oxi-cli`, never compiled. It is
+- **Target crate**: `oxicode-vtui` (the **live** TUI crate). `oxicode-tui` is orphaned —
+  not a workspace member, not depended on by `oxicode-cli`, never compiled. It is
   out of scope.
 
-> NOTE: AGENTS.md describes an `oxi-tui` tape-model architecture that no longer
-> exists in production. The real production TUI is `oxi-vtui` (ratatui alt-screen
-> + an `InlineSession` protocol), consumed by `oxi-cli/src/tui_vt/main_loop.rs`.
+> NOTE: AGENTS.md describes an `oxicode-tui` tape-model architecture that no longer
+> exists in production. The real production TUI is `oxicode-vtui` (ratatui alt-screen
+> + an `InlineSession` protocol), consumed by `oxicode-cli/src/tui_vt/main_loop.rs`.
 > This spec targets the real surface.
 
 ---
 
 ## 1. Problem
 
-The live `oxi-vtui` render path (`render_frame` in `tui_vt/main_loop.rs`) used a
+The live `oxicode-vtui` render path (`render_frame` in `tui_vt/main_loop.rs`) used a
 hard-coded 4-row split: `header(2) / transcript(Min) / composer(3) / footer(1)`.
 There was no reusable spatial model, no pane-focus concept, no mouse
 hit-testing, and no keyboard-hint bar. grok-build ships a clean, pure-data
 layout engine for exactly this. Port it.
 
-## 2. What was ported (library: `oxi-vtui/src/design/layout/`)
+## 2. What was ported (library: `oxicode-vtui/src/design/layout/`)
 
 The old single-file `design/layout.rs` (147 lines: `LayoutMode` only) was split
 into a directory preserving `LayoutMode` and adding grok's primitives:
@@ -46,10 +46,10 @@ into a directory preserving `LayoutMode` and adding grok's primitives:
 - **`ActivePane::cycle(visible)`** + **`PaneAreas::is_visible`** — focus
   switching that respects which panes currently have non-zero height.
 - **Decoupled styling via traits** (`StatusBarStyling`, `ShortcutBarStyling`)
-  mirroring oxi-vtui's existing `PanelStyleProvider` pattern — widgets never
+  mirroring oxicode-vtui's existing `PanelStyleProvider` pattern — widgets never
   reach into a concrete theme type, so they stay theme-agnostic.
 - **ratatui `Widget` impls** (not grok's alt-screen-only widgets, not the dead
-  `oxi-tui` tape `Component`). oxi-vtui has no tape engine; ratatui is the
+  `oxicode-tui` tape `Component`). oxicode-vtui has no tape engine; ratatui is the
   real surface.
 
 ### Vertical stack (top → bottom)
@@ -64,7 +64,7 @@ Short terminals (`height ≤ SHORT_TERMINAL_ROWS=16`) suppress CTA/follow-ups an
 drop bottom padding so the prompt and scrollback are never starved. Auto-compact
 at `≤ 20` rows.
 
-## 3. Production integration (`oxi-cli/src/tui_vt/`)
+## 3. Production integration (`oxicode-cli/src/tui_vt/`)
 
 A new `frame_layout.rs` bridges the library to the live render path:
 
@@ -95,8 +95,8 @@ only.
 
 ## 5. Verification
 
-- `cargo check -p oxi-vtui`, `cargo clippy -p oxi-vtui --all-targets -D warnings`,
-  `cargo nextest run -p oxi-vtui` (64 tests incl. 8 layout tests).
+- `cargo check -p oxicode-vtui`, `cargo clippy -p oxicode-vtui --all-targets -D warnings`,
+  `cargo nextest run -p oxicode-vtui` (64 tests incl. 8 layout tests).
 - `cargo check --workspace` after integration.
 - Hints cross-checked field-by-field against `spawn_input_thread` (lines
   785-860): every advertised key maps to a real `InlineEvent`.

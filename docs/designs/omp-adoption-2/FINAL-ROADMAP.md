@@ -20,10 +20,10 @@ omp-adoption 2차 배치는 **사용자 가시성과 제품 완성도**에 집�
 |---|---|---|---|---|
 | ⑤ | todo 도구 + sticky panel | 🟡 **~80%** | 950+ | `todo.rs` + `todo_panel.rs` + `todo_state.rs` |
 | ⑥ | **Agent Hub** | ✅ **100%** | 800+ | `agent_hub/` 5 files, 28 tests |
-| ⑦ | Snapcompact compaction | 🟡 **~70%** | 2,500+ | `oxi-snapcompact/` + `snapcompact_compactor.rs` |
-| ⑧ | **LSP 통합** | ✅ **~95%** | 1,400+ | `oxi-lsp/` + `tools/lsp.rs` + `cli/lsp/` |
+| ⑦ | Snapcompact compaction | 🟡 **~70%** | 2,500+ | `oxicode-snapcompact/` + `snapcompact_compactor.rs` |
+| ⑧ | **LSP 통합** | ✅ **~95%** | 1,400+ | `oxicode-lsp/` + `tools/lsp.rs` + `cli/lsp/` |
 | ⑨ | Hindsight 응용 | 🟡 **~85%** | 1,800+ | 4 memory tools + boot inject + pipeline |
-| ⑩ | **Mnemopi 백엔드** | ✅ **~95%** | 8,000+ | `oxi-mnemopi/` 40+ files |
+| ⑩ | **Mnemopi 백엔드** | ✅ **~95%** | 8,000+ | `oxicode-mnemopi/` 40+ files |
 | ⑪ | Commit 도구 | 🟡 **~80%** | 1,798 | `tools/commit.rs`, 44 tests |
 | ⑫ | **Mermaid 렌더링** | ✅ **~95%** | 2,608 | `render/mermaid.rs`, 25+ tests |
 
@@ -35,7 +35,7 @@ omp-adoption 2차 배치는 **사용자 가시성과 제품 완성도**에 집�
 - **Build**: `cargo build --workspace` ✅ (2026-07-29)
 - **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` ✅
 - **Tests**: `cargo nextest run --workspace` — **3,584 passed** ✅
-- **Native browser**: `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` ✅
+- **Native browser**: `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` ✅
 
 ## 알려진 갭 (후순위)
 
@@ -64,7 +64,7 @@ omp-adoption 2차 배치는 **사용자 가시성과 제품 완성도**에 집�
 | ⑨ | `session_reflect()` 미호출 (mental-models) | 중 | AgentSession 종료 훅 연결 |
 | ⑨ | `/memory` 서브커맨드 5개 스텁 | 하 | view/stats/diagnose/clear/enqueue 구현 |
 | ⑪ | `/commit` 슬래시 명령 없음 | 중 | SlashCommand 등록 |
-| ⑪ | `oxi commit` CLI TODO 스텁 | 중 | CLI 서브커맨드 구현 |
+| ⑪ | `oxicode commit` CLI TODO 스텁 | 중 | CLI 서브커맨드 구현 |
 
 ### 새 Settings 필드 추가가 필요한 경우
 
@@ -104,7 +104,7 @@ enabled = false
 - feat(agent): todo tool — phased todo with 7 ops (#N1)
 - feat(tui): AgentHubOverlay — table + transcript views (#N2)
 - feat(ai): SnapcompactCompactor — PNG frame compaction (#N2)
-- feat(lsp): oxi-lsp crate + LspTool with 11 operations (#N4)
+- feat(lsp): oxicode-lsp crate + LspTool with 11 operations (#N4)
 - feat(memory): 4 hindsight tools + boot injection + background pipeline (#N3)
 - feat(mnemopi): full SQLite memory engine (FTS5+vectors) (#N3)
 - feat(commit): hybrid LLM+deterministic commit tool (#N4)

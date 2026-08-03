@@ -8,14 +8,14 @@
 
 ## Context
 
-`cargo audit` reports 3 unmaintained crate warnings and 0 actual vulnerability advisories. This is a clean security posture. The unmaintained warnings are transitive dependencies — none are directly depended upon by oxi crates.
+`cargo audit` reports 3 unmaintained crate warnings and 0 actual vulnerability advisories. This is a clean security posture. The unmaintained warnings are transitive dependencies — none are directly depended upon by oxicode crates.
 
 Current state:
 
 | Crate | Version | Advisory ID | Dependency Path | Impact |
 |-------|---------|-------------|-----------------|--------|
-| `number_prefix` | 0.4.0 | RUSTSEC-2025-0119 | `indicatif 0.17.11` ← `self_update 0.41.0` ← `oxi-cli` | Number formatting; unmaintained since 2025-11 |
-| `paste` | 1.0.15 | RUSTSEC-2024-0436 | `rav1e 0.8.1` / `boa_string 0.20.0` ← `oxibrowser-core` ← `oxi-agent` / `oxi-cli` | Procedural macro crate; unmaintained since 2024-10 |
+| `number_prefix` | 0.4.0 | RUSTSEC-2025-0119 | `indicatif 0.17.11` ← `self_update 0.41.0` ← `oxicode-cli` | Number formatting; unmaintained since 2025-11 |
+| `paste` | 1.0.15 | RUSTSEC-2024-0436 | `rav1e 0.8.1` / `boa_string 0.20.0` ← `oxibrowser-core` ← `oxicode-agent` / `oxicode-cli` | Procedural macro crate; unmaintained since 2024-10 |
 
 None of these are direct security vulnerabilities. They are **informational warnings** about crates that are no longer maintained by their authors.
 

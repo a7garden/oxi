@@ -1,6 +1,6 @@
-# oxi-sdk ← oxios-kernel 마이그레이션 설계서
+# oxicode-sdk ← oxios-kernel 마이그레이션 설계서
 
-> **목표**: oxios-kernel에 있는 더 강한 구현을 oxi-sdk로 끌어올려서  
+> **목표**: oxios-kernel에 있는 더 강한 구현을 oxicode-sdk로 끌어올려서  
 > SDK를 "어디서든 쓸 수 있는 에이전트 인프라"로 만들고,  
 > oxios-kernel은 thin wrapper + OS 전용 로직만 남기는 것.
 >
@@ -10,7 +10,7 @@
 
 ## 마이그레이션 대상 및 순서
 
-| # | 모듈 | oxios-kernel 경로 | 라인 | oxi-sdk 교체 대상 |
+| # | 모듈 | oxios-kernel 경로 | 라인 | oxicode-sdk 교체 대상 |
 |---|------|-------------------|------|-------------------|
 | 1 | AuditTrail | `src/audit_trail.rs` | 1134 | `observability/audit.rs` (296줄) |
 | 2 | EventBus | `src/event_bus.rs` | 595 | `message_bus.rs` (359줄) |
@@ -27,26 +27,26 @@
 oxios-kernel 코드는 `crate::types::AgentId`, `crate::state_store::StateStore` 등에 의존합니다.
 마이그레이션 시:
 
-- **AgentId** → `String` 또는 제네릭으로 변경 (oxi-sdk는 특정 타입 강제 안 함)
-- **StateStore** → trait으로 추상화하거나 oxi-sdk 내부 타입 사용
+- **AgentId** → `String` 또는 제네릭으로 변경 (oxicode-sdk는 특정 타입 강제 안 함)
+- **StateStore** → trait으로 추상화하거나 oxicode-sdk 내부 타입 사용
 - **Seed, Phase, Ouroboros** → oxios-kernel에만 두기 (SDK는 모름)
 
 ### 2. 소스 경로
 
 ```
 OXIOS_KERNEL=/Volumes/MERCURY/PROJECTS/oxios/crates/oxios-kernel/src
-OXI_SDK=/Volumes/MERCURY/PROJECTS/oxi/oxi-sdk/src
+OXICODE_SDK=/Volumes/MERCURY/PROJECTS/oxicode/oxicode-sdk/src
 ```
 
 실제 코드를 복사/수정해서 가져옵니다.
 
 ---
 
-## Phase 1: AuditTrail → oxi-sdk
+## Phase 1: AuditTrail → oxicode-sdk
 
 ### 현황
 
-| | oxi-sdk `AuditLog` | oxios-kernel `AuditTrail` |
+| | oxicode-sdk `AuditLog` | oxios-kernel `AuditTrail` |
 |---|---|---|
 | 보안 | 없음 | **blake3 Merkle hash chain** (변조 감지) |
 | 영속화 | 없음 | **StateStore** 연동 (JSON 저장/복원) |
@@ -59,7 +59,7 @@ OXI_SDK=/Volumes/MERCURY/PROJECTS/oxi/oxi-sdk/src
 **1-1. 파일 복사**
 
 ```
-$OXIOS_KERNEL/audit_trail.rs → $OXI_SDK/observability/audit_trail.rs
+$OXIOS_KERNEL/audit_trail.rs → $OXICODE_SDK/observability/audit_trail.rs
 ```
 
 **1-2. 의존성 제거**
@@ -75,7 +75,7 @@ impl StateStore {
 ```
 
 ```rust
-// 변경 후 (oxi-sdk)
+// 변경 후 (oxicode-sdk)
 // StateStore 의존 제거 → trait으로 추상화
 pub trait AuditPersistence: Send + Sync {
     fn save(&self, entries: &[AuditEntry]) -> anyhow::Result<()>;
@@ -109,7 +109,7 @@ pub type AgentId = String;  // oxios-kernel에서도 String이었음
 **1-4. Cargo.toml 의존성 추가**
 
 ```toml
-# oxi-sdk/Cargo.toml
+# oxicode-sdk/Cargo.toml
 [dependencies]
 blake3 = "1"          # AuditTrail 해시 체인
 chrono = "0.4"        # 타임스탬프 (이미 있을 수 있음)
@@ -118,13 +118,13 @@ chrono = "0.4"        # 타임스탬프 (이미 있을 수 있음)
 **1-5. 기존 AuditLog 삭제, AuditTrail로 교체**
 
 ```
-$OXI_SDK/observability/audit.rs  → 삭제
-$OXI_SDK/observability/audit_trail.rs → 새 파일 (oxios에서 가져옴)
+$OXICODE_SDK/observability/audit.rs  → 삭제
+$OXICODE_SDK/observability/audit_trail.rs → 새 파일 (oxios에서 가져옴)
 ```
 
 export 이름 변경:
 ```rust
-// oxi-sdk observability/mod.rs
+// oxicode-sdk observability/mod.rs
 pub use audit_trail::{AuditAction, AuditEntry, AuditError, AuditTrail, HashDigest};
 ```
 
@@ -132,11 +132,11 @@ pub use audit_trail::{AuditAction, AuditEntry, AuditError, AuditTrail, HashDiges
 
 ```rust
 // oxios-kernel/src/audit_trail.rs → 전체 삭제
-// 대신 oxi_sdk에서 re-export
-pub use oxi_sdk::{AuditAction, AuditEntry, AuditTrail, ...};
+// 대신 oxicode_sdk에서 re-export
+pub use oxicode_sdk::{AuditAction, AuditEntry, AuditTrail, ...};
 
 // StateStore 연동은 oxios-kernel에만 남김
-impl oxi_sdk::AuditPersistence for StateStore { ... }
+impl oxicode_sdk::AuditPersistence for StateStore { ... }
 ```
 
 ### 새 Cargo 의존성
@@ -145,11 +145,11 @@ impl oxi_sdk::AuditPersistence for StateStore { ... }
 
 ---
 
-## Phase 2: EventBus → oxi-sdk
+## Phase 2: EventBus → oxicode-sdk
 
 ### 현황
 
-| | oxi-sdk `MessageBus` | oxios-kernel `EventBus` |
+| | oxicode-sdk `MessageBus` | oxios-kernel `EventBus` |
 |---|---|---|
 | 메시지 타입 | `InterAgentMessage` 1개 | **20개 `KernelEvent` variant** |
 | Audit 연동 | 없음 | **attach_audit_trail()** |
@@ -159,7 +159,7 @@ impl oxi_sdk::AuditPersistence for StateStore { ... }
 
 ```rust
 pub enum KernelEvent {
-    // 범용 (oxi-sdk에 와야 함)
+    // 범용 (oxicode-sdk에 와야 함)
     AgentCreated { id, name },
     AgentStarted { id },
     AgentStopped { id },
@@ -187,10 +187,10 @@ pub enum KernelEvent {
 
 ### 작업
 
-**2-1. oxi-sdk에 제네릭 EventBus 추가**
+**2-1. oxicode-sdk에 제네릭 EventBus 추가**
 
 ```rust
-// oxi-sdk/src/event_bus.rs
+// oxicode-sdk/src/event_bus.rs
 
 /// 제네릭 이벤트 버스 — 어떤 이벤트 타입이든 가능
 pub struct EventBus<E: Clone + Send + 'static> {
@@ -208,9 +208,9 @@ impl<E: Clone + Send + 'static> EventBus<E> {
 
 ```rust
 // oxios-kernel/src/event_bus.rs
-// EventBus는 oxi_sdk::EventBus<KernelEvent>의 type alias로 변경
+// EventBus는 oxicode_sdk::EventBus<KernelEvent>의 type alias로 변경
 
-pub type KernelEventBus = oxi_sdk::EventBus<KernelEvent>;
+pub type KernelEventBus = oxicode_sdk::EventBus<KernelEvent>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KernelEvent { ... }  // 20개 variant 그대로
@@ -227,10 +227,10 @@ bus.attach_audit_trail(audit_trail); // 이 로직은 커널에만 있음
 **2-4. 기존 MessageBus 삭제**
 
 ```
-$OXI_SDK/message_bus.rs → 삭제
+$OXICODE_SDK/message_bus.rs → 삭제
 ```
 
-`MessageBus`를 쓰는 곳이 없으므로 (oxios 안 씀, oxi-cli 안 씀) 바로 삭제 가능.
+`MessageBus`를 쓰는 곳이 없으므로 (oxios 안 씀, oxicode-cli 안 씀) 바로 삭제 가능.
 
 ### 새 의존성
 
@@ -238,11 +238,11 @@ $OXI_SDK/message_bus.rs → 삭제
 
 ---
 
-## Phase 3: Supervisor → oxi-sdk
+## Phase 3: Supervisor → oxicode-sdk
 
 ### 현황
 
-| | oxi-sdk `AgentSupervisor` | oxios-kernel `Supervisor` + `AgentPool` |
+| | oxicode-sdk `AgentSupervisor` | oxios-kernel `Supervisor` + `AgentPool` |
 |---|---|---|
 | 핵심 | AgentHandle 상태머신 | **trait Supervisor + AgentPool** |
 | 상태 관리 | 스냅샷 | **export/import state (JSON)** |
@@ -252,10 +252,10 @@ $OXI_SDK/message_bus.rs → 삭제
 
 ### 작업
 
-**3-1. AgentPool을 oxi-sdk로 가져오기**
+**3-1. AgentPool을 oxicode-sdk로 가져오기**
 
 ```rust
-// oxi-sdk/src/lifecycle/agent_pool.rs (새 파일)
+// oxicode-sdk/src/lifecycle/agent_pool.rs (새 파일)
 // oxios-kernel/src/supervisor.rs의 AgentPool 구조체 복사
 // 의존성: AgentId → String으로 변경
 
@@ -273,12 +273,12 @@ impl AgentPool {
 }
 ```
 
-의존성: `oxi_agent::Agent`만 (이미 oxi-sdk에 있음). 외부 크레이트 의존 없음.
+의존성: `oxicode_agent::Agent`만 (이미 oxicode-sdk에 있음). 외부 크레이트 의존 없음.
 
-**3-2. Supervisor trait을 oxi-sdk로 가져오기**
+**3-2. Supervisor trait을 oxicode-sdk로 가져오기**
 
 ```rust
-// oxi-sdk/src/lifecycle/supervisor.rs (재작성)
+// oxicode-sdk/src/lifecycle/supervisor.rs (재작성)
 // oxios-kernel의 Supervisor trait + BasicSupervisor 가져오되,
 // Seed, AgentRuntime 의존 제거
 
@@ -296,10 +296,10 @@ pub trait Supervisor: Send + Sync {
 **3-3. BasicSupervisor 간소화**
 
 oxios-kernel의 BasicSupervisor는 `AgentRuntime`, `EventBus`, `ResourceMonitor`에 의존.
-oxi-sdk 버전에서는:
+oxicode-sdk 버전에서는:
 
 ```rust
-// oxi-sdk: 코어 Supervisor. 실행 로직은 외부에서 주입
+// oxicode-sdk: 코어 Supervisor. 실행 로직은 외부에서 주입
 pub struct BasicSupervisor {
     agents: RwLock<HashMap<String, AgentInfo>>,
     handles: RwLock<HashMap<String, AgentHandle>>,
@@ -319,30 +319,30 @@ oxios-kernel의 `BasicSupervisor`는 `AgentExecutor`를 구현해서 주입.
 
 ```rust
 // oxios-kernel/src/supervisor.rs → 삭제
-// 대신 oxi_sdk::Supervisor trait 구현
+// 대신 oxicode_sdk::Supervisor trait 구현
 
 pub struct OxiosSupervisor {
-    inner: oxi_sdk::BasicSupervisor,
+    inner: oxicode_sdk::BasicSupervisor,
     runtime: Arc<AgentRuntime>,
     event_bus: EventBus<KernelEvent>,
     resource_monitor: Option<Arc<ResourceMonitor>>,
 }
 
-impl oxi_sdk::Supervisor for OxiosSupervisor { ... }
+impl oxicode_sdk::Supervisor for OxiosSupervisor { ... }
 ```
 
-### 삭제 대상 (oxi-sdk)
+### 삭제 대상 (oxicode-sdk)
 
 - `lifecycle/supervisor.rs` 기존 1060줄 → 재작성 (약 400줄로 간소화)
 - `lifecycle/snapshot.rs` → AgentPool의 export/import로 대체 가능하면 삭제
 
 ---
 
-## Phase 4: AccessManager + Capability → oxi-sdk
+## Phase 4: AccessManager + Capability → oxicode-sdk
 
 ### 현황
 
-| | oxi-sdk `security/` | oxios-kernel `access_manager/` + `capability/` |
+| | oxicode-sdk `security/` | oxios-kernel `access_manager/` + `capability/` |
 |---|---|---|
 | 권한 모델 | 16개 Capability enum | **seL4 Capability (Rights 비트플래그)** |
 | RBAC | Authorizer (3단계) | **RbacManager (Role/Policy/Approval)** |
@@ -356,7 +356,7 @@ impl oxi_sdk::Supervisor for OxiosSupervisor { ... }
 **4-1. capability/ 전체 복사**
 
 ```
-$OXIOS_KERNEL/capability/ → $OXI_SDK/security/capability/
+$OXIOS_KERNEL/capability/ → $OXICODE_SDK/security/capability/
   types.rs     (426줄) — Capability, CSpace, Rights, ResourceRef, Issuer
   template.rs  (312줄) — CapabilityTemplate (worker/standard/operator/supervisor)
   resolve.rs   (193줄) — resolve_cspace()
@@ -368,7 +368,7 @@ $OXIOS_KERNEL/capability/ → $OXI_SDK/security/capability/
 **4-2. permissions.rs 복사**
 
 ```
-$OXIOS_KERNEL/access_manager/permissions.rs → $OXI_SDK/security/permissions.rs
+$OXIOS_KERNEL/access_manager/permissions.rs → $OXICODE_SDK/security/permissions.rs
 ```
 
 의존성: 없음 (chrono, glob, serde만). 깔끔하게 복사 가능.
@@ -376,7 +376,7 @@ $OXIOS_KERNEL/access_manager/permissions.rs → $OXI_SDK/security/permissions.rs
 **4-3. rbac.rs 복사**
 
 ```
-$OXIOS_KERNEL/access_manager/rbac.rs → $OXI_SDK/security/rbac.rs
+$OXIOS_KERNEL/access_manager/rbac.rs → $OXICODE_SDK/security/rbac.rs
 ```
 
 의존성: `crate::types::AgentId` → `String`. chrono, uuid만 추가.
@@ -384,18 +384,18 @@ $OXIOS_KERNEL/access_manager/rbac.rs → $OXI_SDK/security/rbac.rs
 **4-4. gate.rs 복사**
 
 ```
-$OXIOS_KERNEL/access_manager/gate.rs → $OXI_SDK/security/gate.rs
+$OXIOS_KERNEL/access_manager/gate.rs → $OXICODE_SDK/security/gate.rs
 ```
 
 의존성:
 - `crate::access_manager::*` → 같은 security 모듈 내 참조로 변경
 - `crate::capability::*` → `super::capability::*`
-- `crate::config::ExecConfig` → oxi-sdk에 `ExecPolicy` 구조체 새로 정의
+- `crate::config::ExecConfig` → oxicode-sdk에 `ExecPolicy` 구조체 새로 정의
 
 **4-5. context.rs 복사**
 
 ```
-$OXIOS_KERNEL/access_manager/context.rs → $OXI_SDK/security/context.rs
+$OXIOS_KERNEL/access_manager/context.rs → $OXICODE_SDK/security/context.rs
 ```
 
 의존성: `crate::capability::CSpace` → `super::capability::CSpace`
@@ -403,7 +403,7 @@ $OXIOS_KERNEL/access_manager/context.rs → $OXI_SDK/security/context.rs
 **4-6. audit_sink.rs 복사**
 
 ```
-$OXIOS_KERNEL/access_manager/audit_sink.rs → $OXI_SDK/security/audit_sink.rs
+$OXIOS_KERNEL/access_manager/audit_sink.rs → $OXICODE_SDK/security/audit_sink.rs
 ```
 
 의존성: `crate::audit_trail::*` → `crate::observability::*`
@@ -411,7 +411,7 @@ $OXIOS_KERNEL/access_manager/audit_sink.rs → $OXI_SDK/security/audit_sink.rs
 **4-7. 기존 security/ 삭제 후 재구성**
 
 ```
-$OXI_SDK/security/
+$OXICODE_SDK/security/
   mod.rs          (새로 작성)
   capability/     (oxios에서 가져옴)
     mod.rs
@@ -455,7 +455,7 @@ Phase 1-4 완료 후:
 |------|------|
 | `agent_builder.rs` | oxios에서 AgentBuilder 사용 |
 | `agent_group.rs` | Pipeline/Parallel은 범용적 |
-| `builder.rs` | OxiBuilder — oxios가 사용 |
+| `builder.rs` | OxicodeBuilder — oxios가 사용 |
 | `closure_tool.rs` | oxios에서 사용 |
 | `kernel_bridge.rs` | trait — oxios에서 구현 |
 | `message_bus.rs` → `event_bus.rs` | 제네릭으로 교체 |
@@ -471,7 +471,7 @@ Phase 1-4 완료 후:
 
 | | 현재 | 마이그레이션 후 | 변화 |
 |---|---|---|---|
-| oxi-sdk 전체 | 10,274 | ~14,000 | +3,700 (oxios 코드 흡수) |
+| oxicode-sdk 전체 | 10,274 | ~14,000 | +3,700 (oxios 코드 흡수) |
 | oxios-kernel | ~25,000 | ~18,000 | -7,000 (SDK로 이관) |
 | **중복 코드** | ~5,000 | **0** | 제거 |
 

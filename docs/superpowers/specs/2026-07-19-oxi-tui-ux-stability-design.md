@@ -1,21 +1,21 @@
-# oxi-tui: 안정성 + UX 이식 설계 (보충)
+# oxicode-tui: 안정성 + UX 이식 설계 (보충)
 
 **날짜**: 2026-07-19
 **상태**: 설계 (사용자 승인 대기)
-**관계**: `2026-07-19-oxi-tui-grok-pattern-adoption-design.md`의 보충. 이전 설계가 렌더링 인프라(OSC8, color level, streaming checkpoint, tmTheme, PTY e2e)를 다뤘다면, 본 설계는 **UX 품질 자체**를 다룬다 — 사용자가 "불안정하고 불편하다"고 느끼는 증상의 원인을 진단하고, (A) 로컬 버그 수정과 (B) grok UX 패턴 이식으로 분리 해법을 제시.
+**관계**: `2026-07-19-oxicode-tui-grok-pattern-adoption-design.md`의 보충. 이전 설계가 렌더링 인프라(OSC8, color level, streaming checkpoint, tmTheme, PTY e2e)를 다뤘다면, 본 설계는 **UX 품질 자체**를 다룬다 — 사용자가 "불안정하고 불편하다"고 느끼는 증상의 원인을 진단하고, (A) 로컬 버그 수정과 (B) grok UX 패턴 이식으로 분리 해법을 제시.
 **버전 타겟**: v0.56 patch ~ v0.58
 
 ---
 
 ## 배경 — 증상 분해 (symptom decomposition)
 
-사용자 피드백: "oxi-tui가 불안정하고 불편하다."
+사용자 피드백: "oxicode-tui가 불안정하고 불편하다."
 
-`grep`으로 `TODO/FIXME/flicker/unstable/janky`를 oxi-tui/src에서 찾아봤으나 **문서화된 알려진 결함은 0건**. 따라서 "불안정하다"는 것은 **체감 UX 문제**이며, 이를 구체적 증상으로 분해해야 한다.
+`grep`으로 `TODO/FIXME/flicker/unstable/janky`를 oxicode-tui/src에서 찾아봤으나 **문서화된 알려진 결함은 0건**. 따라서 "불안정하다"는 것은 **체감 UX 문제**이며, 이를 구체적 증상으로 분해해야 한다.
 
 ### "불안정"의 원인 (코드에서 직접 확인)
 
-`oxi-tui/src/widgets/chat/state.rs`에서 3개 로컬 버그 확인:
+`oxicode-tui/src/widgets/chat/state.rs`에서 3개 로컬 버그 확인:
 
 | 버그 | 위치 | 증상 |
 |---|---|---|
@@ -27,7 +27,7 @@
 
 ### "불편"의 원인 (grok 대비 부재)
 
-| 증상 | oxi-tui 현황 | grok 대응 |
+| 증상 | oxicode-tui 현황 | grok 대응 |
 |---|---|---|
 | 명령어 발견 어려움 | 14개 slash builtin이 있으나 popup 방식. fuzzy/MRU 없음 | `slash/{mod,registry,mru,matcher}.rs` + nucleo fuzzy + 7일 반감기 MRU + inline ghost completion (총 ~3,500 LOC) |
 | 단축키 발견 어려움 | 14개 overlay가 있으나 치트시트 없음 | `views/shortcuts_help.rs` 127KB — registry-driven 검색 가능한 카테고리별 단축키 모달 |
@@ -42,7 +42,7 @@
 1. **증량 우선 (symptom-first)** — 각 후보는 특정 증상에 매핑된다. "grok이 갖고 있어서"가 아니라 "이 증상을 치료하므로" 도입.
 2. **스크롤 증상은 단일 workstream** — u16 cap, auto_scroll race, clamp jump, sticky 헤더는 서로 독립된 로컬 버그가 아니라 **가상 좌표계(virtual coordinate layer) 부재**라는 동일한 근본 원인을 공유. W1 workstream으로 통합 (grok `scrollback/{state,render,sticky}.rs`가 참조 구현). 단 A4(layout cache tuning)는 좌표계와 직교하므로 로컬 수정으로 남김.
 3. **기존 v3 렌더링 설계와 상호보완** — 이전 설계의 5개 후보(OSC8, color level, streaming checkpoint, tmTheme, PTY e2e)는 여전히 유효. 본 설계의 후보들은 그 위에 UX 레이어를 올린다.
-4. **oxi-tui 정체성 존중** — 호스트 의존(title bar, tmux, focus 감지, sleep)은 oxi-cli 영역으로 밀어냄. oxi-tui는 순수 위젯 라이브러리로 유지.
+4. **oxicode-tui 정체성 존중** — 호스트 의존(title bar, tmux, focus 감지, sleep)은 oxicode-cli 영역으로 밀어냄. oxicode-tui는 순수 위젯 라이브러리로 유지.
 
 ---
 
@@ -106,7 +106,7 @@
 - 긴 대화 위치 상실 → sticky 헤더로 turn prompt가 상단에 걸침 (구 B3)
 
 **참조 구현** (grok source):
-- `scrollback/state/mod.rs` (3,478 LOC) — usize scroll position 모델 (oxi는 u32로 축소)
+- `scrollback/state/mod.rs` (3,478 LOC) — usize scroll position 모델 (oxicode는 u32로 축소)
 - `scrollback/render.rs` (4,513 LOC) — draw-time 변환 알고리즘
 - `scrollback/sticky.rs` (1,430 LOC) — sticky 헤더 알고리즘
 - `scrollback/entry.rs` (834 LOC) — 다중 레벨 캐싱 전략
@@ -119,7 +119,7 @@
 
 **안전 메커니즘** (R3 정정: PTY e2e가 W1의 안전망으로 필요):
 - **PTY e2e 선행**: v3 스펙의 후보 5(PTY e2e)가 W1 직전에 도입되어야 함. W1은 렌더 OUTPUT을 바꾸므로(sticky 헤더 추가, viewport 이동) TestBackend snapshot만으로는 flicker/scroll jank를 못 잡음. v3 candidate 2(streaming checkpoint)와 달리 W1은 PTY 없이 self-contained가 아님.
-- Feature flag `--cfg oxi_legacy_scroll`로 구형 좌표계 롤백 (v3의 `oxi_legacy_render`과 별개 — 각 flag가 토글하는 범위 명시: `legacy_render`는 markdown checkpoint on/off, `legacy_scroll`은 가상 좌표계 on/off)
+- Feature flag `--cfg oxicode_legacy_scroll`로 구형 좌표계 롤백 (v3의 `oxicode_legacy_render`과 별개 — 각 flag가 토글하는 범위 명시: `legacy_render`는 markdown checkpoint on/off, `legacy_scroll`은 가상 좌표계 on/off)
 - Snapshot 테스트: sticky 헤더 없는 영역에서 byte-identical 검증
 - Interleaving unit test: 스트리밍 + 사용자 스크롤 + 새 내용 도착 + todo_panel 토글 시나리오 (FollowMode 전이 12개 케이스)
 - Viewport stability baseline: 100K 토큰 더미 응답에서 viewport 점프 0회 (PTY e2e로 검증)
@@ -132,8 +132,8 @@
 
 ### B1. 마우스 스크롤 정규화 상태 머신 — "jumpy wheel" 치료
 
-- **대상**: `oxi-tui/src/widgets/chat/mouse.rs` (신규) + `oxi-cli/src/tui/handlers.rs` (마우스 이벤트 라우팅)
-- **근거**: grok `input/mouse.rs`(1,443 LOC) + `input/mouse/tests.rs`(1,860 LOC). 현재 oxi-tui는 crossterm `MouseEvent` 처리 전혀 없음 — 마우스 휠이 터미널마다 다른 속도로 동작.
+- **대상**: `oxicode-tui/src/widgets/chat/mouse.rs` (신규) + `oxicode-cli/src/tui/handlers.rs` (마우스 이벤트 라우팅)
+- **근거**: grok `input/mouse.rs`(1,443 LOC) + `input/mouse/tests.rs`(1,860 LOC). 현재 oxicode-tui는 crossterm `MouseEvent` 처리 전혀 없음 — 마우스 휠이 터미널마다 다른 속도로 동작.
 - **이식 내용**:
   - **Stream 기반 gesture grouping**: 80ms 갭 또는 방향 전환까지 하나의 stream으로 묶음
   - **Per-terminal events-per-tick (EPT)**: AppleTerminal=3, Ghostty=3, iTerm2=1, VSCode=1. 터미널 브랜드별 wheel notch당 실제 이벤트 수 보정
@@ -149,8 +149,8 @@
 
 ### B2. Slash fuzzy dropdown + MRU — "명령어 발견" 치료
 
-- **대상**: `oxi-tui/src/widgets/slash_dropdown.rs` (신규) + 기존 `oxi-cli/src/tui/slash/registry.rs` 확장
-- **근거**: grok `views/slash_dropdown.rs`(23KB) + `slash/{registry,mru,matcher}.rs`. 현재 oxi-tui는 단순 popup.
+- **대상**: `oxicode-tui/src/widgets/slash_dropdown.rs` (신규) + 기존 `oxicode-cli/src/tui/slash/registry.rs` 확장
+- **근거**: grok `views/slash_dropdown.rs`(23KB) + `slash/{registry,mru,matcher}.rs`. 현재 oxicode-tui는 단순 popup.
 - **이식 내용**:
   - **nucleo fuzzy matching**: ranked results, highlight indices
   - **MRU**: 7일 반감기 decay (사용자가 자주 쓰는 명령이 상단)
@@ -161,11 +161,11 @@
 - **증상 치료**: 사용자가 14개 명령 이름을 외워야 하는 불편
 - **LOC**: ~1,500
 - **외부 의존**: `nucleo` workspace dep 추가 (Helix에서 fork한 고품질 fuzzy matcher)
-- **리스크**: 낮음. 기존 `oxi-cli/src/tui/slash/registry.rs`는 그대로 두고, 위에 dropdown widget 추가.
+- **리스크**: 낮음. 기존 `oxicode-cli/src/tui/slash/registry.rs`는 그대로 두고, 위에 dropdown widget 추가.
 
 ### B4. Scrollback 검색 — "과거 내용 찾기" 치료
 
-- **대상**: `oxi-tui/src/widgets/chat/search.rs` (신규)
+- **대상**: `oxicode-tui/src/widgets/chat/search.rs` (신규)
 - **근거**: grok `scrollback/search.rs`(1,025 LOC). 백그라운드 스레드 regex 검색.
 - **이식 내용**:
   - **SearchIndex**: 각 메시지의 searchable 텍스트를 `content_generation` 카운터로 캐시
@@ -173,13 +173,13 @@
   - **Match iteration**: next/prev 매치 점프 + 하이라이트
   - **단축키**: `/` 입력 시 검색 박스 토글, `n`/`N` 다음/이전
 - **증상 치료**: "아까 본 그 메시지 어디 있지?"
-- **LOC**: ~700 (grok 1,025 LOC 축소 — oxi는 메시지 수가 적어 인덱싱 단순)
+- **LOC**: ~700 (grok 1,025 LOC 축소 — oxicode는 메시지 수가 적어 인덱싱 단순)
 - **외부 의존**: `regex` workspace dep (이미 있을 것)
 - **리스크**: 중간. 백그라운드 스레드와 UI 동기화. tokio channel 사용.
 
 ### B5. Turn status indicator — "진행 상황 불투명" 치료
 
-- **대상**: `oxi-tui/src/widgets/turn_status.rs` (신규) + 기존 `widgets/footer.rs` 대체 또는 확장
+- **대상**: `oxicode-tui/src/widgets/turn_status.rs` (신규) + 기존 `widgets/footer.rs` 대체 또는 확장
 - **근거**: grok `views/turn_status.rs`(54.5KB). 16개 상태 조합.
 - **이식 내용**:
   - **Braille spinner** (7.5fps): ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
@@ -189,35 +189,35 @@
   - **Cancel [stop] button**: 키보드 `Esc` 매핑
   - **Send-to-background [↓] button**: 백그라운드로 보내고 다른 작업 계속
 - **증상 치료**: 긴 작업 중 "지금 뭐 하고 있는 거야?" 불안
-- **LOC**: ~1,500 (grok 54.5KB를 oxi 모델로 축소 — MCP init/drain 등 제품 기능 제외)
+- **LOC**: ~1,500 (grok 54.5KB를 oxicode 모델로 축소 — MCP init/drain 등 제품 기능 제외)
 - **외부 의존**: 없음
-- **리스크**: 낮음. 단순 위젯. oxi-cli가 상태 데이터를 공급해야 (agent 상태 연동).
+- **리스크**: 낮음. 단순 위젯. oxicode-cli가 상태 데이터를 공급해야 (agent 상태 연동).
 
 ### B6. Shortcuts help modal — "단축키 발견" 치료
 
-- **대상**: `oxi-tui/src/widgets/shortcuts_help.rs` (신규)
+- **대상**: `oxicode-tui/src/widgets/shortcuts_help.rs` (신규)
 - **근거**: grok `views/shortcuts_help.rs`(127KB). registry-driven.
 - **이식 내용**:
-  - **KeyBinding registry 확장**: 기존 `oxi-tui/src/keybindings/registry.rs`에 description + category 필드 추가
+  - **KeyBinding registry 확장**: 기존 `oxicode-tui/src/keybindings/registry.rs`에 description + category 필드 추가
   - **Search/filter**: 입력 즉시 단축키 필터링
   - **카테고리 그룹핑**: Navigation / Editing / Slash Commands / Overlays
   - **Collapsible sections**: 카테고리별 접기/펼치기
   - **Context dimming**: 현재 활성 컨텍스트가 아닌 단축키는 회색
 - **증상 치료**: 14개 overlay가 있는데 사용자가 모름
-- **LOC**: ~2,000 (grok 127KB를 oxi 크기로 대폭 축소)
+- **LOC**: ~2,000 (grok 127KB를 oxicode 크기로 대폭 축소)
 - **외부 의존**: 없음
 - **리스크**: 낮음. 키바인딩 registry에 description 메타데이터를 추가하는 작업이 대부분.
 
 ### B7. Tips ephemeral framework — "기능 발견" 치료
 
-- **대상**: `oxi-tui/src/widgets/tips.rs` (신규)
+- **대상**: `oxicode-tui/src/widgets/tips.rs` (신규)
 - **근거**: grok `tips/{ephemeral,render}.rs`(총 ~600 LOC). 프레임워크 수준.
 - **이식 내용**:
   - **EphemeralTipState**: TTL 기반 단일 슬롯 힌트
   - **Dedup key**: 세션당 1회 표시
   - **Ambient mode**: 다른 UI 요소와 충돌 안 함
   - **render_ephemeral_tip**: 배너 영역 렌더링, modifier bleed 방지
-- **트리거 로직**은 oxi-cli에 남김 (clipboard 감지, plan 키워드, undo 패턴 등은 호스트가 판단)
+- **트리거 로직**은 oxicode-cli에 남김 (clipboard 감지, plan 키워드, undo 패턴 등은 호스트가 판단)
 - **증상 치료**: 숨겨진 기능 (예: 단축키, 명령어)을 사용자에게 알림
 - **LOC**: ~400 (프레임워크만)
 - **외부 의존**: 없음
@@ -231,9 +231,9 @@
 2. **Atomic TextElement** (~10,000 LOC, ratatui-textarea fork 필요) — 이미 `ratatui-textarea 0.9`를 쓰고 있어 upstream 기능으로 충분. fork 비용이 가치 안 맞음.
 3. **Welcome screen animation** (8,000 LOC) — cosmetic. 우선순위 아님.
 4. **Tasks pane** (5,000 LOC) — 기존 `widgets/todo_panel.rs`와 기능 겹침. 통합은 별도 설계.
-5. **Title bar / tmux / focus 감지** — 호스트 의존. oxi-cli 또는 oxios로 이관.
-6. **Notifications 시스템** — 호스트 의존. oxi-cli로.
-7. **Subagent catalog pane** — 제품 관심사. oxi-cli로.
+5. **Title bar / tmux / focus 감지** — 호스트 의존. oxicode-cli 또는 oxios로 이관.
+6. **Notifications 시스템** — 호스트 의존. oxicode-cli로.
+7. **Subagent catalog pane** — 제품 관심사. oxicode-cli로.
 
 ---
 
@@ -281,7 +281,7 @@
 
 ## 기존 v3 렌더링 설계와의 관계
 
-이전 설계(`2026-07-19-oxi-tui-grok-pattern-adoption-design.md`)의 5개 후보와 본 설계의 후보는 **상호보완적**이다:
+이전 설계(`2026-07-19-oxicode-tui-grok-pattern-adoption-design.md`)의 5개 후보와 본 설계의 후보는 **상호보완적**이다:
 
 | 이전 (렌더링 인프라) | 본 설계 (UX) | 상호작용 |
 |---|---|---|
@@ -304,11 +304,11 @@
 | 후보 | 주요 위험 | 완화 |
 |---|---|---|
 | A4 | 캐시 invariant 미스 | snapshot 테스트로 before/after 비교 |
-| W1 | **HIGH** — 모든 render 경로 건드림 | feature flag `oxi_legacy_scroll` + snapshot 테스트 + interleaving unit test + stability baseline |
+| W1 | **HIGH** — 모든 render 경로 건드림 | feature flag `oxicode_legacy_scroll` + snapshot 테스트 + interleaving unit test + stability baseline |
 | B1 | EPT 테이블 유지보스 | 환경변수 오버라이드 (W1 이후) |
 | B2 | MRU decay 백그라운드 스레드 | 단순 in-memory + 주기적 flush |
 | B4 | 백그라운드 스레드 동기화 | tokio mpsc channel (W1 이후) |
-| B5 | agent 상태 연동 | oxi-cli에서 상태 push 모델 |
+| B5 | agent 상태 연동 | oxicode-cli에서 상태 push 모델 |
 | B6 | keybindings registry 확장 | description을 Option<String>으로 점진적 |
 | B7 | tips 충돌 | 단일 슬롯 모델 |
 
@@ -336,37 +336,37 @@
 ## 부록 — scout 조사 결과 요약
 
 **ViewsScout** (grok `views/` + `app/`):
-- `views/shortcuts_help.rs` 127KB (oxi-tui: NONE) → B6
-- `views/slash_dropdown.rs` 23KB (oxi-tui: simple completion) → B2
-- `views/turn_status.rs` 54.5KB (oxi-tui: NONE) → B5
+- `views/shortcuts_help.rs` 127KB (oxicode-tui: NONE) → B6
+- `views/slash_dropdown.rs` 23KB (oxicode-tui: simple completion) → B2
+- `views/turn_status.rs` 54.5KB (oxicode-tui: NONE) → B5
 - `views/tasks_pane.rs` 110KB — 비목표 (todo_panel과 겹침)
 - `views/welcome/` 160KB — 비목표 (cosmetic)
-- `views/status_bar.rs + session_title.rs + shortcuts_bar.rs` 29KB — 비목표 (대부분 oxi-cli)
+- `views/status_bar.rs + session_title.rs + shortcuts_bar.rs` 29KB — 비목표 (대부분 oxicode-cli)
 - `views/subagent_catalog_pane.rs` 17KB — 비목표 (제품)
 
 **ScrollbackScout** (grok `scrollback/`):
 - `scrollback/text_selection.rs` 3,107 LOC — 비목표 (비용 과대)
 - `scrollback/search.rs` 1,025 LOC → B4
 - `scrollback/sticky.rs` 1,430 LOC → W1 (sticky 헤더 알고리즘)
-- `scrollback/state/mod.rs` 3,478 LOC — `scroll position: usize` 확인 → W1 근거 (oxi는 u32로 축소 채택)
+- `scrollback/state/mod.rs` 3,478 LOC — `scroll position: usize` 확인 → W1 근거 (oxicode는 u32로 축소 채택)
 - `scrollback/render.rs` 4,513 LOC, `scrollback/block.rs` 1,695 LOC, 기타 — 비목표
 
 **InputSlashScout** (grok `input/` + `slash/`):
 - `input/mouse.rs` 1,443 LOC → B1
-- `input/keyboard_normalizer.rs` + macOS CoreGraphics probe — 비목표 (low ROI for oxi)
+- `input/keyboard_normalizer.rs` + macOS CoreGraphics probe — 비목표 (low ROI for oxicode)
 - `slash/{mod,registry,mru,matcher}.rs` → B2
 - `xai-ratatui-textarea` atomic elements — 비목표 (fork 비용)
 
 **FeedbackScout** (grok `notifications/` + `tips/`):
-- `notifications/{title,focus,tmux,sleep,mod,protocol,progress,config,hooks}.rs` — 비목표 (호스트 의존, oxi-cli 영역)
+- `notifications/{title,focus,tmux,sleep,mod,protocol,progress,config,hooks}.rs` — 비목표 (호스트 의존, oxicode-cli 영역)
 - `tips/{ephemeral,render}.rs` ~600 LOC → B7 (프레임워크만)
-- `tips/{clipboard_focus,plan_nudge,clear_detector,send_now,small_screen,ssh_wrap,word_select}.rs` — 비목표 (트리거는 oxi-cli)
+- `tips/{clipboard_focus,plan_nudge,clear_detector,send_now,small_screen,ssh_wrap,word_select}.rs` — 비목표 (트리거는 oxicode-cli)
 
 ---
 
 ## 참고 문서
 
-- `docs/superpowers/specs/2026-07-19-oxi-tui-grok-pattern-adoption-design.md` — 본 설계의 전 단계 (렌더링 인프라)
+- `docs/superpowers/specs/2026-07-19-oxicode-tui-grok-pattern-adoption-design.md` — 본 설계의 전 단계 (렌더링 인프라)
 - `docs/ref-porter/xai-org-grok-build-tui.md` — 비교분석 보고서
-- `oxi-tui/src/widgets/chat/state.rs` — 로컬 버그 3건의 발견 장소
+- `oxicode-tui/src/widgets/chat/state.rs` — 로컬 버그 3건의 발견 장소
 - grok source: `xai-grok-pager/src/{input/mouse.rs, scrollback/{sticky,search,state/mod}.rs, views/{turn_status,shortcuts_help,slash_dropdown}.rs, tips/{ephemeral,render}.rs}`

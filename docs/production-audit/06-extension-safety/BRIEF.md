@@ -8,9 +8,9 @@
 
 ## Context
 
-oxi has 15 `unsafe` blocks in production code (excluding the keyword appearing in syntax highlighting strings). These fall into three distinct categories with different risk profiles:
+oxicode has 15 `unsafe` blocks in production code (excluding the keyword appearing in syntax highlighting strings). These fall into three distinct categories with different risk profiles:
 
-### Category 1: Extension FFI Loading (oxi-cli/src/extensions/loading.rs) — 4 blocks
+### Category 1: Extension FFI Loading (oxicode-cli/src/extensions/loading.rs) — 4 blocks
 
 These load native shared libraries (`.dylib`/`.so`/`.dll`) via `libloading`:
 
@@ -33,16 +33,16 @@ let extension: Arc<dyn Extension> = unsafe {          // Take ownership of raw p
 
 ### Category 2: Process Signal Handling (3 blocks)
 
-- `oxi-agent/src/tools/bash.rs`: `libc::kill(pgid, SIGKILL)` — kill process group
-- `oxi-agent/src/tools/subagent.rs`: `libc::kill(pid, SIGTERM)` — terminate child process
-- `oxi-agent/src/mcp/client.rs`: `libc::kill(id, SIGTERM)` — terminate MCP server
+- `oxicode-agent/src/tools/bash.rs`: `libc::kill(pgid, SIGKILL)` — kill process group
+- `oxicode-agent/src/tools/subagent.rs`: `libc::kill(pid, SIGTERM)` — terminate child process
+- `oxicode-agent/src/mcp/client.rs`: `libc::kill(id, SIGTERM)` — terminate MCP server
 
 **Risk:** Low. These are standard Unix signal calls with well-defined semantics. The `unsafe` is required because `libc::kill` is an FFI call. The PIDs are obtained from `child.id()` which returns valid process IDs.
 
 ### Category 3: TUI State Mutation via Raw Pointer (6 blocks)
 
-- `oxi-cli/src/tui/overlay/settings.rs`: 2 blocks — dereference `app_state` lock to call `add_notification`
-- `oxi-cli/src/tui/overlay/factories.rs`: 4 blocks — same pattern for notifications
+- `oxicode-cli/src/tui/overlay/settings.rs`: 2 blocks — dereference `app_state` lock to call `add_notification`
+- `oxicode-cli/src/tui/overlay/factories.rs`: 4 blocks — same pattern for notifications
 
 **Risk:** Medium. The pattern is:
 ```rust
@@ -90,7 +90,7 @@ It DOES mean:
 For every `unsafe` block, add a `// SAFETY:` comment:
 ```rust
 // SAFETY: The raw pointer was created by `Box::new` in the extension's
-// `oxi_extension_create` entry point. We take ownership via Box::from_raw,
+// `oxicode_extension_create` entry point. We take ownership via Box::from_raw,
 // matching the original allocation. The null check above ensures the pointer
 // is valid.
 let boxed: Box<dyn Extension> = Box::from_raw(raw_ptr);
@@ -105,7 +105,7 @@ let boxed: Box<dyn Extension> = Box::from_raw(raw_ptr);
 
 ### Phase 4: Document extension safety contract
 
-In `oxi-cli/src/extensions/loading.rs`, add a module-level doc comment explaining:
+In `oxicode-cli/src/extensions/loading.rs`, add a module-level doc comment explaining:
 - The `Box<dyn Extension>` ownership transfer contract
 - Memory safety requirements for extension implementors
 - What happens if an extension violates the contract

@@ -1,4 +1,4 @@
-# oxi 프로덕션 준비도 업그레이드 설계
+# oxicode 프로덕션 준비도 업그레이드 설계
 
 > **작성일**: 2026-05-06  
 > **기준 버전**: v0.5.0  
@@ -126,8 +126,8 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
-          name: oxi-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/oxi*
+          name: oxicode-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/oxicode*
 ```
 
 **의존성**: 없음 (최우선 작업)
@@ -141,7 +141,7 @@ jobs:
 #### A2.1 시크릿 래퍼 타입 도입
 
 ```rust
-// oxi-ai/src/secret.rs (NEW)
+// oxicode-ai/src/secret.rs (NEW)
 use std::fmt;
 
 /// API 키 등 민감 정보를 감싸는 타입.
@@ -204,7 +204,7 @@ impl<'de> serde::Deserialize<'de> for Secret<String> {
 #### A2.2 프로바이더에 적용
 
 ```rust
-// oxi-ai/src/providers/mod.rs
+// oxicode-ai/src/providers/mod.rs
 use crate::secret::Secret;
 
 // Before: 모든 프로바이더에서
@@ -221,7 +221,7 @@ api_key: Option<Secret<String>>,
 #### A2.3 로깅 필터링
 
 ```rust
-// oxi-ai/src/providers/mod.rs
+// oxicode-ai/src/providers/mod.rs
 // 요청 로깅에서 헤더 마스킹
 fn log_request_headers(headers: &HeaderMap) {
     for (name, value) in headers.iter() {
@@ -251,7 +251,7 @@ fn is_sensitive_header(name: &str) -> bool {
 #### A3.1 확장 매니페스트 검증
 
 ```rust
-// oxi-cli/src/extensions/loading.rs (NEW)
+// oxicode-cli/src/extensions/loading.rs (NEW)
 
 /// 확장 바이너리 로딩 전 검증 수행
 pub fn validate_extension(path: &Path) -> Result<ValidatedExtension, ExtensionError> {
@@ -279,12 +279,12 @@ pub fn validate_extension(path: &Path) -> Result<ValidatedExtension, ExtensionEr
         });
     }
 
-    // 3. 매니페스트 파일(.oxi-extension.json) 존재 확인
-    let manifest_path = path.with_extension("oxi-extension.json");
+    // 3. 매니페스트 파일(.oxicode-extension.json) 존재 확인
+    let manifest_path = path.with_extension("oxicode-extension.json");
     if !manifest_path.exists() {
         return Err(ExtensionError::LoadFailed {
             name: path.display().to_string(),
-            reason: "Missing manifest file (.oxi-extension.json)".into(),
+            reason: "Missing manifest file (.oxicode-extension.json)".into(),
         });
     }
 
@@ -316,7 +316,7 @@ pub fn validate_extension(path: &Path) -> Result<ValidatedExtension, ExtensionEr
 #### A3.2 확장 샌드박싱 강화
 
 ```rust
-// oxi-cli/src/extensions/registry.rs
+// oxicode-cli/src/extensions/registry.rs
 
 impl ExtensionRegistry {
     pub fn load_extension(&mut self, path: &Path) -> Result<ExtensionId, ExtensionError> {
@@ -356,7 +356,7 @@ impl ExtensionRegistry {
 **사유**: `temperature: -5.0`, `max_tokens: 0` 등 잘못된 설정이 런타임까지 감지 안 됨.
 
 ```rust
-// oxi-cli/src/settings_validation.rs (NEW)
+// oxicode-cli/src/settings_validation.rs (NEW)
 
 /// 설정 검증 결과
 #[derive(Debug)]
@@ -458,7 +458,7 @@ impl Settings {
 #### 적용 지점
 
 ```rust
-// oxi-cli/src/main.rs — 시작 시 검증
+// oxicode-cli/src/main.rs — 시작 시 검증
 fn main() {
     let settings = Settings::load().expect("Failed to load settings");
     let report = settings.validate();
@@ -504,7 +504,7 @@ fn main() {
 **최소 테스트 목표** — 테스트 0인 핵심 파일에 대한 최소 커버리지:
 
 ```
-oxi-agent/src/agent.rs (710줄) — 15개 테스트 추가
+oxicode-agent/src/agent.rs (710줄) — 15개 테스트 추가
 ├── test_agent_new_with_config
 ├── test_agent_switch_model_same_api
 ├── test_agent_switch_model_cross_api
@@ -521,7 +521,7 @@ oxi-agent/src/agent.rs (710줄) — 15개 테스트 추가
 ├── test_agent_streaming_events_order
 └── test_agent_context_update
 
-oxi-agent/src/agent_loop/mod.rs (494줄) — 10개 테스트 추가
+oxicode-agent/src/agent_loop/mod.rs (494줄) — 10개 테스트 추가
 ├── test_run_single_turn_no_tools
 ├── test_run_multi_turn_with_tools
 ├── test_run_max_iterations_stop
@@ -548,7 +548,7 @@ oxi-agent/src/agent_loop/mod.rs (494줄) — 10개 테스트 추가
 
 ```bash
 # 락 가드가 .await를 넘어가는지 정적 분석
-grep -rn "\.read()\|\.write()" --include="*.rs" oxi-*/src/ | \
+grep -rn "\.read()\|\.write()" --include="*.rs" oxicode-*/src/ | \
   grep -A5 "\.await"
 ```
 
@@ -592,10 +592,10 @@ shutdown: AtomicBool,
 
 | 크레이트 | RwLock 수 | 패턴1 (clone) | 패턴2 (tokio) | 패턴3 (atomic) |
 |----------|:---------:|:------:|:------:|:------:|
-| oxi-ai | 0 | — | — | — |
-| oxi-agent | 15 | 12 | 2 | 1 |
-| oxi-tui | 0 | — | — | — |
-| oxi-cli | 59 | 45 | 10 | 4 |
+| oxicode-ai | 0 | — | — | — |
+| oxicode-agent | 15 | 12 | 2 | 1 |
+| oxicode-tui | 0 | — | — | — |
+| oxicode-cli | 59 | 45 | 10 | 4 |
 
 ---
 
@@ -606,7 +606,7 @@ shutdown: AtomicBool,
 #### B2.1 시그널 핸들러
 
 ```rust
-// oxi-cli/src/shutdown.rs (NEW)
+// oxicode-cli/src/shutdown.rs (NEW)
 
 use tokio::sync::broadcast;
 
@@ -668,7 +668,7 @@ impl ShutdownCoordinator {
 #### B2.2 세션 자동 저장
 
 ```rust
-// oxi-cli/src/session.rs에 추가
+// oxicode-cli/src/session.rs에 추가
 
 impl SessionManager {
     /// 현재 세션을 비동기로 자동 저장하는 백그라운드 태스크
@@ -720,7 +720,7 @@ impl SessionManager {
 #### B3.1 사용자 친화적 에러 메시지
 
 ```rust
-// oxi-ai/src/error.rs — Display 개선
+// oxicode-ai/src/error.rs — Display 개선
 
 impl fmt::Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -729,7 +729,7 @@ impl fmt::Display for ProviderError {
                 write!(f, "⚠️ API rate limit reached. Retry in {}s.", retry_after_secs.unwrap_or(30))
             }
             ProviderError::InvalidApiKey { provider } => {
-                write!(f, "❌ Invalid API key for {provider}. Run: oxi config set {provider}_api_key <YOUR_KEY>")
+                write!(f, "❌ Invalid API key for {provider}. Run: oxicode config set {provider}_api_key <YOUR_KEY>")
             }
             ProviderError::NetworkError { source } => {
                 write!(f, "🔌 Network error: {source}. Check your internet connection.")
@@ -747,7 +747,7 @@ impl fmt::Display for ProviderError {
 #### B3.2 에러 복구 가이드
 
 ```rust
-// oxi-agent/src/error_recovery.rs — 복구 액션 추가
+// oxicode-agent/src/error_recovery.rs — 복구 액션 추가
 
 pub enum RecoveryAction {
     /// 사용자에게 메시지 표시 후 재시도
@@ -791,7 +791,7 @@ impl RetryableError {
 #### B4.1 통합 경로 검증 유틸
 
 ```rust
-// oxi-agent/src/tools/path_security.rs (NEW)
+// oxicode-agent/src/tools/path_security.rs (NEW)
 
 /// 파일 접근 시 보안 검증
 pub struct PathGuard {
@@ -847,7 +847,7 @@ pub enum PathSecurityError {
 #### B4.2 적용
 
 ```rust
-// oxi-agent/src/tools/read.rs
+// oxicode-agent/src/tools/read.rs
 async fn execute(...) -> Result<AgentToolResult, ToolError> {
     let path = params["path"].as_str().unwrap_or(".");
     let guard = PathGuard::new(cwd);
@@ -935,7 +935,7 @@ for block in blocks { block.write_to(&mut result); }  // 중간 String 할당 �
 #### C2.3 스트리밍 버퍼 풀
 
 ```rust
-// oxi-ai/src/providers/sse_parser.rs
+// oxicode-ai/src/providers/sse_parser.rs
 // SSE 청크 처리 시 매번 새 버퍼 할당 대신 재사용
 
 pub struct SseParser {
@@ -963,8 +963,8 @@ impl SseParser {
 
 ```toml
 # 현재 상태:
-# oxi-ai: thiserror = "2"
-# oxi-agent: thiserror = "1"
+# oxicode-ai: thiserror = "2"
+# oxicode-agent: thiserror = "1"
 
 # [workspace.dependencies]로 통일
 # Cargo.toml (workspace root)
@@ -998,7 +998,7 @@ thiserror = { workspace = true }
 | < 0.5   | ❌ |
 
 ## Reporting a Vulnerability
-Email: security@oxi.dev (예시)
+Email: security@oxicode.dev (예시)
 Do NOT file a public issue for security vulnerabilities.
 
 ## Security Features

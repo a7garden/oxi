@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in oxi
+description: Report a bug in oxicode
 labels: ["bug"]
 body:
   - type: markdown
@@ -9,9 +9,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: oxi Version
-      description: Output of `oxi --version`
-      placeholder: "oxi 0.20.0"
+      label: oxicode Version
+      description: Output of `oxicode --version`
+      placeholder: "oxicode 0.20.0"
     validations:
       required: true
   - type: input
@@ -54,7 +54,7 @@ body:
       label: Steps to Reproduce
       description: How can we reproduce the issue?
       placeholder: |
-        1. Run `oxi -p openai -m gpt-4o`
+        1. Run `oxicode -p openai -m gpt-4o`
         2. Enter prompt "..."
         3. Observe error "..."
     validations:

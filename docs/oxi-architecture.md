@@ -1,4 +1,4 @@
-# Architecture: oxi
+# Architecture: oxicode
 
 **Date:** 2026-05-02
 **Status:** Active
@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-oxi is a Rust-based terminal AI coding assistant with a modular architecture. Its core value proposition is **provider-agnostic LLM abstraction**, **event-driven streaming**, and **extensible minimalism**. The project aims to be the "harness" you adapt to your workflow, not the other way around.
+oxicode is a Rust-based terminal AI coding assistant with a modular architecture. Its core value proposition is **provider-agnostic LLM abstraction**, **event-driven streaming**, and **extensible minimalism**. The project aims to be the "harness" you adapt to your workflow, not the other way around.
 
 ---
 
@@ -16,25 +16,25 @@ oxi is a Rust-based terminal AI coding assistant with a modular architecture. It
 ### Package Architecture
 
 ```
-oxi (CLI harness)
-├── oxi-tui (Terminal UI)
-├── oxi-agent (Agent runtime)
-│   └── oxi-ai (LLM abstraction)
-└── oxi-ai (LLM abstraction)
+oxicode (CLI harness)
+├── oxicode-tui (Terminal UI)
+├── oxicode-agent (Agent runtime)
+│   └── oxicode-ai (LLM abstraction)
+└── oxicode-ai (LLM abstraction)
 ```
 
 ### Core Value Chain
 
-1. **oxi-ai** provides unified LLM API access
-2. **oxi-agent** orchestrates conversation + tool execution
-3. **oxi-tui** renders interactive terminal interface
-4. **oxi** glues it together with session management and extensions
+1. **oxicode-ai** provides unified LLM API access
+2. **oxicode-agent** orchestrates conversation + tool execution
+3. **oxicode-tui** renders interactive terminal interface
+4. **oxicode** glues it together with session management and extensions
 
 ---
 
 ## 2. Core Domain Models
 
-### 2.1 oxi-ai Types
+### 2.1 oxicode-ai Types
 
 ```rust
 // Model = provider + API + capabilities + pricing
@@ -67,7 +67,7 @@ pub enum ContentBlock {
 }
 ```
 
-### 2.2 oxi-agent Types
+### 2.2 oxicode-agent Types
 
 ```rust
 // AgentTool = definition + execution
@@ -95,7 +95,7 @@ pub struct AgentState {
 ### 2.3 Event System
 
 ```rust
-// oxi-ai streaming events
+// oxicode-ai streaming events
 pub enum ProviderEvent {
     TextDelta { delta: String, ... },
     ThinkingDelta { delta: String, ... },
@@ -104,7 +104,7 @@ pub enum ProviderEvent {
     Error { error: String, ... },
 }
 
-// oxi-agent agent events
+// oxicode-agent agent events
 pub enum AgentEvent {
     Start,
     Thinking,
@@ -210,7 +210,7 @@ pub trait Extension {
 
 ## 6. Implementation Phases
 
-### Phase 1: oxi-ai (LLM Abstraction) - HIGHEST PRIORITY
+### Phase 1: oxicode-ai (LLM Abstraction) - HIGHEST PRIORITY
 
 **Goals:**
 - [ ] Core types (Model, Context, Message, Tool)
@@ -221,7 +221,7 @@ pub trait Extension {
 - [ ] JSON Schema validation for tools
 - [ ] Token/cost tracking
 
-### Phase 2: oxi-agent (Agent Runtime) - HIGH PRIORITY
+### Phase 2: oxicode-agent (Agent Runtime) - HIGH PRIORITY
 
 **Goals:**
 - [ ] Agent state management
@@ -230,7 +230,7 @@ pub trait Extension {
 - [ ] Context transformation
 - [ ] Steering/follow-up queues
 
-### Phase 3: oxi-tui (Terminal UI)
+### Phase 3: oxicode-tui (Terminal UI)
 
 **Goals:**
 - [ ] Core TUI framework
@@ -239,7 +239,7 @@ pub trait Extension {
 - [ ] Overlay system
 - [ ] Theme support
 
-### Phase 4: oxi (CLI Harness)
+### Phase 4: oxicode (CLI Harness)
 
 **Goals:**
 - [ ] Session management (JSONL)
@@ -262,7 +262,7 @@ pub trait Extension {
 
 ## 8. Key Rust Idioms
 
-**Start with oxi-ai** as it's the foundation everything else builds on. The core abstractions are:
+**Start with oxicode-ai** as it's the foundation everything else builds on. The core abstractions are:
 
 1. **Provider trait** with `stream()` returning `impl Stream<Item = Event>`
 2. **Model registry** with JSON Schema for tool validation

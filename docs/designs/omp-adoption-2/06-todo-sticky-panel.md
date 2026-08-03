@@ -19,7 +19,7 @@ omp의 **sticky todo panel**은 입력창 바로 위에 상주하는 진행 표�
 5. **자동 제거 타이머**: 닫힌(completed/abandoned) todo는 설정된 지연 후 패널에서 사라짐.
 6. **접기/펼치기**: 단일 키(`Tab` 제안)로 전체 phase 펼치기/활성 phase만 보기 토글.
 
-본 설계는 oxi-tui에 `TodoPanel` 위젯을 추가하고, `AgentEvent::TodoUpdate`를 소비해 렌더하는 파이프라인을 정의한다.
+본 설계는 oxicode-tui에 `TodoPanel` 위젯을 추가하고, `AgentEvent::TodoUpdate`를 소비해 렌더하는 파이프라인을 정의한다.
 
 ---
 
@@ -181,11 +181,11 @@ function strikeRevealCount(text: string, frame: number | undefined): number | un
 
 ---
 
-## 2. oxi-tui 설계: `TodoPanel` 위젯
+## 2. oxicode-tui 설계: `TodoPanel` 위젯
 
 ### 2.1 위젯 구조
 
-`oxi-tui/src/widgets/todo_panel.rs` (신규):
+`oxicode-tui/src/widgets/todo_panel.rs` (신규):
 
 ```rust
 use ratatui::buffer::Buffer;
@@ -421,7 +421,7 @@ fn render_partial_strikethrough(
 
 ### 3.1 상태 필드
 
-`oxi-cli/src/tui/app.rs`의 `AppState`에 추가:
+`oxicode-cli/src/tui/app.rs`의 `AppState`에 추가:
 
 ```rust
 pub struct AppState {
@@ -503,7 +503,7 @@ fn active_subagent_descs(state: &AppState) -> Vec<String> {
 
 ### 4.1 ChatView와 Input 사이에 패널 삽입
 
-`oxi-tui/src/widgets/chat/mod.rs`의 `StatefulWidget::render` 또는 `oxi-cli/src/tui/render.rs`에서:
+`oxicode-tui/src/widgets/chat/mod.rs`의 `StatefulWidget::render` 또는 `oxicode-cli/src/tui/render.rs`에서:
 
 ```rust
 // 레이아웃 분할
@@ -532,7 +532,7 @@ if !state.todo_panel.phases.is_empty() {
 
 ### 4.2 패널 토글 키
 
-`oxi-cli/src/tui/handlers.rs`에 추가:
+`oxicode-cli/src/tui/handlers.rs`에 추가:
 
 ```rust
 // Tab 키 (또는 설정 가능한 키)로 패널 확장/축소 토글
@@ -543,7 +543,7 @@ KeyCode::Tab => {
 }
 ```
 
-> **키 충돌 주의**: `Tab`이 입력 필드 자동완성에 이미 사용 중이면 별도 키 필요. omp는 `Ctrl+T` 사용 제안. `oxi-tui/src/keybindings/`에서 설정 가능하도록.
+> **키 충돌 주의**: `Tab`이 입력 필드 자동완성에 이미 사용 중이면 별도 키 필요. omp는 `Ctrl+T` 사용 제안. `oxicode-tui/src/keybindings/`에서 설정 가능하도록.
 
 ---
 
@@ -571,7 +571,7 @@ KeyCode::Tab => {
 
 `todo` 도구가 반환한 결과를 TUI 대화 내에도 표시 (`tools/todo.ts:849-936`의 `todoToolRenderer` 대응).
 
-`oxi-tui/src/widgets/tool_renderer.rs`에 todo 분기 추가:
+`oxicode-tui/src/widgets/tool_renderer.rs`에 todo 분기 추가:
 
 ```rust
 fn render_todo_result(result: &str, args: &Value, theme: &Theme) -> Vec<Line<'_>> {
@@ -616,7 +616,7 @@ pub struct Settings {
 
 | 항목 | 상태 | 논의 |
 |---|:-:|---|
-| 렌더 성능 (매 프레임 재구축) | 🟡 최적화 | omp는 render cache. oxi는 `line_count()`로 높이만 계산, 라인은 캐시 |
+| 렌더 성능 (매 프레임 재구축) | 🟡 최적화 | omp는 render cache. oxicode는 `line_count()`로 높이만 계산, 라인은 캐시 |
 | 스트라이크루 애니메이션 프레임 속도 | 🟢 결정됨 | 60fps tick (16ms). 14프레임 = ~230ms |
 | 토글 키 충돌 (Tab vs 자동완성) | 🟡 미결정 | `Ctrl+T` 제안. keybindings에서 설정 가능 |
 | 패널이 없을 때 레이아웃 (빈 줄) | 🟢 결정됨 | `line_count() == 0`이면 높이 0, 레이아웃에서 제외 |
@@ -702,17 +702,17 @@ mod tests {
 
 ---
 
-## 10. 부록: omp → oxi 매핑
+## 10. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `interactive-mode.ts:583` (`todoContainer`) | `oxi-tui/src/widgets/todo_panel.rs` (`TodoPanel`) |
+| `interactive-mode.ts:583` (`todoContainer`) | `oxicode-tui/src/widgets/todo_panel.rs` (`TodoPanel`) |
 | `interactive-mode.ts:1,525` (`#renderTodoList`) | `TodoPanel::render` |
 | `interactive-mode.ts:1,375` (`#formatTodoLine`) | `render_todo_line()` |
 | `interactive-mode.ts:1,415` (`#reconcileTodosWithSubagents`) | `handlers.rs` (⑥ Agent Hub 이벤트 소비) |
 | `interactive-mode.ts:1,464` (`#syncTodoAutoClearTimer`) | `schedule_todo_auto_clear()` |
 | `interactive-mode.ts:3,818` (`toggleTodoExpansion`) | `handlers.rs` (토글 키) |
-| `tools/todo.ts:818` (`todoToolRenderer`) | `oxi-tui/src/widgets/tool_renderer.rs` (todo 분기) |
+| `tools/todo.ts:818` (`todoToolRenderer`) | `oxicode-tui/src/widgets/tool_renderer.rs` (todo 분기) |
 | `tools/todo.ts:718` (`TODO_STRIKE_*`) | `todo_panel.rs` (`TODO_STRIKE_*` 상수) |
 | `tools/todo.ts:745` (`formatTodoLine` with strike) | `render_partial_strikethrough()` |
 | `tools/todo.ts:173` (`selectStickyTodoWindow`) | `TodoPanelState::active_phase` + line_count |

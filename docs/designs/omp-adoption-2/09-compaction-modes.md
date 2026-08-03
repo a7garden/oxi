@@ -4,20 +4,20 @@
 > 작성: 2026-06-19 (v1), 개정 (v2)
 > 선행: [`00-master-plan.md`](./00-master-plan.md)
 > omp 분석: `packages/snapcompact/src/snapcompact.ts` (1,554줄), `session/snapcompact-inline.ts` (542줄), `session/compact-modes.ts` (105줄)
-> oxi 기반: `oxi-ai/src/compaction.rs` (1,288줄, `Compactor` trait, `LlmCompactor`, `CompactionManager`)
+> oxicode 기반: `oxicode-ai/src/compaction.rs` (1,288줄, `Compactor` trait, `LlmCompactor`, `CompactionManager`)
 > 후속: N2 구현 → CHANGELOG.md
 
 ---
 
 ## 0. 핵심 (TL;DR)
 
-oxi는 현재 **LLM 기반 단일 compaction**만 지원한다 (`LlmCompactor`). omp는 세 가지 전략을 제공한다:
+oxicode는 현재 **LLM 기반 단일 compaction**만 지원한다 (`LlmCompactor`). omp는 세 가지 전략을 제공한다:
 
-1. **context-full (soft)** — LLM 요약 (oxi가 이미 구현). omp의 `soft` 모드 대응.
+1. **context-full (soft)** — LLM 요약 (oxicode가 이미 구현). omp의 `soft` 모드 대응.
 2. **snapcompact** — 대화 이력을 **비트맵 PNG 프레임**으로 아카이빙. LLM 호출 없이 결정론적. 비전 모델이 이미지를 읽어 역사를 복원.
 3. **inline imaging** — 요청 변환 단계에서 **큰 tool result를 PNG로 치환**. snapcompact의 인라인 버전.
 
-**oxi의 핵심 자산**: `Compactor` trait이 이미 확장 가능하게 설계됨. `SnapcompactCompactor`를 새 구현체로 추가하면 된다. **omp의 snapcompact 네이티브 렌더러가 이미 Rust**(`crates/pi-natives/src/snapcompact.rs`) — 이식 비용이 낮다.
+**oxicode의 핵심 자산**: `Compactor` trait이 이미 확장 가능하게 설계됨. `SnapcompactCompactor`를 새 구현체로 추가하면 된다. **omp의 snapcompact 네이티브 렌더러가 이미 Rust**(`crates/pi-natives/src/snapcompact.rs`) — 이식 비용이 낮다.
 
 ### omp가 검증한 가치
 - **토큰 절약** — 큰 tool result(3,000+ 토큰)를 PNG(수백 토큰)로 치환 → 컨텍스트 비용 60-90% 절감.
@@ -98,9 +98,9 @@ type SnapcompactSavingsSink = (
 
 ---
 
-## 2. oxi 기존 분석
+## 2. oxicode 기존 분석
 
-### 2.1 `oxi-ai/src/compaction.rs`
+### 2.1 `oxicode-ai/src/compaction.rs`
 
 ```rust
 pub trait Compactor: Send + Sync {
@@ -128,14 +128,14 @@ pub enum CompactionStrategy {
 }
 ```
 
-oxi의 compaction은:
+oxicode의 compaction은:
 - LLM 요약만 (`LlmCompactor`).
 - `CompactionConfig`: keep_recent, max_batch, target_ratio, summary_max_tokens, temperature, timeout.
 - `CompactionManager`가 `should_compact` 판단 후 `compact` 호출.
 
 ### 2.2 갭
 
-| omp 기능 | oxi 상태 |
+| omp 기능 | oxicode 상태 |
 |---|---|
 | snapcompact (비트맵 아카이빙) | ❌ 없음 |
 | inline imaging (요청 내 변환) | ❌ 없음 |
@@ -145,14 +145,14 @@ oxi의 compaction은:
 
 ---
 
-## 3. oxi화 설계
+## 3. oxicode화 설계
 
 ### 3.1 `Compactor` trait 확장
 
 기존 trait은 유지하고 새 구현체 추가:
 
 ```rust
-// oxi-ai/src/compaction.rs — 기존 유지
+// oxicode-ai/src/compaction.rs — 기존 유지
 pub trait Compactor: Send + Sync {
     fn compact<'a>(...) -> ...;
     fn name(&self) -> &str { "default" }
@@ -238,10 +238,10 @@ pub fn shape_for_provider(provider: &str) -> FrameShape {
 
 ### 3.3 네이티브 렌더러 이식
 
-omp의 `crates/pi-natives/src/snapcompact.rs`는 **이미 Rust**. 이를 독립 크레이트 또는 oxi-ai 내 모듈로 이식:
+omp의 `crates/pi-natives/src/snapcompact.rs`는 **이미 Rust**. 이를 독립 크레이트 또는 oxicode-ai 내 모듈로 이식:
 
 ```rust
-// oxi-ai/src/snapcompact/renderer.rs (또는 별도 oxi-snapcompact 크레이트)
+// oxicode-ai/src/snapcompact/renderer.rs (또는 별도 oxicode-snapcompact 크레이트)
 
 /// 픽셀 폰트로 텍스트를 PNG 프레임들로 렌더.
 /// omp pi-natives/snapcompact.rs에서 직접 이식.
@@ -315,7 +315,7 @@ impl Compactor for SnapcompactCompactor {
 
 ### 3.5 inline imaging — 요청 변환 훅
 
-`oxi-ai/src/`에 컨텍스트 변환 훅 추가:
+`oxicode-ai/src/`에 컨텍스트 변환 훅 추가:
 
 ```rust
 /// provider 호출 직전 컨텍스트를 변환하는 훅.
@@ -412,7 +412,7 @@ impl CompactionManager {
 
 ### `/compact` 명령 확장
 
-`oxi-cli/src/tui/slash/builtin/`에 compaction 명령 추가:
+`oxicode-cli/src/tui/slash/builtin/`에 compaction 명령 추가:
 
 | 서브명령 | 동작 |
 |---|---|
@@ -514,15 +514,15 @@ mod tests {
 
 ---
 
-## 9. 부록: omp → oxi 매핑
+## 9. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `packages/snapcompact/src/snapcompact.ts` (1,554) | `oxi-ai/src/snapcompact/mod.rs` (또는 별도 크레이트) |
+| `packages/snapcompact/src/snapcompact.ts` (1,554) | `oxicode-ai/src/snapcompact/mod.rs` (또는 별도 크레이트) |
 | `packages/snapcompact/src/snapcompact.ts` (Shape) | `FrameShape` |
 | `packages/snapcompact/src/snapcompact.ts` (shapeForProvider) | `shape_for_provider` |
-| `crates/pi-natives/src/snapcompact.rs` (Rust 네이티브) | `oxi-ai/src/snapcompact/renderer.rs` (직접 이식) |
-| `session/snapcompact-inline.ts` (542) | `oxi-ai/src/snapcompact/inline.rs` |
-| `session/snapcompact-savings-journal.ts` | `oxi-ai/src/snapcompact/savings.rs` |
-| `session/compact-modes.ts` (105) | `oxi-cli/src/tui/slash/builtin/compact.rs` |
+| `crates/pi-natives/src/snapcompact.rs` (Rust 네이티브) | `oxicode-ai/src/snapcompact/renderer.rs` (직접 이식) |
+| `session/snapcompact-inline.ts` (542) | `oxicode-ai/src/snapcompact/inline.rs` |
+| `session/snapcompact-savings-journal.ts` | `oxicode-ai/src/snapcompact/savings.rs` |
+| `session/compact-modes.ts` (105) | `oxicode-cli/src/tui/slash/builtin/compact.rs` |
 | `LlmCompactor` (기존) | 유지 (soft 모드) |

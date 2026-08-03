@@ -6,15 +6,15 @@
 ## Current State
 
 - `CompactCommand` in `tools_commands.rs` — exists, accepts optional instructions, delegates to `session.compact(instructions)`
-- `CompactionStrategy::Snapcompact` — exists in `oxi-ai/src/compaction.rs:347`
-- `SnapcompactCompactor` — exists in `oxi-sdk/src/snapcompact_compactor.rs` (312 LOC, 5 tests)
+- `CompactionStrategy::Snapcompact` — exists in `oxicode-ai/src/compaction.rs:347`
+- `SnapcompactCompactor` — exists in `oxicode-sdk/src/snapcompact_compactor.rs` (312 LOC, 5 tests)
 - No subcommand routing — `/compact` always uses default strategy (soft)
 
 ## Plan
 
 ### Task: Add subcommand routing to CompactCommand
 
-**Files:** Modify `oxi-cli/src/tui/slash/builtin/tools_commands.rs`
+**Files:** Modify `oxicode-cli/src/tui/slash/builtin/tools_commands.rs`
 
 **Change in `CompactCommand::execute()`:**
 
@@ -77,8 +77,8 @@ if strategy == Some(CompactionStrategy::Snapcompact) && !ctx.session.snapcompact
 
 | File | Action |
 |---|---|
-| `oxi-cli/src/tui/slash/builtin/tools_commands.rs` | **Modify** — subcommand parsing + strategy routing |
-| `oxi-cli/src/app/agent_session.rs` | **Modify** — add `set_compaction_strategy()` and `snapcompact_enabled()` methods |
+| `oxicode-cli/src/tui/slash/builtin/tools_commands.rs` | **Modify** — subcommand parsing + strategy routing |
+| `oxicode-cli/src/app/agent_session.rs` | **Modify** — add `set_compaction_strategy()` and `snapcompact_enabled()` methods |
 
 ### Acceptance
 

@@ -1,6 +1,6 @@
 # Documentation Index
 
-Top-level map of `/oxi/docs/` (~175 markdown files). Subdirectories are
+Top-level map of `/oxicode/docs/` (~175 markdown files). Subdirectories are
 intentionally preserved as written; this index exists to make them findable.
 
 > **Canonical design system.** The unified `DESIGN.md` lives at
@@ -28,13 +28,13 @@ intentionally preserved as written; this index exists to make them findable.
 ## Highlighted key docs
 
 ### Architecture & design system
-- `oxi-design.md` — top-level oxi design narrative.
-- `oxi-architecture.md` — repo-wide architecture overview.
+- `oxicode-design.md` — top-level oxicode design narrative.
+- `oxicode-architecture.md` — repo-wide architecture overview.
 - `extensions.md` — extension system design.
 
 ### SDK
 - `sdk-redesign/00-overview.md` … `06-integration.md` — seven-part SDK plan.
-- `oxi-sdk-ownership.md` — operational guidance for SDK maintainers.
+- `oxicode-sdk-ownership.md` — operational guidance for SDK maintainers.
 - `sdk-stabilization-roadmap.md` — stabilization timeline.
 - `rfc-sdk-improvements.md` — proposed improvements (RFC-style).
 
@@ -55,18 +55,18 @@ intentionally preserved as written; this index exists to make them findable.
 
 ### Process & release
 - `release-process.md` — release pipeline.
-- `oxi-sdk-ownership.md` — SDK ownership / hand-off rules.
+- `oxicode-sdk-ownership.md` — SDK ownership / hand-off rules.
 
 ## Transient & version-sprawl handling
 
-- `oxi-sdk/DESIGN_IMPROVEMENTS_V2.md` is the **latest** of the trio. The
+- `oxicode-sdk/DESIGN_IMPROVEMENTS_V2.md` is the **latest** of the trio. The
   earlier `DESIGN_IMPROVEMENTS.md` and `DESIGN_IMPROVEMENTS_REVIEW.md`
-  have been moved to `oxi-sdk/docs/archive/` (superseded by V2; V2
+  have been moved to `oxicode-sdk/docs/archive/` (superseded by V2; V2
   itself supersedes both).
 - Transient status files (`progress.md`, `.release-prep-status.md`) have
   been moved into `docs/archive/transient/`.
 
-## Top-level docs (`*.md` directly under `/oxi/docs/`)
+## Top-level docs (`*.md` directly under `/oxicode/docs/`)
 
 ```
 LINE_COUNT_AUDIT.md
@@ -85,9 +85,9 @@ design-github-sync.md
 design-native-browser-resurrection.md
 design-pi-mono-alignment.md
 extensions.md
-oxi-architecture.md
-oxi-design.md
-oxi-sdk-ownership.md
+oxicode-architecture.md
+oxicode-design.md
+oxicode-sdk-ownership.md
 release-process.md
 rfc-browser-interactive-sessions.md
 rfc-oxios-requirements.md

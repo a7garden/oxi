@@ -2,7 +2,7 @@
 
 > **갱신**: 2026-07-28 — **모든 Phase 완료**
 > **Git 커밋**: `cb8fb96` (Phase 4 — GitLab Duo Workflow full impl)
-> **테스트**: 664/664 (oxi-ai), clippy clean, consumer check clean
+> **테스트**: 664/664 (oxicode-ai), clippy clean, consumer check clean
 
 > **현재 상태 (2026-07-30):** P0.5 remote-AGENT transport는 아래 기록대로
 > 완료되었고, P2 production tape cutover도 이후 완료되었습니다. P2
@@ -16,10 +16,10 @@
 
 | Provider | File | Lines | Status | Protocol |
 |----------|------|-------|--------|----------|
-| **Cursor** | `oxi-ai/src/providers/cursor.rs` | **1,117** | **✅ Full impl** | HTTP/2 + Connect + Protobuf (492 types via prost-build) |
-| **Devin** | `oxi-ai/src/providers/devin.rs` | **916** | **✅ Full impl** | HTTP/1.1 Connect + Protobuf |
-| **GitLab Duo** | `oxi-ai/src/providers/gitlab_duo.rs` | **480** | **✅ Working REST proxy** | REST + Auth Delegation |
-| **GitLab Duo Agent** | `oxi-ai/src/providers/gitlab_duo_agent.rs` | **1,238** | **✅ Full impl** | WebSocket + JSON protocol |
+| **Cursor** | `oxicode-ai/src/providers/cursor.rs` | **1,117** | **✅ Full impl** | HTTP/2 + Connect + Protobuf (492 types via prost-build) |
+| **Devin** | `oxicode-ai/src/providers/devin.rs` | **916** | **✅ Full impl** | HTTP/1.1 Connect + Protobuf |
+| **GitLab Duo** | `oxicode-ai/src/providers/gitlab_duo.rs` | **480** | **✅ Working REST proxy** | REST + Auth Delegation |
+| **GitLab Duo Agent** | `oxicode-ai/src/providers/gitlab_duo_agent.rs` | **1,238** | **✅ Full impl** | WebSocket + JSON protocol |
 
 ### Api Variant Mapping
 
@@ -31,10 +31,10 @@
 | `Api::GitLabDuoAgent` | `gitlab-duo-agent` | `GitLabDuoAgentProvider::new()` | **✅ Working** |
 
 ### Test Suite
-- oxi-ai: **664/664** passing
+- oxicode-ai: **664/664** passing
 - Workspace total: **3,653/3,653** passing
 - clippy: clean (`-D warnings`)
-- consumer check (`cargo check -p oxi-cli`): clean
+- consumer check (`cargo check -p oxicode-cli`): clean
 
 ---
 

@@ -2,11 +2,11 @@
 
 > **Status:** Complete ✅
 > **Date:** 2026-06-07
-> **Scope:** Workspace-wide (oxi-ai, oxi-agent, oxi-sdk, oxi-cli)
+> **Scope:** Workspace-wide (oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-cli)
 
 ## Motivation
 
-oxi는 이미 `edition = "2024"`, `rust-version = "1.96"`으로 마이그레이션을 완료했다.
+oxicode는 이미 `edition = "2024"`, `rust-version = "1.96"`으로 마이그레이션을 완료했다.
 하지만 마이그레이션은 "컴파일 되게 만드는" 작업이었고, 에디션이 제공하는 **새 언어 기능**과
 최신 러스트 생태계의 **관용 패턴**을 적극 활용하진 않았다.
 
@@ -32,7 +32,7 @@ Rust 1.75 (2023-12) 부터 `async fn` in trait이 안정화되었다.
 |---|---|
 | 사용 파일 | 59 |
 | `#[async_trait]` 발생 | 104 |
-| 영향 크레이트 | oxi-ai, oxi-agent, oxi-sdk, oxi-cli |
+| 영향 크레이트 | oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-cli |
 | `async-trait` 의존 | 4개 Cargo.toml |
 
 ### 변경 계획
@@ -97,20 +97,20 @@ async-trait = "0.1"
 
 | 크레이트 | 트레잇 | async 메서드 수 |
 |---|---|---|
-| oxi-ai | `Provider` | 1 |
-| oxi-agent | `AgentTool` | 1 |
-| oxi-sdk | `StateStore` | 4 |
-| oxi-sdk | `AuthProvider` | 5 |
-| oxi-sdk | `EventBus` | 2 |
-| oxi-sdk | `SkillLoader` | 1 |
-| oxi-sdk | `PersonaProvider` | 1 |
-| oxi-sdk | `MemoryStore` | 3 |
-| oxi-sdk | `CronScheduler` | 2 |
-| oxi-sdk | `ResourceMonitor` | 2 |
-| oxi-sdk | `AccessGate` | 1 |
-| oxi-sdk | `CapabilityResolver` | 1 |
-| oxi-ai | `ProviderResolver` (agent.rs) | 1 |
-| oxi-cli | `Extension` | 여러 |
+| oxicode-ai | `Provider` | 1 |
+| oxicode-agent | `AgentTool` | 1 |
+| oxicode-sdk | `StateStore` | 4 |
+| oxicode-sdk | `AuthProvider` | 5 |
+| oxicode-sdk | `EventBus` | 2 |
+| oxicode-sdk | `SkillLoader` | 1 |
+| oxicode-sdk | `PersonaProvider` | 1 |
+| oxicode-sdk | `MemoryStore` | 3 |
+| oxicode-sdk | `CronScheduler` | 2 |
+| oxicode-sdk | `ResourceMonitor` | 2 |
+| oxicode-sdk | `AccessGate` | 1 |
+| oxicode-sdk | `CapabilityResolver` | 1 |
+| oxicode-ai | `ProviderResolver` (agent.rs) | 1 |
+| oxicode-cli | `Extension` | 여러 |
 
 ### 효과
 
@@ -188,25 +188,25 @@ rg -n --type rust -U 'if let .+\{\s*\n\s*if let'
 | 파일 | 라인 | 패턴 |
 |---|---|---|
 | `scripts/generate-models.rs` | 393-394 | `if let Some(ap)` → `if let Some(sample)` |
-| `oxi-sdk/src/coordination/shared_memory.rs` | 89-90 | `if let Some(expected)` → `if let Some(entry)` |
-| `oxi-sdk/src/middleware/builtins.rs` | 201-202 | `if let Some(tracker)` → `if let Some(budget)` |
-| `oxi-tui/src/widgets/chat/state.rs` | 250-251 | `if let Some(idx)` → `if let ContentBlock::Text` |
-| `oxi-tui/src/widgets/chat/state.rs` | 334-335 | `if let Some(existing_idx)` → `if let Some(ContentBlock::ToolCall)` |
-| `oxi-tui/src/widgets/chat/state.rs` | 369-370 | `if let Some(ref mut s)` → `if let Some(ref id)` |
-| `oxi-tui/src/widgets/chat/state.rs` | 418-419 | `if let Some(ref mut s)` → `if let Some(ContentBlock::Thinking)` |
-| `oxi-ai/src/router/signals.rs` | 276-277 | `if let Message::User(u)` → `if let MessageContent::Blocks` |
-| `oxi-cli/src/store/settings.rs` | 750-751 | `if let Ok(mut settings)` → `if let Some((provider, model))` |
-| `oxi-cli/src/store/settings.rs` | 811-812 | `if let Some(model)` → `if let Some((provider, model_name))` |
-| `oxi-agent/src/proxy.rs` | 573-577 | 3중첩 `if let Some(state)` → `if let ContentState::Text` → `if let Some(block)` → `if let ContentBlock::Text` |
-| `oxi-agent/src/proxy.rs` | 590-594 | 3중첩 (Thinking) |
-| `oxi-agent/src/proxy.rs` | 607-613 | 3중첩 (ToolCall) |
-| `oxi-agent/src/proxy.rs` | 846-847 | 2중첩 (ToolCall) |
-| `oxi-cli/src/bootstrap.rs` | 51-52 | `if let Some(ref level_str)` → `if let Some(level)` |
-| `oxi-cli/src/store/session.rs` | 1121-1122 | `if let SessionEntryEnum::Label` → `if let Some(ref label)` |
+| `oxicode-sdk/src/coordination/shared_memory.rs` | 89-90 | `if let Some(expected)` → `if let Some(entry)` |
+| `oxicode-sdk/src/middleware/builtins.rs` | 201-202 | `if let Some(tracker)` → `if let Some(budget)` |
+| `oxicode-tui/src/widgets/chat/state.rs` | 250-251 | `if let Some(idx)` → `if let ContentBlock::Text` |
+| `oxicode-tui/src/widgets/chat/state.rs` | 334-335 | `if let Some(existing_idx)` → `if let Some(ContentBlock::ToolCall)` |
+| `oxicode-tui/src/widgets/chat/state.rs` | 369-370 | `if let Some(ref mut s)` → `if let Some(ref id)` |
+| `oxicode-tui/src/widgets/chat/state.rs` | 418-419 | `if let Some(ref mut s)` → `if let Some(ContentBlock::Thinking)` |
+| `oxicode-ai/src/router/signals.rs` | 276-277 | `if let Message::User(u)` → `if let MessageContent::Blocks` |
+| `oxicode-cli/src/store/settings.rs` | 750-751 | `if let Ok(mut settings)` → `if let Some((provider, model))` |
+| `oxicode-cli/src/store/settings.rs` | 811-812 | `if let Some(model)` → `if let Some((provider, model_name))` |
+| `oxicode-agent/src/proxy.rs` | 573-577 | 3중첩 `if let Some(state)` → `if let ContentState::Text` → `if let Some(block)` → `if let ContentBlock::Text` |
+| `oxicode-agent/src/proxy.rs` | 590-594 | 3중첩 (Thinking) |
+| `oxicode-agent/src/proxy.rs` | 607-613 | 3중첩 (ToolCall) |
+| `oxicode-agent/src/proxy.rs` | 846-847 | 2중첩 (ToolCall) |
+| `oxicode-cli/src/bootstrap.rs` | 51-52 | `if let Some(ref level_str)` → `if let Some(level)` |
+| `oxicode-cli/src/store/session.rs` | 1121-1122 | `if let SessionEntryEnum::Label` → `if let Some(ref label)` |
 
 ### 3중첩 예시 — 가장 극적인 개선
 
-`oxi-agent/src/proxy.rs:573-577`:
+`oxicode-agent/src/proxy.rs:573-577`:
 
 ```rust
 // Before (3중첩, 들여쓰기 24칸)
@@ -270,7 +270,7 @@ Rust 2024에서 `if let`의 임시값(scrutinee temporary)이 `else` 블록 진�
 ### 현재 코드의 이점
 
 ```rust
-// oxi-agent/src/tools/browse/engine.rs
+// oxicode-agent/src/tools/browse/engine.rs
 if let Some(entry) = self.entries.lock().get(tab_id) {
     // lock guard는 여기서 유지
 } else {
@@ -298,12 +298,12 @@ if let Some(entry) = self.entries.lock().get(tab_id) {
 
 | 위치 | 사용 | 대체 |
 |---|---|---|
-| `oxi-ai/src/model_registry.rs:49` | `static STATIC_MODELS: Lazy<HashMap<...>>` | `LazyLock` |
-| `oxi-ai/src/model_registry.rs:855` | `static GLOBAL_REGISTRY: Lazy<ModelRegistry>` | `LazyLock` |
-| `oxi-ai/src/env_api_keys.rs:23` | `static VERTEX_ADC_CHECK: Lazy<bool>` | `LazyLock` |
-| `oxi-ai/src/providers/mod.rs:211` | `static CUSTOM_PROVIDERS: Lazy<RwLock<...>>` | `LazyLock` |
+| `oxicode-ai/src/model_registry.rs:49` | `static STATIC_MODELS: Lazy<HashMap<...>>` | `LazyLock` |
+| `oxicode-ai/src/model_registry.rs:855` | `static GLOBAL_REGISTRY: Lazy<ModelRegistry>` | `LazyLock` |
+| `oxicode-ai/src/env_api_keys.rs:23` | `static VERTEX_ADC_CHECK: Lazy<bool>` | `LazyLock` |
+| `oxicode-ai/src/providers/mod.rs:211` | `static CUSTOM_PROVIDERS: Lazy<RwLock<...>>` | `LazyLock` |
 
-`oxi-cli`는 이미 `std::sync::LazyLock`을 사용 중 (wasm.rs, changelog.rs, packages.rs). ✅
+`oxicode-cli`는 이미 `std::sync::LazyLock`을 사용 중 (wasm.rs, changelog.rs, packages.rs). ✅
 
 ### 변경 계획
 
@@ -317,9 +317,9 @@ use std::sync::LazyLock;
 static STATIC_MODELS: LazyLock<HashMap<String, Model>> = LazyLock::new(|| { ... });
 ```
 
-`oxi-ai/Cargo.toml`에서 `once_cell = "1"` 제거.
+`oxicode-ai/Cargo.toml`에서 `once_cell = "1"` 제거.
 
-> `oxi-cli/Cargo.toml`에도 `once_cell = "1"`과 `lazy_static = "1.4"`가 선언되어 있으나,
+> `oxicode-cli/Cargo.toml`에도 `once_cell = "1"`과 `lazy_static = "1.4"`가 선언되어 있으나,
 > 코드에서 직접 사용하지 않음 (다른 의존 크레이트의 전이 의존). 제거해도 무방.
 
 ### 위험도: 매우 낮음
@@ -337,7 +337,7 @@ static STATIC_MODELS: LazyLock<HashMap<String, Model>> = LazyLock::new(|| { ... 
 
 `full`은 16개 feature를 포함하며, 그 중 사용하지 않는 것들이 있다:
 
-| Feature | oxi-ai | oxi-agent | oxi-sdk | oxi-cli |
+| Feature | oxicode-ai | oxicode-agent | oxicode-sdk | oxicode-cli |
 |---|:---:|:---:|:---:|:---:|
 | `rt-multi-thread` | ✅ | ✅ | ✅ | ✅ |
 | `macros` | ✅ (`#[tokio::test]`) | ✅ | ✅ | ✅ |
@@ -363,10 +363,10 @@ static STATIC_MODELS: LazyLock<HashMap<String, Model>> = LazyLock::new(|| { ... 
 
 | 위치 | 타입 | 컨텍스트 |
 |---|---|---|
-| oxi-sdk 대부분 | `parking_lot::Mutex` / `RwLock` | 비동기 컨텍스트에서 lock을 짧게 잡을 때 |
-| oxi-cli | `std::sync::Mutex` | UI 콜백, 테스트 |
-| oxi-agent 테스트 | `std::sync::Mutex` | 테스트에서 Arc<Mutex<Vec<_>>> |
-| oxi-agent | `tokio::sync::Mutex` | `.await` 경계에서 lock 유지 필요 시 |
+| oxicode-sdk 대부분 | `parking_lot::Mutex` / `RwLock` | 비동기 컨텍스트에서 lock을 짧게 잡을 때 |
+| oxicode-cli | `std::sync::Mutex` | UI 콜백, 테스트 |
+| oxicode-agent 테스트 | `std::sync::Mutex` | 테스트에서 Arc<Mutex<Vec<_>>> |
+| oxicode-agent | `tokio::sync::Mutex` | `.await` 경계에서 lock 유지 필요 시 |
 
 AGENTS.md에 이미 다음이 명시되어 있음:
 
@@ -381,14 +381,14 @@ AGENTS.md에 이미 다음이 명시되어 있음:
 
 ### 6c. `tokio-test` 제거 ✅ 확정
 
-`oxi-ai`와 `oxi-agent`에 `tokio-test = "0.4"`가 선언되어 있으나, 코드 전체에서 **단 한 곳도 사용하지 않음**:
+`oxicode-ai`와 `oxicode-agent`에 `tokio-test = "0.4"`가 선언되어 있으나, 코드 전체에서 **단 한 곳도 사용하지 않음**:
 
 ```bash
 $ rg --type rust 'tokio_test' -l
 # (결과 없음)
 ```
 
-**조치:** `oxi-ai/Cargo.toml`과 `oxi-agent/Cargo.toml`에서 `tokio-test = "0.4"` 제거.
+**조치:** `oxicode-ai/Cargo.toml`과 `oxicode-agent/Cargo.toml`에서 `tokio-test = "0.4"` 제거.
 
 ### 6d. `tokio::select!` 패턴 개선
 
@@ -406,27 +406,27 @@ Rust 2024의 `if let` temporary scope 변경과 결합하여 lock을 `select!` �
 
 **예상 소요:** 2-3시간 (기계적 치환 + 테스트)
 
-1. `oxi-ai` 부터 시작 (가장 독립적인 크레이트)
+1. `oxicode-ai` 부터 시작 (가장 독립적인 크레이트)
    - `trait_def.rs`: trait 정의에서 `#[async_trait]` 제거
    - 각 provider 구현체에서 `#[async_trait]` 제거
    - `multi_provider.rs`, `compaction.rs`, `provider_pool.rs` 등
    - `use async_trait::async_trait;` 전체 제거
    - `Cargo.toml`에서 `async-trait` 제거
-   - `cargo clippy -p oxi-ai -- -D warnings`
-   - `cargo nextest run -p oxi-ai`
+   - `cargo clippy -p oxicode-ai -- -D warnings`
+   - `cargo nextest run -p oxicode-ai`
 
-2. `oxi-agent`
+2. `oxicode-agent`
    - `tools.rs`: `AgentTool` trait에서 `#[async_trait]` 제거
    - 17개 tool 구현체에서 제거
    - `mcp/`, `agent_loop/`, `proxy.rs` 등
    - 동일하게 clippy + test
 
-3. `oxi-sdk`
+3. `oxicode-sdk`
    - 11개 port trait에서 제거
    - noop 구현체, fs/ 구현체, inmem/ 구현체
    - `closure_tool.rs`, `kernel_bridge.rs`, `lifecycle/` 등
 
-4. `oxi-cli`
+4. `oxicode-cli`
    - `agent_session.rs`, `extensions/wasm_tool.rs` 등
    - 의존하는 모든 upstream 크레이트가 완료된 후 작업
 
@@ -446,10 +446,10 @@ PR 리뷰 또는 별도 브랜치에서 중첩 `if let` 패턴을 let chain으�
 
 **예상 소요:** 30분
 
-1. `oxi-ai`: `once_cell::sync::Lazy` → `std::sync::LazyLock` (4곳)
-2. `oxi-ai/Cargo.toml`에서 `once_cell` 제거
-3. `oxi-cli/Cargo.toml`에서 `once_cell`, `lazy_static` 제거 (직접 미사용)
-4. `oxi-ai/Cargo.toml`, `oxi-agent/Cargo.toml`에서 `tokio-test` 제거
+1. `oxicode-ai`: `once_cell::sync::Lazy` → `std::sync::LazyLock` (4곳)
+2. `oxicode-ai/Cargo.toml`에서 `once_cell` 제거
+3. `oxicode-cli/Cargo.toml`에서 `once_cell`, `lazy_static` 제거 (직접 미사용)
+4. `oxicode-ai/Cargo.toml`, `oxicode-agent/Cargo.toml`에서 `tokio-test` 제거
 5. `cargo clippy --workspace -- -D warnings` + `cargo nextest run --workspace`
 
 ---

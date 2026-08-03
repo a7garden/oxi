@@ -8,8 +8,8 @@
 
 The local issue system is implemented in Phases 1–5:
 
-- **Phase 1**: `FileIssueStore` — markdown + YAML frontmatter in `.oxi/issues/`.
-- **Phase 1.5**: `oxi issue …` CLI subcommand.
+- **Phase 1**: `FileIssueStore` — markdown + YAML frontmatter in `.oxicode/issues/`.
+- **Phase 1.5**: `oxicode issue …` CLI subcommand.
 - **Phase 2**: `IssueTool` agent tool.
 - **Phase 3**: TUI overlay panel + `/issue` slash command.
 - **Phase 4**: Status-bar indicator.
@@ -25,7 +25,7 @@ Allow issues to flow between local markdown and GitHub Issues so that:
 
 - A user working locally can publish their tracker to a team using GitHub.
 - A user whose team uses GitHub Issues can mirror a subset locally to
-  work on them through `oxi`.
+  work on them through `oxicode`.
 
 ## Non-goals (v1)
 
@@ -105,11 +105,11 @@ Per-issue sync state is **computed, not stored**, derived from the above:
 ### CLI
 
 ```sh
-oxi issue push <id>            # local → GitHub (creates or updates)
-oxi issue pull <number>        # GitHub → local (creates or updates)
-oxi issue sync [<id>]          # bidirectional; one or all
-oxi issue where <id>           # show sync state of an issue
-oxi issue status               # show sync state of all linked issues
+oxicode issue push <id>            # local → GitHub (creates or updates)
+oxicode issue pull <number>        # GitHub → local (creates or updates)
+oxicode issue sync [<id>]          # bidirectional; one or all
+oxicode issue where <id>           # show sync state of an issue
+oxicode issue status               # show sync state of all linked issues
 ```
 
 All commands support `--dry-run` and `--repo owner/name` (override the
@@ -127,7 +127,7 @@ Add a new `action` to the existing `issue` tool:
 
 The `sync` action is **opt-in**: the tool is only registered if the
 project has a `github_repo` configured (e.g. via
-`oxi issue init --repo owner/name`).
+`oxicode issue init --repo owner/name`).
 
 ## Conflict resolution (Phase 6.3)
 
@@ -148,7 +148,7 @@ decide to override before the write is committed.
 ## Auth & rate limits
 
 Reuse the existing `gh` CLI authentication (already in use by the
-`github` tool — see `oxi-agent/src/tools/github.rs`). No new auth
+`github` tool — see `oxicode-agent/src/tools/github.rs`). No new auth
 surface.
 
 - Authenticated rate limit: 5000 requests/hour.
@@ -236,7 +236,7 @@ in the dependency graph.
 
 1. **Where does `owner/repo` come from?**
    - `git remote get-url origin` parsed?
-   - Per-project `oxi issue init --repo owner/name`?
+   - Per-project `oxicode issue init --repo owner/name`?
    - Global setting?
    - *Default: parse `git remote get-url origin`; override with init flag.*
 

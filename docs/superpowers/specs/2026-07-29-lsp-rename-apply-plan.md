@@ -5,16 +5,16 @@
 
 ## Current State
 
-- `CliLspProvider` in `oxi-cli/src/lsp/provider.rs` — `action_rename()` exists, sends `textDocument/rename` but returns **preview only** (accepts `_apply: bool` parameter but ignores it)
+- `CliLspProvider` in `oxicode-cli/src/lsp/provider.rs` — `action_rename()` exists, sends `textDocument/rename` but returns **preview only** (accepts `_apply: bool` parameter but ignores it)
 - `action_file_rename()` — sends `WillRenameFiles` request, also preview-only
-- `oxi-agent/src/tools/lsp.rs::LspAction` — has `Rename`, `FileRename` variants with `apply: bool` field already defined
+- `oxicode-agent/src/tools/lsp.rs::LspAction` — has `Rename`, `FileRename` variants with `apply: bool` field already defined
 - No standalone willRenameFiles operation exposed to the agent tool
 
 ## Plan
 
 ### Task 1: Implement rename apply in CliLspProvider
 
-**Files:** Modify `oxi-cli/src/lsp/provider.rs`
+**Files:** Modify `oxicode-cli/src/lsp/provider.rs`
 
 **Current `action_rename()` (preview-only):**
 ```rust
@@ -67,7 +67,7 @@ fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<(), ToolError> {
 
 ### Task 2: Add willRenameFiles as standalone LspAction
 
-**Files:** Modify `oxi-agent/src/tools/lsp.rs` + `oxi-cli/src/lsp/provider.rs`
+**Files:** Modify `oxicode-agent/src/tools/lsp.rs` + `oxicode-cli/src/lsp/provider.rs`
 
 - Add `LspAction::WillRenameFiles` variant
 - Add `action_will_rename_files()` to `LspProvider` trait
@@ -77,9 +77,9 @@ fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<(), ToolError> {
 
 | File | Action |
 |---|---|
-| `oxi-cli/src/lsp/provider.rs` | **Modify** — `action_rename()` apply path, `action_file_rename()` apply path, `action_will_rename_files()` |
-| `oxi-agent/src/tools/lsp.rs` | **Modify** — add `LspAction::WillRenameFiles`, add trait method |
-| `oxi-agent/src/tools.rs` | **Modify** — update `LspProvider` trait if needed |
+| `oxicode-cli/src/lsp/provider.rs` | **Modify** — `action_rename()` apply path, `action_file_rename()` apply path, `action_will_rename_files()` |
+| `oxicode-agent/src/tools/lsp.rs` | **Modify** — add `LspAction::WillRenameFiles`, add trait method |
+| `oxicode-agent/src/tools.rs` | **Modify** — update `LspProvider` trait if needed |
 
 ### Acceptance
 

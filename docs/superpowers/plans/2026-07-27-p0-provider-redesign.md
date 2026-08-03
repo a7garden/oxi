@@ -3,11 +3,11 @@
 > **상위 설계:** `docs/superpowers/specs/2026-07-27-omp-realignment-design.md` (Phase 0)
 > **모드:** 자율 실행 (사용자 승인, 자러 감). 각 increment마다 build+clippy+nextest green 유지 후 커밋.
 
-**Goal:** oxi-ai의 provider 정체성 붕괴를 수정하고 omp의 3-way 분리(transport / auth-login / metadata)로 재설계.
+**Goal:** oxicode-ai의 provider 정체성 붕괴를 수정하고 omp의 3-way 분리(transport / auth-login / metadata)로 재설계.
 
 **Architecture:** omp처럼 `Api` dialect로 dispatch하는 streaming transport(identity 없음) + `ProviderDefinition` registry(auth/login) + `ProviderDescriptor`(catalog, metadata/discovery)로 분리. catalog는 별도 leaf 크레이트로 추출.
 
-**Tech Stack:** Rust 2024 edition, cargo workspace. 검증: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`, `cargo nextest run --workspace`, `cargo fmt --all -- --check`.
+**Tech Stack:** Rust 2024 edition, cargo workspace. 검증: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`, `cargo nextest run --workspace`, `cargo fmt --all -- --check`.
 
 ## Global Constraints
 - edition = "2024", rust-version = "1.96" (workspace). 새 크레이트 동일.
@@ -17,14 +17,14 @@
 
 ## Move Order (P0.1 — circular-dep 방지, advisor 검증)
 
-`catalog/`가 oxi-ai core로 가는 의존성은 `crate::Api` 단 하나 (`models_dev.rs:49`, `materialize.rs:220` test). `InputModality`는 catalog/가 아니라 `model_db.rs`(bridge)에서만 사용 → model_db.rs는 oxi-ai 잔류.
+`catalog/`가 oxicode-ai core로 가는 의존성은 `crate::Api` 단 하나 (`models_dev.rs:49`, `materialize.rs:220` test). `InputModality`는 catalog/가 아니라 `model_db.rs`(bridge)에서만 사용 → model_db.rs는 oxicode-ai 잔류.
 
-1. `oxi-catalog` crate skeleton (`Cargo.toml`, `src/lib.rs`).
-2. `Api` enum (`oxi-ai/src/types.rs:8-53`) → `oxi-catalog/src/api.rs`. oxi-ai는 `pub use oxi_catalog::Api;` 재-내보내기 (backward compat, callsite 대폭 감소).
-3. `catalog/` 7파일 → `oxi-catalog/src/` (crate root). 내부 `crate::catalog::X` → `crate::X`. `crate::Api` → 그대로 (이제 local).
-4. workspace `Cargo.toml` members에 `oxi-catalog` 추가. oxi-ai `Cargo.toml`에 `oxi-catalog` dep 추가.
-5. workspace import 갱신: `oxi_ai::catalog::*` → `oxi_catalog::*`. `oxi_ai::Api` → re-export 유지로 그대로 동작.
-6. `model_db.rs`/`model_registry.rs`: `crate::catalog::*` → `oxi_catalog::*`.
+1. `oxicode-catalog` crate skeleton (`Cargo.toml`, `src/lib.rs`).
+2. `Api` enum (`oxicode-ai/src/types.rs:8-53`) → `oxicode-catalog/src/api.rs`. oxicode-ai는 `pub use oxicode_catalog::Api;` 재-내보내기 (backward compat, callsite 대폭 감소).
+3. `catalog/` 7파일 → `oxicode-catalog/src/` (crate root). 내부 `crate::catalog::X` → `crate::X`. `crate::Api` → 그대로 (이제 local).
+4. workspace `Cargo.toml` members에 `oxicode-catalog` 추가. oxicode-ai `Cargo.toml`에 `oxicode-catalog` dep 추가.
+5. workspace import 갱신: `oxicode_ai::catalog::*` → `oxicode_catalog::*`. `oxicode_ai::Api` → re-export 유지로 그대로 동작.
+6. `model_db.rs`/`model_registry.rs`: `crate::catalog::*` → `oxicode_catalog::*`.
 7. 회귀 게이트 green 확인 후 커밋.
 
 ## Task Sequence
@@ -42,7 +42,7 @@
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo nextest run --workspace
 cargo fmt --all -- --check
 ```

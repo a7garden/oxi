@@ -1,6 +1,6 @@
 # 03. 에이전트 간 조정 (Inter-Agent Coordination)
 
-모듈 경로: `oxi-sdk/src/coordination/`
+모듈 경로: `oxicode-sdk/src/coordination/`
 
 ---
 
@@ -311,7 +311,7 @@ Coordinator(AgentHandle-0)  WorkQueue  Worker(AgentHandle-1)  SharedMemory
 ## 3.7 사용 예시
 
 ```rust
-use oxi_sdk::coordination::*;
+use oxicode_sdk::coordination::*;
 
 // 1. 프리미티브 생성
 let queue = Arc::new(WorkQueue::new(WorkQueueConfig::default()));

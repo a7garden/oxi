@@ -4,7 +4,7 @@
 - **상태**: 설계 (사용자 승인 방침 T1 기반, 상세 설계 완료)
 - **상위 문서**: `specs/2026-07-27-omp-realignment-design.md` §3.2 원칙 4, Phase 2
 - **omp 소스**: `/tmp/omp/packages/tui/src/tui.ts` (4273 lines), `components/`, `terminal.ts` (66KB), `keys.ts` (17KB)
-- **대상 크레이트**: `oxi-tui-legacy/` (22.5K LOC → `oxi-tui`로 rename), 현 `oxi-tui/` v2 (9.8K LOC → 폐기)
+- **대상 크레이트**: `oxicode-tui-legacy/` (22.5K LOC → `oxicode-tui`로 rename), 현 `oxicode-tui/` v2 (9.8K LOC → 폐기)
 
 ---
 
@@ -12,12 +12,12 @@
 
 ### 1.1 이중 크레이트 교착
 
-oxi-cli은 두 TUI 크레이트에 동시 의존한다:
+oxicode-cli은 두 TUI 크레이트에 동시 의존한다:
 
 | 크레이트 | LOC | 역할 | 렌더 패러다임 |
 |---|---|---|---|
-| `oxi-tui-legacy` | 22,499 | 모든 위젯·테마·심볼·키바인딩·오버레이·머메이드·이미지·LaTeX | ratatui Frame + DiffBackend (alt screen, row-level diff, CSI 2026, DECCARA) |
-| `oxi-tui` (v2) | 9,792 | draw_frame_closure 파이프라인, CursorState, RetainedTree, capability detect | ratatui Frame (closure-based, cell-level diff) |
+| `oxicode-tui-legacy` | 22,499 | 모든 위젯·테마·심볼·키바인딩·오버레이·머메이드·이미지·LaTeX | ratatui Frame + DiffBackend (alt screen, row-level diff, CSI 2026, DECCARA) |
+| `oxicode-tui` (v2) | 9,792 | draw_frame_closure 파이프라인, CursorState, RetainedTree, capability detect | ratatui Frame (closure-based, cell-level diff) |
 
 실제 렌더 경로는 hybrid다: v2 `draw_frame_closure`이 프레임 라이프사이클을 소유하고, 그 안에서 legacy `render::draw`가 위젯을 그린다. 터미널 백엔드는 `Terminal<DiffBackend<io::Stdout>>` — **legacy DiffBackend**가 실제 출력을 담당.
 
@@ -38,7 +38,7 @@ oxi-cli은 두 TUI 크레이트에 동시 의존한다:
 
 ### 1.3 omp tape 모델과의 근본적 차이
 
-| 측면 | 현재 oxi (legacy + v2) | omp tape 모델 |
+| 측면 | 현재 oxicode (legacy + v2) | omp tape 모델 |
 |---|---|---|
 | 스크린 모드 | **Alt screen** (1049h) — 종료 시 전체 소실 | **Main screen** (native scrollback) — 종료 후에도 대화 이력 잔존 |
 | 렌더링 단위 | ratatui `Frame` → `Buffer` → `Cell[][]` | `Component.render(width) → string[]` (raw ANSI lines) |
@@ -81,7 +81,7 @@ omp의 핵심 혁신은 **append-only native scrollback**이다:
 
 #### ADR-3: Line 타입 — 자체 도메인 타입, ratatui 비의존
 
-**결정**: `Line`은 oxi-tui 자체 타입 (`Vec<Span>`, Span = `{ text: String, style: Style }`). ratatui `buffer::Cell`이나 `text::Line`에 의존하지 않는다.
+**결정**: `Line`은 oxicode-tui 자체 타입 (`Vec<Span>`, Span = `{ text: String, style: Style }`). ratatui `buffer::Cell`이나 `text::Line`에 의존하지 않는다.
 
 **이유**: tape engine은 alt screen을 벗어나 main screen에 직접 write해야 한다. ratatui Buffer/Cell은 alt screen 프레임 렌더링에 최적화된 타입이다. Component가 `Vec<Line>`을 반환하면, tape engine이 이를 raw ANSI bytes로 직렬화하여 stdout에 write.
 
@@ -105,16 +105,16 @@ omp의 핵심 혁신은 **append-only native scrollback**이다:
 
 ### P2.1 — V2 Retirement + Rename (~300 lines, 1-2일)
 
-**목표**: v2 crate 폐기, `oxi-tui-legacy` → `oxi-tui` rename, 단일 크레이트 확보.
+**목표**: v2 crate 폐기, `oxicode-tui-legacy` → `oxicode-tui` rename, 단일 크레이트 확보.
 
 **변경 범위**:
 - legacy DiffBackend에 cursor dedup 추가 (~60 lines)
-- oxi-cli에서 v2 import 전부 제거 (~50 lines)
+- oxicode-cli에서 v2 import 전부 제거 (~50 lines)
 - `v2_render.rs` (35 lines), `v2_bridge.rs` (57 lines), `v2_overlay_adapter.rs` (341 lines) 삭제
-- `oxi-tui/` v2 crate 삭제, workspace에서 제거
-- `oxi-tui-legacy/` → `oxi-tui/` rename (Cargo.toml, workspace, import paths)
+- `oxicode-tui/` v2 crate 삭제, workspace에서 제거
+- `oxicode-tui-legacy/` → `oxicode-tui/` rename (Cargo.toml, workspace, import paths)
 
-**수락 기준**: `oxi-tui` 단일 크레이트. build + clippy + nextest green. 렌더링 시각적 동일.
+**수락 기준**: `oxicode-tui` 단일 크레이트. build + clippy + nextest green. 렌더링 시각적 동일.
 
 ### P2.2 — Native Scrollback Tape Engine (~3000 lines, 2-3주)
 
@@ -171,7 +171,7 @@ omp의 핵심 혁신은 **append-only native scrollback**이다:
 - `Component` trait 구현체: UserMessage, AssistantMessage, ToolCallBlock, ThinkingBlock
 - 각 Component의 `render(width)` — markdown, code, diff를 `Vec<Line>`으로 출력
 - `ChatContainer`: children 관리, content_hash memoization
-- oxi-cli `render.rs`의 transcript 부분을 tape engine 경로로 전환
+- oxicode-cli `render.rs`의 transcript 부분을 tape engine 경로로 전환
 - Legacy ratatui Frame 렌더링은 overlay 전용으로 잔존
 
 **핵심 위젯 마이그레이션**:
@@ -183,7 +183,7 @@ omp의 핵심 혁신은 **append-only native scrollback**이다:
 
 **목표**: omp 수준의 입력 처리.
 
-| 항목 | omp 소스 | 현재 oxi | 목표 |
+| 항목 | omp 소스 | 현재 oxicode | 목표 |
 |---|---|---|---|
 | Kitty keyboard protocol | `keys.ts` (17KB) | ❌ | crossterm 확장 + custom CSI parsing |
 | Bracketed paste | `bracketed-paste.ts` (5KB) | ❌ | crossterm `EnableBracketedPaste` |
@@ -218,7 +218,7 @@ omp의 핵심 혁신은 **append-only native scrollback**이다:
 
 v2 `CursorState`는 커서 위치/가시성을 추적하고, 동일 위치면 cursor move escape를 생략한다.
 
-**이식 위치**: `oxi-tui-legacy/src/render/mod.rs`의 `DiffBackend` 또는 별도 `cursor.rs` 모듈.
+**이식 위치**: `oxicode-tui-legacy/src/render/mod.rs`의 `DiffBackend` 또는 별도 `cursor.rs` 모듈.
 
 **설계**:
 ```rust
@@ -256,7 +256,7 @@ impl CursorState {
 
 **Before** (v2 closure):
 ```rust
-let result = oxi_tui::pipeline::draw_frame_closure(
+let result = oxicode_tui::pipeline::draw_frame_closure(
     &mut tui.terminal,
     &mut cursor_state,
     FocusTarget::None,
@@ -283,15 +283,15 @@ state.cursor_state.reconcile(want_cursor, &mut tui.terminal)?;
 
 ### 4.4 Rename 계획
 
-1. `oxi-tui-legacy/` → `oxi-tui/` (디렉토리 rename)
-2. `oxi-tui-legacy/Cargo.toml` `[package] name = "oxi-tui"` + version 유지
-3. `Cargo.toml` workspace members에서 `oxi-tui-legacy` 제거 (이미 `oxi-tui` 존재 → 디렉토리 교체)
-4. 모든 `oxi_tui_legacy::` → `oxi_tui::` import 치환
-5. 모든 `use oxi_tui_legacy` → `use oxi_tui`
+1. `oxicode-tui-legacy/` → `oxicode-tui/` (디렉토리 rename)
+2. `oxicode-tui-legacy/Cargo.toml` `[package] name = "oxicode-tui"` + version 유지
+3. `Cargo.toml` workspace members에서 `oxicode-tui-legacy` 제거 (이미 `oxicode-tui` 존재 → 디렉토리 교체)
+4. 모든 `oxicode_tui_legacy::` → `oxicode_tui::` import 치환
+5. 모든 `use oxicode_tui_legacy` → `use oxicode_tui`
 6. AGENTS.md, README 등 문서 업데이트
-7. `.github/workflows/`에서 `oxi-tui-legacy` 참조 확인
+7. `.github/workflows/`에서 `oxicode-tui-legacy` 참조 확인
 
-**주의**: 현 `oxi-tui/` v2를 먼저 삭제한 후 rename해야 충돌 회피.
+**주의**: 현 `oxicode-tui/` v2를 먼저 삭제한 후 rename해야 충돌 회피.
 
 ---
 
@@ -419,7 +419,7 @@ write!(out, "{}", show_cursor_if_needed)?;
 
 ## 7. 성공 기준 (P2 전체)
 
-- [x] `oxi-tui` 단일 크레이트 (v2/legacy 이중 제거) — **P2.1**
+- [x] `oxicode-tui` 단일 크레이트 (v2/legacy 이중 제거) — **P2.1**
 - [x] Native scrollback + append-only tape 동작 — **P2.2 + production cutover**
 - [x] Component 모델 기반 transcript 렌더링 — **P2.3 + production cutover**
 - [x] Kitty/bracketed-paste/keybinding/mouse/kill-ring — **P2.4**

@@ -51,7 +51,7 @@ teardown_current()
 
 ### 요약 전략
 
-omp는 별도 LLM 호출로 요약을 생성한다. oxi에서도 같은 접근:
+omp는 별도 LLM 호출로 요약을 생성한다. oxicode에서도 같은 접근:
 
 **Option A (recommended):** `memory_reflect` 도구와 동일한 로직 재사용
 - `MemoryReflectTool`이 이미 요약 생성 로직을 가지고 있음
@@ -83,7 +83,7 @@ pub async fn session_reflect(
 ### 호출 위치 상세
 
 ```rust
-// oxi-cli/src/app/agent_session_runtime.rs
+// oxicode-cli/src/app/agent_session_runtime.rs
 
 fn teardown_current(&mut self, reason: SessionSwitchReason) {
     // Capture data before reset
@@ -129,9 +129,9 @@ fn memory_backend(&self) -> Option<Arc<dyn MemoryBackend>> {
 
 | File | Change |
 |---|---|
-| `oxi-cli/src/app/agent_session_runtime.rs` | `teardown_current()`에 memory reflect 로직 추가. `memory_backend()` accessor. |
-| `oxi-cli/src/services.rs` | `session_reflect()`는 이미 있음. (선택) `generate_session_summary()` helper 추가 |
-| `oxi-cli/src/app/agent_session_services.rs` (if exists) | MemoryBackend accessor 노출 |
+| `oxicode-cli/src/app/agent_session_runtime.rs` | `teardown_current()`에 memory reflect 로직 추가. `memory_backend()` accessor. |
+| `oxicode-cli/src/services.rs` | `session_reflect()`는 이미 있음. (선택) `generate_session_summary()` helper 추가 |
+| `oxicode-cli/src/app/agent_session_services.rs` (if exists) | MemoryBackend accessor 노출 |
 
 ### Acceptance Criteria
 

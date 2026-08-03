@@ -12,7 +12,7 @@
 
 omp는 `read`/`search`가 **로컬 파일뿐 아니라** PR·이슈·서브에이전트 결과·스킬·룰·메모리·아티팩트를 **같은 형태**(`scheme://path`)로 소비하게 한다. 도구 표면은 그대로(read/search/grep/find)면서 에이전트가 접근하는 정보 영역이 확장된다.
 
-oxi는 이것을 **새 포트 `InternalUrlRouter`**(포트 12) + `ProtocolHandler` 트레잇 + `CompositeUrlRouter`로 구현한다. 미등록 시 일반 파일 경로로 100% 폴백 — 기존 동작 regression 제로.
+oxicode는 이것을 **새 포트 `InternalUrlRouter`**(포트 12) + `ProtocolHandler` 트레잇 + `CompositeUrlRouter`로 구현한다. 미등록 시 일반 파일 경로로 100% 폴백 — 기존 동작 regression 제로.
 
 ### omp가 검증한 가치
 - **도구 수 증가 없음** — `gh_issue_view`, `gh_pr_view` 같은 별도 도구 없이 `read issue://1428`, `read pr://owner/repo/1063`.
@@ -51,9 +51,9 @@ interface ResolveContext {
 }
 ```
 
-### 1.3 12개 스킴과 oxi 우선순위
+### 1.3 12개 스킴과 oxicode 우선순위
 
-| 스킴 | omp 용도 | oxi 우선순위 | 비고 |
+| 스킴 | omp 용도 | oxicode 우선순위 | 비고 |
 |---|---|:-:|---|
 | `issue://` | GitHub 이슈 본문/댓글 | **M2 1차** | 기존 `github` 도구 재사용 |
 | `pr://` | PR 본문/diff/커밋 | **M2 1차** | 기존 `github` 도구 재사용 |
@@ -61,7 +61,7 @@ interface ResolveContext {
 | `memory://` | Hindsight 메모리 항목 | M3 (04 연동) | `MemoryStore` 포트 |
 | `skill://` | SKILL.md 본문 | M2 2차 | `SkillLoader` 포트 |
 | `rule://` | TTSR 룰 본문 | M3 (03 연동) | `RuleRegistry` 포트 |
-| `local://` | 세션 artifacts 디렉토리 | M2 2차 | oxi-cli 세션 경로 |
+| `local://` | 세션 artifacts 디렉토리 | M2 2차 | oxicode-cli 세션 경로 |
 | `artifact://` | sealed 산출물 | 검토 | oxios 연관 |
 | `history://` | 세션 히스토리 | 검토 | 세션 트리 |
 | `omp://` | 번들 문서 | 제외 | omp 전용 |
@@ -77,11 +77,11 @@ interface ResolveContext {
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
 ### 2.1 새 포트: `InternalUrlRouter` (포트 12)
 
-`oxi-sdk/src/ports/mod.rs`:
+`oxicode-sdk/src/ports/mod.rs`:
 
 ```rust
 // ═══════════════════════════════════════════════════════════════════════════
@@ -170,8 +170,8 @@ impl InternalUrlRouter for NoopInternalUrlRouter {
 
 ```rust
 use async_trait::async_trait;
-/// 단일 스킴 처리기. 제품이 각자 구현 (oxi-cli: IssueHandler, PrHandler, ...).
-/// — `oxi-sdk/src/ports/mod.rs` (또는 `ports/url_router.rs`) —
+/// 단일 스킴 처리기. 제품이 각자 구현 (oxicode-cli: IssueHandler, PrHandler, ...).
+/// — `oxicode-sdk/src/ports/mod.rs` (또는 `ports/url_router.rs`) —
 #[async_trait]
 pub trait ProtocolHandler: Send + Sync {
     /// 이 핸들러가 다루는 스킴 ("issue", "pr", ...). 소문자.
@@ -222,7 +222,7 @@ impl InternalUrlRouter for CompositeUrlRouter {
 
 ### 2.3 read/search 도구 진입점 변경
 
-**공통 dispatch 함수** (`oxi-agent/src/tools/path_security.rs` 또는 신규 `url_dispatch.rs`):
+**공통 dispatch 함수** (`oxicode-agent/src/tools/path_security.rs` 또는 신규 `url_dispatch.rs`):
 
 ```rust
 /// 경로가 내부 URL이면 라우터로, 아니면 파일로.
@@ -256,7 +256,7 @@ pub enum PathOrUrl {
 
 ### 2.4 selector 처리
 
-omp는 path-utils의 정규식群으로 selector peel. oxi는 표준화:
+omp는 path-utils의 정규식群으로 selector peel. oxicode는 표준화:
 - `LineMap` 타입으로 selector 해석을 read 도구에 위임 (이미 read는 offset/limit 지원).
 - opaque 스킴(`mcp://`)은 selector 해석 안 함 — omp 정책 동일.
 
@@ -267,7 +267,7 @@ pub struct ToolContext {
     pub workspace_dir: PathBuf,
     pub root_dir: Option<PathBuf>,
     pub session_id: Option<String>,
-    pub snapshot_store: Option<Arc<dyn oxi_hashline::SnapshotStore>>,           // ①
+    pub snapshot_store: Option<Arc<dyn oxicode_hashline::SnapshotStore>>,           // ①
     pub internal_url_router: Option<Arc<dyn InternalUrlRouter>>,                 // ② 신규
 }
 impl ToolContext {
@@ -279,11 +279,11 @@ impl ToolContext {
 
 ---
 
-## 3. oxi-cli 구현체 (M2)
+## 3. oxicode-cli 구현체 (M2)
 
 ### 3.1 핸들러 (기존 도구 재사용)
 
-`oxi-cli/src/internal_urls/`:
+`oxicode-cli/src/internal_urls/`:
 - `issue_handler.rs` — `IssueProtocolHandler`, 기존 `github` 도구의 GitHub API 클라이언트 재사용. `issue://1428` → 현재 repo의 이슈, `issue://owner/repo/1428` → 명시 repo.
 - `pr_handler.rs` — `pr://1428`, `pr://owner/repo/1428/diff/N`. diff는 unified diff를 markdown으로.
 - `agent_handler.rs` — 서브에이전트 결과 저장소(신규)에서 JSON path 조회.
@@ -299,7 +299,7 @@ let url_router = Arc::new(CompositeUrlRouter::new());
 url_router.register(Arc::new(IssueProtocolHandler::new(gh_client.clone())));
 url_router.register(Arc::new(PrProtocolHandler::new(gh_client.clone())));
 // ... 추가 핸들러
-OxiBuilder::new().with_port_internal_url_router(url_router).build()
+OxicodeBuilder::new().with_port_internal_url_router(url_router).build()
 ```
 
 ---
@@ -324,7 +324,7 @@ OxiBuilder::new().with_port_internal_url_router(url_router).build()
 
 | 항목 | 상태 | 논의 |
 |---|:-:|---|
-| 글로벌 라우터 vs 인스턴스 | 🟢 Composite 주입 | omp는 싱글톤. oxi는 포트 주입(세션별 가능, 더 유연) |
+| 글로벌 라우터 vs 인스턴스 | 🟢 Composite 주입 | omp는 싱글톤. oxicode는 포트 주입(세션별 가능, 더 유연) |
 | immutable 리소스 + hashline | 🟢 tag 억제 | immutable=true 시 read가 `[path#TAG]` 헤더 생략 |
 | selector 문법 표준화 | 🟡 `LineMap` | omp 정규식 호환 + 표준 타입. 세부는 M2.5 |
 | MCP opaque 처리 | 🟢 동일 정책 | `OPAQUE_RESOURCE_SCHEMES = {mcp}` |
@@ -333,14 +333,14 @@ OxiBuilder::new().with_port_internal_url_router(url_router).build()
 
 ---
 
-## 6. 부록: omp → oxi 매핑
+## 6. 부록: omp → oxicode 매핑
 
-| omp 파일 | oxi 위치 |
+| omp 파일 | oxicode 위치 |
 |---|---|
-| `internal-urls/router.ts` | `oxi-sdk/src/ports/inmem/url_router.rs` (`CompositeUrlRouter`) |
-| `internal-urls/types.ts` (`ProtocolHandler`) | `oxi-sdk/src/ports/mod.rs` (또는 `ports/url_router.rs`) — 제품이 구현하는 계약 |
-| `internal-urls/types.ts` (`InternalResource`) | `oxi-sdk/src/ports/mod.rs` (`ResolvedUrl`) |
-| `internal-urls/parse.ts` | `oxi-sdk/src/ports/inmem/url_router.rs` (parse_scheme_and_path) |
-| `internal-urls/issue-pr-protocol.ts` | `oxi-cli/src/internal_urls/issue_handler.rs`, `pr_handler.rs` |
-| `internal-urls/local-protocol.ts` | `oxi-cli/src/internal_urls/local_handler.rs` |
-| `tools/path-utils.ts` (selector) | `oxi-agent/src/tools/url_dispatch.rs` |
+| `internal-urls/router.ts` | `oxicode-sdk/src/ports/inmem/url_router.rs` (`CompositeUrlRouter`) |
+| `internal-urls/types.ts` (`ProtocolHandler`) | `oxicode-sdk/src/ports/mod.rs` (또는 `ports/url_router.rs`) — 제품이 구현하는 계약 |
+| `internal-urls/types.ts` (`InternalResource`) | `oxicode-sdk/src/ports/mod.rs` (`ResolvedUrl`) |
+| `internal-urls/parse.ts` | `oxicode-sdk/src/ports/inmem/url_router.rs` (parse_scheme_and_path) |
+| `internal-urls/issue-pr-protocol.ts` | `oxicode-cli/src/internal_urls/issue_handler.rs`, `pr_handler.rs` |
+| `internal-urls/local-protocol.ts` | `oxicode-cli/src/internal_urls/local_handler.rs` |
+| `tools/path-utils.ts` (selector) | `oxicode-agent/src/tools/url_dispatch.rs` |

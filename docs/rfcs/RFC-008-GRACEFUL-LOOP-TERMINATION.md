@@ -2,10 +2,10 @@
 
 | 메타 | 값 |
 |------|-----|
-| **상태** | ✅ 구현 완료 (oxi 0.32.0, oxios 1.2.0) |
+| **상태** | ✅ 구현 완료 (oxicode 0.32.0, oxios 1.2.0) |
 | **작성일** | 2026-06-12 |
-| **영역** | `oxi-agent/src/agent_loop/`, `oxios-kernel/src/agent_runtime.rs` |
-| **영향 크레이트** | `oxi-agent`, `oxios-kernel` |
+| **영역** | `oxicode-agent/src/agent_loop/`, `oxios-kernel/src/agent_runtime.rs` |
+| **영향 크레이트** | `oxicode-agent`, `oxios-kernel` |
 | **관련** | RFC-003 (Agent/Tool superiority) |
 
 ---
@@ -19,7 +19,7 @@ Oxios Web UI에서 에이전트 실행 후 **도구 호출 아이콘만 보이�
 
 ### 1.2 근본 원인
 
-oxi-agent 0.31.x의 `should_stop_after_turn()`이 `turn_number >= max_iterations`일 때
+oxicode-agent 0.31.x의 `should_stop_after_turn()`이 `turn_number >= max_iterations`일 때
 에이전트 루프를 **즉시 종료**했다. 이때 마지막 LLM 응답이 `tool_use`였으면
 텍스트 응답이 생성되지 않은 채로 루프가 끝났다.
 
@@ -37,7 +37,7 @@ iteration 8: max_iterations (8) 도달 → 강제 종료
 pi-agent(= pi-mono)의 `shouldStopAfterTurn`은 **아무도 설정하지 않는 optional hook**이다.
 루프는 LLM이 스스로 tool_use를 그만두고 텍스트만 반환할 때 자연스럽게 종료된다.
 
-| | pi-agent | oxi-agent 0.31.x |
+| | pi-agent | oxicode-agent 0.31.x |
 |---|---|---|
 | `shouldStopAfterTurn` | 사용 안 함 (undefined) | `turn >= max_iterations → true` |
 | 루프 종료 조건 | `hasMoreToolCalls === false` (자연스러운) | `max_iterations` 도달 (강제) |
@@ -49,13 +49,13 @@ pi-agent(= pi-mono)의 `shouldStopAfterTurn`은 **아무도 설정하지 않는 
 
 1. **텍스트 응답 보장**: 에이전트 루프 종료 후 항상 사용자에게 전달할 텍스트 응답이 존재해야 한다.
 2. **무한 루프 방지**: 외부 중단(Ctrl+C)은 즉시 처리.
-3. **최소 변경**: oxi-agent의 공개 API를 바꾸지 않는다.
+3. **최소 변경**: oxicode-agent의 공개 API를 바꾸지 않는다.
 
 ---
 
 ## 3. 구현 결과
 
-### 3.1 oxi-agent 0.32.0 — `max_iterations` 완전 제거
+### 3.1 oxicode-agent 0.32.0 — `max_iterations` 완전 제거
 
 `should_stop_after_turn`에서 `max_iterations` 체크를 제거하고,
 **오직 외부 중단(Ctrl+C)만** 확인한다.
@@ -98,7 +98,7 @@ pi-agent와 완전히 동일한 동작.
 `agent_runtime.rs`에 안전망을 유지:
 
 ```rust
-// oxi 0.32.0 removed max_iterations — the loop now exits naturally
+// oxicode 0.32.0 removed max_iterations — the loop now exits naturally
 // when the LLM produces a text-only response (pi-agent behavior).
 // This block is kept as a safety net in case the LLM returns empty
 // text despite a natural exit (rare, but possible).
@@ -143,11 +143,11 @@ if (last?.role !== 'assistant') return s
 
 ---
 
-## 5. oxi 0.32.0 추가 기능 활용
+## 5. oxicode 0.32.0 추가 기능 활용
 
 ### 5.1 ToolExecutionStart.context
 
-oxi 0.32.0의 `ToolExecutionStart` 이벤트에 `context: Option<ToolCallContext>` 필드가 추가되었다.
+oxicode 0.32.0의 `ToolExecutionStart` 이벤트에 `context: Option<ToolCallContext>` 필드가 추가되었다.
 oxios-kernel의 이벤트 콜백과 `KernelEvent::ToolExecutionStarted`에 `context` 필드를 전달하도록 업데이트.
 
 지원되는 컨텍스트:
@@ -174,11 +174,11 @@ s.success = matches!(
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/agent_loop/helpers.rs` | `should_stop_after_turn`에서 `max_iterations` 제거 |
-| `oxi-agent/src/agent_loop/config.rs` | `AgentLoopConfig::max_iterations` 필드 제거 |
-| `oxi-agent/src/config.rs` | `AgentConfig::max_iterations` 필드 제거 |
-| `oxios/Cargo.toml` | `oxi-sdk = "0.32.0"`, path patch 주석 처리 |
-| `oxios/Cargo.lock` | `oxi-agent/ai/sdk 0.31.6 → 0.32.0` |
+| `oxicode-agent/src/agent_loop/helpers.rs` | `should_stop_after_turn`에서 `max_iterations` 제거 |
+| `oxicode-agent/src/agent_loop/config.rs` | `AgentLoopConfig::max_iterations` 필드 제거 |
+| `oxicode-agent/src/config.rs` | `AgentConfig::max_iterations` 필드 제거 |
+| `oxios/Cargo.toml` | `oxicode-sdk = "0.32.0"`, path patch 주석 처리 |
+| `oxios/Cargo.lock` | `oxicode-agent/ai/sdk 0.31.6 → 0.32.0` |
 | `oxios/crates/oxios-kernel/src/agent_runtime.rs` | `max_iterations` 필드 제거, 안전망 주석 업데이트 |
 | `oxios/surface/oxios-web/web/src/stores/chat.ts` | Activity placeholder + done→activities 통일 |
 
@@ -188,7 +188,7 @@ s.success = matches!(
 
 - `cargo check` ✅
 - `cargo test --package oxios-kernel --lib` ✅ (531 passed, 0 failed)
-- oxi-agent 0.32.0 자체 테스트 (crates.io 배포 전 통과)
+- oxicode-agent 0.32.0 자체 테스트 (crates.io 배포 전 통과)
 
 ---
 
@@ -197,7 +197,7 @@ s.success = matches!(
 | 항목 | 내용 |
 |------|------|
 | **문제** | `max_iterations` 강제 종료 시 LLM 텍스트 응답 누락 |
-| **근본 원인** | oxi-agent의 `should_stop_after_turn`이 강제 종료 |
+| **근본 원인** | oxicode-agent의 `should_stop_after_turn`이 강제 종료 |
 | **해결** | `max_iterations` 완전 제거 → LLM이 자연스럽게 텍스트 응답 생성 |
 | **참조** | pi-agent의 `shouldStopAfterTurn`은 아무도 설정하지 않음 |
 | **안전망** | oxios-kernel의 post-execution summarization 유지 |

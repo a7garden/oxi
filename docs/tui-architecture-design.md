@@ -1,4 +1,4 @@
-# oxi TUI 아키텍처 리팩토링 설계
+# oxicode TUI 아키텍처 리팩토링 설계
 
 ## 문제 진단
 
@@ -80,7 +80,7 @@ enum OverlayAction {
 
 ### 1. ChatView — 스크롤바 추가
 
-`oxi-tui/src/widgets/chat.rs` 내부 수정만으로 충분.
+`oxicode-tui/src/widgets/chat.rs` 내부 수정만으로 충분.
 별도 오버레이가 아니므로 Component trait과 무관.
 
 **변경**: ScrollView 우측에 `ratatui::widgets::Scrollbar` 렌더링 추가.
@@ -93,7 +93,7 @@ enum OverlayAction {
 
 ### 2. ResumeTable — 세션 목록 Table
 
-**위치**: `oxi-tui/src/widgets/session_table.rs` (새 파일)
+**위치**: `oxicode-tui/src/widgets/session_table.rs` (새 파일)
 
 ```rust
 pub struct SessionTableState {
@@ -120,7 +120,7 @@ impl StatefulWidget for SessionTable<'_> {
 
 ### 3. SettingsPanel — 탭 패널
 
-**위치**: `oxi-tui/src/widgets/settings_panel.rs` (새 파일)
+**위치**: `oxicode-tui/src/widgets/settings_panel.rs` (새 파일)
 
 ```rust
 pub enum SettingsTab { Model, Tools, Extensions, Auth }
@@ -177,7 +177,7 @@ struct AuthTabState {
 ## 파일 구조 변경
 
 ```
-oxi-tui/src/widgets/
+oxicode-tui/src/widgets/
 ├── mod.rs              # pub mod 추가
 ├── input.rs            # ✅ 완료 (ratatui-textarea)
 ├── chat.rs             # ★ 스크롤바 추가
@@ -185,7 +185,7 @@ oxi-tui/src/widgets/
 ├── session_table.rs    # ★ 새 파일
 └── settings_panel.rs   # ★ 새 파일
 
-oxi-cli/src/tui/
+oxicode-cli/src/tui/
 ├── mod.rs
 ├── app.rs              # AppState 단순화, OverlayComponent enum
 ├── handlers.rs          #大幅 축소 (공통 키 처리만)
@@ -250,7 +250,7 @@ fn render_overlay(f, area, state, theme) {
 1. **스크롤바** (chat.rs만 수정, 즉시 효과)
 2. **OverlayComponent trait + overlay/ 디렉토리** (인프라)
 3. **기존 오버레이 마이그레이션** (ModelSelect → ResumeSelect → Setup)
-4. **SessionTable 위젯** (oxi-tui에 추가)
+4. **SessionTable 위젯** (oxicode-tui에 추가)
 5. **Resume 오버레이를 SessionTable로 교체**
-6. **SettingsPanel 위젯** (oxi-tui에 추가)
+6. **SettingsPanel 위젯** (oxicode-tui에 추가)
 7. **Settings 오버레이 구현 + slash.rs 라우팅 변경**

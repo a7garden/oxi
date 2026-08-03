@@ -6,17 +6,17 @@
 
 **Architecture:** Keep provider transport, catalog metadata, and auth concerns separate. Keep tape rendering as the production main-screen path, with overlays as the only alternate-screen path. Add plugin runtime policy as a package-manager boundary, consume personas/prompts at session construction, and make memory commands invoke real backend/pipeline operations.
 
-**Tech Stack:** Rust 2024, Tokio, reqwest, tokio-tungstenite, ratatui/crossterm, rusqlite, oxi-mnemopi, cargo-nextest.
+**Tech Stack:** Rust 2024, Tokio, reqwest, tokio-tungstenite, ratatui/crossterm, rusqlite, oxicode-mnemopi, cargo-nextest.
 
 ## Global Constraints
 
 - Do not reintroduce `Provider::name()` or a second provider identity source.
-- Do not add a runtime `OXI_TAPE_RENDER` dual path.
+- Do not add a runtime `OXICODE_TAPE_RENDER` dual path.
 - Do not hardcode TUI glyphs or SGR colors in tape components.
 - Preserve TOML settings and atomic file writes.
 - Keep OS desktop capture/input, collab-web, stats dashboard, and wire protocol outside this alignment unless an existing real backend already exists.
 - Every implementation task adds behavior tests before production code, runs focused tests, and skips project-wide validation until the final gate.
-- Final gate: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`, `cargo fmt --all -- --check`, and `cargo nextest run --workspace`.
+- Final gate: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`, `cargo fmt --all -- --check`, and `cargo nextest run --workspace`.
 
 ## Tasks
 

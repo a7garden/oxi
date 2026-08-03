@@ -20,37 +20,37 @@
 4. `lib.rs`에서 `Attributes`, `FontScheme` export 제거
 
 ### 영향 파일
-- `oxi-tui/src/widgets/markdown.rs` → 대폭 축소
-- `oxi-tui/src/cell.rs` → Attributes 제거
-- `oxi-tui/src/theme.rs` → FontScheme 제거
-- `oxi-tui/src/lib.rs` → export 정리
+- `oxicode-tui/src/widgets/markdown.rs` → 대폭 축소
+- `oxicode-tui/src/cell.rs` → Attributes 제거
+- `oxicode-tui/src/theme.rs` → FontScheme 제거
+- `oxicode-tui/src/lib.rs` → export 정리
 
 ---
 
-## 작업 2: 이벤트 타입 통일 (oxi_tui::Event → crossterm 직접 사용)
+## 작업 2: 이벤트 타입 통일 (oxicode_tui::Event → crossterm 직접 사용)
 
 ### 문제
-- `oxi-tui/event.rs`가 자체 `KeyCode`, `KeyEvent`, `Event`를 정의
+- `oxicode-tui/event.rs`가 자체 `KeyCode`, `KeyEvent`, `Event`를 정의
 - 실제 핸들러는 `crossterm::event::Event` 직접 사용
-- `CommandPalette`만 `oxi_tui::Event` 사용 — 유일한 소비자
+- `CommandPalette`만 `oxicode_tui::Event` 사용 — 유일한 소비자
 - 두 시스템이 병존하며 혼란 발생
 
 ### 해결
 1. `CommandPalette::handle_key()` → `crossterm::event::KeyEvent` 직접 받도록 변경
-2. `oxi-tui/event.rs` 모듈 삭제
+2. `oxicode-tui/event.rs` 모듈 삭제
 3. `lib.rs`에서 Event 관련 export 제거
-4. `oxi-tui/Cargo.toml`에 `crossterm` 의존성 추가 (이미 ratatui가 끌어오지만 명시적 선언)
+4. `oxicode-tui/Cargo.toml`에 `crossterm` 의존성 추가 (이미 ratatui가 끌어오지만 명시적 선언)
 
 ### 설계 선택: crossterm 타입을 선택한 이유
-- oxi-tui의 자체 이벤트는 "백엔드 독립"을 목표로 하지만, 실제로 crossterm만 사용
+- oxicode-tui의 자체 이벤트는 "백엔드 독립"을 목표로 하지만, 실제로 crossterm만 사용
 - 위젯 라이브러리가 백엔드 의존적이 되는 것은 ratatui 생태계에서 일반적
 - termion 등 다른 백엔드 전환 가능성이 현재로선 0%
 
 ### 영향 파일
-- `oxi-tui/src/event.rs` → 삭제
-- `oxi-tui/src/widgets/command_palette.rs` → crossterm 타입 사용
-- `oxi-tui/src/lib.rs` → export 정리
-- `oxi-tui/Cargo.toml` → crossterm 추가
+- `oxicode-tui/src/event.rs` → 삭제
+- `oxicode-tui/src/widgets/command_palette.rs` → crossterm 타입 사용
+- `oxicode-tui/src/lib.rs` → export 정리
+- `oxicode-tui/Cargo.toml` → crossterm 추가
 
 ---
 
@@ -77,7 +77,7 @@ impl ToolCallTracker {
 2. `ChatViewState`는 `ToolCallTracker`에 위임만
 
 ### 영향 파일
-- `oxi-tui/src/widgets/chat.rs` — 내부 리팩터링
+- `oxicode-tui/src/widgets/chat.rs` — 내부 리팩터링
 
 ---
 
@@ -105,7 +105,7 @@ struct CachedLines {
 ```
 
 ### 영향 파일
-- `oxi-tui/src/widgets/chat.rs` — 캐시 메커니즘 추가
+- `oxicode-tui/src/widgets/chat.rs` — 캐시 메커니즘 추가
 
 ---
 
@@ -123,8 +123,8 @@ struct CachedLines {
    - `\u{00a0}` (NBSP)로 나머지 폭을 채워 bg color가 자동 적용되게
 
 ### 영향 파일
-- `oxi-tui/src/widgets/input.rs` — prompt 렌더링 변경
-- `oxi-tui/src/widgets/command_palette.rs` — 하이라이트 로직 변경
+- `oxicode-tui/src/widgets/input.rs` — prompt 렌더링 변경
+- `oxicode-tui/src/widgets/command_palette.rs` — 하이라이트 로직 변경
 
 ---
 
@@ -147,7 +147,7 @@ async fn handle_setup_key_inner(
 2. `handle_setup_step_key`와 `handle_provider_step_key`가 이 함수를 호출
 
 ### 영향 파일
-- `oxi-cli/src/tui/handlers.rs` — 핸들러 통합
+- `oxicode-cli/src/tui/handlers.rs` — 핸들러 통합
 
 ---
 

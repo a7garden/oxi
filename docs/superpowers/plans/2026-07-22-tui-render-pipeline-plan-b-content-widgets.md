@@ -1,4 +1,4 @@
-# oxi-tui v2 — Plan B: Streaming Markdown + Content State + Chat Widgets
+# oxicode-tui v2 — Plan B: Streaming Markdown + Content State + Chat Widgets
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -16,11 +16,11 @@
 
 ## Global Constraints
 
-- Workspace: oxi monorepo, branch `oxi-tui-v2-plan-a` (continued from Plan A).
+- Workspace: oxicode monorepo, branch `oxicode-tui-v2-plan-a` (continued from Plan A).
 - Rust 2024. MSRV per workspace.
 - Every module ≤ 500 LOC.
-- All gates per task: `cargo fmt --check`, `cargo clippy -p oxi-tui -- -D warnings`, `cargo nextest run -p oxi-tui`.
-- `oxi-tui` has zero oxi-* dependencies.
+- All gates per task: `cargo fmt --check`, `cargo clippy -p oxicode-tui -- -D warnings`, `cargo nextest run -p oxicode-tui`.
+- `oxicode-tui` has zero oxicode-* dependencies.
 - No `unwrap()`/`expect()` in shipped code (tests only).
 - `#![forbid(unsafe_code)]` enforced.
 - Clean-room — no grok code copying.
@@ -31,7 +31,7 @@
 ## File Structure (Plan B additions)
 
 ```
-oxi-tui/src/
+oxicode-tui/src/
 ├── widget/
 │   ├── retained_child.rs     NEW — RetainedChild<T> wrapper (~80 LOC)
 │   ├── chat/                 NEW directory
@@ -70,15 +70,15 @@ oxi-tui/src/
 ## Task 1: RetainedChild<T> wrapper
 
 **Files:**
-- Create: `oxi-tui/src/widget/retained_child.rs`
-- Modify: `oxi-tui/src/widget/mod.rs`
+- Create: `oxicode-tui/src/widget/retained_child.rs`
+- Modify: `oxicode-tui/src/widget/mod.rs`
 
 **Interfaces:**
 - Produces: `pub struct RetainedChild<T: Renderable> { inner: T, last_hash: u64, last_height: u16 }` with `new(child)`, `inner(&self) -> &T`, `inner_mut(&mut self) -> &mut T`, `render_if_changed(area, ctx) -> bool`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `oxi-tui/src/widget/retained_child.rs` with this skeleton + tests:
+Create `oxicode-tui/src/widget/retained_child.rs` with this skeleton + tests:
 ```rust
 //! Per-child memoization wrapper. Composite widgets (ChatView, Footer, etc.)
 //! wrap children in `RetainedChild<T>` to get automatic per-subtree skip
@@ -200,14 +200,14 @@ Add `pub mod retained_child; pub use retained_child::RetainedChild;`.
 
 - [ ] **Step 3: Run tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 100 tests pass (97 prior + 3 new).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/widget/
-git commit -m "feat(oxi-tui/widget): add RetainedChild<T> per-subtree memoization wrapper
+git add oxicode-tui/src/widget/
+git commit -m "feat(oxicode-tui/widget): add RetainedChild<T> per-subtree memoization wrapper
 
 Composite widgets wrap children in RetainedChild<T> and call
 render_if_changed() instead of bare render(). The wrapper tracks
@@ -225,17 +225,17 @@ Plan B Task 1"
 ## Task 2: Content — ChatMessage + ContentBlock + StreamingState
 
 **Files:**
-- Create: `oxi-tui/src/content/mod.rs`
-- Create: `oxi-tui/src/content/message.rs`
-- Create: `oxi-tui/src/content/streaming.rs`
-- Modify: `oxi-tui/src/lib.rs`
+- Create: `oxicode-tui/src/content/mod.rs`
+- Create: `oxicode-tui/src/content/message.rs`
+- Create: `oxicode-tui/src/content/streaming.rs`
+- Modify: `oxicode-tui/src/lib.rs`
 
 **Interfaces:**
 - Produces: `pub struct ChatMessage { id, role, blocks, ... }`, `pub enum ContentBlock { Text(...), ToolCall(...), ToolResult(...), Thinking(...) }`, `pub enum MessageRole { User, Assistant, System, Tool }`, `pub struct StreamingState { active_stream_id, partial_text }`.
 
 - [ ] **Step 1: Define domain types**
 
-Read `oxi-tui-legacy/src/widgets/chat/types.rs` (67 LOC) for the legacy versions. Migrate to `oxi-tui/src/content/message.rs` with these public types:
+Read `oxicode-tui-legacy/src/widgets/chat/types.rs` (67 LOC) for the legacy versions. Migrate to `oxicode-tui/src/content/message.rs` with these public types:
 
 ```rust
 pub type MessageId = u64;
@@ -273,7 +273,7 @@ Add `content_hash` to ChatMessage (combines role + block hashes). Used by ChatLo
 
 - [ ] **Step 2: StreamingState**
 
-Create `oxi-tui/src/content/streaming.rs`:
+Create `oxicode-tui/src/content/streaming.rs`:
 ```rust
 pub type StreamId = u64;
 
@@ -293,7 +293,7 @@ impl StreamingState {
 
 - [ ] **Step 3: mod.rs + lib.rs wire-up**
 
-Create `oxi-tui/src/content/mod.rs`:
+Create `oxicode-tui/src/content/mod.rs`:
 ```rust
 pub mod message;
 pub mod streaming;
@@ -311,15 +311,15 @@ Add tests for ChatMessage::append_text (creates new block if none, appends to la
 
 Run gates. Expected: 103+ tests pass (100 + 3+ new).
 
-Commit: `feat(oxi-tui/content): ChatMessage + ContentBlock + StreamingState domain types`
+Commit: `feat(oxicode-tui/content): ChatMessage + ContentBlock + StreamingState domain types`
 
 ---
 
 ## Task 3: Content — ChatLog (append-only)
 
 **Files:**
-- Create: `oxi-tui/src/content/chat_log.rs`
-- Modify: `oxi-tui/src/content/mod.rs`
+- Create: `oxicode-tui/src/content/chat_log.rs`
+- Modify: `oxicode-tui/src/content/mod.rs`
 
 **Interfaces:**
 - Produces: `pub struct ChatLog { messages, next_id, active_stream }` with `append_message`, `append_token`, `finalize_stream`, `messages()`, `active_stream()`, `content_hash()`.
@@ -363,15 +363,15 @@ impl ChatLog {
 
 - [ ] **Step 3: Verify + Commit**
 
-Commit: `feat(oxi-tui/content): ChatLog append-only message store with O(1) hash`
+Commit: `feat(oxicode-tui/content): ChatLog append-only message store with O(1) hash`
 
 ---
 
 ## Task 4: Content — ChatView (scroll/follow/selection)
 
 **Files:**
-- Create: `oxi-tui/src/content/chat_view.rs`
-- Modify: `oxi-tui/src/content/mod.rs`
+- Create: `oxicode-tui/src/content/chat_view.rs`
+- Modify: `oxicode-tui/src/content/mod.rs`
 
 **Interfaces:**
 - Produces: `pub struct ChatView { scroll_offset, follow_mode, selection, viewport_cache }` with scroll methods, `visible_msg_range(log, viewport_h) -> (usize, usize)`, `viewport_hash(log, width, theme) -> u64`.
@@ -425,23 +425,23 @@ impl ChatView {
 
 - [ ] **Step 3: Verify + Commit**
 
-Commit: `feat(oxi-tui/content): ChatView scroll/follow/selection state with viewport hash`
+Commit: `feat(oxicode-tui/content): ChatView scroll/follow/selection state with viewport hash`
 
 ---
 
 ## Task 5: Text — Word wrap (CJK-aware)
 
 **Files:**
-- Create: `oxi-tui/src/text/mod.rs`
-- Create: `oxi-tui/src/text/wrap.rs`
-- Modify: `oxi-tui/src/lib.rs`
+- Create: `oxicode-tui/src/text/mod.rs`
+- Create: `oxicode-tui/src/text/wrap.rs`
+- Modify: `oxicode-tui/src/lib.rs`
 
 **Interfaces:**
 - Produces: `pub fn wrap_lines(text: &str, width: usize) -> Vec<Line<'static>>` with CJK width handling, soft/hard break tracking.
 
 - [ ] **Step 1: wrap.rs implementation**
 
-Read `oxi-tui-legacy/src/widgets/chat/markdown.rs` for the legacy wrap_lines_styled. Migrate the core algorithm (without styling — just plain text wrapping). Use `unicode-width` for CJK.
+Read `oxicode-tui-legacy/src/widgets/chat/markdown.rs` for the legacy wrap_lines_styled. Migrate the core algorithm (without styling — just plain text wrapping). Use `unicode-width` for CJK.
 
 ```rust
 //! Word-aware line wrapping with CJK support.
@@ -476,15 +476,15 @@ pub fn wrap_lines_styled(text: &str, width: usize, style: ratatui::style::Style)
 
 - [ ] **Step 3: Verify + Commit**
 
-Commit: `feat(oxi-tui/text): CJK-aware word wrap`
+Commit: `feat(oxicode-tui/text): CJK-aware word wrap`
 
 ---
 
 ## Task 6: Text — Streaming markdown checkpoint renderer
 
 **Files:**
-- Create: `oxi-tui/src/text/streaming_md.rs`
-- Modify: `oxi-tui/src/text/mod.rs`
+- Create: `oxicode-tui/src/text/streaming_md.rs`
+- Modify: `oxicode-tui/src/text/mod.rs`
 
 **Interfaces:**
 - Produces: `pub struct StreamingMarkdown { frozen_lines, checkpoint, pending_tail }` with `push_token`, `lines(width, theme) -> Vec<Line>`.
@@ -570,23 +570,23 @@ fn parse_markdown_to_lines(md: &str, width: u16, theme: &Theme) -> Vec<Line> {
 
 - [ ] **Step 3: Verify + Commit**
 
-Commit: `feat(oxi-tui/text): streaming markdown checkpoint renderer`
+Commit: `feat(oxicode-tui/text): streaming markdown checkpoint renderer`
 
 ---
 
 ## Task 7: Text — Syntax highlighting (feature-gated)
 
 **Files:**
-- Create: `oxi-tui/src/text/syntax.rs`
-- Modify: `oxi-tui/Cargo.toml` (add syntect as optional dep)
-- Modify: `oxi-tui/src/text/mod.rs`
+- Create: `oxicode-tui/src/text/syntax.rs`
+- Modify: `oxicode-tui/Cargo.toml` (add syntect as optional dep)
+- Modify: `oxicode-tui/src/text/mod.rs`
 
 **Interfaces:**
 - Produces (under `feature = "syntax"`): `pub struct SyntaxHighlighter { syntax_set, theme_set }` with `highlight(code, lang) -> Vec<Line>`.
 
 - [ ] **Step 1: Add syntect optional dep**
 
-In `oxi-tui/Cargo.toml`:
+In `oxicode-tui/Cargo.toml`:
 ```toml
 [dependencies]
 # ... existing ...
@@ -638,14 +638,14 @@ impl SyntaxHighlighter {
 
 - [ ] **Step 4: Verify + Commit**
 
-Commit: `feat(oxi-tui/text): optional syntect syntax highlighting (feature = "syntax")`
+Commit: `feat(oxicode-tui/text): optional syntect syntax highlighting (feature = "syntax")`
 
 ---
 
 ## Task 8: Widget — Border primitive
 
 **Files:**
-- Create: `oxi-tui/src/widget/primitive/border.rs`
+- Create: `oxicode-tui/src/widget/primitive/border.rs`
 
 **Interfaces:**
 - Produces: `pub struct Border { title, style, bordered }` impl Renderable.
@@ -660,14 +660,14 @@ Simple Renderable that draws a ratatui Block::bordered() with optional title.
 
 - [ ] **Step 3: Commit**
 
-Commit: `feat(oxi-tui/widget/primitive): Border`
+Commit: `feat(oxicode-tui/widget/primitive): Border`
 
 ---
 
 ## Task 9: Widget — List primitive (virtualized)
 
 **Files:**
-- Create: `oxi-tui/src/widget/primitive/list.rs`
+- Create: `oxicode-tui/src/widget/primitive/list.rs`
 
 **Interfaces:**
 - Produces: `pub struct List<T: Renderable> { items: Vec<RetainedChild<T>>, scroll: usize, visible_count: u16 }` impl Renderable.
@@ -684,26 +684,26 @@ Virtualized list — only renders items in the visible window. Uses RetainedChil
 
 - [ ] **Step 3: Commit**
 
-Commit: `feat(oxi-tui/widget/primitive): virtualized List with RetainedChild per item`
+Commit: `feat(oxicode-tui/widget/primitive): virtualized List with RetainedChild per item`
 
 ---
 
 ## Task 10: Widget — Scrollbar primitive
 
 **Files:**
-- Create: `oxi-tui/src/widget/primitive/scrollbar.rs`
+- Create: `oxicode-tui/src/widget/primitive/scrollbar.rs`
 
 - [ ] Implement Scrollbar Renderable (position indicator, optional follow-mode awareness).
 
-Commit: `feat(oxi-tui/widget/primitive): Scrollbar`
+Commit: `feat(oxicode-tui/widget/primitive): Scrollbar`
 
 ---
 
 ## Task 11: Widget/chat — MessageItem
 
 **Files:**
-- Create: `oxi-tui/src/widget/chat/mod.rs`
-- Create: `oxi-tui/src/widget/chat/message_item.rs`
+- Create: `oxicode-tui/src/widget/chat/mod.rs`
+- Create: `oxicode-tui/src/widget/chat/message_item.rs`
 
 **Interfaces:**
 - Produces: `pub struct MessageItem { message: ChatMessage, md_renderer: StreamingMarkdown, cached_hash: u64 }` impl Renderable.
@@ -720,28 +720,28 @@ Each message wraps a StreamingMarkdown renderer for its text content. content_ha
 
 - [ ] **Step 3: Commit**
 
-Commit: `feat(oxi-tui/widget/chat): MessageItem Renderable`
+Commit: `feat(oxicode-tui/widget/chat): MessageItem Renderable`
 
 ---
 
 ## Task 12: Widget/chat — ToolCall card
 
 **Files:**
-- Create: `oxi-tui/src/widget/chat/tool_call.rs`
-- Create: `oxi-tui/src/widget/chat/spinner.rs`
+- Create: `oxicode-tui/src/widget/chat/tool_call.rs`
+- Create: `oxicode-tui/src/widget/chat/spinner.rs`
 
 - [ ] Implement ToolCall Renderable (bordered card with name + args + status + result). Spinner is a simple frame-based animation Renderable.
 
 Tests: `tool_call_pending_renders_dots`, `tool_call_completed_renders_check`.
 
-Commit: `feat(oxi-tui/widget/chat): ToolCall + Spinner`
+Commit: `feat(oxicode-tui/widget/chat): ToolCall + Spinner`
 
 ---
 
 ## Task 13: Widget/chat — ChatView (the centerpiece)
 
 **Files:**
-- Modify: `oxi-tui/src/widget/chat/mod.rs`
+- Modify: `oxicode-tui/src/widget/chat/mod.rs`
 
 **Interfaces:**
 - Produces: `pub struct ChatView { log: ChatLog, view: ChatView, messages: Vec<RetainedChild<MessageItem>> }` impl Renderable.
@@ -796,43 +796,43 @@ impl Renderable for ChatView {
 
 - [ ] **Step 3: Commit**
 
-Commit: `feat(oxi-tui/widget/chat): ChatView Renderable with per-message memoization`
+Commit: `feat(oxicode-tui/widget/chat): ChatView Renderable with per-message memoization`
 
 ---
 
 ## Task 14: Widget/panel — Footer
 
 **Files:**
-- Create: `oxi-tui/src/widget/panel/mod.rs`
-- Create: `oxi-tui/src/widget/panel/footer.rs`
+- Create: `oxicode-tui/src/widget/panel/mod.rs`
+- Create: `oxicode-tui/src/widget/panel/footer.rs`
 
 - [ ] Implement Footer Renderable (model name + token count + cost + spinner). Uses theme for styling.
 
 Tests: `footer_renders_model_and_tokens`, `footer_spinner_animates_on_tick`.
 
-Commit: `feat(oxi-tui/widget/panel): Footer`
+Commit: `feat(oxicode-tui/widget/panel): Footer`
 
 ---
 
 ## Task 15: Widget/panel — Sticky + Overlay
 
 **Files:**
-- Create: `oxi-tui/src/widget/panel/sticky.rs`
-- Create: `oxi-tui/src/widget/panel/overlay.rs`
+- Create: `oxicode-tui/src/widget/panel/sticky.rs`
+- Create: `oxicode-tui/src/widget/panel/overlay.rs`
 
 - [ ] Sticky: panel that sticks to top/bottom of viewport (for todo/issues panels).
 - [ ] Overlay: modal container with border + optional title.
 
 Tests: `sticky_renders_at_top`, `overlay_renders_centered_popup`.
 
-Commit: `feat(oxi-tui/widget/panel): Sticky + Overlay`
+Commit: `feat(oxicode-tui/widget/panel): Sticky + Overlay`
 
 ---
 
 ## Task 16: Integration — ChatView in RetainedTree
 
 **Files:**
-- Create: `oxi-tui/tests/chat_integration.rs`
+- Create: `oxicode-tui/tests/chat_integration.rs`
 
 - [ ] Write integration test: build a composite tree with ChatView + Footer + Sticky. Stream tokens, verify:
   - Only ChatView's hash changes during streaming
@@ -841,7 +841,7 @@ Commit: `feat(oxi-tui/widget/panel): Sticky + Overlay`
 
 Tests: `streaming_updates_only_chat_subtree`, `composite_tree_idle_when_chat_stable`.
 
-Commit: `test(oxi-tui): ChatView integration in composite RetainedTree`
+Commit: `test(oxicode-tui): ChatView integration in composite RetainedTree`
 
 ---
 
@@ -855,4 +855,4 @@ After all tasks:
 - [ ] ChatView streaming updates only re-render the active message
 - [ ] No `unwrap()`/`expect()` in shipped code
 - [ ] No `unsafe`
-- [ ] No oxi-* deps
+- [ ] No oxicode-* deps

@@ -23,7 +23,7 @@ omp에서는 subagent spawn 시 자동으로 todo item이 생성되고, 완료 �
 
 ### Core Mechanism: SubagentTool.execute()에서 todo 연동
 
-`oxi-agent/src/tools/subagent.rs`의 `SubagentTool.execute()`에서 spawn 전후에 todo state provider를 호출한다.
+`oxicode-agent/src/tools/subagent.rs`의 `SubagentTool.execute()`에서 spawn 전후에 todo state provider를 호출한다.
 
 #### Spawn 전: todo item 생성
 
@@ -80,15 +80,15 @@ if ctx.todo_panel_enabled {
 - Option A: ToolContext에 `todo_panel_enabled: bool` 추가 (단순, 약간의 coupling)
 - Option B: SubagentTool이 settings를 몰라도 todo가 None이면 skip (이미 그렇게 동작)
 
-**Decision: Option B.** `ctx.todo`가 `None`이면 자동 skip. `todo_panel_enabled: false`일 때 `oxi-cli`가 `with_todo(None)`으로 설정하면 SubagentTool은 아무것도 하지 않는다. 즉, gating은 oxi-cli 레벨에서 처리.
+**Decision: Option B.** `ctx.todo`가 `None`이면 자동 skip. `todo_panel_enabled: false`일 때 `oxicode-cli`가 `with_todo(None)`으로 설정하면 SubagentTool은 아무것도 하지 않는다. 즉, gating은 oxicode-cli 레벨에서 처리.
 
 ### Files to Modify
 
 | File | Change |
 |---|---|
-| `oxi-agent/src/tools/subagent.rs` | `execute()` 내 spawn 전: `ctx.todo.apply_ops([Start])`. spawn 후: `apply_ops([Done])`. SubagentTaskResult 도착 시 done 마킹. |
-| `oxi-tui/src/widgets/todo_panel.rs` | (확인) Completed 상태에 CROSSED_OUT 적용 확인. 없으면 추가. |
-| `oxi-cli/src/bootstrap.rs` | (변경 없음) — `with_todo` 설정은 이미 존재 |
+| `oxicode-agent/src/tools/subagent.rs` | `execute()` 내 spawn 전: `ctx.todo.apply_ops([Start])`. spawn 후: `apply_ops([Done])`. SubagentTaskResult 도착 시 done 마킹. |
+| `oxicode-tui/src/widgets/todo_panel.rs` | (확인) Completed 상태에 CROSSED_OUT 적용 확인. 없으면 추가. |
+| `oxicode-cli/src/bootstrap.rs` | (변경 없음) — `with_todo` 설정은 이미 존재 |
 
 ### SubagentTool.execute() 의사코드
 

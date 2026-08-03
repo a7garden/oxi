@@ -1,6 +1,6 @@
 # Browser Improvements Design
 
-> oxi 내장 브라우저 기능 개선 설계
+> oxicode 내장 브라우저 기능 개선 설계
 > Status: **Draft** | Date: 2026-05-25
 
 ## 0. 현재 문제 요약
@@ -42,7 +42,7 @@ Severity:  ████████░░  CRITICAL  (P0)
 **해결**: `TabGuard` — RAII wrapper로 탭 생명주기를 강제.
 
 ```rust
-// oxi-agent/src/tools/browse/tab_guard.rs (신규 파일)
+// oxicode-agent/src/tools/browse/tab_guard.rs (신규 파일)
 
 use super::engine::{BrowserTab, BrowserError};
 
@@ -217,8 +217,8 @@ if want_screenshot {
             let b64 = base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD, &png,
             );
-            let img = oxi_ai::ContentBlock::Image(
-                oxi_ai::ImageContent::new(b64, "image/png"),
+            let img = oxicode_ai::ContentBlock::Image(
+                oxicode_ai::ImageContent::new(b64, "image/png"),
             );
             result = result.with_content_blocks(vec![img]);
         }
@@ -232,7 +232,7 @@ if want_screenshot {
 ### 1.5 변경 후 파일 구조
 
 ```
-oxi-agent/src/tools/browse/
+oxicode-agent/src/tools/browse/
 ├── mod.rs                       # + pub mod tab_guard;
 ├── engine.rs                    # 변경 없음
 ├── tab_guard.rs                 # 신규 (TabGuard)
@@ -378,7 +378,7 @@ Step::Uncheck { selector } => {
 ### 3.1 TabPool
 
 ```rust
-// oxi-agent/src/tools/browse/tab_pool.rs (신규 파일)
+// oxicode-agent/src/tools/browse/tab_pool.rs (신규 파일)
 
 use super::engine::{BrowserEngine, BrowserTab, BrowserError};
 use std::sync::Arc;
@@ -475,7 +475,7 @@ guard.close().await;
 ### 3.3 기본값
 
 ```rust
-// OxiBuilder / App 초기화 시
+// OxicodeBuilder / App 초기화 시
 let pool = TabPool::new(engine, /* max_tabs = */ 4);
 ```
 
@@ -496,7 +496,7 @@ max_tabs = 4       # 동시 열린 탭 수 제한
 ### 4.1 RenderCache
 
 ```rust
-// oxi-agent/src/tools/browse/render_cache.rs (신규 파일)
+// oxicode-agent/src/tools/browse/render_cache.rs (신규 파일)
 
 use super::engine::PageContent;
 use std::collections::HashMap;
@@ -612,7 +612,7 @@ if wait_for.is_none() {
 ### 5.1 BrowseConfig
 
 ```rust
-// oxi-agent/src/tools/browse/config.rs (신규 파일)
+// oxicode-agent/src/tools/browse/config.rs (신규 파일)
 
 /// Configuration for browser tools behavior.
 #[derive(Debug, Clone)]
@@ -691,7 +691,7 @@ Step::Wait { selector } => {
 커스텀 `BrowserEngine` 구현체를 사용할 때 스크립트 도구를 사용할 수 없음.
 
 ```rust
-// oxi-agent/src/tools/browse/mod.rs
+// oxicode-agent/src/tools/browse/mod.rs
 #[cfg(feature = "native-browser")]        // ← 문제
 pub mod browse_script_tool;
 
@@ -713,7 +713,7 @@ pub use browse_script_tool::BrowseScriptTool;
 `serde_yaml` 의존성을 `native-browser` feature에서 분리:
 
 ```toml
-# oxi-agent/Cargo.toml
+# oxicode-agent/Cargo.toml
 [features]
 default = []
 native-browser = ["oxibrowser-core"]
@@ -732,7 +732,7 @@ browse-script = ["serde_yaml"]
 SDK와 CLI에서:
 
 ```rust
-// oxi-sdk/src/tool_factory.rs
+// oxicode-sdk/src/tool_factory.rs
 pub fn browse_tools(engine: Arc<dyn BrowserEngine>) -> Arc<ToolRegistry> {
     let registry = ToolRegistry::new();
     registry.register(BrowseTool::new(engine.clone()));
@@ -753,7 +753,7 @@ pub fn browse_tools(engine: Arc<dyn BrowserEngine>) -> Arc<ToolRegistry> {
 ### 7.1 MockBrowserEngine
 
 ```rust
-// oxi-agent/src/tools/browse/mock_engine.rs (신규, #[cfg(test)])
+// oxicode-agent/src/tools/browse/mock_engine.rs (신규, #[cfg(test)])
 
 use super::engine::*;
 
@@ -843,7 +843,7 @@ impl BrowserTab for MockTab {
 ### 7.2 테스트 매트릭스
 
 ```
-oxi-agent/src/tools/browse/tests.rs
+oxicode-agent/src/tools/browse/tests.rs
 │
 ├── engine_tests          (기존 — 유지)
 │   ├── page_content_empty
@@ -951,7 +951,7 @@ Week 1:
 ┌─────────────────────────────────────────────────────────┐
 │ Day 1-2: Phase 1 — Critical Bug Fixes                   │
 │   TabGuard, 이중 렌더링 제거, 탭 재사용                   │
-│   → cargo test -p oxi-agent --features native-browser    │
+│   → cargo test -p oxicode-agent --features native-browser    │
 ├─────────────────────────────────────────────────────────┤
 │ Day 3:   Phase 2 — Missing Step Implementations          │
 │   Select, Screenshot, Check/Uncheck                      │
@@ -1001,7 +1001,7 @@ Week 2:
 - [ ] active 탭 카운트가 정확함
 
 ### Phase 7 완료 기준
-- [ ] `cargo test -p oxi-agent --features native-browser` 30개+ 테스트 통과
+- [ ] `cargo test -p oxicode-agent --features native-browser` 30개+ 테스트 통과
 - [ ] MockBrowserEngine으로 전체 도구 테스트 가능
 - [ ] CI에서 두 feature 모드 모두 green
 

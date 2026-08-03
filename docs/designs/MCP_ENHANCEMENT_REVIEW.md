@@ -2,8 +2,8 @@
 
 ## 총평
 
-설계서는 pi-mcp-adapter의 아이디어를 oxi 아키텍처에 잘 매핑했습니다.
-Phase 분리가 합리적이고, 크레이트 경계 원칙(oxi-tui 독립성, 의존 흐름)을 준수합니다.
+설계서는 pi-mcp-adapter의 아이디어를 oxicode 아키텍처에 잘 매핑했습니다.
+Phase 분리가 합리적이고, 크레이트 경계 원칙(oxicode-tui 독립성, 의존 흐름)을 준수합니다.
 다만 **실제 코드 기반으로 검증하면 수정이 필요한 부분**이 몇 가지 있습니다.
 
 ---
@@ -13,18 +13,18 @@ Phase 분리가 합리적이고, 크레이트 경계 원칙(oxi-tui 독립성, �
 ### 1.1 `McpManager` 생성 위치 — 설계서가 틀림
 
 **설계서 내용:**
-> `oxi-agent/src/tools.rs` → `ToolRegistry::with_builtins_cwd()`에서 `OnceCell`로 `McpManager` 생성
+> `oxicode-agent/src/tools.rs` → `ToolRegistry::with_builtins_cwd()`에서 `OnceCell`로 `McpManager` 생성
 
 **실제 코드:**
 ```rust
-// oxi-agent/src/tools.rs:469-472
+// oxicode-agent/src/tools.rs:469-472
 let mcp_once: std::cell::OnceCell<Arc<crate::mcp::McpManager>> = std::cell::OnceCell::new();
 let mcp_manager = mcp_once
     .get_or_init(|| Arc::new(crate::mcp::McpManager::new()))
     .clone();
 ```
 
-**문제:** `McpManager`는 **oxi-agent 내부**에서 생성됩니다. oxi-cli는 `McpManager`에 직접 접근할 수 없습니다.
+**문제:** `McpManager`는 **oxicode-agent 내부**에서 생성됩니다. oxicode-cli는 `McpManager`에 직접 접근할 수 없습니다.
 설계서 Phase 3에서 `McpDashboardOverlay`가 `Arc<McpManager>`를 들고 있다고 가정하지만,
 현재 아키텍처에서는 `McpManager`가 `ToolRegistry` 내부에 캡슐화되어 있습니다.
 
@@ -172,7 +172,7 @@ OverlayAction::McpAction(McpAction::Reconnect(server)) => {
 
 ### 2.3 🟡 캐시 파일 경로가 config 로드와 불일치
 
-**설계서:** `~/.oxi/mcp-cache.json`
+**설계서:** `~/.oxicode/mcp-cache.json`
 
 **실제:** `McpManager::new()`는 `config::load_mcp_config()`를 호출하는데,
 이 함수는 `dirs::config_dir()` 기반으로 설정을 읽습니다.
@@ -182,7 +182,7 @@ macOS에서는 `~/Library/Application Support/` 일 수 있습니다.
 ```rust
 let cache_path = dirs::config_dir()
     .unwrap_or_else(|| PathBuf::from("."))
-    .join("oxi")
+    .join("oxicode")
     .join("mcp-cache.json");
 ```
 
@@ -203,7 +203,7 @@ MCP 서버 연결은 빈번하지 않으므로 성능 문제 없음.
 **설계서:** "Ask 상태인 툴 호출 시, agent loop에서 사용자에게 인라인 프롬프트 표시"
 
 **문제:** "인라인 프롬프트"가 구체적으로 무엇인지 정의 안 됨.
-기존 oxi에 사용자 확인용 인라인 UI가 없습니다.
+기존 oxicode에 사용자 확인용 인라인 UI가 없습니다.
 
 **옵션:**
 1. **에이전트가 텍스트로 질문** → LLM이 사용자에게 "이 툴을 실행할까요?"라고 물어보고 응답 대기
@@ -281,19 +281,19 @@ impl McpManager {
 이 패턴은 `McpManager::new()` → `McpManager::spawn()`으로 변경됨.
 `ToolRegistry`에서 `Arc::new(McpManager::new())` 대신 `McpManager::spawn()` 사용.
 
-### 3.2 oxi-tui의 뷰 타입 — 크레이트 경계 재고
+### 3.2 oxicode-tui의 뷰 타입 — 크레이트 경계 재고
 
 **설계서:**
-> `McpServerView`, `McpToolView`, `McpSettingsSummary` 등을 oxi-tui에 정의
+> `McpServerView`, `McpToolView`, `McpSettingsSummary` 등을 oxicode-tui에 정의
 
 **문제:** 이 타입들은 MCP 도메인 지식(서버, 툴, lifecycle, consent)을 포함합니다.
-oxi-tui는 "oxi-* 의존 없음" 원칙을 지켜야 합니다.
-이 뷰 타입을 oxi-tui에 넣으면 oxi-tui가 MCP 개념에 결합됩니다.
+oxicode-tui는 "oxicode-* 의존 없음" 원칙을 지켜야 합니다.
+이 뷰 타입을 oxicode-tui에 넣으면 oxicode-tui가 MCP 개념에 결합됩니다.
 
-**권장:** 뷰 타입은 **oxi-agent에** 정의하고, oxi-tui에는 **제네릭 대시보드 위젯**만 제공:
+**권장:** 뷰 타입은 **oxicode-agent에** 정의하고, oxicode-tui에는 **제네릭 대시보드 위젯**만 제공:
 
 ```rust
-// oxi-tui: 제네릭 섹션/아이템 기반 대시보드 위젯
+// oxicode-tui: 제네릭 섹션/아이템 기반 대시보드 위젯
 pub struct SectionedDashboard {
     pub sections: Vec<DashboardSection>,
     pub selected_section: usize,
@@ -314,12 +314,12 @@ pub struct DashboardItem {
 }
 ```
 
-그리고 oxi-cli에서 MCP 데이터를 이 제네릭 구조로 변환.
-이렇게 하면 oxi-tui는 MCP에 대해 아무것도 모르면서도 대시보드를 렌더링할 수 있습니다.
+그리고 oxicode-cli에서 MCP 데이터를 이 제네릭 구조로 변환.
+이렇게 하면 oxicode-tui는 MCP에 대해 아무것도 모르면서도 대시보드를 렌더링할 수 있습니다.
 
 **트레이드오프:** 제네릭 위젯은 MCP 특화 UI(consent 토글, direct/proxy 전환)를 
-표현력 있게 렌더링하기 어려울 수 있음. 실용적으로는 MCP 전용 위젯을 oxi-tui에 
-넣되, oxi-agent 타입을 의존하지 않고 독립적인 뷰 모델을 사용하는 것이 타협점.
+표현력 있게 렌더링하기 어려울 수 있음. 실용적으로는 MCP 전용 위젯을 oxicode-tui에 
+넣되, oxicode-agent 타입을 의존하지 않고 독립적인 뷰 모델을 사용하는 것이 타협점.
 
 ### 3.3 Transport trait 추출은 Phase 1에서 미리 준비
 
@@ -365,8 +365,8 @@ Phase 1: Cache + Lifecycle + Transport trait 인터페이스  (P0, ~5일)
   - McpManager 대시보드 데이터 API
 
 Phase 2: TUI Dashboard                                    (P0, ~4일)
-  - oxi-tui: MCP 대시보드 위젯 (독립 뷰 모델)
-  - oxi-cli: McpDashboardOverlay + OverlayAction
+  - oxicode-tui: MCP 대시보드 위젯 (독립 뷰 모델)
+  - oxicode-cli: McpDashboardOverlay + OverlayAction
   - /mcp 슬래시 명령
   - ※ Phase 1보다 먼저 해도 됨 — 캐시/lifecycle이 없어도 기본 상태 표시 가능
 
@@ -411,7 +411,7 @@ Phase 5: HTTP/SSE Transport                                (P2, ~2일)
 
 ### 5.3 세션 재개 시 MCP 상태
 
-oxi의 세션 시스템(Append-only)과 MCP 연결 상태는 독립적입니다.
+oxicode의 세션 시스템(Append-only)과 MCP 연결 상태는 독립적입니다.
 세션을 재개(resume)하면 MCP 서버는 disconnected 상태에서 시작.
 캐시가 있으면 검색/조회는 되지만, 툴 호출 시 재연결 필요.
 
@@ -432,15 +432,15 @@ oxi의 세션 시스템(Append-only)과 MCP 연결 상태는 독립적입니다.
 | 항목 | 평가 |
 |------|------|
 | 아키텍처 방향 | ✅ 올바름 — pi-mcp-adapter의 핵심 패턴을 잘 이해함 |
-| 크레이트 경계 | ⚠️ oxi-tui에 MCP 뷰 타입을 넣는 것은 재고 필요 |
+| 크레이트 경계 | ⚠️ oxicode-tui에 MCP 뷰 타입을 넣는 것은 재고 필요 |
 | Phase 분리 | ✅ 합리적이나, TUI를 Phase 2로 올리는 걸 권장 |
 | 데드락 분석 | ❌ LifecycleManager + Mutex 조합의 데드락 미감지 |
-| McpManager 접근성 | ❌ oxi-cli에서 McpManager에 접근하는 경로 미설계 |
+| McpManager 접근성 | ❌ oxicode-cli에서 McpManager에 접근하는 경로 미설계 |
 | 비동기/동기 경계 | ⚠️ Overlay handle_key (동기) vs MCP 연결 (비동기) 패턴 불명확 |
 | 호환성 | ✅ 기존 API 100% 유지하는 방향은 좋음 |
 | 테스트 | ✅ 테스트 계획이 구체적 |
 | 누락 | ⚠️ 캐시/설정 prefix 불일치, 세션 재개, 동시성 |
 
 **결론:** 설계의 방향은 옳지만, **McpManager의 비동기 lifecycle 관리(데드락 회피)와
-oxi-cli → McpManager 접근 경로** 두 가지를 먼저 해결해야 구현에 들어갈 수 있습니다.
+oxicode-cli → McpManager 접근 경로** 두 가지를 먼저 해결해야 구현에 들어갈 수 있습니다.
 위 리뷰의 수정사항을 반영한 후 Phase 1 구현을 시작하는 것을 권장합니다.

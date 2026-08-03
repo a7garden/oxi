@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-19
 **Status:** Implemented
-**Scope:** `oxi-cli/src/storage/export.rs`
+**Scope:** `oxicode-cli/src/storage/export.rs`
 **Related:** emoji audit (same session), review findings (same session)
 
 ## 1. Problem
@@ -21,15 +21,15 @@ is structurally broken:
      truncated, full_output_path }` — same system fallback; rich metadata is
      discarded. **However, `BashExecution` is never produced by any code path**
      (verified: no `AgentMessage::BashExecution` construction exists in
-     `oxi-cli`, `oxi-agent`, or `oxi-sdk`). It is a dead variant. Rendering it
+     `oxicode-cli`, `oxicode-agent`, or `oxicode-sdk`). It is a dead variant. Rendering it
      is therefore deferred to a future change that first adds a producer
      (see §3.7).
 
 2. **A dead text parser runs instead.** `render_tool_blocks()` scans the
    assistant's free text for emoji-prefixed lines (`🔧 Running bash`, `📝 Writing`,
    `📄 Reading`, `✏️ Editing`, `🔍 Searching`, `📤 result:`). Nothing in the
-   codebase emits that format — verified by grep across `oxi-cli`, `oxi-tui`,
-   `oxi-agent`. The only producer is `export.rs`'s own unit tests
+   codebase emits that format — verified by grep across `oxicode-cli`, `oxicode-tui`,
+   `oxicode-agent`. The only producer is `export.rs`'s own unit tests
    (self-fulfilling).
 
 3. **A second dead parser duplicates the same idea.** `render_markdown_with_options`
@@ -39,7 +39,7 @@ is structurally broken:
 4. **Emoji as protocol markers is an anti-pattern.** Font-dependent, collides
    with LLM free-text output, unparseable on terminals without emoji support.
 
-Meanwhile, `oxi-tui/src/widgets/tool_renderer.rs` already implements the correct
+Meanwhile, `oxicode-tui/src/widgets/tool_renderer.rs` already implements the correct
 pattern — rendering from structured `(name, arguments)` and result text, used by
 the live TUI. The fix is to bring export in line with that pattern.
 
@@ -59,7 +59,7 @@ representations that are **actually produced** by `agent_session.rs`.
 
 **Non-Goals**
 - Changing what gets persisted in sessions (data shape is already correct).
-- Touching `oxi-tui` rendering (already correct).
+- Touching `oxicode-tui` rendering (already correct).
 - Designing new export formats (HTML only).
 - **Rendering `BashExecution` entries.** No code path produces them. Rendering
   is deferred until a producer is added (§3.7).
@@ -175,7 +175,7 @@ is the stable grouping key.
 | _other_ | `.tool-call` generic label + JSON arguments | (raw display) |
 
 The dispatch table covers the same tools as
-`oxi-tui/tool_renderer.rs::format_tool_call` for the common built-in path.
+`oxicode-tui/tool_renderer.rs::format_tool_call` for the common built-in path.
 Tools with TUI-specific formatting (`issue`, `web_search`, `generate_image`,
 `subagent`, etc.) fall to the generic JSON fallback in export — a conscious
 divergence, not a parity claim. The dispatch table is a `match` on `name`, so
@@ -302,7 +302,7 @@ fixtures that mimic a format nothing produces.
    markdown emoji branch.
 4. Rewrite the affected tests (delete the emoji-input ones, add the
    structural-input ones).
-5. `cargo fmt && cargo clippy --workspace -- -D warnings && cargo nextest run -p oxi-cli`.
+5. `cargo fmt && cargo clippy --workspace -- -D warnings && cargo nextest run -p oxicode-cli`.
 
 ## 11. Risks
 

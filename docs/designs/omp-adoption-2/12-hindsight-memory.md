@@ -155,8 +155,8 @@ Current time: 2026-06-19T10:00:00Z
 
 <mental_models>
 ## Project Architecture
-oxi is a Rust port of pi-mono with 5 crates: oxi-ai (foundation), oxi-agent
-(runtime), oxi-tui (widgets), oxi-sdk (ports), oxi-cli (binary)...
+oxicode is a Rust port of pi-mono with 5 crates: oxicode-ai (foundation), oxicode-agent
+(runtime), oxicode-tui (widgets), oxicode-sdk (ports), oxicode-cli (binary)...
 
 ## User Preferences
 - Korean prose, English code
@@ -192,12 +192,12 @@ function projectLabel(cwd: string): string {
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
 ### 2.1 모듈 구조
 
 ```
-oxi-cli/src/hindsight/
+oxicode-cli/src/hindsight/
 ├── mod.rs              HindsightSessionState + 공개 API
 ├── config.rs           HindsightConfig (환경변수 + settings)
 ├── state.rs            세션 상태 관리 (자동 recall/retain)
@@ -442,7 +442,7 @@ impl MentalModelManager {
             existing, new_facts, self.config.mm_max_render_chars
         );
         
-        let response = oxi_ai::high_level::complete_text(
+        let response = oxicode_ai::high_level::complete_text(
             &self.llm_provider, &self.llm_model, &prompt, 2000
         ).await?;
         
@@ -517,8 +517,8 @@ pub enum TagMatch {
 
 pub fn compute_bank_scope(config: &HindsightConfig, cwd: &Path) -> BankScope {
     // v2: git 루트 기반 project label (omp #2412 수정 반영)
-    // oxi-cli::storage::find_git_root 재사용
-    let project_label = oxi_cli::storage::find_git_root(cwd)
+    // oxicode-cli::storage::find_git_root 재사용
+    let project_label = oxicode_cli::storage::find_git_root(cwd)
         .and_then(|root| root.file_name()?.to_str().map(String::from))
         .or_else(|| cwd.file_name().and_then(|n| n.to_str().map(String::from))
         .unwrap_or_else(|| "default".into());
@@ -556,11 +556,11 @@ pub fn compute_bank_scope(config: &HindsightConfig, cwd: &Path) -> BankScope {
 
 ---
 
-## 3. 4개 메모리 도구 (oxi-agent)
+## 3. 4개 메모리 도구 (oxicode-agent)
 
 ### 3.1 retain 도구
 
-`oxi-agent/src/tools/memory_retain.rs`:
+`oxicode-agent/src/tools/memory_retain.rs`:
 
 ```rust
 pub struct MemoryRetainTool {
@@ -842,10 +842,10 @@ pub struct Settings {
 | N3.20 | `HindsightConfig` + 환경변수 | ⑩ N3.13 |
 | N3.21 | `BankScope` + `compute_bank_scope` | ⑩ N3.15 |
 | N3.22 | `HindsightRetainQueue` (디바운스 배치) | ⑩ N3.13 |
-| N3.23 | `MemoryRetainTool` (oxi-agent) | N3.22 |
-| N3.24 | `MemoryRecallTool` (oxi-agent) | ⑩ N3.9 |
-| N3.25 | `MemoryReflectTool` (oxi-agent) | N3.24 |
-| N3.26 | `MemoryEditTool` (oxi-agent) | ⑩ N3.7 |
+| N3.23 | `MemoryRetainTool` (oxicode-agent) | N3.22 |
+| N3.24 | `MemoryRecallTool` (oxicode-agent) | ⑩ N3.9 |
+| N3.25 | `MemoryReflectTool` (oxicode-agent) | N3.24 |
+| N3.26 | `MemoryEditTool` (oxicode-agent) | ⑩ N3.7 |
 | N3.27 | `format_memories_block` + `format_mental_models_block` | — |
 | N3.28 | `inject_into_system_prompt` | N3.27 |
 | N3.29 | `HindsightSessionState` (자동 recall/retain) | N3.22, N3.28 |
@@ -875,21 +875,21 @@ pub struct Settings {
 
 ---
 
-## 8. 부록: omp → oxi 매핑
+## 8. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `hindsight/state.ts` (493) | `oxi-cli/src/hindsight/state.rs` |
-| `hindsight/config.ts` (187) | `oxi-cli/src/hindsight/config.rs` |
+| `hindsight/state.ts` (493) | `oxicode-cli/src/hindsight/state.rs` |
+| `hindsight/config.ts` (187) | `oxicode-cli/src/hindsight/config.rs` |
 | `hindsight/client.ts` (624) | ⑩ Mnemopi 직접 호출 (HTTP 클라이언트 불필요) |
-| `hindsight/bank.ts` (134) | `oxi-cli/src/hindsight/bank.rs` (⑩ BankManager 위임) |
-| `hindsight/mental-models.ts` (429) | `oxi-cli/src/hindsight/mental_models.rs` |
-| `hindsight/content.ts` (210) | `oxi-cli/src/hindsight/prompt.rs` |
-| `hindsight/transcript.ts` (71) | `oxi-cli/src/hindsight/state.rs` (통합) |
-| `tools/memory-retain.ts` (89) | `oxi-agent/src/tools/memory_retain.rs` |
-| `tools/memory-recall.ts` (102) | `oxi-agent/src/tools/memory_recall.rs` |
-| `tools/memory-reflect.ts` (88) | `oxi-agent/src/tools/memory_reflect.rs` |
-| `tools/memory-edit.ts` (59) | `oxi-agent/src/tools/memory_edit.rs` |
-| `tools/learn.ts` (141) | `oxi-agent/src/tools/learn.rs` (후순위 N3.35) |
-| `tools/memory-render.ts` (202) | `oxi-tui/src/widgets/tool_renderer.rs` (memory 분기) |
-| `mnemopi/state.ts` (630, coding-agent 래퍼) | `oxi-cli/src/hindsight/state.rs` (통합) |
+| `hindsight/bank.ts` (134) | `oxicode-cli/src/hindsight/bank.rs` (⑩ BankManager 위임) |
+| `hindsight/mental-models.ts` (429) | `oxicode-cli/src/hindsight/mental_models.rs` |
+| `hindsight/content.ts` (210) | `oxicode-cli/src/hindsight/prompt.rs` |
+| `hindsight/transcript.ts` (71) | `oxicode-cli/src/hindsight/state.rs` (통합) |
+| `tools/memory-retain.ts` (89) | `oxicode-agent/src/tools/memory_retain.rs` |
+| `tools/memory-recall.ts` (102) | `oxicode-agent/src/tools/memory_recall.rs` |
+| `tools/memory-reflect.ts` (88) | `oxicode-agent/src/tools/memory_reflect.rs` |
+| `tools/memory-edit.ts` (59) | `oxicode-agent/src/tools/memory_edit.rs` |
+| `tools/learn.ts` (141) | `oxicode-agent/src/tools/learn.rs` (후순위 N3.35) |
+| `tools/memory-render.ts` (202) | `oxicode-tui/src/widgets/tool_renderer.rs` (memory 분기) |
+| `mnemopi/state.ts` (630, coding-agent 래퍼) | `oxicode-cli/src/hindsight/state.rs` (통합) |

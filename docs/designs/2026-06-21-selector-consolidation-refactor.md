@@ -22,14 +22,14 @@
 | `logout_select.rs` | 150 | ✓ | — | ✓ | ✓ |
 | **합계** | **2840** | | | | |
 
-omp는 이 전부를 `HookSelectorComponent` 1개(660줄)로 처리한다. oxi의 `ask.rs`만 이미 994줄이다.
+omp는 이 전부를 `HookSelectorComponent` 1개(660줄)로 처리한다. oxicode의 `ask.rs`만 이미 994줄이다.
 
 **설계 부채 4종:**
 
 1. **커서/필터 로직 N중 구현** — 각 오버레이가 `cursor`, `filtered()`, `move_selection`을 따로 구현. ask.rs의 compact 모드 버그(리뷰에서 발견)가 다른 오버레이에도 잠재 존재.
-2. **ask 오버레이가 오케스트레이션 + 선택을 한 구조체에 섞음** — omp는 `askSingleQuestion`(선택 1회) + 도구 루프(순차)로 분리. oxi는 `AskOverlay`가 두 역할을 모두 담당 → 994줄짜리 갈레오 클래스.
+2. **ask 오버레이가 오케스트레이션 + 선택을 한 구조체에 섞음** — omp는 `askSingleQuestion`(선택 1회) + 도구 루프(순차)로 분리. oxicode는 `AskOverlay`가 두 역할을 모두 담당 → 994줄짜리 갈레오 클래스.
 3. **툴 결과가 텍스트 문자열만 전달** — `AgentToolResult.metadata`가 이벤트 파이프라인에서 누락됨. `format_ask_result`가 텍스트를 정규식 파싱으로 복원 (취약).
-4. **뒤로 가기(←) 사전 채움 누락** — omp는 `initialSelection`으로 이전 답을 커서에 반영. oxi는 recommended로 리셋.
+4. **뒤로 가기(←) 사전 채움 누락** — omp는 `initialSelection`으로 이전 답을 커서에 반영. oxicode는 recommended로 리셋.
 
 ---
 
@@ -37,16 +37,16 @@ omp는 이 전부를 `HookSelectorComponent` 1개(660줄)로 처리한다. oxi�
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  oxi-tui/src/widgets/list_selector.rs                   │  Layer 1
-│  ListSelectorState — 순수 위젯 (상태 + 렌더 + 입력)       │  (oxi-tui, 의존성 無)
+│  oxicode-tui/src/widgets/list_selector.rs                   │  Layer 1
+│  ListSelectorState — 순수 위젯 (상태 + 렌더 + 입력)       │  (oxicode-tui, 의존성 無)
 │  • options + markers (radio/checkbox/none)              │
 │  • cursor 이동, disabled 스킵, compact+fuzzy            │
 │  • render() → Vec<Line>, handle_key() → SelectorAction  │
 └────────────────────────┬────────────────────────────────┘
                          │ 사용
 ┌────────────────────────▼────────────────────────────────┐
-│  oxi-cli/src/tui/overlay/selector.rs                    │  Layer 2
-│  SelectorOverlay — OverlayComponent 래퍼                │  (oxi-cli)
+│  oxicode-cli/src/tui/overlay/selector.rs                    │  Layer 2
+│  SelectorOverlay — OverlayComponent 래퍼                │  (oxicode-cli)
 │  • ListSelectorState를 중앙 popup에 합성                 │
 │  • 제어 행(Other/Done/Custom) 주입                       │
 │  • oneshot 채널 브리지                                    │
@@ -62,19 +62,19 @@ omp는 이 전부를 `HookSelectorComponent` 1개(660줄)로 처리한다. oxi�
 ```
 
 ### 핵심 원칙
-- **Layer 1은 oxi-tui에 산다** — oxi-cli에 의존하지 않는 순수 위젯. `Symbols`, `ThemeStyles`만 사용.
+- **Layer 1은 oxicode-tui에 산다** — oxicode-cli에 의존하지 않는 순수 위젯. `Symbols`, `ThemeStyles`만 사용.
 - **Layer 1은 도메인을 모른다** — "질문", "모델", "세션"을 모름. 옵션 리스트 + 마커 타입 + 콜백만 안다.
 - **Layer 2는 OverlayComponent 프로토콜을 구현** — app.rs의 기존 폴링 루프와 호환.
 - **Layer 3은 설정만 한다** — 각 오버레이가 30-60줄로 줄어듦.
 
 ---
 
-## 2. Layer 1 — `ListSelectorState` (oxi-tui)
+## 2. Layer 1 — `ListSelectorState` (oxicode-tui)
 
 ### 타입
 
 ```rust
-// oxi-tui/src/widgets/list_selector.rs
+// oxicode-tui/src/widgets/list_selector.rs
 
 /// 행 마커 종류. omp `selectionMarker`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -170,7 +170,7 @@ impl ListSelectorState {
 
 ### 왜 상태를 호출자가 소유하는가
 
-omp의 `HookSelectorComponent`는 상태를 자체 필드로 보관하지만, oxi의 ratatui 모델에서는 위젯이 무상태(stateless)로 `render()`만 하는 것이 관례다 (`tool_renderer`, `footer` 등이 이 패턴). 상태 소유자가 `handle_key`를 호출해 상태를 갱신하고, 다음 프레임에 `render`에 넘긴다. 이렇게 하면:
+omp의 `HookSelectorComponent`는 상태를 자체 필드로 보관하지만, oxicode의 ratatui 모델에서는 위젯이 무상태(stateless)로 `render()`만 하는 것이 관례다 (`tool_renderer`, `footer` 등이 이 패턴). 상태 소유자가 `handle_key`를 호출해 상태를 갱신하고, 다음 프레임에 `render`에 넘긴다. 이렇게 하면:
 - 상태 직렬화/복원이 자연스럽다 (오버레이가 `Clone + Debug`).
 - 테스트가 쉽다 (상태 생성 → 키 입력 → assert).
 - 같은 상태로 여러 번 렌더해도 부작용이 없다.
@@ -186,10 +186,10 @@ omp의 `HookSelectorComponent`는 상태를 자체 필드로 보관하지만, ox
 
 ---
 
-## 3. Layer 2 — `SelectorOverlay` (oxi-cli)
+## 3. Layer 2 — `SelectorOverlay` (oxicode-cli)
 
 ```rust
-// oxi-cli/src/tui/overlay/selector.rs
+// oxicode-cli/src/tui/overlay/selector.rs
 
 /// 제어 행 — 옵션 목록 끝에 자동으로 붙는 특수 행.
 #[derive(Debug, Clone)]
@@ -288,7 +288,7 @@ handle_key(key):
 omp `askSingleQuestion` + 도구 루프 모델. **bridge가 한 질문씩 전달**한다.
 
 ```rust
-// oxi-agent/src/tools/ask.rs — 브리지 페이로드 변경
+// oxicode-agent/src/tools/ask.rs — 브리지 페이로드 변경
 
 pub struct PendingAsk {
     pub question: Question,          // 단일 질문 (was: Vec<Question>)
@@ -363,7 +363,7 @@ pub fn model_select_overlay(
 AgentToolResult { output: String, metadata: Option<Value> }
                           ↓ 에이전트 루프
 AgentEvent::ToolExecutionEnd { result: ToolResult }    // metadata 누락!
-                          ↓ oxi-cli 핸들러
+                          ↓ oxicode-cli 핸들러
 stream_tool_result(id, name, content, is_error)        // metadata 전달 안 됨
                           ↓
 ContentBlock::ToolCall { result: (String, bool) }       // 텍스트만
@@ -378,7 +378,7 @@ format_tool_result(name, result, ...)                   // 텍스트 파싱
 AgentToolResult { output, metadata }
     ↓ 에이전트 루프: metadata를 이벤트에 복사
 AgentEvent::ToolExecutionEnd { result, is_error, metadata: Option<Value> }   // NEW
-    ↓ oxi-cli 핸들러
+    ↓ oxicode-cli 핸들러
 stream_tool_result(id, name, content, is_error, metadata)                    // NEW
     ↓
 ContentBlock::ToolCall { result: (String, bool), metadata: Option<Value> }   // NEW
@@ -427,9 +427,9 @@ ask 도구가 설정하는 메타데이터:
 ## 6. 마이그레이션 계획 (단계별)
 
 ```
-Phase 1: ListSelectorState (oxi-tui)         ←─ 토대, 독립
+Phase 1: ListSelectorState (oxicode-tui)         ←─ 토대, 독립
    │
-   ├─→ Phase 2: SelectorOverlay (oxi-cli)    ←─ Phase 1 의존
+   ├─→ Phase 2: SelectorOverlay (oxicode-cli)    ←─ Phase 1 의존
    │       │
    │       └─→ Phase 3: AskCoordinator        ←─ bridge 단일 질문 + 도구 루프
    │               │                          ←─ AskOverlay 994줄 → ~80줄
@@ -444,8 +444,8 @@ Phase 1: ListSelectorState (oxi-tui)         ←─ 토대, 독립
 
 | Phase | 대상 | 위험 | 노력 | 삭제되는 코드 |
 |-------|------|------|------|---------------|
-| 1 | `oxi-tui/widgets/list_selector.rs` 신규 | 낮음 | M | — |
-| 2 | `oxi-cli/tui/overlay/selector.rs` 신규 | 낮음 | S | — |
+| 1 | `oxicode-tui/widgets/list_selector.rs` 신규 | 낮음 | M | — |
+| 2 | `oxicode-cli/tui/overlay/selector.rs` 신규 | 낮음 | S | — |
 | 3 | ask 도구 + bridge + app.rs | **중간** | M | ask.rs 994줄 → ~80줄 |
 | 4 | events → state → render 파이프라인 | 중간 | M | parse_ask_result |
 | 5a | model_select + model_select_inline | 낮음 | S | 439줄 → ~40줄 |
@@ -552,9 +552,9 @@ pub fn model_select(models: Vec<String>, on_select: ...) -> SelectorOverlay {
 
 ## 부록 — omp와의 구조 대응
 
-| omp (TypeScript) | oxi (Rust) 목표 |
+| omp (TypeScript) | oxicode (Rust) 목표 |
 |---|---|
-| `HookSelectorComponent` (660줄, Container 서브클래스) | `ListSelectorState` (oxi-tui, 무상태 위젯) |
+| `HookSelectorComponent` (660줄, Container 서브클래스) | `ListSelectorState` (oxicode-tui, 무상태 위젯) |
 | `ExtensionUiController.showHookSelector` | `SelectorOverlay` (OverlayComponent 래퍼) |
 | `ui.select()` / `ui.editor()` 원시 | `SelectorOverlay::new()` + `ControlRow::Other` |
 | `askSingleQuestion` + 도구 루프 | `AskTool::execute` 루프 + bridge 단일 질문 |

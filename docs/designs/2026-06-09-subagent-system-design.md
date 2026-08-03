@@ -12,11 +12,11 @@
 
 | 레이어 | 모듈 | 상태 |
 |--------|------|------|
-| 실행 (Agent) | `oxi-agent/src/tools/subagent.rs` | ✅ 완전 구현 (Single/Parallel/Chain) |
-| 정의 (SDK) | `oxi-sdk/src/agent_definition.rs` | ✅ 완전 구현 |
-| 오케스트레이션 (SDK) | `oxi-sdk/src/agent_group.rs` | ⚠️ Orchestrated 스텁 |
-| 워크플로우 (SDK) | `oxi-sdk/src/workflow_dsl.rs` | ❌ 파서만, 실행기 없음 |
-| 보안 (SDK) | `oxi-sdk/src/security/` | ✅ Capability 정의됨 |
+| 실행 (Agent) | `oxicode-agent/src/tools/subagent.rs` | ✅ 완전 구현 (Single/Parallel/Chain) |
+| 정의 (SDK) | `oxicode-sdk/src/agent_definition.rs` | ✅ 완전 구현 |
+| 오케스트레이션 (SDK) | `oxicode-sdk/src/agent_group.rs` | ⚠️ Orchestrated 스텁 |
+| 워크플로우 (SDK) | `oxicode-sdk/src/workflow_dsl.rs` | ❌ 파서만, 실행기 없음 |
+| 보안 (SDK) | `oxicode-sdk/src/security/` | ✅ Capability 정의됨 |
 
 해결해야 할 5가지 문제:
 
@@ -33,7 +33,7 @@
 1. **SDK가 정규(Canonical) 소스**: 에이전트 정의, 발견, 검증은 모두 SDK를 통해 이루어진다. Agent 툴은 SDK를 호출한다.
 2. **하이브리드 실행 모델 유지**: `SubagentTool`은 프로세스 격리(보안), `AgentGroup`/`WorkflowEngine`은 인프로세스(성능) 방식을 유지한다.
 3. **점진적 구현**: Phase 1→2→3 순서로, 각 Phase가 독립적으로 배포 가능하다.
-4. **기존 호환성**: `~/.oxi/agents/` 디렉토리 구조, `.md` 파일 포맷, `subagent` 툴 스키마는 변경하지 않는다.
+4. **기존 호환성**: `~/.oxicode/agents/` 디렉토리 구조, `.md` 파일 포맷, `subagent` 툴 스키마는 변경하지 않는다.
 
 ---
 
@@ -42,13 +42,13 @@
 ### 3.1. 통합 에이전트 디스커버리
 
 **문제**: `subagent.rs`와 `agent_definition.rs`가 각각 독립적으로 에이전트를 발견한다. 디렉토리 구조도 다름:
-- SDK: `~/.oxi/agents/<name>/agent.md` (서브디렉토리)
-- Agent: `~/.oxi/agents/<name>.md` (플랫 파일)
+- SDK: `~/.oxicode/agents/<name>/agent.md` (서브디렉토리)
+- Agent: `~/.oxicode/agents/<name>.md` (플랫 파일)
 
 **해결**: SDK의 `AgentDiscovery`를 정규 API로 삼고, 두 포맷을 모두 지원한다.
 
 ```
-~/.oxi/agents/
+~/.oxicode/agents/
 ├── scout.md                    ← 플랫 파일 (기존 SubagentTool 포맷)
 ├── scout/agent.md              ← 서브디렉토리 (기존 SDK 포맷, 우선순위 높음)
 ├── reviewer/
@@ -60,7 +60,7 @@
 1. 프로젝트 > 사용자 (기존과 동일)
 2. 서브디렉토리 > 플랫 파일 (새로운 규칙)
 
-#### 변경: `oxi-sdk/src/agent_definition.rs`
+#### 변경: `oxicode-sdk/src/agent_definition.rs`
 
 `AgentDiscovery::discover_from_dir()` 확장:
 
@@ -108,12 +108,12 @@ fn discover_from_dir(dir: &Path, agents: &mut HashMap<String, AgentDefinition>) 
 
 `AgentDefinition::from_markdown()`은 이미 프론트매터가 없으면 파일명을 이름으로 사용하므로, 플랫 `.md` 파일도 자동 처리된다.
 
-#### 변경: `oxi-agent/src/tools/subagent.rs`
+#### 변경: `oxicode-agent/src/tools/subagent.rs`
 
 `discover_agents()`를 SDK의 `AgentDiscovery`에 위임:
 
 ```rust
-use oxi_sdk::agent_definition::{AgentDefinition, AgentDiscovery};
+use oxicode_sdk::agent_definition::{AgentDefinition, AgentDiscovery};
 
 /// 에이전트 발견 — SDK의 AgentDiscovery에 위임.
 pub fn discover_agents(cwd: &Path, scope: AgentScope) -> Vec<ResolvedAgent> {
@@ -126,11 +126,11 @@ pub fn discover_agents(cwd: &Path, scope: AgentScope) -> Vec<ResolvedAgent> {
     for (name, def) in discovered {
         let source = match scope {
             AgentScope::Project => {
-                // 프로젝트 스코프: .oxi/agents/에 있는 것만
+                // 프로젝트 스코프: .oxicode/agents/에 있는 것만
                 if def.source == "project" { Some("project") } else { None }
             }
             AgentScope::User => {
-                // 사용자 스코프: 글로벌 ~/.oxi/agents/만
+                // 사용자 스코프: 글로벌 ~/.oxicode/agents/만
                 if def.source == "user" { Some("user") } else { None }
             }
             AgentScope::Both => Some("both"), // 모두 포함
@@ -187,35 +187,35 @@ impl AgentDiscovery {
 
 **문제**: `AgentDefinition::max_subagent_depth`가 정의되어 있지만, `SubagentTool::execute()`에서 체크하지 않아 무한 중첩이 가능하다.
 
-**해결**: 환경 변수 `OXI_SUBAGENT_DEPTH`를 통해 깊이를 추적하고, 제한을 초과하면 즉시 에러를 반환한다.
+**해결**: 환경 변수 `OXICODE_SUBAGENT_DEPTH`를 통해 깊이를 추적하고, 제한을 초과하면 즉시 에러를 반환한다.
 
 #### 메커니즘
 
 ```
 부모 프로세스 (depth=0)
-  └─ spawn 자식 프로세스 (OXI_SUBAGENT_DEPTH=1)
-       └─ spawn 손자 프로세스 (OXI_SUBAGENT_DEPTH=2)
+  └─ spawn 자식 프로세스 (OXICODE_SUBAGENT_DEPTH=1)
+       └─ spawn 손자 프로세스 (OXICODE_SUBAGENT_DEPTH=2)
             └─ depth >= max_subagent_depth → 에러 반환
 ```
 
-#### 변경: `oxi-agent/src/tools/subagent.rs`
+#### 변경: `oxicode-agent/src/tools/subagent.rs`
 
 ```rust
 /// 현재 서브에이전트 깊이를 가져온다.
 /// 기본값 0 (최상위 프로세스).
 fn current_depth() -> u8 {
-    std::env::var("OXI_SUBAGENT_DEPTH")
+    std::env::var("OXICODE_SUBAGENT_DEPTH")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0)
 }
 
 /// 깊이 제한을 가져온다.
-/// 우선순위: OXI_MAX_SUBAGENT_DEPTH 환경변수 > 기본값 3.
+/// 우선순위: OXICODE_MAX_SUBAGENT_DEPTH 환경변수 > 기본값 3.
 /// 에이전트 정의의 max_subagent_depth는 Command::env()로 전달되어
 /// 자식 프로세스에서 이 값을 읽게 된다.
 fn max_depth() -> u8 {
-    std::env::var("OXI_MAX_SUBAGENT_DEPTH")
+    std::env::var("OXICODE_MAX_SUBAGENT_DEPTH")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3)
@@ -224,7 +224,7 @@ fn max_depth() -> u8 {
 
 `build_agent_args()`에서 자식 프로세스에 깊이 전달:
 
-> **참고**: `oxi` CLI에는 `--env` 인자가 없다. 대신 `Command::env()`를 사용해
+> **참고**: `oxicode` CLI에는 `--env` 인자가 없다. 대신 `Command::env()`를 사용해
 > 자식 프로세스의 환경 변수를 직접 설정한다.
 
 ```rust
@@ -236,8 +236,8 @@ cmd.args(&args)
     .stderr(std::process::Stdio::piped())
     .stdin(std::process::Stdio::null())
     // 깊이 전달
-    .env("OXI_SUBAGENT_DEPTH", (current_depth() + 1).to_string())
-    .env("OXI_MAX_SUBAGENT_DEPTH", agent.max_subagent_depth.to_string());
+    .env("OXICODE_SUBAGENT_DEPTH", (current_depth() + 1).to_string())
+    .env("OXICODE_MAX_SUBAGENT_DEPTH", agent.max_subagent_depth.to_string());
 ```
 
 `execute()` 진입점에서 체크:
@@ -265,10 +265,10 @@ async fn execute(&self, ...) -> Result<AgentToolResult, ToolError> {
 
 | 파일 | 변경 내용 |
 |------|-----------|
-| `oxi-sdk/src/agent_definition.rs` | `discover_from_dir()`에 플랫 `.md` 지원 추가, `source` 필드 추가 |
-| `oxi-agent/src/tools/subagent.rs` | `AgentConfig`/`discover_agents()` 제거 → SDK `AgentDiscovery` 위임, `current_depth()`/`max_depth()` 추가 |
-| `oxi-agent/src/tools/subagent.rs` | `parse_frontmatter()`, `parse_agent_file()`, `load_agents_from_dir()` 제거 |
-| `oxi-agent/src/tools/subagent.rs` | `run_single_agent()` 시그니처: `&[AgentConfig]` → `&[ResolvedAgent]` |
+| `oxicode-sdk/src/agent_definition.rs` | `discover_from_dir()`에 플랫 `.md` 지원 추가, `source` 필드 추가 |
+| `oxicode-agent/src/tools/subagent.rs` | `AgentConfig`/`discover_agents()` 제거 → SDK `AgentDiscovery` 위임, `current_depth()`/`max_depth()` 추가 |
+| `oxicode-agent/src/tools/subagent.rs` | `parse_frontmatter()`, `parse_agent_file()`, `load_agents_from_dir()` 제거 |
+| `oxicode-agent/src/tools/subagent.rs` | `run_single_agent()` 시그니처: `&[AgentConfig]` → `&[ResolvedAgent]` |
 
 ---
 
@@ -334,7 +334,7 @@ Worker results:
 "#;
 ```
 
-#### 변경: `oxi-sdk/src/agent_group.rs`
+#### 변경: `oxicode-sdk/src/agent_group.rs`
 
 ```rust
 /// 분해된 서브태스크.
@@ -496,7 +496,7 @@ fn parse_worker_tasks(content: &str) -> Result<Vec<WorkerTask>> {
 
 **설계**: `WorkflowEngine`이 `WorkflowDefinition`을 받아 `AgentGroup` + `MessageBus` + `SharedMemory`를 조합해 실행.
 
-#### 새 파일: `oxi-sdk/src/workflow_engine.rs`
+#### 새 파일: `oxicode-sdk/src/workflow_engine.rs`
 
 ```rust
 //! Workflow execution engine.
@@ -508,7 +508,7 @@ use crate::agent_definition::AgentDiscovery;
 use crate::agent_group::{AgentGroup, AgentGroupOutput, GroupStrategy, GroupResult};
 use crate::workflow_dsl::{WorkflowDefinition, WorkflowStepDef};
 use anyhow::{Context, Result};
-use oxi_agent::Agent;
+use oxicode_agent::Agent;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -850,10 +850,10 @@ fn execute_set_state(&self, index: usize, key: &str, value: serde_json::Value) -
 
 | 파일 | 변경 내용 |
 |------|-----------|
-| `oxi-sdk/src/agent_group.rs` | `run_orchestrated()` 전체 구현, `dispatch_to_workers()`, `parse_worker_tasks()` 추가 |
-| `oxi-sdk/src/workflow_engine.rs` | **새 파일** — `WorkflowEngine`, `WorkflowResult`, `StepOutput` + 6개 스텝 실행 메서드 |
-| `oxi-sdk/src/lib.rs` | `pub mod workflow_engine;` + public re-export |
-| `oxi-sdk/src/prelude.rs` | `WorkflowEngine`, `WorkflowResult` re-export |
+| `oxicode-sdk/src/agent_group.rs` | `run_orchestrated()` 전체 구현, `dispatch_to_workers()`, `parse_worker_tasks()` 추가 |
+| `oxicode-sdk/src/workflow_engine.rs` | **새 파일** — `WorkflowEngine`, `WorkflowResult`, `StepOutput` + 6개 스텝 실행 메서드 |
+| `oxicode-sdk/src/lib.rs` | `pub mod workflow_engine;` + public re-export |
+| `oxicode-sdk/src/prelude.rs` | `WorkflowEngine`, `WorkflowResult` re-export |
 
 ---
 
@@ -871,7 +871,7 @@ impl WorkflowEngine {
     /// 실제 `Provider` 인스턴스로 해석하는 함수다.
     pub fn from_discovery(
         cwd: &Path,
-        provider_resolver: &dyn Fn(&str) -> Result<Arc<dyn oxi_ai::Provider>>,
+        provider_resolver: &dyn Fn(&str) -> Result<Arc<dyn oxicode_ai::Provider>>,
     ) -> Result<Self> {
         let definitions = AgentDiscovery::discover(cwd)?;
         let mut agents = HashMap::new();
@@ -881,7 +881,7 @@ impl WorkflowEngine {
             let provider = provider_resolver(&model_id)
                 .with_context(|| format!("No provider for agent '{}' model '{}'", name, model_id))?;
 
-            let config = oxi_agent::AgentConfig {
+            let config = oxicode_agent::AgentConfig {
                 model: model_id,
                 system_prompt: def.system_prompt.clone(),
                 ..Default::default()
@@ -898,7 +898,7 @@ impl WorkflowEngine {
 
 ### 5.2. CLI 통합 — 워크플로우 명령
 
-`oxi workflow run <file>` CLI 서브커맨드 (선택적, Phase 3에서 논의).
+`oxicode workflow run <file>` CLI 서브커맨드 (선택적, Phase 3에서 논의).
 
 ---
 
@@ -908,7 +908,7 @@ impl WorkflowEngine {
 Phase 1: 디스커버리 통합 + 깊이 제한 (약 2-3일)
   ├── 1a. AgentDefinition에 source 필드 + 플랫 .md 지원
   ├── 1b. SubagentTool → SDK AgentDiscovery 위임
-  └── 1c. OXI_SUBAGENT_DEPTH 환경 변수 기반 깊이 제한
+  └── 1c. OXICODE_SUBAGENT_DEPTH 환경 변수 기반 깊이 제한
 
 Phase 2: Orchestrated + Workflow 실행기 (약 4-5일)
   ├── 2a. AgentGroup::run_orchestrated() 구현
@@ -918,7 +918,7 @@ Phase 2: Orchestrated + Workflow 실행기 (약 4-5일)
 
 Phase 3: 통합 + CLI (약 2일)
   ├── 3a. WorkflowEngine::from_discovery()
-  └── 3b. oxi workflow 서브커맨드 (선택)
+  └── 3b. oxicode workflow 서브커맨드 (선택)
 ```
 
 ---
@@ -928,7 +928,7 @@ Phase 3: 통합 + CLI (약 2일)
 | 리스크 | 완화 |
 |--------|------|
 | LLM이 JSON 분해를 반환하지 않을 수 있음 | `parse_worker_tasks()`에 폴백: 전체 텍스트를 단일 태스크로 처리 |
-| 프로세스 격리 + 환경 변수가 CI/CD에서 문제될 수 있음 | `OXI_SUBAGENT_DEPTH`가 설정되지 않으면 depth=0, max=3으로 기본 동작 |
+| 프로세스 격리 + 환경 변수가 CI/CD에서 문제될 수 있음 | `OXICODE_SUBAGENT_DEPTH`가 설정되지 않으면 depth=0, max=3으로 기본 동작 |
 | Vote가 동일 응답을 보장하지 않음 | 소문자 변환 + 트리밍으로 정규화, 임계값 조정 가능 |
 | WorkflowEngine이 `Agent::run()`의 `!Send` 문제 상속 | `spawn_blocking` + current_thread 런타임 패턴 재사용 |
 | `WorkflowEngine::from_discovery()`가 Provider 해석 방법을 모름 | `provider_resolver` 콜백으로 외부 주입 — SDK는 Provider 생성 책임 없음 |

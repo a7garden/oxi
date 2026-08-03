@@ -1,4 +1,4 @@
-# 설계: Advisor 시스템 — omp → oxi 포팅
+# 설계: Advisor 시스템 — omp → oxicode 포팅
 
 > **상태:** 설계 (구현 전)
 > **소스:** omp v16.2.2 — `packages/coding-agent/src/advisor/` (6 파일, ~1,270줄 + 테스트 1,577줄)
@@ -12,7 +12,7 @@ Advisor는 **주 에이전트를 shadowing하는 두 번째 읽기 전용 LLM �
 동료 프로그래머로서 전략을 다듬고, 검증 부족을 지적하며, 사용자 의도에서 벗어나는
 순간을 알린다.
 
-**핵심 통찰:** oxi는 advisor의 인프라 대부분을 **이미 갖추고 있다.**
+**핵심 통찰:** oxicode는 advisor의 인프라 대부분을 **이미 갖추고 있다.**
 `ModelRole::Advisor`, `AgentEvent::TurnEnd`(트리거), `AgentLoop::steer()`(steer 채널),
 steering/follow-up 큐가 모두 존재한다. 따라서 신규 작업은 **런타임 로직 + 통합
 배선**에 집중되며, omp의 ~1.3K줄을 Rust로 옮기는 것이 본질이다.
@@ -29,9 +29,9 @@ steering/follow-up 큐가 모두 존재한다. 따라서 신규 작업은 **런�
 저비용 백그라운드 검토자**로 해결한다 — 주 에이전트의 추론을 방해하지 않고, 토큰이
 허락하는 한 1-2개의 읽기 도구 호출로 의심을 검증한 뒤, 필요한 순간에만 개입한다.
 
-### 1.2 왜 oxi에 도입하는가
+### 1.2 왜 oxicode에 도입하는가
 
-- **이미 설계된 역할:** `ModelRole::Advisor`가 `oxi-ai/src/roles.rs:78`에 정의되어
+- **이미 설계된 역할:** `ModelRole::Advisor`가 `oxicode-ai/src/roles.rs:78`에 정의되어
   있으나 소비자가 없다 — 역할만 있고 기능이 없는 상태.
 - **이미 존재하는 인프라:** `AgentEvent::TurnEnd`, `AgentLoop::steer()`,
   steering 큐가 있어 omp 대비 오히려 통합이 더 깔끔하다.
@@ -47,7 +47,7 @@ omp #3520 버그가 설계의 나침반이다: 어드바이저 모델이 92개 �
 
 **결론:** 중복 제거, 속도 제한, 의미없는 문구 억제는 **`EmissionGuard` 코드가
 강제**한다. 이것이 advisor가 신뢰할 수 있는 이유다 — 모델이 잘못 행동해도 호스트가
-지킨다. oxi 포팅에서도 이 경계를 절대 prose로 약화시키지 않는다.
+지킨다. oxicode 포팅에서도 이 경계를 절대 prose로 약화시키지 않는다.
 
 ## 2. omp 아키텍처 — 포팅 대상 분해
 
@@ -67,13 +67,13 @@ AdvisorAgent ──prompt(delta)──> [advisor LLM + read/grep/glob + advise t
 
 ### 2.1 6개 컴포넌트
 
-| 컴포넌트 | omp 파일 (줄) | 책임 | oxi 목적지 |
+| 컴포넌트 | omp 파일 (줄) | 책임 | oxicode 목적지 |
 |---|---|---|---|
-| `AdviseTool` | advise-tool.ts (199) | 에이전트 도구; 심각도 랭크 중복제거; `Recorded.` 반환 | `oxi-agent/src/tools/advise.rs` (NEW) |
-| `AdvisorRuntime` | runtime.ts (508) | 델타 렌더 → 어드바이저 prompt → 재시도/epoch 가드 | `oxi-cli/src/app/advisor/runtime.rs` (NEW) |
-| `AdvisorEmissionGuard` | emission-guard.ts (172) | dedupe + 1/update 속도제한 + 문구 억제 | `oxi-cli/src/app/advisor/emission_guard.rs` (NEW) |
-| `AdvisorTranscriptRecorder` | transcript-recorder.ts (136) | `<session>/__advisor.jsonl` append | `oxi-cli/src/app/advisor/transcript_recorder.rs` (NEW) |
-| `watchdog` | watchdog.ts (109) | WATCHDOG.md 발견 + 컨텍스트 파일 주입 | `oxi-cli/src/app/advisor/watchdog.rs` (NEW) |
+| `AdviseTool` | advise-tool.ts (199) | 에이전트 도구; 심각도 랭크 중복제거; `Recorded.` 반환 | `oxicode-agent/src/tools/advise.rs` (NEW) |
+| `AdvisorRuntime` | runtime.ts (508) | 델타 렌더 → 어드바이저 prompt → 재시도/epoch 가드 | `oxicode-cli/src/app/advisor/runtime.rs` (NEW) |
+| `AdvisorEmissionGuard` | emission-guard.ts (172) | dedupe + 1/update 속도제한 + 문구 억제 | `oxicode-cli/src/app/advisor/emission_guard.rs` (NEW) |
+| `AdvisorTranscriptRecorder` | transcript-recorder.ts (136) | `<session>/__advisor.jsonl` append | `oxicode-cli/src/app/advisor/transcript_recorder.rs` (NEW) |
+| `watchdog` | watchdog.ts (109) | WATCHDOG.md 발견 + 컨텍스트 파일 주입 | `oxicode-cli/src/app/advisor/watchdog.rs` (NEW) |
 | `formatAdvisorBatchContent` 등 순수 함수 | advise-tool.ts | `<advisory>` 렌더링, 채널 결정 | 동일 모듈 내 함수 |
 
 ### 2.2 전달 채널 모델 (`resolveAdvisorDeliveryChannel`)
@@ -119,28 +119,28 @@ Rust에서는 `Promise` 체인 대신 **`tokio` 태스크 + `Arc<AtomicU64>` epo
 5. **오프라인 안전:** 어드바이저 실패가 주 세션을 망가뜨리지 않는다 — 3회 실패 후
    자동 백로그 드랍, 모든 에러는 `tracing::debug!`로만 기록.
 
-## 4. oxi 현재 상태 — 의존성 매핑
+## 4. oxicode 현재 상태 — 의존성 매핑
 
 ### 4.1 이미 충족된 의존성 (신규 작업 無)
 
-| omp 필요 | oxi 상태 | 위치 |
+| omp 필요 | oxicode 상태 | 위치 |
 |---|---|---|
-| `advisor` 모델 역할 | ✅ 정의됨 (tag ADVISOR, Accent 색상) | `oxi-ai/src/roles.rs:78,222` |
-| turn-end 트리거 | ✅ `AgentEvent::TurnEnd` 발생 | `oxi-agent/src/events.rs:422` |
+| `advisor` 모델 역할 | ✅ 정의됨 (tag ADVISOR, Accent 색상) | `oxicode-ai/src/roles.rs:78,222` |
+| turn-end 트리거 | ✅ `AgentEvent::TurnEnd` 발생 | `oxicode-agent/src/events.rs:422` |
 | `steer` 전달 채널 | ✅ `AgentLoop::steer(Message)` 내장 | `agent_loop/mod.rs:175` |
 | steering/follow-up 큐 | ✅ `AgentSession` 필드 | `agent_session.rs:156-157` |
 | streaming 상태 | ✅ `streaming: Arc<AtomicBool>` | `agent_session.rs:171` |
 | 도구 훅 | ✅ `before/after_tool_call` | `agent_loop/config.rs` |
-| 슬래시 명령 | ✅ 레지스트리 | `oxi-cli/src/tui/slash/` |
-| 역할 → 모델 해석 | ✅ `role_switcher.rs`, `RoleRegistry` | `oxi-ai/src/` |
+| 슬래시 명령 | ✅ 레지스트리 | `oxicode-cli/src/tui/slash/` |
+| 역할 → 모델 해석 | ✅ `role_switcher.rs`, `RoleRegistry` | `oxicode-ai/src/` |
 
-**omp 대비 이점:** omp는 `setOnTurnEnd` 훅을 별도로 장착해야 했으나, oxi는
+**omp 대비 이점:** omp는 `setOnTurnEnd` 훅을 별도로 장착해야 했으나, oxicode는
 `AgentEvent::TurnEnd` 이벤트를 **구독만 하면** 트리거가 된다 — 통합이 더 깔끔하다.
 
 ### 4.2 신규 작업 (MISSING)
 
-1. `advise` AgentTool — `oxi-agent/src/tools/advise.rs`
-2. Advisor 런타임 모듈 — `oxi-cli/src/app/advisor/` (runtime, emission_guard,
+1. `advise` AgentTool — `oxicode-agent/src/tools/advise.rs`
+2. Advisor 런타임 모듈 — `oxicode-cli/src/app/advisor/` (runtime, emission_guard,
    transcript_recorder, watchdog, mod)
 3. 어드바이저 `Agent` 구성 — Advisor 역할 + 읽기 전용 도구 + 시스템 프롬프트
 4. `/advisor` 슬래시 명령 + 설정 플래그
@@ -152,10 +152,10 @@ Rust에서는 `Promise` 체인 대신 **`tokio` 태스크 + `Arc<AtomicU64>` epo
 
 ### 5.1 목표
 
-`AdviseTool`과 `EmissionGuard`를 oxi-agent/oxi-cli에 추가. 이 둘은 순수 로직이므로
+`AdviseTool`과 `EmissionGuard`를 oxicode-agent/oxicode-cli에 추가. 이 둘은 순수 로직이므로
 호스트 통합 없이 단위 테스트가 가능하다.
 
-### 5.2 `AdviseTool` — `oxi-agent/src/tools/advise.rs` (NEW)
+### 5.2 `AdviseTool` — `oxicode-agent/src/tools/advise.rs` (NEW)
 
 omp `AdviseTool`(advise-tool.ts:154)의 Rust 역역. `AgentTool` 트레이트 구현.
 
@@ -221,7 +221,7 @@ impl AdviseTool {
 **스키마:** `{ note: String (non-empty), severity?: "nit"|"concern"|"blocker" }`.
 `essential()` = `false` (비활성화 가능).
 
-### 5.3 `AdvisorEmissionGuard` — `oxi-cli/src/app/advisor/emission_guard.rs`
+### 5.3 `AdvisorEmissionGuard` — `oxicode-cli/src/app/advisor/emission_guard.rs`
 
 omp(emission-guard.ts:116) 정합. `AdviseTool`의 **2차 방어선**이자 호스트 소유의
 최종 관문.
@@ -264,11 +264,11 @@ pub fn resolve_delivery_channel(opts: DeliveryOpts) -> AdvisorDeliveryChannel { 
 
 | 파일 | 변경 | 줄 추정 |
 |---|---|---|
-| `oxi-agent/src/tools/advise.rs` | NEW | ~140 |
-| `oxi-agent/src/tools.rs` | 모듈 선언 + `with_builtins_cwd` 등록 (비essential) | +5 |
-| `oxi-cli/src/app/advisor/mod.rs` | NEW (모듈 루트) | ~20 |
-| `oxi-cli/src/app/advisor/emission_guard.rs` | NEW | ~130 |
-| `oxi-cli/src/app/advisor/channels.rs` | NEW (순수 함수 + SUPPRESSED 테이블) | ~110 |
+| `oxicode-agent/src/tools/advise.rs` | NEW | ~140 |
+| `oxicode-agent/src/tools.rs` | 모듈 선언 + `with_builtins_cwd` 등록 (비essential) | +5 |
+| `oxicode-cli/src/app/advisor/mod.rs` | NEW (모듈 루트) | ~20 |
+| `oxicode-cli/src/app/advisor/emission_guard.rs` | NEW | ~130 |
+| `oxicode-cli/src/app/advisor/channels.rs` | NEW (순수 함수 + SUPPRESSED 테이블) | ~110 |
 
 ### 5.6 테스트 (Phase 1)
 
@@ -296,7 +296,7 @@ omp `AdvisorRuntime`(runtime.ts:67)의 Rust 역역 — 어드바이저 에이전
 
 ```rust
 /// omp `AdvisorAgent` 인터페이스의 Rust 역역.
-/// `oxi_agent::Agent`가 만족하며, 테스트는 hand-rolled 페이크 사용.
+/// `oxicode_agent::Agent`가 만족하며, 테스트는 hand-rolled 페이크 사용.
 #[async_trait]
 pub trait AdvisorAgent: Send + Sync {
     async fn prompt(&self, input: String) -> Result<(), String>;
@@ -408,9 +408,9 @@ async fn drain(self: Arc<Self>) {
 
 | 파일 | 변경 | 줄 추정 |
 |---|---|---|
-| `oxi-cli/src/app/advisor/runtime.rs` | NEW | ~320 |
-| `oxi-cli/src/app/advisor/mod.rs` | export 추가 | +3 |
-| `oxi-cli/src/app/advisor/message_view.rs` | NEW (델타 렌더, `AdvisorViewMessage`) | ~90 |
+| `oxicode-cli/src/app/advisor/runtime.rs` | NEW | ~320 |
+| `oxicode-cli/src/app/advisor/mod.rs` | export 추가 | +3 |
+| `oxicode-cli/src/app/advisor/message_view.rs` | NEW (델타 렌더, `AdvisorViewMessage`) | ~90 |
 
 ### 6.6 테스트 (Phase 2)
 
@@ -441,7 +441,7 @@ fn build_advisor(&self) -> Option<AdvisorHandle> {
     if !self.advisor_enabled.load(SeqCst) { return None; }
     // 1. Advisor 역할 모델 해석 — RoleRegistry + role_switcher로 Model 확정
     let model = self.resolve_role_model(ModelRole::Advisor)?;
-    // 2. 읽기 전용 도구 서브셋: read/grep/find (oxi 이름; omp는 glob)
+    // 2. 읽기 전용 도구 서브셋: read/grep/find (oxicode 이름; omp는 glob)
     let tools = self.readonly_tools_subset(&["read", "grep", "find"]);
     // 3. 시스템 프롬프트 조립: system.md + context-files + watchdog?
     let system = self.build_advisor_system_prompt();
@@ -460,7 +460,7 @@ omp처럼 `slow` 체인으로 폴백한다 (`inherits_default`에 "advisor" 추�
 
 ### 7.3 TurnEnd 트리거 — 이벤트 구독
 
-oxi는 omp의 `setOnTurnEnd` 훅 대신 **`AgentEvent::TurnEnd` 이벤트 스트림을 구독**한다.
+oxicode는 omp의 `setOnTurnEnd` 훅 대신 **`AgentEvent::TurnEnd` 이벤트 스트림을 구독**한다.
 `AgentSession`의 기존 이벤트 리스너 루프에 분기 추가:
 
 ```rust
@@ -485,7 +485,7 @@ match &event {
 `enqueue_advice` 콜백(호스트 소유)이 `EmissionGuard.accept()` 통과한 노트를
 `resolve_delivery_channel`로 라우팅:
 
-| 채널 | oxi 구현 |
+| 채널 | oxicode 구현 |
 |---|---|
 | `aside` | `SessionEvent::Advisor(AdvisorNote)` 발행 → TUI 렌더러가 `<advisory>` 카드 표시. 트랜스크립트에 custom 메시지로 persist. |
 | `steer` | `agent_loop.steer(Message::User(...))` 호출 — **이미 존재**. 라이브 스트림 중이면 다음 턴에 처리. |
@@ -529,12 +529,12 @@ pub struct AdvisorSettings {
 
 | 파일 | 변경 | 줄 추정 |
 |---|---|---|
-| `oxi-cli/src/app/agent_session.rs` | 어드바이저 필드 + build_advisor + TurnEnd 분기 + enqueue 콜백 | +180 |
-| `oxi-cli/src/app/agent_session.rs` | `SessionEvent::Advisor` 변형 추가 | +8 |
-| `oxi-agent/src/agent_loop/mod.rs` | `peek_steering_queue` / `replace_queues` | +25 |
-| `oxi-cli/src/tui/slash/builtin/advisor_command.rs` | NEW (`/advisor`) | ~90 |
-| `oxi-cli/src/store/settings.rs` | `AdvisorSettings` | +35 |
-| `oxi-ai/src/roles.rs` | `inherits_default`에 "advisor" 추가 (slow 폴백) | +1 |
+| `oxicode-cli/src/app/agent_session.rs` | 어드바이저 필드 + build_advisor + TurnEnd 분기 + enqueue 콜백 | +180 |
+| `oxicode-cli/src/app/agent_session.rs` | `SessionEvent::Advisor` 변형 추가 | +8 |
+| `oxicode-agent/src/agent_loop/mod.rs` | `peek_steering_queue` / `replace_queues` | +25 |
+| `oxicode-cli/src/tui/slash/builtin/advisor_command.rs` | NEW (`/advisor`) | ~90 |
+| `oxicode-cli/src/store/settings.rs` | `AdvisorSettings` | +35 |
+| `oxicode-ai/src/roles.rs` | `inherits_default`에 "advisor" 추가 (slow 폴백) | +1 |
 
 ## 8. Phase 4 — 트랜스크립트 레코더 + WATCHDOG + 프롬프트
 
@@ -544,7 +544,7 @@ omp(transcript-recorder.ts:38) 정합. 어드바이저 턴을 `<session>/__advis
 append. 핵심: 파일 경로를 **세션 파일** 기반으로 동기 해결 (artifacts dir 아님 —
 서브에이전트 충돌 방지).
 
-oxi의 `SessionManager`가 이미 append-only JSONL 패턴을 가지므로 재사용:
+oxicode의 `SessionManager`가 이미 append-only JSONL 패턴을 가지므로 재사용:
 
 ```rust
 pub struct AdvisorTranscriptRecorder {
@@ -561,15 +561,15 @@ pub struct AdvisorTranscriptRecorder {
 ### 8.2 WATCHDOG 발견 — `watchdog.rs`
 
 omp(watchdog.ts) 정합:
-- `discover_watchdog_files(cwd, agent_dir)` — cwd→repoRoot→`~/.oxi/` 워크업하며
+- `discover_watchdog_files(cwd, agent_dir)` — cwd→repoRoot→`~/.oxicode/` 워크업하며
   `WATCHDOG.md` 발견. user-level 우선, project-level은 depth 역순.
 - `format_advisor_context_prompt(context_files)` — `AGENTS.md` 등을
-  `<project-context>` 블록으로 렌더 (oxi의 기존 컨텍스트 파일 발견 재사용).
+  `<project-context>` 블록으로 렌더 (oxicode의 기존 컨텍스트 파일 발견 재사용).
 - `format_active_repo_watchdog_prompt(repo_ctx)` — cwd가 git 밖이고 자식 repo 1개일 때.
 
 ### 8.3 프롬프트 임베드
 
-4개 파일을 omp에서 복사해 `oxi-cli/src/app/advisor/prompts/`에 두고 `include_str!`:
+4개 파일을 omp에서 복사해 `oxicode-cli/src/app/advisor/prompts/`에 두고 `include_str!`:
 
 | 파일 | 변수 |
 |---|---|
@@ -578,21 +578,21 @@ omp(watchdog.ts) 정합:
 | `active-repo-watchdog.md` | `{{relativeRepoRoot}}` |
 | `context-files.md` | `{{#each contextFiles}}` |
 
-템플릿 렌더링은 omp의 Handlebars 대신 단순 문자열 치환(oxi에 Handlebars 의존성
+템플릿 렌더링은 omp의 Handlebars 대신 단순 문자열 치환(oxicode에 Handlebars 의존성
 추가 회피 — 변수 패턴이 단순하므로 `replace`로 충분).
 
 ### 8.4 파일 변경 요약 (Phase 4)
 
 | 파일 | 변경 | 줄 추정 |
 |---|---|---|
-| `oxi-cli/src/app/advisor/transcript_recorder.rs` | NEW | ~110 |
-| `oxi-cli/src/app/advisor/watchdog.rs` | NEW | ~120 |
-| `oxi-cli/src/app/advisor/prompts/*.md` | NEW (4개, omp에서 복사) | — |
-| `oxi-cli/src/app/advisor/mod.rs` | export | +5 |
+| `oxicode-cli/src/app/advisor/transcript_recorder.rs` | NEW | ~110 |
+| `oxicode-cli/src/app/advisor/watchdog.rs` | NEW | ~120 |
+| `oxicode-cli/src/app/advisor/prompts/*.md` | NEW (4개, omp에서 복사) | — |
+| `oxicode-cli/src/app/advisor/mod.rs` | export | +5 |
 
 ## 9. 동시성 모델 (Rust 특화)
 
-omp는 JS 싱글스레드 + `Promise` 체인이지만, oxi는 멀티스레드 `tokio`다. 핵심 안전 장치:
+omp는 JS 싱글스레드 + `Promise` 체인이지만, oxicode는 멀티스레드 `tokio`다. 핵심 안전 장치:
 
 ### 9.1 epoch 가드 (드레인 무결성)
 
@@ -653,7 +653,7 @@ backlog 검사 + waiter push 를 **동일 `waiters` 잠금** 안에서, `notify_
 
 - 어드바이저가 주 에이전트보다 느리면 `backlog` 증가. `wait_for_catchup`이 임계값
   도달 시 주 루프를 잠시 멈춰 어드바이저가 따라잡게 함 (omp `syncBacklog` 정합).
-- `pending` 무한 증가 방지: omp는 명시적 상한이 없으나, oxi에서는 `MAX_PENDING`
+- `pending` 무한 증가 방지: omp는 명시적 상한이 없으나, oxicode에서는 `MAX_PENDING`
   (예: 64) 도입 — 초과 시 가장 오래된 델타 병합 (드랍 아님).
 
 ## 10. 의존성 & 호환성
@@ -661,9 +661,9 @@ backlog 검사 + waiter push 를 **동일 `waiters` 잠금** 안에서, `notify_
 ### 10.1 크레이트 의존 흐름
 
 ```
-oxi-ai (roles.rs: Advisor)  ── 이미 존재
-oxi-agent (tools/advise.rs) ── Phase 1 추가
-oxi-cli (app/advisor/)      ── Phase 2-4 추가
+oxicode-ai (roles.rs: Advisor)  ── 이미 존재
+oxicode-agent (tools/advise.rs) ── Phase 1 추가
+oxicode-cli (app/advisor/)      ── Phase 2-4 추가
 ```
 
 새 외부 의존성 **없음** — `tokio`, `parking_lot`, `serde`, `tracing` 모두 기존.
@@ -686,7 +686,7 @@ Rust로 1:1 포팅해 회귀 방어. 특히 "reset 중 배치 폐기"와 "3회 �
 ### 11.2 🟧 `Agent::rollback_to` 신규 API
 
 omp는 `Agent.#runLoop`가 실패 시 합성 assistant-error 턴을 추가하므로 어드바이저가
-`rollbackTo`로 제거한다. oxi의 `Agent`는 이 패턴이 있는지 확인 필요 — 없다면
+`rollbackTo`로 제거한다. oxicode의 `Agent`는 이 패턴이 있는지 확인 필요 — 없다면
 `AdvisorAgent` 트레이트의 `rollback_to`를 no-op으로 둬도록(최악엔 stale 턴 잔류)
 기능은 동작하지만 컨텍스트 품질이 떨어진다. Phase 2에서 `Agent` 내부 상태 접근
 가능성 먼저 조사.
@@ -694,12 +694,12 @@ omp는 `Agent.#runLoop`가 실패 시 합성 assistant-error 턴을 추가하므
 ### 11.3 🟨 aside 채널의 트랜스크립트 persist
 
 `SessionEvent::Advisor`를 트랜스크립트에 영속화하려면 `SessionEntry` 변형이 필요할
-수 있다. omp는 `CustomMessageEntry`를 쓴다. oxi의 세션 스키마 확장 여부는 Phase 3에서
+수 있다. omp는 `CustomMessageEntry`를 쓴다. oxicode의 세션 스키마 확장 여부는 Phase 3에서
 결정 — 임시로 런타임 전용(비persist)으로 시작하고, 사용자 반응 보고 영속화 결정.
 
 ### 11.4 🟨 도구 이름 매핑
 
-omp는 `glob`, oxi는 `find`. `ADVISOR_READONLY_TOOL_NAMES`은 oxi 이름(`read`, `grep`,
+omp는 `glob`, oxicode는 `find`. `ADVISOR_READONLY_TOOL_NAMES`은 oxicode 이름(`read`, `grep`,
 `find`)로. 시스템 프롬프트의 `glob` 언급은 `find`로 수정 — 동작 동일.
 
 ### 11.5 🟩 비활성 시 제로 영향
@@ -765,6 +765,6 @@ Phase 1 (엔진 순수 로직)  ──>  Phase 2 (런타임 + 드레인)
                           통합 테스트 + clippy + 수동 E2E
 ```
 
-Phase 1-2는 `oxi-cli/src/app/advisor/`에 격리되어 호스트 없이 완성·검증 가능하다.
+Phase 1-2는 `oxicode-cli/src/app/advisor/`에 격리되어 호스트 없이 완성·검증 가능하다.
 Phase 3가 처음으로 `AgentSession`을 건드리므로, Phase 1-2 머지 후 Phase 3를 별도
 PR로 분리해 회귀 위험을 국소화한다.

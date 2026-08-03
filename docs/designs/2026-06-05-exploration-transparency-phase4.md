@@ -2,7 +2,7 @@
 
 > **Status:** ✅ Implemented
 > **목표:** 기능이 완성된 현재 코드를 **구조적으로 아름다운** 상태로 다듬기
-> **범위:** oxi-agent (핵심), oxi-sdk (re-export), oxi-cli (호환성)
+> **범위:** oxicode-agent (핵심), oxicode-sdk (re-export), oxicode-cli (호환성)
 > **Tests:** 2116/2116 pass (default), 514/514 pass (native-browser), 0 clippy errors
 
 ---
@@ -252,7 +252,7 @@ if let Some(ref meta) = result.metadata {
 1. pending_browse_callback 필드 선언
 2. 생성자에서 Mutex::new(None)
 3. on_browse_progress에서 lock → store
-4. execute에서 lock → take → registry.set_browse 또는 OxiTab.set_browse_progress_callback
+4. execute에서 lock → take → registry.set_browse 또는 OxicodeTab.set_browse_progress_callback
 ```
 
 **20줄 × 4개 툴 = 80줄 중복.**
@@ -263,7 +263,7 @@ if let Some(ref meta) = result.metadata {
 
 ```rust
 /// Browse 툴의 공통 callback 관리.
-/// on_progress/on_browse_progress → pending → registry/OxiTab 등록의
+/// on_progress/on_browse_progress → pending → registry/OxicodeTab 등록의
 /// 공통 패턴을 캡슐화.
 pub(crate) struct BrowseCallbackMixin {
     pending_callback: SyncMutex<Option<ProgressCallback>>,
@@ -281,10 +281,10 @@ impl BrowseCallbackMixin {
 
     /// 탭이 열렸을 때 두 콜백을 모두 등록.
     /// - registry 경로: BrowseSessionTool, BrowseExtractTool, BrowseScriptTool
-    /// - OxiTab downcast 경로: BrowseTool
+    /// - OxicodeTab downcast 경로: BrowseTool
     pub fn register_on_tab(&self, tab: &dyn BrowserTab, registry: Option<&TabCallbackRegistry>) {
         if let Some(cb) = self.pending_callback.lock().take() {
-            // registry 또는 OxiTab에 등록
+            // registry 또는 OxicodeTab에 등록
         }
         if let Some(bcb) = self.pending_browse_callback.lock().take() {
             // 동일
@@ -390,7 +390,7 @@ impl TabCallbackRegistry {
 | `engine.rs` | `TabCallbackRegistry`를 단일 맵으로 재구조화 |
 | `tab_guard.rs` | clear_browse_progress_callback 제거 (clear 하나로 충분) |
 | `engine.rs` | BrowserTab trait에서 `clear_browse_progress_callback` 제거 |
-| `oxibrowser_backend.rs` | OxiTab의 clear_browse_progress_callback_impl 제거 |
+| `oxibrowser_backend.rs` | OxicodeTab의 clear_browse_progress_callback_impl 제거 |
 
 ---
 
@@ -519,7 +519,7 @@ BrowseProgress 검증을 추가:
 ```rust
 #[tokio::test]
 async fn engine_forwards_browse_progress_to_callback() {
-    let engine = OxiBrowserEngine::new().await.unwrap();
+    let engine = OxicodeBrowserEngine::new().await.unwrap();
     let registry = engine.callback_registry();
 
     let received: Arc<StdMutex<Vec<BrowseProgress>>> = ...;
@@ -596,7 +596,7 @@ Batch 3 (정리):
 | | `browse_extract_tool.rs` | Mixin 적용 ~15 |
 | | `browse_script_tool.rs` | Mixin 적용 ~15 |
 | | `tab_guard.rs` | clear 간소화 ~5 |
-| | `oxibrowser_backend.rs` | OxiTab 간소화 ~10 |
+| | `oxibrowser_backend.rs` | OxicodeTab 간소화 ~10 |
 | | `tool_exec.rs` | 병렬 경로 수정 ~50 |
 | **Batch 2** | | **~60** |
 | | `tool_exec.rs` | infer_context + browse_cb enrichment ~30 |

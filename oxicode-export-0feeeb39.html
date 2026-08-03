@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oxicode session export</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hljs-dark">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-light" disabled>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+
+/* ── Reset & base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.6;
+  padding: 1rem;
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── Dark theme (default) ─────────────────────────────────────── */
+body.dark {
+  background: #1a1b26;
+  color: #c0caf5;
+}
+
+/* ── Light theme ──────────────────────────────────────────────── */
+body.light {
+  background: #f8f9fc;
+  color: #1a1b26;
+}
+
+/* ── Theme toggle button ──────────────────────────────────────── */
+#theme-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 100;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  font-size: 1.2rem;
+}
+body.light #theme-toggle {
+  background: rgba(0,0,0,0.05);
+  border-color: rgba(0,0,0,0.15);
+}
+
+/* ── Tree sidebar ──────────────────────────────────────────────── */
+.tree-nav {
+  width: 220px;
+  min-width: 220px;
+  padding: 1rem;
+  margin-right: 1rem;
+  border-right: 1px solid rgba(255,255,255,0.1);
+  font-size: 0.85rem;
+  overflow-y: auto;
+}
+body.light .tree-nav { border-color: rgba(0,0,0,0.12); }
+.tree-nav h3 { margin-bottom: 0.5rem; font-size: 0.95rem; }
+.tree-node { padding: 0.2rem 0; }
+.tree-node a { text-decoration: none; color: inherit; opacity: 0.7; }
+.tree-node a:hover { opacity: 1; }
+.tree-current a { font-weight: bold; opacity: 1; }
+body.dark .tree-current a { color: #7aa2f7; }
+body.light .tree-current a { color: #1d4ed8; }
+
+/* ── Main content ──────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ── Metadata header ───────────────────────────────────────────── */
+.meta-header { margin-bottom: 1.5rem; }
+.meta-header h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+.meta-table { border-collapse: collapse; font-size: 0.9rem; }
+.meta-table td { padding: 0.15rem 0.75rem 0.15rem 0; }
+.meta-label { color: #7982a9; font-weight: 600; }
+body.light .meta-label { color: #6b7280; }
+
+/* ── Message bubbles ───────────────────────────────────────────── */
+.msg {
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  max-width: 100%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.msg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.msg-role { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.msg-time { opacity: 0.5; font-size: 0.78rem; }
+
+.msg-body p { margin: 0.25rem 0; }
+.msg-body h1, .msg-body h2, .msg-body h3 { margin: 0.6rem 0 0.25rem; }
+.msg-body li { margin-left: 1.2rem; }
+
+/* ── User message ──────────────────────────────────────────────── */
+body.dark .msg-user  { background: #24283b; border-left: 4px solid #7aa2f7; }
+body.light .msg-user { background: #eef2ff; border-left: 4px solid #6366f1; }
+.msg-user .msg-role { color: #7aa2f7; }
+body.light .msg-user .msg-role { color: #4f46e5; }
+
+/* ── Assistant message ─────────────────────────────────────────── */
+body.dark .msg-assistant  { background: #1f2335; border-left: 4px solid #9ece6a; }
+body.light .msg-assistant { background: #f0fdf4; border-left: 4px solid #22c55e; }
+.msg-assistant .msg-role { color: #9ece6a; }
+body.light .msg-assistant .msg-role { color: #16a34a; }
+
+/* ── System message ────────────────────────────────────────────── */
+body.dark .msg-system  { background: #292e42; border-left: 4px solid #ff9e64; }
+body.light .msg-system { background: #fffbeb; border-left: 4px solid #f59e0b; }
+.msg-system .msg-role { color: #ff9e64; }
+body.light .msg-system .msg-role { color: #d97706; }
+
+/* ── Code blocks ───────────────────────────────────────────────── */
+pre {
+  background: #13141c;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+  font-size: 0.88rem;
+}
+body.light pre { background: #f1f5f9; }
+pre code { font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace; }
+
+code {
+  background: rgba(255,255,255,0.07);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.88em;
+}
+body.light code { background: rgba(0,0,0,0.06); }
+
+/* ── Thinking block (collapsible) ──────────────────────────────── */
+.thinking-block {
+  border: 1px dashed rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.4rem 0;
+  font-size: 0.88rem;
+}
+body.light .thinking-block { border-color: rgba(0,0,0,0.15); }
+.thinking-block summary {
+  cursor: pointer;
+  color: #bb9af7;
+  font-weight: 600;
+  user-select: none;
+}
+body.light .thinking-block summary { color: #7c3aed; }
+.think-content {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  opacity: 0.8;
+}
+body.light .think-content { border-color: rgba(0,0,0,0.08); }
+
+/* ── Tool call / result ────────────────────────────────────────── */
+.tool-call, .tool-result {
+  border-radius: 5px;
+  padding: 0.4rem 0.75rem;
+  margin: 0.3rem 0;
+  font-size: 0.88rem;
+  font-family: monospace;
+}
+body.dark .tool-call  { background: #2d1f3d; border-left: 3px solid #bb9af7; }
+body.dark .tool-result { background: #1a2d2d; border-left: 3px solid #73daca; }
+body.light .tool-call  { background: #faf5ff; border-left: 3px solid #a78bfa; }
+body.light .tool-result { background: #f0fdfa; border-left: 3px solid #14b8a6; }
+
+/* ── Tool blocks (structured) ──────────────────────────────────── */
+.tool-block {
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+.tool-label {
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+/* Bash tool */
+body.dark .tool-bash { border: 1px solid #3b2d5d; }
+body.light .tool-bash { border: 1px solid #e0d4f5; }
+body.dark .tool-bash .tool-label { background: #2d1f3d; color: #bb9af7; }
+body.light .tool-bash .tool-label { background: #faf5ff; color: #7c3aed; }
+.tool-bash .tool-command {
+  background: #0d1117;
+  border-radius: 4px;
+  margin: 0.35rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+body.light .tool-bash .tool-command { background: #f6f8fa; }
+
+/* File read tool */
+body.dark .tool-file-read { border: 1px solid #1e3a5f; }
+body.light .tool-file-read { border: 1px solid #d0e0f0; }
+body.dark .tool-file-read .tool-label { background: #1a2d44; color: #7aa2f7; }
+body.light .tool-file-read .tool-label { background: #eff6ff; color: #2563eb; }
+
+/* File write tool */
+body.dark .tool-file-write { border: 1px solid #2d4a2d; }
+body.light .tool-file-write { border: 1px solid #d0f0d0; }
+body.dark .tool-file-write .tool-label { background: #1a2d1a; color: #9ece6a; }
+body.light .tool-file-write .tool-label { background: #f0fdf4; color: #16a34a; }
+
+/* File edit tool */
+body.dark .tool-file-edit { border: 1px solid #4a3a1a; }
+body.light .tool-file-edit { border: 1px solid #f0e0c0; }
+body.dark .tool-file-edit .tool-label { background: #2d2a1a; color: #e0af68; }
+body.light .tool-file-edit .tool-label { background: #fffbeb; color: #d97706; }
+.edit-section { margin: 0.35rem 0.5rem; }
+.edit-old { border-left: 3px solid #f7768e; }
+.edit-new { border-left: 3px solid #9ece6a; }
+body.light .edit-old { border-left-color: #ef4444; }
+body.light .edit-new { border-left-color: #22c55e; }
+.edit-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+}
+.edit-old .edit-label { color: #f7768e; }
+.edit-new .edit-label { color: #9ece6a; }
+body.light .edit-old .edit-label { color: #ef4444; }
+body.light .edit-new .edit-label { color: #22c55e; }
+
+/* Search tool */
+body.dark .tool-search { border: 1px solid #1a3a3a; }
+body.light .tool-search { border: 1px solid #d0f0f0; }
+body.dark .tool-search .tool-label { background: #1a2d2d; color: #73daca; }
+body.light .tool-search .tool-label { background: #f0fdfa; color: #14b8a6; }
+.search-results {
+  margin: 0.35rem 0.5rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+.search-result-line {
+  padding: 0.15rem 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+body.light .search-result-line { border-bottom-color: rgba(0,0,0,0.05); }
+.search-result-line:last-child { border-bottom: none; }
+.tool-no-results {
+  padding: 0.5rem 0.75rem;
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* Tool output details (collapsible) */
+.tool-output-details {
+  margin: 0.35rem 0.5rem;
+}
+.tool-output-details summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #7982a9;
+  padding: 0.2rem 0;
+  user-select: none;
+}
+body.light .tool-output-details summary { color: #6b7280; }
+.tool-output-details summary:hover { color: inherit; }
+.tool-output {
+  background: #0d1117;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  max-height: 400px;
+  overflow: auto;
+}
+body.light .tool-output { background: #f6f8fa; }
+
+/* ── ANSI lines ────────────────────────────────────────────────── */
+.ansi-line {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* ── Links ─────────────────────────────────────────────────────── */
+a { color: #7aa2f7; text-decoration: underline; }
+body.light a { color: #2563eb; }
+
+</style>
+</head>
+<body class="dark">
+<button id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme">🌓</button>
+<main class="content">
+<header class="meta-header">
+<h1>oxicode Session Export</h1>
+<table class="meta-table">
+<tr><td class="meta-label">Exported</td><td class="meta-value">2026-05-30 13:17:43 UTC</td></tr>
+<tr><td class="meta-label">Model</td><td class="meta-value">zai/glm-5-turbo</td></tr>
+</table>
+</header>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이 코드베이스 분석해봐.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>프로젝트 구조를 파악하겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Model: zai/glm-5-turbo</p>
+</div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이 코드베이스 분석해봐.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>프로젝트 전체 구조를 파악해보겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이제 각 크레이트의 구조를 더 자세히 살펴보겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>코드 라인 수와 의존성도 확인해보겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Essential (always on):</p>
+<br>
+<p>  ls — Ls [essential]</p>
+<p>  write — Write File [essential]</p>
+<p>  grep — Grep [essential]</p>
+<p>  bash — Bash [essential]</p>
+<p>  edit — Edit File [essential]</p>
+<p>  find — Find [essential]</p>
+<p>  read — Read File [essential]</p>
+<br>
+<p>Optional (toggle with /tools &lt;name&gt;):</p>
+<br>
+<p>  get_search_results — Get Search Results [toggle]</p>
+<p>  github — GitHub [toggle]</p>
+<p>  web_search — Web Search [toggle]</p>
+<p>  subagent — Subagent [toggle]</p>
+<br>
+<p>WASM Extensions:</p>
+<br>
+<p>  mcp — MCP [wasm]</p>
+<p>  context7_resolve-library-id — Context7: Resolve Library ID [wasm]</p>
+<p>  questionnaire — Questionnaire [wasm]</p>
+<p>  context7_query-docs — Context7: Query Documentation [wasm]</p>
+<p>  generate_image — Generate Image [wasm]</p>
+<br>
+<br>
+<p>Place .wasm files in ~/.oxicode/extensions/ to add extensions</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Settings saved.</p>
+</div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>분석 끝이야? 결론은?</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>더 깊이 파보겠습니다. 핵심 파일들과 아키텍처의 실제 구현을 확인하겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>좋습니다. 이제 전체 그림이 보입니다. 결론을 말씀드리겠습니다.</p>
+<br>
+<p>---</p>
+<br>
+<h2>🔍 결론</h2>
+<br>
+<h3>이 프로젝트는 무엇인가</h3>
+<br>
+<p><strong>pi (Java)를 Rust로 전환한 터미널 AI 코딩 어시스턴트</strong>니다. Claude Code, Aider, Cline 같은 제품과 동일 카테고리입니다. 사용자가 터미널에서 LLM과 대화하며 코드를 읽고, 쓰고, 실행하고, 수정하는 것을 하나의 루프로 자동화합니다.</p>
+<br>
+<h3>핵심 엔진의 동작 원리</h3>
+<br>
+<p>전체 시스템은 <strong>하나의 while 루프</strong> 요약됩니다:</p>
+<br>
+<pre><code class="language-">사용자 입력 → Context 구성 → Provider.stream() → 토큰 스트리밍
+    → ToolCall 감지 → Tool 실행 (병렬/순차) → 결과를 Context에 추가 → 반복
+    → EndTurn 감지 → 종료
+</code></pre>
+<br>
+<p><code>AgentLoop</code>(<code>agent_loop/streaming.rs</code>+ <code>tool_exec.rs</code>가 이 루프의 심장입니다. <code>ProviderEvent</code>스트림을 소비하면서 <code>AgentEvent</code> 변환해 TUI/RPC 계층에 전달합니다. 취소(30초 idle timeout + 500ms 폴링), 회로 차단기, 자동 재시도, 컴팩션이 모두 이 루프 안에 내장되어 있습니다.</p>
+<br>
+<h3>잘 설계된 부분</h3>
+<br>
+<p>| 부분 | 평가 |</p>
+<p>|---|---|</p>
+<p>| <strong>6크레이트 워크스페이스</strong>| 의존 방향이 단방향(<code>ai → agent → sdk → cli</code> <code>ai → store → cli</code> <code>tui → cli</code>으로 깔끔. 순환 의존 없음 |</p>
+<p>| <strong>Provider 추상화</strong>| 단일 <code>Provider</code>트레잇으로 20개 프로바이더를 흡수. <code>transform.rs</code> OpenAI↔Anthropic 포맷 차이를 처리 |</p>
+<p>| <strong>이벤트 시스템</strong>| <code>AgentEvent</code> 생명주기/스트리밍/툴/재시도/컴팩션을 모두 커버. TUI와 RPC가 같은 이벤트를 소비 |</p>
+<p>| <strong>세션 모델</strong>| Append-only JSONL + 트리(<code>parent_id</code>로 포크/브랜칭이 가능. 데이터 손실 없음 |</p>
+<p>| <strong>툴 시스템</strong>| <code>AgentTool</code>트레잇 + <code>essential()</code>플래그 + 병렬/순차 실행 모드 + before/after 훅 |</p>
+<p>| <strong>SDK 계층</strong>| <code>KernelBridge</code> SDK 에이전트가 호스트의 도우미 레지스트리를 안전하게 사용 |</p>
+<br>
+<h3>문제점 및 개선 필요</h3>
+<br>
+<p>| 문제 | 심각도 | 설명 |</p>
+<p>|---|---|---|</p>
+<p>| <strong><code>model_db.rs</code>13,473줄</strong>| 🔴 높음 | 단일 파일에 544개 모델의 하드코딩된 데이터. 자동 생성 스크립트로 관리되지만, 수작업 편집 시 위험. 별도 크레이트나 <code>build.rs</code>서 JSON에서 컴파일하는 방식이 더 안전 |</p>
+<p>| <strong><code>unwrap()</code>1,054회 (테스트 제외 1,358회)</strong>| 🟡 중간 | <code>#![warn(clippy::unwrap_used)]</code> 설정되어 있으나 warn만 하고 deny가 아님. 프로덕션 코드에서 panic 가능성 남음. <code>?</code>연산자나 <code>ok_or_else()</code> 교체 필요 |</p>
+<p>| <strong>TODO/FIXME/HACK 66개</strong>| 🟡 중간 | 문서 주석에 <code>/// TODO.</code>같은 플레이스홀더가 다수. 특히 공개 API에 TODO가 있으면 라이브러리 사용자에게 혼란 |</p>
+<p>| <strong>이벤트 enum 복잡도</strong>| 🟡 중간 | <code>AgentEvent</code> 레거시(Start/Thinking/TextChunk)와 새 스타일(AgentStart/MessageStart/MessageUpdate/MessageEnd)이 공존. <code>#[non_exhaustive]</code>만 마이그레이션 계획이 보이지 않음 |</p>
+<p>| <strong><code>oxicode-cli</code> 크기</strong>| 🟠 중간-높음 | 45,500줄로 워크스페이스 전체의 32%. <code>packages.rs</code>2,950줄), <code>export.rs</code>2,175줄)는 별도 크레이트로 분리할 후보 |</p>
+<p>| <strong>스트리밍의 <code>if let</code>+ 인덱스 접근</strong>| 🟢 낮음 | <code>streaming.rs</code>서 <code>messages.len() - 1</code>+ <code>if let Message::Assistant(ref mut m)</code>패턴이 반복. 헬퍼 메서드로 추출하면 가독성 향상 |</p>
+<p>| <strong>unsafe 14건</strong>| 🟢 낮음 | 존재 자체는 적정 수준이나, 각 사이트의 안전성 정당성 문서화 필요 |</p>
+<br>
+<h3>전체 평가</h3>
+<br>
+<p><strong>품질 등급: B+ (프로덕션 가능, 개선 여유 있음)</strong></p>
+<br>
+<p>이것은 <strong>구조적으로 잘 설계된 프로젝트</strong>니다. 14만 라인 규모임에도 단방향 의존, 명확한 트레잇 경계, 이벤트 기반 아키텍처를 유지하고 있습니다. pi의 아키텍처를 Rust의 이디엄(tokio 비동기, trait 객체, parking_lot 동기화)으로 자연스럽게 번역했습니다.</p>
+<br>
+<p><strong>가장 우선적으로 개선해야 할 것</strong> <code>unwrap()</code> <code>deny</code> 올리고, <code>model_db.rs</code> 데이터 파일 기반으로 전환하는 것입니다. 그 다음으로 이벤트 enum의 레거시 정리와 <code>oxicode-cli</code> 분리를 고려하면 품질 등급이 A 수준으로 올라갈 수 있습니다.</p>
+</div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>현재 tui를 통해서 요청을 보낼 떄 minimax 프로바이더로 보낼 경우에는 thiunking이 한 번 나오고 그 다음에 툴 ㄹ호출이 안 되고 그대로 루프가 끝나버려. zai나 다른 프로바이더는 괜찮은데.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>MiniMax 프로바이더의 스트리밍/툴콜 처리를 조사하겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>핵심을 찾았습니다. MiniMax는 <strong>Anthropic 호환 프로바이더</strong> 등록되어 있습니다. Anthropic 프로바이더 코드를 확인하겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>⚠ Stream error: HTTP error 400: {"error":{"code":"1214","message":"The messages parameter is illegal. Please check the documentation."}}</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Error: Stream error: HTTP error 400: {"error":{"code":"1214","message":"The messages parameter is illegal. Please check the documentation."}}</p>
+</div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>뭐야 계속해.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>계속해서 코드베이스 분석을 진행합니다. 핵심 모듈들을 더 살펴보겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>좋습니다. 코드베이스 전체를 분석했습니다. 종합 요약을 드리겠습니다.</p>
+<br>
+<p>---</p>
+<br>
+<h2>🦀 oxicode 코드베이스 분석 보고서</h2>
+<br>
+<h3>개요</h3>
+<br>
+<p><strong>oxicode</strong> TypeScript 프로젝트 <a href="https://github.com/earendil-works/pi">pi</a> Rust 포트입니다. 터미널 기반 AI 코딩 어시스턴트로, 6개 워크스페이스 크레이트로 구성된 모듈형 아키텍처를 사용합니다.</p>
+<br>
+<pre><code class="language-">oxicode-cli (진입점)
+  ├── oxicode-sdk   (멀티 에이전트 SDK / 빌더 패턴)
+  │     └── oxicode-agent (에이전트 런타임 / 툴 루프 / MCP)
+  │           └── oxicode-ai   (통합 LLM API / 10+ 프로바이더)
+  ├── oxicode-tui   (터미널 UI / Ratatui)
+  └── oxicode-store (세션 / 설정 / 인증 영속성)
+</code></pre>
+<br>
+<p>---</p>
+<br>
+<h3>🔧 크레이트별 상세 분석</h3>
+<br>
+<p>#### 1. <strong>oxicode-ai</strong>— 통합 LLM API (핵심)</p>
+<p>| 파일 | 역할 |</p>
+<p>|---|---|</p>
+<p>| <code>providers/</code>| OpenAI, Anthropic, Google, DeepSeek, Mistral, Groq, Cerebras, xAI, OpenRouter, Azure, MiniMax 등 <strong>10+ 프로바이더</strong>|</p>
+<p>| <code>compaction.rs</code>| 긴 대화를 위한 컨텍스트 압축 (LLM 기반 요약) |</p>
+<p>| <code>complexity_router.rs</code>| 복잡도 기반 모델 라우팅 |</p>
+<p>| <code>fallback_chain.rs</code>| 순서 모델 페일오버 체인 |</p>
+<p>| <code>circuit_breaker.rs</code>| 프로바이더별 서킷 브레이커 (헬스 트래킹) |</p>
+<p>| <code>transform.rs</code>| 프로바이더 간 메시지 포맷 변환 (Anthropic↔OpenAI↔Google) |</p>
+<p>| <code>model_db.rs</code>| 정적 모델 데이터베이스 (비용, 모달리티 정보) |</p>
+<p>| <code>model_registry.rs</code>| 런타임 동적 모델 등록 |</p>
+<p>| <code>partial_response.rs</code>| 스트림 복구용 부분 응답 누적기 |</p>
+<br>
+<p><strong>주요 패턴:</strong></p>
+<li><strong>Anthropic 프로바이더</strong> MiniMax 같은 호환 프로바이더도 처리 (<code>native</code>플래그로 구분)</li>
+<li><code>thinking</code>파라미터는 네이티브 Anthropic에서만 전송 (호환 프로바이더에서는 스트림 중단 방지)</li>
+<li>SSE 파싱은 <strong>stateful</strong>— <code>scan()</code>상태로 partial_message가 HTTP 청크 경계를 넘어 유지</li>
+<li>캐시 컨트롤은 최대 4개 브레이크포인트 (system → 마지막 메시지 → 뒤에서 두 번째)</li>
+<br>
+<p>#### 2. <strong>oxicode-agent</strong>— 에이전트 런타임</p>
+<li>툴 호출 루프 (최대 10 반복)</li>
+<li>이벤트 시스템 (<code>AgentEvent</code> TextChunk, Thinking, Complete, Error 등)</li>
+<li>MCP 클라이언트</li>
+<li>Questionnaire 브릿지 (UI ↔ 에이전트 질문 연동)</li>
+<br>
+<p>#### 3. <strong>oxicode-store</strong>— 영속성 계층</p>
+<p>| 파일 | 역할 |</p>
+<p>|---|---|</p>
+<p>| <code>session.rs</code>| JSONL 기반 세션 저장 (분기/포크 지원 트리 구조) |</p>
+<p>| <code>settings.rs</code>| 계층형 설정 (defaults → ~/.oxicode → .oxicode → env → CLI) |</p>
+<p>| <code>auth_storage.rs</code>| API 키 / OAuth 토큰 관리 |</p>
+<p>| <code>model_registry.rs</code>| 사용자 정의 모델 등록 |</p>
+<p>| <code>model_resolver.rs</code>| 모델 ID 해석 |</p>
+<br>
+<p>#### 4. <strong>oxicode-tui</strong>— 터미널 UI</p>
+<li>Ratatui 기반 차분 렌더링</li>
+<li>마크다운 스타일링, 이미지 지원</li>
+<li>위젯 시스템 (채팅, 입력, 상태바)</li>
+<li>테마 시스템</li>
+<li>키바인딩 관리</li>
+<br>
+<p>#### 5. <strong>oxicode-cli</strong>— CLI 진입점</p>
+<li><code>App</code>구조체가 전체 애플리케이션 상태 보유</li>
+<li><code>InteractiveSession</code>— 실시간 스트리밍 대화</li>
+<li>모드: <strong>TUI 모드</strong>(대화형) / <strong>Print 모드</strong>(단일 프롬프트) / <strong>RPC 모드</strong></li>
+<li>설정 마법사 (<code>setup_wizard.rs</code></li>
+<li>확장 시스템 (WASM / 네이티브 <code>.so</code><code>.dylib</code><code>.dll</code></li>
+<li>패키지 매니저 (스킬/확장 설치)</li>
+<li><strong>스킬 시스템</strong> Autonomous Loop, Brainstorming, Deep Research, Reviewer, Planner 등</li>
+<br>
+<p>#### 6. <strong>oxicode-sdk</strong>— 멀티 에이전트 SDK</p>
+<li><code>OxicodeBuilder</code>패턴으로 엔진 구성</li>
+<li>프로바이더 생성 / 모델 해석</li>
+<br>
+<p>---</p>
+<br>
+<h3>🏗️ 핵심 아키텍처 패턴</h3>
+<br>
+<p>1. <strong>프로바이더 추상화</strong> <code>Provider</code>트레이트 → <code>stream()</code>메서드가 <code>Pin&lt;Box&lt;dyn Stream&lt;Item = ProviderEvent&gt;&gt;&gt;</code>반환</p>
+<p>2. <strong>이벤트 드리븐</strong> 모든 LLM 응답이 <code>ProviderEvent</code>(Start, TextStart/Delta, ThinkingStart/Delta, ToolCallStart/Delta/End, Done) 스트림</p>
+<p>3. <strong>설정 레이어링</strong> defaults → global settings → project settings → env vars → CLI flags</p>
+<p>4. <strong>세션 트리</strong> JSONL append-only 저장 + 분기/포크 (Git worktree와 유사)</p>
+<p>5. <strong>Stateful SSE 파싱</strong> HTTP 청크 경계에서 컨텐츠 손실 방지 (pi의 단점 개선)</p>
+<br>
+<h3>📊 규모</h3>
+<li><strong>언어</strong> Rust 1.82+</li>
+<li><strong>테스트</strong> 1,600+ 개</li>
+<li><strong>프로바이더</strong> 10+ 개</li>
+<li><strong>빌드</strong> Release는 LTO + codegen-units=1 + strip (최적화)</li>
+<li><strong>라이선스</strong> MIT (pi 프로젝트 기반)</li>
+<br>
+<p>전반적으로 pi의 아키텍처를 Rust 생태계에 잘 적응시킨 프로젝트입니다. 특히 스트리밍 파싱의 stateful 접근, 서킷 브레이커, 폴백 체인 등이 pi보다 더 견고하게 구현되어 있습니다.</p>
+</div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>그래서 minimax로 보낼 경우네느 왜 제대로 동작을 안 할까?</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>MiniMax 에러 코드 <code>1214</code>("messages parameter is illegal")의 원인을 추적하겠습니다. 메시지 빌드 파이프라인을 따라가봅니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이제 URL 구성과 메시지 정규화를 확인하겠습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이제 메시지 정규화(<code>normalize_messages</code>를 확인합니다. 이게 핵심일 가능성이 높습니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이제 핵심을 찾았습니다. <code>normalize_messages</code>서 <code>is_anthropic</code>체크를 봅시다:</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>자, 여기 <code>model.provider</code>값이 MiniMax에서 어떻게 설정되는지 확인합니다:</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>계쏙해봐. 그리고 지금 툴 콜이 일어나다가 갑자기 루프가 끊기는 문제도 있네. 불안정해.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>두 가지 문제를 모두 추적하겠습니다: (1) 에러 1214, (2) 툴 콜 루프 불안정성. 파이프라인 전체를 조사합니다.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>⚠ Stream error: HTTP error 400: {"error":{"code":"1214","message":"The messages parameter is illegal. Please check the documentation."}}</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Error: Stream error: HTTP error 400: {"error":{"code":"1214","message":"The messages parameter is illegal. Please check the documentation."}}</p>
+</div>
+</div>
+<div class="msg msg-user">
+<div class="msg-header"><span class="msg-role">You</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>계쏙해봐. 그리고 지금 툴 콜이 일어나다가 갑자기 루프가 끊기는 문제도 있네. 불안정해.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>좋아, 계속 분석하겠다. 특히 tool call 중간에 루프가 끊기는 불안정성 문제를 집중적으로 파헤쳐보자.</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>이제 실제 실행 로그를 확인해보자 — 특히 tool call 관련 오류:</p>
+</div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"></div>
+</div>
+<div class="msg msg-assistant">
+<div class="msg-header"><span class="msg-role">Assistant</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>좋아, 이제 전체 구조를 파악했다. 핵심 코드를 모두 읽었으니 분석 결과를 정리하겠다.</p>
+<br>
+<p>---</p>
+<br>
+<h2>🔍 <code>agent_loop</code>전체 분석 및 Tool Call 중단 문제 원인</h2>
+<br>
+<h3>아키텍처 요약</h3>
+<br>
+<pre><code class="language-">Agent.run_with_channel()
+  └─ AgentLoop.run_messages()
+       └─ run_loop()  ← 핵심 드라이버
+            ├─ Outer loop (follow-up/steering)
+            │   └─ Inner while (tool calls + steering)
+            │       1. process_steering_messages()
+            │       2. poll_external_queues()
+            │       3. maybe_compact()
+            │       4. stream_assistant_response()   ← LLM 호출
+            │       5. execute_tool_calls()            ← 툴 실행
+            │       6. should_stop_after_turn()?
+            │       7. drain steering → check external_stop
+            └─ follow-up drain → break
+</code></pre>
+<br>
+<p>---</p>
+<br>
+<h3>🐛 Tool Call 중간에 루프가 끊기는 원인 (버그 분석)</h3>
+<br>
+<p>#### <strong>버그 1: <code>stream_with_retry</code>— 첫 시도에서 non-rate-limit 에러면 즉시 포기</strong></p>
+<br>
+<p><strong>파일:</strong><code>stream_retry.rs:64-67</code></p>
+<br>
+<pre><code class="language-rust">// Non-retryable on the first attempt → bail immediately.
+if !is_rate_limit &amp;&amp; attempt == 0 {
+    return Err(AgentError::Stream(msg));
+}
+</code></pre>
+<br>
+<p>문제: 첫 시도에서 429 이외의 HTTP 에러 (400, 401, 500 등)가 오면 <strong>즉시 에러 반환</strong> 그런데 <code>run_loop</code>서 <code>stream_assistant_response</code> <code>Err</code> 반환하면:</p>
+<br>
+<pre><code class="language-rust">// mod.rs:612-627
+let assistant_message = match stream_assistant_response(self, &amp;mut messages, &amp;emit).await {
+    Ok(msg) =&gt; msg,
+    Err(e) =&gt; {
+        return Ok(self.handle_streaming_error(...).await);
+    }
+};
+</code></pre>
+<br>
+<p>→ <code>handle_streaming_error</code> <code>StopReason::Error</code>메시지를 합성하고 <strong>루프를 종료</strong>다. </p>
+<br>
+<p><strong>이것이 당신이 보는 문제의 가장 유력한 원인.</strong>예를 들어 HTTP 400 (<code>&quot;messages parameter is illegal&quot;</code>이 날아오면:</p>
+<p>1. <code>stream_with_retry</code> 첫 시도에서 에러 → 즉시 <code>Err</code>반환</p>
+<p>2. <code>stream_assistant_response</code>→ <code>Err</code>반환  </p>
+<p>3. <code>handle_streaming_error</code>→ 합성 에러 메시지 → <code>return Ok(...)</code>→ <strong>루프 종료</strong></p>
+<p>4. auto-retry 로직조차 도달하지 못함 (auto-retry는 <code>StopReason::Error</code>처리 단계에서 작동)</p>
+<br>
+<p>&gt; 즉, provider가 tool call 이후에 400 에러를 내면 루프가 완전히 멈춘다.</p>
+<br>
+<p>#### <strong>버그 2: <code>auto_retry</code> streaming 에러에 도달하지 않음</strong></p>
+<br>
+<p><code>auto_retry</code> <code>stream_assistant_response</code> <strong>성공적으로</strong><code>Ok(error_message)</code> 반환했을 때만 작동한다 (mod.rs:631-649). 하지만 <code>stream_with_retry</code>서 발생한 연결 수준 에러는 <code>Err</code> 반환하므로 auto-retry 경로를 <strong>우회</strong>다.</p>
+<br>
+<p>두 가지 retry 계층이 있다:</p>
+<li><strong>Connection-level retry</strong>(<code>stream_retry.rs</code>: 429만 재시도, 나머지는 첫 시도에서 포기</li>
+<li><strong>Message-level retry</strong>(<code>retry.rs</code><code>handle_retryable_error</code>: <code>StopReason::Error</code>메시지에서 regex 매칭으로 재시도</li>
+<br>
+<p>하지만 connection-level에서 non-429 에러가 <code>Err</code> 변환되면 두 계층 모두를 건너뛴다.</p>
+<br>
+<p>#### <strong>버그 3: <code>Done</code>핸들러의 tool call dedup 로직이 복잡하고 취약</strong></p>
+<br>
+<p><strong>파일:</strong><code>streaming.rs:286-325</code></p>
+<br>
+<pre><code class="language-rust">// Done 핸들러:
+let mut preserved_tool_calls: Vec&lt;ContentBlock&gt; = m
+    .content.drain(..)
+    .filter(|b| matches!(b, ContentBlock::ToolCall(_)))
+    .collect();
+
+let mut seen: HashSet&lt;String&gt; = message.content.iter()
+    .filter_map(|b| match b { ContentBlock::ToolCall(tc) =&gt; Some(tc.id.clone()), _ =&gt; None })
+    .collect();
+
+preserved_tool_calls.retain(|b| match b {
+    ContentBlock::ToolCall(tc) =&gt; seen.insert(tc.id.clone()),
+    _ =&gt; true,
+});
+
+*m = message.clone();
+m.content.extend(preserved_tool_calls);
+</code></pre>
+<br>
+<p>문제: </p>
+<li><code>ToolCallEnd</code>이벤트에서 수동으로 누적한 tool call (streaming.rs:247-262)과 <code>Done</code>메시지에 포함된 tool call을 <strong>dedup</strong>려는 시도</li>
+<li>하지만 일부 provider는 <code>Done</code> <code>message.content</code> tool call을 포함하지 않거나, <code>partial</code>누적과 불일치할 수 있음</li>
+<li><code>drain(..)</code>로 모든 content를 날려버리고 <code>Done</code>message로 교체한 뒤 preserved를 extend하는데, <strong>순서가 뒤바뀜</strong>(tool call이 text 뒤에 붙음)</li>
+<li>Provider마다 streaming 동작이 다른데, 이 로직이 모든 케이스를 커버하지 못할 가능성</li>
+<br>
+<p>#### <strong>버그 4: Parallel tool execution에서 cancel 체크 누락</strong></p>
+<br>
+<p><strong>파일:</strong><code>tool_exec.rs:257-268</code></p>
+<br>
+<pre><code class="language-rust">let indexed_results: Vec&lt;(usize, FinalizedToolCall)&gt; = futures::future::join_all(
+    pending_futures.into_iter().map(|(i, f)| async move { (i, f.await) }),
+).await;
+</code></pre>
+<br>
+<p><code>join_all</code> <strong>모든 future가 완료될 때까지 대기</strong>다. Sequential 모드는 각 툴 전에 cancel 체크를 하지만, Parallel 모드에서는 <strong>시작 전에만 체크하고, 실행 중에는 취소 불가</strong> 긴 툴 실행이 있으면 취소 반응이 느려진다.</p>
+<br>
+<p>#### <strong>버그 5: <code>has_more_tool_calls</code>로직에서 terminate flag와의 상호작용</strong></p>
+<br>
+<p><strong>파일:</strong><code>mod.rs:743</code></p>
+<br>
+<pre><code class="language-rust">has_more_tool_calls = !executed_batch.terminate;
+</code></pre>
+<br>
+<p>그리고 <code>helpers.rs:39-44</code></p>
+<br>
+<pre><code class="language-rust">pub fn should_terminate_batch(finalized_calls: &amp;[FinalizedToolCall]) -&gt; bool {
+    if finalized_calls.is_empty() { return false; }
+    finalized_calls.iter().all(|f| f.result.terminate)
+}
+</code></pre>
+<br>
+<p><strong>만약 툴 결과의 <code>terminate</code> 어떤 이유로 <code>true</code> 설정되면, tool call이 있어도 루프가 즉시 종료된다.</strong><code>AgentToolResult::success(&quot;&quot;)</code> 생성하면 <code>terminate</code>기본값이 <code>false</code>야 하지만, after_tool_call hook이 <code>terminate: true</code> 설정하면 조용히 루프가 멈춘다.</p>
+<br>
+<p>---</p>
+<br>
+<h3>📋 수정 제안 (우선순위 순)</h3>
+<br>
+<p>| 우선순위 | 문제 | 수정 |</p>
+<p>|---|---|---|</p>
+<p>| <strong>P0</strong>| <code>stream_retry</code> non-429 에러를 첫 시도에서 즉시 포기 | 400/500/502/503/504도 재시도 대상에 포함 |</p>
+<p>| <strong>P0</strong>| Streaming <code>Err</code>→ <code>handle_streaming_error</code> 루프 종료 | <code>handle_retryable_error</code> streaming <code>Err</code>경로에서도 호출 |</p>
+<p>| <strong>P1</strong>| Done 핸들러의 tool call dedup이 취약 | Provider별 동작을 명확히 하거나, <code>ToolCallEnd</code>서만 tool call을 수집하고 Done에서는 무시 |</p>
+<p>| <strong>P2</strong>| Parallel 모드에서 cancel 불가 | <code>join_all</code>대신 <code>FuturesUnordered</code>+ periodic cancel check |</p>
+<p>| <strong>P2</strong>| <code>terminate</code>flag로 인한 조용한 루프 종료 | terminate가 true일 때 로그 추가 |</p>
+<br>
+<p>수정할까?</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Changelog:</p>
+<br>
+<h2>0.24.0</h2>
+<br>
+<h2>[0.24.0] - 2026-05-30</h2>
+<br>
+<h3>Changed — workspace</h3>
+<br>
+<li>Bumped all crate versions to 0.24.0</li>
+<li>Fixed 18 doc warnings across all crates (unresolved links, bare URLs, HTML tags)</li>
+<li>Added <code>.cargo/audit.toml...</code>.cargo/audit.toml...</li>
+<br>
+<h2>0.20.0</h2>
+<br>
+<h2>[0.20.0] - 2026-05-19</h2>
+<br>
+<h3>Added — oxicode-sdk</h3>
+<br>
+<li>Re-export <code>SearchCache</code> <code>CompactionEvent</code> <code>UserMessage</code>and all built-in tools (<code>EditTool</code> <code>ReadTool</code> <code>WriteTool</code> <code>GrepTool</code> <code>FindTool</code> <code>LsToo...</code>LsToo...</li>
+<br>
+<h2>0.15.1</h2>
+<br>
+<h2>[0.15.1] - 2026-05-16</h2>
+<br>
+<h3>Fixed — oxicode-agent</h3>
+<br>
+<li><strong>tool_exec.rs</strong> Add <code>+ Send</code>bound to <code>FinalizedToolCallEntry::Future</code>and <code>pending_futures</code>type alias, making <code>AgentLoop::run()</code>/ <code>run_message...</code>run_message...</li>
+<br>
+<h2>0.15.0</h2>
+<br>
+<h2>[0.15.0] - 2026-05-16</h2>
+<br>
+<p>(No changelog entry recorded)</p>
+<br>
+<h2>0.14.0</h2>
+<br>
+<h2>[0.14.0] - 2026-05-16</h2>
+<br>
+<h3>Added — oxicode-sdk (oxios Agent OS Engine)</h3>
+<br>
+<li><strong>KernelToolProvider trait</strong>(<code>oxicode-sdk/src/kernel_bridge.rs</code>: Bridge interface for oxios kernel tools (exec, memory, browser...</li>
+<br>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>No active session to clone.</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>Compacted from 47316 tokens</p>
+</div>
+</div>
+<div class="msg msg-system">
+<div class="msg-header"><span class="msg-role">System</span><span class="msg-time">13:17:43</span></div>
+<div class="msg-body"><p>OK: Copied to clipboard</p>
+</div>
+</div>
+</main>
+<script>
+
+function toggleTheme() {
+  const body = document.body;
+  const isDark = body.classList.contains('dark');
+  body.classList.toggle('dark', !isDark);
+  body.classList.toggle('light', isDark);
+
+  // Swap highlight.js stylesheet
+  const darkSheet = document.getElementById('hljs-dark');
+  const lightSheet = document.getElementById('hljs-light');
+  if (darkSheet && lightSheet) {
+    darkSheet.disabled = isDark;
+    lightSheet.disabled = !isDark;
+  }
+}
+
+// Apply syntax highlighting
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('pre code').forEach((block) => {
+    hljs.highlightElement(block);
+  });
+});
+
+</script>
+</body>
+</html>

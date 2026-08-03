@@ -4,7 +4,7 @@
 > 작성: 2026-06-19 (v1), 개정 (v2)
 > 선행: [`00-master-plan.md`](./00-master-plan.md)
 > omp 분석: `modes/components/agent-hub.ts` (566줄), `agent-transcript-viewer.ts` (461줄), `agent-dashboard.ts` (1,206줄)
-> oxi 기반: `oxi-sdk/src/lifecycle/` (Supervisor 1,068줄, AgentPool, AgentHandle)
+> oxicode 기반: `oxicode-sdk/src/lifecycle/` (Supervisor 1,068줄, AgentPool, AgentHandle)
 > 후속: N2 구현 → CHANGELOG.md
 
 ---
@@ -13,7 +13,7 @@
 
 omp의 **Agent Hub**는 등록된 모든 에이전트(메인 + 서브)를 한 화면에서 모니터링하는 풀스크린 오버레이다. 상태·비읽은 IRC 수·현재 작업·마지막 활동을 테이블로 보여주고, 각 에이전트의 트랜스크립트를 라이브로 열람할 수 있다.
 
-**oxi의 핵심 자산**: `oxi-sdk/src/lifecycle/supervisor.rs`가 이미 `AgentHandle`(status, metrics, lifecycle events, parent_id)과 `AgentPool`을 제공한다. omp는 이것을 처음부터 만들었지만, oxi는 **TUI 레이어만 추가하면 된다**.
+**oxicode의 핵심 자산**: `oxicode-sdk/src/lifecycle/supervisor.rs`가 이미 `AgentHandle`(status, metrics, lifecycle events, parent_id)과 `AgentPool`을 제공한다. omp는 이것을 처음부터 만들었지만, oxicode는 **TUI 레이어만 추가하면 된다**.
 
 ### omp가 검증한 가치
 - **서브에이전트 가시성** — `task`로 띄운 서브에이전트의 진행·출력·비용을 실시간으로 확인.
@@ -122,17 +122,17 @@ const POLL_MS = 250;
 
 ---
 
-## 2. oxi 기존 자산 분석
+## 2. oxicode 기존 자산 분석
 
-### 2.1 `oxi-sdk/src/lifecycle/supervisor.rs`
+### 2.1 `oxicode-sdk/src/lifecycle/supervisor.rs`
 
-oxi는 이미 강력한 에이전트 라이프사이클 인프라를 갖추고 있다:
+oxicode는 이미 강력한 에이전트 라이프사이클 인프라를 갖추고 있다:
 
 ```rust
 pub struct AgentHandle {
     agent_id: String,
     status: Arc<AtomicU8>,           // STATUS_CREATED/RUNNING/IDLE/STOPPED/FAILED
-    agent: Arc<oxi_agent::Agent>,
+    agent: Arc<oxicode_agent::Agent>,
     config: Arc<RwLock<AgentConfig>>,
     metrics: Arc<AgentMetrics>,       // 토큰/비용/지속시간
     lifecycle_tx: broadcast::Sender<AgentLifecycleEvent>,
@@ -162,9 +162,9 @@ pub enum AgentLifecycleEvent {
 }
 ```
 
-### 2.2 oxi에 부족한 것
+### 2.2 oxicode에 부족한 것
 
-| omp 기능 | oxi 상태 | 갭 |
+| omp 기능 | oxicode 상태 | 갭 |
 |---|---|---|
 | `displayName` / `currentTask` | `config.name`만 있음 | 표시용 메타데이터 부재 |
 | `unreadIrcCount` | IRC 미구현 (1차 계획에 없음) | IRC 카운트 불가 |
@@ -176,11 +176,11 @@ pub enum AgentLifecycleEvent {
 
 ---
 
-## 3. oxi화 설계
+## 3. oxicode화 설계
 
 ### 3.1 AgentHandle 확장
 
-`oxi-sdk/src/lifecycle/supervisor.rs`의 `AgentHandle`에 표시용 필드 추가:
+`oxicode-sdk/src/lifecycle/supervisor.rs`의 `AgentHandle`에 표시용 필드 추가:
 
 ```rust
 #[derive(Clone)]
@@ -255,7 +255,7 @@ impl AgentHandle {
 
 ### 3.2 TUI 오버레이: `AgentHubOverlay`
 
-`oxi-cli/src/tui/overlay/agent_hub.rs` (신규):
+`oxicode-cli/src/tui/overlay/agent_hub.rs` (신규):
 
 ```rust
 pub struct AgentHubOverlay {
@@ -443,7 +443,7 @@ pub fn register_persisted_subagents(pool: &Arc<AgentPool>, session_dir: &Path) {
 
 ### 3.6 IRC 통합 (선택, 후순위)
 
-omp의 IRC 카운트는 `IrcBus`에서 가져온다. oxi에 IRC가 없으므로 (1차 계획에도 없음):
+omp의 IRC 카운트는 `IrcBus`에서 가져온다. oxicode에 IRC가 없으므로 (1차 계획에도 없음):
 
 ```rust
 impl AgentHandle {
@@ -462,7 +462,7 @@ impl AgentHandle {
 
 ### 4.1 서브에이전트 생성 시 registry 등록
 
-`oxi-agent/src/tools/subagent.rs`에서 서브에이전트 spawn 시 pool에 등록:
+`oxicode-agent/src/tools/subagent.rs`에서 서브에이전트 spawn 시 pool에 등록:
 
 ```rust
 async fn execute(&self, ..., ctx: &ToolContext) -> Result<AgentToolResult, ToolError> {
@@ -543,7 +543,7 @@ if let Some(pool) = &ctx.agent_pool {
 | N2.13 | ⑤ sticky panel과 연동 (서브에이전트 설명 → todo 매칭) | N2.5, ⑤ |
 
 > **독립성**: ⑥은 ⑤ todo와 병렬 가능. N2.13만 양쪽 완료 후.
-> **oxi-sdk 기반**: AgentPool/AgentHandle이 이미 있으므로 TUI 레이어가 주 작업.
+> **oxicode-sdk 기반**: AgentPool/AgentHandle이 이미 있으므로 TUI 레이어가 주 작업.
 
 ---
 
@@ -555,7 +555,7 @@ omp의 `agent-dashboard.ts` (1,206줄)는 에이전트 정의(definition)를 관
 - 새 에이전트 생성
 - 소스 탭 (project / user)
 
-이는 oxi의 `agent_definition.rs` (567줄)과 겹친다. **후순위**: N2 완료 후, `/agents` 명령을 dashboard로 확장.
+이는 oxicode의 `agent_definition.rs` (567줄)과 겹친다. **후순위**: N2 완료 후, `/agents` 명령을 dashboard로 확장.
 
 ---
 
@@ -568,7 +568,7 @@ omp의 `agent-dashboard.ts` (1,206줄)는 에이전트 정의(definition)를 관
 | IRC 카운트 (IRC 미구현) | 🟢 고정 | 항상 0. IRC 도입 시 연결 |
 | 대량 서브에이전트 (32개 동시) | 🟡 최적화 | 테이블 스크롤 + 가상화 검토 |
 | 에이전트 정의 관리 (dashboard) | 🔴 후순위 | N2 완료 후 별도 설계 |
-| advisor 에이전트 (omp 전용) | 🔴 후순위 | oxi에 advisor 개념 없음. 향후 별도 검토 |
+| advisor 에이전트 (omp 전용) | 🔴 후순위 | oxicode에 advisor 개념 없음. 향후 별도 검토 |
 | collab 게스트 (원격 에이전트) | 🔴 영구 제외 | 네트워킹 계층 필요. oxios 제품 |
 
 ---
@@ -613,15 +613,15 @@ mod tests {
 
 ---
 
-## 9. 부록: omp → oxi 매핑
+## 9. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `modes/components/agent-hub.ts` (566) | `oxi-cli/src/tui/overlay/agent_hub.rs` |
-| `modes/components/agent-transcript-viewer.ts` (461) | `oxi-cli/src/tui/overlay/agent_hub.rs` (통합) |
+| `modes/components/agent-hub.ts` (566) | `oxicode-cli/src/tui/overlay/agent_hub.rs` |
+| `modes/components/agent-transcript-viewer.ts` (461) | `oxicode-cli/src/tui/overlay/agent_hub.rs` (통합) |
 | `modes/components/agent-dashboard.ts` (1,206) | 후순위 (별도 설계) |
-| `registry/agent-registry.ts` | `oxi-sdk/src/lifecycle/agent_pool.rs` (기존) |
-| `registry/agent-lifecycle.ts` | `oxi-sdk/src/lifecycle/supervisor.rs` (기존) |
+| `registry/agent-registry.ts` | `oxicode-sdk/src/lifecycle/agent_pool.rs` (기존) |
+| `registry/agent-lifecycle.ts` | `oxicode-sdk/src/lifecycle/supervisor.rs` (기존) |
 | `registry/agent-registry.ts` (AgentRef) | `AgentHandle` 확장 필드 |
 | `irc/bus.ts` (unread count) | 미구현 (항상 0) |
 | `advisor/` | 후순위 (별도 설계) |

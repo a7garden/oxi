@@ -2,12 +2,12 @@
 
 > **상위 설계:** `docs/superpowers/specs/2026-07-27-omp-realignment-design.md` (Phase 2, 결정 T1)
 > **omp 소스:** `/tmp/omp/packages/tui/src/` (tui.ts 173KB — Component/Container/TUI + 3-전략 차등 렌더링 + native scrollback; components/ — editor 117KB, markdown 98KB, input, select-list, settings-list, image, box, scroll-view, tab-bar, …; terminal.ts 62KB; terminal-capabilities.ts 43KB)
-> **대상 크레이트:** `oxi-tui-legacy/` (74K LOC, 주축으로 진화) → `oxi-tui`로 rename; 현 `oxi-tui` v2(9.7K LOC, grok-inspired)는 폐기.
+> **대상 크레이트:** `oxicode-tui-legacy/` (74K LOC, 주축으로 진화) → `oxicode-tui`로 rename; 현 `oxicode-tui` v2(9.7K LOC, grok-inspired)는 폐기.
 > **의존:** P1 느슨하게 (위젯 도메인 타입이 agent 이벤트에 의존).
 
 **Goal:** legacy를 omp의 3-전략 차등 렌더링(component memo → native scrollback commit → ED3 replay)과 append-only "tape" 계약을 Rust로 진화시키고, 현 v2를 폐기해 이중 크레이트 교착 해소.
 
-**Architecture:** omp TUI의 핵심 혁신 = native scrollback + append-only tape (commit된 row 불변, mutable 접미사만 in-place repaint). oxi-tui v2는 이게 없는 grok-inspired 재해석. legacy가 omp에 더 가까움(전체 위젯·glyph·mermaid 보유).
+**Architecture:** omp TUI의 핵심 혁신 = native scrollback + append-only tape (commit된 row 불변, mutable 접미사만 in-place repaint). oxicode-tui v2는 이게 없는 grok-inspired 재해석. legacy가 omp에 더 가까움(전체 위젯·glyph·mermaid 보유).
 
 ## Global Constraints
 - 매 단계 green 게이트. v2 폐기는 단계적 (callsite를 legacy로 하나씩 옮긴 뒤 v2 crate 삭제).
@@ -16,11 +16,11 @@
 
 ## 작업 분해 (점진적, 각 단계 독립 배포)
 
-### P2.1 — legacy → oxi-tui rename + v2 callsite 전환 (선행, 정리)
-- legacy를 `oxi-tui`로 rename, 현 v2 crate를 단계적 폐기.
+### P2.1 — legacy → oxicode-tui rename + v2 callsite 전환 (선행, 정리)
+- legacy를 `oxicode-tui`로 rename, 현 v2 crate를 단계적 폐기.
 - `LegacyOverlayAdapter`(always-dirty, hash-skip 불가)에 의존하는 callsite를 legacy 직접 사용으로 전환.
-- v2 의존 callsite를 legacy로 옮긴 뒤 v2 crate + `oxi-tui-v2-plan-a` 잔재 삭제.
-- **수락 기준**: `oxi-tui` 단일 크레이트, `oxi-tui-legacy` 제거, 빌드 green.
+- v2 의존 callsite를 legacy로 옮긴 뒤 v2 crate + `oxicode-tui-v2-plan-a` 잔재 삭제.
+- **수락 기준**: `oxicode-tui` 단일 크레이트, `oxicode-tui-legacy` 제거, 빌드 green.
 
 ### P2.2 — Native scrollback + append-only tape (핵심 혁신, omp 정렬)
 - omp `NativeScrollbackLiveRegion`: finalized row를 터미널 scrollback에 commit(불변), mutable 접미사만 repaint.
@@ -34,7 +34,7 @@
 - **수락 기준**: unchanged 위젯은 재렌더 skip (hash 비교).
 
 ### P2.4 — 전체 입력 시스템 (가장 큰 UX gap)
-omp 대응 (oxi에 전부 없음):
+omp 대응 (oxicode에 전부 없음):
 - **Kitty keyboard protocol**: `keys.ts`(16KB).
 - **Bracketed paste**(paste markers): omp stdin-buffer(27KB).
 - **Keybinding system**(conflict resolution): `keybindings.ts`.
@@ -60,7 +60,7 @@ omp 대응 (oxi에 전부 없음):
 - 점진적 접근 필수: P2.1(정리) → P2.2(tape) → P2.4(입력) → P2.5(풍부화) 순, 각 단계 독립 배포.
 
 ## 수락 기준 (P2 전체)
-- `oxi-tui` 단일 크레이트(v2/legacy 이중 제거).
+- `oxicode-tui` 단일 크레이트(v2/legacy 이중 제거).
 - native scrollback + append-only tape 동작.
 - 전체 입력 시스템(Kitty/paste/keybinding/mouse/kill ring).
 - LaTeX/mermaid/image/autocomplete 지원.

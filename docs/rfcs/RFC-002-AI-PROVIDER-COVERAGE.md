@@ -9,7 +9,7 @@
 
 ## 1. 문제 정의
 
-oxi-ai는 코딩 에이전트용 LLM 추상화 계층으로, 28개 프로바이더 / 544개 모델 / 8개 API 프로토콜을 지원한다.
+oxicode-ai는 코딩 에이전트용 LLM 추상화 계층으로, 28개 프로바이더 / 544개 모델 / 8개 API 프로토콜을 지원한다.
 
 ```
 현재 상태:
@@ -56,7 +56,7 @@ oxi-ai는 코딩 에이전트용 LLM 추상화 계층으로, 28개 프로바이�
 
 ### 3.1 CompatSettings — 이미 Model 레벨에 완전 구현
 
-`oxi-ai/src/types.rs`의 `CompatSettings`는 9개 필드를 가진다:
+`oxicode-ai/src/types.rs`의 `CompatSettings`는 9개 필드를 가진다:
 
 ```rust
 pub struct CompatSettings {
@@ -98,7 +98,7 @@ pub struct BuiltinProvider {
 
 ### 3.3 메시지 변환 (완전 구현)
 
-`oxi-ai/src/transform.rs` (1252줄) — 2-pass 파이프라인:
+`oxicode-ai/src/transform.rs` (1252줄) — 2-pass 파이프라인:
 
 ```
 Pass 1: transform_messages_for_model()
@@ -114,7 +114,7 @@ Pass 2: insert_synthetic_results()
 
 ### 3.4 모델 DB 현황
 
-`oxi-ai/src/model_db.rs`: 544개 모델 / 28개 프로바이더 static 배열
+`oxicode-ai/src/model_db.rs`: 544개 모델 / 28개 프로바이더 static 배열
 
 ```
 AMAZON_BEDROCK_MODELS:     50개
@@ -167,13 +167,13 @@ TOTAL:                   544개
 | 작업 | 산출물 |
 |------|--------|
 | `scripts/generate-models.rs` 작성 | JSON/YAML → Rust ModelEntry[] codegen |
-| 850+ 모델 목표 | pi의 872개 중 oxi에 적합한 것 선별 |
+| 850+ 모델 목표 | pi의 872개 중 oxicode에 적합한 것 선별 |
 | 프로바이더별 CompatSettings 기본값 | model_registry.rs에 자동 설정 규칙 추가 |
 | Dedup + 정렬 검증 | 중복 모델 제거, ID 정규화 |
 
 **산출 파일**:
 - `scripts/generate-models.rs` — 빌드 시 model_db.rs 자동 생성
-- `oxi-ai/src/model_db.rs` 갱신
+- `oxicode-ai/src/model_db.rs` 갱신
 
 ### Phase 2: CompatSettings per-model 기본값 자동화 (1주)
 
@@ -203,7 +203,7 @@ TOTAL:                   544개
 | **WebSocket 스트리밍** | 주요 프로바이더(OpenAI, Anthropic, Google) 모두 SSE 지원. SSE로 충분한데 WebSocket 추가 시 이중 유지보수만 발생. | 주요 프로바이더가 SSE废弃宣告 시 |
 | **Claude Code 스텔스** | `sk-ant-oat*` 토큰은 Anthropic API 약관 위반 소지. OAuth + 동적 헤더 패턴도 법적 검토 필요. | Anthropic 공식 지원 또는 법적 검토 완료 시 |
 
-이미지 생성이 정말 필요하다면, `Provider` 트레이트 확장이 아닌 **독립 AgentTool**(`oxi-agent/src/tools/image_gen.rs`)로 구현할 것을 권장. 내부적으로 OpenAI 이미지 API를 직접 호출하고, 코딩 에이전트 워크플로우에 통합.
+이미지 생성이 정말 필요하다면, `Provider` 트레이트 확장이 아닌 **독립 AgentTool**(`oxicode-agent/src/tools/image_gen.rs`)로 구현할 것을 권장. 내부적으로 OpenAI 이미지 API를 직접 호출하고, 코딩 에이전트 워크플로우에 통합.
 
 ---
 
@@ -249,14 +249,14 @@ open:          openrouter
 ## 부록 B: API 구현 파일 (8개)
 
 ```
-oxi-ai/src/providers/openai.rs             ← 35개 (Api::OpenAiCompletions)
-oxi-ai/src/providers/openai_responses.rs ←  2개 (Api::OpenAiResponses)
-oxi-ai/src/providers/anthropic.rs         ←  4개 (Api::AnthropicMessages)
-oxi-ai/src/providers/google.rs            ←  1개 (Api::GoogleGenerativeAi)
-oxi-ai/src/providers/vertex.rs            ←  1개 (Api::GoogleVertex)
-oxi-ai/src/providers/mistral.rs          ←  1개 (Api::MistralConversations)
-oxi-ai/src/providers/azure.rs             ←  1개 (Api::AzureOpenAiResponses)
-oxi-ai/src/providers/bedrock.rs           ←  1개 (Api::BedrockConverseStream)
+oxicode-ai/src/providers/openai.rs             ← 35개 (Api::OpenAiCompletions)
+oxicode-ai/src/providers/openai_responses.rs ←  2개 (Api::OpenAiResponses)
+oxicode-ai/src/providers/anthropic.rs         ←  4개 (Api::AnthropicMessages)
+oxicode-ai/src/providers/google.rs            ←  1개 (Api::GoogleGenerativeAi)
+oxicode-ai/src/providers/vertex.rs            ←  1개 (Api::GoogleVertex)
+oxicode-ai/src/providers/mistral.rs          ←  1개 (Api::MistralConversations)
+oxicode-ai/src/providers/azure.rs             ←  1개 (Api::AzureOpenAiResponses)
+oxicode-ai/src/providers/bedrock.rs           ←  1개 (Api::BedrockConverseStream)
 ```
 
 ## 부록 C: CompatSettings 필드 상세
@@ -283,7 +283,7 @@ pub enum MaxTokensField {
 // scripts/generate-models.rs
 //
 // 입력: providers.json (provider, base_url, models[{id, name, pricing...}])
-// 출력: oxi-ai/src/model_db.rs (Rust source)
+// 출력: oxicode-ai/src/model_db.rs (Rust source)
 //
 // Usage: cargo run --bin generate-models
 

@@ -12,13 +12,13 @@
 ## 빠른 시작
 
 ```bash
-cd /Volumes/MERCURY/PROJECTS/oxi
+cd /Volumes/MERCURY/PROJECTS/oxicode
 git checkout main
 
 # 회귀 게이트 (각 변경마다)
 cargo nextest run --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 
 # omp 소스 (포팅/참조용)
@@ -55,7 +55,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 | 3 | P1.3 루프 와이어링 (append-only → run_loop) | 루프 핵심 | ~300 lines | ⚠️ P1.4/1.5와 함께 |
 | 4 | P1.6b Meta 6개 도구 | 에이전트 기능 | ~2400 lines | ✅ |
 | 5 | P3 프롬프트 & CLI | 사용자 경험 | ~2000 lines | ⚠️ P1 후 |
-| 6 | P4 oxi-original 정리 | 코드 품질 | ~1500 lines | ✅ (독립) |
+| 6 | P4 oxicode-original 정리 | 코드 품질 | ~1500 lines | ✅ (독립) |
 | 7 | P1.6c Meta 6개 도구 | 에이전트 기능 | ~2400 lines | ✅ (P1.6b 후) |
 | 8 | P1.6a debug 도구 재등록 | 에이전트 기능 | ~600 lines | DAP 프록시 구현 후 |
 | 9 | P0.5 remote-AGENT providers | provider | ~2000 lines | ✅ (요청 시) |
@@ -67,7 +67,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 ### P1.4 — Approval/tier 시스템 [NEXT]
 
-**무엇**: omp는 사용자 확인 게이트(approval tiers). oxi는 `AccessGate` port (oxi-sdk)가 있지만 루프 통합이 다름.
+**무엇**: omp는 사용자 확인 게이트(approval tiers). oxicode는 `AccessGate` port (oxicode-sdk)가 있지만 루프 통합이 다름.
 
 **omp 참조**:
 - `/tmp/omp/packages/agent/src/agent-loop.ts` — approval 분기
@@ -75,7 +75,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 **작업**:
 1. 위험도 분류: 읽기(read/grep/ls/find) / 쓰기(write/edit) / 실행(bash/computer).
-2. `oxi-sdk` `AccessGate` port를 agent loop에 통합.
+2. `oxicode-sdk` `AccessGate` port를 agent loop에 통합.
 3. `AgentLoopConfig`에 `approval_tiers: ApprovalConfig` 필드 (opt-in, 기본 해제).
 4. 실행 전 확인 프롬프트: 쓰기/실행 도구 앞에서 사용자에게 확인.
 5. `AgentEvent::ApprovalRequired` / `ApprovalResult` 이벤트.
@@ -156,7 +156,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 ## Phase 3 — 프롬프트 & CLI 재정렬
 
-**대상 크레이트**: `oxi-cli/`, `oxi-ai/`
+**대상 크레이트**: `oxicode-cli/`, `oxicode-ai/`
 
 ### P3.1 — `.md` 기반 시스템 프롬프트
 
@@ -178,9 +178,9 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 ---
 
-## Phase 4 — oxi-original 처리
+## Phase 4 — oxicode-original 처리
 
-**대상 크레이트**: `oxi-cli/`
+**대상 크레이트**: `oxicode-cli/`
 
 ### P4.1 — Issue 시스템 격리
 
@@ -188,7 +188,7 @@ Issue 시스템(CAS + flock)을 agent 루프/session 모델에서 분리. 명시
 
 ### P4.2 — Package manager → omp 플러그인 모델
 
-`oxi-cli/src/storage/packages.rs`(106KB)를 omp `extensibility/plugins/` 모델에 맞춤.
+`oxicode-cli/src/storage/packages.rs`(106KB)를 omp `extensibility/plugins/` 모델에 맞춤.
 
 ### P4.3 — Language policy 제거
 
@@ -210,9 +210,9 @@ Cursor/Devin/GitLab Duo transport. `Api` enum에 variant 존재, transport만 `_
 ## Phase 2 — TUI 재정렬 (가장 큼, 마지막)
 
 **omp 참조**: `/tmp/omp/packages/tui/src/tui.ts`(173KB)
-**대상 크레이트**: `oxi-tui`, `oxi-tui-legacy → oxi-tui rename`
+**대상 크레이트**: `oxicode-tui`, `oxicode-tui-legacy → oxicode-tui rename`
 
-1. `oxi-tui-legacy` → `oxi-tui` rename
+1. `oxicode-tui-legacy` → `oxicode-tui` rename
 2. omp 3-전략 차등 렌더링 Rust 구현 (Component memoization, Native scrollback commit, ED3 replay)
 3. Append-only "tape" 렌더 계약
 4. 전체 입력 시스템 (Kitty keyboard, bracketed paste, keybinding, mouse SGR, kill ring, undo)
@@ -224,7 +224,7 @@ Cursor/Devin/GitLab Duo transport. `Api` enum에 variant 존재, transport만 `_
 ## 변경 시 주의사항
 
 ### dialect `xml.rs` 코드 작성 금지 규칙
-`oxi-ai/src/dialect/xml.rs`에 literal XML 태그(`<invoke`, `<parameter`, `</invoke>`)를 **절대 포함하지 마십시오**. harness wire framing과 충돌:
+`oxicode-ai/src/dialect/xml.rs`에 literal XML 태그(`<invoke`, `<parameter`, `</invoke>`)를 **절대 포함하지 마십시오**. harness wire framing과 충돌:
 - 모든 태그는 `concat!("<", "invoke")` / `concat!("</", "parameter>")` 형태로 빌드
 - 문서 작성 시 prose로 설명
 - `edit` 도구로 기존 xml.rs 수정은 안전 (직접 파일을 읽고 쓰므로)
@@ -234,7 +234,7 @@ Cursor/Devin/GitLab Duo transport. `Api` enum에 variant 존재, transport만 `_
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
 ```
@@ -243,5 +243,5 @@ cargo nextest run --workspace
 `AgentLoopConfig`에 새 필드 추가 시 `Default::default()`에도 반드시 `None`/`false` 기본값 추가.
 
 ### debug_tool 재등록
-`oxi-agent/src/tools.rs`에서 주석 처리된 `all_tools.push(Box::new(debug_tool::DebugTool));`의 주석 해제 필요.
-DAP 프록시 구현 후 `oxi-agent/tests/tools.rs`의 카운트도 `25` → `26`으로 업데이트.
+`oxicode-agent/src/tools.rs`에서 주석 처리된 `all_tools.push(Box::new(debug_tool::DebugTool));`의 주석 해제 필요.
+DAP 프록시 구현 후 `oxicode-agent/tests/tools.rs`의 카운트도 `25` → `26`으로 업데이트.

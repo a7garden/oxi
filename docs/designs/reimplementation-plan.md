@@ -8,14 +8,14 @@
 ### 디스크에 있는 것 (살아있음)
 
 ```
-oxi-agent/src/tools/browse/
+oxicode-agent/src/tools/browse/
 ├── config.rs        ✅ BrowseConfig (118줄)
 ├── helpers.rs       ✅ JS 헬퍼 + 파서 (238줄)
 └── tab_guard.rs     ✅ TabGuard RAII (189줄)
 
-oxi-ai/src/router/    ✅ 라우터 전체 (비전 없이)
-oxi-store/src/router_config.rs  ✅ 라우터 설정 (비전 없이)
-oxi-cli/              ✅ CLI 전체 (비전 없이)
+oxicode-ai/src/router/    ✅ 라우터 전체 (비전 없이)
+oxicode-store/src/router_config.rs  ✅ 라우터 설정 (비전 없이)
+oxicode-cli/              ✅ CLI 전체 (비전 없이)
 
 docs/designs/browser-improvements.md   ✅ 설계 문서
 docs/designs/vision-routing.md         ✅ 설계 문서
@@ -24,25 +24,25 @@ docs/designs/vision-routing.md         ✅ 설계 문서
 ### 유실된 것
 
 ```
-oxi-agent/src/tools/browse/
+oxicode-agent/src/tools/browse/
 ├── mod.rs                ❌ 모듈 진입점
 ├── engine.rs             ❌ BrowserEngine/BrowserTab trait + 공유 타입
 ├── browse_tool.rs        ❌ BrowseTool (AgentTool)
 ├── browse_extract_tool.rs ❌ BrowseExtractTool (AgentTool)
 ├── browse_script_tool.rs  ❌ BrowseScriptTool (AgentTool) [feature-gated]
-├── oxibrowser_backend.rs  ❌ OxiBrowserEngine impl [feature-gated]
+├── oxibrowser_backend.rs  ❌ OxicodeBrowserEngine impl [feature-gated]
 └── tests.rs              ❌ 단위 테스트
 
-oxi-agent/src/tools.rs     ❌ "pub mod browse;" 선언 + re-exports
+oxicode-agent/src/tools.rs     ❌ "pub mod browse;" 선언 + re-exports
 
-oxi-ai/src/router/signals.rs  ❌ VisionSignal 추가분
-oxi-ai/src/router/types.rs    ❌ ScoringWeights.vision + RoutingDecision vision 필드
-oxi-ai/src/router/scoring.rs  ❌ compute_score() vision 파라미터
-oxi-ai/src/router/mod.rs      ❌ route_with_vision() + ensure_vision_model()
+oxicode-ai/src/router/signals.rs  ❌ VisionSignal 추가분
+oxicode-ai/src/router/types.rs    ❌ ScoringWeights.vision + RoutingDecision vision 필드
+oxicode-ai/src/router/scoring.rs  ❌ compute_score() vision 파라미터
+oxicode-ai/src/router/mod.rs      ❌ route_with_vision() + ensure_vision_model()
 
-oxi-store/src/router_config.rs ❌ ScoringWeights.vision 필드 + 파싱
-oxi-cli/src/main.rs            ❌ vision 필드 매핑
-oxi-cli/src/router_integration.rs ❌ vision 필드 매핑
+oxicode-store/src/router_config.rs ❌ ScoringWeights.vision 필드 + 파싱
+oxicode-cli/src/main.rs            ❌ vision 필드 매핑
+oxicode-cli/src/router_integration.rs ❌ vision 필드 매핑
 ```
 
 ## 1. 구현 순서 (의존성 순)
@@ -90,7 +90,7 @@ Phase D: 테스트 + clippy
 - #[cfg(feature = "native-browser")] pub mod oxibrowser_backend
 - #[cfg(test)] mod tests
 - re-exports: BrowseTool, BrowseExtractTool, BrowserEngine, BrowserTab, BrowseConfig, etc.
-- #[cfg(feature = "native-browser")] re-exports: BrowseScriptTool, OxiBrowserEngine
+- #[cfg(feature = "native-browser")] re-exports: BrowseScriptTool, OxicodeBrowserEngine
 ```
 
 ### A3. `tools.rs` 수정 (1줄 추가)
@@ -169,7 +169,7 @@ AgentTool 구현:
 - parse_steps() — YAML → Vec<Step>
 - parse_selector_value(), parse_extract()
 - execute_script() — 단일 탭에서 전체 스텝 실행
-  - OxiTab을 TabGuard로 감쌈
+  - OxicodeTab을 TabGuard로 감쌈
   - deadline 기반 timeout
   - max_script_steps 제한
 - BrowseScriptTool (AgentTool)
@@ -192,10 +192,10 @@ AgentTool 구현:
 
 ```
 포함 내용:
-- OxiBrowserEngine { browser: oxibrowser_core::Browser }
+- OxicodeBrowserEngine { browser: oxibrowser_core::Browser }
   - new(config) / new_default()
   - BrowserEngine impl: fetch, extract_links, query_all, screenshot, new_tab, close
-- OxiTab { inner: oxibrowser_core::Tab }
+- OxicodeTab { inner: oxibrowser_core::Tab }
   - BrowserTab impl: goto, click, type, fill, press, wait_for, content, query_all, evaluate, screenshot, close
 ```
 
@@ -285,7 +285,7 @@ pub struct ScoringWeights {
 
 ScoringWeights 생성 시 `vision` 필드 추가:
 ```rust
-oxi_ai::router::ScoringWeights {
+oxicode_ai::router::ScoringWeights {
     structural: ...,
     behavioral: ...,
     context_budget: ...,
@@ -297,7 +297,7 @@ oxi_ai::router::ScoringWeights {
 
 ## Phase D: Cargo.toml + 테스트
 
-### D1. `oxi-agent/Cargo.toml` feature 확인
+### D1. `oxicode-agent/Cargo.toml` feature 확인
 
 ```toml
 [features]

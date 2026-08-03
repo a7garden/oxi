@@ -9,9 +9,9 @@
 
 ## 1. 현재 상태
 
-oxi-sdk는 pi에 없는 독자적인 SDK 크레이트이다 (9,597 LOC). pi의 `AgentGroup`은 `coding-agent`에 포함된 내부 기능이지만, oxi는 이를 독립 라이브러리로 분리했다.
+oxicode-sdk는 pi에 없는 독자적인 SDK 크레이트이다 (9,597 LOC). pi의 `AgentGroup`은 `coding-agent`에 포함된 내부 기능이지만, oxicode는 이를 독립 라이브러리로 분리했다.
 
-### oxi-sdk 전체 모듈 현황
+### oxicode-sdk 전체 모듈 현황
 
 #### 핵심 (Core)
 | 모듈 | 파일 | 설명 | 상태 |
@@ -80,7 +80,7 @@ oxi-sdk는 pi에 없는 독자적인 SDK 크레이트이다 (9,597 LOC). pi의 `
 ### 2.1 에이전트 정의 검증 (유일한 신규 기능)
 
 ```rust
-/// oxi-sdk/src/agent_definition.rs — 신규
+/// oxicode-sdk/src/agent_definition.rs — 신규
 
 /// 에이전트 정의 (마크다운 YAML frontmatter)
 #[derive(Debug, Serialize, Deserialize)]
@@ -164,11 +164,11 @@ impl AgentDiscovery {
     pub fn discover(cwd: &Path) -> Result<Vec<(String, AgentDefinition)>> {
         let mut agents = HashMap::new();
         
-        // 1. 글로벌: ~/.oxi/agents/
-        discover_from_dir(home_dir().join(".oxi/agents"), &mut agents)?;
+        // 1. 글로벌: ~/.oxicode/agents/
+        discover_from_dir(home_dir().join(".oxicode/agents"), &mut agents)?;
         
-        // 2. 프로젝트: .oxi/agents/
-        discover_from_dir(cwd.join(".oxi/agents"), &mut agents)?;
+        // 2. 프로젝트: .oxicode/agents/
+        discover_from_dir(cwd.join(".oxicode/agents"), &mut agents)?;
         
         // 프로젝트가 글로벌을 오버라이드
         Ok(agents.into_iter().map(|(k, v)| (k, v)).collect())
@@ -218,7 +218,7 @@ pub struct SharedMemory {
 ### 2.3 선언적 워크플로우 DSL (YAML 파싱만 추가)
 
 ```rust
-/// oxi-sdk/src/workflow_dsl.rs — 신규 (파싱 레이어만)
+/// oxicode-sdk/src/workflow_dsl.rs — 신규 (파싱 레이어만)
 
 /// YAML 워크플로우 정의를 기존 coordination 모듈 호출로 변환
 #[derive(Debug, Serialize, Deserialize)]
@@ -262,7 +262,7 @@ observability/
 └── event_store.rs # EventStore: 이벤트 영속 저장
 ```
 
-모델 가격 데이터가 `oxi-ai::Model`에 포함되어 CostTracker와 연동된다.
+모델 가격 데이터가 `oxicode-ai::Model`에 포함되어 CostTracker와 연동된다.
 
 ### 2.5 기존 보안 모듈 (이미 구현됨)
 
@@ -284,7 +284,7 @@ Authorizer는 AuditLog와 연동되어 모든 접근 결정을 기록한다.
 | 작업 | 산출물 |
 |------|--------|
 | AgentDefinition | YAML frontmatter 파싱 + 검증 |
-| AgentDiscovery | ~/.oxi/agents/ + .oxi/agents/ 검색 |
+| AgentDiscovery | ~/.oxicode/agents/ + .oxicode/agents/ 검색 |
 | WorkflowDefinition | YAML 워크플로우 → 기존 coordination API 매핑 |
 | 문서화 | 에이전트 정의 포맷 가이드 |
 

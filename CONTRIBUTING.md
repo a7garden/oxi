@@ -1,6 +1,6 @@
-# Contributing to oxi
+# Contributing to oxicode
 
-Thank you for your interest in contributing to oxi! This document provides
+Thank you for your interest in contributing to oxicode! This document provides
 guidelines and instructions for contributing.
 
 ## Table of Contents
@@ -19,8 +19,8 @@ guidelines and instructions for contributing.
 1. **Fork** the repository on GitHub.
 2. **Clone** your fork locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/oxi.git
-   cd oxi
+   git clone https://github.com/YOUR_USERNAME/oxicode.git
+   cd oxicode
    ```
 3. **Create a branch** for your change:
    ```bash
@@ -115,10 +115,10 @@ cargo clippy --workspace -- -D warnings
 cargo test --workspace
 
 # Single crate
-cargo test -p oxi-ai
+cargo test -p oxicode-ai
 
 # Specific test
-cargo test -p oxi-agent test_reject_traversal
+cargo test -p oxicode-agent test_reject_traversal
 
 # Doc tests
 cargo test --workspace --doc
@@ -128,7 +128,7 @@ cargo test --workspace --doc
 
 - Unit tests go in `#[cfg(test)] mod tests` within each module.
 - Integration tests go in `<crate>/tests/*.rs`.
-- Use `MockProvider` for provider-dependent tests (see `oxi-ai` test utilities).
+- Use `MockProvider` for provider-dependent tests (see `oxicode-ai` test utilities).
 - Every new public function or significant change should include tests.
 - Tool implementations must be idempotent (the agent loop retries on failure).
 
@@ -207,7 +207,7 @@ When opening a PR, please include:
 
 When filing an issue, please include:
 
-1. **oxi version** (`oxi --version`)
+1. **oxicode version** (`oxicode --version`)
 2. **Rust version** (`rustc --version`)
 3. **OS and architecture**
 4. **Steps to reproduce**
@@ -230,38 +230,38 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 ## Architecture
 
 ```
-oxi-ai      ← oxi-agent ← oxi-sdk ← oxi-cli
-oxi-hashline ← oxi-agent
-oxi-tui     (independent)         ← oxi-cli
+oxicode-ai      ← oxicode-agent ← oxicode-sdk ← oxicode-cli
+oxicode-hashline ← oxicode-agent
+oxicode-tui     (independent)         ← oxicode-cli
 ```
 
 ### Adding a New Provider
 
-1. Create `oxi-ai/src/providers/<name>.rs`.
+1. Create `oxicode-ai/src/providers/<name>.rs`.
 2. Implement the `Provider` trait.
-3. Register in `oxi-ai/src/providers/register_builtins.rs`.
-4. Add model data to `oxi-ai/data/catalog/` (no Rust changes needed — `build.rs` auto-enumerates; runtime models.dev enrichment fills gaps).
+3. Register in `oxicode-ai/src/providers/register_builtins.rs`.
+4. Add model data to `oxicode-ai/data/catalog/` (no Rust changes needed — `build.rs` auto-enumerates; runtime models.dev enrichment fills gaps).
 
 ### Adding a New Tool
 
-1. Create `oxi-agent/src/tools/<name>.rs`.
+1. Create `oxicode-agent/src/tools/<name>.rs`.
 2. Implement the `AgentTool` trait.
-3. Register in `oxi-agent/src/tools.rs`.
+3. Register in `oxicode-agent/src/tools.rs`.
 4. Mark `essential()` as `true` if it cannot be disabled.
 
 ### Adding a New Extension Type
 
-1. Define types in `oxi-cli/src/extensions/types.rs`.
-2. Implement loading in `oxi-cli/src/extensions/loading.rs` or `wasm.rs`.
-3. Register hooks in `oxi-cli/src/extensions/registry.rs`.
+1. Define types in `oxicode-cli/src/extensions/types.rs`.
+2. Implement loading in `oxicode-cli/src/extensions/loading.rs` or `wasm.rs`.
+3. Register hooks in `oxicode-cli/src/extensions/registry.rs`.
 
 ## License
 
-By contributing to oxi, you agree that your contributions will be licensed
+By contributing to oxicode, you agree that your contributions will be licensed
 under the [MIT License](LICENSE.md).
 
-Note: oxi is a Rust port of [pi](https://github.com/earendil-works/pi) (MIT License, Copyright © 2025 Mario Zechner).
+Note: oxicode is a Rust port of [pi](https://github.com/earendil-works/pi) (MIT License, Copyright © 2025 Mario Zechner).
 All contributions are made under the same MIT License that covers both the original
-pi codebase and the oxi port.
+pi codebase and the oxicode port.
 
 [rust-api]: https://rust-lang.github.io/api-guidelines/

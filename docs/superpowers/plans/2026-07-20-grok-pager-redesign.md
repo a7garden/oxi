@@ -1,16 +1,16 @@
-# oxi-pager Implementation Plan
+# oxicode-pager Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the `oxi-pager` crate as a thin state-machine layer between `oxi-agent` events and the existing `oxi-tui` widgets, plus the typed tool trait migration (PR-A1 from applied-design.md) — without disturbing the 32 existing `AgentTool` implementations or any `oxi-tui` widget code.
+**Goal:** Build the `oxicode-pager` crate as a thin state-machine layer between `oxicode-agent` events and the existing `oxicode-tui` widgets, plus the typed tool trait migration (PR-A1 from applied-design.md) — without disturbing the 32 existing `AgentTool` implementations or any `oxicode-tui` widget code.
 
-**Architecture:** `oxi-pager` is a `select!`-driven event consumer that fans `AgentEvent` (and only `AgentEvent`) into a pure `reduce(state, event) -> Vec<PagerAction>` function. State lives behind `Arc<parking_lot::RwLock<PagerState>>`. Render path reads the same state and pushes to the existing `oxi-tui` widget tree — no widget code is modified. Typed tools are introduced in `oxi-agent` via a parallel generic trait `TypedTool` with a `TypedToolAdapter: AgentTool` eraser; the `ToolRegistry`'s public surface is unchanged.
+**Architecture:** `oxicode-pager` is a `select!`-driven event consumer that fans `AgentEvent` (and only `AgentEvent`) into a pure `reduce(state, event) -> Vec<PagerAction>` function. State lives behind `Arc<parking_lot::RwLock<PagerState>>`. Render path reads the same state and pushes to the existing `oxicode-tui` widget tree — no widget code is modified. Typed tools are introduced in `oxicode-agent` via a parallel generic trait `TypedTool` with a `TypedToolAdapter: AgentTool` eraser; the `ToolRegistry`'s public surface is unchanged.
 
-**Tech Stack:** Rust 2024 edition, tokio 1, `parking_lot` 0.12, `schemars` 0.8 (new), `thiserror` 2 (already workspace). No new runtime deps for oxi-pager. The pager reuses `oxi-tui`'s `KeybindingsManager`, `ChatWidget`, `Footer`, `ToolRenderer` unchanged.
+**Tech Stack:** Rust 2024 edition, tokio 1, `parking_lot` 0.12, `schemars` 0.8 (new), `thiserror` 2 (already workspace). No new runtime deps for oxicode-pager. The pager reuses `oxicode-tui`'s `KeybindingsManager`, `ChatWidget`, `Footer`, `ToolRenderer` unchanged.
 
 **Reference spec:** `docs/superpowers/specs/2026-07-20-grok-pager-redesign.md`
 **Reference design:** `docs/designs/2026-07-20-grok-build-applied-design.md` (for the typed-tool half)
-**Reference pattern:** `oxi-cli/src/tui/app.rs:898-903` (`run_tui_interactive`) — the redirect target
+**Reference pattern:** `oxicode-cli/src/tui/app.rs:898-903` (`run_tui_interactive`) — the redirect target
 
 ## Global Constraints
 
@@ -20,10 +20,10 @@
 - Lint gate: `cargo clippy --workspace --all-targets -- -D warnings` MUST pass clean
 - Test runner: `cargo nextest run --workspace` MUST pass
 - Pre-commit: `cargo fmt --check`, `cargo clippy --all-targets`
-- Native-browser feature MUST still compile: `cargo build -p oxi-agent --features native-browser` (AGENTS.md)
+- Native-browser feature MUST still compile: `cargo build -p oxicode-agent --features native-browser` (AGENTS.md)
 - `parking_lot::MutexGuard` is `!Send` — drop guard before any `.await`
-- `oxi-tui` widget code: **0 lines** may be modified. (PR-3 may add 4 variants to the `Action` enum only — that file is `oxi-tui/src/keybindings/registry.rs`, not a widget.)
-- `oxi-agent::AgentTool` and `oxi-agent::ToolRegistry` public surface: **0 breaking changes**. (PR-1 adds a sibling trait and a `wrap_typed` helper; it may convert `ToolError` from `String` alias to enum, which is a type-system change but no caller signature change at the call sites that go through `Arc<dyn AgentTool>`.)
+- `oxicode-tui` widget code: **0 lines** may be modified. (PR-3 may add 4 variants to the `Action` enum only — that file is `oxicode-tui/src/keybindings/registry.rs`, not a widget.)
+- `oxicode-agent::AgentTool` and `oxicode-agent::ToolRegistry` public surface: **0 breaking changes**. (PR-1 adds a sibling trait and a `wrap_typed` helper; it may convert `ToolError` from `String` alias to enum, which is a type-system change but no caller signature change at the call sites that go through `Arc<dyn AgentTool>`.)
 
 ---
 
@@ -31,86 +31,86 @@
 
 | File | Action | Responsibility |
 |---|---|---|
-| `Cargo.toml` (workspace) | Modify | Add `oxi-pager` to `members` (PR-0); add `schemars = "0.8"` to `[workspace.dependencies]` (PR-1) |
-| `oxi-pager/Cargo.toml` | Create | Crate manifest, deps `oxi-tui` + `oxi-agent` only |
-| `oxi-pager/src/lib.rs` | Create | `pub fn version()`, top-level re-exports |
-| `oxi-pager/src/state.rs` | Create | `PagerState` + sub-states (PR-2) |
-| `oxi-pager/src/emitter.rs` | Create | `PagerEvent` enum, `AgentEvent → PagerEvent::Agent` wrapper (PR-2) |
-| `oxi-pager/src/reducer.rs` | Create | `pub fn reduce(...) -> Vec<PagerAction>`, **PR-2 = empty body returning `vec![]`**, **PR-5 = full body** |
-| `oxi-pager/src/dispatch.rs` | Create | `pub enum AgentCmd`, `dispatch(state, cmd)` (PR-4) |
-| `oxi-pager/src/main_loop.rs` | Create | `pub async fn run(app: App) -> Result<()>` (PR-4) |
-| `oxi-pager/src/prompt.rs` | Create | `PromptState` (PR-5) |
-| `oxi-pager/src/status.rs` | Create | `StatusState` (PR-5) |
-| `oxi-pager/src/scrollback.rs` | Create | `ScrollbackState` (PR-5) |
-| `oxi-pager/src/modal.rs` | Create | `ModalKind` enum (PR-6) |
-| `oxi-pager/src/slash.rs` | Create | `route_slash` (PR-6) |
-| `oxi-pager/src/keymap.rs` | Create | `KeyRouter`, `ResolvedKey` (PR-3) |
-| `oxi-pager/src/theme_bridge.rs` | Create | `Theme → line style` helper (PR-3, minimal) |
-| `oxi-pager/src/render/mod.rs` | Create | Render glue (PR-4 stub, PR-5 body) |
-| `oxi-pager/src/render/markdown_streaming.rs` | Create | `MarkdownStreaming` (PR-7) |
-| `oxi-pager/src/widgets/spinner.rs` | Create | 12-frame spinner (PR-7) |
-| `oxi-pager/src/widgets/token_bar.rs` | Create | `TokenBar` (PR-7) |
-| `oxi-pager/src/widgets/tool_progress_card.rs` | Create | `ToolProgressCard` (PR-7) |
-| `oxi-pager/README.md` | Create | Crate README (PR-0) |
-| `oxi-agent/src/tools/typed.rs` | Create | `TypedTool` trait, `TypedToolAdapter`, `wrap_typed` (PR-1) |
-| `oxi-agent/src/error.rs` | Modify | Convert `pub type ToolError = String` to enum with `InvalidArgs(String)` etc. (PR-1) |
-| `oxi-agent/src/tools.rs` | Modify | Re-export `pub mod typed;` + adjust 32 tool error sites to use new variants (PR-1) |
-| `oxi-agent/Cargo.toml` | Modify | Add `schemars = { workspace = true }` to `[dependencies]` (PR-1) |
-| `oxi-tui/src/keybindings/registry.rs` | Modify | Add 4 variants `ToggleTodo` / `ToggleIssues` / `ToggleHub` / `ToggleLsp` (PR-3) |
-| `oxi-tui/src/keybindings/keys.rs` | Modify | Add default key bindings for the 4 new actions (PR-3) |
-| `oxi-cli/src/tui/app.rs:898-903` | Modify | `run_tui_interactive` body becomes `oxi_pager::run(app).await` (PR-4) |
-| `oxi-cli/src/bootstrap.rs:250-252` | Modify | (No change in PR-4 — the call site already points to `run_tui_interactive*`) |
+| `Cargo.toml` (workspace) | Modify | Add `oxicode-pager` to `members` (PR-0); add `schemars = "0.8"` to `[workspace.dependencies]` (PR-1) |
+| `oxicode-pager/Cargo.toml` | Create | Crate manifest, deps `oxicode-tui` + `oxicode-agent` only |
+| `oxicode-pager/src/lib.rs` | Create | `pub fn version()`, top-level re-exports |
+| `oxicode-pager/src/state.rs` | Create | `PagerState` + sub-states (PR-2) |
+| `oxicode-pager/src/emitter.rs` | Create | `PagerEvent` enum, `AgentEvent → PagerEvent::Agent` wrapper (PR-2) |
+| `oxicode-pager/src/reducer.rs` | Create | `pub fn reduce(...) -> Vec<PagerAction>`, **PR-2 = empty body returning `vec![]`**, **PR-5 = full body** |
+| `oxicode-pager/src/dispatch.rs` | Create | `pub enum AgentCmd`, `dispatch(state, cmd)` (PR-4) |
+| `oxicode-pager/src/main_loop.rs` | Create | `pub async fn run(app: App) -> Result<()>` (PR-4) |
+| `oxicode-pager/src/prompt.rs` | Create | `PromptState` (PR-5) |
+| `oxicode-pager/src/status.rs` | Create | `StatusState` (PR-5) |
+| `oxicode-pager/src/scrollback.rs` | Create | `ScrollbackState` (PR-5) |
+| `oxicode-pager/src/modal.rs` | Create | `ModalKind` enum (PR-6) |
+| `oxicode-pager/src/slash.rs` | Create | `route_slash` (PR-6) |
+| `oxicode-pager/src/keymap.rs` | Create | `KeyRouter`, `ResolvedKey` (PR-3) |
+| `oxicode-pager/src/theme_bridge.rs` | Create | `Theme → line style` helper (PR-3, minimal) |
+| `oxicode-pager/src/render/mod.rs` | Create | Render glue (PR-4 stub, PR-5 body) |
+| `oxicode-pager/src/render/markdown_streaming.rs` | Create | `MarkdownStreaming` (PR-7) |
+| `oxicode-pager/src/widgets/spinner.rs` | Create | 12-frame spinner (PR-7) |
+| `oxicode-pager/src/widgets/token_bar.rs` | Create | `TokenBar` (PR-7) |
+| `oxicode-pager/src/widgets/tool_progress_card.rs` | Create | `ToolProgressCard` (PR-7) |
+| `oxicode-pager/README.md` | Create | Crate README (PR-0) |
+| `oxicode-agent/src/tools/typed.rs` | Create | `TypedTool` trait, `TypedToolAdapter`, `wrap_typed` (PR-1) |
+| `oxicode-agent/src/error.rs` | Modify | Convert `pub type ToolError = String` to enum with `InvalidArgs(String)` etc. (PR-1) |
+| `oxicode-agent/src/tools.rs` | Modify | Re-export `pub mod typed;` + adjust 32 tool error sites to use new variants (PR-1) |
+| `oxicode-agent/Cargo.toml` | Modify | Add `schemars = { workspace = true }` to `[dependencies]` (PR-1) |
+| `oxicode-tui/src/keybindings/registry.rs` | Modify | Add 4 variants `ToggleTodo` / `ToggleIssues` / `ToggleHub` / `ToggleLsp` (PR-3) |
+| `oxicode-tui/src/keybindings/keys.rs` | Modify | Add default key bindings for the 4 new actions (PR-3) |
+| `oxicode-cli/src/tui/app.rs:898-903` | Modify | `run_tui_interactive` body becomes `oxicode_pager::run(app).await` (PR-4) |
+| `oxicode-cli/src/bootstrap.rs:250-252` | Modify | (No change in PR-4 — the call site already points to `run_tui_interactive*`) |
 
 ---
 
-## Task 1: PR-0 — Scaffold `oxi-pager` crate (no-op)
+## Task 1: PR-0 — Scaffold `oxicode-pager` crate (no-op)
 
 **Files:**
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` (add `oxi-pager` to `[workspace] members`)
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/Cargo.toml`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/lib.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/README.md`
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml` (add `oxicode-pager` to `[workspace] members`)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/Cargo.toml`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/lib.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/README.md`
 
 **Interfaces:**
-- Produces: a new workspace member `oxi-pager` that builds clean and exposes `pub fn version() -> &'static str`.
+- Produces: a new workspace member `oxicode-pager` that builds clean and exposes `pub fn version() -> &'static str`.
 
-- [ ] **Step 1: Add `oxi-pager` to workspace members**
+- [ ] **Step 1: Add `oxicode-pager` to workspace members**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml`, find the `[workspace] members = [...]` array (currently contains `oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-cli`, `oxi-sdk`, `oxi-hashline`, `oxi-lsp`, `oxi-mnemopi`, `oxi-snapcompact`). Add `"oxi-pager"` to the end of the array (preserving trailing comma style — match the existing format).
+In `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml`, find the `[workspace] members = [...]` array (currently contains `oxicode-ai`, `oxicode-agent`, `oxicode-tui`, `oxicode-cli`, `oxicode-sdk`, `oxicode-hashline`, `oxicode-lsp`, `oxicode-mnemopi`, `oxicode-snapcompact`). Add `"oxicode-pager"` to the end of the array (preserving trailing comma style — match the existing format).
 
-- [ ] **Step 2: Create `oxi-pager/Cargo.toml`**
+- [ ] **Step 2: Create `oxicode-pager/Cargo.toml`**
 
 Create the file with these exact contents:
 
 ```toml
 [package]
-name = "oxi-pager"
+name = "oxicode-pager"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Pager state machine + emitter + reducer for the oxi-cli TUI"
+description = "Pager state machine + emitter + reducer for the oxicode-cli TUI"
 
 [dependencies]
-oxi-tui = { path = "../oxi-tui" }
-oxi-agent = { path = "../oxi-agent" }
+oxicode-tui = { path = "../oxicode-tui" }
+oxicode-agent = { path = "../oxicode-agent" }
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 ```
 
-- [ ] **Step 3: Create `oxi-pager/src/lib.rs`**
+- [ ] **Step 3: Create `oxicode-pager/src/lib.rs`**
 
 Create the file with these exact contents:
 
 ```rust
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-//! oxi-pager — pager state machine for the oxi-cli TUI.
+//! oxicode-pager — pager state machine for the oxicode-cli TUI.
 //!
 //! See `docs/superpowers/specs/2026-07-20-grok-pager-redesign.md` for the
-//! full architecture. This crate is a thin layer between `oxi-agent`
-//! events and the existing `oxi-tui` widget tree. It does not introduce
+//! full architecture. This crate is a thin layer between `oxicode-agent`
+//! events and the existing `oxicode-tui` widget tree. It does not introduce
 //! new widgets, new agent semantics, or new public types in either
 //! dependency.
 
@@ -120,14 +120,14 @@ pub fn version() -> &'static str {
 }
 ```
 
-- [ ] **Step 4: Create `oxi-pager/README.md`**
+- [ ] **Step 4: Create `oxicode-pager/README.md`**
 
 Create the file with these exact contents:
 
 ```markdown
-# oxi-pager
+# oxicode-pager
 
-Pager state machine for the [oxi](https://github.com/project-oxi/oxicode) TUI.
+Pager state machine for the [oxicode](https://github.com/project-oxi/oxicode) TUI.
 
 See `docs/superpowers/specs/2026-07-20-grok-pager-redesign.md` for the
 architecture and `docs/superpowers/plans/2026-07-20-grok-pager-redesign.md`
@@ -136,21 +136,21 @@ for the implementation plan.
 
 - [ ] **Step 5: Verify the crate builds**
 
-Run: `cargo build -p oxi-pager`
-Expected: `Compiling oxi-pager v0.1.0 (...)` and `Finished` with no errors.
+Run: `cargo build -p oxicode-pager`
+Expected: `Compiling oxicode-pager v0.1.0 (...)` and `Finished` with no errors.
 
 - [ ] **Step 6: Verify clippy passes**
 
-Run: `cargo clippy -p oxi-pager -- -D warnings`
+Run: `cargo clippy -p oxicode-pager -- -D warnings`
 Expected: `Finished` with no warnings.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Cargo.toml oxi-pager/
-git commit -m "feat(pager): scaffold oxi-pager crate (PR-0)
+git add Cargo.toml oxicode-pager/
+git commit -m "feat(pager): scaffold oxicode-pager crate (PR-0)
 
-Adds an empty oxi-pager workspace member with oxi-tui + oxi-agent
+Adds an empty oxicode-pager workspace member with oxicode-tui + oxicode-agent
 dependencies. No behavior yet — this is the scaffold. PR-1+ will
 add state, emitter, reducer, and main loop.
 "
@@ -160,27 +160,27 @@ add state, emitter, reducer, and main loop.
 
 ## Task 2: PR-1 — Typed tool trait (TypedTool + TypedToolAdapter)
 
-This task migrates oxi-agent to support typed tool arguments via a parallel generic trait. Existing 32 tools stay on `AgentTool` unchanged.
+This task migrates oxicode-agent to support typed tool arguments via a parallel generic trait. Existing 32 tools stay on `AgentTool` unchanged.
 
 **Files:**
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` (add `schemars = "0.8"` to `[workspace.dependencies]`)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/Cargo.toml` (add `schemars = { workspace = true }` to `[dependencies]`)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/tools.rs` (declare `pub mod typed;`, re-export)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/tools.rs:557` (replace `pub type ToolError = String` with a new enum; preserve `pub type` alias for compatibility)
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/tools/typed.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/tools/typed_tests.rs` (test module, or use `#[cfg(test)] mod tests` inline — pick the inline form)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml` (add `schemars = "0.8"` to `[workspace.dependencies]`)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/Cargo.toml` (add `schemars = { workspace = true }` to `[dependencies]`)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/tools.rs` (declare `pub mod typed;`, re-export)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/tools.rs:557` (replace `pub type ToolError = String` with a new enum; preserve `pub type` alias for compatibility)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/tools/typed.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/tools/typed_tests.rs` (test module, or use `#[cfg(test)] mod tests` inline — pick the inline form)
 
 **Interfaces:**
-- Produces (in `oxi_agent::tools`):
+- Produces (in `oxicode_agent::tools`):
   - `pub trait TypedTool` with `type Args: DeserializeOwned + JsonSchema + Send + 'static`, methods `name`, `label`, `description`, `essential`, `async fn execute_typed`
   - `pub struct TypedToolAdapter<T: TypedTool>(pub Arc<T>)`
   - `impl<T: TypedTool> AgentTool for TypedToolAdapter<T>`
   - `pub fn wrap_typed<T: TypedTool>(tool: T) -> Arc<dyn AgentTool>`
-- Modifies: `pub type ToolError = String` (line 557) → `pub type ToolError = ToolErrorKind;` with a new enum in `oxi_agent::error`. **Critical**: keep the type alias to preserve all 32 existing call sites that do `Result<_, ToolError>`.
+- Modifies: `pub type ToolError = String` (line 557) → `pub type ToolError = ToolErrorKind;` with a new enum in `oxicode_agent::error`. **Critical**: keep the type alias to preserve all 32 existing call sites that do `Result<_, ToolError>`.
 
 - [ ] **Step 1: Add `schemars` to workspace deps**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml`, the `[workspace.dependencies]` section currently has `thiserror = "2"`. Add the new dep:
+In `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml`, the `[workspace.dependencies]` section currently has `thiserror = "2"`. Add the new dep:
 
 ```toml
 [workspace.dependencies]
@@ -188,9 +188,9 @@ thiserror = "2"
 schemars = "0.8"
 ```
 
-- [ ] **Step 2: Add `schemars` to oxi-agent deps**
+- [ ] **Step 2: Add `schemars` to oxicode-agent deps**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/Cargo.toml`, find the `[dependencies]` section. Add a new line:
+In `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/Cargo.toml`, find the `[dependencies]` section. Add a new line:
 
 ```toml
 schemars = { workspace = true }
@@ -200,21 +200,21 @@ schemars = { workspace = true }
 
 - [ ] **Step 3: Convert `ToolError` from alias to enum-backed alias**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/tools.rs`, find the line `pub type ToolError = String;` (around line 557). Replace it with:
+In `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/tools.rs`, find the line `pub type ToolError = String;` (around line 557). Replace it with:
 
 ```rust
 /// Tool error type — re-exported as the public `ToolError` alias.
 ///
-/// Backed by `oxi_agent::error::ToolErrorKind` so typed tools can return
+/// Backed by `oxicode_agent::error::ToolErrorKind` so typed tools can return
 /// structured variants (e.g. `InvalidArgs`) without breaking the existing
 /// `String`-based call sites in the 32 legacy `AgentTool` impls.
 pub type ToolError = crate::error::ToolErrorKind;
 ```
 
-Create `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/error.rs` with:
+Create `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/error.rs` with:
 
 ```rust
-//! oxi-agent error types.
+//! oxicode-agent error types.
 
 use thiserror::Error;
 
@@ -246,7 +246,7 @@ impl From<&str> for ToolErrorKind {
 }
 ```
 
-In `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/lib.rs`, add near the top-level module declarations:
+In `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/lib.rs`, add near the top-level module declarations:
 
 ```rust
 pub mod error;
@@ -256,12 +256,12 @@ pub mod error;
 
 - [ ] **Step 4: Verify the 32 legacy tools still compile**
 
-Run: `cargo build -p oxi-agent`
+Run: `cargo build -p oxicode-agent`
 Expected: builds clean. The `From<String>` / `From<&str>` impls let every `Err(ToolError::from("..."))` and `Err("...".into())` site keep working.
 
 If any legacy tool uses `ToolError` in a pattern like `match err { ToolError::Something => ... }` (without going through `From`), the build will fail. **Fix by replacing such patterns with the new variants** — most likely only `ToolError::Other` and `ToolError::InvalidArgs` are needed.
 
-- [ ] **Step 5: Create `oxi-agent/src/tools/typed.rs`**
+- [ ] **Step 5: Create `oxicode-agent/src/tools/typed.rs`**
 
 Create the file with these exact contents:
 
@@ -465,9 +465,9 @@ mod tests {
 }
 ```
 
-- [ ] **Step 6: Add `pub mod typed;` to oxi-agent/src/tools.rs**
+- [ ] **Step 6: Add `pub mod typed;` to oxicode-agent/src/tools.rs**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/tools.rs`, find the bottom of the `// Built-in tools` section (around line 766 onward). Add a new module declaration in alphabetical order — for example, after `pub mod truncate;` (line 826):
+In `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-agent/src/tools.rs`, find the bottom of the `// Built-in tools` section (around line 766 onward). Add a new module declaration in alphabetical order — for example, after `pub mod truncate;` (line 826):
 
 ```rust
 /// Typed tool trait and adapter — see [typed].
@@ -478,28 +478,28 @@ pub mod typed;
 
 - [ ] **Step 7: Verify build + tests pass**
 
-Run: `cargo build -p oxi-agent`
+Run: `cargo build -p oxicode-agent`
 Expected: builds clean.
 
-Run: `cargo nextest run -p oxi-agent -- typed`
+Run: `cargo nextest run -p oxicode-agent -- typed`
 Expected: all 4 new tests pass. The `-- typed` filter targets the test module name (matches the file `typed.rs`).
 
-If the 4 tests don't appear in the run list, the `#[cfg(test)] mod tests` block may be filtered out. Run without filter: `cargo nextest run -p oxi-agent`. The 32 existing tool tests must still pass.
+If the 4 tests don't appear in the run list, the `#[cfg(test)] mod tests` block may be filtered out. Run without filter: `cargo nextest run -p oxicode-agent`. The 32 existing tool tests must still pass.
 
 - [ ] **Step 8: Verify clippy passes**
 
-Run: `cargo clippy -p oxi-agent --all-targets -- -D warnings`
+Run: `cargo clippy -p oxicode-agent --all-targets -- -D warnings`
 Expected: no warnings. If `schemars` derive macros emit warnings, see Task 1's `tools.rs:704-710` precedent in applied-design.md — they should not appear, but if they do, add `#![cfg_attr(test, allow(...))]` narrowly.
 
 - [ ] **Step 9: Verify native-browser feature still compiles**
 
-Run: `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`
-Expected: passes. This is the AGENTS.md-mandated sanity check — PR-1 changes oxi-agent only, so oxi-sdk should be untouched, but we verify.
+Run: `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`
+Expected: passes. This is the AGENTS.md-mandated sanity check — PR-1 changes oxicode-agent only, so oxicode-sdk should be untouched, but we verify.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add Cargo.toml oxi-agent/Cargo.toml oxi-agent/src/
+git add Cargo.toml oxicode-agent/Cargo.toml oxicode-agent/src/
 git commit -m "feat(agent): typed tool trait + adapter (PR-1)
 
 Adds TypedTool trait with DeserializeOwned + JsonSchema Args, a
@@ -519,19 +519,19 @@ migrations (PR-A4..N) are intentionally out of scope.
 ## Task 3: PR-2 — PagerState + PagerEvent + reduce stub
 
 **Files:**
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/state.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/emitter.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/reducer.rs`
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/lib.rs` (add module decls + re-exports)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/state.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/emitter.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/reducer.rs`
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/lib.rs` (add module decls + re-exports)
 
 **Interfaces:**
-- Produces (in `oxi_pager`):
+- Produces (in `oxicode_pager`):
   - `pub struct PagerState` (with sub-states `ScrollbackState`, `PromptState`, `StatusState`, `AgentMetaState`, `StickyPanelState` — these are stub `pub struct XxxState {}` definitions; filled in PR-5)
-  - `pub enum PagerEvent` with variants `Agent(oxi_agent::events::AgentEvent)`, `Input(ResolvedKey)` (where `ResolvedKey` is a stub enum), `Tick`, `Background(BackgroundEvent)` (stub)
+  - `pub enum PagerEvent` with variants `Agent(oxicode_agent::events::AgentEvent)`, `Input(ResolvedKey)` (where `ResolvedKey` is a stub enum), `Tick`, `Background(BackgroundEvent)` (stub)
   - `pub enum PagerAction` with `Render`, `SendToAgent(AgentCmd)`, `SendToTerminal(TermCmd)`, `PlaySound(Sound)`, `ScheduleTick(u64)`, `OpenModal(ModalKind, ModalCtx)`, `CloseModal`, `Quit(ExitReason)`
   - `pub fn reduce(_state: &mut PagerState, _event: PagerEvent) -> Vec<PagerAction>` — **stub: always returns `vec![]`**
 
-- [ ] **Step 1: Create `oxi-pager/src/state.rs`**
+- [ ] **Step 1: Create `oxicode-pager/src/state.rs`**
 
 Create the file with these exact contents:
 
@@ -607,19 +607,19 @@ impl Default for ModalKind {
 }
 ```
 
-- [ ] **Step 2: Create `oxi-pager/src/emitter.rs`**
+- [ ] **Step 2: Create `oxicode-pager/src/emitter.rs`**
 
 Create the file with these exact contents:
 
 ```rust
 //! PagerEvent — normalized input from agent / user / tick / background.
 
-use oxi_agent::events::AgentEvent;
+use oxicode_agent::events::AgentEvent;
 
 use crate::state::ModalKind;
 
 /// All inputs to the reducer go through this enum. Only `AgentEvent`
-/// crosses the oxi-agent boundary; crossterm events, ticks, and
+/// crosses the oxicode-agent boundary; crossterm events, ticks, and
 /// background-job notifications are wrapped locally.
 #[derive(Debug, Clone)]
 pub enum PagerEvent {
@@ -650,7 +650,7 @@ pub enum BackgroundEvent {
 pub use ModalKind as _ModalKindReexport;
 ```
 
-- [ ] **Step 3: Create `oxi-pager/src/reducer.rs`**
+- [ ] **Step 3: Create `oxicode-pager/src/reducer.rs`**
 
 Create the file with these exact contents:
 
@@ -739,14 +739,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Update `oxi-pager/src/lib.rs` to expose modules**
+- [ ] **Step 4: Update `oxicode-pager/src/lib.rs` to expose modules**
 
 Replace the file with these exact contents:
 
 ```rust
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-//! oxi-pager — pager state machine for the oxi-cli TUI.
+//! oxicode-pager — pager state machine for the oxicode-cli TUI.
 
 pub mod emitter;
 pub mod reducer;
@@ -767,16 +767,16 @@ pub fn version() -> &'static str {
 
 - [ ] **Step 5: Verify build + tests**
 
-Run: `cargo build -p oxi-pager`
+Run: `cargo build -p oxicode-pager`
 Expected: builds clean.
 
-Run: `cargo nextest run -p oxi-pager`
+Run: `cargo nextest run -p oxicode-pager`
 Expected: the 1 stub test passes.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-pager/
+git add oxicode-pager/
 git commit -m "feat(pager): add PagerState, PagerEvent, reduce stub (PR-2)
 
 Stub implementations: PagerState with sub-states (filled in PR-5),
@@ -788,27 +788,27 @@ will wire it into the main loop.
 
 ---
 
-## Task 4: PR-3 — KeyRouter + 4 Action variants in oxi-tui
+## Task 4: PR-3 — KeyRouter + 4 Action variants in oxicode-tui
 
 **Files:**
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/keymap.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/theme_bridge.rs`
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-tui/src/keybindings/registry.rs` (add 4 Action variants + 4 default bindings)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-tui/src/keybindings/keys.rs` (parse_key_id support, if not present)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/lib.rs` (re-export)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/keymap.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/theme_bridge.rs`
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-tui/src/keybindings/registry.rs` (add 4 Action variants + 4 default bindings)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-tui/src/keybindings/keys.rs` (parse_key_id support, if not present)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/lib.rs` (re-export)
 
 **Interfaces:**
-- Produces (in `oxi_pager::keymap`):
-  - `pub struct KeyRouter { inner: oxi_tui::keybindings::KeybindingsManager, modal_active: bool, focused: FocusTarget }`
-  - `pub enum ResolvedKey { Bind(oxi_tui::keybindings::Action), ModalLocal(ModalInput), PassThrough(crossterm::event::KeyEvent), Ignored }`
+- Produces (in `oxicode_pager::keymap`):
+  - `pub struct KeyRouter { inner: oxicode_tui::keybindings::KeybindingsManager, modal_active: bool, focused: FocusTarget }`
+  - `pub enum ResolvedKey { Bind(oxicode_tui::keybindings::Action), ModalLocal(ModalInput), PassThrough(crossterm::event::KeyEvent), Ignored }`
   - `pub fn resolve(&self, ev: crossterm::event::KeyEvent) -> ResolvedKey`
   - `pub enum FocusTarget { Chat, Prompt, Modal, Status }`
   - `pub enum ModalInput { Submit(String), Cancel, MoveUp, MoveDown }` (stub — PR-6 will refine)
-- Modifies `oxi_tui::keybindings::Action` to add `ToggleTodo`, `ToggleIssues`, `ToggleHub`, `ToggleLsp`. **Backwards-compatible** (additive enum variant).
+- Modifies `oxicode_tui::keybindings::Action` to add `ToggleTodo`, `ToggleIssues`, `ToggleHub`, `ToggleLsp`. **Backwards-compatible** (additive enum variant).
 
-- [ ] **Step 1: Add 4 Action variants to oxi-tui**
+- [ ] **Step 1: Add 4 Action variants to oxicode-tui**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/oxi-tui/src/keybindings/registry.rs`, find the `pub enum Action { ... }` definition (around line 25-109). Add 4 new variants at the end of the enum body (after the last existing variant, before the closing brace):
+In `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-tui/src/keybindings/registry.rs`, find the `pub enum Action { ... }` definition (around line 25-109). Add 4 new variants at the end of the enum body (after the last existing variant, before the closing brace):
 
 ```rust
     /// Toggle the todo sticky panel.
@@ -832,12 +832,12 @@ Then find the `KeybindingsManager::default()` (or wherever the default bindings 
 
 (Adjust the `keyseq!` macro form to match the existing file's convention — it may be a `vec!["ctrl-t"]` or `KeyId::ctrl_t()`-style expression. The goal: bind each new Action to a `Ctrl+<letter>` key.)
 
-- [ ] **Step 2: Verify oxi-tui builds + tests pass**
+- [ ] **Step 2: Verify oxicode-tui builds + tests pass**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: all existing tests pass. The Action enum's `strum::EnumIter` derive will pick up the 4 new variants automatically — verify no `match` over `Action` is non-exhaustive (the project may have `#[non_exhaustive]` on the enum already, which makes this safe).
 
-- [ ] **Step 3: Create `oxi-pager/src/keymap.rs`**
+- [ ] **Step 3: Create `oxicode-pager/src/keymap.rs`**
 
 Create the file with these exact contents:
 
@@ -845,7 +845,7 @@ Create the file with these exact contents:
 //! KeyRouter — bridges crossterm key events to the pager.
 
 use crossterm::event::KeyEvent;
-use oxi_tui::keybindings::{Action, KeybindingsManager};
+use oxicode_tui::keybindings::{Action, KeybindingsManager};
 
 use crate::state::ModalKind;
 
@@ -942,37 +942,37 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Create `oxi-pager/src/theme_bridge.rs`** (minimal stub)
+- [ ] **Step 4: Create `oxicode-pager/src/theme_bridge.rs`** (minimal stub)
 
 Create the file with these exact contents:
 
 ```rust
-//! Theme bridge — helper to look up line styles from `oxi_tui::Theme`.
+//! Theme bridge — helper to look up line styles from `oxicode_tui::Theme`.
 //!
 //! PR-3 ships a minimal stub. PR-7 will use this to render the footer
 //! and status bar with the right foreground/background colors.
 
-use oxi_tui::theme::Theme;
+use oxicode_tui::theme::Theme;
 
 pub fn theme_name() -> &'static str {
     "default"
 }
 
-pub fn lookup_line_style(_theme: &Theme) -> oxi_tui::render::LineStyle {
-    oxi_tui::render::LineStyle::default()
+pub fn lookup_line_style(_theme: &Theme) -> oxicode_tui::render::LineStyle {
+    oxicode_tui::render::LineStyle::default()
 }
 ```
 
-(Note: if `oxi_tui::render::LineStyle` does not exist, replace the return type with `()` and the function body with `()`. The PR's purpose is to anchor the module; PR-7 will refine.)
+(Note: if `oxicode_tui::render::LineStyle` does not exist, replace the return type with `()` and the function body with `()`. The PR's purpose is to anchor the module; PR-7 will refine.)
 
-- [ ] **Step 5: Update `oxi-pager/src/lib.rs`**
+- [ ] **Step 5: Update `oxicode-pager/src/lib.rs`**
 
 Replace the file with these exact contents:
 
 ```rust
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-//! oxi-pager — pager state machine for the oxi-cli TUI.
+//! oxicode-pager — pager state machine for the oxicode-cli TUI.
 
 pub mod emitter;
 pub mod keymap;
@@ -998,18 +998,18 @@ pub fn version() -> &'static str {
 
 - [ ] **Step 6: Verify build + tests**
 
-Run: `cargo nextest run -p oxi-tui -p oxi-pager`
+Run: `cargo nextest run -p oxicode-tui -p oxicode-pager`
 Expected: all existing tests pass + 2 new pager tests pass.
 
-If the build fails because `oxi_tui::render::LineStyle` doesn't exist (from Step 4), adjust theme_bridge.rs to use a stub type that compiles — the test for this module is in PR-7.
+If the build fails because `oxicode_tui::render::LineStyle` doesn't exist (from Step 4), adjust theme_bridge.rs to use a stub type that compiles — the test for this module is in PR-7.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-pager/ oxi-tui/src/keybindings/
+git add oxicode-pager/ oxicode-tui/src/keybindings/
 git commit -m "feat(pager): KeyRouter + 4 sticky-panel Action variants (PR-3)
 
-Adds 4 Action variants (ToggleTodo/Issues/Hub/Lsp) to oxi-tui
+Adds 4 Action variants (ToggleTodo/Issues/Hub/Lsp) to oxicode-tui
 keybindings, each bound to a Ctrl+<letter> default. Pager now
 owns a KeyRouter that dispatches keys to the global keymap or
 to a modal-local handler depending on FocusTarget. theme_bridge
@@ -1022,20 +1022,20 @@ is a minimal stub — PR-7 fills in the style lookups.
 ## Task 5: PR-4 — Pager main loop + bootstrap redirect
 
 **Files:**
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/dispatch.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/main_loop.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/render/mod.rs`
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/lib.rs` (add module decls)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-cli/src/tui/app.rs:898-903` (delegate `run_tui_interactive` body to `oxi_pager::run`)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/dispatch.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/main_loop.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/render/mod.rs`
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/lib.rs` (add module decls)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-cli/src/tui/app.rs:898-903` (delegate `run_tui_interactive` body to `oxicode_pager::run`)
 
 **Interfaces:**
-- Produces (in `oxi_pager`):
-  - `pub async fn run(app: oxi_cli::App) -> anyhow::Result<()>` — the main entry point
+- Produces (in `oxicode_pager`):
+  - `pub async fn run(app: oxicode_cli::App) -> anyhow::Result<()>` — the main entry point
   - `pub enum AgentCmd` (already in `reducer.rs`)
   - `pub fn dispatch(state: &PagerState, cmd: AgentCmd) -> anyhow::Result<()>` — translates PagerAction::SendToAgent into agent API calls
   - Stub `pub fn render(state: &PagerState) -> anyhow::Result<()>` — does nothing in PR-4; PR-5 fills it in
 
-- [ ] **Step 1: Create `oxi-pager/src/dispatch.rs`**
+- [ ] **Step 1: Create `oxicode-pager/src/dispatch.rs`**
 
 Create the file with these exact contents:
 
@@ -1047,7 +1047,7 @@ Create the file with these exact contents:
 //! only meaningful action is `SubmitUserMessage` which calls the
 //! owned agent handle. The other variants are stubs that return Ok(()).
 
-use oxi_agent::Agent;
+use oxicode_agent::Agent;
 
 use crate::reducer::AgentCmd;
 use crate::state::PagerState;
@@ -1073,7 +1073,7 @@ pub fn dispatch(agent: &Agent, _state: &PagerState, cmd: AgentCmd) -> anyhow::Re
 
 (Note: this stub body is intentionally minimal. PR-5 will wire it up to the actual agent API. The signature is stable.)
 
-- [ ] **Step 2: Create `oxi-pager/src/render/mod.rs`** (stub)
+- [ ] **Step 2: Create `oxicode-pager/src/render/mod.rs`** (stub)
 
 Create the file with these exact contents:
 
@@ -1087,7 +1087,7 @@ pub fn render(_state: &PagerState) -> anyhow::Result<()> {
 }
 ```
 
-- [ ] **Step 3: Create `oxi-pager/src/main_loop.rs`**
+- [ ] **Step 3: Create `oxicode-pager/src/main_loop.rs`**
 
 Create the file with these exact contents:
 
@@ -1096,8 +1096,8 @@ Create the file with these exact contents:
 
 use std::time::{Duration, Instant};
 
-use oxi_agent::Agent;
-use oxi_cli::App;
+use oxicode_agent::Agent;
+use oxicode_cli::App;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
@@ -1212,14 +1212,14 @@ pub async fn run(app: App) -> anyhow::Result<()> {
 
 (Note: this main loop is intentionally minimal. `app.subscribe_events` / `app.subscribe_background` / `app.agent` are the assumed App API; if they differ, adapt to the actual fields. The intent of PR-4 is to wire up the loop — the body of the actions is a no-op for now. PR-5..7 fill in the real wiring.)
 
-- [ ] **Step 4: Update `oxi-pager/src/lib.rs`**
+- [ ] **Step 4: Update `oxicode-pager/src/lib.rs`**
 
 Replace the file with these exact contents:
 
 ```rust
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-//! oxi-pager — pager state machine for the oxi-cli TUI.
+//! oxicode-pager — pager state machine for the oxicode-cli TUI.
 
 pub mod dispatch;
 pub mod emitter;
@@ -1247,20 +1247,20 @@ pub fn version() -> &'static str {
 }
 ```
 
-- [ ] **Step 5: Wire `oxi-cli::tui::app::run_tui_interactive` to pager**
+- [ ] **Step 5: Wire `oxicode-cli::tui::app::run_tui_interactive` to pager**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/oxi-cli/src/tui/app.rs:898-903`, find the existing function bodies. Replace them so they delegate to `oxi_pager::run`:
+In `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-cli/src/tui/app.rs:898-903`, find the existing function bodies. Replace them so they delegate to `oxicode_pager::run`:
 
 ```rust
 pub async fn run_tui_interactive(app: crate::App) -> anyhow::Result<()> {
-    oxi_pager::run(app).await
+    oxicode_pager::run(app).await
 }
 
 pub async fn run_tui_interactive_with_continue(
     app: crate::App,
     _resume_last: bool,
 ) -> anyhow::Result<()> {
-    oxi_pager::run(app).await
+    oxicode_pager::run(app).await
 }
 ```
 
@@ -1276,7 +1276,7 @@ Expected: all tests pass.
 
 - [ ] **Step 7: Smoke test — boot the TUI**
 
-Run: `cargo run --bin oxi -- --provider <some-provider> "echo hi"` (or the equivalent invocation for the current binary's CLI surface — check `oxi-cli/src/main.rs` for the actual arg layout).
+Run: `cargo run --bin oxicode -- --provider <some-provider> "echo hi"` (or the equivalent invocation for the current binary's CLI surface — check `oxicode-cli/src/main.rs` for the actual arg layout).
 
 Expected: the TUI starts and the user message is delivered. Visually nothing should be different from before PR-4 — pager is a no-op loop right now. Quit with Ctrl+C.
 
@@ -1285,10 +1285,10 @@ If the binary cannot run in this environment (no API key, no terminal), document
 - [ ] **Step 8: Commit**
 
 ```bash
-git add oxi-pager/ oxi-cli/src/tui/app.rs
+git add oxicode-pager/ oxicode-cli/src/tui/app.rs
 git commit -m "feat(pager): main loop + bootstrap redirect (PR-4)
 
-oxi-cli::tui::run_tui_interactive* now delegates to oxi_pager::run.
+oxicode-cli::tui::run_tui_interactive* now delegates to oxicode_pager::run.
 The main loop is a 4-source select! that pipes events into reduce() and
 applies the returned PagerActions. Render is a no-op stub. PR-5 will
 fill in the reducer body and PR-7 the actual widget rendering.
@@ -1302,12 +1302,12 @@ fill in the reducer body and PR-7 the actual widget rendering.
 This is the largest task. It replaces the empty `reduce` with the real one, and fills in `PromptState` / `StatusState` / `ScrollbackState` with their actual fields and update methods.
 
 **Files:**
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/reducer.rs` (full body replacing the stub)
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/prompt.rs` (PromptState methods)
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/status.rs` (StatusState methods)
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/scrollback.rs` (ScrollbackState methods)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/state.rs` (extend sub-states)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/lib.rs` (re-export)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/reducer.rs` (full body replacing the stub)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/prompt.rs` (PromptState methods)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/status.rs` (StatusState methods)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/scrollback.rs` (ScrollbackState methods)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/state.rs` (extend sub-states)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/lib.rs` (re-export)
 
 **Interfaces:**
 - Produces:
@@ -1316,15 +1316,15 @@ This is the largest task. It replaces the empty `reduce` with the real one, and 
   - `ScrollbackState` with `append_agent_token(&str)`, `begin_tool_call(BeginToolCall)`, `update_tool_progress(...)`, `end_tool_call(EndToolCall)`, `append_user_message(&str)`
   - `reduce(state, event)` matching every `AgentEvent` variant that affects display (TextDelta, MessageStart/End, ToolExecutionStart/Update/End, AgentStart/End, Error) plus ResolvedKey::Bind(Submit/NewLine/HistoryUp/HistoryDown/etc.)
 
-This task is **large** — break it into a sequence of focused sub-implementations if `cargo nextest run -p oxi-pager` reveals trouble.
+This task is **large** — break it into a sequence of focused sub-implementations if `cargo nextest run -p oxicode-pager` reveals trouble.
 
 - [ ] **Step 1: Add sub-state methods** (one file per sub-state)
 
-Create `oxi-pager/src/prompt.rs` with `PromptAction` enum (matching the `Action` enum's editor subset) and `apply_key` method.
+Create `oxicode-pager/src/prompt.rs` with `PromptAction` enum (matching the `Action` enum's editor subset) and `apply_key` method.
 
-Create `oxi-pager/src/status.rs` with `tick()` (advance `spinner_phase` mod 12), `set_error(String)`, `clear_error()`.
+Create `oxicode-pager/src/status.rs` with `tick()` (advance `spinner_phase` mod 12), `set_error(String)`, `clear_error()`.
 
-Create `oxi-pager/src/scrollback.rs` with the 5 mutator methods above. They take `&mut self` and emit no actions (the reducer is the only action emitter).
+Create `oxicode-pager/src/scrollback.rs` with the 5 mutator methods above. They take `&mut self` and emit no actions (the reducer is the only action emitter).
 
 - [ ] **Step 2: Extend `state.rs` sub-states with the new fields**
 
@@ -1336,7 +1336,7 @@ Update `ScrollbackState` to include `blocks: Vec<RenderedBlock>`, `block_index: 
 
 - [ ] **Step 3: Replace `reduce` with the real body**
 
-Replace the `reduce` function in `reducer.rs` with a `match event { ... }` covering all `AgentEvent` variants that affect pager state, plus `PagerEvent::Input(ResolvedKey::Bind(action))` mapping to PromptState updates. Reference: spec §4.1 + the existing `oxi-cli/src/tui/handlers.rs:1633` for the event → state mutation map.
+Replace the `reduce` function in `reducer.rs` with a `match event { ... }` covering all `AgentEvent` variants that affect pager state, plus `PagerEvent::Input(ResolvedKey::Bind(action))` mapping to PromptState updates. Reference: spec §4.1 + the existing `oxicode-cli/src/tui/handlers.rs:1633` for the event → state mutation map.
 
 The `reduce` function must remain pure — no `await`, no external calls.
 
@@ -1346,7 +1346,7 @@ In each of `prompt.rs`, `status.rs`, `scrollback.rs`, add `#[cfg(test)] mod test
 
 - [ ] **Step 5: Verify build + tests**
 
-Run: `cargo nextest run -p oxi-pager`
+Run: `cargo nextest run -p oxicode-pager`
 Expected: all new tests pass. The reducer's exhaustive match over `AgentEvent` may require `_ => Vec::new()` for events that don't affect pager state — that's fine.
 
 Run: `cargo nextest run --workspace`
@@ -1362,7 +1362,7 @@ Run the TUI as in Task 5 Step 7. This time the prompt and history should actuall
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-pager/
+git add oxicode-pager/
 git commit -m "feat(pager): full reducer body + sub-state machines (PR-5)
 
 Replaces the empty reducer with a real match over AgentEvent + key
@@ -1377,10 +1377,10 @@ sub-states are unit-tested.
 ## Task 7: PR-6 — Modal dispatch + slash router + sticky panels
 
 **Files:**
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/modal.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/slash.rs`
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/keymap.rs` (focus tracking)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/reducer.rs` (handle SlashDecision, modal open/close)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/modal.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/slash.rs`
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/keymap.rs` (focus tracking)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/reducer.rs` (handle SlashDecision, modal open/close)
 
 **Interfaces:**
 - Produces:
@@ -1390,7 +1390,7 @@ sub-states are unit-tested.
 
 - [ ] **Step 1: Implement `route_slash`**
 
-Create `oxi-pager/src/slash.rs` with:
+Create `oxicode-pager/src/slash.rs` with:
 
 ```rust
 #[derive(Debug, Clone)]
@@ -1408,11 +1408,11 @@ pub fn route_slash(text: &str) -> SlashDecision {
 }
 ```
 
-The Dispatch return is consumed by the main loop, which calls `oxi_cli::tui::slash::dispatch(...)` — that call site is in `main_loop.rs` but is a `// PR-6: wire here` comment until this task.
+The Dispatch return is consumed by the main loop, which calls `oxicode_cli::tui::slash::dispatch(...)` — that call site is in `main_loop.rs` but is a `// PR-6: wire here` comment until this task.
 
 - [ ] **Step 2: Implement `open_modal` / `close_modal`**
 
-Create `oxi-pager/src/modal.rs` with the two functions. They mutate `state.modal: Option<ModalKind>`.
+Create `oxicode-pager/src/modal.rs` with the two functions. They mutate `state.modal: Option<ModalKind>`.
 
 - [ ] **Step 3: Extend reducer to handle sticky-panel toggles**
 
@@ -1420,11 +1420,11 @@ In `reducer.rs::reduce`, add a match arm for `PagerEvent::Input(ResolvedKey::Bin
 
 - [ ] **Step 4: Extend reducer to handle slash submissions**
 
-Add an arm for `PagerEvent::Input(ResolvedKey::Bind(Action::Submit))` that calls `route_slash(&state.prompt.text)` and emits `vec![PagerAction::SendToAgent(AgentCmd::SubmitUserMessage { text })]` for non-slash, or a placeholder action for slash (the main loop will dispatch to `oxi_cli::tui::slash::dispatch`).
+Add an arm for `PagerEvent::Input(ResolvedKey::Bind(Action::Submit))` that calls `route_slash(&state.prompt.text)` and emits `vec![PagerAction::SendToAgent(AgentCmd::SubmitUserMessage { text })]` for non-slash, or a placeholder action for slash (the main loop will dispatch to `oxicode_cli::tui::slash::dispatch`).
 
-- [ ] **Step 5: Extend main loop to call `oxi_cli::tui::slash::dispatch`**
+- [ ] **Step 5: Extend main loop to call `oxicode_cli::tui::slash::dispatch`**
 
-In `main_loop.rs`, add an action variant `PagerAction::DispatchSlash(String)` and a match arm in the main loop that calls `oxi_cli::tui::slash::dispatch(&slash_text, &slash_ctx)`. The function signature varies — check `oxi-cli/src/tui/slash/mod.rs` for the actual API.
+In `main_loop.rs`, add an action variant `PagerAction::DispatchSlash(String)` and a match arm in the main loop that calls `oxicode_cli::tui::slash::dispatch(&slash_text, &slash_ctx)`. The function signature varies — check `oxicode-cli/src/tui/slash/mod.rs` for the actual API.
 
 - [ ] **Step 6: Verify + smoke test**
 
@@ -1436,12 +1436,12 @@ Smoke test: open the TUI, type `/model`, press Enter — the model-select modal 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-pager/
+git add oxicode-pager/
 git commit -m "feat(pager): modal dispatch + slash router + sticky panels (PR-6)
 
 Adds modal open/close, slash routing, and sticky-panel visibility
 toggles (Ctrl+T/I/H/L). The main loop now dispatches slash commands
-to oxi-cli's existing slash registry.
+to oxicode-cli's existing slash registry.
 "
 ```
 
@@ -1450,13 +1450,13 @@ to oxi-cli's existing slash registry.
 ## Task 8: PR-7 — UX polish (Ctrl+D 2-tap, MarkdownStreaming, TokenBar, ESC cancel)
 
 **Files:**
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/widgets/spinner.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/widgets/token_bar.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/widgets/tool_progress_card.rs`
-- Create: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/render/markdown_streaming.rs`
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/render/mod.rs` (wire new components)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/reducer.rs` (Ctrl+D 2-tap, ESC cancel)
-- Modify: `/Volumes/MERCURY/PROJECTS/oxi/oxi-pager/src/theme_bridge.rs` (real style lookups)
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/widgets/spinner.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/widgets/token_bar.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/widgets/tool_progress_card.rs`
+- Create: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/render/markdown_streaming.rs`
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/render/mod.rs` (wire new components)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/reducer.rs` (Ctrl+D 2-tap, ESC cancel)
+- Modify: `/Volumes/MERCURY/PROJECTS/oxicode/oxicode-pager/src/theme_bridge.rs` (real style lookups)
 
 **Interfaces:**
 - Produces:
@@ -1468,19 +1468,19 @@ to oxi-cli's existing slash registry.
 
 - [ ] **Step 1: Implement the 12-frame spinner**
 
-Create `oxi-pager/src/widgets/spinner.rs` with the standard 12 frames (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠟⠻` for Unicode, fallback ASCII). Use `glyph_set.symbols.spinner` from `oxi-tui` to pick the frame.
+Create `oxicode-pager/src/widgets/spinner.rs` with the standard 12 frames (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠟⠻` for Unicode, fallback ASCII). Use `glyph_set.symbols.spinner` from `oxicode-tui` to pick the frame.
 
 - [ ] **Step 2: Implement `TokenBar`**
 
-Create `oxi-pager/src/widgets/token_bar.rs` with a 1-line render using the `Footer` widget's lookup mechanism. The bar shows: `<model> | <tokens_in>/<tokens_out> | $<cost> | <spinner>`.
+Create `oxicode-pager/src/widgets/token_bar.rs` with a 1-line render using the `Footer` widget's lookup mechanism. The bar shows: `<model> | <tokens_in>/<tokens_out> | $<cost> | <spinner>`.
 
 - [ ] **Step 3: Implement `ToolProgressCard`**
 
-Create `oxi-pager/src/widgets/tool_progress_card.rs` with a compact card for an in-flight tool call: `🔧 <name> <progress> <elapsed>`.
+Create `oxicode-pager/src/widgets/tool_progress_card.rs` with a compact card for an in-flight tool call: `🔧 <name> <progress> <elapsed>`.
 
 - [ ] **Step 4: Implement `MarkdownStreaming`**
 
-Create `oxi-pager/src/render/markdown_streaming.rs` with the line-cache structure described in spec §4 (grok-style). For PR-7 the implementation reuses `oxi-tui`'s existing markdown renderer — wrap it with a per-line cache that invalidates on viewport change.
+Create `oxicode-pager/src/render/markdown_streaming.rs` with the line-cache structure described in spec §4 (grok-style). For PR-7 the implementation reuses `oxicode-tui`'s existing markdown renderer — wrap it with a per-line cache that invalidates on viewport change.
 
 - [ ] **Step 5: Implement Ctrl+D 2-tap quit + ESC cancel**
 
@@ -1499,14 +1499,14 @@ Replace the stub `render` with a real function that draws:
 - Active modal (if any)
 - Sticky panels (if toggled on)
 
-The actual drawing uses `ratatui::Frame` and the existing `oxi-tui` widgets — the pager is a thin orchestrator.
+The actual drawing uses `ratatui::Frame` and the existing `oxicode-tui` widgets — the pager is a thin orchestrator.
 
 - [ ] **Step 7: Verify + visual diff**
 
 Run: `cargo nextest run --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 Expected: clean.
 
-Run: `cargo build -p oxi-sdk --features native-browser -- -D warnings` (AGENTS.md gate)
+Run: `cargo build -p oxicode-sdk --features native-browser -- -D warnings` (AGENTS.md gate)
 Expected: clean.
 
 Smoke test: open the TUI. Verify the spinner ticks. Verify the token bar updates. Verify Ctrl+D once shows a confirmation hint, Ctrl+D again within 2s quits. Take a screenshot. Compare to the pre-PR-7 screenshot.
@@ -1514,7 +1514,7 @@ Smoke test: open the TUI. Verify the spinner ticks. Verify the token bar updates
 - [ ] **Step 8: Commit**
 
 ```bash
-git add oxi-pager/
+git add oxicode-pager/
 git commit -m "feat(pager): UX polish — Ctrl+D 2-tap, spinner, TokenBar, ESC cancel (PR-7)
 
 Final polish pass. Spinner cycles 12 frames at 50ms. TokenBar shows
@@ -1542,7 +1542,7 @@ caches rendered lines to avoid full re-render on every token.
 - [x] AGENTS.md pitfall (mutex guard across .await) is observed in the main loop: `state.write()` is dropped before `dispatch(...)` is called.
 - [x] AGENTS.md pitfall (mutex guard across .await) is also observed in Task 5's reducer contract (no .await inside reduce).
 - [x] AGENTS.md pitfall (AgentTool dyn surface preserved) is observed in Task 2 (no caller signature changes).
-- [x] Global Constraints section covers: rust-version, edition, license, lint gate, test runner, pre-commit, native-browser feature, !Send MutexGuard, 0-line oxi-tui widget constraint, 0-breaking-change AgentTool constraint.
+- [x] Global Constraints section covers: rust-version, edition, license, lint gate, test runner, pre-commit, native-browser feature, !Send MutexGuard, 0-line oxicode-tui widget constraint, 0-breaking-change AgentTool constraint.
 
 ---
 

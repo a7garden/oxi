@@ -47,23 +47,23 @@
 # ── Area labels — which crate/module ───────────────────────────────
 - name: "area: ai"
   color: "1d76db"
-  description: oxi-ai — LLM provider abstraction, streaming, model DB.
+  description: oxicode-ai — LLM provider abstraction, streaming, model DB.
 
 - name: "area: agent"
   color: "1d76db"
-  description: oxi-agent — tool calling, agent loop, MCP, browse.
+  description: oxicode-agent — tool calling, agent loop, MCP, browse.
 
 - name: "area: tui"
   color: "1d76db"
-  description: oxi-tui — terminal UI widgets, themes, markdown rendering.
+  description: oxicode-tui — terminal UI widgets, themes, markdown rendering.
 
 - name: "area: sdk"
   color: "1d76db"
-  description: oxi-sdk — multi-agent SDK, port system, builder API.
+  description: oxicode-sdk — multi-agent SDK, port system, builder API.
 
 - name: "area: cli"
   color: "1d76db"
-  description: oxi-cli — binary, RPC, print mode, command dispatch.
+  description: oxicode-cli — binary, RPC, print mode, command dispatch.
 
 - name: "area: ci"
   color: "fbca04"

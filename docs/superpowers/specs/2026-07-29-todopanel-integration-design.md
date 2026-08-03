@@ -5,7 +5,7 @@
 
 ## Problem
 
-`oxi-tui/src/widgets/todo_panel.rs`에 `TodoPanel` StatefulWidget이 완전히 구현되어 있다 (line_count, render, collapsed/expanded, strikethrough 스타일). 하지만 `oxi-cli/src/tui/tape_render.rs`는 이 위젯을 전혀 호출하지 않고, 대신 compact `"X todos"` badge 문자열만 sticky 영역에 추가한다.
+`oxicode-tui/src/widgets/todo_panel.rs`에 `TodoPanel` StatefulWidget이 완전히 구현되어 있다 (line_count, render, collapsed/expanded, strikethrough 스타일). 하지만 `oxicode-cli/src/tui/tape_render.rs`는 이 위젯을 전혀 호출하지 않고, 대신 compact `"X todos"` badge 문자열만 sticky 영역에 추가한다.
 
 즉, TodoPanelState는 AppState에서 매 프레임 sync되지만, 그 데이터를 시각화하는 코드가 tape_render.rs에 없다.
 
@@ -45,7 +45,7 @@ tape_render.rs의 현재 sync() 메서드는 모든 sticky row를 `self.rows: Ve
 
 #### Step 1: TodoPanelState → String 변환 헬퍼
 
-`oxi-cli/src/tui/tape_render.rs`에 새 메서드 추가:
+`oxicode-cli/src/tui/tape_render.rs`에 새 메서드 추가:
 
 ```rust
 /// Render the todo panel into sticky lines, using the ratatui StatefulWidget.
@@ -122,7 +122,7 @@ if app.todo_panel_enabled && !app.todo_panel.is_empty() {
 `AppState`에 `todo_panel_enabled: bool` 필드 추가. `sync_todo_panel()` 호출 시점에 `settings.todo_panel_enabled` 값을 반영.
 
 ```rust
-// oxi-cli/src/tui/app.rs
+// oxicode-cli/src/tui/app.rs
 pub struct AppState {
     // ... existing fields
     pub todo_panel_enabled: bool,  // synced from settings
@@ -133,9 +133,9 @@ pub struct AppState {
 
 | File | Change |
 |---|---|
-| `oxi-cli/src/tui/tape_render.rs` | Add `render_todo_lines()` helper. Replace badge line with full panel render. Gate with `app.todo_panel_enabled`. |
-| `oxi-cli/src/tui/app.rs` | Add `todo_panel_enabled: bool` field. Sync from settings at state init. |
-| `oxi-tui/src/widgets/todo_panel.rs` | No changes needed (widget API is sufficient). |
+| `oxicode-cli/src/tui/tape_render.rs` | Add `render_todo_lines()` helper. Replace badge line with full panel render. Gate with `app.todo_panel_enabled`. |
+| `oxicode-cli/src/tui/app.rs` | Add `todo_panel_enabled: bool` field. Sync from settings at state init. |
+| `oxicode-tui/src/widgets/todo_panel.rs` | No changes needed (widget API is sufficient). |
 
 ### Striketheough Animation Note
 

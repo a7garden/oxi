@@ -4,7 +4,7 @@
 > **상태**: 설계 확정, 구현 대기
 > **상위 문서**: `omp-realignment-design.md` (P0–P4 완료 후속)
 > **omp 소스**: `agent-hub.ts` (566), `agent-transcript-viewer.ts` (461), `transcript-recorder.ts` (159)
-> **대상 크레이트**: `oxi-cli/`, `oxi-agent/`, `oxi-tui/`
+> **대상 크레이트**: `oxicode-cli/`, `oxicode-agent/`, `oxicode-tui/`
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### 1.1 advisor 시스템은 완성, 시각화만 부재
 
-oxi는 `oxi-agent/src/advisor/` (1,846줄)에 advisor 엔진을 이미 포팅했다:
+oxicode는 `oxicode-agent/src/advisor/` (1,846줄)에 advisor 엔진을 이미 포팅했다:
 - `AdvisorRuntime` — primary turn을 shadow해서 비동기 advise
 - `AdviseTool` — `nit`/`concern`/`blocker` severity와 함께 advise를 큐에 enqueue
 - `AdvisorEmissionGuard` — 중복/무의미 advise 차단
@@ -26,11 +26,11 @@ oxi는 `oxi-agent/src/advisor/` (1,846줄)에 advisor 엔진을 이미 포팅했
 
 ### 1.2 subagent 모니터링은 처음부터 부재
 
-`oxi-sdk/src/lifecycle/AgentPool`/`AgentHandle` 데이터 계층은 있으나, oxi-cli는 한 번도 `agent_pool: Some(...)`로 설정한 적이 없다. subagent는 out-of-process CLI로 spawn되어 자체 `session_file`에 기록되지만, 부모 TUI에서는 그 파일을 발견할 방법이 없다.
+`oxicode-sdk/src/lifecycle/AgentPool`/`AgentHandle` 데이터 계층은 있으나, oxicode-cli는 한 번도 `agent_pool: Some(...)`로 설정한 적이 없다. subagent는 out-of-process CLI로 spawn되어 자체 `session_file`에 기록되지만, 부모 TUI에서는 그 파일을 발견할 방법이 없다.
 
 ### 1.3 목표
 
-**두 종류의 shadow agent(advisor + subagent)를 한 화면에서 모니터링하고, 각각의 live transcript를 볼 수 있게 한다.** omp의 Agent Hub를 oxi의 tape 모델 + 기존 overlay 인프라에 맞게 이식.
+**두 종류의 shadow agent(advisor + subagent)를 한 화면에서 모니터링하고, 각각의 live transcript를 볼 수 있게 한다.** omp의 Agent Hub를 oxicode의 tape 모델 + 기존 overlay 인프라에 맞게 이식.
 
 ---
 
@@ -61,7 +61,7 @@ oxi는 `oxi-agent/src/advisor/` (1,846줄)에 advisor 엔진을 이미 포팅했
 ### 3.1 데이터 모델
 
 ```rust
-// oxi-sdk/src/lifecycle/supervisor.rs (확장)
+// oxicode-sdk/src/lifecycle/supervisor.rs (확장)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentKind {
@@ -74,7 +74,7 @@ pub struct AgentHandle {
     // 기존 필드 (그대로)
     pub agent_id: String,
     pub status: Arc<AtomicU8>,
-    pub agent: Arc<oxi_agent::Agent>,
+    pub agent: Arc<oxicode_agent::Agent>,
     pub config: Arc<RwLock<AgentConfig>>,
     pub metrics: Arc<AgentMetrics>,
     pub lifecycle_tx: broadcast::Sender<AgentLifecycleEvent>,
@@ -142,7 +142,7 @@ impl AgentSession {
         Ok(session)
     }
 
-    /// Subagent spawn 후 호출 — oxi-sdk의 subagent 도구가 ToolContext에서
+    /// Subagent spawn 후 호출 — oxicode-sdk의 subagent 도구가 ToolContext에서
     /// session.pool을 얻어 호출. out-of-process 경로는 디렉토리 스캔으로
     /// 복원 (3.4).
     pub fn register_subagent(&self, name: String, session_file: PathBuf) {
@@ -157,7 +157,7 @@ impl AgentSession {
 `AdvisorRuntime`은 자체 `Agent`를 보유하지만, transcript를 `AdvisorTranscriptRecorder`로 파일에 쓴다. 변경 최소화:
 
 ```rust
-// oxi-agent/src/advisor/runtime.rs (변경 없음, hook만 추가)
+// oxicode-agent/src/advisor/runtime.rs (변경 없음, hook만 추가)
 
 impl AdvisorRuntime {
     /// Returns the transcript file path (or None if no session file).
@@ -173,7 +173,7 @@ advisor transcript는 이미 `<session_dir>/__advisor.jsonl`로 기록되므로 
 **핵심 결정: push가 아니라 mtime 폴링.** omp도 동일 (`DATA_CHANGE_RENDER_COALESCE_MS = 100ms`).
 
 ```rust
-// oxi-cli/src/tui/overlay/agent_hub/transcript_reader.rs (신규)
+// oxicode-cli/src/tui/overlay/agent_hub/transcript_reader.rs (신규)
 
 pub struct TranscriptReader {
     /// Path to the .jsonl file (or __advisor.jsonl).
@@ -219,7 +219,7 @@ pub struct TranscriptLine {
 }
 ```
 
-**파일 형식**: oxi의 session JSONL은 각 entry가 `SessionEntry` (timestamp + role + content). advisor transcript는 `AdvisorTranscriptRecorder`가 자체 JSONL을 쓰지만 형식이 다르다 (line 184-188):
+**파일 형식**: oxicode의 session JSONL은 각 entry가 `SessionEntry` (timestamp + role + content). advisor transcript는 `AdvisorTranscriptRecorder`가 자체 JSONL을 쓰지만 형식이 다르다 (line 184-188):
 ```json
 {"ts": 1234, "messages": ["...", "..."]}
 ```
@@ -229,7 +229,7 @@ pub struct TranscriptLine {
 ### 3.5 AgentHubOverlay 구조
 
 ```rust
-// oxi-cli/src/tui/overlay/agent_hub/ (신규 디렉토리, ~500 LOC)
+// oxicode-cli/src/tui/overlay/agent_hub/ (신규 디렉토리, ~500 LOC)
 
 pub enum HubView { Table, Transcript { agent_id: String } }
 
@@ -278,20 +278,20 @@ impl AgentHubOverlay {
 
 **결정: 풀스크린 alt-screen** (omp 검증, transcript 보기엔 좁은 popup 부적합).
 
-oxi의 tape 모델과 양립:
+oxicode의 tape 모델과 양립:
 - 일반 채팅 → main screen (tape)
 - Hub 열기 → `EnterAlternateScreen` → Hub가 alt-screen 차지
 - Hub 닫기 → `LeaveAlternateScreen` → main screen 복귀
-- 이미 `oxi-cli/src/tui/terminal_host.rs:94`가 alt-screen enter/leave를 처리 중
+- 이미 `oxicode-cli/src/tui/terminal_host.rs:94`가 alt-screen enter/leave를 처리 중
 
-**Transcript viewer는 nested 풀스크린이 아니라 table view의 풀스크린을 그대로 사용** (omp `openChat`은 nested overlay지만, oxi에서는 별도 overlay로 분리해 단순화). Hub의 풀스크린 안에서 table ↔ transcript를 토글.
+**Transcript viewer는 nested 풀스크린이 아니라 table view의 풀스크린을 그대로 사용** (omp `openChat`은 nested overlay지만, oxicode에서는 별도 overlay로 분리해 단순화). Hub의 풀스크린 안에서 table ↔ transcript를 토글.
 
 ### 3.7 Advisor 메시지 영속화 (transcript 카드)
 
 현재 aside channel advise는 `SessionEvent::Advisor` → `UiEvent::SystemMessage` → 토스트. **추가**: 동일 이벤트로 transcript 카드(스크롤백에 영속)를 emit.
 
 ```rust
-// oxi-cli/src/tui/handlers.rs (확장)
+// oxicode-cli/src/tui/handlers.rs (확장)
 
 SessionEvent::Advisor { channel, body, severity } => {
     // 기존 토스트
@@ -314,10 +314,10 @@ advisor 카드는 기존 chat transcript의 `ContentBlock::Advisory`로 추가 �
 
 ## 4. 통합 포인트
 
-### 4.1 키 바인딩 (oxi-tui)
+### 4.1 키 바인딩 (oxicode-tui)
 
 ```rust
-// oxi-tui/src/keybindings/registry.rs
+// oxicode-tui/src/keybindings/registry.rs
 
 pub enum Action {
     // ... 기존 ...
@@ -333,10 +333,10 @@ pub enum Action {
 
 `Ctrl+h`는 omp의 `app.agents.hub` 기본값과 동일.
 
-### 4.2 슬래시 명령 (oxi-cli)
+### 4.2 슬래시 명령 (oxicode-cli)
 
 ```rust
-// oxi-cli/src/tui/slash/builtin/agents.rs (신규)
+// oxicode-cli/src/tui/slash/builtin/agents.rs (신규)
 
 pub(crate) struct AgentsCommand;
 impl SlashCommand for AgentsCommand {
@@ -353,10 +353,10 @@ impl SlashCommand for AgentsCommand {
 
 `mod.rs`의 `register_builtin_slash_commands`에 등록.
 
-### 4.3 Handler dispatch (oxi-cli)
+### 4.3 Handler dispatch (oxicode-cli)
 
 ```rust
-// oxi-cli/src/tui/handlers.rs
+// oxicode-cli/src/tui/handlers.rs
 
 KAction::ToggleAgentHub => {
     let pool = session.pool().clone();
@@ -367,12 +367,12 @@ KAction::ToggleAgentHub => {
 
 `dispatch_action` match arm에 추가.
 
-### 4.4 Subagent 등록 (oxi-agent)
+### 4.4 Subagent 등록 (oxicode-agent)
 
-subagent 도구가 spawn 후 `ToolContext`의 `agent_pool`을 얻어 등록. oxi-cli의 out-of-process 경로는 디렉토리 스캔으로 복원 (3.5).
+subagent 도구가 spawn 후 `ToolContext`의 `agent_pool`을 얻어 등록. oxicode-cli의 out-of-process 경로는 디렉토리 스캔으로 복원 (3.5).
 
 ```rust
-// oxi-agent/src/tools/subagent.rs (변경)
+// oxicode-agent/src/tools/subagent.rs (변경)
 
 async fn execute(...) {
     // ... spawn logic ...
@@ -382,7 +382,7 @@ async fn execute(...) {
 }
 ```
 
-`ToolContext::agent_pool`는 이미 SDK에 존재 (`oxi-sdk/src/agent_loop/...`) — oxi-cli의 `App::from_oxi`에서 `agent_pool: Some(session.pool().clone())`로 전달.
+`ToolContext::agent_pool`는 이미 SDK에 존재 (`oxicode-sdk/src/agent_loop/...`) — oxicode-cli의 `App::from_oxicode`에서 `agent_pool: Some(session.pool().clone())`로 전달.
 
 **v1 한정**: out-of-process subagent는 `__advisor.jsonl`과 동일하게 **세션 디렉토리 스캔**으로 복원. 스캔 규칙:
 - `<session_dir>/*.jsonl` (subagent transcript)
@@ -398,33 +398,33 @@ async fn execute(...) {
 ### 신규
 
 ```
-oxi-cli/src/tui/overlay/agent_hub/
+oxicode-cli/src/tui/overlay/agent_hub/
 ├── mod.rs              # AgentHubOverlay struct + OverlayComponent impl
 ├── state.rs            # HubRow, HubView, sort logic
 ├── table.rs            # render_table, status_badge, format_age
 ├── transcript.rs       # TranscriptReader + TranscriptLine + parse_jsonl
 └── keys.rs             # handle_key, key hints
 
-oxi-cli/src/tui/slash/builtin/agents.rs   # /agents slash command
-oxi-cli/src/app/agent_hub_bridge.rs       # AgentPool wiring in AgentSession
+oxicode-cli/src/tui/slash/builtin/agents.rs   # /agents slash command
+oxicode-cli/src/app/agent_hub_bridge.rs       # AgentPool wiring in AgentSession
 ```
 
 ### 변경
 
 ```
-oxi-sdk/src/lifecycle/supervisor.rs        # AgentKind, HubStatus, AgentHandle 필드 5개 + impl
-oxi-sdk/src/lifecycle/agent_pool.rs       # register_subagent, for_each_row
-oxi-tui/src/keybindings/registry.rs        # ToggleAgentHub action
-oxi-tui/src/widgets/chat/state.rs          # ContentBlock::Advisory variant (card)
-oxi-tui/src/widgets/chat/markdown.rs        # Advisory variant render (severity-colored card)
-oxi-tui/src/widgets/chat/render.rs          # route ContentBlock::Advisory through transcript
-oxi-agent/src/advisor/runtime.rs           # transcript_path() getter
-oxi-agent/src/advisor/agent_advisor.rs     # (변경 없음, hook만 노출)
-oxi-cli/src/app/agent_session.rs           # pool field, register_advisor, register_subagent
-oxi-cli/src/tui/handlers.rs                # ToggleAgentHub dispatch + SessionEvent::Advisor → UiEvent::AdvisorCard
-oxi-cli/src/tui/app.rs                     # UiEvent::AdvisorCard → ContentBlock::Advisory emit
-oxi-cli/src/tui/slash/builtin/mod.rs       # AgentsCommand 등록
-oxi-cli/src/tui/overlay/mod.rs             # agent_hub module 등록
+oxicode-sdk/src/lifecycle/supervisor.rs        # AgentKind, HubStatus, AgentHandle 필드 5개 + impl
+oxicode-sdk/src/lifecycle/agent_pool.rs       # register_subagent, for_each_row
+oxicode-tui/src/keybindings/registry.rs        # ToggleAgentHub action
+oxicode-tui/src/widgets/chat/state.rs          # ContentBlock::Advisory variant (card)
+oxicode-tui/src/widgets/chat/markdown.rs        # Advisory variant render (severity-colored card)
+oxicode-tui/src/widgets/chat/render.rs          # route ContentBlock::Advisory through transcript
+oxicode-agent/src/advisor/runtime.rs           # transcript_path() getter
+oxicode-agent/src/advisor/agent_advisor.rs     # (변경 없음, hook만 노출)
+oxicode-cli/src/app/agent_session.rs           # pool field, register_advisor, register_subagent
+oxicode-cli/src/tui/handlers.rs                # ToggleAgentHub dispatch + SessionEvent::Advisor → UiEvent::AdvisorCard
+oxicode-cli/src/tui/app.rs                     # UiEvent::AdvisorCard → ContentBlock::Advisory emit
+oxicode-cli/src/tui/slash/builtin/mod.rs       # AgentsCommand 등록
+oxicode-cli/src/tui/overlay/mod.rs             # agent_hub module 등록
 ```
 
 ---
@@ -432,7 +432,7 @@ oxi-cli/src/tui/overlay/mod.rs             # agent_hub module 등록
 ## 6. 테스트 계획
 
 ```rust
-// oxi-cli/src/tui/overlay/agent_hub/transcript.rs
+// oxicode-cli/src/tui/overlay/agent_hub/transcript.rs
 #[cfg(test)]
 mod tests {
     #[test]
@@ -447,7 +447,7 @@ mod tests {
     fn incremental_growth_does_not_reparse() { ... } // append-only
 }
 
-// oxi-cli/src/tui/overlay/agent_hub/state.rs
+// oxicode-cli/src/tui/overlay/agent_hub/state.rs
 #[cfg(test)]
 mod tests {
     #[test]
@@ -458,7 +458,7 @@ mod tests {
     fn age_formats_correctly() { ... }
 }
 
-// oxi-sdk/src/lifecycle/supervisor.rs
+// oxicode-sdk/src/lifecycle/supervisor.rs
 #[cfg(test)]
 mod tests {
     #[test]
@@ -470,20 +470,20 @@ mod tests {
 }
 ```
 
-**PTY 테스트 추가**: `cargo nextest run -p oxi-cli --test pty_e2e test_pty_hub_opens_and_lists_advisor` — PTY에서 `/agents` 입력 → overlay 표시 → advisor 행 1개 확인 → Esc로 닫기.
+**PTY 테스트 추가**: `cargo nextest run -p oxicode-cli --test pty_e2e test_pty_hub_opens_and_lists_advisor` — PTY에서 `/agents` 입력 → overlay 표시 → advisor 행 1개 확인 → Esc로 닫기.
 
 ---
 
 ## 7. 성공 기준
 
-- [ ] `cargo build --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` + `cargo fmt --all -- --check` + `cargo nextest run --workspace` 모두 green
+- [ ] `cargo build --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` + `cargo fmt --all -- --check` + `cargo nextest run --workspace` 모두 green
 - [ ] `Ctrl+h` 또는 `/agents` 입력 시 AgentHubOverlay 열림
 - [ ] Advisor가 활성화된 세션에서 `__advisor.jsonl`이 Hub table에 "advisor" 행으로 표시
 - [ ] 그 행에서 Enter → advisor의 live transcript 표시 (tail following)
 - [ ] subagent (out-of-process) spawn 후 Hub에 해당 transcript 파일이 행으로 추가
 - [ ] advisor aside advise가 토스트 + transcript 카드 양쪽으로 표시
 - [ ] PTY 인수 테스트 통과
-- [ ] `oxi-sdk/src/lifecycle/AgentPool` 이 oxi-cli에서 한 번 이상 사용됨 (현재 0)
+- [ ] `oxicode-sdk/src/lifecycle/AgentPool` 이 oxicode-cli에서 한 번 이상 사용됨 (현재 0)
 
 ---
 

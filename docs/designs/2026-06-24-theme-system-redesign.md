@@ -1,8 +1,8 @@
-# 설계: oxi-tui 테마 시스템 전면 재설계 (확정版)
+# 설계: oxicode-tui 테마 시스템 전면 재설계 (확정版)
 
 > 상태: **확정** (구현 착수 가능)
 > 작성: 2026-06-24 (v1 초안 → v2 자체 리뷰 → 확정)
-> 감사: oxi-tui/src 전수 audit + ratatui 0.30.2 소스 교차검증
+> 감사: oxicode-tui/src 전수 audit + ratatui 0.30.2 소스 교차검증
 > 선행: 기존 Theme / ColorScheme / ThemeStyles / ThemeManager / ThemeRegistry 인프라
 > 후속: CHANGELOG.md + AGENTS.md pitfalls + 6개 built-in 테마 컬러 재조정
 
@@ -35,7 +35,7 @@
 | `Theme` (name + colors + spacing + symbols) | `theme.rs:21` | ✅ 완성 |
 | `ColorScheme` (21 슬롯) | `theme.rs:38` | ✅ 확장만 |
 | `ThemeManager` (hot-reload, mtime polling, `check_external`) | `theme.rs:724` | ✅ 완성 |
-| `ThemeRegistry` (built-in + custom layering, `~/.oxi/themes/*.toml`) | `theme.rs:914` | ✅ 완성 |
+| `ThemeRegistry` (built-in + custom layering, `~/.oxicode/themes/*.toml`) | `theme.rs:914` | ✅ 완성 |
 | `ThemeFile` (TOML/JSON 로더, `into_theme()`) | `theme.rs:498` | ✅ 확장만 |
 | 6개 built-in 테마 (dark/light/nord/catppuccin/github_dark/monokai) | `theme.rs:91-246` | ✅ 값 재조정 |
 | 3개 GlyphSet (Unicode/Ascii/Nerd) | `symbols.rs` | ✅ 변경 없음 |
@@ -45,7 +45,7 @@
 | 증상 | 원인 | 렌더 코드 위치 |
 |---|---|---|
 | user 행이 1-cell border stripe만 있고 행 전체 bg 없음 | `user_bg` 정의만 됨, 소비 0건 | `chat/render.rs:57-77` |
-| code block 배경이 항상 다크 amber | `OxiStyleSheet::code()` hardcoded `#231e14`; fenced code block은 bg 전혀 없음 | `markdown_styles.rs:38`, `highlight.rs:27-38` |
+| code block 배경이 항상 다크 amber | `OxicodeStyleSheet::code()` hardcoded `#231e14`; fenced code block은 bg 전혀 없음 | `markdown_styles.rs:38`, `highlight.rs:27-38` |
 | selection이 terminal default swap | `Modifier::REVERSED` 사용, `selection_bg` 미소비 | `dashboard.rs:323` |
 | chat viewport / footer / completion / routing / thinking / tool-result 모두 terminal default 투명 | `buf.set_style(area, bg)` 호출 0건 (input 제외) | 각 위젯 render() |
 
@@ -294,7 +294,7 @@ pub(crate) fn highlight_code(content: &str, lang: &str, styles: &ThemeStyles) ->
 
 **경로 B: inline `` `code` ``** (`markdown_styles.rs:31`)
 
-`OxiStyleSheet::code()`의 hardcoded `#231e14`를 `Color::Reset`로 변경 (fenced와 달리 inline은 theme code_bg를 받기 어려움 — `tui_markdown`이 `ThemeStyles`를 전달하지 않음). **Phase 2**에서 `OxiStyleSheet`를 theme-aware 구조체로 교체.
+`OxicodeStyleSheet::code()`의 hardcoded `#231e14`를 `Color::Reset`로 변경 (fenced와 달리 inline은 theme code_bg를 받기 어려움 — `tui_markdown`이 `ThemeStyles`를 전달하지 않음). **Phase 2**에서 `OxicodeStyleSheet`를 theme-aware 구조체로 교체.
 
 ```rust
 // Phase 1 (최소 수정): hardcoded 값 제거
@@ -384,7 +384,7 @@ impl<'a> DashboardWidget<'a> {
 }
 ```
 
-**호출 사이트:** LSP references로 식별 후 `DashboardWidget::new(data, &theme)`로 일괄 수정. oxi-cli `tui/overlay/*`에만 존재 예상.
+**호출 사이트:** LSP references로 식별 후 `DashboardWidget::new(data, &theme)`로 일괄 수정. oxicode-cli `tui/overlay/*`에만 존재 예상.
 
 ---
 
@@ -408,7 +408,7 @@ impl<'a> DashboardWidget<'a> {
 | 10 | `code_bg` inline hardcoded 제거 | `markdown_styles.rs` |
 | 11 | `diff_*_bg` wire-up (`patch()` 패턴) | `tool_renderer.rs` |
 | 12 | `surface_bg` footer fill | `footer.rs` |
-| 13 | `panel_bg` overlay fill | `completion.rs`, `routing.rs`, `settings.rs` (oxi-cli) |
+| 13 | `panel_bg` overlay fill | `completion.rs`, `routing.rs`, `settings.rs` (oxicode-cli) |
 | 14 | 단위 테스트: 각 fill 사이트의 cell bg 검증 | `*_test` |
 | 15 | `cargo fmt` + `cargo clippy --workspace -- -D warnings` + `cargo nextest run` | — |
 
@@ -416,7 +416,7 @@ impl<'a> DashboardWidget<'a> {
 
 | 순서 | 변경 |
 |:----:|------|
-| 1 | `OxiStyleSheet` → theme-aware 구조체 (`&ThemeStyles` 보유). inline code에 `code_fg`/`code_bg` 반영 |
+| 1 | `OxicodeStyleSheet` → theme-aware 구조체 (`&ThemeStyles` 보유). inline code에 `code_fg`/`code_bg` 반영 |
 | 2 | `docs/THEME_GUIDE.md` 작성 (확장 TOML 스키마 + 예시) |
 | 3 | `examples/theme_demo.rs` 갱신 (28 슬롯 전체 출력) |
 | 4 | CHANGELOG.md + AGENTS.md pitfalls 갱신 |
@@ -434,7 +434,7 @@ impl<'a> DashboardWidget<'a> {
 
 ## 9. 마이그레이션 & 호환성
 
-### 기존 커스텀 테마 (`~/.oxi/themes/*.toml`)
+### 기존 커스텀 테마 (`~/.oxicode/themes/*.toml`)
 
 `ThemeFileColors`의 모든 필드가 `Option<String>`. 신규 7개 필드가 없는 파일 → `None` → `into_theme()`에서 **dark 테마 기본값**으로 fallback. **기존 테마 100% 호환.**
 

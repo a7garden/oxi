@@ -5,14 +5,14 @@
 > 이 문서는 커스텀 프로바이더 등록 기능이 구현된 후 사용할 가이드입니다.
 > 현재 `[[custom_provider]]` 설정은 지원되지 않습니다.
 
-OpenAI 호환 API를 사용하는 서드파티 프로바이더를 oxi에 등록할 수 있습니다.
+OpenAI 호환 API를 사용하는 서드파티 프로바이더를 oxicode에 등록할 수 있습니다.
 등록된 프로바이더는 빌트인 프로바이더와 동일하게 `provider/model` 형식으로 사용할 수 있습니다.
 
 ---
 
 ## 설정
 
-`~/.oxi/settings.toml`에 `[[custom_provider]]` 섹션을 추가합니다:
+`~/.oxicode/settings.toml`에 `[[custom_provider]]` 섹션을 추가합니다:
 
 ```toml
 # ── Minimax ──────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ export ZAI_API_KEY="your-zai-api-key"
 ```bash
 # 현재 세션에만 적용
 export MINIMAX_API_KEY="your-key"
-oxi -m minimax/MiniMax-M1 "Hello"
+oxicode -m minimax/MiniMax-M1 "Hello"
 ```
 
 ---
@@ -74,19 +74,19 @@ oxi -m minimax/MiniMax-M1 "Hello"
 
 ```bash
 # Minimax 모델 사용
-oxi -m minimax/MiniMax-M1 "Hello, world!"
+oxicode -m minimax/MiniMax-M1 "Hello, world!"
 
 # ZAI 모델 사용
-oxi -m zai/glm-4 "안녕하세요"
+oxicode -m zai/glm-4 "안녕하세요"
 
 # 모델 이름은 프로바이더 API가 지원하는 모델 ID를 그대로 사용
-oxi -m minimax/MiniMax-Text-01 "Explain quantum computing"
-oxi -m zai/glm-4-flash "Quick summary"
+oxicode -m minimax/MiniMax-Text-01 "Explain quantum computing"
+oxicode -m zai/glm-4-flash "Quick summary"
 ```
 
 ### 기본 모델로 설정
 
-`~/.oxi/settings.toml`에서 기본 모델로 지정:
+`~/.oxicode/settings.toml`에서 기본 모델로 지정:
 
 ```toml
 default_model = "minimax/MiniMax-M1"
@@ -95,7 +95,7 @@ default_model = "minimax/MiniMax-M1"
 또는 환경 변수:
 
 ```bash
-export OXI_MODEL="minimax/MiniMax-M1"
+export OXICODE_MODEL="minimax/MiniMax-M1"
 ```
 
 ---
@@ -113,7 +113,7 @@ api_key_env = "TOGETHER_API_KEY"
 
 ```bash
 export TOGETHER_API_KEY="your-key"
-oxi -m together/meta-llama/Llama-3.3-70B-Instruct-Turbo "Hello"
+oxicode -m together/meta-llama/Llama-3.3-70B-Instruct-Turbo "Hello"
 ```
 
 ### Grok (직접 등록)
@@ -127,7 +127,7 @@ api_key_env = "XAI_API_KEY"
 
 ```bash
 export XAI_API_KEY="your-key"
-oxi -m grok/grok-2 "Hello"
+oxicode -m grok/grok-2 "Hello"
 ```
 
 ### 로컬 모델 (Ollama 등)
@@ -142,7 +142,7 @@ api_key_env = "OLLAMA_API_KEY"  # Ollama는 키가 필요 없지만 필수 필�
 ```bash
 # Ollama는 API 키가 필요 없으므로 빈 값 설정
 export OLLAMA_API_KEY="ollama"
-oxi -m ollama/llama3 "Hello"
+oxicode -m ollama/llama3 "Hello"
 ```
 
 ---
@@ -152,7 +152,7 @@ oxi -m ollama/llama3 "Hello"
 ### "Provider not found" 에러
 
 - `name` 필드가 명령어의 프로바이더 부분과 정확히 일치하는지 확인
-- `settings.toml` 파일이 `~/.oxi/` 또는 `.oxi/` 디렉토리에 있는지 확인
+- `settings.toml` 파일이 `~/.oxicode/` 또는 `.oxicode/` 디렉토리에 있는지 확인
 
 ### "API key not found" 에러
 
@@ -183,6 +183,6 @@ oxi -m ollama/llama3 "Hello"
 
 ## 관련 문서
 
-- [oxi 설정 가이드](../oxi-cli/src/settings.rs) — settings.toml 구조
-- [프로바이더 레지스트리](../oxi-ai/src/provider_registry.rs) — 인증 관리
-- [빌트인 프로바이더](../oxi-ai/src/providers/register_builtins.rs) — 기본 프로바이더 목록
+- [oxicode 설정 가이드](../oxicode-cli/src/settings.rs) — settings.toml 구조
+- [프로바이더 레지스트리](../oxicode-ai/src/provider_registry.rs) — 인증 관리
+- [빌트인 프로바이더](../oxicode-ai/src/providers/register_builtins.rs) — 기본 프로바이더 목록

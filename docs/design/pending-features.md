@@ -1,6 +1,6 @@
 # 미구현 기능 설계서
 
-> **대상**: oxi-sdk + oxi-cli  
+> **대상**: oxicode-sdk + oxicode-cli  
 > **목적**: oxios(에이전트 OS)에서 필요로 하는 미구현 기능의 구현 설계  
 > **날짜**: 2026-06-01
 
@@ -26,10 +26,10 @@ oxios가 데몬으로 장시간 실행됨. 프로세스 재시작 시 SharedMemo
 
 #### 접근: JSONL append-only 백엔드
 
-세션 스토어(oxi-store)에서 이미 검증된 JSONL 패턴을 재사용.
+세션 스토어(oxicode-store)에서 이미 검증된 JSONL 패턴을 재사용.
 
 ```
-~/.oxi/state/
+~/.oxicode/state/
 ├── shared_memory.jsonl      # SharedMemory 영속 로그
 └── work_queue.jsonl          # WorkQueue 영속 로그
 ```
@@ -37,7 +37,7 @@ oxios가 데몬으로 장시간 실행됨. 프로세스 재시작 시 SharedMemo
 #### SharedMemory 백엔드
 
 ```rust
-// oxi-sdk/src/coordination/shared_memory.rs 에 추가
+// oxicode-sdk/src/coordination/shared_memory.rs 에 추가
 
 /// 영속화 백엔드 트레이트
 pub trait MemoryBackend: Send + Sync {
@@ -132,10 +132,10 @@ JSONL이 무한히 커지는 것을 방지:
 #### 설정
 
 ```toml
-# ~/.oxi/settings.toml
+# ~/.oxicode/settings.toml
 [persistence]
-shared_memory_path = "~/.oxi/state/shared_memory.jsonl"
-work_queue_path = "~/.oxi/state/work_queue.jsonl"
+shared_memory_path = "~/.oxicode/state/shared_memory.jsonl"
+work_queue_path = "~/.oxicode/state/work_queue.jsonl"
 compaction_threshold_mb = 10
 ```
 
@@ -160,17 +160,17 @@ compaction_threshold_mb = 10
 
 ### 문제
 
-oxi-sdk의 `Tracer`는 내부적으로 span을 생성하지만, 외부 모니터링 시스템(Jaeger, Zipkin, Datadog)으로 전송 불가.  
+oxicode-sdk의 `Tracer`는 내부적으로 span을 생성하지만, 외부 모니터링 시스템(Jaeger, Zipkin, Datadog)으로 전송 불가.  
 oxios에는 이미 `otel` feature와 `OtelConfig`가 정의되어 있지만, `init_telemetry_layers()`가 빈 Vec을 반환함.
 
 ### 설계
 
 #### 접근: Tracer → OTel SpanBridge
 
-oxi-sdk의 자체 `Tracer`를 그대로 유지하면서, span 이벤트를 OTel으로 브릿지.
+oxicode-sdk의 자체 `Tracer`를 그대로 유지하면서, span 이벤트를 OTel으로 브릿지.
 
 ```
-oxi-sdk Tracer (내부)
+oxicode-sdk Tracer (내부)
   │
   ├── subscribe() → broadcast::Receiver<Span>
   │
@@ -183,7 +183,7 @@ oxi-sdk Tracer (내부)
 #### 새 모듈: `observability/otel.rs`
 
 ```rust
-// oxi-sdk/src/observability/otel.rs
+// oxicode-sdk/src/observability/otel.rs
 // #[cfg(feature = "otel")] 가드
 
 use crate::Tracer;
@@ -223,7 +223,7 @@ impl Drop for OtelGuard {
 
 #### Span 변환 매핑
 
-| oxi-sdk | OTel |
+| oxicode-sdk | OTel |
 |---------|------|
 | `SpanKind::Agent` | `SpanKind::Internal` |
 | `SpanKind::Tool` | `SpanKind::Client` |
@@ -239,7 +239,7 @@ impl Drop for OtelGuard {
 #### Cargo.toml (feature-gated)
 
 ```toml
-# oxi-sdk/Cargo.toml
+# oxicode-sdk/Cargo.toml
 [features]
 otel = [
     "dep:opentelemetry",
@@ -255,14 +255,14 @@ opentelemetry-otlp = { version = "0.27", optional = true }
 
 ### oxios 연동
 
-oxios의 `telemetry_otel.rs`에서 oxi-sdk의 `start_otel_export()`를 호출:
+oxios의 `telemetry_otel.rs`에서 oxicode-sdk의 `start_otel_export()`를 호출:
 
 ```rust
 // oxios-kernel/src/telemetry_otel.rs
 pub fn init_telemetry_layers(config: &OtelConfig) -> Result<Vec<...>> {
     if config.enabled {
         let sdk_tracer = global_tracer();  // 기존 oxios Tracer
-        let guard = oxi_sdk::start_otel_export(sdk_tracer, OtelExportConfig {
+        let guard = oxicode_sdk::start_otel_export(sdk_tracer, OtelExportConfig {
             endpoint: config.endpoint.clone(),
             service_name: config.service_name.clone(),
             sampling_ratio: config.sampling_ratio,
@@ -276,10 +276,10 @@ pub fn init_telemetry_layers(config: &OtelConfig) -> Result<Vec<...>> {
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-sdk/Cargo.toml` | `otel` feature + opentelemetry 의존성 |
-| `oxi-sdk/src/observability/otel.rs` | 새 파일 — OtelExportConfig, start_otel_export, 변환 |
-| `oxi-sdk/src/observability/mod.rs` | `#[cfg(feature = "otel")] pub mod otel;` |
-| `oxi-sdk/src/lib.rs` | feature-gated re-export |
+| `oxicode-sdk/Cargo.toml` | `otel` feature + opentelemetry 의존성 |
+| `oxicode-sdk/src/observability/otel.rs` | 새 파일 — OtelExportConfig, start_otel_export, 변환 |
+| `oxicode-sdk/src/observability/mod.rs` | `#[cfg(feature = "otel")] pub mod otel;` |
+| `oxicode-sdk/src/lib.rs` | feature-gated re-export |
 
 ### 테스트
 
@@ -294,7 +294,7 @@ pub fn init_telemetry_layers(config: &OtelConfig) -> Result<Vec<...>> {
 
 ### 문제
 
-oxi-cli TUI에서 세션 트리 오버레이로 엔트리를 선택해도 아무 일이 일어나지 않음.  
+oxicode-cli TUI에서 세션 트리 오버레이로 엔트리를 선택해도 아무 일이 일어나지 않음.  
 pi에서는 `navigateTree()`로 세션을 특정 엔트리 시점으로 되감기 가능.
 
 ### pi의 동작 (참고)
@@ -331,7 +331,7 @@ navigateTree: async (targetId, options) => {
 #### SessionManager 확장
 
 ```rust
-// oxi-store/src/session.rs 에 추가
+// oxicode-store/src/session.rs 에 추가
 
 impl SessionManager {
     /// 지정한 엔트리로 세션을 되감기.
@@ -380,7 +380,7 @@ pub struct NavigateResult {
 #### TUI 핸들러 수정
 
 ```rust
-// oxi-cli/src/tui/handlers.rs
+// oxicode-cli/src/tui/handlers.rs
 
 OverlayAction::NavigateToEntry { entry_id } => {
     state.overlay_state = None;
@@ -433,9 +433,9 @@ fn rebuild_messages_from_chain(
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-store/src/session.rs` | `navigate_to()`, `collect_ancestor_chain()`, `NavigateResult` |
-| `oxi-cli/src/tui/handlers.rs` | `NavigateToEntry` 핸들러 구현 |
-| `oxi-cli/src/tui/mod.rs` 또는 `render.rs` | `rebuild_messages_from_chain()` |
+| `oxicode-store/src/session.rs` | `navigate_to()`, `collect_ancestor_chain()`, `NavigateResult` |
+| `oxicode-cli/src/tui/handlers.rs` | `NavigateToEntry` 핸들러 구현 |
+| `oxicode-cli/src/tui/mod.rs` 또는 `render.rs` | `rebuild_messages_from_chain()` |
 
 ### 테스트
 
@@ -458,16 +458,16 @@ fn rebuild_messages_from_chain(
 
 | 파일 | 액션 |
 |------|------|
-| `oxi-sdk/src/observability/event_store.rs` | **삭제** |
-| `oxi-sdk/src/observability/mod.rs` | `pub mod event_store` 및 re-export 제거 |
-| `oxi-sdk/src/lib.rs` | `EventStore`, `EventStoreConfig`, `EventQuery`, `StoredEvent` export 제거 |
-| `oxi-sdk/src/prelude.rs` | 동일 제거 |
+| `oxicode-sdk/src/observability/event_store.rs` | **삭제** |
+| `oxicode-sdk/src/observability/mod.rs` | `pub mod event_store` 및 re-export 제거 |
+| `oxicode-sdk/src/lib.rs` | `EventStore`, `EventStoreConfig`, `EventQuery`, `StoredEvent` export 제거 |
+| `oxicode-sdk/src/prelude.rs` | 동일 제거 |
 
 ### 영향
 
 ```bash
 # oxios에서 EventStore 사용 없음 (이미 확인)
-# oxi-cli에서 EventStore 사용 없음
+# oxicode-cli에서 EventStore 사용 없음
 # 영향 없음
 ```
 
@@ -478,17 +478,17 @@ fn rebuild_messages_from_chain(
 ### 근거
 
 - oxios에서 **0 uses**
-- oxi-cli에 이미 자체 확장 시스템 있음 (native + WASM)
+- oxicode-cli에 이미 자체 확장 시스템 있음 (native + WASM)
 - JSON 매니페스트 기반 동적 미들웨어 로딩은 실제 사용자 없음
 
 ### 삭제 범위
 
 | 파일 | 액션 |
 |------|------|
-| `oxi-sdk/src/middleware/plugin.rs` | **삭제** |
-| `oxi-sdk/src/middleware/mod.rs` | `pub mod plugin` 및 `PluginLoader`, `PluginManifest` re-export 제거 |
-| `oxi-sdk/src/lib.rs` | export 제거 |
-| `oxi-sdk/src/prelude.rs` | export 제거 |
+| `oxicode-sdk/src/middleware/plugin.rs` | **삭제** |
+| `oxicode-sdk/src/middleware/mod.rs` | `pub mod plugin` 및 `PluginLoader`, `PluginManifest` re-export 제거 |
+| `oxicode-sdk/src/lib.rs` | export 제거 |
+| `oxicode-sdk/src/prelude.rs` | export 제거 |
 
 ### 영향
 

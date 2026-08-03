@@ -19,7 +19,7 @@ main.rs
 - TUI 모드는 `app`에서 settings/model_id만 가져오고 **agent_1을 버림**
 - `create_agent_session_from_services()`에서 **새 agent_2** 생성 (역시 빈 ToolRegistry)
 
-**→ 현재 oxi는 builtin 도구가 0개인 상태로 실행됩니다.**
+**→ 현재 oxicode는 builtin 도구가 0개인 상태로 실행됩니다.**
 **→ main.rs에서 등록한 extension 도구도 TUI 모드에서 유실됩니다.**
 
 > **v3 리뷰 피드백 반영:** cwd 획득, libc 의존성, --append-system-prompt 구체화,
@@ -47,7 +47,7 @@ main.rs
 
 ### 항목 0: ToolRegistry 단일 소유권
 
-**변경 파일:** `oxi-cli/src/main.rs`, `oxi-cli/src/lib.rs`, `oxi-cli/src/agent_session_runtime.rs`
+**변경 파일:** `oxicode-cli/src/main.rs`, `oxicode-cli/src/lib.rs`, `oxicode-cli/src/agent_session_runtime.rs`
 
 #### main.rs
 
@@ -56,7 +56,7 @@ main.rs
 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
 // App 생성 (agent_1 포함, ToolRegistry는 아직 빈 상태)
-let app = oxi::App::new(settings).await?;
+let app = oxicode::App::new(settings).await?;
 
 // --append-system-prompt 처리 (v3 리뷰: set_system_prompt 활용)
 if let Some(ref prompt_path) = args.append_system_prompt {
@@ -68,7 +68,7 @@ if let Some(ref prompt_path) = args.append_system_prompt {
 
 // ToolRegistry에 builtin + extension 등록
 let tools = app.agent_tools();
-let builtins = oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone());
+let builtins = oxicode_agent::ToolRegistry::with_builtins_cwd(cwd.clone());
 for name in builtins.names() {
     if let Some(tool) = builtins.get(&name) {
         tools.register_arc(tool);
@@ -79,7 +79,7 @@ for tool in ext_registry.all_tools() {
 }
 
 if prompt.is_empty() || args.interactive {
-    oxi::tui_interactive::run_tui_interactive(app).await?;
+    oxicode::tui_interactive::run_tui_interactive(app).await?;
 } else if args.mode.as_deref() == Some("json") || args.print {
     // print_mode는 app.agent() 사용 → 이미 도구 등록됨
     // ...
@@ -99,19 +99,19 @@ pub struct CreateAgentSessionFromServicesOptions {
     pub model_id: Option<String>,
     pub thinking_level: Option<ThinkingLevel>,
     pub scoped_models: Vec<ScopedModel>,
-    pub tool_registry: Option<Arc<oxi_agent::ToolRegistry>>,  // ← 추가
+    pub tool_registry: Option<Arc<oxicode_agent::ToolRegistry>>,  // ← 추가
 }
 ```
 
 `create_agent_session_from_services()`에서:
 
 ```rust
-let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));
+let agent = Arc::new(oxicode_agent::Agent::new(Arc::from(provider), config));
 
 // 도구 등록: 전달받은 registry를 복사하여 새 agent에 설정
 let registry = options.tool_registry.unwrap_or_else(|| {
     // fallback: builtin만 (extension 없이 호출된 경우)
-    Arc::new(oxi_agent::ToolRegistry::with_builtins_cwd(PathBuf::from(&cwd)))
+    Arc::new(oxicode_agent::ToolRegistry::with_builtins_cwd(PathBuf::from(&cwd)))
 });
 let agent_tools = agent.tools();
 for name in registry.names() {
@@ -144,7 +144,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
 ### 항목 1: CLI 인자 확장
 
-**변경 파일:** `oxi-cli/src/cli.rs`, `oxi-cli/src/main.rs`
+**변경 파일:** `oxicode-cli/src/cli.rs`, `oxicode-cli/src/main.rs`
 
 cli.rs에 인자 5개 추가:
 
@@ -179,16 +179,16 @@ main.rs에서 `--mode json` 분기 (항목 0의 도구 등록 이후):
 ```rust
 if args.mode.as_deref() == Some("json") || args.print {
     let mode = if args.mode.as_deref() == Some("json") {
-        oxi::print_mode::PrintMode::Json
+        oxicode::print_mode::PrintMode::Json
     } else {
-        oxi::print_mode::PrintMode::Text
+        oxicode::print_mode::PrintMode::Text
     };
-    let options = oxi::print_mode::PrintModeOptions {
+    let options = oxicode::print_mode::PrintModeOptions {
         mode,
         initial_message: if prompt.is_empty() { None } else { Some(prompt) },
         messages: vec![],
     };
-    let exit_code = oxi::print_mode::run_print_mode(&app, options).await?;
+    let exit_code = oxicode::print_mode::run_print_mode(&app, options).await?;
     std::process::exit(exit_code);
 }
 ```
@@ -200,7 +200,7 @@ if args.mode.as_deref() == Some("json") || args.print {
 
 ### 항목 2: --tools로 도구 필터링
 
-**변경 파일:** `oxi-agent/src/tools.rs`, `oxi-cli/src/main.rs`, `oxi-agent/src/tools/subagent.rs`
+**변경 파일:** `oxicode-agent/src/tools.rs`, `oxicode-cli/src/main.rs`, `oxicode-agent/src/tools/subagent.rs`
 
 #### tools.rs
 
@@ -229,9 +229,9 @@ impl ToolRegistry {
 // 도구 등록 시 --tools 인자 고려
 let builtin_registry = if let Some(ref tools_str) = args.tools {
     let names: Vec<&str> = tools_str.split(',').map(|s| s.trim()).collect();
-    oxi_agent::ToolRegistry::with_selected_tools(cwd.clone(), &names)
+    oxicode_agent::ToolRegistry::with_selected_tools(cwd.clone(), &names)
 } else {
-    oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone())
+    oxicode_agent::ToolRegistry::with_builtins_cwd(cwd.clone())
 };
 
 let tools = app.agent_tools();
@@ -259,7 +259,7 @@ if let Some(ref agent_tools) = agent.tools {
 
 ### 항목 3: 프로세스 스폰
 
-**변경 파일:** `oxi-agent/src/tools/subagent.rs`
+**변경 파일:** `oxicode-agent/src/tools/subagent.rs`
 
 `run_single_agent`에 `binary_path` 파라미터 추가:
 
@@ -295,7 +295,7 @@ impl SubagentTool {
     fn get_binary(&self) -> PathBuf {
         self.binary_path.clone()
             .or_else(|| std::env::current_exe().ok())
-            .unwrap_or_else(|| PathBuf::from("oxi"))
+            .unwrap_or_else(|| PathBuf::from("oxicode"))
     }
 }
 
@@ -327,7 +327,7 @@ async fn run_parallel(
 
 ### 항목 4: Abort 처리 — 채널 기반 select! + 조건부 대기
 
-**변경 파일:** `oxi-agent/src/tools/subagent.rs`
+**변경 파일:** `oxicode-agent/src/tools/subagent.rs`
 
 ```rust
 async fn run_single_agent(/* ... */) -> SingleResult {
@@ -433,7 +433,7 @@ async fn run_single_agent(/* ... */) -> SingleResult {
 
 ### 항목 5: Usage 추적
 
-**변경 파일:** `oxi-cli/src/print_mode.rs`, `oxi-agent/src/tools/subagent.rs`, `oxi-agent/src/events.rs`
+**변경 파일:** `oxicode-cli/src/print_mode.rs`, `oxicode-agent/src/tools/subagent.rs`, `oxicode-agent/src/events.rs`
 
 #### 5a. UsageStats (v3 리뷰: 필드 유지 + turns 추가)
 
@@ -499,7 +499,7 @@ fn process_json_line(
 
 ### 항목 6: 임시 파일 정리 — RAII
 
-**변경 파일:** `oxi-agent/src/tools/subagent.rs`
+**변경 파일:** `oxicode-agent/src/tools/subagent.rs`
 
 ```rust
 /// RAII guard: Drop 시 임시 디렉토리 삭제.
@@ -526,7 +526,7 @@ impl Drop for TempDirGuard {
 `run_single_agent` 함수 스코프에 배치:
 
 ```rust
-let tmp_dir = TempDirGuard::new("oxi-subagent")
+let tmp_dir = TempDirGuard::new("oxicode-subagent")
     .map_err(|e| format!("Failed to create temp dir: {}", e))?;
 if !agent.system_prompt.is_empty() {
     std::fs::write(tmp_dir.prompt_path(), &agent.system_prompt)
@@ -541,20 +541,20 @@ if !agent.system_prompt.is_empty() {
 
 ### 항목 7: 프로젝트 에이전트 순회 — .git 경계
 
-**변경 파일:** `oxi-agent/src/tools/subagent.rs`
+**변경 파일:** `oxicode-agent/src/tools/subagent.rs`
 
 ```rust
-/// Walk up from `cwd` to find `.oxi/agents/`.
+/// Walk up from `cwd` to find `.oxicode/agents/`.
 /// Stops at `.git` boundary (project root). Returns None if not found.
 fn find_project_agents_dir(cwd: &Path) -> Option<PathBuf> {
     let mut current = cwd;
     loop {
-        let candidate = current.join(".oxi").join("agents");
+        let candidate = current.join(".oxicode").join("agents");
         if candidate.is_dir() {
             return Some(candidate);
         }
         if current.join(".git").exists() {
-            return None;  // 프로젝트 루트에 도달했는데 .oxi/agents가 없음
+            return None;  // 프로젝트 루트에 도달했는데 .oxicode/agents가 없음
         }
         current = current.parent()?;
     }
@@ -579,7 +579,7 @@ pub fn discover_agents(cwd: &Path, scope: AgentScope) -> Vec<AgentConfig> {
 
 ### 항목 8: 스트리밍 진행 상황
 
-**변경 파일:** `oxi-agent/src/tools/subagent.rs`
+**변경 파일:** `oxicode-agent/src/tools/subagent.rs`
 
 ```rust
 type ProgressFn = Arc<dyn Fn(String) + Send + Sync>;
@@ -646,13 +646,13 @@ E, G, H는 subagent.rs 내부 변경이므로 **한 번에 통합 구현** 권�
 ## 파일 변경 요약
 
 ```
-oxi-cli/src/cli.rs                  — 인자 5개 추가
-oxi-cli/src/main.rs                 — --mode 분기, ToolRegistry 구성, 도구 등록
-oxi-cli/src/lib.rs                  — App (변경 없음, 도구 등록은 main에서)
-oxi-cli/src/tui_interactive.rs      — tool_registry 전달
-oxi-cli/src/agent_session_runtime.rs — tool_registry 옵션 필드
-oxi-cli/src/print_mode.rs           — Usage 이벤트 JSON 출력
-oxi-agent/Cargo.toml              — libc (unix) 추가
-oxi-agent/src/tools.rs              — with_selected_tools() 추가
-oxi-agent/src/tools/subagent.rs     — 항목 3,4,5,6,7,8 통합 개선
+oxicode-cli/src/cli.rs                  — 인자 5개 추가
+oxicode-cli/src/main.rs                 — --mode 분기, ToolRegistry 구성, 도구 등록
+oxicode-cli/src/lib.rs                  — App (변경 없음, 도구 등록은 main에서)
+oxicode-cli/src/tui_interactive.rs      — tool_registry 전달
+oxicode-cli/src/agent_session_runtime.rs — tool_registry 옵션 필드
+oxicode-cli/src/print_mode.rs           — Usage 이벤트 JSON 출력
+oxicode-agent/Cargo.toml              — libc (unix) 추가
+oxicode-agent/src/tools.rs              — with_selected_tools() 추가
+oxicode-agent/src/tools/subagent.rs     — 항목 3,4,5,6,7,8 통합 개선
 ```

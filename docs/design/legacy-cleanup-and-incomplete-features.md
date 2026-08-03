@@ -1,7 +1,7 @@
 # Legacy Cleanup & Incomplete Features Audit
 
 **Date**: 2026-06-01
-**Scope**: oxi + oxios 전체
+**Scope**: oxicode + oxios 전체
 **Purpose**: 미완성 기능, 레거시 코드, 과도한 복잡성, dead code를 체계적으로 파악하고 우선순위를 정한다.
 
 ---
@@ -11,7 +11,7 @@
 1. [Incomplete Features — 연결만 하면 작동](#1-incomplete-features--연결만-하면-작동)
 2. [Incomplete Features — 로직이 없음](#2-incomplete-features--로직이-없음)
 3. [Skeleton Features — 인프라만 있고 실제 구현이 없음](#3-skeleton-features--인프라만-있고-실제-구현이-없음)
-4. [Mislayered Dependency — oxi-cli의 불필요한 oxi-sdk 의존](#4-mislayered-dependency--oxi-cli의-불필요한-oxi-sdk-의존)
+4. [Mislayered Dependency — oxicode-cli의 불필요한 oxicode-sdk 의존](#4-mislayered-dependency--oxicode-cli의-불필요한-oxicode-sdk-의존)
 5. [Redundant Re-export Layer — oxios-kernel lib.rs](#5-redundant-re-export-layer--oxios-kernel-librs)
 6. [Dead Code — 호출되지 않는 함수/타입](#6-dead-code--호출되지-않는-함수타입)
 7. [Summary Table](#7-summary-table)
@@ -22,12 +22,12 @@
 
 ### 1.1 TUI 세션 브랜치 전환
 
-**Location**: `oxi-cli/src/tui/handlers.rs:987`
+**Location**: `oxicode-cli/src/tui/handlers.rs:987`
 **Priority**: 🔴 High (사용자가 UI에서 선택해도 아무 일이 안 일어남)
 **Effort**: Small (~20줄)
 
 **Current State**:
-- `SessionNavigator` (1451줄)이 `oxi-store/src/session_navigation.rs`에 **완전히 구현**되어 있음 — 트리 순회, 브랜치 찾기, 부모-자식 관리, 브랜치 생성 전부 작동.
+- `SessionNavigator` (1451줄)이 `oxicode-store/src/session_navigation.rs`에 **완전히 구현**되어 있음 — 트리 순회, 브랜치 찾기, 부모-자식 관리, 브랜치 생성 전부 작동.
 - 트리 오버레이 UI도 `tui/overlay/tree_navigator.rs`에 구현되어 있음.
 - 그러나 `OverlayAction::NavigateToEntry` 핸들러에서 실제 브랜치 전환을 하지 않고 notification만 표시:
 
@@ -111,7 +111,7 @@ CLI에 명령어는 있지만 실제 커널 API로 연결이 안 됨.
 
 ### 2.1 Setup 위저드 OAuth 플로우
 
-**Location**: `oxi-cli/src/tui/handlers.rs:1150`
+**Location**: `oxicode-cli/src/tui/handlers.rs:1150`
 **Priority**: 🟡 Medium
 **Effort**: Large
 
@@ -132,9 +132,9 @@ Setup 오버레이에 "API Key"와 "OAuth" 두 선택지가 표시됨. OAuth를 
 아무 OAuth 플로우도 실행하지 않고 바로 provider 선택 화면으로 넘어감. **사용자에게 작동하는 것처럼 보이지만 실제로는 무시됨.**
 
 이미 존재하는 인프라:
-- `AuthCredential::OAuth` 타입 (`oxi-store/src/auth_storage.rs`)
+- `AuthCredential::OAuth` 타입 (`oxicode-store/src/auth_storage.rs`)
 - 토큰 갱신 로직, `save_token`, `load_token`
-- `oxi-ai/src/oauth.rs`의 OAuth 헬퍼
+- `oxicode-ai/src/oauth.rs`의 OAuth 헬퍼
 
 없는 것:
 - 브라우저 리다이렉트 → 콜백 → 토큰 교환 플로우
@@ -251,22 +251,22 @@ pub async fn restore_sessions(&self) -> Result<()> {
 
 ---
 
-## 4. Mislayered Dependency — oxi-cli의 불필요한 oxi-sdk 의존
+## 4. Mislayered Dependency — oxicode-cli의 불필요한 oxicode-sdk 의존
 
-**Location**: `oxi-cli/Cargo.toml`, `oxi-cli/src/lib.rs`
+**Location**: `oxicode-cli/Cargo.toml`, `oxicode-cli/src/lib.rs`
 **Priority**: 🔴 High (빌드 의존성 트리 대폭 감소)
 **Effort**: Small (~30줄 변경)
 
 ### Current State
 
-`oxi-cli/Cargo.toml`:
+`oxicode-cli/Cargo.toml`:
 ```toml
-oxi-sdk = { version = "0.25.5", path = "../oxi-sdk" }
+oxicode-sdk = { version = "0.25.5", path = "../oxicode-sdk" }
 ```
 
-`oxi-cli/src/lib.rs` — `App::new()`:
+`oxicode-cli/src/lib.rs` — `App::new()`:
 ```rust
-let engine = OxiBuilder::new().with_builtins().build();
+let engine = OxicodeBuilder::new().with_builtins().build();
 let _ = engine.resolve_model(...);           // 결과 버림
 let provider = engine.create_provider(...)?; // 실제 사용
 // engine은 App 필드로 저장되지만 다시는 쓰이지 않음
@@ -276,30 +276,30 @@ let provider = engine.create_provider(...)?; // 실제 사용
 
 ### Problem
 
-`create_provider()` 한 번을 위해 oxi-sdk 전체를 빌드 의존성으로 끌어옴. oxi-sdk는 oxi-ai + oxi-agent + oxi-store + security/middleware/observability/workflow_dsl(6500줄)을 포함. oxi-cli는 실제로 oxi-ai, oxi-agent, oxi-store를 **직접 import**해서 사용하고 있음:
+`create_provider()` 한 번을 위해 oxicode-sdk 전체를 빌드 의존성으로 끌어옴. oxicode-sdk는 oxicode-ai + oxicode-agent + oxicode-store + security/middleware/observability/workflow_dsl(6500줄)을 포함. oxicode-cli는 실제로 oxicode-ai, oxicode-agent, oxicode-store를 **직접 import**해서 사용하고 있음:
 
 ```rust
-use oxi_agent::{Agent, AgentConfig, AgentEvent};
-use oxi_ai::{Model, Api, ...};
-use oxi_store::settings::Settings;
+use oxicode_agent::{Agent, AgentConfig, AgentEvent};
+use oxicode_ai::{Model, Api, ...};
+use oxicode_store::settings::Settings;
 ```
 
-oxi-sdk를 통한 간접 접근이 아니라 처음부터 직접 사용 중.
+oxicode-sdk를 통한 간접 접근이 아니라 처음부터 직접 사용 중.
 
 ### Why This Happened
 
-초기에 oxi-cli를 oxi-sdk 기반으로 마이그레이션하려 했으나, 실제로는 oxi-sdk의 기능(엔진 빌더) 하나만 쓰고 나머지는 여전히 하위 크레이트를 직접 사용.
+초기에 oxicode-cli를 oxicode-sdk 기반으로 마이그레이션하려 했으나, 실제로는 oxicode-sdk의 기능(엔진 빌더) 하나만 쓰고 나머지는 여전히 하위 크레이트를 직접 사용.
 
 ### Target State
 
 ```rust
 // Before:
-use oxi_sdk::OxiBuilder;
-let engine = OxiBuilder::new().with_builtins().build();
+use oxicode_sdk::OxicodeBuilder;
+let engine = OxicodeBuilder::new().with_builtins().build();
 let provider = engine.create_provider(&provider_name)?;
 
 // After:
-use oxi_ai::{create_builtin_provider_with_options, create_builtin_provider};
+use oxicode_ai::{create_builtin_provider_with_options, create_builtin_provider};
 let provider = create_builtin_provider_with_options(&provider_name, api_key, base_url)
     .or_else(|_| create_builtin_provider(&provider_name))
     .map(Arc::from)?;
@@ -307,18 +307,18 @@ let provider = create_builtin_provider_with_options(&provider_name, api_key, bas
 
 ### Changes Required
 
-1. `oxi-cli/Cargo.toml`에서 `oxi-sdk` 의존성 제거.
-2. `lib.rs`에서 `use oxi_sdk::OxiBuilder` 제거.
-3. `App` 구조체에서 `engine: oxi_sdk::Oxi` 필드 제거.
+1. `oxicode-cli/Cargo.toml`에서 `oxicode-sdk` 의존성 제거.
+2. `lib.rs`에서 `use oxicode_sdk::OxicodeBuilder` 제거.
+3. `App` 구조체에서 `engine: oxicode_sdk::Oxicode` 필드 제거.
 4. `App::engine()` 메서드 제거.
-5. `App::new()`에서 provider 생성을 `oxi_ai::create_builtin_provider_with_options`로 교체.
-6. `model_db::register_model` / `model_db::get_provider_models` 등 model_db 함수는 이미 `oxi-ai`에 있으므로 직접 사용.
+5. `App::new()`에서 provider 생성을 `oxicode_ai::create_builtin_provider_with_options`로 교체.
+6. `model_db::register_model` / `model_db::get_provider_models` 등 model_db 함수는 이미 `oxicode-ai`에 있으므로 직접 사용.
 
 ### Impact
 
-- 빌드 의존성 트리에서 oxi-sdk + 그 하위 모듈(security, middleware, observability, workflow_dsl) 제거.
-- oxi-cli 컴파일 시간 감소.
-- 의존성 방향 명확화: oxi-cli → oxi-ai, oxi-agent, oxi-store (직접).
+- 빌드 의존성 트리에서 oxicode-sdk + 그 하위 모듈(security, middleware, observability, workflow_dsl) 제거.
+- oxicode-cli 컴파일 시간 감소.
+- 의존성 방향 명확화: oxicode-cli → oxicode-ai, oxicode-agent, oxicode-store (직접).
 
 ---
 
@@ -330,14 +330,14 @@ let provider = create_builtin_provider_with_options(&provider_name, api_key, bas
 
 ### Current State
 
-`lib.rs`에 3개의 oxi_sdk re-export 블록이 있음:
+`lib.rs`에 3개의 oxicode_sdk re-export 블록이 있음:
 
 **Block 1** — Top-level re-export (25개):
 ```rust
-pub use oxi_sdk::{
+pub use oxicode_sdk::{
     Agent, AgentConfig, AgentEvent, AgentTool, AgentToolResult,
     CircuitBreakerConfig, KernelToolProvider, MessageBus, MiddlewarePipeline,
-    Model, Oxi, OxiBuilder, Provider, ProviderCircuitBreaker, ProviderOptions,
+    Model, Oxicode, OxicodeBuilder, Provider, ProviderCircuitBreaker, ProviderOptions,
     RoutingControl, ToolContext, ToolError, ToolExecutionMode, ToolRegistry,
 };
 ```
@@ -345,7 +345,7 @@ pub use oxi_sdk::{
 **Block 2** — `sdk_exports` 모듈 (33개):
 ```rust
 pub mod sdk_exports {
-    pub use oxi_sdk::{
+    pub use oxicode_sdk::{
         AgentBuilder, AgentGroup as SdkAgentGroup, AgentHandle, ...
     };
 }
@@ -353,7 +353,7 @@ pub mod sdk_exports {
 
 **Block 3** — `coordination.rs` re-export (16개):
 ```rust
-pub use oxi_sdk::{
+pub use oxicode_sdk::{
     Consensus, CoordinatedGroup, CoordinatedGroupBuilder, GroupResult,
     MemoryEntry, MemoryEvent, MemoryKey, SharedMemory, VoteResult,
     WorkEvent, WorkItem, WorkQueue, WorkQueueConfig, ...
@@ -362,27 +362,27 @@ pub use oxi_sdk::{
 
 **Block 4** — `CircuitBreaker` alias (1개):
 ```rust
-pub use oxi_sdk::ProviderCircuitBreaker as CircuitBreaker;
+pub use oxicode_sdk::ProviderCircuitBreaker as CircuitBreaker;
 ```
 
 ### Problem
 
-oxios 프로젝트 내의 모든 코드가 `use oxi_sdk::X`로 **직접 참조**. `oxios_kernel::Agent`, `oxios_kernel::sdk_exports::*`, `oxios_kernel::coordination::Consensus` 등으로 접근하는 곳이 **프로젝트 전체에 0개**.
+oxios 프로젝트 내의 모든 코드가 `use oxicode_sdk::X`로 **직접 참조**. `oxios_kernel::Agent`, `oxios_kernel::sdk_exports::*`, `oxios_kernel::coordination::Consensus` 등으로 접근하는 곳이 **프로젝트 전체에 0개**.
 
-다른 crate (oxios-cli, oxios-web, oxios-ouroboros)도 각자 직접 `oxi-sdk`를 의존하고 있어서 `oxios_kernel`을 통한 간접 접근이 필요 없음.
+다른 crate (oxios-cli, oxios-web, oxios-ouroboros)도 각자 직접 `oxicode-sdk`를 의존하고 있어서 `oxios_kernel`을 통한 간접 접근이 필요 없음.
 
 추가 문제: `MemoryEntry`가 `coordination.rs`와 `memory/mod.rs` 양쪽에서 re-export되어 **이름 충돌 위험**.
 
 ### Target State
 
-- Block 1 (top-level 25개): 제거. 내부에서는 이미 `use oxi_sdk::`로 직접 참조 중.
+- Block 1 (top-level 25개): 제거. 내부에서는 이미 `use oxicode_sdk::`로 직접 참조 중.
 - Block 2 (`sdk_exports` 모듈): **모듈 전체 제거.** 소비자 0.
 - Block 3 (`coordination.rs` re-export): 제거. `MemoryEntry` 충돌 해소.
 - Block 4 (`CircuitBreaker` alias): 제거. 소비자 0.
 
 ### Rationale
 
-이것은 "SDK 완성도"가 아님. oxios-kernel은 oxi_sdk의 re-exporter가 아니라 자체 로직을 가진 크레이트. 다른 crate이 oxi_sdk 타입이 필요하면 각자 `oxi-sdk`를 의존하면 됨 (이미 그렇게 하고 있음).
+이것은 "SDK 완성도"가 아님. oxios-kernel은 oxicode_sdk의 re-exporter가 아니라 자체 로직을 가진 크레이트. 다른 crate이 oxicode_sdk 타입이 필요하면 각자 `oxicode-sdk`를 의존하면 됨 (이미 그렇게 하고 있음).
 
 ---
 
@@ -442,16 +442,16 @@ pub fn c(&self) -> f64 { self.curvature }
 
 | # | 항목 | 분류 | 위치 | Priority | Effort | Blocker |
 |---|------|------|------|----------|--------|---------|
-| 1 | 세션 브랜치 전환 | 미완성(연결) | oxi-cli/handlers.rs:987 | 🔴 High | S | 없음 |
+| 1 | 세션 브랜치 전환 | 미완성(연결) | oxicode-cli/handlers.rs:987 | 🔴 High | S | 없음 |
 | 2 | Web chat tool_calls | 미완성(연결) | oxios-web/chat.rs | 🟡 Medium | M | 커널 API |
 | 3 | Web A2A 로깅 | 미완성(연결) | oxios-web/a2a.rs | 🟢 Low | S | 커널 API |
 | 4 | CLI 모델/페르소나 전환 | 미완성(연결) | oxios-cli/interactive.rs | 🟡 Medium | M | 커널 API |
-| 5 | Setup OAuth 플로우 | 미완성(로직) | oxi-cli/handlers.rs:1150 | 🟡 Medium | L | 없음 |
+| 5 | Setup OAuth 플로우 | 미완성(로직) | oxicode-cli/handlers.rs:1150 | 🟡 Medium | L | 없음 |
 | 6 | WorkerManager 12개 | Skeleton | oxios-kernel/workers/ | 🟢 Low | XL | 없음 |
 | 7 | WasmSandbox (feature off) | Skeleton | oxios-kernel/wasm_sandbox.rs | 🟢 Low | — | 없음 |
 | 8 | Memory 5단계 압축 | Skeleton | oxios-kernel/memory/compaction.rs | 🟢 Low | L | 없음 |
 | 9 | Orchestrator 세션 복원 | Skeleton | oxios-kernel/orchestrator.rs | 🟡 Medium | M | 없음 |
-| 10 | oxi-cli → oxi-sdk 의존 | Mislayered | oxi-cli/Cargo.toml | 🔴 High | S | 없음 |
+| 10 | oxicode-cli → oxicode-sdk 의존 | Mislayered | oxicode-cli/Cargo.toml | 🔴 High | S | 없음 |
 | 11 | lib.rs dead re-export 74개 | Redundant | oxios-kernel/lib.rs | 🟡 Medium | S | 없음 |
 | 12 | degraded_seed() | Dead code | oxios-ouroboros/degraded.rs | 🟢 Low | — | 없음 |
 | 13 | record_access() | Dead code | oxios-kernel/memory/auto_protect.rs | 🟢 Low | — | 없음 |
@@ -461,7 +461,7 @@ pub fn c(&self) -> f64 { self.curvature }
 
 ## Recommended Action Order
 
-1. **#10** oxi-cli → oxi-sdk 의존 정리 — 즉시, 빌드 시간 감소 효과 큼
+1. **#10** oxicode-cli → oxicode-sdk 의존 정리 — 즉시, 빌드 시간 감소 효과 큼
 2. **#1** 세션 브랜치 전환 연결 — 즉시, 작업량 적고 사용자 경험 개선 큼
 3. **#11** oxios-kernel dead re-export 정리 — 즉시, 코드 정리
 4. **#5** Setup OAuth — #5a (OAuth 선택지 숨기기) 또는 #5b (실제 구현) 결정

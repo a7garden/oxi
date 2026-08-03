@@ -1,6 +1,6 @@
 ---
 name: sdk-final-fixes
-description: Fix remaining oxi-sdk build errors
+description: Fix remaining oxicode-sdk build errors
 tools: read, edit, write, bash
 model: anthropic/claude-sonnet-4-20250514
 systemPromptMode: replace
@@ -9,9 +9,9 @@ inheritSkills: false
 defaultContext: fresh
 ---
 
-Fix all remaining Rust compilation errors in oxi-sdk.
+Fix all remaining Rust compilation errors in oxicode-sdk.
 
-Run: cargo build -p oxi-sdk 2>&1
+Run: cargo build -p oxicode-sdk 2>&1
 
 The errors reported are:
 1. E0195 - lifetime mismatch: `async fn handle(&self, ctx: &MiddlewareContext) -> MiddlewareResult` in builtins.rs vs trait
@@ -29,9 +29,9 @@ First run cargo build, read all errors, then read the specific files and fix eac
 Important: Read the existing files before editing. Do targeted fixes only.
 
 Key files to check:
-- oxi-sdk/src/middleware/builtins.rs
-- oxi-sdk/src/middleware/mod.rs
-- oxi-sdk/src/observability/audit.rs
-- oxi-sdk/src/observability/cost.rs
+- oxicode-sdk/src/middleware/builtins.rs
+- oxicode-sdk/src/middleware/mod.rs
+- oxicode-sdk/src/observability/audit.rs
+- oxicode-sdk/src/observability/cost.rs
 
-After fixing all errors, run cargo build -p oxi-sdk and then cargo test -p oxi-sdk
+After fixing all errors, run cargo build -p oxicode-sdk and then cargo test -p oxicode-sdk

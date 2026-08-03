@@ -12,17 +12,17 @@
 
 > **상태:** v2.0 착륙 완료. G1(스펙 비준수) 및 D-rev1(trait 재설계) 모두 코드·실험로 검증.
 
-**착륙한 변경 (`oxi-agent/src/mcp/`):**
+**착륙한 변경 (`oxicode-agent/src/mcp/`):**
 - `transport/mod.rs` — `McpTransport` trait 재설계: `request(id, json)` / `notify(json)` / `set_inbound_handler` / `close` / `is_connected`. `send`/`recv` 모델 폐기. `InboundHandler` 타입 별도 노출.
 - `transport/stdio.rs` — **JSONL 프레이밍**(스펙 준수), `Content-Length` 완전 제거. `request()` 루프에서 인바운드 디스패치 + id 매칭. `MAX_LINE_SIZE=10MB` 상한으로 `fill_buf`/`consume` 기반 경계 보장. SIGTERM→5s→SIGKILL 종료 유지.
 - `client.rs` — `send_request`를 `transport.request(id, json)` 한 줄로 축소. `drain_orphaned_responses` 제거. `transport.send→notify` 마이그레이션. 데드 `write_framed`/`read_framed` 제거. `connect_with_transport`에서 `default_inbound_handler()` 설치.
 - `default_inbound_handler()` — `ping`→`{"result":{}}`, `roots/list`→`{"result":{"roots":[]}}`, 그 외→`-32601`. 알림은 무응답. v2.1에서 G4 전체 처리로 확장.
 
 **검증:**
-- `cargo build -p oxi-agent` ✅ (lib 컴파일, 사전 존재 `missing_docs` 경고만)
-- `cargo test -p oxi-agent --test mcp_stdio_interop --no-run` ✅ (테스트 바이너리 생성)
-- `cargo test -p oxi-agent --test mcp_stdio_interop -- --ignored` ✅ — **`@modelcontextprotocol/server-everything`** stdio 서버에 대해 initialize → `tools/list` (비어있지 않음) → `ping` 왕복 성공 (3.04s). G1 종결의 결정적 증거.
-- `cargo clippy -p oxi-agent --lib -- -A missing_docs` — `mcp/` 경로 진단 **0건** (모든 경고는 사전 존재 `tools/{edit,hashline_fs,todo}.rs`).
+- `cargo build -p oxicode-agent` ✅ (lib 컴파일, 사전 존재 `missing_docs` 경고만)
+- `cargo test -p oxicode-agent --test mcp_stdio_interop --no-run` ✅ (테스트 바이너리 생성)
+- `cargo test -p oxicode-agent --test mcp_stdio_interop -- --ignored` ✅ — **`@modelcontextprotocol/server-everything`** stdio 서버에 대해 initialize → `tools/list` (비어있지 않음) → `ping` 왕복 성공 (3.04s). G1 종결의 결정적 증거.
+- `cargo clippy -p oxicode-agent --lib -- -A missing_docs` — `mcp/` 경로 진단 **0건** (모든 경고는 사전 존재 `tools/{edit,hashline_fs,todo}.rs`).
 
 **잔여:** v2.0 완결. v2.1–v2.4는 아래 "v2.1–v2.4 구현 결과" 절 참조.
 
@@ -39,8 +39,8 @@
 - `tests/mcp_http_interop.rs` *(신규, `#[ignore]`)* — 의존성 없는 목 TCP 서버로 Streamable HTTP initialize + `tools/list` 왕복 검증. **G2 종결 증거.**
 - **의도적 축소:** 배경 GET SSE 리스너(server-push between requests)는 `Arc<Self>` 수명 문제로 v2.1에서 제외 — POST-SSE 응답 스트림 내 인바운드 디스패치는 처리. 사양 브라우저 OAuth authorization-code 플로우는 미구현(client_credentials만). 옛 HTTP+SSE(2024-11-05) 역호환 폴백 생략.
 
-### v2.2 — OAuth client_credentials + oxi-cli 백엔드
-- `oxi-cli/src/mcp_credentials.rs` *(신규)* — `FileMcpCredentialProvider`: `mcp.json`의 `oauth` 블록(`tokenUrl`/`clientId`/`clientSecret`/`scope`)에서 OAuth2 **client_credentials** 교환, 토큰 캐시(`~/.config/oxi/mcp-tokens.json`, atomic write), `expires_in` 기반 만료/자동갱신.
+### v2.2 — OAuth client_credentials + oxicode-cli 백엔드
+- `oxicode-cli/src/mcp_credentials.rs` *(신규)* — `FileMcpCredentialProvider`: `mcp.json`의 `oauth` 블록(`tokenUrl`/`clientId`/`clientSecret`/`scope`)에서 OAuth2 **client_credentials** 교환, 토큰 캐시(`~/.config/oxicode/mcp-tokens.json`, atomic write), `expires_in` 기반 만료/자동갱신.
 - `types.rs` — `OAuthConfig` + `ServerEntry.oauth` 필드.
 - `bootstrap.rs` — `build_app`에서 `mcp.json` oauth 맵 → provider 생성 → `manager.set_credential_provider(...)`.
 - `McpManager::reauth_server(server)` + `/mcp reauth <server>` 슬래시 명령(tools_commands.rs) — 토큰 강제 갱신.
@@ -53,11 +53,11 @@
 
 ### v2.4 — 서드파티 config opt-in 발견
 - `types.rs` — `McpSettings.discover_external_configs`(기본 false).
-- `config.rs` — `load_mcp_config_from`가 활성화 시 `.claude/mcp.json`·`.cursor/mcp.json` 흡수(oxi 자체가 항상 승리, 외부는 빈 슬롯만 채움). VSCode(`servers`)/opencode(`mcp`) 스키마 정규화는 v2.4 범위 외.
+- `config.rs` — `load_mcp_config_from`가 활성화 시 `.claude/mcp.json`·`.cursor/mcp.json` 흡수(oxicode 자체가 항상 승리, 외부는 빈 슬롯만 채움). VSCode(`servers`)/opencode(`mcp`) 스키마 정규화는 v2.4 범위 외.
 
 ### 검증 (v2.1–v2.4)
-- `cargo build -p oxi-agent` ✅ · `cargo build -p oxi-cli` ✅ (둘 다 exit 0; 사전 존재 `missing_docs` 경고만)
-- `cargo test -p oxi-agent --test mcp_stdio_interop --test mcp_http_interop -- --ignored` ✅ — **2 passed** (stdio server-everything + HTTP 목). v2.0 회귀 없음.
+- `cargo build -p oxicode-agent` ✅ · `cargo build -p oxicode-cli` ✅ (둘 다 exit 0; 사전 존재 `missing_docs` 경고만)
+- `cargo test -p oxicode-agent --test mcp_stdio_interop --test mcp_http_interop -- --ignored` ✅ — **2 passed** (stdio server-everything + HTTP 목). v2.0 회귀 없음.
 - **제약:** `cargo clippy --workspace --all-targets -- -D warnings`는 사전 존재 결함으로 실패 — (a) `tools/todo.rs:633`의 `&& false`(`clippy::overly_complex_bool_expr`, deny), (b) crate-wide `missing_docs`(~68건, tools.rs/todo.rs). MCP 코드는 warn-수준 스타일 린트(`collapsible_if` 등)만 발생, deny-수준 없음. close()의 MutexGuard-across-await는 수정.
 
 ---
@@ -70,7 +70,7 @@
 | Phase 1: cache · lifecycle · `McpTransport` trait · `spawn()` | P0 | ✅ | `cache.rs`, `lifecycle.rs`, `transport/{mod,stdio}.rs`, `mod.rs:spawn*` |
 | Phase 2: TUI 대시보드 데이터 | P0 | ✅ | `types.rs:McpDashboardData`, `dashboard_data()` |
 | Phase 3: direct tools · consent Allow/Deny | P1 | ✅ | `direct_tool.rs`, `consent.rs`, `excludeTools` |
-| SDK 레이어 (re-export · `with_mcp_config` · `mcp_tools` · `mcp()`) | v3 | ✅ | `oxi-sdk/src/{lib,builder,tool_factory}.rs` |
+| SDK 레이어 (re-export · `with_mcp_config` · `mcp_tools` · `mcp()`) | v3 | ✅ | `oxicode-sdk/src/{lib,builder,tool_factory}.rs` |
 | Phase 4: consent `Ask` 모드 | P2 | ❌ | `ConsentState` = Allow/Deny만 |
 | Phase 5: HTTP/SSE 전송 | P2 | ❌ | `transport/`에 `stdio.rs`만 존재; `url`/`headers` 필드는 dead field |
 
@@ -84,14 +84,14 @@
 
 | # | 갭 | 기존 설계에서의 취급 | 실제 심각도 | 근거 |
 |---|---|---|:---:|---|
-| G1 | **stdio 프레이밍 비준수** | 미언급 | 🔴 **P0(버그)** | 스펙: "Messages are delimited by newlines". oxi는 `Content-Length` 프레이밍(LSP) 사용 → 표준 stdio 서버와 통신 불가 |
+| G1 | **stdio 프레이밍 비준수** | 미언급 | 🔴 **P0(버그)** | 스펙: "Messages are delimited by newlines". oxicode는 `Content-Length` 프레이밍(LSP) 사용 → 표준 stdio 서버와 통신 불가 |
 | G2 | **Streamable HTTP 전송** | Phase 5 "http_sse"(🟢, thin stub) | 🔴 P1 | 기존은 deprecated(2024-11-05) HTTP+SSE 기반. 현재 스펙은 Streamable HTTP(2025-03-26) |
 | G3 | **인증(API key + OAuth)** | 🟢 Low, 설계 없음 | 🔴 P1 | G2와 짝. 없으면 Slack·GitHub Copilot MCP 등 호스팅 서버 사용 불가 |
-| G4 | **서버→클라이언트 요청** 처리 | 미언급 | 🟡 P2 | oxi `recv`는 id 불일치 메시지를 skip만 → `roots/list`·`ping` 응답 안 함 |
+| G4 | **서버→클라이언트 요청** 처리 | 미언급 | 🟡 P2 | oxicode `recv`는 id 불일치 메시지를 skip만 → `roots/list`·`ping` 응답 안 함 |
 | G5 | **resources/prompts** 런타임 통합 | 🟡(메서드만) | 🟡 P2 | `McpClient`에 메서드는 있으나 `McpManager`가 에이전트에 노출 안 함 |
 | G6 | **재연결 안정성**(KeepAlive 과소복원) | 미언급 | 🟡 P2 | KeepAlive가 1회 재연결 실패 후 헬스체크 영구 중단(`mod.rs:653`). lazy는 백오프 정상. 백오프 재시도 + 차단기(2차) 필요 |
 | G7 | **`${VAR}`/`!cmd` 시크릿 해석** | 미언급 | 🟢 P3 | 토큰을 `mcp.json`에 커밋하지 않으려면 필요 |
-| G8 | **서드파티 config 발견** (`.claude` 등) | 미언급 | 🟢 P3(의견 분기) | OMP는 적극 흡수. oxi는 4 고정경로만. 정체성 결정 필요 |
+| G8 | **서드파티 config 발견** (`.claude` 등) | 미언급 | 🟢 P3(의견 분기) | OMP는 적극 흡수. oxicode는 4 고정경로만. 정체성 결정 필요 |
 
 > **핵심 발견은 G1.** 이것은 "부족한 기능"이 아니라 **스펙 비준수 버그**로, 본 설계의 최우선 수정 대상이다.
 
@@ -107,7 +107,7 @@ MCP 스펙(2025-03-26, stdio 전송) 명문:
 
 OMP stdio는 newline-delimited JSON(JSONL)을 사용한다(`omp://mcp-protocol-transports.md`: *"newline-delimited JSON over subprocess stdio"*).
 
-반면 oxi `StdioTransport`(`transport/stdio.rs`)는 LSP 방식을 쓴다:
+반면 oxicode `StdioTransport`(`transport/stdio.rs`)는 LSP 방식을 쓴다:
 
 ```rust
 // 현재 send(): Content-Length 헤더 + 바디 (LSP 프레이밍 — MCP 비준수)
@@ -119,8 +119,8 @@ async fn send(&mut self, json: &str) -> Result<()> {
 // 현재 recv(): Content-Length 헤더를 파싱해 정확히 N 바이트 읽기 (LSP 방식)
 ```
 
-**영향:** 공식 `@modelcontextprotocol/sdk` 및 생태계 대부분의 stdio 서버는 newline-delimited를 기대한다. oxi가 보내는 `Content-Length: ...` 프레임을 표준 서버는 파싱하지 못한다. 실서버 통합 테스트가 없어(기존 설계는 Mock MCP 서버만 가정) 미발견 상태다. `client.rs:461-500`의 `write_framed`/`read_framed`는 `#[allow(dead_code)]`로 이미 미사용 — 이 버그의 잔재다.
-**실증(리뷰):** 공식 `@modelcontextprotocol/server-everything` stdio 서버에 두 프레이밍을 각각 전송해 재현 — Content-Length 프레이밍 = **무응답/행업**, newline-delimited = **즉시 `initialize` 응답**. oxi가 보내는 프레임을 표준 서버가 받아들이지 않음이 확인됐다(추론 아님).
+**영향:** 공식 `@modelcontextprotocol/sdk` 및 생태계 대부분의 stdio 서버는 newline-delimited를 기대한다. oxicode가 보내는 `Content-Length: ...` 프레임을 표준 서버는 파싱하지 못한다. 실서버 통합 테스트가 없어(기존 설계는 Mock MCP 서버만 가정) 미발견 상태다. `client.rs:461-500`의 `write_framed`/`read_framed`는 `#[allow(dead_code)]`로 이미 미사용 — 이 버그의 잔재다.
+**실증(리뷰):** 공식 `@modelcontextprotocol/server-everything` stdio 서버에 두 프레이밍을 각각 전송해 재현 — Content-Length 프레이밍 = **무응답/행업**, newline-delimited = **즉시 `initialize` 응답**. oxicode가 보내는 프레임을 표준 서버가 받아들이지 않음이 확인됐다(추론 아님).
 
 ### 3.2 수정
 
@@ -156,7 +156,7 @@ async fn recv(&mut self) -> Result<RawJsonRpcMessage> {
 ### 3.3 검증 기준(acceptance)
 
 - `npx -y @modelcontextprotocol/server-everything` (또는 `server-filesystem`) stdio 서버와 실제 핸드셰이크 + `tools/list` + `tools/call` 성공.
-- 새 통합 테스트 `oxi-agent/tests/mcp_stdio_interop.rs`: 위 공식 서버를 spawn해 실제 응답 round-trip 검증(기존엔 없었음 — 이 버그의 근본 원인).
+- 새 통합 테스트 `oxicode-agent/tests/mcp_stdio_interop.rs`: 위 공식 서버를 spawn해 실제 응답 round-trip 검증(기존엔 없었음 — 이 버그의 근본 원인).
 - 기존 단위 테스트는 `connect_with_transport` + 인메모리 mock transport로 검증하므로 영향 없음.
 
 ---
@@ -186,7 +186,7 @@ flowchart TD
 
 ```rust
 /// MCP Streamable HTTP 전송 (스펙 2025-03-26).
-/// reqwest 0.12(이미 oxi-agent 의존) 기반.
+/// reqwest 0.12(이미 oxicode-agent 의존) 기반.
 pub struct StreamableHttpTransport {
     endpoint: String,                       // 단일 MCP 엔드포인트
     client: reqwest::Client,
@@ -255,14 +255,14 @@ G2와 짝. HTTP 전송만 있고 인증이 없으면 호스팅 MCP(Slack·GitHub
 
 ### 5.2 크레이트 경계 문제 (핵심 제약)
 
-`oxi-agent`는 `oxi-cli`에 의존할 수 없다(의존 흐름: `oxi-agent ← oxi-cli`). 그런데 **credential 저장소**는 `oxi-cli/src/store/auth_storage.rs`에 있다. OAuth 갱신 플로우는 `McpManager`(oxi-agent) 안에서 일어나야 하므로, credential 조회가 oxi-agent에서 가능해야 한다.
+`oxicode-agent`는 `oxicode-cli`에 의존할 수 없다(의존 흐름: `oxicode-agent ← oxicode-cli`). 그런데 **credential 저장소**는 `oxicode-cli/src/store/auth_storage.rs`에 있다. OAuth 갱신 플로우는 `McpManager`(oxicode-agent) 안에서 일어나야 하므로, credential 조회가 oxicode-agent에서 가능해야 한다.
 
 → 기존 설계 D11(MCP를 port로 만들지 않음)을 존중하되, **MCP에 국한된 좁은 콜백 trait**을 도입:
 
 ```rust
-// oxi-agent/src/mcp/auth.rs (신규)
+// oxicode-agent/src/mcp/auth.rs (신규)
 /// MCP 서버 자격 증명 해결자. noop 기본 구현 = 해석 없음.
-/// oxi-cli이 auth_storage 백엔드로 구현해서 주입.
+/// oxicode-cli이 auth_storage 백엔드로 구현해서 주입.
 #[async_trait]
 pub trait McpCredentialProvider: Send + Sync {
     /// 서버별 OAuth 토큰 조회(갱신 포함). 없으면 None.
@@ -274,7 +274,7 @@ pub struct NoopCredentialProvider;
 #[async_trait] impl McpCredentialProvider for NoopCredentialProvider { /* None */ }
 ```
 
-`McpManager::spawn_with_paths`에 `credential_provider: Arc<dyn McpCredentialProvider>` 추가(기본 `Noop`). oxi-cli bootstrap에서 `auth_storage` 백엔드 구현체 주입. **이것은 SDK port가 아니다** — MCP 모듈 로컬 trait이며, `coding_tools()` 패턴과 일관됨.
+`McpManager::spawn_with_paths`에 `credential_provider: Arc<dyn McpCredentialProvider>` 추가(기본 `Noop`). oxicode-cli bootstrap에서 `auth_storage` 백엔드 구현체 주입. **이것은 SDK port가 아니다** — MCP 모듈 로컬 trait이며, `coding_tools()` 패턴과 일관됨.
 
 ### 5.3 `${VAR}`/`!cmd` 해석 (5.1a)
 
@@ -283,13 +283,13 @@ pub struct NoopCredentialProvider;
 - `${VAR}` / `${VAR:-default}` → 환경변수 치환(미해결 시 리터럴 유지)
 - 값이 `!`로 시작 → 나머지를 셸 명령(10s 타임아웃) 실행, trim한 stdout 사용. 실패/공백 시 해당 엔트리 생략.
 
-`oxi-agent`에 셸 실행은 이미 bash 툴 경로로 있으나 MCP는 경량 `std::process::Command` 직접 사용(툴 인프라 의존 지양).
+`oxicode-agent`에 셸 실행은 이미 bash 툴 경로로 있으나 MCP는 경량 `std::process::Command` 직접 사용(툴 인프라 의존 지양).
 
 ---
 
 ## 6. 🟡 P2 — 프로토콜 완전성: 서버→클라이언트 요청 (G4)
 
-현재 `McpClient::send_request`의 recv 루프(`client.rs:406-427`)는 id 불일치 메시지를 **무조건 skip**한다. 스펙상 서버는 `roots/list`·`ping`·sampling·elicitation 등의 *요청*(method + id)을 보낼 수 있다. oxi는 이에 응답하지 않아 서버가 영구 대기하거나 세션을 끊을 수 있다.
+현재 `McpClient::send_request`의 recv 루프(`client.rs:406-427`)는 id 불일치 메시지를 **무조건 skip**한다. 스펙상 서버는 `roots/list`·`ping`·sampling·elicitation 등의 *요청*(method + id)을 보낼 수 있다. oxicode는 이에 응답하지 않아 서버가 영구 대기하거나 세션을 끊을 수 있다.
 
 ### 6.1 recv 루프 개선
 
@@ -319,12 +319,12 @@ loop {
 | 서버 요청 | 응답 |
 |---|---|
 | `ping` | 빈 결과 `{}` |
-| `roots/list` | 빈 `roots: []`(oxi는 roots 노출 안 함) |
+| `roots/list` | 빈 `roots: []`(oxicode는 roots 노출 안 함) |
 | 그 외 | JSON-RPC `-32601 Method not found` |
 
 ### 6.2 notification 디스패치
 
-`notifications/tools/list_changed` 같은 MCP notification을 `McpManager`로 전달해 캐시/메타데이터를 갱신하는 훅을 추가(OMP의 `#onToolsChanged` 대응). 현재는 무시 → 서버가 툴을 동적으로 추가/제거해도 oxi는 갱신 안 됨.
+`notifications/tools/list_changed` 같은 MCP notification을 `McpManager`로 전달해 캐시/메타데이터를 갱신하는 훅을 추가(OMP의 `#onToolsChanged` 대응). 현재는 무시 → 서버가 툴을 동적으로 추가/제거해도 oxicode는 갱신 안 됨.
 
 ---
 
@@ -372,17 +372,17 @@ OMP처럼 resources/resource-templates를 자동 구독해 에이전트 컨텍�
 
 ### 9.2 서드파티 config 발견 (G8) — **정체성 결정 필요**
 
-OMP는 `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.json`을 흡수한다. oxi는 4개 고정경로(`~/.config/mcp`, `<config>/oxi`, `<cwd>/.mcp.json`, `<cwd>/.oxi/mcp.json`)만 읽는다.
+OMP는 `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.json`을 흡수한다. oxicode는 4개 고정경로(`~/.config/mcp`, `<config>/oxicode`, `<cwd>/.mcp.json`, `<cwd>/.oxicode/mcp.json`)만 읽는다.
 
 **의견 분기(사용자 결정 사항):**
 
 | 옵션 | 장점 | 단점 |
 |---|---|---|
-| A. 흡수하지 않음(현상 유지) | oxi 정체성 명확, 예측 가능 | `.claude` 사용자가 oxi로 이관 시 재설정 |
+| A. 흡수하지 않음(현상 유지) | oxicode 정체성 명확, 예측 가능 | `.claude` 사용자가 oxicode로 이관 시 재설정 |
 | B. **opt-in 흡수**(권장) | 호환성 + 명시적 통제 | 발견 로직 복잡도 증가 |
 | C. OMP처럼 기본 흡수 | 최대 호환성 | 예기치 않은 서버 자동 실행(보안) |
 
-**권장 B:** `settings.discoverExternalConfigs: bool`(기본 `false`). 활성화 시 외부 설정을 읽되 **우선순위는 oxi 자체 > 외부**(`.oxi/mcp.json`이 `.claude`를 덮어씀). 흡수 시 `/mcp` 대시보드에 출처 표시.
+**권장 B:** `settings.discoverExternalConfigs: bool`(기본 `false`). 활성화 시 외부 설정을 읽되 **우선순위는 oxicode 자체 > 외부**(`.oxicode/mcp.json`이 `.claude`를 덮어씀). 흡수 시 `/mcp` 대시보드에 출처 표시.
 
 ---
 
@@ -397,7 +397,7 @@ OMP는 `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.jso
 | **v2.1** | `StreamableHttpTransport`(Streamable HTTP + SSE) | G2 | 🔴 P1 | ~450 | 3일 |
 | **v2.1** | `${VAR}`/`!cmd` 값 해석(config.rs) | G3/G7 | 🔴 P1 | ~120 | 1일 |
 | **v2.1** | API key 인증 + `McpCredentialProvider` trait + noop | G3 | 🔴 P1 | ~150 | 1일 |
-| **v2.2** | OAuth confidential flow + oxi-cli auth_storage 백엔드 + `/mcp reauth` | G3 | 🔴 P1 | ~400 | 3일 |
+| **v2.2** | OAuth confidential flow + oxicode-cli auth_storage 백엔드 + `/mcp reauth` | G3 | 🔴 P1 | ~400 | 3일 |
 | **v2.1** | 서버→클라이언트 요청 응답(ping/roots/list) + notification 디스패치 | G4 | 🔴 P1 | ~200 | 1.5일 |
 | **v2.3** | resources/prompts 게이트웨이 actions | G5 | 🟡 P2 | ~180 | 1일 |
 | **v2.3** | KeepAlive 백오프 재시도 + 차단기(2차) + `/mcp reconnect` reset | G6 | 🟡 P2 | ~150 | 1일 |
@@ -414,7 +414,7 @@ OMP는 `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.jso
 - **D1: stdio 프레이밍은 스펙(JSONL)으로 교체.** `Content-Length`는 LSP 방식이며 MCP 비준수. 프레이밍 바이트는 `StdioTransport`에 국한이나, v2.0에서 trait 재설계(D-rev1, §4.3)와 동시에 반영해 일관성 확보. (G1)
 - **D2: 전송 선택은 `ServerEntry`에서 command vs url로 분기.** `McpClient::connect`를 stdio 전용 `connect_stdio`로 개명하고 공통 진입은 `connect_with_transport`. (G2)
 - **D3: Streamable HTTP(현행 스펙) 채택, 옛 HTTP+SSE 폴백은 v2.1 이후.** 기존 "http_sse" 명칭/설계 폐기. reqwest 0.12(이미 의존) 사용, SSE 프레이머는 직접 구현(새 크레이트 없음). (G2)
-- **D4: 인증은 `McpCredentialProvider` 좁은 trait으로 주입.** SDK port 아님(기존 D11 존중). oxi-cli이 auth_storage 백엔드 제공. (G3)
+- **D4: 인증은 `McpCredentialProvider` 좁은 trait으로 주입.** SDK port 아님(기존 D11 존중). oxicode-cli이 auth_storage 백엔드 제공. (G3)
 - **D5: `${VAR}`/`!cmd` 해석은 config 발견 단계에서 수행.** 전송층이 아닌 config.rs 책임. (G7)
 - **D6: 서버→클라이언트 요청은 보수적 최소 응답.** ping/roots/list만 처리, 나머지 -32601. sampling/elicitation(호스트→LLM)은 v3. (G4)
 - **D7: resources/prompts는 게이트웨이 actions만, 자동 구독/주입은 보류.** 토큰 폭발·데이터 노출 부작용 회피. (G5)
@@ -429,10 +429,10 @@ OMP는 `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.jso
 
 | 크레이트 | 변경 | 비고 |
 |---|---|---|
-| oxi-agent | **변경 없음** | `reqwest 0.12` 이미 의존(Streamable HTTP), SSE 프레이머 직접 구현 |
-| oxi-sdk | MCP 재노출 타입 확장(`StreamableHttpTransport`·`McpCredentialProvider`) | 기존 re-export에 추가 |
-| oxi-cli | `McpCredentialProvider` 구현(auth_storage 백엔드) + `/mcp reauth`·`/mcp resources` 핸들러 | bootstrap에서 주입 |
-| oxi-tui | **변경 없음** | 제네릭 대시보드 위젯 재사용 |
+| oxicode-agent | **변경 없음** | `reqwest 0.12` 이미 의존(Streamable HTTP), SSE 프레이머 직접 구현 |
+| oxicode-sdk | MCP 재노출 타입 확장(`StreamableHttpTransport`·`McpCredentialProvider`) | 기존 re-export에 추가 |
+| oxicode-cli | `McpCredentialProvider` 구현(auth_storage 백엔드) + `/mcp reauth`·`/mcp resources` 핸들러 | bootstrap에서 주입 |
+| oxicode-tui | **변경 없음** | 제네릭 대시보드 위젯 재사용 |
 
 ### 12.2 공개 API 변경
 
@@ -453,18 +453,18 @@ OMP는 `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.jso
 - **R1 — 프레이밍 수정의 기존 동작 영향:** 기존에 Content-Length로 *우연히* 동작하던 비표준 서버가 있으면 깨질 수 있음. 단, 스펙 준수 서버는 없었을 것이므로 실질적 회귀 없음. 통합 테스트로 증빙.
 - **R2 — OAuth 보안:** OAuth credential은 프로필/프로젝트 스코프로 격리 필요(OMP의 url-keyed binding 패턴 참고). 커밋된 `mcp.json` 정의 + 각 환경 자체 credential 모델 채택.
 - **R3 — reqwest 스트리밍 안정성:** SSE 장시간 연결의 백프레셔/재연결. 백그라운드 리스너 실패 시 `onClose`→`McpManager` 재연결 트리거(OMP 패턴 정합).
-- **R4 — OMP 기능 전수입의 유혹:** OMP의 fast-startup gate(250ms + DeferredTool)는 oxi의 *lazy-by-default* 철학과 충돌. oxi는 이미 캐시 기반 오프라인 검색으로 "느린 서버가 부팅 막기"를 해결하므로 **도입하지 않음**. oxi의 차별점(유휴 해제·헬스체크·consent)은 보존.
+- **R4 — OMP 기능 전수입의 유혹:** OMP의 fast-startup gate(250ms + DeferredTool)는 oxicode의 *lazy-by-default* 철학과 충돌. oxicode는 이미 캐시 기반 오프라인 검색으로 "느린 서버가 부팅 막기"를 해결하므로 **도입하지 않음**. oxicode의 차별점(유휴 해제·헬스체크·consent)은 보존.
 - **R5 — 역호환 HTTP+SSE 폴백 생략:** v2.1에서는 현행 Streamable HTTP만. 옛 서버(2024-11-05) 지원이 필요하면 v2.1.1에서 폴백 추가. 마이그레이션 중인 서버가 많지 않으면 연기.
 
 ---
 
 ## 14. 요약
 
-기존 MCP 설계(Phase 1-3 + SDK)는 건강하게 완료됐고, oxi의 자원 관리 모델(유휴 해제·헬스체크·consent)은 OMP에 역수출할 만한 자산이다. **그러나 stdio 프레이밍 비준수(G1)가 가장 시급** — 이것은 결함이지 결핍이 아니다.
+기존 MCP 설계(Phase 1-3 + SDK)는 건강하게 완료됐고, oxicode의 자원 관리 모델(유휴 해제·헬스체크·consent)은 OMP에 역수출할 만한 자산이다. **그러나 stdio 프레이밍 비준수(G1)가 가장 시급** — 이것은 결함이지 결핍이 아니다.
 
 v2 로드맵은 세 축으로 요약된다:
-1. **준수성(G1, P0):** JSONL 전환 → oxi가 처음으로 표준 stdio MCP 서버와 대화 가능.
+1. **준수성(G1, P0):** JSONL 전환 → oxicode가 처음으로 표준 stdio MCP 서버와 대화 가능.
 2. **전송 + 인증(G2/G3, P1):** Streamable HTTP + OAuth → 호스팅 MCP 생태계(Slack·GitHub) 개방.
 3. **완전성(G4-G6, P2):** 양방향 프로토콜 + resources/prompts 노출 + 재연결 안정성.
 
-이 순서로 진행하면, 각 단계가 독립적으로 검증 가능하며 oxi의 lean 정체성을 해치지 않는다.
+이 순서로 진행하면, 각 단계가 독립적으로 검증 가능하며 oxicode의 lean 정체성을 해치지 않는다.

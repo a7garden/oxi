@@ -2,14 +2,14 @@
 
 **날짜**: 2026-07-19
 **상태**: v0.57.1
-**스펙**: `docs/superpowers/specs/2026-07-19-oxi-tui-ux-stability-design.md` §B1
+**스펙**: `docs/superpowers/specs/2026-07-19-oxicode-tui-ux-stability-design.md` §B1
 **선행 조건**: Phase 2 W1 완료 (가상 좌표, FollowMode, sticky)
 
 ---
 
 ## 배경
 
-현재 `oxi-cli/src/tui/handlers.rs:54-66`의 마우스 핸들러는 naive:
+현재 `oxicode-cli/src/tui/handlers.rs:54-66`의 마우스 핸들러는 naive:
 
 ```rust
 MouseEventKind::ScrollUp => state.scroll_up(3),
@@ -22,13 +22,13 @@ MouseEventKind::ScrollDown => state.scroll_down(3),
 - Ghostty: 3 events
 - VS Code: 1 event
 
-grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축소 이식.
+grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxicode 크기로 축소 이식.
 
 ---
 
 ## 이식 범위 (grok 1,443 LOC → ~600 LOC)
 
-1. **EPT 테이블** (events-per-tick): 5개 터미널 환경별 보정값. 환경변수 `OXI_SCROLL_EPT`로 override 가능.
+1. **EPT 테이블** (events-per-tick): 5개 터미널 환경별 보정값. 환경변수 `OXICODE_SCROLL_EPT`로 override 가능.
 2. **Multiplexer 감지**: tmux/screen/zellij는 EPT=1 강제 (SGR 마우스 모드 비활성).
 3. **Stream 기반 gesture grouping**: 80ms 이내 또는 방향 동일 시 한 stream으로 묶음 → flush.
 4. **Acceleration bands**: fast (<8ms) 2.5x, medium (<20ms) 1.6x, base 1.0x.
@@ -39,9 +39,9 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 
 ## 작업 분할 — 4개 커밋
 
-### Commit 1: `feat(oxi-tui): mouse scroll normalizer core`
+### Commit 1: `feat(oxicode-tui): mouse scroll normalizer core`
 
-**신규 모듈** `oxi-tui/src/widgets/chat/mouse.rs`:
+**신규 모듈** `oxicode-tui/src/widgets/chat/mouse.rs`:
 - `pub struct ScrollNormalizer` — EPT + gesture state + history (last 16 events)
 - `pub enum TerminalKind { Iterm2, AppleTerminal, Ghostty, VSCode, Unknown, Multiplexer }`
 - `pub fn detect_terminal() -> TerminalKind` — `TERM_PROGRAM`, `TMUX`, `STY`, `ZELLIJ` env vars
@@ -49,7 +49,7 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 - `ScrollNormalizer::push(event) -> Option<NormalizedScroll>` — 내부에서 flush 결정
 - `ScrollNormalizer::flush() -> Option<NormalizedScroll>` — 누적된 stream을 정제된 delta로 반환
 - `pub struct NormalizedScroll { pub delta_lines: i32, pub direction: ScrollDirection }`
-- 환경변수 override: `OXI_SCROLL_EPT` (1-10), `OXI_SCROLL_MULT=1.0`, `OXI_SCROLL_FLUSH_MS=80`
+- 환경변수 override: `OXICODE_SCROLL_EPT` (1-10), `OXICODE_SCROLL_MULT=1.0`, `OXICODE_SCROLL_FLUSH_MS=80`
 
 **테스트**:
 - EPT 테이블 검증 (5 terminal kinds × expected EPT)
@@ -63,7 +63,7 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 
 ---
 
-### Commit 2: `feat(oxi-tui): wheel/trackpad detection + acceleration bands`
+### Commit 2: `feat(oxicode-tui): wheel/trackpad detection + acceleration bands`
 
 **mouse.rs 확장**:
 - `enum InputDevice { Wheel, Trackpad }`
@@ -82,10 +82,10 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 
 ---
 
-### Commit 3: `feat(oxi-cli): wire scroll normalizer into mouse handler`
+### Commit 3: `feat(oxicode-cli): wire scroll normalizer into mouse handler`
 
 **변경**:
-- `AppState` (in `oxi-cli/src/tui/app.rs`) — `pub scroll_normalizer: ScrollNormalizer`
+- `AppState` (in `oxicode-cli/src/tui/app.rs`) — `pub scroll_normalizer: ScrollNormalizer`
 - `handlers.rs::handle_event`:
   - `ScrollUp`/`ScrollDown` → `state.scroll_normalizer.push(...)` → `state.scroll_normalizer.flush()` 결과에 따라 `state.scroll_up/down(n)`
 - `app.rs::new()`: 초기화 + `ScrollNormalizer::with_terminal(detect_terminal())`
@@ -98,15 +98,15 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 
 ---
 
-### Commit 4: `docs(oxi-tui): terminal_support pattern for EPT overrides`
+### Commit 4: `docs(oxicode-tui): terminal_support pattern for EPT overrides`
 
-**신규** `oxi-tui/src/widgets/chat/terminal_support.rs`:
+**신규** `oxicode-tui/src/widgets/chat/terminal_support.rs`:
 - 문서 + 헬퍼: `fn ept_with_override(kind: TerminalKind) -> u8`
-- `OXI_SCROLL_EPT` 환경변수가 있으면 그것으로, 없으면 테이블 값
-- `OXI_SCROLL_FLUSH_MS=80` (기본값), `OXI_SCROLL_ACCEL=2.5` 등도 문서화
+- `OXICODE_SCROLL_EPT` 환경변수가 있으면 그것으로, 없으면 테이블 값
+- `OXICODE_SCROLL_FLUSH_MS=80` (기본값), `OXICODE_SCROLL_ACCEL=2.5` 등도 문서화
 
 **테스트**:
-- override: `OXI_SCROLL_EPT=5` → EPT=5 반환 (table 무시)
+- override: `OXICODE_SCROLL_EPT=5` → EPT=5 반환 (table 무시)
 - 0/음수/너무 큰 값 → 기본값 fallback
 
 **LOC**: ~50
@@ -118,8 +118,8 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 ### 단위 테스트
 - 4개 commit 합쳐서 신규 테스트 ≥ 20개
 - 기존 388개 + 신규 = ≥ 408개 통과
-- `cargo clippy -p oxi-tui --all-targets -- -D warnings` clean
-- `cargo clippy -p oxi-cli --tests -- -D warnings` clean
+- `cargo clippy -p oxicode-tui --all-targets -- -D warnings` clean
+- `cargo clippy -p oxicode-cli --tests -- -D warnings` clean
 - `cargo fmt --check` clean
 
 ### UX 증상
@@ -128,7 +128,7 @@ grok `input/mouse.rs`(1,443 LOC)이 이미 해결한 패턴을 oxi 크기로 축
 - tmux 안에서 EPT=1 강제 → 예측 가능한 스크롤
 
 ### 환경변수 호환
-- `OXI_SCROLL_EPT=5` env로 override 가능
+- `OXICODE_SCROLL_EPT=5` env로 override 가능
 - invalid value는 silently fallback (default table)
 
 ---

@@ -1,8 +1,8 @@
-# oxi-tui v2 — Plan A: Foundation (Pipeline + Widget Model + Theme)
+# oxicode-tui v2 — Plan A: Foundation (Pipeline + Widget Model + Theme)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the rendering pipeline (`draw_frame` + `CursorState` + `DiffBackend` migration), the widget model (`Renderable` trait + `RetainedTree` + `RenderCtx` with `CursorSlot` tri-state), and the capability-aware theme system — as the first ~2,250 LOC of the new `oxi-tui`.
+**Goal:** Build the rendering pipeline (`draw_frame` + `CursorState` + `DiffBackend` migration), the widget model (`Renderable` trait + `RetainedTree` + `RenderCtx` with `CursorSlot` tri-state), and the capability-aware theme system — as the first ~2,250 LOC of the new `oxicode-tui`.
 
 **Architecture:** Terminal-first pipeline that decomposes `Terminal::draw()` into `autoresize → hash check → render → flush → conditional cursor → swap_buffers` (no fork, no writer thread, no SafeBuf). Retained widget tree with content_hash memoization for proactive skip. Theme split into palette/capability/serializer so capability detection and color downgrade live in the same module (dead-code structural prevention).
 
@@ -12,11 +12,11 @@
 
 ## Global Constraints
 
-- Workspace: oxi monorepo, single crate greenfield rewrite of `oxi-tui` (kept name). Legacy stays as `oxi-tui-legacy` until PR-10 (Plan D).
+- Workspace: oxicode monorepo, single crate greenfield rewrite of `oxicode-tui` (kept name). Legacy stays as `oxicode-tui-legacy` until PR-10 (Plan D).
 - Rust edition: 2024. MSRV per workspace `rust-toolchain.toml`.
 - Every module ≤ 500 LOC (spec §2.4).
-- `cargo fmt --check`, `cargo clippy --workspace --all-targets --exclude oxi-vendor-* -- -D warnings`, `cargo nextest run --workspace`, `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` must pass after every task.
-- `oxi-tui` has zero oxi-* dependencies. Re-export through oxi-tui crate root only.
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets --exclude oxicode-vendor-* -- -D warnings`, `cargo nextest run --workspace`, `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` must pass after every task.
+- `oxicode-tui` has zero oxicode-* dependencies. Re-export through oxicode-tui crate root only.
 - Library crate uses `thiserror::Error` for public error types (AGENTS.md convention).
 - Use `parking_lot::RwLock` over `std::sync::RwLock`; never hold lock guards across `.await` (irrelevant here — pipeline is sync).
 - Atomic file writes via temp + rename for any persistence.
@@ -27,7 +27,7 @@
 ## File Structure
 
 ```
-oxi-tui/                          (NEW tree, replaces old oxi-tui/ contents)
+oxicode-tui/                          (NEW tree, replaces old oxicode-tui/ contents)
 ├── Cargo.toml                    (rewrite — slimmer deps, no tui-markdown, no nucleo)
 ├── README.md                     (rewrite — shorter)
 └── src/
@@ -48,11 +48,11 @@ oxi-tui/                          (NEW tree, replaces old oxi-tui/ contents)
         ├── capability.rs         (TerminalCaps, detect, adapt_theme)
         └── serializer.rs         (load_theme, save_theme TOML)
 
-oxi-tui-legacy/                   (RENAMED from oxi-tui/, contents unchanged)
+oxicode-tui-legacy/                   (RENAMED from oxicode-tui/, contents unchanged)
 └── (existing files, no edits until Plan D PR-10)
 
 Cargo.toml (workspace root)
-└── members list: oxi-tui-legacy added; oxi-tui kept (will be re-populated)
+└── members list: oxicode-tui-legacy added; oxicode-tui kept (will be re-populated)
 ```
 
 ---
@@ -60,100 +60,100 @@ Cargo.toml (workspace root)
 ## Task 1: PR-0 — Workspace scaffold
 
 **Files:**
-- Modify: `Cargo.toml` (workspace root — add `oxi-tui-legacy` to members, keep `oxi-tui`)
-- Rename: `oxi-tui/` → `oxi-tui-legacy/`
-- Create: `oxi-tui/Cargo.toml`
-- Create: `oxi-tui/src/lib.rs`
-- Create: `oxi-tui/README.md`
+- Modify: `Cargo.toml` (workspace root — add `oxicode-tui-legacy` to members, keep `oxicode-tui`)
+- Rename: `oxicode-tui/` → `oxicode-tui-legacy/`
+- Create: `oxicode-tui/Cargo.toml`
+- Create: `oxicode-tui/src/lib.rs`
+- Create: `oxicode-tui/README.md`
 
 **Interfaces:**
-- Produces: empty `oxi-tui` crate at version `0.58.0` that compiles with `cargo check -p oxi-tui`. Legacy continues to work under new name.
+- Produces: empty `oxicode-tui` crate at version `0.58.0` that compiles with `cargo check -p oxicode-tui`. Legacy continues to work under new name.
 
 - [ ] **Step 1: Verify clean tree and create branch**
 
 ```bash
-cd /Volumes/MERCURY/PROJECTS/oxi
+cd /Volumes/MERCURY/PROJECTS/oxicode
 git status
-git checkout -b oxi-tui-v2-foundation
+git checkout -b oxicode-tui-v2-foundation
 ```
 
 Expected: `nothing to commit, working tree clean` (or commit existing work first).
 
-- [ ] **Step 2: Rename oxi-tui to oxi-tui-legacy**
+- [ ] **Step 2: Rename oxicode-tui to oxicode-tui-legacy**
 
 ```bash
-git mv oxi-tui oxi-tui-legacy
+git mv oxicode-tui oxicode-tui-legacy
 ```
 
-- [ ] **Step 3: Update oxi-tui-legacy/Cargo.toml name field**
+- [ ] **Step 3: Update oxicode-tui-legacy/Cargo.toml name field**
 
-Modify `oxi-tui-legacy/Cargo.toml` line 2:
+Modify `oxicode-tui-legacy/Cargo.toml` line 2:
 ```toml
-name = "oxi-tui-legacy"
+name = "oxicode-tui-legacy"
 ```
 (Rest of file unchanged. This is the only edit — package name must match new dir.)
 
 - [ ] **Step 4: Update workspace root Cargo.toml members**
 
-Modify `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` `members` array: rename the existing `"oxi-tui"` entry to `"oxi-tui-legacy"`. **Do NOT add `"oxi-tui"` yet** — the new `oxi-tui/` directory does not exist. We'll add it in Step 8 after the new crate is created.
+Modify `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml` `members` array: rename the existing `"oxicode-tui"` entry to `"oxicode-tui-legacy"`. **Do NOT add `"oxicode-tui"` yet** — the new `oxicode-tui/` directory does not exist. We'll add it in Step 8 after the new crate is created.
 
 ```toml
 members = [
     # ... existing entries ...
-    "oxi-tui-legacy",   # was "oxi-tui"; new oxi-tui added in Step 8
+    "oxicode-tui-legacy",   # was "oxicode-tui"; new oxicode-tui added in Step 8
     # ... rest ...
 ]
 ```
 
-- [ ] **Step 5: Update legacy `oxi-tui-legacy/Cargo.toml` references**
+- [ ] **Step 5: Update legacy `oxicode-tui-legacy/Cargo.toml` references**
 
-The `oxi-tui-legacy/Cargo.toml` `name` field is `"oxi-tui-legacy"` (Step 3). Now update everything that depends on the old name to point at the new name.
+The `oxicode-tui-legacy/Cargo.toml` `name` field is `"oxicode-tui-legacy"` (Step 3). Now update everything that depends on the old name to point at the new name.
 
-**5a — `oxi-cli/Cargo.toml`** (and any other workspace crate depending on oxi-tui): change the dependency from `oxi-tui` to `oxi-tui-legacy`. For path deps:
+**5a — `oxicode-cli/Cargo.toml`** (and any other workspace crate depending on oxicode-tui): change the dependency from `oxicode-tui` to `oxicode-tui-legacy`. For path deps:
 
 ```toml
-oxi-tui-legacy = { path = "../oxi-tui-legacy" }
+oxicode-tui-legacy = { path = "../oxicode-tui-legacy" }
 ```
 
-**5b — Rust source files (★ CRITICAL: underscore form)**. Rust source uses `oxi_tui` (underscore) — NOT `oxi-tui`. A hyphen-only grep misses every `.rs` file. Scan with both forms:
+**5b — Rust source files (★ CRITICAL: underscore form)**. Rust source uses `oxicode_tui` (underscore) — NOT `oxicode-tui`. A hyphen-only grep misses every `.rs` file. Scan with both forms:
 
 ```bash
 # Hyphen form (Cargo.toml, rare .rs string literals)
-grep -rln 'oxi-tui' --include='*.toml' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxi/ \
-  | grep -v 'oxi-tui-legacy\|target/\|Cargo.lock\|docs/'
+grep -rln 'oxicode-tui' --include='*.toml' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxicode/ \
+  | grep -v 'oxicode-tui-legacy\|target/\|Cargo.lock\|docs/'
 
 # Underscore form (Rust use statements, paths, types) — this is the bulk
-grep -rln 'oxi_tui' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxi/ \
-  | grep -v 'oxi-tui-legacy\|target/'
+grep -rln 'oxicode_tui' --include='*.rs' /Volumes/MERCURY/PROJECTS/oxicode/ \
+  | grep -v 'oxicode-tui-legacy\|target/'
 ```
 
-Expected underscore-form hits (verified 2026-07-21): **27 files in `oxi-cli/src/`** including:
-- `oxi-cli/src/main.rs`, `setup_wizard.rs`, `store/settings.rs`
-- `oxi-cli/src/tui/{app.rs, handlers.rs, render.rs, welcome.rs}`
-- `oxi-cli/src/tui/overlay/*.rs` (18 files: ask, factories, extensions, fork_select, mcp_config, mcp_dashboard, model_select_inline, provider_select, roles_config, router_setup, settings, text_viewer, tree_navigator, mod, anchor, issues_panel/{mod,input,render})
-- `oxi-cli/src/tui/slash/builtin/{export_grp,clipboard}.rs`
+Expected underscore-form hits (verified 2026-07-21): **27 files in `oxicode-cli/src/`** including:
+- `oxicode-cli/src/main.rs`, `setup_wizard.rs`, `store/settings.rs`
+- `oxicode-cli/src/tui/{app.rs, handlers.rs, render.rs, welcome.rs}`
+- `oxicode-cli/src/tui/overlay/*.rs` (18 files: ask, factories, extensions, fork_select, mcp_config, mcp_dashboard, model_select_inline, provider_select, roles_config, router_setup, settings, text_viewer, tree_navigator, mod, anchor, issues_panel/{mod,input,render})
+- `oxicode-cli/src/tui/slash/builtin/{export_grp,clipboard}.rs`
 
-For each hit, do a global replace `oxi_tui` → `oxi_tui_legacy` (in `use` statements, fully-qualified paths, type references). Use `sed -i '' 's/oxi_tui/oxi_tui_legacy/g'` per file, or an editor macro. Do NOT touch `oxi_tui_legacy` itself (the new crate's own source — there is none yet).
+For each hit, do a global replace `oxicode_tui` → `oxicode_tui_legacy` (in `use` statements, fully-qualified paths, type references). Use `sed -i '' 's/oxicode_tui/oxicode_tui_legacy/g'` per file, or an editor macro. Do NOT touch `oxicode_tui_legacy` itself (the new crate's own source — there is none yet).
 
 - [ ] **Step 6: Verify legacy crate builds under new name**
 
-Run: `cargo check -p oxi-tui-legacy`
+Run: `cargo check -p oxicode-tui-legacy`
 Expected: `Finished` with no errors.
 
-Run: `cargo check -p oxi-cli`
-Expected: `Finished` (oxi-cli now depends on oxi-tui-legacy, all `oxi_tui_legacy::` paths resolve).
+Run: `cargo check -p oxicode-cli`
+Expected: `Finished` (oxicode-cli now depends on oxicode-tui-legacy, all `oxicode_tui_legacy::` paths resolve).
 
-**★ Do NOT run `cargo check --workspace` yet** — `oxi-tui` is still not in members (Step 4 deliberately omitted it). The workspace check happens after Step 8.
-- [ ] **Step 7: Create empty new oxi-tui crate**
+**★ Do NOT run `cargo check --workspace` yet** — `oxicode-tui` is still not in members (Step 4 deliberately omitted it). The workspace check happens after Step 8.
+- [ ] **Step 7: Create empty new oxicode-tui crate**
 
-Create `oxi-tui/Cargo.toml`:
+Create `oxicode-tui/Cargo.toml`:
 ```toml
 [package]
-name = "oxi-tui"
+name = "oxicode-tui"
 version = "0.58.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Terminal UI rendering pipeline and widget library for oxi (v2 — terminal-first pipeline)"
+description = "Terminal UI rendering pipeline and widget library for oxicode (v2 — terminal-first pipeline)"
 readme = "README.md"
 license = "MIT"
 authors = ["a7garden <a7garden@icloud.com>"]
@@ -191,9 +191,9 @@ linkify = { workspace = true }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 ```
 
-Create `oxi-tui/src/lib.rs`:
+Create `oxicode-tui/src/lib.rs`:
 ```rust
-//! oxi-tui v2 — terminal-first rendering pipeline + widget library.
+//! oxicode-tui v2 — terminal-first rendering pipeline + widget library.
 //!
 //! Greenfield rewrite. See `docs/superpowers/specs/2026-07-21-tui-render-pipeline-redesign.md`.
 //!
@@ -211,50 +211,50 @@ Create `oxi-tui/src/lib.rs`:
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 ```
 
-Create `oxi-tui/README.md` (one paragraph):
+Create `oxicode-tui/README.md` (one paragraph):
 ```markdown
-# oxi-tui v2
+# oxicode-tui v2
 
-Terminal-first rendering pipeline and widget library for oxi. Decomposes ratatui's `Terminal::draw()` to own the frame lifecycle (cursor blink preservation, proactive skip via content_hash memoization). See `docs/superpowers/specs/2026-07-21-tui-render-pipeline-redesign.md` for design.
+Terminal-first rendering pipeline and widget library for oxicode. Decomposes ratatui's `Terminal::draw()` to own the frame lifecycle (cursor blink preservation, proactive skip via content_hash memoization). See `docs/superpowers/specs/2026-07-21-tui-render-pipeline-redesign.md` for design.
 
 MIT licensed. Clean-room — no upstream code copied.
 ```
 
-- [ ] **Step 8: Add new oxi-tui to workspace and verify**
+- [ ] **Step 8: Add new oxicode-tui to workspace and verify**
 
-**8a** — Modify `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml` members: add `"oxi-tui"` alongside `"oxi-tui-legacy"`. Now both are workspace members.
+**8a** — Modify `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml` members: add `"oxicode-tui"` alongside `"oxicode-tui-legacy"`. Now both are workspace members.
 
 ```toml
 members = [
     # ... existing entries ...
-    "oxi-tui",
-    "oxi-tui-legacy",
+    "oxicode-tui",
+    "oxicode-tui-legacy",
     # ... rest ...
 ]
 ```
 
-**8b** — Run: `cargo check -p oxi-tui`
+**8b** — Run: `cargo check -p oxicode-tui`
 Expected: `Finished` (empty lib compiles).
 
 **8c** — Run: `cargo check --workspace`
-Expected: `Finished` — both old (legacy) and new (empty) oxi-tui resolve, oxi-cli compiles against legacy.
+Expected: `Finished` — both old (legacy) and new (empty) oxicode-tui resolve, oxicode-cli compiles against legacy.
 
 **8d** — Run: `cargo fmt --all -- --check`
 Expected: clean.
 
-**8e** — Run: `cargo clippy --workspace --all-targets --exclude oxi-vendor-* -- -D warnings`
+**8e** — Run: `cargo clippy --workspace --all-targets --exclude oxicode-vendor-* -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add -A
-git commit -m "feat(oxi-tui): scaffold v2 crate, rename legacy to oxi-tui-legacy
+git commit -m "feat(oxicode-tui): scaffold v2 crate, rename legacy to oxicode-tui-legacy
 
-- oxi-tui/ renamed to oxi-tui-legacy/ (keeps working under new name)
-- new empty oxi-tui/ crate at v0.58.0 with slimmed deps (no tui-markdown, no nucleo)
+- oxicode-tui/ renamed to oxicode-tui-legacy/ (keeps working under new name)
+- new empty oxicode-tui/ crate at v0.58.0 with slimmed deps (no tui-markdown, no nucleo)
 - workspace members list updated
-- all callsites updated to depend on oxi-tui-legacy temporarily
+- all callsites updated to depend on oxicode-tui-legacy temporarily
 
 Plan A PR-0 of docs/superpowers/specs/2026-07-21-tui-render-pipeline-redesign.md"
 ```
@@ -264,16 +264,16 @@ Plan A PR-0 of docs/superpowers/specs/2026-07-21-tui-render-pipeline-redesign.md
 ## Task 2: PR-1 — CursorSlot tri-state enum
 
 **Files:**
-- Create: `oxi-tui/src/pipeline/mod.rs`
-- Create: `oxi-tui/src/pipeline/cursor_slot.rs`
-- Modify: `oxi-tui/src/lib.rs`
+- Create: `oxicode-tui/src/pipeline/mod.rs`
+- Create: `oxicode-tui/src/pipeline/cursor_slot.rs`
+- Modify: `oxicode-tui/src/lib.rs`
 
 **Interfaces:**
 - Produces: `pub enum CursorSlot { NotSet, Show(Position), Hide }` — used by `RenderCtx` (Task 5) and `RetainedTree` (Task 6).
 
 - [ ] **Step 1: Write the failing test**
 
-Create `oxi-tui/src/pipeline/cursor_slot.rs`:
+Create `oxicode-tui/src/pipeline/cursor_slot.rs`:
 ```rust
 //! Tri-state cursor slot — distinguishes "widget did not touch cursor"
 //! from "widget explicitly showed/hid cursor".
@@ -346,7 +346,7 @@ mod tests {
 
 - [ ] **Step 2: Wire module into pipeline/mod.rs and lib.rs**
 
-Create `oxi-tui/src/pipeline/mod.rs`:
+Create `oxicode-tui/src/pipeline/mod.rs`:
 ```rust
 //! Terminal-first frame lifecycle.
 //!
@@ -358,24 +358,24 @@ pub mod cursor_slot;
 pub use cursor_slot::CursorSlot;
 ```
 
-Modify `oxi-tui/src/lib.rs` — append before the closing attributes:
+Modify `oxicode-tui/src/lib.rs` — append before the closing attributes:
 ```rust
 pub mod pipeline;
 ```
 
 - [ ] **Step 3: Run tests to verify they pass**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 4 tests pass (`notset_falls_back_to_last_cursor`, `show_is_authoritative_over_last_cursor`, `hide_is_authoritative_over_last_cursor`, `default_is_notset`).
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/
-git commit -m "feat(oxi-tui/pipeline): add CursorSlot tri-state enum
+git add oxicode-tui/src/pipeline/
+git commit -m "feat(oxicode-tui/pipeline): add CursorSlot tri-state enum
 
 Distinguishes 'hash-skipped widget' from 'widget explicitly hid cursor'.
 - NotSet: fall back to last_cursor (RetainedTree responsibility)
@@ -393,9 +393,9 @@ Plan A PR-1 (1/5)"
 ## Task 3: PR-1 — CursorState with reconcile
 
 **Files:**
-- Create: `oxi-tui/src/pipeline/cursor.rs`
-- Modify: `oxi-tui/src/pipeline/mod.rs`
-- Test: `oxi-tui/src/pipeline/cursor.rs` (inline `#[cfg(test)]`)
+- Create: `oxicode-tui/src/pipeline/cursor.rs`
+- Modify: `oxicode-tui/src/pipeline/mod.rs`
+- Test: `oxicode-tui/src/pipeline/cursor.rs` (inline `#[cfg(test)]`)
 
 **Interfaces:**
 - Consumes: `ratatui_core::terminal::Terminal`, `ratatui_core::backend::Backend`, `ratatui::layout::Position`.
@@ -403,7 +403,7 @@ Plan A PR-1 (1/5)"
 
 - [ ] **Step 1: Write failing tests (test-first for cursor dedup semantics)**
 
-Create `oxi-tui/src/pipeline/cursor.rs`:
+Create `oxicode-tui/src/pipeline/cursor.rs`:
 ```rust
 //! Cursor state with dedup — the core of cursor blink preservation.
 //!
@@ -602,7 +602,7 @@ mod tests {
 
 - [ ] **Step 4: Wire cursor into pipeline mod**
 
-Modify `oxi-tui/src/pipeline/mod.rs`:
+Modify `oxicode-tui/src/pipeline/mod.rs`:
 ```rust
 pub mod cursor;
 pub mod cursor_slot;
@@ -613,14 +613,14 @@ pub use cursor_slot::CursorSlot;
 
 - [ ] **Step 5: Verify clippy is clean**
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean. Address any warnings (likely `too_many_lines`, `cast_possible_truncation` — fix at source).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/
-git commit -m "feat(oxi-tui/pipeline): add CursorState with conditional cursor emit
+git add oxicode-tui/src/pipeline/
+git commit -m "feat(oxicode-tui/pipeline): add CursorState with conditional cursor emit
 
 reconcile() emits Show/Hide only on visibility transition, MoveTo only on
 position change. Same position → 0 bytes → blink timer preserved.
@@ -638,14 +638,14 @@ Plan A PR-1 (2/5)"
 ## Task 4: PR-1 — FrameOutcome enum
 
 **Files:**
-- Modify: `oxi-tui/src/pipeline/mod.rs`
+- Modify: `oxicode-tui/src/pipeline/mod.rs`
 
 **Interfaces:**
 - Produces: `pub enum FrameOutcome { Idle, Rendered }` — returned by `draw_frame` (Task 8).
 
 - [ ] **Step 1: Update pipeline/mod.rs with FrameOutcome**
 
-Replace `oxi-tui/src/pipeline/mod.rs` with:
+Replace `oxicode-tui/src/pipeline/mod.rs` with:
 ```rust
 //! Terminal-first frame lifecycle.
 //!
@@ -674,17 +674,17 @@ pub enum FrameOutcome {
 
 - [ ] **Step 2: Verify build + tests still pass**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 10 tests pass (unchanged).
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/mod.rs
-git commit -m "feat(oxi-tui/pipeline): add FrameOutcome enum (Idle | Rendered)
+git add oxicode-tui/src/pipeline/mod.rs
+git commit -m "feat(oxicode-tui/pipeline): add FrameOutcome enum (Idle | Rendered)
 
 Returned by draw_frame (Task 8). Idle = pipeline was skipped entirely.
 
@@ -696,11 +696,11 @@ Plan A PR-1 (3/5)"
 ## Task 5: PR-1 — DiffBackend migration (no behavioral changes)
 
 **Files:**
-- Create: `oxi-tui/src/pipeline/diff_backend/mod.rs` (~400 LOC — DiffBackend struct + impls)
-- Create: `oxi-tui/src/pipeline/diff_backend/row.rs` (~150 LOC — Row, build_row, checksum)
-- Create: `oxi-tui/src/pipeline/diff_backend/deccara.rs` (~410 LOC — DECCARA plan + emit)
-- Create: `oxi-tui/src/pipeline/diff_backend/caps.rs` (~80 LOC — TerminalCaps inline, will move to theme/ in Task 13)
-- Modify: `oxi-tui/src/pipeline/mod.rs`
+- Create: `oxicode-tui/src/pipeline/diff_backend/mod.rs` (~400 LOC — DiffBackend struct + impls)
+- Create: `oxicode-tui/src/pipeline/diff_backend/row.rs` (~150 LOC — Row, build_row, checksum)
+- Create: `oxicode-tui/src/pipeline/diff_backend/deccara.rs` (~410 LOC — DECCARA plan + emit)
+- Create: `oxicode-tui/src/pipeline/diff_backend/caps.rs` (~80 LOC — TerminalCaps inline, will move to theme/ in Task 13)
+- Modify: `oxicode-tui/src/pipeline/mod.rs`
 
 **Interfaces:**
 - Produces: `pub struct DiffBackend<W>` with same API as legacy. Later (Task 6) we add `set_links()`.
@@ -710,10 +710,10 @@ Plan A PR-1 (3/5)"
 - [ ] **Step 1: Read the legacy files**
 
 Read:
-- `oxi-tui-legacy/src/render/mod.rs` (743 LOC) — DiffBackend struct + both impls + inline TerminalCaps
-- `oxi-tui-legacy/src/render/diff.rs` (144 LOC) — Row, build_row, checksum
-- `oxi-tui-legacy/src/render/deccara.rs` (406 LOC) — DECCARA plan + emission
-- `oxi-tui-legacy/src/render/terminal.rs` — TerminalCaps struct + TerminalKind enum + detect()
+- `oxicode-tui-legacy/src/render/mod.rs` (743 LOC) — DiffBackend struct + both impls + inline TerminalCaps
+- `oxicode-tui-legacy/src/render/diff.rs` (144 LOC) — Row, build_row, checksum
+- `oxicode-tui-legacy/src/render/deccara.rs` (406 LOC) — DECCARA plan + emission
+- `oxicode-tui-legacy/src/render/terminal.rs` — TerminalCaps struct + TerminalKind enum + detect()
 
 Catalog items per file. Each new file owns one concern.
 
@@ -762,7 +762,7 @@ Target ~8-12 migrated tests. Skip tests requiring legacy infrastructure not pres
 
 - [ ] **Step 4: Wire into pipeline/mod.rs**
 
-Modify `oxi-tui/src/pipeline/mod.rs`:
+Modify `oxicode-tui/src/pipeline/mod.rs`:
 ```rust
 pub mod cursor;
 pub mod cursor_slot;
@@ -777,10 +777,10 @@ Preserve existing `FrameOutcome` enum.
 
 - [ ] **Step 5: Verify build and tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: ~8-12 DiffBackend tests pass + existing 10 cursor/cursorslot tests.
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean. Fix any dead_code warnings (likely some TerminalCaps fields not yet consumed — `#[allow(dead_code)]` is acceptable with a comment explaining Task 13 will consume them).
 
 Run: `cargo fmt --all -- --check`
@@ -789,10 +789,10 @@ Expected: clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/
-git commit -m "feat(oxi-tui/pipeline): migrate DiffBackend from legacy render/
+git add oxicode-tui/src/pipeline/
+git commit -m "feat(oxicode-tui/pipeline): migrate DiffBackend from legacy render/
 
-Merges oxi-tui-legacy/src/render/{mod.rs(DiffBackend 부분), diff.rs, deccara.rs, terminal.rs}
+Merges oxicode-tui-legacy/src/render/{mod.rs(DiffBackend 부분), diff.rs, deccara.rs, terminal.rs}
 into pipeline/diff_backend/ 4-file module (mod/row/deccara/caps).
 Each file ≤500 LOC per Global Constraint. No behavioral change.
 
@@ -807,7 +807,7 @@ Plan A PR-1 (4/5)"
 ## Task 6: PR-1 — LinkCollector skeleton (set_links hook on DiffBackend)
 
 **Files:**
-- Modify: `oxi-tui/src/pipeline/diff_backend.rs`
+- Modify: `oxicode-tui/src/pipeline/diff_backend.rs`
 
 **Interfaces:**
 - Produces: `pub enum LinkTarget { Url(String), File { path: PathBuf, line: Option<u32> } }`, `pub struct LinkCollector { spans: Vec<(RowRange, LinkTarget)> }`, `impl DiffBackend { pub fn set_links(&mut self, links: LinkCollector) }`.
@@ -816,7 +816,7 @@ Plan A PR-1 (4/5)"
 
 - [ ] **Step 1: Write the failing test**
 **Files:**
-- Modify: `oxi-tui/src/pipeline/diff_backend/mod.rs` (add LinkCollector + set_links)
+- Modify: `oxicode-tui/src/pipeline/diff_backend/mod.rs` (add LinkCollector + set_links)
 
 **Interfaces:**
 // ── OSC8 link collection (stub — emission comes in Plan C PR-7) ────────
@@ -925,14 +925,14 @@ fn diff_backend_accepts_set_links_without_emitting() {
 
 - [ ] **Step 3: Run tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 2 new tests pass + all prior tests still pass.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/diff_backend/mod.rs
-git commit -m "feat(oxi-tui/pipeline): add LinkCollector + set_links hook on DiffBackend
+git add oxicode-tui/src/pipeline/diff_backend/mod.rs
+git commit -m "feat(oxicode-tui/pipeline): add LinkCollector + set_links hook on DiffBackend
 
 LinkCollector stores (CellRange, LinkTarget) spans collected during render.
 DiffBackend::set_links(links) takes them before flush — emission inside
@@ -948,16 +948,16 @@ Plan A PR-1 (5/5) — pipeline complete"
 ## Task 7: PR-2 — Renderable trait
 
 **Files:**
-- Create: `oxi-tui/src/widget/mod.rs`
-- Create: `oxi-tui/src/widget/renderable.rs`
-- Modify: `oxi-tui/src/lib.rs`
+- Create: `oxicode-tui/src/widget/mod.rs`
+- Create: `oxicode-tui/src/widget/renderable.rs`
+- Modify: `oxicode-tui/src/lib.rs`
 
 **Interfaces:**
 - Produces: `pub trait Renderable: Send { fn content_hash(&self) -> u64; fn height_for(&self, width: u16, ctx: &RenderCtx) -> u16; fn render(&mut self, area: Rect, ctx: &mut RenderCtx); }`
 
 - [ ] **Step 1: Write Renderable trait with doc + minimal stub**
 
-Create `oxi-tui/src/widget/renderable.rs`:
+Create `oxicode-tui/src/widget/renderable.rs`:
 ```rust
 //! The widget trait. Every UI element (chat view, message, footer, scrollbar)
 //! implements `Renderable`.
@@ -1044,7 +1044,7 @@ mod tests {
 }
 ```
 
-Create `oxi-tui/src/widget/mod.rs`:
+Create `oxicode-tui/src/widget/mod.rs`:
 ```rust
 //! Retained widget tree + memoization.
 //!
@@ -1064,7 +1064,7 @@ pub use renderable::{Renderable, hash_combine, hash_str};
 // Forward-declared — RenderCtx comes in Task 8.
 ```
 
-Modify `oxi-tui/src/lib.rs` — append:
+Modify `oxicode-tui/src/lib.rs` — append:
 ```rust
 pub mod widget;
 ```
@@ -1076,8 +1076,8 @@ pub mod widget;
 - [ ] **Step 3: Commit (no test verification yet — RenderCtx is next)**
 
 ```bash
-git add oxi-tui/src/widget/
-git commit -m "feat(oxi-tui/widget): add Renderable trait + hash helpers
+git add oxicode-tui/src/widget/
+git commit -m "feat(oxicode-tui/widget): add Renderable trait + hash helpers
 
 Renderable: content_hash, height_for, render. FNV-1a hash_combine for
 child→parent hash propagation. Tests for hash determinism.
@@ -1092,9 +1092,9 @@ Plan A PR-2 (1/4)"
 ## Task 8: PR-2 — RenderCtx with CursorSlot integration
 
 **Files:**
-- Create: `oxi-tui/src/widget/context.rs`
-- Modify: `oxi-tui/src/widget/mod.rs`
-- Test: `oxi-tui/src/widget/renderable.rs` (now compiles) and `oxi-tui/src/widget/context.rs`
+- Create: `oxicode-tui/src/widget/context.rs`
+- Modify: `oxicode-tui/src/widget/mod.rs`
+- Test: `oxicode-tui/src/widget/renderable.rs` (now compiles) and `oxicode-tui/src/widget/context.rs`
 
 **Interfaces:**
 - Consumes: `CursorSlot` (Task 2), `LinkCollector` (Task 6).
@@ -1102,7 +1102,7 @@ Plan A PR-2 (1/4)"
 
 - [ ] **Step 1: Write RenderCtx with failing tests**
 
-Create `oxi-tui/src/widget/context.rs`:
+Create `oxicode-tui/src/widget/context.rs`:
 ```rust
 //! Per-frame render context passed to every `Renderable::render` call.
 //!
@@ -1259,7 +1259,7 @@ pub use crate::pipeline::diff_backend::{CellRange, LinkCollector, LinkTarget};
 
 (These will move to a dedicated `link/` module in Plan C.)
 
-Modify `oxi-tui/src/widget/mod.rs` to:
+Modify `oxicode-tui/src/widget/mod.rs` to:
 ```rust
 //! Retained widget tree + memoization. See spec §5.
 
@@ -1273,17 +1273,17 @@ pub use renderable::{Renderable, hash_combine, hash_str};
 
 - [ ] **Step 3: Run all tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: hash tests (3) + RenderCtx tests (4) + cursor tests (6) + CursorSlot tests (4) + DiffBackend tests + LinkCollector tests (2) = ~19+ tests pass.
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/widget/
-git commit -m "feat(oxi-tui/widget): add RenderCtx with CursorSlot tri-state integration
+git add oxicode-tui/src/widget/
+git commit -m "feat(oxicode-tui/widget): add RenderCtx with CursorSlot tri-state integration
 
 RenderCtx carries frame, focus, time, links, cursor. Widgets call
 set_cursor/hide_cursor; take_cursor_slot drains after render.
@@ -1299,16 +1299,16 @@ Plan A PR-2 (2/4)"
 ## Task 9: PR-2 — RetainedTree with last_cursor fallback
 
 **Files:**
-- Create: `oxi-tui/src/widget/tree.rs`
-- Modify: `oxi-tui/src/widget/mod.rs`
-- Test: `oxi-tui/src/widget/tree.rs`
+- Create: `oxicode-tui/src/widget/tree.rs`
+- Modify: `oxicode-tui/src/widget/mod.rs`
+- Test: `oxicode-tui/src/widget/tree.rs`
 
 **Interfaces:**
 - Produces: `pub struct RetainedTree { root: Box<dyn Renderable>, last_hash: u64, last_cursor: Option<Position> }` with `any_hash_changed`, `render`.
 
 - [ ] **Step 1: Write RetainedTree with cursor fallback tests**
 
-Create `oxi-tui/src/widget/tree.rs`:
+Create `oxicode-tui/src/widget/tree.rs`:
 ```rust
 //! The retained widget tree root. Owns the top-level widget and tracks
 //! two pieces of cross-frame state:
@@ -1476,7 +1476,7 @@ mod tests {
 
 - [ ] **Step 2: Wire into widget/mod.rs**
 
-Modify `oxi-tui/src/widget/mod.rs`:
+Modify `oxicode-tui/src/widget/mod.rs`:
 ```rust
 //! Retained widget tree + memoization. See spec §5.
 
@@ -1492,17 +1492,17 @@ pub use tree::RetainedTree;
 
 - [ ] **Step 3: Run tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 5 new RetainedTree tests pass + all prior (~24 total).
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/widget/
-git commit -m "feat(oxi-tui/widget): add RetainedTree with last_cursor fallback
+git add oxicode-tui/src/widget/
+git commit -m "feat(oxicode-tui/widget): add RetainedTree with last_cursor fallback
 
 RetainedTree tracks last_hash (any_hash_changed) and last_cursor
 (render fallback when CursorSlot::NotSet). CursorSlot tri-state ensures
@@ -1521,7 +1521,7 @@ Plan A PR-2 (3/4)"
 ## Task 10: PR-2 — Dummy widget + integration smoke test
 
 **Files:**
-- Create: `oxi-tui/src/widget/primitive.rs` (small — Text widget only, ~80 LOC; full primitive/ set comes in Plan B)
+- Create: `oxicode-tui/src/widget/primitive.rs` (small — Text widget only, ~80 LOC; full primitive/ set comes in Plan B)
 - Test: end-to-end pipeline+widget integration
 
 **Interfaces:**
@@ -1529,7 +1529,7 @@ Plan A PR-2 (3/4)"
 
 - [ ] **Step 1: Write Text widget with tests**
 
-Create `oxi-tui/src/widget/primitive.rs`:
+Create `oxicode-tui/src/widget/primitive.rs`:
 ```rust
 //! Minimal primitive widgets. The full set (Border, List, Scrollbar) comes
 //! in Plan B. This module just has `Text` for integration testing of the
@@ -1627,7 +1627,7 @@ mod tests {
 
 - [ ] **Step 2: Add module to widget/mod.rs**
 
-Modify `oxi-tui/src/widget/mod.rs` — add:
+Modify `oxicode-tui/src/widget/mod.rs` — add:
 ```rust
 pub mod primitive;
 pub use primitive::Text;
@@ -1635,14 +1635,14 @@ pub use primitive::Text;
 
 - [ ] **Step 3: Run widget primitive tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 3 new Text tests + all prior.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/widget/
-git commit -m "feat(oxi-tui/widget): add Text primitive widget
+git add oxicode-tui/src/widget/
+git commit -m "feat(oxicode-tui/widget): add Text primitive widget
 
 Smallest concrete Renderable impl. Caches content hash; style changes
 affect hash. Used for integration tests in next task.
@@ -1655,14 +1655,14 @@ Plan A PR-2 (4/4) — widget model complete"
 ## Task 11: PR-1 — `draw_frame` integration (pipeline + widget glue)
 
 **Files:**
-- Modify: `oxi-tui/src/pipeline/mod.rs`
+- Modify: `oxicode-tui/src/pipeline/mod.rs`
 
 **Interfaces:**
 - Produces: `pub fn draw_frame<B>(term, tree, ctx, cursor) -> Result<FrameOutcome, B::Error>` — the central 14-LOC function from spec §4.2.
 
 - [ ] **Step 1: Write the failing integration test**
 
-Add to `oxi-tui/src/pipeline/mod.rs` at the bottom (before any `#[cfg(test)]`):
+Add to `oxicode-tui/src/pipeline/mod.rs` at the bottom (before any `#[cfg(test)]`):
 ```rust
 // ── draw_frame ─────────────────────────────────────────────────────────
 
@@ -1753,19 +1753,19 @@ mod draw_frame_tests {
 
 - [ ] **Step 2: Run the integration tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 2 new draw_frame tests pass + all prior.
 
 - [ ] **Step 3: Verify clippy**
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-tui/src/pipeline/mod.rs
-git commit -m "feat(oxi-tui/pipeline): add draw_frame — terminal-first frame lifecycle
+git add oxicode-tui/src/pipeline/mod.rs
+git commit -m "feat(oxicode-tui/pipeline): add draw_frame — terminal-first frame lifecycle
 
 14-LOC body: autoresize → hash check → render → flush → reconcile cursor
 → swap_buffers. Idle skip when content_hash unchanged and no resize.
@@ -1783,16 +1783,16 @@ Plan A PR-1 + PR-2 integration complete"
 ## Task 12: PR-3 — Theme palette (3-way split, part 1/3)
 
 **Files:**
-- Create: `oxi-tui/src/theme/mod.rs`
-- Create: `oxi-tui/src/theme/palette.rs`
-- Modify: `oxi-tui/src/lib.rs`
+- Create: `oxicode-tui/src/theme/mod.rs`
+- Create: `oxicode-tui/src/theme/palette.rs`
+- Modify: `oxicode-tui/src/lib.rs`
 
 **Interfaces:**
 - Produces: `pub struct ColorScheme { /* 28 semantic slots */ }`, `pub struct Theme { colors, styles, name }`, 6 constructors `Theme::{dark, light, nord, catppuccin, github_dark, monokai}`.
 
 - [ ] **Step 1: Read legacy theme.rs to extract palette definitions**
 
-Read `oxi-tui-legacy/src/theme.rs` (1,907 LOC) and extract:
+Read `oxicode-tui-legacy/src/theme.rs` (1,907 LOC) and extract:
 - `ColorScheme` struct (28 fields including the 7 Phase-1 background slots per AGENTS.md pitfall)
 - 6 constructors with their exact color values
 - `ThemeStyles` struct + `to_styles()` impl
@@ -1802,7 +1802,7 @@ Do NOT copy: TOML/JSON loading logic (Task 14), hot-reload watcher (out of scope
 
 - [ ] **Step 2: Write theme/palette.rs with extracted types**
 
-Create `oxi-tui/src/theme/palette.rs` (~200 LOC):
+Create `oxicode-tui/src/theme/palette.rs` (~200 LOC):
 ```rust
 //! Semantic color slots + Theme struct + 6 named constructors.
 //!
@@ -1888,11 +1888,11 @@ impl Theme {
 }
 ```
 
-Fill in all 6 constructors with exact color values from legacy. Run `cargo check -p oxi-tui` to verify completeness.
+Fill in all 6 constructors with exact color values from legacy. Run `cargo check -p oxicode-tui` to verify completeness.
 
 - [ ] **Step 3: Wire into theme/mod.rs and lib.rs**
 
-Create `oxi-tui/src/theme/mod.rs`:
+Create `oxicode-tui/src/theme/mod.rs`:
 ```rust
 //! Capability-aware theme system. See spec §7.
 
@@ -1901,14 +1901,14 @@ pub mod palette;
 pub use palette::{ColorScheme, Theme, ThemeStyles};
 ```
 
-Modify `oxi-tui/src/lib.rs`:
+Modify `oxicode-tui/src/lib.rs`:
 ```rust
 pub mod theme;
 ```
 
 - [ ] **Step 4: Add smoke tests for each constructor**
 
-Add to `oxi-tui/src/theme/palette.rs` end:
+Add to `oxicode-tui/src/theme/palette.rs` end:
 ```rust
 #[cfg(test)]
 mod tests {
@@ -1943,17 +1943,17 @@ mod tests {
 
 - [ ] **Step 5: Run tests + clippy**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 2 new theme tests pass.
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-tui/src/theme/
-git commit -m "feat(oxi-tui/theme): extract palette from legacy theme.rs
+git add oxicode-tui/src/theme/
+git commit -m "feat(oxicode-tui/theme): extract palette from legacy theme.rs
 
 3-way split part 1/3: ColorScheme (28 slots), ThemeStyles, Theme with
 6 named constructors. TOML loading and color-level adaptation come in
@@ -1967,16 +1967,16 @@ Plan A PR-3 (1/3)"
 ## Task 13: PR-3 — Capability detection + adapt_theme (3-way split part 2/3)
 
 **Files:**
-- Create: `oxi-tui/src/theme/capability.rs`
-- Modify: `oxi-tui/src/theme/mod.rs`
-- Modify: `oxi-tui/src/pipeline/diff_backend/caps.rs` (move TerminalCaps out, leave re-export)
+- Create: `oxicode-tui/src/theme/capability.rs`
+- Modify: `oxicode-tui/src/theme/mod.rs`
+- Modify: `oxicode-tui/src/pipeline/diff_backend/caps.rs` (move TerminalCaps out, leave re-export)
 
 **Interfaces:**
 - Produces: `pub enum ColorLevel { None, Basic, Ansi256, TrueColor }`, `pub struct TerminalCaps { color_level, true_color, hyperlinks, kitty_protocol, sixel, synchronized_output, deccara, cell_size }`, `TerminalCaps::detect()`, `TerminalCaps::adapt_theme(&self, theme)`. **Same module owns detection AND consumption — dead code prevention.**
 
 - [ ] **Step 1: Write capability.rs with detection + adaptation**
 
-Create `oxi-tui/src/theme/capability.rs` (~150 LOC):
+Create `oxicode-tui/src/theme/capability.rs` (~150 LOC):
 ```rust
 //! Terminal capability detection + theme color-level adaptation.
 //!
@@ -2137,7 +2137,7 @@ mod tests {
 
 - [ ] **Step 2: Wire into theme/mod.rs**
 
-Modify `oxi-tui/src/theme/mod.rs`:
+Modify `oxicode-tui/src/theme/mod.rs`:
 ```rust
 //! Capability-aware theme system. See spec §7.
 
@@ -2150,7 +2150,7 @@ pub use palette::{ColorScheme, Theme, ThemeStyles};
 
 - [ ] **Step 3: Migrate TerminalCaps from pipeline/diff_backend/caps.rs**
 
-In `oxi-tui/src/pipeline/diff_backend/caps.rs`, replace the `TerminalCaps` struct definition with a re-export from `theme::capability`. The `TerminalKind` enum and `detect()` function move entirely to `theme/capability.rs`:
+In `oxicode-tui/src/pipeline/diff_backend/caps.rs`, replace the `TerminalCaps` struct definition with a re-export from `theme::capability`. The `TerminalKind` enum and `detect()` function move entirely to `theme/capability.rs`:
 ```rust
 pub use crate::theme::capability::{TerminalCaps, TerminalKind};
 ```
@@ -2159,17 +2159,17 @@ This makes DiffBackend consume theme's TerminalCaps. Anywhere DiffBackend uses `
 
 - [ ] **Step 4: Run tests + clippy**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: 5 new capability tests pass. The `no_color_env_returns_none_level` test may need `--test-threads=1` if it races; add `#[serial_test::serial]` if needed (or run that test alone).
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-tui/src/theme/ oxi-tui/src/pipeline/diff_backend/caps.rs
-git commit -m "feat(oxi-tui/theme): capability detection + adapt_theme (3-way 2/3)
+git add oxicode-tui/src/theme/ oxicode-tui/src/pipeline/diff_backend/caps.rs
+git commit -m "feat(oxicode-tui/theme): capability detection + adapt_theme (3-way 2/3)
 
 TerminalCaps::detect() honors NO_COLOR/COLORTERM/TERM. adapt_theme
 downgrades RGB → Ansi256 → Basic per detected level.
@@ -2188,16 +2188,16 @@ Plan A PR-3 (2/3)"
 ## Task 14: PR-3 — TOML serializer (3-way split part 3/3)
 
 **Files:**
-- Create: `oxi-tui/src/theme/serializer.rs`
-- Modify: `oxi-tui/src/theme/mod.rs`
-- Modify: `oxi-tui/src/theme/palette.rs` (remove TOML derives if they were copied)
+- Create: `oxicode-tui/src/theme/serializer.rs`
+- Modify: `oxicode-tui/src/theme/mod.rs`
+- Modify: `oxicode-tui/src/theme/palette.rs` (remove TOML derives if they were copied)
 
 **Interfaces:**
 - Produces: `pub fn load_theme(path: &Path) -> Result<Theme>`, `pub fn save_theme(theme: &Theme, path: &Path) -> Result<()>`.
 
 - [ ] **Step 1: Write serializer.rs with TOML load/save**
 
-Create `oxi-tui/src/theme/serializer.rs` (~100 LOC):
+Create `oxicode-tui/src/theme/serializer.rs` (~100 LOC):
 ```rust
 //! TOML/JSON theme loading and saving. Atomic writes (temp + rename).
 //!
@@ -2291,7 +2291,7 @@ mod tests {
 
 - [ ] **Step 2: Extract into_scheme / from_scheme from legacy**
 
-Read `oxi-tui-legacy/src/theme.rs` — locate `ThemeFileColors::into_theme()` and `from()`. Replace the two `todo!()` calls with the extracted implementations. They parse hex strings like `"#1a1b26"` to `Color::Rgb(0x1a, 0x1b, 0x26)` and named colors like `"red"` to `Color::Red`.
+Read `oxicode-tui-legacy/src/theme.rs` — locate `ThemeFileColors::into_theme()` and `from()`. Replace the two `todo!()` calls with the extracted implementations. They parse hex strings like `"#1a1b26"` to `Color::Rgb(0x1a, 0x1b, 0x26)` and named colors like `"red"` to `Color::Red`.
 
 - [ ] **Step 3: Add round-trip test**
 
@@ -2299,7 +2299,7 @@ Append to serializer.rs `#[cfg(test)]`:
 ```rust
 #[test]
 fn dark_theme_round_trips_through_toml() {
-    let temp = std::env::temp_dir().join("oxi_tui_test_theme.toml");
+    let temp = std::env::temp_dir().join("oxicode_tui_test_theme.toml");
     let original = Theme::dark();
     save_theme(&original, &temp).unwrap();
     let loaded = load_theme(&temp).unwrap();
@@ -2311,7 +2311,7 @@ fn dark_theme_round_trips_through_toml() {
 
 - [ ] **Step 4: Wire into theme/mod.rs**
 
-Modify `oxi-tui/src/theme/mod.rs`:
+Modify `oxicode-tui/src/theme/mod.rs`:
 ```rust
 //! Capability-aware theme system. See spec §7.
 
@@ -2326,17 +2326,17 @@ pub use serializer::{load_theme, save_theme};
 
 - [ ] **Step 5: Run tests + clippy**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: round-trip test passes + load_nonexistent error test passes.
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-tui/src/theme/
-git commit -m "feat(oxi-tui/theme): TOML serializer with atomic write (3-way 3/3)
+git add oxicode-tui/src/theme/
+git commit -m "feat(oxicode-tui/theme): TOML serializer with atomic write (3-way 3/3)
 
 load_theme / save_theme. Atomic temp+rename. Brightness hierarchy
 validation hook (warn-only). Round-trip test for Theme::dark().
@@ -2351,17 +2351,17 @@ Plan A PR-3 (3/3) — theme complete"
 ## Task 15: End-of-Plan-A integration test + final verification
 
 **Files:**
-- Create: `oxi-tui/tests/foundation_integration.rs`
+- Create: `oxicode-tui/tests/foundation_integration.rs`
 
 - [ ] **Step 1: Write integration test exercising the whole foundation**
 
-Create `oxi-tui/tests/foundation_integration.rs`:
+Create `oxicode-tui/tests/foundation_integration.rs`:
 ```rust
 //! Integration test for the Plan A foundation (pipeline + widget + theme).
 
-use oxi_tui::pipeline::{CursorState, FrameOutcome, draw_frame};
-use oxi_tui::theme::Theme;
-use oxi_tui::widget::{FocusTarget, Renderable, RetainedTree, Text, hash_combine, hash_str};
+use oxicode_tui::pipeline::{CursorState, FrameOutcome, draw_frame};
+use oxicode_tui::theme::Theme;
+use oxicode_tui::widget::{FocusTarget, Renderable, RetainedTree, Text, hash_combine, hash_str};
 use ratatui::backend::TestBackend;
 use ratatui::terminal::Terminal;
 
@@ -2385,7 +2385,7 @@ fn foundation_idle_frame_skips_render() {
 
 #[test]
 fn foundation_theme_adapt_to_basic_level() {
-    use oxi_tui::theme::{ColorLevel, TerminalCaps};
+    use oxicode_tui::theme::{ColorLevel, TerminalCaps};
     let mut theme = Theme::dark();
     let original_bg = theme.colors.background;
     let caps = TerminalCaps { color_level: ColorLevel::None, ..Default::default() };
@@ -2406,10 +2406,10 @@ fn foundation_hash_propagation() {
 
 - [ ] **Step 2: Run all tests including integration**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: all tests pass (foundation_integration + all prior unit tests).
 
-Run: `cargo clippy -p oxi-tui -- -D warnings`
+Run: `cargo clippy -p oxicode-tui -- -D warnings`
 Expected: clean.
 
 - [ ] **Step 3: Run full workspace regression gate**
@@ -2417,18 +2417,18 @@ Expected: clean.
 Run:
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --exclude oxi-vendor-* -- -D warnings
+cargo clippy --workspace --all-targets --exclude oxicode-vendor-* -- -D warnings
 cargo nextest run --workspace
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 ```
 
-Expected: all pass. The legacy `oxi-tui-legacy` crate must still build (it does — no changes since rename).
+Expected: all pass. The legacy `oxicode-tui-legacy` crate must still build (it does — no changes since rename).
 
 - [ ] **Step 4: Final commit + PR-ready**
 
 ```bash
-git add oxi-tui/tests/
-git commit -m "test(oxi-tui): foundation integration — idle skip + theme adapt
+git add oxicode-tui/tests/
+git commit -m "test(oxicode-tui): foundation integration — idle skip + theme adapt
 
 Integration tests for Plan A: pipeline idle skip on second frame, theme
 adapt to None color level (all colors → Reset), hash propagation determinism.
@@ -2443,8 +2443,8 @@ Plan A complete."
 ## Plan A Complete
 
 **Delivered:**
-- `oxi-tui` (new, ~2,250 LOC): pipeline (draw_frame, CursorState, CursorSlot, DiffBackend, LinkCollector), widget (Renderable, RetainedTree, RenderCtx, Text), theme (palette, capability, serializer)
-- `oxi-tui-legacy` (renamed, unchanged contents)
+- `oxicode-tui` (new, ~2,250 LOC): pipeline (draw_frame, CursorState, CursorSlot, DiffBackend, LinkCollector), widget (Renderable, RetainedTree, RenderCtx, Text), theme (palette, capability, serializer)
+- `oxicode-tui-legacy` (renamed, unchanged contents)
 - All workspace regression gates pass
 - Cursor blink preservation (same-position 0-byte reconcile) verified
 - Cursor flicker regression (NotSet fallback + Hide authoritative) verified
@@ -2467,7 +2467,7 @@ Plan A complete."
 - ⏸ Spec §8 Text streaming markdown → Plan B (PR-4)
 - ⏸ Spec §9 Link OSC8 emission → Plan C (PR-7) — foundation stub in Task 6
 - ⏸ Spec §10 Widget inventory migration → Plan B (PR-6) + Plan D (PR-11)
-- ✅ Spec §11 Orthogonality with oxi-pager → respected (no PagerState coupling)
+- ✅ Spec §11 Orthogonality with oxicode-pager → respected (no PagerState coupling)
 - ⏸ Spec §12 PR sequence → PR-0 through PR-3 here; PR-4+ in subsequent plans
 
 **Placeholder scan:** Tasks 12-14 have explicit "extract from legacy" callouts. These are not placeholders — they're precise instructions to migrate specific functions (`into_theme`, `from_scheme`, color values). The engineer knows the legacy file path and function name.

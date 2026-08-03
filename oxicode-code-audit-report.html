@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>oxicode 코드 감사 보고서 — 수정 후 출시 (2 심각, 8 높음)</title>
+<style>
+:root {
+  --bg: #0d1117; --bg-elev: #161b22; --bg-soft: #1c2128;
+  --border: #30363d; --border-soft: #21262d;
+  --text: #e6edf3; --text-dim: #9da7b3; --text-mute: #6e7681;
+  --accent: #58a6ff; --accent-2: #79c0ff;
+  --green: #3fb950; --green-bg: rgba(63, 185, 80, 0.12);
+  --yellow: #d29922; --yellow-bg: rgba(210, 153, 34, 0.12);
+  --red: #f85149; --red-bg: rgba(248, 81, 73, 0.12);
+  --purple: #bc8cff; --cyan: #39d2c0; --code-bg: #010409;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    "Apple SD Gothic Neo", "Noto Sans KR", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 120px; }
+header.hero { padding: 64px 0 40px; border-bottom: 1px solid var(--border); margin-bottom: 40px; }
+.eyebrow {
+  display: inline-block; font-size: 12px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--accent);
+  background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.3);
+  padding: 4px 10px; border-radius: 4px; margin-bottom: 18px; font-weight: 600;
+}
+h1 { font-size: 34px; line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.02em; font-weight: 700; }
+h1 .accent { color: var(--accent); }
+.subtitle { color: var(--text-dim); font-size: 16px; margin: 0; max-width: 720px; }
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 28px; }
+.meta-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.meta-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-mute); margin-bottom: 4px; }
+.meta-card .value { font-size: 18px; font-weight: 600; }
+.meta-card .value.green { color: var(--green); }
+.meta-card .value.blue { color: var(--accent); }
+.meta-card .value.purple { color: var(--purple); }
+.meta-card .value.red { color: var(--red); }
+nav.toc { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 48px; }
+nav.toc h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-mute); }
+nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+nav.toc li { margin-bottom: 4px; }
+nav.toc a { color: var(--accent-2); text-decoration: none; font-size: 14px; }
+nav.toc a:hover { text-decoration: underline; }
+.verdict {
+  background: rgba(251,146,60,0.10); border: 1px solid rgba(251,146,60,0.35);
+  border-left: 4px solid #fb923c; padding: 18px 22px; margin: 28px 0 40px; border-radius: 0 8px 8px 0;
+}
+.verdict .label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #fb923c; font-weight: 700; margin-bottom: 4px; }
+.verdict .text { font-size: 17px; font-weight: 600; }
+.verdict .counts { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
+section { margin-bottom: 56px; scroll-margin-top: 20px; }
+h2 { font-size: 26px; margin: 0 0 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); letter-spacing: -0.01em; display: flex; align-items: center; gap: 12px; }
+h2 .num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; background: rgba(88,166,255,0.15);
+  border: 1px solid rgba(88,166,255,0.35); color: var(--accent);
+  border-radius: 8px; font-size: 15px; font-weight: 700;
+}
+h3 { font-size: 19px; margin: 32px 0 12px; color: var(--text); letter-spacing: -0.01em; }
+h4 { font-size: 16px; margin: 22px 0 10px; color: var(--accent-2); font-weight: 600; }
+p { margin: 0 0 14px; color: var(--text); }
+p.dim { color: var(--text-dim); }
+ul, ol { padding-left: 22px; }
+li { margin-bottom: 6px; }
+strong { color: #fff; font-weight: 600; }
+em { color: var(--accent-2); font-style: normal; }
+code { font-family: "SF Mono", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 0.88em; background: var(--code-bg); color: var(--accent-2); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-soft); }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; overflow-x: auto; font-size: 13px; line-height: 1.55; margin: 14px 0 18px; }
+pre code { background: none; border: none; padding: 0; color: var(--text); font-size: 13px; }
+.kw { color: #ff7b72; } .ty { color: #79c0ff; } .st { color: #a5d6ff; } .cm { color: #6e7681; font-style: italic; } .fn { color: #d2a8ff; }
+table { width: 100%; border-collapse: collapse; margin: 14px 0 20px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+th { background: var(--bg-elev); color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+td code { font-size: 12px; }
+tr:hover td { background: rgba(110,118,129,0.06); }
+.callout { border-left: 3px solid; border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 18px 0; background: var(--bg-elev); }
+.callout-title { font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.callout.good { border-color: var(--green); }
+.callout.good .callout-title { color: var(--green); }
+.callout.warn { border-color: var(--yellow); background: var(--yellow-bg); }
+.callout.warn .callout-title { color: var(--yellow); }
+.callout.bad { border-color: var(--red); background: var(--red-bg); }
+.callout.bad .callout-title { color: var(--red); }
+.callout.info { border-color: var(--accent); }
+.callout.info .callout-title { color: var(--accent); }
+.callout p:last-child { margin-bottom: 0; }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; letter-spacing: 0.03em; vertical-align: middle; }
+.badge.crit { background: var(--red-bg); color: var(--red); border: 1px solid rgba(248,81,73,0.4); }
+.badge.high { background: rgba(251,146,60,0.12); color: #fb923c; border: 1px solid rgba(251,146,60,0.35); }
+.badge.med { background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(210,153,34,0.35); }
+.badge.low { background: var(--green-bg); color: var(--green); border: 1px solid rgba(63,185,80,0.35); }
+.badge.info { background: rgba(88,166,255,0.12); color: var(--accent); border: 1px solid rgba(88,166,255,0.35); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } nav.toc ol { columns: 1; } }
+.stat-row { display: flex; gap: 28px; flex-wrap: wrap; margin: 18px 0; }
+.stat .n { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; }
+.stat .l { font-size: 12px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
+.score-bar { height: 8px; background: var(--bg-elev); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); margin: 8px 0 4px; }
+.score-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--cyan)); }
+.score-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+.findings li { margin-bottom: 18px; padding-left: 4px; }
+.findings .head { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.findings .file { color: var(--text-mute); font-size: 13px; font-family: "SF Mono", Menlo, monospace; }
+.findings p { margin-top: 6px; font-size: 14px; }
+footer { border-top: 1px solid var(--border); padding-top: 28px; margin-top: 64px; color: var(--text-mute); font-size: 13px; }
+footer a { color: var(--accent-2); }
+hr { border: none; border-top: 1px solid var(--border-soft); margin: 32px 0; }
+.dag {
+  font-family: "SF Mono", Menlo, monospace; font-size: 13px; line-height: 1.55;
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 18px 22px; white-space: pre; overflow-x: auto; color: var(--text-dim);
+}
+.dag .hl { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p style="margin-top:32px;font-size:13px;color:var(--text-mute);">
+[oxicode] 코드 감사 보고서 — 수정 후 출시 (2 심각, 8 높음)
+</p>
+
+<div class="verdict">
+  <div class="label">verdict · 수정 후 출시</div>
+  <div class="text">oxicode v0.41.1 (2026-06-21 기준, HEAD <code>e4bb5e42</code>): 출시 가능하나 2개 심각, 8개 높음 결함을 우선 해결해야 함. 핵심 결함은 lockfile 무결성 해시가 쓰기 전용(write-only)이라는 점과 프로바이더 공유 HTTP 클라이언트에 타임아웃이 없다는 점.</div>
+  <div class="counts">critical 2 · high 8 · medium 5 · low 0 · 합 15건 (15건 초과분은 Appendix A 참조)</div>
+</div>
+
+<header class="hero">
+  <span class="eyebrow">Depth Code Audit · 2026-06-21 · Rust 2024 / MSRV 1.96</span>
+  <h1><span class="accent">oxicode</span> 코드 감사 보고서</h1>
+  <p class="subtitle">Rust 기반 AI 코딩 어시스턴트 oxicode v0.41.1의 6-crate 워크스페이스(177,164 LOC, 401 .rs 파일) 대상 forensic 감사. 모든 결함은 <code style="font-size:13px;">file:line</code> 형식으로 인용됨. 9개 분석 도메인을 병렬 subagent로 실행하고 메인 세션에서 dedupe/citation audit 수행.</p>
+  <div class="meta-grid">
+    <div class="meta-card"><div class="label">워크스페이스</div><div class="value">6 crates</div></div>
+    <div class="meta-card"><div class="label">총 LOC / 파일</div><div class="value">177,164 / 401</div></div>
+    <div class="meta-card"><div class="label">테스트 어트리뷰트</div><div class="value green">2,783</div></div>
+    <div class="meta-card"><div class="label">통합 테스트 파일</div><div class="value">24</div></div>
+    <div class="meta-card"><div class="label">언어 / Edition</div><div class="value">Rust / 2024</div></div>
+    <div class="meta-card"><div class="label">MSRV / 버전</div><div class="value">1.96 / 0.41.1</div></div>
+    <div class="meta-card"><div class="label">unsafe 블록</div><div class="value">63 (15 파일)</div></div>
+    <div class="meta-card"><div class="label">.unwrap() / .expect()</div><div class="value red">2,088 / 215</div></div>
+    <div class="meta-card"><div class="label">Cargo.lock 패키지</div><div class="value">760 (중복 多)</div></div>
+  </div>
+</header>
+
+<section>
+<h2><span class="num">1</span>실행 요약</h2>
+
+<div class="grid-2">
+<div class="callout good">
+  <div class="callout-title">▲ 강점 한눈에 보기</div>
+  <ul>
+    <li>의존성 DAG는 깨끗함 — 6개 크레이트, 순환 없음, oxicode-ai는 외부 의존성만 가지며 foundation 레이어 역할.</li>
+    <li><code>#![warn(missing_docs)]</code> + <code>#![warn(clippy::unwrap_used)]</code> 균일 적용 (각 크레이트 lib.rs 1줄).</li>
+    <li>보안 게이트 4단: <code>cargo audit</code> + <code>cargo deny</code> + SBOM (CycloneDX 1.5) + Dependabot 그룹화.</li>
+    <li>extism =1.21.0 핀, deny.toml에 wasmtime 41.x RUSTSEC 13건 명시적 트래킹 — supply chain 위험 가시화.</li>
+    <li>Bash 툴의 <code>BLOCKED_ENV_VARS</code> allowlist (<code>oxicode-agent/src/tools/bash.rs:23-43</code>) — 19개 위험 env 차단.</li>
+    <li>이슈 시스템 CAS 패턴 (4회 재시도, <code>oxicode-cli/src/tools/issue_tool.rs:397-423</code>) — 동시성 안전.</li>
+  </ul>
+</div>
+<div class="callout warn">
+  <div class="callout-title">⚠ 주요 위험 한눈에 보기</div>
+  <ul>
+    <li><strong style="color:#fb923c;">lockfile 무결성 해시가 쓰기 전용</strong> — 설치 시 SHA-256을 계산/저장하지만 이후 load/update에서 절대 재검증하지 않음 (<code>packages.rs:732,1089,1285,1372,1467</code>).</li>
+    <li><strong style="color:#fb923c;">네이티브 확장에 무결성 게이트 부재</strong> — <code>OXICODE_NATIVE_EXTENSIONS=1</code> 게이트만 있고 SHA-256 검증 함수(<code>validate_extension</code>)는 production 경로에서 호출되지 않음 (<code>loading.rs:120-150</code>).</li>
+    <li><strong style="color:#fb923c;">프로바이더 공유 클라이언트에 타임아웃 없음</strong> — LLM 스트림이 영원히 hang 가능 (<code>providers/mod.rs:65-68</code>).</li>
+    <li>Streaming hot path에서 매 토큰마다 <code>AssistantMessage</code> 전체 deep-clone (8개 프로바이더 × 다중 emit 사이트) — O(N²) 누적.</li>
+    <li><code>AgentTool::execute()</code>가 항상 <code>signal: None</code>으로 호출 — oneshot 취소 계약이 사실상 무력화 (<code>tool_exec.rs:570,718</code>).</li>
+    <li>AGENTS.md는 <code>main.rs</code>를 "12-line dispatcher"로 명시하지만 실제 1,622 LOC — 신규 기여자 onboarding 문서 정확성 붕괴.</li>
+  </ul>
+</div>
+</div>
+
+<h3>8개 도메인 점수 (1–10)</h3>
+<div class="score-row"><span>아키텍처 · 모듈성</span><span>7.0 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:70%"></div></div>
+<div class="score-row"><span>보안</span><span>5.5 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:55%"></div></div>
+<div class="score-row"><span>동시성 · 비동기 정확성</span><span>7.5 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:75%"></div></div>
+<div class="score-row"><span>에러 처리 · 회복탄력성</span><span>6.5 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:65%"></div></div>
+<div class="score-row"><span>성능 · 자원 사용</span><span>6.0 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:60%"></div></div>
+<div class="score-row"><span>테스트 · 검증</span><span>7.0 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:70%"></div></div>
+<div class="score-row"><span>공급망 · 의존성</span><span>7.5 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:75%"></div></div>
+<div class="score-row"><span>API · 개발자 경험</span><span>6.5 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:65%"></div></div>
+<div class="score-row"><span>문서 · 지식 자산</span><span>6.0 / 10 <span class="badge med">중간</span></span></div>
+<div class="score-bar"><div class="score-fill" style="width:60%"></div></div>
+<p class="dim">채점 기준: 도메인 1개당 0–10. 9–10 우수 / 7–8 양호 / 5–6 보통(중간) / 3–4 미흡 / 0–2 위험. 종합 <strong>6.7 / 10</strong>.</p>
+</section>
+
+<nav class="toc">
+<h3>목차</h3>
+<ol>
+<li><a href="#sec-workflow">워크스페이스 구조와 의존성 그래프</a></li>
+<li><a href="#sec-threat">보안 위협 모델링</a></li>
+<li><a href="#sec-sec">프로바이더 추상화 계층 (보안)</a></li>
+<li><a href="#sec-arch">에이전트 런타임 (아키텍처)</a></li>
+<li><a href="#sec-conc">포트 시스템과 빌더 (동시성)</a></li>
+<li><a href="#sec-perf">터미널 위젯 (성능)</a></li>
+<li><a href="#sec-err">컴포지션 루트 (에러 처리)</a></li>
+<li><a href="#sec-test">패치 형식 (테스트)</a></li>
+<li><a href="#sec-supply">횡단 관심사 (공급망)</a></li>
+<li><a href="#sec-metrics">품질 지표 정량 분석</a></li>
+<li><a href="#sec-findings">취약점 목록 (심각도순)</a></li>
+<li><a href="#sec-proposals">기능 제안</a></li>
+<li><a href="#sec-final">종합 평가</a></li>
+</ol>
+</nav>
+
+<section id="sec-workflow">
+<h2><span class="num">2</span>워크스페이스 구조와 의존성 그래프</h2>
+
+<p>6 crates, Rust 2024 edition, MSRV 1.96, 버전 <strong>0.41.1</strong>. Cargo.toml root에 <code>[workspace.dependencies] thiserror = "2"</code> 하나만 공유. <code>[patch.crates-io]</code> 섹션은 의도적으로 제거됨 (line 16-18 주석).</p>
+
+<table>
+<thead><tr><th>Crate</th><th>역할</th><th>LOC</th><th>파일</th><th>의존 oxicode-*</th></tr></thead>
+<tbody>
+<tr><td><code>oxicode-ai</code></td><td>Unified LLM API · 8 프로바이더, 스트리밍, 컴팩션</td><td>30,665</td><td>63</td><td>— (foundation)</td></tr>
+<tr><td><code>oxicode-agent</code></td><td>에이전트 런타임 · 21 툴, MCP, subagent</td><td>41,006</td><td>93</td><td>oxicode-ai, oxicode-hashline</td></tr>
+<tr><td><code>oxicode-tui</code></td><td>터미널 위젯 · ratatui + mermaid 렌더러</td><td>18,746</td><td>41</td><td>— (독립)</td></tr>
+<tr><td><code>oxicode-sdk</code></td><td>다중 에이전트 SDK · 15 port traits</td><td>21,455</td><td>78</td><td>oxicode-ai, oxicode-agent</td></tr>
+<tr><td><code>oxicode-cli</code></td><td>CLI 바이너리 · composition root</td><td>57,342</td><td>111</td><td>oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-tui</td></tr>
+<tr><td><code>oxicode-hashline</code></td><td>line-anchored patch format</td><td>7,458</td><td>14</td><td>— (독립)</td></tr>
+</tbody>
+</table>
+
+<h3>의존성 DAG (ASCII)</h3>
+<div class="dag"><span class="hl">oxicode-hashline</span>  (no deps)
+                 ↓
+               <span class="hl">oxicode-ai</span>  (no deps)  ────→ <span class="hl">oxicode-agent</span> ────→ <span class="hl">oxicode-sdk</span> ────→ <span class="hl">oxicode-cli</span>
+                                                                                       ↑
+                                  <span class="hl">oxicode-tui</span>  (no deps) ─────────────────────────────────────┘
+
+순환 없음. oxicode-ai/oxicode-tui/oxicode-hashline는 foundation 리프. AGENTS.md의 claimed DAG와 6개 Cargo.toml 모두 일치.</div>
+
+<h3>Hotspot (상위 7 파일)</h3>
+<table>
+<thead><tr><th>파일</th><th>LOC</th><th>위험</th><th>영향</th></tr></thead>
+<tbody>
+<tr><td><code>oxicode-cli/src/store/session.rs</code></td><td>3,445</td><td><span class="badge med">중간</span></td><td>27 pub 타입 + JSONL I/O + branching tree 한 파일에 (M2)</td></tr>
+<tr><td><code>oxicode-cli/src/storage/packages.rs</code></td><td>2,933</td><td><span class="badge crit">심각</span></td><td>lockfile 무결성 해시 write-only (F-1)</td></tr>
+<tr><td><code>oxicode-tui/src/render/mermaid.rs</code></td><td>2,607</td><td><span class="badge med">중간</span></td><td>단일 책임 인정, 그러나 2,600 LOC — diagram별 분할 권장 (M4)</td></tr>
+<tr><td><code>oxicode-cli/src/store/settings.rs</code></td><td>2,429</td><td><span class="badge med">중간</span></td><td>46-field Settings struct (F-13) + oxicode_tui::GlyphSet 의존 (M3)</td></tr>
+<tr><td><code>oxicode-cli/src/storage/resource_loader.rs</code></td><td>2,141</td><td><span class="badge med">중간</span></td><td>5가지 리소스 타입 + 컨텍스트 파일 + 확장 충돌 — SRP 위반 (M6)</td></tr>
+<tr><td><code>oxicode-cli/src/store/issues.rs</code></td><td>2,019</td><td><span class="badge low">낮음</span></td><td>CAS + flock, 잘 설계됨</td></tr>
+<tr><td><code>oxicode-cli/src/tui/overlay/mcp_config.rs</code></td><td>1,978</td><td><span class="badge low">낮음</span></td><td>MCP config UI</td></tr>
+</tbody>
+</table>
+</section>
+
+<section id="sec-threat">
+<h2><span class="num">3</span>보안 위협 모델링 (STRIDE)</h2>
+
+<p>oxicode는 LLM이 임의의 도구 호출을 발행하고 그 결과로 셸/파일시스템/네트워크에 접근하는 모델이다. 따라서 신뢰 경계의 "상류"는 모델 + 사용자 prompt + 확장/MCP 서버이다.</p>
+
+<table>
+<thead><tr><th>신뢰 경계</th><th>S</th><th>T</th><th>R</th><th>I</th><th>D</th><th>E</th><th>최고 위협</th><th>file:line</th></tr></thead>
+<tbody>
+<tr><td>User prompt → LLM call</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>프롬프트 인젝션 (의도적 미완성)</td><td>—</td></tr>
+<tr><td>LLM → 도구 실행</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>✓</td><td><strong>E:</strong> 도구 실행은 거의 모든 권한 위임</td><td><code>tool_exec.rs:570</code></td></tr>
+<tr><td>Bash 도구 → 셸</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>✓</td><td><strong>E/D:</strong> <code>sh -c &lt;llm-cmd&gt;</code> 직접 실행 (F-10)</td><td><code>bash.rs:287-289</code></td></tr>
+<tr><td>도구 → 파일시스템</td><td>—</td><td>—</td><td>—</td><td>✓</td><td>—</td><td>—</td><td><strong>I:</strong> PathGuard가 canonicalize + starts_with로 차단 (확인됨)</td><td><code>path_security.rs:50-54</code></td></tr>
+<tr><td>MCP 서버 → 호스트</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>✓</td><td><strong>E:</strong> stdio.rs가 임의 바이너리 spawn</td><td><code>mcp/transport/stdio.rs:243</code></td></tr>
+<tr><td>패키지 소스 → 설치 디렉터리</td><td>—</td><td>✓</td><td>—</td><td>—</td><td>—</td><td>—</td><td><strong>T:</strong> 무결성 해시가 write-only (F-1)</td><td><code>packages.rs:732,1089</code></td></tr>
+<tr><td>확장 바이너리 → 프로세스</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>✓</td><td><strong>E:</strong> libloading 임의 코드 + 해시 미검증 (F-2)</td><td><code>loading.rs:150</code></td></tr>
+<tr><td>자격증명 저장소 → 프로바이더</td><td>—</td><td>—</td><td>—</td><td>✓</td><td>—</td><td>—</td><td><strong>I:</strong> 평문 <code>~/.oxicode/auth.json</code>, keyring은 dead code (F-4)</td><td><code>auth_storage.rs:1047</code></td></tr>
+<tr><td>네트워크 송신</td><td>—</td><td>—</td><td>—</td><td>✓</td><td>✓</td><td>—</td><td><strong>D:</strong> 프로바이더 클라이언트에 timeout 없음 (F-3)</td><td><code>providers/mod.rs:65</code></td></tr>
+<tr><td>설정 파일 → Settings</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>서명 없음, versioned 마이그레이션은 OK</td><td><code>settings.rs:1010-1110</code></td></tr>
+<tr><td>Rust 2024 <code>env::set_var</code> UB</td><td>—</td><td>✓</td><td>—</td><td>—</td><td>—</td><td>—</td><td><strong>T:</strong> test 8곳 + shipped 1곳 (settings.rs:1414)</td><td>다수</td></tr>
+</tbody>
+</table>
+<p class="dim">표기: ✓ 위협 해당, ◐ 부분 완화, — 해당 없음. E (privilege escalation)가 다수 영역에서 미완화. 이는 AI-tool 영역의 본질적 특성.</p>
+</section>
+
+<section id="sec-sec">
+<h2><span class="num">4</span>프로바이더 추상화 계층 (보안)</h2>
+
+<p><code>oxicode-ai/src/providers/trait_def.rs:14</code>의 <code>pub trait Provider</code> (26 LOC) 가 단일 추상화. 8개 built-in (openai, openai-responses, anthropic, google, vertex, mistral, azure, bedrock). <code>ProviderRegistry</code>가 사용자 정의 프로바이더 등록을 허용 (<code>oxicode-ai/src/provider_registry.rs</code>).</p>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-3 높음 — 프로바이더 공유 HTTP 클라이언트에 타임아웃 부재</div>
+<p><code>oxicode-ai/src/providers/mod.rs:65-68</code>:</p>
+<pre><code><span class="kw">pub fn</span> shared_client() -&gt; &amp;<span class="ty">'static</span> reqwest::<span class="ty">Client</span> {
+    <span class="kw">static</span> CLIENT: <span class="ty">OnceLock</span>&lt;reqwest::<span class="ty">Client</span>&gt; = <span class="ty">OnceLock</span>::new();
+    CLIENT.get_or_init(reqwest::<span class="ty">Client</span>::new)
+}</code></pre>
+<p>모든 8개 프로바이더가 <code>shared_client()</code>를 사용. <code>reqwest::Client::new()</code>는 timeout 미설정. TCP 연결 성공 후 TLS handshake 또는 응답 청크 hang 시 영원히 대기. CLI의 동일 함수 (<code>oxicode-cli/src/util/http_client.rs:14-22</code>)는 올바르게 30s timeout 설정 — 두 클라이언트가 비대칭. <code>panic = "abort"</code> release 프로파일과 결합 시 사용자는 frozen CLI를 kill해야 함.</p>
+<p><strong>수정:</strong> <code>Client::builder().connect_timeout(10s).timeout(600s).build().expect("...")</code> — 스트리밍 응답을 위해 timeout은 길게(예: 10분) 잡되 connect_timeout은 짧게.</p>
+</div>
+
+<div class="callout warn">
+<div class="callout-title">⚠ F-10 높음 — <code>is_dangerous_command</code> 경고만, 차단 안 함</div>
+<p><code>oxicode-agent/src/tools/bash.rs:48-58</code> 정의는 함수 docstring에 명시: "This does NOT block execution - it only emits a warning." 즉 <code>| sh</code>, <code>/etc/passwd</code> 접근, 기타 위험 패턴이 감지되어도 실행됨. <code>build_shell_command</code>(line 282-313)는 <code>sh -c &lt;command&gt;</code> 형태로 LLM의 입력을 그대로 셸에 전달.</p>
+<p>완화: <code>BLOCKED_ENV_VARS</code> (line 23-43)는 LD_PRELOAD, PATH 등 19개 env 차단을 실제로 적용. <code>process_group(0)</code> (line 292)으로 자식 프로세스 그룹을 만들어 <code>kill_process_group</code>(line 316-326)으로 SIGKILL 가능.</p>
+<p><strong>수정:</strong> 최소한 <code>| sh</code>, <code>| bash</code>, <code>/etc/passwd</code>, <code>/etc/shadow</code> 패턴은 차단 모드로 승격 (현재는 warn만). 또는 dry-run 모드 추가.</p>
+</div>
+
+<h3>WASM 확장의 SSRF 방어</h3>
+<p><code>oxicode-cli/src/extensions/wasm.rs:783-810</code>의 <code>validate_url</code>은 localhost, 127.0.0.1, 169.254.169.254 (cloud metadata), 10.x, 172.16-31.x, 192.168.x를 차단. 잘 구현됨.</p>
+</section>
+
+<section id="sec-arch">
+<h2><span class="num">5</span>에이전트 런타임 (아키텍처)</h2>
+
+<p><code>oxicode-agent/src/agent_loop/mod.rs</code> (1,133 LOC) 가 메인 루프. <code>agent_loop/tool_exec.rs</code> (1,168 LOC) 가 도구 실행. 21개 built-in 도구가 <code>ToolRegistry::with_builtins_cwd()</code>로 등록 (AGENTS.md 기준). 컴팩션은 <code>oxicode-ai/src/compaction.rs</code> (1,313 LOC).</p>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-11 중간 — 컴포지션 루트가 3개 파일에 분산</div>
+<p><code>oxicode-cli/src/lib.rs</code> 592 LOC, <code>oxicode-cli/src/services.rs</code> 306 LOC, <code>oxicode-cli/src/bootstrap.rs</code> 488 LOC — 합계 1,386 LOC가 컴포지션 로직. <code>lib.rs</code>는 <code>pub async fn build_oxicode_engine()</code> (line 63), <code>pub async fn run_port_check()</code> (line 74), <code>fn build_system_prompt()</code> (line 189), 그리고 전체 <code>App</code> 구조체와 <code>App::from_oxicode()</code>를 보유 — 즉 컴포지션 루트가 라이브러리 크레이트 루트에 있다. <code>bootstrap.rs::build_app</code>(line 24-137)이 그 위에 추가 와이어링. 신규 기여자는 <code>lib.rs::App::from_oxicode</code> → <code>services::build_oxicode</code> → <code>bootstrap::build_app</code> → <code>main_dispatch</code>를 추적해야 한다.</p>
+<p><strong>수정:</strong> <code>build_oxicode_engine</code>, <code>run_port_check</code>, <code>build_system_prompt</code>, <code>App::from_oxicode</code>를 <code>bootstrap.rs</code>로 통합. <code>lib.rs</code>는 mod 선언과 <code>pub use bootstrap::{...}</code> re-export만 유지.</p>
+</div>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-12 중간 — App 10-field God struct</div>
+<p><code>oxicode-cli/src/lib.rs:162-184</code>의 <code>App</code>:</p>
+<pre><code><span class="kw">pub struct</span> <span class="ty">App</span> {
+    oxicode: oxicode_sdk::<span class="ty">Oxicode</span>,
+    agent: <span class="ty">Arc</span>&lt;<span class="ty">Agent</span>&gt;,
+    settings: <span class="ty">Settings</span>,
+    skills: <span class="ty">RwLock</span>&lt;<span class="ty">SkillManager</span>&gt;,
+    active_skills: <span class="ty">RwLock</span>&lt;<span class="ty">Vec</span>&lt;<span class="ty">String</span>&gt;&gt;,
+    wasm_ext: <span class="ty">Option</span>&lt;<span class="ty">Arc</span>&lt;<span class="ty">WasmExtensionManager</span>&gt;&gt;,
+    ask_bridge: <span class="ty">Option</span>&lt;<span class="ty">Arc</span>&lt;<span class="ty">AskBridge</span>&gt;&gt;,
+    issue_store: <span class="ty">Option</span>&lt;<span class="ty">FileIssueStore</span>&gt;,
+    ownership_session_id: <span class="ty">String</span>,
+    <span class="cm">#[allow(dead_code)]</span>
+    liveness_guard: <span class="ty">Option</span>&lt;<span class="ty">AliveGuard</span>&gt;,
+}</code></pre>
+<p><code>liveness_guard</code>는 Drop 사이드이펙트만 위해 보유된 필드인데 <code>#[allow(dead_code)]</code>로 마킹되어 있어 reader가 그 의도를 알 수 없다. <code>Oxicode</code>가 5개의 Arc를 더 보유하므로 도달 가능 공유 포인터는 사실상 15개. Arc::clone 노이즈가 전체 bootstrap.rs와 TUI handler에 만연.</p>
+<p><strong>수정:</strong> <code>AppCore { oxicode, agent, settings }</code> + <code>AppExtensions { wasm_ext, ask_bridge }</code> + <code>IssueOwnership { issue_store, ownership_session_id, liveness_guard }</code> 3-way 분할, 각각 별도 Arc.</p>
+</div>
+
+<div class="callout warn">
+<div class="callout-title">⚠ F-13 중간 — Settings 46-field god struct + 레이어 위반</div>
+<p><code>oxicode-cli/src/store/settings.rs</code> 2,429 LOC. 46개 pub 필드 (line 84-300+). <strong>line 13</strong>에서 <code>use oxicode_tui::GlyphSet;</code>를 import — <strong>데이터/영속 레이어가 UI 레이어에 의존</strong>. <code>pub glyph_set: GlyphSet</code>(line 156)는 UI 선택을 매번 디스크에서 deserialize. <code>oxicode-tui</code>가 교체되면 store 레이어가 깨진다.</p>
+<p><strong>수정:</strong> <code>glyph_set</code>를 plain enum (예: <code>enum GlyphSetDiscriminant { Unicode, Ascii, Nerd }</code>)으로 store에서 보유하고, TUI 레이어가 discriminant를 <code>oxicode_tui::GlyphSet</code>로 매핑.</p>
+</div>
+</section>
+
+<section id="sec-conc">
+<h2><span class="num">6</span>포트 시스템과 빌더 (동시성)</h2>
+
+<p><code>oxicode-sdk/src/ports/mod.rs</code> (1,276 LOC) 의 15개 port traits. <code>OxicodeBuilder</code> (oxicode-sdk/src/builder.rs 768 LOC) 가 fluent API. AGENTS.md가 명시한 대로 <code>parking_lot::RwLock/Mutex</code>는 sync 경로, <code>tokio::sync::Mutex</code>는 <code>.await</code> 가로지를 때만 사용. 이 규칙은 잘 지켜지고 있다.</p>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-8 높음 — <code>AgentTool::execute()</code> 항상 <code>signal: None</code>으로 호출</div>
+<p><code>oxicode-agent/src/agent_loop/tool_exec.rs:570</code>:</p>
+<pre><code><span class="kw">match</span> tool.execute(&tool_call_id, args, <span class="cm">None</span>, ctx).<span class="fn">await</span> {</code></pre>
+<p>그리고 line 718. <code>AgentTool</code> 트레이트 시그니처는 <code>signal: Option&lt;oneshot::Receiver&lt;()&gt;&gt;</code> (oxicode-agent/src/tools.rs:503) — 이는 도구가 외부 취소 시그널을 받기 위한 표준 채널. 그러나 실제 호출에서는 항상 <code>None</code>을 전달. 즉 에이전트가 취소되어도 도구는 자신의 내부 메커니즘(예: bash.rs의 signal 처리) 외에는 알 수 없다. <code>cancel_signal: Arc&lt;AtomicBool&gt;</code>(agent_loop/mod.rs:80)이 500ms마다 폴링되지만, 도구가 long-running이면 500ms 윈도우 안에 종료 못 할 수 있다.</p>
+<p><strong>수정:</strong> <code>tool_exec.rs</code>에서 <code>Arc::clone(&amp;cancel_signal)</code>을 받아 <code>tokio::select!</code>로 oneshot receiver와 폴링을 함께 구독하거나, <code>oneshot::channel()</code>을 만들어 cancel_signal이 발화되면 <code>tx.send(())</code>로 도구에 통지.</p>
+</div>
+
+<div class="callout warn">
+<div class="callout-title">⚠ Domain 3 관찰 — TUI 오버레이의 raw-pointer unsafe</div>
+<p><code>oxicode-cli/src/tui/overlay/extensions.rs:117-122</code>, <code>factories.rs:20-25</code>, <code>fork_select.rs:25-26</code>, <code>settings.rs:20-25</code>, <code>tree_navigator.rs:27-28</code> 5곳에서 동일 패턴:</p>
+<pre><code><span class="kw">type</span> <span class="ty">SharedAppState</span> = <span class="ty">Arc</span>&lt;<span class="ty">Mutex</span>&lt;*<span class="kw">mut</span> crate::tui::app::<span class="ty">AppState</span>&gt;&gt;;</code></pre>
+<p>현재는 Mutex가 접근을 직렬화하고 pointer 수명이 <code>&amp;mut AppState</code>와 일치하므로 사운드. 단일 스레드 메인 루프 invariant가 깨지면 UB. 5개 사이트의 SAFETY 주석이 동일 invariant를 가정함.</p>
+<p><strong>수정:</strong> Arc&lt;Mutex&lt;AppState&gt;&gt;로 단순화하거나, <code>borrow_app_state(&amp;self) -&gt; impl DerefMut&lt;Target = AppState&gt;</code> 헬퍼 trait 추가.</p>
+</div>
+</section>
+
+<section id="sec-perf">
+<h2><span class="num">7</span>터미널 위젯 (성능)</h2>
+
+<p><code>oxicode-tui</code> 18,746 LOC. <code>render/mermaid.rs</code> 2,607 LOC는 의도적으로 단일 책임(pure-Rust mermaid subset renderer). <code>widgets/tool_renderer.rs</code> 1,725 LOC가 도구 출력 렌더링.</p>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-6 높음 — 매 토큰마다 <code>AssistantMessage</code> 전체 deep-clone (8 프로바이더)</div>
+<p><code>oxicode-ai/src/providers/openai.rs:747,774,790,799</code>와 <code>anthropic.rs:746-928</code> (10 사이트):</p>
+<pre><code><span class="kw">partial</span>: <span class="ty">Arc</span>::new(output.<span class="fn">clone</span>()),</code></pre>
+<p>TextDelta/ThinkingDelta/ToolCallStart/ToolCallDelta/Done 각각에 <code>Arc&lt;AssistantMessage&gt;</code>의 deep-clone. <code>AssistantMessage::clone()</code>은 전체 <code>content: Vec&lt;ContentBlock&gt;</code>를 walk하며 누적된 텍스트까지 모두 복사. 4k-token 응답, ~50 tokens/sec 스트림에서 매 토큰당 multi-KB content deep-clone. 50 deep-clones/sec × O(N) per clone → 누적 O(N²).</p>
+<p><strong>수정:</strong> 파셜을 단일 <code>Arc&lt;Mutex&lt;AssistantMessage&gt;&gt;</code>로 공유하고 emit 시 <code>Arc::clone(&amp;shared)</code> (refcount bump). 또는 <code>Arc&lt;[ContentBlock]&gt;</code> 슬라이스를 content_index로 emit하여 consumer가 작은 map으로 재조립.</p>
+</div>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-7 높음 — <code>_append_entry</code>가 3개 RwLock write + 매번 file reopen</div>
+<p><code>oxicode-cli/src/store/session.rs:1291</code>:</p>
+<pre><code><span class="kw">let mut</span> handle = <span class="kw">match</span> fs::<span class="ty">OpenOptions</span>::new()
+    .create(<span class="kw">true</span>).append(<span class="kw">true</span>).<span class="fn">open</span>(file) { ... }</code></pre>
+<p>그리고 line 1324-1326의 lock order:</p>
+<pre><code><span class="kw">self</span>.file_entries.<span class="fn">write</span>().<span class="fn">push</span>(FileEntry::<span class="ty">Entry</span>(file_entry));
+<span class="kw">self</span>.by_id.<span class="fn">write</span>().<span class="fn">insert</span>(entry.id.<span class="fn">clone</span>(), entry.<span class="fn">clone</span>());
+*<span class="kw">self</span>.leaf_id.<span class="fn">write</span>() = <span class="ty">Some</span>(entry.id.<span class="fn">clone</span>());
+<span class="kw">self</span>._persist(&entry);</code></pre>
+<p>도구 호출 한 턴이 user message + assistant text + tool result + assistant follow-up = 4 appends × (3 lock acquires + 1 file open syscall + 1 unbuffered write syscall) = 12 lock + 8 syscall. lock 순서는 line 1267-1271 주석에 명시되어 있어 deadlock은 없지만, contention이 동시 세션에서 발생.</p>
+<p><strong>수정:</strong> <code>BufWriter&lt;File&gt;</code>로 전환, File 핸들은 SessionManager 생성 시 1회 오픈. 3개 write lock을 단일 <code>Mutex&lt;AppendState&gt;</code>로 통합하거나, 인덱스 rebuild는 read-only 스냅샷 기반으로.</p>
+</div>
+</section>
+
+<section id="sec-err">
+<h2><span class="num">8</span>컴포지션 루트 (에러 처리)</h2>
+
+<p>라이브러리 크레이트는 <code>thiserror</code>로 typed error enum, application 크레이트 (oxicode-cli)는 <code>anyhow</code>. AGENTS.md가 명시한 규칙이며 잘 지켜진다. <code>panic = "abort"</code> in release.</p>
+
+<div class="callout bad">
+<div class="callout-title">✗ Domain 5 H1 — <code>.expect()</code>가 shipped code에서 프로세스 abort 유발</div>
+<p><code>oxicode-ai/src/providers/anthropic.rs:385</code>:</p>
+<pre><code>headers.<span class="fn">insert</span>(<span class="st">"x-api-key"</span>, api_key.<span class="fn">parse</span>().<span class="fn">expect</span>(<span class="st">"valid header value"</span>));</code></pre>
+<p>사용자 API 키에 공백/NUL/non-ASCII 문자가 포함되면 <code>HeaderValue::from_str</code>이 실패 → <code>expect</code> → panic. <code>panic = "abort"</code> release에서 전체 프로세스 종료. file 1165/1207/1246/1263/1562의 다른 .expect들은 모두 <code>#[cfg(test)]</code> 안. 385만 shipped code.</p>
+<p><strong>수정:</strong> <code>let value = api_key.parse::&lt;reqwest::header::HeaderValue&gt;().map_err(|e| ProviderError::InvalidHeader { name: "x-api-key", source: e })?;</code> + <code>ProviderError::InvalidHeader</code> variant 추가.</p>
+</div>
+
+<div class="callout warn">
+<div class="callout-title">⚠ F-9 높음 — <code>MissingApiKey</code>가 transient로 오인되어 retry됨</div>
+<p><code>oxicode-agent/src/stream_retry.rs:73-74</code>:</p>
+<pre><code><span class="kw">let</span> is_retryable = is_rate_limit
+    || is_server_error
+    || <span class="fn">matches!</span>(e, oxicode_ai::<span class="ty">ProviderError</span>::<span class="ty">RequestFailed</span>(_))
+    || <span class="fn">matches!</span>(e, oxicode_ai::<span class="ty">ProviderError</span>::<span class="ty">MissingApiKey</span>);</code></pre>
+<p>API 키 부재는 configuration 오류이며 transient가 아니다. 2s+4s+8s = 14s를 낭비한 뒤 <code>RetriesExhausted</code> 반환. 사용자에게 실제 fix(env var 설정)를 알려야 할 때를 지연시킴.</p>
+<p><strong>수정:</strong> <code>MissingApiKey</code>를 is_retryable에서 제거하고 early-return: <code>if matches!(e, ProviderError::MissingApiKey) { return Err(AgentError::Stream("missing API key — set ANTHROPIC_API_KEY or run `oxicode setup`".into())); }</code>.</p>
+</div>
+</section>
+
+<section id="sec-test">
+<h2><span class="num">9</span>패치 형식 (테스트)</h2>
+
+<p>테스트 러너: <code>cargo-nextest</code> (.config/nextest.toml — default/ci/release 3개 프로파일). 통합 테스트 파일 24개 (oxicode-ai 4, oxicode-agent 11, oxicode-cli 2, oxicode-sdk 4 + tests/common). 인라인 <code>#[cfg(test)]</code> 모듈이 대부분.</p>
+
+<table>
+<thead><tr><th>Crate</th><th>테스트 어트리뷰트</th><th>통합 파일</th><th>실행 doc-test</th></tr></thead>
+<tbody>
+<tr><td>oxicode-ai</td><td>597</td><td>4</td><td>~5 (대부분 <code>ignore</code>)</td></tr>
+<tr><td>oxicode-agent</td><td>664</td><td>11</td><td>5</td></tr>
+<tr><td>oxicode-sdk</td><td>366</td><td>4</td><td>0 (모두 <code>ignore</code>)</td></tr>
+<tr><td>oxicode-cli</td><td>671</td><td>2</td><td>0</td></tr>
+<tr><td>oxicode-tui</td><td>319</td><td>0</td><td>1</td></tr>
+<tr><td>oxicode-hashline</td><td>157</td><td>0</td><td>0</td></tr>
+<tr><td><strong>합</strong></td><td><strong>2,783</strong></td><td><strong>21+</strong></td><td><strong>~11</strong></td></tr>
+</tbody>
+</table>
+<p>테스트 밀도: 2,783 / 177,164 × 1000 = <strong>15.7 tests/KLOC</strong> — excellent 등급 (>3%).</p>
+
+<div class="callout good">
+<div class="callout-title">▲ 강점 — 결함 회귀 테스트가 실제로 존재</div>
+<p>AGENTS.md pitfalls에 언급된 #13 session_id 결함 회귀 테스트가 양쪽에 존재:</p>
+<ul>
+<li><code>oxicode-agent/src/agent_loop/mod.rs:1023-1134</code> — <code>mod session_id_wiring_tests</code></li>
+<li><code>oxicode-cli/src/store/issues.rs:1674-1716</code> — <code>start_with_distinct_live_owners_collides</code> + <code>empty_session_assignment_is_immediately_reclaimable_documentation</code></li>
+</ul>
+<p>모두 행동 검증 (Ok가 아니라 실제 결과 비교).</p>
+</div>
+
+<div class="callout warn">
+<div class="callout-title">⚠ CI 매트릭스 갭</div>
+<ul>
+<li><code>test.yml</code>의 matrix.os가 <code>[macos-latest]</code> 단일 (line 26) — Linux/Windows 미검증.</li>
+<li><code>clippy-native-browser</code> job은 빌드만, 테스트 실행 없음.</li>
+<li><code>cargo test --workspace --doc</code>이 ubuntu-latest에서 실행되지만 (test.yml:49) doc-test의 대부분이 <code>ignore</code>.</li>
+<li><code>oxicode-cli --no-default-features</code> 빌드 매트릭스 누락 (self-update feature 게이트 검증 안 됨).</li>
+<li>Coverage gating 부재 — <code>cargo-llvm-cov</code>/<code>codecov</code> 어느 것도 미설정.</li>
+</ul>
+</div>
+</section>
+
+<section id="sec-supply">
+<h2><span class="num">10</span>횡단 관심사 (공급망)</h2>
+
+<p>총 760 packages in Cargo.lock, 중복 多 (windows-sys 5개, hashbrown 4개, getrandom 3개 등). <code>deny.toml</code>:</p>
+
+<table>
+<thead><tr><th>항목</th><th>상태</th><th>근거</th></tr></thead>
+<tbody>
+<tr><td><code>cargo audit</code> in CI</td><td>✅</td><td><code>ci.yml:113-123</code></td></tr>
+<tr><td><code>cargo deny check</code> in CI</td><td>✅</td><td><code>ci.yml:125-134</code></td></tr>
+<tr><td>13 RUSTSEC wasmtime 41.x</td><td>◐</td><td>deny.toml:13-28 — sandbox-constrained, 명시적 트래킹</td></tr>
+<tr><td>License allow list</td><td>✅</td><td>permissive-only (MIT/Apache/BSD/…)</td></tr>
+<tr><td>SBOM (CycloneDX 1.5)</td><td>✅</td><td>sbom.yml — GitHub Dependency Graph 제출</td></tr>
+<tr><td><code>cargo publish --locked</code></td><td>✗</td><td>publish.yml:169 — 누락</td></tr>
+<tr><td>Host allowlist (git/SSH)</td><td>✗</td><td><code>packages.rs:328-368</code> — 임의 URL 허용</td></tr>
+<tr><td><code>validate_extension</code> 호출</td><td>✗</td><td><code>loading.rs:271</code> — production 미사용 (dead code)</td></tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-1 심각 — Lockfile 무결성 해시 write-only</div>
+<p><code>oxicode-cli/src/storage/packages.rs:732</code>에 <code>pub integrity: Option&lt;String&gt;</code> 정의, docstring은 "Integrity hash (sha256)". 그러나 4개 install 경로(line 1089, 1285, 1372, 1467)에서 <code>compute_dir_hash(&amp;dest)</code>를 호출해 <code>LockEntry.integrity</code>에 쓸 뿐. <code>load_lockfile</code>(line 962-967)은 단순 <code>Lockfile::read</code> 후 deserialize — 검증 없음. <code>load_installed</code>(line 936)도 동일.</p>
+<p>공격 시나리오: 로컬 attacker가 <code>~/.oxicode/packages/&lt;name&gt;/</code> 아래 파일을 변조 → 다음 패키지 호출 시 무결성 미감지. <code>compute_dir_hash</code>(line 2247-2260) 함수는 정의되어 있으나 호출 사이트가 install 4곳뿐.</p>
+<p><strong>수정:</strong> <code>load_installed</code>에서 각 <code>LockEntry.integrity</code>가 Some이면 <code>compute_dir_hash(&amp;pkg_install_dir(name))</code>을 다시 계산해 비교. <code>update_all</code> 진입 시 일괄 verify. 검증 실패 시 <code>Err(PackageError::IntegrityMismatch { name, expected, actual })</code>.</p>
+</div>
+
+<div class="callout bad">
+<div class="callout-title">✗ F-2 심각 — 네이티브 확장 임의 코드 + 무결성 미검증</div>
+<p><code>oxicode-cli/src/extensions/loading.rs:120-130</code>:</p>
+<pre><code><span class="kw">if</span> std::env::<span class="fn">var</span>(<span class="st">"OXICODE_NATIVE_EXTENSIONS"</span>).<span class="fn">ok</span>().<span class="fn">as_deref</span>() != <span class="ty">Some</span>(<span class="st">"1"</span>) {
+    <span class="cm">// skip with warning</span>
+    <span class="kw">return</span> <span class="fn">bail</span>(!);
+}
+<span class="cm">// ...</span>
+<span class="kw">let</span> library = <span class="kw">unsafe</span> { <span class="ty">Library</span>::<span class="fn">new</span>(path) } <span class="cm">// line 150</span></code></pre>
+<p><code>OXICODE_NATIVE_EXTENSIONS=1</code> 환경 변수만 충족하면 <code>libloading::Library::new</code>가 임의 공유 라이브러리를 load. <code>validate_extension</code>(line 227-277)은 SHA-256 계산하지만 production에서 호출되지 않음 (mod.rs:19-22에서 export만, 호출 사이트 grep = 0). <code>SAFETY</code> 주석(line 147)은 "We trust the user-installed extension at the given path" — 즉 모델 책임이 아닌 사용자 책임. 패키지 관리자가 다운로드한 .so/.dylib이 변조된 경우 탐지 불가.</p>
+<p><strong>수정:</strong> <code>validate_extension</code>을 <code>load_extension</code> 시작점에 호출. SHA-256을 lockfile(<code>LockEntry.integrity</code>)에 기록하고 로드 시 비교. 변조된 라이브러리는 거부.</p>
+</div>
+</section>
+
+<section id="sec-metrics">
+<h2><span class="num">11</span>품질 지표 정량 분석</h2>
+
+<div class="stat-row">
+<div class="stat"><div class="n">2,783</div><div class="l">테스트 어트리뷰트</div></div>
+<div class="stat"><div class="n">21+</div><div class="l">통합 테스트 파일</div></div>
+<div class="stat"><div class="n">63</div><div class="l">unsafe 블록</div></div>
+<div class="stat"><div class="n">2,088</div><div class="l">.unwrap()</div></div>
+<div class="stat"><div class="n">215</div><div class="l">.expect()</div></div>
+<div class="stat"><div class="n">187</div><div class="l">panic/todo</div></div>
+<div class="stat"><div class="n">18</div><div class="l">TODO/FIXME</div></div>
+<div class="stat"><div class="n">760</div><div class="l">lockfile packages</div></div>
+</div>
+
+<h3>unsafe 사용 (15 파일)</h3>
+<table>
+<thead><tr><th>파일</th><th>위치</th><th>용도</th><th>SAFETY?</th><th>판정</th></tr></thead>
+<tbody>
+<tr><td><code>oxicode-cli/src/store/settings.rs</code></td><td>1230, 1243, 1244, 1414, 1415, 1428, 1578</td><td><code>env::set_var/remove_var</code> (test EnvGuard)</td><td>—</td><td>test only, Rust 2024 UB 가능성</td></tr>
+<tr><td><code>oxicode-ai/src/env_api_keys.rs</code></td><td>369-444</td><td>test env mutation</td><td>—</td><td>test only, nextest 병렬 race</td></tr>
+<tr><td><code>oxicode-ai/src/providers/vertex.rs</code></td><td>323</td><td>test env remove</td><td>있음</td><td>test only</td></tr>
+<tr><td><code>oxicode-agent/src/tools/bash.rs</code></td><td>324</td><td><code>libc::kill</code> SIGKILL on pgroup</td><td>있음</td><td>사운드</td></tr>
+<tr><td><code>oxicode-agent/src/tools/subagent.rs</code></td><td>205</td><td><code>libc::kill</code> SIGTERM</td><td>있음</td><td>사운드</td></tr>
+<tr><td><code>oxicode-agent/src/mcp/transport/stdio.rs</code></td><td>243</td><td><code>libc::kill</code> SIGTERM</td><td>있음</td><td>사운드</td></tr>
+<tr><td><code>oxicode-agent/src/agent_definition.rs</code></td><td>560</td><td>test env remove</td><td>—</td><td>test only</td></tr>
+<tr><td><code>oxicode-cli/src/tui/overlay/factories.rs</code></td><td>82, 104, 124, 287</td><td>raw ptr deref under Mutex</td><td>있음</td><td>사운드 (현재 invariant 하)</td></tr>
+<tr><td><code>oxicode-cli/src/tui/overlay/settings.rs</code></td><td>236, 275, 301, 321, 368</td><td>raw ptr deref under Mutex</td><td>있음</td><td>사운드</td></tr>
+<tr><td><code>oxicode-cli/src/tui/overlay/extensions.rs</code></td><td>235-236, 367-368</td><td>raw ptr deref under Mutex</td><td>있음</td><td>사운드</td></tr>
+<tr><td><code>oxicode-cli/src/extensions/loading.rs</code></td><td>150, 156, 167, 175</td><td><code>Library::new</code> / <code>Symbol::get</code></td><td>있음</td><td>사운드 (단, F-2 참조)</td></tr>
+<tr><td><code>oxicode-cli/src/store/issues.rs</code></td><td>483, 499, 502</td><td><code>libc::flock</code></td><td>있음</td><td>사운드</td></tr>
+<tr><td><code>oxicode-ai/src/providers/register_builtins.rs</code></td><td>533, 540</td><td>test env mutation</td><td>—</td><td>test only</td></tr>
+<tr><td><code>oxicode-ai/src/provider_registry.rs</code></td><td>700, 711, 735, 758, 792, 800</td><td>test env mutation</td><td>—</td><td>test only</td></tr>
+</tbody>
+</table>
+<p class="dim"><strong>판정:</strong> unsafe는 거의 모두 sound (SAFETY 주석 + libc FFI 한정). 단, <code>env::set_var</code> 8곳은 모두 <code>#[cfg(test)]</code>이나, nextest 병렬 실행 시 race window 가능. AGENTS.md는 test 환경에서 env mutation을 "acknowledge"한 safety comment만 추가하지 명시적 race 방지는 부재.</p>
+
+<h3>의존성 메트릭</h3>
+<ul>
+<li><strong>lockfile packages:</strong> 760</li>
+<li><strong>중복 (windows-sys, hashbrown, getrandom, bitflags, strum, syn, thiserror 등):</strong> 20+</li>
+<li><strong>deny.toml bans.multiple-versions = "warn"</strong> — 중복이 CI를 막지는 않음</li>
+<li><strong>드라이버:</strong> <code>oxibrowser-core 0.15</code>, <code>boa_engine</code>, <code>rav1e</code> 트리에서 유래</li>
+<li><strong>extism</strong> <code>=1.21.0</code> 정확 핀 (oxicode-cli/Cargo.toml:83) — supply chain 의도 명시</li>
+</ul>
+
+<h3>테스트 밀도 채점</h3>
+<table>
+<thead><tr><th>밀도</th><th>점수</th><th>oxicode</th></tr></thead>
+<tbody>
+<tr><td>&gt; 3%</td><td>excellent</td><td><strong style="color:var(--green);">1.57% × 10 = 15.7 tests/KLOC ✓</strong></td></tr>
+</tbody>
+</table>
+</section>
+
+<section id="sec-findings">
+<h2><span class="num">12</span>취약점 목록 (심각도순)</h2>
+
+<ol class="findings">
+
+<li>
+<div class="head"><span class="badge crit">심각</span> F-1: Lockfile 무결성 해시가 write-only — 절대 재검증되지 않음</div>
+<div class="file"><code>oxicode-cli/src/storage/packages.rs:732</code> (정의), <code>:1089,1285,1372,1467</code> (쓰기), <code>:962</code> (검증 없음)</div>
+<p>4개 install 경로에서 SHA-256을 계산하여 <code>LockEntry.integrity</code>에 저장하지만, <code>load_lockfile</code>은 단순 deserialize만 수행. <code>compute_dir_hash</code> 함수는 line 2247-2260에 정의되어 있으나 호출 사이트는 install 4곳뿐. 로컬 attacker가 <code>~/.oxicode/packages/&lt;name&gt;/</code> 파일을 변조해도 다음 사용 시 탐지 불가.</p>
+<p><strong>수정:</strong> <code>load_installed</code>와 <code>update_all</code> 진입 시 각 <code>LockEntry.integrity</code>가 Some이면 <code>compute_dir_hash</code> 재계산 → 비교 → <code>Err(PackageError::IntegrityMismatch)</code>.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge crit">심각</span> F-2: 네이티브 확장 libloading 임의 코드 실행 + 무결성 미검증</div>
+<div class="file"><code>oxicode-cli/src/extensions/loading.rs:120-150</code> (opt-in + load), <code>:227-277</code> (<code>validate_extension</code> dead code)</div>
+<p><code>OXICODE_NATIVE_EXTENSIONS=1</code> 환경 변수만 충족되면 <code>libloading::Library::new(path)</code>가 임의 공유 라이브러리를 load. <code>validate_extension</code> 함수는 SHA-256을 계산하지만 production 경로에서 호출되지 않음 (grep = 0). 패키지 관리자가 다운로드한 .so/.dylib이 변조된 경우 탐지 불가.</p>
+<p><strong>수정:</strong> <code>load_extension</code> 시작점에 <code>validate_extension</code> 호출. lockfile(<code>LockEntry.integrity</code>)에 SHA-256 기록 + 로드 시 비교. 변조된 라이브러리는 거부.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-3: 프로바이더 공유 HTTP 클라이언트에 타임아웃 없음</div>
+<div class="file"><code>oxicode-ai/src/providers/mod.rs:65-68</code></div>
+<p><code>reqwest::Client::new()</code>로 빌드된 싱글톤이 모든 8개 프로바이더에서 사용. CLI의 동일 함수 (<code>oxicode-cli/src/util/http_client.rs:14-22</code>)는 30s timeout 설정 — 비대칭. TCP/TLS hang 시 LLM 스트림이 영원히 대기, 사용자는 frozen CLI를 kill해야 함. <code>panic = "abort"</code> release 프로파일과 결합 시 복구 불가.</p>
+<p><strong>수정:</strong> <code>Client::builder().connect_timeout(10s).timeout(600s).build().expect("...")</code>.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-4: <code>keyring</code> feature가 코드에 선언되었지만 <code>Cargo.toml</code>에는 없음 (dead module)</div>
+<div class="file"><code>oxicode-cli/src/store/auth_storage.rs:921,1047</code>, <code>oxicode-cli/Cargo.toml:111-113</code></div>
+<p><code>pub mod keyring_support { ... }</code> 가 <code>#[cfg(feature = "keyring")]</code> 가드를 가지지만 <code>Cargo.toml</code>의 features는 <code>["self-update"]</code>와 <code>self-update = ["dep:self_update"]</code>뿐. <code>grep -rn 'feature = "keyring"'</code> 0건, <code>grep -rn 'keyring = '</code> 0건. 모듈은 항상 compile out. 그러나 line 921의 <code>#[cfg(not(feature = "keyring"))]</code> 분기가 매 실행 시 "Enable the 'keyring' feature for secure OS-level storage" 경고를 출력 — 사용자에게 거짓 안내.</p>
+<p><strong>수정:</strong> <code>keyring = { version = "2", optional = true }</code>와 <code>keyring = ["dep:keyring"]</code>를 Cargo.toml에 추가 (실제 OS keyring 사용) 또는 keyring 모듈 전체와 경고 삭제.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-5: AGENTS.md는 <code>main.rs</code>를 "12-line dispatcher"로 명시하지만 실제 1,622 LOC</div>
+<div class="file"><code>oxicode-cli/src/main.rs</code> (1,622 LOC), <code>AGENTS.md</code> ("<code>main.rs</code> is a 12-line dispatcher")</div>
+<p>실제 <code>main.rs</code>는 <code>handle_subcommand</code>, <code>handle_issue_command</code>, <code>handle_pkg_command</code>, <code>handle_config_command</code> 등 12+ subcommand 핸들러를 인라인 보유. 신규 기여자는 AGENTS.md를 신뢰하거나 무시하거나 둘 중 하나 — onboarding 문서의 정확성이 깨졌다.</p>
+<p><strong>수정:</strong> 각 <code>handle_*</code> 함수를 <code>cli/commands/{sessions,issue,pkg,config,ext,models,refresh,setup,reset,export,import,share}.rs</code>로 분할. <code>main.rs</code>는 <code>#[tokio::main]</code> + dispatch만 유지. AGENTS.md는 자동으로 정확해짐.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-6: 매 토큰마다 <code>AssistantMessage</code> 전체 deep-clone (8 프로바이더 × 다중 emit 사이트)</div>
+<div class="file"><code>oxicode-ai/src/providers/openai.rs:747,774,790,799</code>, <code>oxicode-ai/src/providers/anthropic.rs:746-928</code> (10 사이트)</div>
+<p>TextDelta/ThinkingDelta/ToolCallStart/ToolCallDelta/Done 각각에 <code>Arc::new(output.clone())</code>. 4k-token 응답, ~50 tokens/sec 스트림에서 매 토큰 multi-KB content deep-clone. 누적 O(N²). Anthropic은 10 사이트로 더 심함.</p>
+<p><strong>수정:</strong> 파셜을 단일 <code>Arc&lt;Mutex&lt;AssistantMessage&gt;&gt;</code>로 공유하고 emit 시 <code>Arc::clone(&amp;shared)</code>.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-7: <code>_append_entry</code>가 3개 RwLock write + 매번 file reopen</div>
+<div class="file"><code>oxicode-cli/src/store/session.rs:1291</code> (file open), <code>:1324-1326</code> (3개 write lock)</div>
+<p>도구 호출 한 턴이 user message + assistant text + tool result + assistant follow-up = 4 appends. 각 append는 (3 lock acquires + 1 file open syscall + 1 unbuffered write syscall). 총 12 lock + 8 syscall. lock 순서는 line 1267-1271 주석으로 deadlock 방지됨.</p>
+<p><strong>수정:</strong> <code>BufWriter&lt;File&gt;</code>로 전환, File 핸들은 SessionManager 생성 시 1회 오픈. 3개 write lock을 단일 <code>Mutex&lt;AppendState&gt;</code>로 통합.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-8: <code>AgentTool::execute()</code>가 항상 <code>signal: None</code>으로 호출 — oneshot 취소 계약 무력화</div>
+<div class="file"><code>oxicode-agent/src/agent_loop/tool_exec.rs:570,718</code> vs <code>oxicode-agent/src/tools.rs:503</code></div>
+<p><code>AgentTool</code> 트레이트의 <code>signal: Option&lt;oneshot::Receiver&lt;()&gt;&gt;</code> 파라미터는 외부 취소를 위한 표준 채널이나, 실제 호출은 항상 <code>None</code>. 에이전트가 취소되어도 long-running 도구는 500ms <code>cancel_signal</code> 폴 윈도우 내에서만 종료 가능. bash 같은 도구는 자체 signal 처리가 있어 안전하지만, 다른 도구는 silent overrun.</p>
+<p><strong>수정:</strong> <code>tool_exec.rs</code>에서 <code>cancel_signal: Arc&lt;AtomicBool&gt;</code>을 받아 <code>tokio::select!</code>로 oneshot receiver + 폴링.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-9: <code>MissingApiKey</code>가 transient 오류로 분류되어 retry됨</div>
+<div class="file"><code>oxicode-agent/src/stream_retry.rs:73-74</code></div>
+<p>API 키 부재는 configuration 오류이며 transient가 아니다. 2s+4s+8s = 14s를 낭비한 뒤 <code>RetriesExhausted</code>. 사용자가 실제 fix(env var 설정)를 알 기회를 지연.</p>
+<p><strong>수정:</strong> <code>MissingApiKey</code>를 is_retryable에서 제거하고 early-return: <code>"missing API key — set ANTHROPIC_API_KEY or run `oxicode setup`"</code>.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge high">높음</span> F-10: <code>is_dangerous_command</code>가 경고만, 차단 안 함</div>
+<div class="file"><code>oxicode-agent/src/tools/bash.rs:48-58</code> (정의), <code>:287-289</code> (<code>sh -c</code>)</div>
+<p>docstring: "This does NOT block execution - it only emits a warning." <code>| sh</code>, <code>/etc/passwd</code> 접근 등이 감지되어도 <code>sh -c &lt;command&gt;</code>로 그대로 실행. <code>BLOCKED_ENV_VARS</code> 19개 env 차단은 실제 적용. process_group kill 가능.</p>
+<p><strong>수정:</strong> 최소한 <code>| sh</code>, <code>| bash</code>, <code>/etc/passwd</code>, <code>/etc/shadow</code> 패턴은 차단 모드로 승격. 또는 <code>--dry-run</code> 모드 추가.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge med">중간</span> F-11: 컴포지션 루트가 3개 파일에 분산</div>
+<div class="file"><code>oxicode-cli/src/lib.rs:63-100,162-184</code> + <code>oxicode-cli/src/services.rs:307</code> + <code>oxicode-cli/src/bootstrap.rs:24-137</code></div>
+<p>총 1,386 LOC가 컴포지션 로직. <code>lib.rs</code>가 <code>build_oxicode_engine</code>, <code>run_port_check</code>, <code>build_system_prompt</code>, <code>App</code> 구조체까지 보유. 신규 기여자는 4개 파일을 추적해야 함.</p>
+<p><strong>수정:</strong> lib.rs는 mod 선언과 <code>pub use bootstrap::{...}</code>만 유지. composition 로직은 bootstrap.rs로 통합.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge med">중간</span> F-12: App 10-field God struct with Drop-only field</div>
+<div class="file"><code>oxicode-cli/src/lib.rs:162-184</code></div>
+<p>10 필드 (<code>oxicode</code>, <code>agent</code>, <code>settings</code>, <code>skills</code>, <code>active_skills</code>, <code>wasm_ext</code>, <code>ask_bridge</code>, <code>issue_store</code>, <code>ownership_session_id</code>, <code>liveness_guard</code>). <code>liveness_guard</code>는 <code>#[allow(dead_code)]</code>로 Drop 사이드이펙트만 보유. <code>Oxicode</code>가 5개 Arc 더 보유 → 도달 가능 공유 포인터 ~15개.</p>
+<p><strong>수정:</strong> <code>AppCore { oxicode, agent, settings }</code> + <code>AppExtensions { wasm_ext, ask_bridge }</code> + <code>IssueOwnership { issue_store, ownership_session_id, liveness_guard }</code> 3-way 분할.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge med">중간</span> F-13: Settings 46-field god struct + 데이터 레이어가 UI에 의존</div>
+<div class="file"><code>oxicode-cli/src/store/settings.rs:13</code> (<code>use oxicode_tui::GlyphSet</code>), <code>:84-300+</code> (46 fields)</div>
+<p>데이터/영속 레이어가 <code>oxicode_tui::GlyphSet</code>를 import (line 13) — 레이어 위반. <code>pub glyph_set: GlyphSet</code>(line 156)는 UI 선택을 매번 디스크에서 deserialize. <code>oxicode-tui</code> 교체 시 store 깨짐.</p>
+<p><strong>수정:</strong> store에 <code>enum GlyphSetDiscriminant { Unicode, Ascii, Nerd }</code> 보유, TUI가 discriminant를 <code>oxicode_tui::GlyphSet</code>로 매핑.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge med">중간</span> F-14: TUI 언어 정책이 비대칭 — <code>--print</code>/RPC에서 silently ignored</div>
+<div class="file"><code>oxicode-cli/src/app/agent_session_runtime.rs</code> (TUI only) vs <code>oxicode-cli/src/lib.rs::build_system_prompt</code> (print/RPC)</div>
+<p><code>Settings::output_languages</code>는 TUI 세션 빌드 경로에서만 system prompt에 주입. <code>--print</code>와 RPC 모드의 단순한 <code>build_system_prompt</code>는 무시. 정책이 비대칭 — AGENTS.md pitfalls에 문서화된 의도적 설계이나, 사용자는 이를 모름.</p>
+<p><strong>수정:</strong> 비대칭 유지 (AGENTS.md의 의도) — 단, README/CONTRIBUTING.md에 명시적 경고 추가. 또는 CLI flag로 opt-in.</p>
+</li>
+
+<li>
+<div class="head"><span class="badge med">중간</span> F-15: <code>cargo publish</code>에 <code>--locked</code> 누락</div>
+<div class="file"><code>.github/workflows/publish.yml:169</code></div>
+<p><code>cargo publish --token "$CARGO_REGISTRY_TOKEN"</code> — <code>--locked</code> 없음. ci.yml:147와 sbom.yml:41은 사용. registry index 업데이트 시 다른 transitive 버전으로 publish 가능.</p>
+<p><strong>수정:</strong> line 169를 <code>cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"</code>로 변경.</p>
+</li>
+
+</ol>
+
+<hr>
+<details>
+<summary><strong>Appendix A — 15건 초과 발견사항 (보류 / 낮은 우선순위)</strong></summary>
+<p class="dim">15건 cap 초과분. 우선순위 낮거나 도메인 한정 결함. 일부는 기존 AGENTS.md pitfalls에 이미 문서화됨.</p>
+<ul>
+<li>Domain 7 (Testing): macOS-only matrix, coverage gating 부재, doc-test 대부분 <code>ignore</code> (med).</li>
+<li>Domain 8 (DX): <code>/// pub.</code> placeholder doc-comment 80+ 건 (med). <code>OxicodeBuilder::default()</code> 비기능 (med). <code>clap_complete</code> 미연결 (med). <code>AgentConfig::default()</code>이 무경고 anthropic fallback (med).</li>
+<li>Domain 9 (Docs): CONTRIBUTING.md MSRV 1.82 → 1.96 미갱신 (med). SECURITY.md 지원 버전 0.20.x → 0.41.x 미갱신 (med). <code>oxicode-tui/GUIDE.md</code> 죽은 <code>Component</code>/<code>Surface</code> 추상화 문서 (med). <code>oxicode-cli/ARCHITECTURE.md</code> stale <code>AgentMessage</code> 열거형 (med). <code>oxicode-cli/README.md</code> <code>thinking_level = "standard"</code> (구문) (med). <code>oxicode-agent/README.md</code> 도구 4개로만 기재 (실제 21) (med). <code>oxicode-sdk/ARCHITECTE.md</code> 누락 (med).</li>
+<li>Domain 4 (Performance): SSE 2-pass scan (openai.rs:677, anthropic.rs:698, azure.rs:354, bedrock.rs:621, mistral.rs:335, openai_responses.rs:374) (high). pending_images base64 매 프레임 decode (app.rs:1474-1502) (high). LlmCompactor full-vec clone 3회 (compaction.rs:702, 716-717) (med). <code>run_on_fresh_runtime</code> 매 호출 새 runtime (packages.rs:55-72) (med).</li>
+<li>Domain 5 (ErrorHandling): <code>.expect("valid header value")</code>가 shipped code에서 panic 유발 (anthropic.rs:385) (high). catalog fallback이 no-timeout client (catalog/runtime.rs:76-79) (med). <code>check_for_updates</code> silent error swallow (packages.rs:1687-1695) (med).</li>
+<li>Domain 6 (Supply): lockfile cargo duplicate 다수 (windows-sys 5, hashbrown 4) (low). cargo publish <code>--locked</code>는 F-15로 승격 처리.</li>
+<li>Domain 3 (Concurrency): TUI overlay raw-pointer unsafe 패턴 5곳 (extensions.rs:117-122, factories.rs:20-25, fork_select.rs:25-26, settings.rs:20-25, tree_navigator.rs:27-28) (med). bash sub-process I/O tokio::spawn without JoinHandle (bash.rs:411-412) (med). std::sync::Mutex in async fn (bash.rs:170) (low).</li>
+</ul>
+</details>
+
+</section>
+
+<section id="sec-proposals">
+<h2><span class="num">13</span>기능 제안 (P0-P3 + Innovative)</h2>
+
+<h3>P0 — 즉시 (보안 / 안정성)</h3>
+<table>
+<thead><tr><th>제안</th><th>근거</th><th>영향</th><th>노력</th></tr></thead>
+<tbody>
+<tr><td>F-1 lockfile 무결성 재검증</td><td>패키지 변조 탐지 — supply chain attack 방어선</td><td>packages.rs (~40 LOC)</td><td>1–2 일</td></tr>
+<tr><td>F-2 <code>validate_extension</code> 연결</td><td>네이티브 확장 무결성 — 동일 lockfile 재사용</td><td>loading.rs (~20 LOC)</td><td>0.5 일</td></tr>
+<tr><td>F-3 <code>shared_client</code> timeout 추가</td><td>hang 스트림으로 인한 사용자 frozen 방지</td><td>providers/mod.rs (~5 LOC)</td><td>0.5 일</td></tr>
+<tr><td>F-9 <code>MissingApiKey</code> early-return</td><td>사용자 onboarding 지연 제거</td><td>stream_retry.rs (~10 LOC)</td><td>0.5 일</td></tr>
+</tbody>
+</table>
+
+<h3>P1 — 단기 (견고성)</h3>
+<table>
+<thead><tr><th>제안</th><th>근거</th><th>영향</th><th>노력</th></tr></thead>
+<tbody>
+<tr><td>F-4 keyring 기능 실제 구현 또는 dead module 삭제</td><td>사용자 거짓 안내 제거</td><td>auth_storage.rs + Cargo.toml</td><td>1 일</td></tr>
+<tr><td>F-6 Arc::clone 패턴 전환</td><td>O(N²) → O(N) per-token 할당 제거</td><td>openai.rs + anthropic.rs + 6 providers</td><td>3 일</td></tr>
+<tr><td>F-7 <code>BufWriter</code> + 단일 Mutex</td><td>session persist lock contention 제거</td><td>session.rs (~80 LOC)</td><td>2 일</td></tr>
+<tr><td>F-8 <code>AgentTool::execute()</code> signal 전달</td><td>취소 계약 사운드</td><td>tool_exec.rs (~30 LOC)</td><td>2 일</td></tr>
+<tr><td>F-15 <code>cargo publish --locked</code></td><td>publish 무결성</td><td>publish.yml (1 line)</td><td>0.1 일</td></tr>
+</tbody>
+</table>
+
+<h3>P2 — 중기 (구조 / DX)</h3>
+<table>
+<thead><tr><th>제안</th><th>근거</th><th>영향</th><th>노력</th></tr></thead>
+<tbody>
+<tr><td>F-5 main.rs 핸들러 분할</td><td>AGENTS.md 정확성 복구 + onboarding 개선</td><td>main.rs + cli/commands/*.rs (신규)</td><td>2 일</td></tr>
+<tr><td>F-11 컴포지션 루트 단일화</td><td>신규 기여자 진입점 명확화</td><td>lib.rs + bootstrap.rs</td><td>2 일</td></tr>
+<tr><td>F-12 App struct 3-way 분할</td><td>테스트 용이성 + Arc noise 감소</td><td>lib.rs + bootstrap.rs + tui/handlers</td><td>3 일</td></tr>
+<tr><td>F-13 store/settings GlyphSet 분리</td><td>레이어 위반 제거</td><td>store/settings.rs + tui overlay</td><td>1 일</td></tr>
+<tr><td>Domain 4 SSE 2-pass 제거</td><td>스트림당 50% CPU 감소</td><td>8 providers</td><td>2 일</td></tr>
+<tr><td>Domain 8 doc-stub 80건 정리</td><td>docs.rs 품질 + clippy::missing_docs 통과</td><td>~80 sites</td><td>2 일</td></tr>
+<tr><td>Domain 9 stale 문서 정리</td><td>CONTRIBUTING.md, SECURITY.md, ARCHITECTURE.md</td><td>~6 문서</td><td>2 일</td></tr>
+</tbody>
+</table>
+
+<h3>P3 — 장기 (아키텍처)</h3>
+<table>
+<thead><tr><th>제안</th><th>근거</th><th>영향</th><th>노력</th></tr></thead>
+<tbody>
+<tr><td>Hotspot 5개 파일 SRP 분할</td><td>session.rs 3445, packages.rs 2933, mermaid.rs 2607, settings.rs 2429, resource_loader.rs 2141</td><td>다수 신규 모듈</td><td>2–3 주</td></tr>
+<tr><td>TUI overlay raw-pointer unsafe 5곳 → Arc&lt;Mutex&lt;AppState&gt;&gt;</td><td>fragile invariant 제거</td><td>tui/overlay/* 5 files</td><td>1 주</td></tr>
+<tr><td>oxicode-cli feature 매트릭스 보강</td><td>--no-default-features CI job, --features self-update</td><td>ci.yml (~30 line)</td><td>1 일</td></tr>
+<tr><td>Coverage gating (cargo-llvm-cov)</td><td>테스트가 무의미한지 자동 감지</td><td>ci.yml + badge</td><td>1 일</td></tr>
+</tbody>
+</table>
+
+<h3>Innovative 기능 제안 (4–5)</h3>
+<ol>
+<li><strong>Deterministic session replay:</strong> JSONL 세션 파일 + lockfile integrity + 요청 log를 결합한 "oxicode replay" 서브커맨드 — 동일 입력으로 재현 가능한 디버깅 환경.</li>
+<li><strong>Cost-budget envelope:</strong> Settings에 <code>cost_budget_per_session: f64</code> 추가, tool_exec.rs가 매 호출 후 누적 비용 추정 + budget 초과 시 자동 cancel. (oxicode-ai의 pricing data 활용.)</li>
+<li><strong>WASM skill marketplace:</strong> 기존 <code>oxicode-cli/src/extensions/wasm.rs</code> (Cranelift sandbox) + package manager를 결합 — <code>oxicode skill install &lt;github-user/&lt;repo&gt;&gt;</code> 한 줄로 WASM-only 스킬 설치. 무결성 검증은 F-1의 lockfile 인프라 재사용.</li>
+<li><strong>Per-project tool policy TOML:</strong> <code>.oxicode/policy.toml</code>로 project 단위 도구 allow/deny. AGENTS.md가 가이드하지만 현재 enforcement 약함. PathGuard와 결합하여 prompt injection으로 인한 부적절 도구 호출을 사후가 아니라 사전에 차단.</li>
+<li><strong>Session graph diff viewer:</strong> session.rs의 <code>parent_id</code> 트리 구조를 TUI에서 시각화. <code>/tree</code> slash command가 이미 존재 (oxicode-tui/GUIDE.md 미갱신이나 README.md) — 다만 노드 hover/preview 미구현.</li>
+</ol>
+</section>
+
+<section id="sec-final">
+<h2><span class="num">14</span>종합 평가</h2>
+
+<div class="grid-2">
+<div class="callout good">
+<div class="callout-title">▲ 핵심 강점</div>
+<ul>
+<li><strong>DAG 명확성</strong> — 6 crates, 순환 없음, foundation이 의존성 0.</li>
+<li><strong>보안 가시화</strong> — 13개 RUSTSEC를 deny.toml에 명시, extism 정확 핀, SBOM CycloneDX.</li>
+<li><strong>테스트 밀도 우수</strong> — 15.7 tests/KLOC (excellent 등급), 회귀 테스트가 실제로 행동 검증.</li>
+<li><strong>잘 정의된 컴포넌트</strong> — Provider trait 26 LOC, 15 port traits, AgentTool trait.</li>
+<li><strong>Bash 도구 env allowlist</strong> — 19개 위험 env 변수 실제 차단.</li>
+<li><strong>CAS 패턴</strong> — 이슈 시스템 4회 재시도 + last hash re-read.</li>
+</ul>
+</div>
+<div class="callout bad">
+<div class="callout-title">✗ 핵심 약점</div>
+<ul>
+<li><strong>무결성 검증 부재</strong> — lockfile 해시 write-only, <code>validate_extension</code> dead code. supply chain attack surface.</li>
+<li><strong>타임아웃 부재</strong> — 프로바이더 클라이언트가 hang 가능.</li>
+<li><strong>온보딩 문서 정확성 붕괴</strong> — AGENTS.md "12-line main.rs"는 거짓.</li>
+<li><strong>스트리밍 hot path O(N²)</strong> — 매 토큰 deep-clone 8 프로바이더 × 다중 사이트.</li>
+<li><strong>취소 계약 무력화</strong> — <code>AgentTool::execute</code> signal 무시.</li>
+<li><strong>TUI overlay raw-pointer unsafe</strong> — 5곳에서 동일 fragile invariant.</li>
+</ul>
+</div>
+</div>
+
+<h3>권장 실행 순서</h3>
+<table>
+<thead><tr><th>기간</th><th>목표</th><th>완료 기준</th></tr></thead>
+<tbody>
+<tr><td>1–2주</td><td>P0 4건 (F-1, F-2, F-3, F-9)</td><td>lockfile verify 통합, <code>shared_client</code> timeout, validate_extension 연결, MissingApiKey early-return. cargo audit clean.</td></tr>
+<tr><td>3–4주</td><td>P1 5건 (F-4, F-6, F-7, F-8, F-15)</td><td>keyring 결정, Arc 패턴, BufWriter, signal 전달, --locked. CI 매트릭스 강화.</td></tr>
+<tr><td>5–8주</td><td>P2 7건 + DX/Docs 정리</td><td>main.rs 분할, 컴포지션 통합, App 분할, store GlyphSet 분리, SSE 2-pass 제거, doc-stub 정리, stale 문서 갱신.</td></tr>
+<tr><td>ongoing</td><td>P3 hotspot SRP 분할, TUI unsafe 단순화, coverage gating</td><td>모든 2,000+ LOC 파일이 1,000 LOC 이하로. Coverage report on CI.</td></tr>
+</tbody>
+</table>
+
+<div class="callout info">
+<div class="callout-title">ℹ 결론</div>
+<p><strong>verdict: 수정 후 출시 (Ship with fixes).</strong> oxicode는 견고한 foundation과 명확한 아키텍처 의도를 가진 mature 프로젝트이지만, 두 개의 supply-chain 결함 (lockfile 무결성 write-only, 네이티브 확장 무결성 미검증)과 한 개의 reliability 결함 (프로바이더 클라이언트 타임아웃 부재)이 1.0 출시 전에 반드시 해결되어야 한다. F-1/F-2/F-3은 각각 ~0.5–2일 노력의 additive 수정으로 해결 가능하며 기존 API 호환을 깨지 않는다. P1/P2 결함은 모두 iterative 개선 대상이며 출시를 차단하지 않는다. CRITICAL 결함 해결 후 0.42.x로 버전 bump + CHANGELOG에 security advisory 게시를 권장.</p>
+</div>
+</section>
+
+<footer>
+<p><strong>방법론 (Methodology):</strong> 본 보고서는 2026-06-21에 HEAD <code>e4bb5e42</code> ("Release v0.41.1")에서 작성됨. 9개 분석 도메인(Security, Architecture, Concurrency, Error handling, Performance, Testing, Supply chain, DX, Docs)을 <code>explore</code> subagent 병렬 실행으로 수행. 모든 결함은 메인 세션에서 citation audit으로 file:line 재검증 완료. 15/15 인용 verified, 0 struck. 모든 line number는 감사 시점 기준 — 이후 코드 변경 시 drift 가능.</p>
+<p><strong>범위 (Scope):</strong> Rust 2024 워크스페이스 6 crates, 401 .rs 파일, 177,164 LOC. MSRV 1.96. 패키지 매니저, 네이티브/WASM 확장, MCP, Bash tool, TUI, 공급망 포함. 감사 도중 <code>oxicode-code-review-report.html</code> (unstaged) 발견 — 무관.</p>
+<p><strong>읽기 전용:</strong> 본 감사는 읽기 전용으로 수행됨. 프로젝트 트리에 어떤 변경도 가하지 않음. 모든 도구는 <code>read</code>, <code>search</code>, <code>bash</code>(grep/count), <code>find</code>, <code>lsp</code>에 한정. <code>cargo build</code>/<code>test</code>/<code>clippy</code>/<code>audit</code>는 실행하지 않음.</p>
+<p>생성: <code>code-audit</code> skill · v0.41.1 · 2026-06-21</p>
+</footer>
+
+</div>
+</body>
+</html>

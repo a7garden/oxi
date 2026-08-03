@@ -1,4 +1,4 @@
-# Design: oxi — A Rust Coding Agent
+# Design: oxicode — A Rust Coding Agent
 
 **Date:** 2026-05-02
 **Status:** Draft
@@ -7,28 +7,28 @@
 
 ## Overview
 
-oxi is a terminal-based AI coding assistant built in Rust. It is inspired by modern agent architectures and provides provider-agnostic LLM access, event-driven streaming, and an extensible tool system.
+oxicode is a terminal-based AI coding assistant built in Rust. It is inspired by modern agent architectures and provides provider-agnostic LLM access, event-driven streaming, and an extensible tool system.
 
 ---
 
 ## Package Architecture
 
 ```
-oxi (CLI harness)
-├── oxi-ai (LLM abstraction layer)
+oxicode (CLI harness)
+├── oxicode-ai (LLM abstraction layer)
 │   ├── Model registry + provider trait
 │   ├── Streaming event system
 │   ├── Tool definitions + validation
 │   └── Token/cost tracking
-├── oxi-agent (Agent runtime)
+├── oxicode-agent (Agent runtime)
 │   ├── State management
 │   ├── Tool execution loop
 │   └── Event emitters
-├── oxi-tui (Terminal UI)
+├── oxicode-tui (Terminal UI)
 │   ├── Component framework
 │   ├── Differential rendering
 │   └── Built-in components
-└── oxi (Harness)
+└── oxicode (Harness)
     ├── Session management
     ├── Built-in tools
     └── Extension system
@@ -36,7 +36,7 @@ oxi (CLI harness)
 
 ---
 
-## 1. oxi-ai: LLM Abstraction Layer
+## 1. oxicode-ai: LLM Abstraction Layer
 
 ### Core Types
 
@@ -463,7 +463,7 @@ pub async fn stream(
 
 ---
 
-## 2. oxi-agent: Agent Runtime
+## 2. oxicode-agent: Agent Runtime
 
 ### Core Types
 
@@ -607,7 +607,7 @@ pub async fn execute_tools(
 
 ---
 
-## 3. oxi-tui: Terminal UI
+## 3. oxicode-tui: Terminal UI
 
 ### Core Framework
 
@@ -751,7 +751,7 @@ pub use select_list::{SelectList, SelectItem};
 
 ---
 
-## 4. oxi: CLI Harness
+## 4. oxicode: CLI Harness
 
 ### Session Management
 
@@ -814,7 +814,7 @@ pub use bash::BashTool;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum OxiError {
+pub enum OxicodeError {
     #[error("Provider error: {0}")]
     Provider(#[from] ProviderError),
     
@@ -836,7 +836,7 @@ pub enum OxiError {
 
 ## 6. Implementation Checklist
 
-### Phase 1: oxi-ai
+### Phase 1: oxicode-ai
 
 - [ ] Core types (types.rs, messages.rs)
 - [ ] Context management
@@ -847,7 +847,7 @@ pub enum OxiError {
 - [ ] Anthropic provider implementation
 - [ ] Model registry
 
-### Phase 2: oxi-agent
+### Phase 2: oxicode-agent
 
 - [ ] AgentState
 - [ ] Agent struct
@@ -856,7 +856,7 @@ pub enum OxiError {
 - [ ] Context transformation
 - [ ] Hooks (before/after)
 
-### Phase 3: oxi-tui
+### Phase 3: oxicode-tui
 
 - [ ] TUI framework
 - [ ] Component trait
@@ -866,7 +866,7 @@ pub enum OxiError {
 - [ ] Editor component
 - [ ] Overlay system
 
-### Phase 4: oxi
+### Phase 4: oxicode
 
 - [ ] Session management
 - [ ] Built-in tools
@@ -924,12 +924,12 @@ parking_lot = "0.12"
 ## 8. Files Structure
 
 ```
-oxi/
+oxicode/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs
 │   └── main.rs
-├── oxi-ai/
+├── oxicode-ai/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -943,7 +943,7 @@ oxi/
 │       │   ├── openai.rs
 │       │   └── anthropic.rs
 │       └── error.rs
-├── oxi-agent/
+├── oxicode-agent/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -954,7 +954,7 @@ oxi/
 │       ├── tools.rs
 │       ├── tool_execution.rs
 │       └── error.rs
-├── oxi-tui/
+├── oxicode-tui/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -970,7 +970,7 @@ oxi/
 │           ├── editor.rs
 │           ├── markdown.rs
 │           └── select_list.rs
-└── oxi-cli/
+└── oxicode-cli/
     ├── Cargo.toml
     └── src/
         ├── lib.rs

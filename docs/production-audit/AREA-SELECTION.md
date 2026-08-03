@@ -1,8 +1,8 @@
-# Area Selection — oxi
+# Area Selection — oxicode
 
 **Date:** 2026-05-31
 **Version:** 0.24.0 / 0.25.0 (crate versions)
-**Survey summary:** oxi is a healthy Rust workspace with 290 source files, 113K lines of Rust code across 6 crates. Build is clean (0 clippy warnings, `cargo check` passes). All 2131 tests pass with zero failures. The project has strong CI (fmt, clippy, audit, deny, nextest, doc-tests, release build). Release profile is properly configured (LTO, strip, panic=abort). The main areas for improvement are documentation debt (39 ignored doc-tests, 34 stub `TODO` doc comments), dependency maintenance (3 unmaintained crate warnings from `cargo audit`), and scattered production `expect()`/`unwrap()` calls in streaming/provider paths.
+**Survey summary:** oxicode is a healthy Rust workspace with 290 source files, 113K lines of Rust code across 6 crates. Build is clean (0 clippy warnings, `cargo check` passes). All 2131 tests pass with zero failures. The project has strong CI (fmt, clippy, audit, deny, nextest, doc-tests, release build). Release profile is properly configured (LTO, strip, panic=abort). The main areas for improvement are documentation debt (39 ignored doc-tests, 34 stub `TODO` doc comments), dependency maintenance (3 unmaintained crate warnings from `cargo audit`), and scattered production `expect()`/`unwrap()` calls in streaming/provider paths.
 
 ## Areas
 

@@ -1,6 +1,6 @@
 # Model DB Tooling
 
-Tools for managing `oxi-ai/src/model_db.rs` — a static database of 544 models across 28 providers.
+Tools for managing `oxicode-ai/src/model_db.rs` — a static database of 544 models across 28 providers.
 
 ## Round-trip workflow
 
@@ -24,16 +24,16 @@ python3 scripts/extract-models.py
 Regenerate `model_db.rs` from JSON:
 
 ```bash
-cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxi-ai/src/model_db.rs
+cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxicode-ai/src/model_db.rs
 # Verify:
-cargo check -p oxi-ai
+cargo check -p oxicode-ai
 ```
 
 ## Adding models
 
 1. Edit `scripts/models.json` — add models under the appropriate provider, or add a new provider block.
-2. Regenerate: `cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxi-ai/src/model_db.rs`
-3. Verify: `cargo check -p oxi-ai && cargo test -p oxi-ai`
+2. Regenerate: `cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxicode-ai/src/model_db.rs`
+3. Verify: `cargo check -p oxicode-ai && cargo test -p oxicode-ai`
 
 ## JSON schema
 

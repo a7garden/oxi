@@ -7,7 +7,7 @@
 > 후속: N4 구현 → CHANGELOG.md
 > 의존: ⑧ LSP (선택 — rename_file 연동)
 >
-> **⚠️ v2**: `oxi_ai::high_level::complete` 시그니처 수정 (provider 인자 제거), `Tool::new` 사용, `find_git_root` 재사용. hunk 스테이징을 MVP로 격상.
+> **⚠️ v2**: `oxicode_ai::high_level::complete` 시그니처 수정 (provider 인자 제거), `Tool::new` 사용, `find_git_root` 재사용. hunk 스테이징을 MVP로 격상.
 
 ---
 
@@ -20,7 +20,7 @@ omp의 **commit 도구**는 무관련 변경사항을 atomic 커밋으로 분할
 
 **진입 분기**: 강제 fallback → trivial 변경 감지(공백/임포트만) → agentic 세션 → 실패 시 결정론적 fallback.
 
-**oxi 설계 전략**: omp의 **결정론적 휴리스틱**(scope 추출, 검증, 위상정렬, 메시지 포맷)은 LLM 비의존적이므로 Rust로 직접 이식. agentic 파이프라인은 oxi의 기존 에이전트 루프 위에서 별도 에이전트 정의로 구현. **초기 구현은 legacy 결정론적 경로 우선** — agentic은 후순위.
+**oxicode 설계 전략**: omp의 **결정론적 휴리스틱**(scope 추출, 검증, 위상정렬, 메시지 포맷)은 LLM 비의존적이므로 Rust로 직접 이식. agentic 파이프라인은 oxicode의 기존 에이전트 루프 위에서 별도 에이전트 정의로 구현. **초기 구현은 legacy 결정론적 경로 우선** — agentic은 후순위.
 
 ### omp가 검증한 가치
 - **atomic 커밋** — 무관련 변경이 섞인 working tree를 의미 단위로 분할.
@@ -184,12 +184,12 @@ function validateScope(scope: string): string[] {
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
 ### 2.1 모듈 구조
 
 ```
-oxi-cli/src/commit/
+oxicode-cli/src/commit/
 ├── mod.rs              파이프라인 오케스트레이터
 ├── types.rs            CommitType, ConventionalAnalysis, CommitGroup
 ├── scope.rs            결정론적 scope 추출 (omp analysis/scope.ts 이식)
@@ -316,12 +316,12 @@ pub fn is_wide_change(numstat: &[NumstatEntry]) -> bool {
 ### 2.4 LLM 분석 (`analysis.rs`)
 
 ```rust
-use oxi_ai::{self, high_level::complete, Context, Message, UserMessage, Tool};
+use oxicode_ai::{self, high_level::complete, Context, Message, UserMessage, Tool};
 
 /// LLM에게 ConventionalAnalysis 생성 요청.
 /// v2: `complete(model, context, options)` — provider 인자 없음 (글로벌 레지스트리).
 pub async fn generate_conventional_analysis(
-    model: &oxi_ai::Model,
+    model: &oxicode_ai::Model,
     diff: &str,
     scope_candidates: &[ScopeCandidate],
 ) -> anyhow::Result<ConventionalAnalysis> {
@@ -333,7 +333,7 @@ pub async fn generate_conventional_analysis(
     ctx.add_message(Message::User(UserMessage::new(user)));
     ctx.tools = vec![conventional_analysis_tool()];
 
-    let response = complete(model, &ctx, Some(oxi_ai::StreamOptions {
+    let response = complete(model, &ctx, Some(oxicode_ai::StreamOptions {
         max_tokens: Some(2400),
         ..Default::default()
     })).await?;
@@ -517,17 +517,17 @@ impl GitOps {
 
 ---
 
-## 3. Commit 도구 (oxi-agent)
+## 3. Commit 도구 (oxicode-agent)
 
 ### 3.1 `commit` 도구
 
-`oxi-agent/src/tools/commit.rs`:
+`oxicode-agent/src/tools/commit.rs`:
 
 ```rust
 pub struct CommitTool {
     cwd: PathBuf,
     /// v2: LLM 분석용 모델. bootstrap에서 주입.
-    model: oxi_ai::Model,
+    model: oxicode_ai::Model,
 }
 
 impl AgentTool for CommitTool {
@@ -633,7 +633,7 @@ impl AgentTool for CommitTool {
 ### 3.2 `/commit` 슬래시 명령
 
 ```rust
-// oxi-cli/src/tui/slash/builtin/commit.rs
+// oxicode-cli/src/tui/slash/builtin/commit.rs
 pub struct CommitCommand;
 
 impl BuiltinSlashCommand for CommitCommand {
@@ -789,21 +789,21 @@ mod tests {
 
 ---
 
-## 8. 부록: omp → oxi 매핑
+## 8. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `commit/types.ts` (110) | `oxi-cli/src/commit/types.rs` |
-| `commit/pipeline.ts` (220) | `oxi-cli/src/commit/mod.rs` |
-| `commit/analysis/scope.ts` (210) | `oxi-cli/src/commit/scope.rs` |
-| `commit/analysis/conventional.ts` (62) | `oxi-cli/src/commit/analysis.rs` |
-| `commit/analysis/summary.ts` (95) | `oxi-cli/src/commit/summary.rs` |
-| `commit/analysis/validation.ts` (60) | `oxi-cli/src/commit/validation.rs` |
-| `commit/message.ts` (11) | `oxi-cli/src/commit/message.rs` |
-| `commit/agentic/topo-sort.ts` (44) | `oxi-cli/src/commit/topo_sort.rs` |
-| `commit/changelog/` (234) | `oxi-cli/src/commit/changelog.rs` |
-| `commit/utils/exclusions.ts` (35) | `oxi-cli/src/commit/exclusions.rs` |
-| `commit/git/diff.ts` (148) | `oxi-cli/src/commit/git.rs` |
-| `utils/git.ts` (1,838) | `oxi-cli/src/commit/git.rs` (필요 부분만) |
-| `commands/commit.ts` (63) | `oxi-cli/src/tui/slash/builtin/commit.rs` |
+| `commit/types.ts` (110) | `oxicode-cli/src/commit/types.rs` |
+| `commit/pipeline.ts` (220) | `oxicode-cli/src/commit/mod.rs` |
+| `commit/analysis/scope.ts` (210) | `oxicode-cli/src/commit/scope.rs` |
+| `commit/analysis/conventional.ts` (62) | `oxicode-cli/src/commit/analysis.rs` |
+| `commit/analysis/summary.ts` (95) | `oxicode-cli/src/commit/summary.rs` |
+| `commit/analysis/validation.ts` (60) | `oxicode-cli/src/commit/validation.rs` |
+| `commit/message.ts` (11) | `oxicode-cli/src/commit/message.rs` |
+| `commit/agentic/topo-sort.ts` (44) | `oxicode-cli/src/commit/topo_sort.rs` |
+| `commit/changelog/` (234) | `oxicode-cli/src/commit/changelog.rs` |
+| `commit/utils/exclusions.ts` (35) | `oxicode-cli/src/commit/exclusions.rs` |
+| `commit/git/diff.ts` (148) | `oxicode-cli/src/commit/git.rs` |
+| `utils/git.ts` (1,838) | `oxicode-cli/src/commit/git.rs` (필요 부분만) |
+| `commands/commit.ts` (63) | `oxicode-cli/src/tui/slash/builtin/commit.rs` |
 | `commit/agentic/` (전체) | 후순위 (N4.15) |

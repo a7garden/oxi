@@ -1,0 +1,793 @@
+//! ChatView widget — scrollable message list with streaming support.
+//!
+//! Renders layout entries directly into the frame buffer. Only visible
+//! entries (those within the scroll viewport) are rendered, avoiding the
+//! overhead of a virtual buffer. Scroll offset is managed directly.
+//!
+//! Benefits:
+//! - Tool/error boxes use Block::bordered() — real ratatui borders
+//! - Text uses CJK-aware pre-wrapping (wrap_lines_styled) for correct line-breaking
+//! - No virtual buffer — direct rendering, no double-write
+//! - Layout caching — only recomputes when state actually changes
+//! - Truncation at ingest — no height inflation from monster inputs
+
+pub mod dashboard;
+pub mod highlight;
+pub mod layout;
+pub mod markdown;
+pub mod mouse;
+pub mod render;
+pub mod state;
+pub mod sticky;
+pub mod terminal_support;
+pub mod types;
+
+pub use dashboard::DashboardInfo;
+pub use mouse::{
+    InputDevice, NormalizedScroll, ScrollDirection, ScrollNormalizer, acceleration_band,
+    detect_terminal,
+};
+pub use state::{ChatViewState, FollowMode};
+pub use types::{
+    AdvisorSeverity, ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus,
+};
+
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    widgets::{StatefulWidget, Widget},
+};
+
+use crate::Theme;
+use layout::LayoutKind;
+use render::EntryWidget;
+
+// ── ChatView widget ────────────────────────────────────────────────────
+
+pub struct ChatView<'a> {
+    theme: &'a Theme,
+}
+
+impl<'a> ChatView<'a> {
+    pub fn new(theme: &'a Theme) -> Self {
+        Self { theme }
+    }
+}
+
+impl StatefulWidget for ChatView<'_> {
+    type State = ChatViewState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        if area.width < 4 || area.height < 1 {
+            return;
+        }
+        // Paint the entire viewport with the theme background *first*.
+        // Every entry that doesn't explicitly set its own bg inherits this.
+        buf.set_style(
+            area,
+            ratatui::style::Style::default().bg(self.theme.colors.background),
+        );
+        let styles = self.theme.to_styles();
+        let width = area.width;
+
+        // Outer layout already provides consistent horizontal margin.
+        // No additional internal padding needed.
+        let inner_width = width;
+
+        // Clear click regions before recompute
+        state.thinking_regions.clear();
+        state.tool_regions.clear();
+        state.message_regions.clear();
+
+        // Get layout computed with inner_width for correct height measurements
+        let layout = state.get_layout(inner_width, &styles);
+        // Virtual-coordinate total: u32 from LayoutEntry, saturated to u16
+        // for the legacy u16 chat-wide content_height field. The draw loop
+        // uses u32 throughout and only converts to u16 at Rect construction.
+        let total_height: u32 = layout
+            .last()
+            .map(|e| e.y.saturating_add(e.height))
+            .unwrap_or(0);
+        // Detect new content arrival during Pinned BEFORE updating
+        // content_height so the helper can compare prev → current.
+        let prev_content_height = state.content_height;
+        state.content_height = total_height;
+        state.on_content_grew_during_pinned(prev_content_height);
+        // Stash the rendered viewport rect so keyboard-driven toggles can
+        // pick which collapsible block sits at the viewport top.
+        state.viewport_rect = area;
+
+        // FollowMode state machine: decide what to do with the viewport
+        // based on user intent (follow, grace, or pinned).
+        use crate::widgets::chat::state::{FOLLOW_GRACE, FollowMode};
+        let now = std::time::Instant::now();
+        match &state.follow {
+            FollowMode::Following => {
+                state.scroll_to_bottom(area.height);
+            }
+            FollowMode::FollowingGrace { until } => {
+                if now >= *until {
+                    // Grace expired: promote to Pinned.
+                    // Anchor = topmost currently visible message.
+                    let anchor =
+                        crate::widgets::chat::state::resolve_anchor(&layout, state.scroll_offset);
+                    state.follow = FollowMode::Pinned {
+                        anchor_msg_idx: anchor.0,
+                        anchor_y_in_msg: anchor.1,
+                    };
+                    // Don't move viewport_base — freeze in place.
+                } else {
+                    // Still in grace: keep following new content.
+                    state.scroll_to_bottom(area.height);
+                }
+            }
+            FollowMode::Pinned { .. } => {
+                // Frozen viewport. New content extends content_height but
+                // viewport_base stays put. Just clamp in case content shrank.
+                state.clamp_scroll(area.height);
+            }
+        }
+        // Touch FOLLOW_GRACE to silence dead_code lint if grace not exercised.
+        let _ = FOLLOW_GRACE;
+
+        // Render only visible entries into the buffer. All math is u32 to
+        // break the 65K-row cap; conversion to u16 happens only at the final
+        // Rect construction step (ratatui's Buffer/Rect is u16-indexed).
+        let scroll_offset: u32 = state.scroll_offset;
+        let vp_height: u32 = area.height as u32;
+        let vp_bottom: u32 = scroll_offset.saturating_add(vp_height);
+
+        for entry in &layout {
+            // Skip entries fully outside the viewport.
+            if entry.y.saturating_add(entry.height) <= scroll_offset {
+                continue;
+            }
+            if entry.y >= vp_bottom {
+                break;
+            }
+            if entry.height == 0 {
+                continue;
+            }
+
+            // Compute the entry's vertical range within the viewport.
+            // All in u32; clamp at the final Rect construction.
+            let entry_top: u32 = entry.y.max(scroll_offset);
+            let entry_bot: u32 = entry.y.saturating_add(entry.height).min(vp_bottom);
+            let h_u32: u32 = entry_bot.saturating_sub(entry_top);
+            if h_u32 == 0 {
+                continue;
+            }
+            // Clamp h to u16 (impossible to exceed u16::MAX given ratatui's
+            // Buffer limits, but explicit).
+            let h: u16 = h_u32.min(u16::MAX as u32) as u16;
+            let rel_y: u32 = entry_top - scroll_offset;
+            // area.y + rel_y must fit in u16 — area.y is at most u16::MAX - 1
+            // (terminal height) and rel_y is bounded by vp_height = u16::MAX - area.y.
+            let dst_y: u16 = area.y.saturating_add(rel_y.min(u16::MAX as u32) as u16);
+            let rect = Rect::new(area.x, dst_y, inner_width, h);
+
+            // Track click regions (still u16 — absolute screen coords).
+            let region_bottom = dst_y.saturating_add(h);
+            if let LayoutKind::Thinking { key, .. } = &entry.kind {
+                state
+                    .thinking_regions
+                    .push((dst_y, region_bottom, key.clone()));
+            }
+            if let LayoutKind::ToolBox { key, result, .. } = &entry.kind
+                && result.is_some()
+            {
+                state.tool_regions.push((dst_y, region_bottom, key.clone()));
+            }
+
+            // Track copyable message regions (skip pure spacers/dividers)
+            if !matches!(
+                entry.kind,
+                LayoutKind::Spacer | LayoutKind::Rule | LayoutKind::ResponseDivider
+            ) {
+                state
+                    .message_regions
+                    .push((dst_y, region_bottom, entry.msg_idx));
+            }
+
+            // For entries fully within the viewport, render directly.
+            // For entries clipped at the top, render the full entry to a
+            // temp buffer then copy only the visible rows — otherwise
+            // EntryWidget would draw starting from row 0 of the rect
+            // (top border, first lines) instead of the clipped rows.
+            if entry.y >= scroll_offset {
+                EntryWidget::new(&entry.kind, &styles, &mut state.tool_format_cache)
+                    .render(rect, buf);
+            } else {
+                // hidden rows above the viewport top (u32 → usize for indexing)
+                let hidden: u32 = scroll_offset - entry.y;
+                // entry.height must fit in u16 for Rect::new; the LayoutEntry
+                // is u32 but ratatui's Buffer is u16 — same assumption as before.
+                let entry_h_u16: u16 = entry.height.min(u16::MAX as u32) as u16;
+                let tmp_rect = Rect::new(0, 0, inner_width, entry_h_u16);
+                let mut tmp = ratatui::buffer::Buffer::empty(tmp_rect);
+                EntryWidget::new(&entry.kind, &styles, &mut state.tool_format_cache)
+                    .render(tmp_rect, &mut tmp);
+                // Copy visible rows from the temp buffer to the frame buffer.
+                // Uses row-level clone instead of per-cell iteration for
+                // better performance on wide terminals.
+                for row in 0..h {
+                    let src_base = (hidden + row as u32) as usize * inner_width as usize;
+                    let dst_base = buf.index_of(area.x, dst_y + row);
+                    let dst_slice = &mut buf.content[dst_base..dst_base + inner_width as usize];
+                    let src_slice = &tmp.content[src_base..src_base + inner_width as usize];
+                    dst_slice.clone_from_slice(src_slice);
+                }
+            }
+        }
+        // W1 step 5: sticky turn-prompt overlay + ↓ new answer badge.
+        let candidates = sticky::compute_sticky_candidates(&layout);
+        sticky::render_sticky_headers(
+            &candidates,
+            area,
+            area.height,
+            scroll_offset,
+            &styles,
+            buf,
+            state.new_answer_pending,
+        );
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeStyles;
+    use layout::compute_layout;
+    use markdown::{fix_bare_code_fences, md_lines, wrap_lines_styled};
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use state::MAX_TEXT_CHARS;
+    use types::ContentBlock;
+
+    #[test]
+    fn scroll_bounds() {
+        use crate::widgets::chat::state::FollowMode;
+        let mut s = ChatViewState::new();
+        s.content_height = 100;
+        // scroll_to_bottom → FollowMode::Following
+        s.scroll_to_bottom(20);
+        assert_eq!(s.scroll_offset, 80);
+        assert!(matches!(s.follow, FollowMode::Following));
+
+        // Manual scroll up → FollowMode::FollowingGrace
+        s.scroll_up(50);
+        assert_eq!(s.scroll_offset, 30);
+        assert!(matches!(s.follow, FollowMode::FollowingGrace { .. }));
+
+        s.scroll_down(10);
+        assert_eq!(s.scroll_offset, 40);
+        // scroll_down during grace → back to Following
+        assert!(matches!(s.follow, FollowMode::Following));
+
+        // Clamp at top
+        s.scroll_up(100);
+        assert_eq!(s.scroll_offset, 0);
+
+        // clamp_scroll when content shrinks — scroll_offset clamped to max_off
+        s.scroll_offset = 90;
+        s.content_height = 30;
+        s.clamp_scroll(20);
+        assert_eq!(s.scroll_offset, 10);
+    }
+
+    #[test]
+    fn streaming_lifecycle() {
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+        assert!(s.streaming.is_some());
+        s.stream_text_delta("Hi");
+        s.finish_streaming();
+        assert!(s.streaming.is_none());
+        assert_eq!(s.messages.len(), 1);
+    }
+
+    #[test]
+    fn streaming_text_after_thinking() {
+        // Regression test: when a Thinking block is added before Text blocks,
+        // each text delta must append to the SAME Text block, not create
+        // a new one for every delta.
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+
+        // Simulate provider sending Thinking first, then Text deltas
+        s.streaming
+            .as_mut()
+            .unwrap()
+            .message
+            .content_blocks
+            .push(ContentBlock::Thinking {
+                content: "Let me think...".into(),
+                collapsed: true,
+            });
+
+        // First text delta — creates a new Text block
+        s.stream_text_delta("안녕");
+        // Second text delta — must append, NOT create a new block
+        s.stream_text_delta("하세요");
+
+        // Verify only ONE Text block exists with accumulated content
+        let text_blocks: Vec<&ContentBlock> = s
+            .streaming
+            .as_ref()
+            .unwrap()
+            .message
+            .content_blocks
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::Text { .. }))
+            .collect();
+        assert_eq!(
+            text_blocks.len(),
+            1,
+            "Expected 1 Text block, got {}",
+            text_blocks.len()
+        );
+        if let ContentBlock::Text { content } = text_blocks[0] {
+            assert_eq!(content, "안녕하세요");
+        } else {
+            panic!("Expected Text block");
+        }
+    }
+
+    #[test]
+    fn tool_call_lifecycle() {
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+        s.stream_tool_call(
+            "t1".into(),
+            "bash".into(),
+            "ls".into(),
+            ToolCallStatus::Executing,
+        );
+        s.stream_tool_result(Some("t1".into()), "bash".into(), "file.txt".into(), false);
+        s.finish_streaming();
+        match &s.messages[0].content_blocks[0] {
+            ContentBlock::ToolCall {
+                status,
+                result,
+                duration,
+                ..
+            } => {
+                assert_eq!(*status, ToolCallStatus::Done);
+                assert!(result.is_some());
+                assert!(duration.is_none()); // not set in this test
+            }
+            _ => panic!("expected ToolCall"),
+        }
+    }
+
+    #[test]
+    fn image_tracking() {
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+        s.stream_image("image/png".into(), "AAAA".into());
+        assert_eq!(s.pending_images.len(), 1);
+        assert_eq!(s.pending_images[0].1, "image/png");
+    }
+
+    #[test]
+    fn compute_layout_basic() {
+        let mut s = ChatViewState::new();
+        s.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text {
+                content: "Hello".into(),
+            }],
+            timestamp: 0,
+        });
+        let layout = compute_layout(&s, 80, &ThemeStyles::default());
+        assert!(!layout.is_empty());
+        assert!(layout.iter().any(|e| matches!(&e.kind, LayoutKind::Rule)));
+    }
+
+    #[test]
+    fn fix_bare_code_fences_basic() {
+        let input = "```\ncode\n```";
+        let fixed = fix_bare_code_fences(input);
+        assert!(fixed.starts_with("```text"));
+    }
+
+    #[test]
+    fn clamp_str_no_truncate() {
+        let short = "hello world".to_string();
+        let result = state::clamp_str(short.clone(), 100, 10);
+        assert_eq!(result, short);
+    }
+
+    #[test]
+    fn clamp_str_truncates_chars() {
+        let long = "x".repeat(100);
+        let result = state::clamp_str(long.clone(), 10, 200);
+        // 10 chars + "\n ..." = 16 chars, 2 lines
+        assert!(result.starts_with("xxxxxxxxxx"));
+        assert!(result.contains("..."));
+    }
+
+    #[test]
+    fn clamp_str_truncates_lines() {
+        let long = (0..20)
+            .map(|i| format!("line{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = state::clamp_str(long.clone(), 10000, 5);
+        assert!(result.lines().count() <= 6); // 5 + "...\n"
+        assert!(result.ends_with(" ..."));
+    }
+
+    #[test]
+    fn layout_cache_hit() {
+        let mut s = ChatViewState::new();
+        s.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text {
+                content: "Hello".into(),
+            }],
+            timestamp: 0,
+        });
+        // First call — cache miss, recompute
+        let layout1 = s.get_layout(80, &ThemeStyles::default());
+        // Second call with same params — cache hit
+        let layout2 = s.get_layout(80, &ThemeStyles::default());
+        assert_eq!(layout1.len(), layout2.len());
+        // Different width — cache miss
+        let layout3 = s.get_layout(60, &ThemeStyles::default());
+        assert_eq!(layout1.len(), layout3.len()); // same content, different heights
+    }
+
+    #[test]
+    fn text_truncation_on_ingest() {
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+        // Append a huge chunk
+        let huge = "x".repeat(600_000);
+        s.stream_text_delta(&huge);
+        let content = match &s.streaming {
+            Some(st) => match &st.message.content_blocks[0] {
+                ContentBlock::Text { content } => content.clone(),
+                _ => panic!("expected Text"),
+            },
+            None => panic!("expected streaming"),
+        };
+        // Content should be clamped to MAX_TEXT_CHARS (with overflow marker)
+        assert!(
+            content.chars().count() <= MAX_TEXT_CHARS + 10,
+            "content len = {}",
+            content.chars().count()
+        );
+    }
+
+    #[test]
+    fn wrap_lines_styled_cjk() {
+        // CJK text without spaces between characters should wrap
+        // at character boundaries, not overflow.
+        let text = "oxicode is a terminal-based AI coding assistant written in Rust with full multilingual support.";
+        let lines = md_lines(text, 30, &ThemeStyles::default());
+        // Should produce multiple lines, all fitting within width 30
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(w <= 30, "Line width {} exceeds 30: '{}'", w, line);
+        }
+        assert!(lines.len() > 1, "Expected multiple wrapped lines");
+    }
+
+    #[test]
+    fn wrap_lines_styled_ascii() {
+        let text = "Hello world, this is a test of text wrapping.";
+        let lines = md_lines(text, 20, &ThemeStyles::default());
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(w <= 20, "Line width {} exceeds 20: '{}'", w, line);
+        }
+        assert!(lines.len() > 1, "Expected multiple wrapped lines");
+    }
+
+    #[test]
+    fn wrap_lines_styled_mixed_width() {
+        // Mixed narrow and wide characters
+        let text =
+            "Multi-provider LLM support with streaming and extensible tool system architecture";
+        let lines = md_lines(text, 30, &ThemeStyles::default());
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(w <= 30, "Line width {} exceeds 30: '{}'", w, line);
+        }
+        assert!(lines.len() > 1, "Expected multiple wrapped lines");
+    }
+
+    #[test]
+    fn wrap_lines_styled_short_text() {
+        // Short text should not be split
+        let text = "Hello";
+        let lines = md_lines(text, 80, &ThemeStyles::default());
+        assert_eq!(lines.len(), 1, "Short text should be a single line");
+    }
+
+    #[test]
+    fn wrap_lines_preserves_style() {
+        let styled_line = Line::from(vec![
+            Span::styled(
+                "bold ".to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("normal".to_string(), Style::default()),
+        ]);
+        let result = wrap_lines_styled(&[styled_line], 80);
+        // Should have 1 line since it fits
+        assert_eq!(result.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use crate::symbols::Symbols;
+    use crate::table_renderer::render_markdown_table;
+    use crate::theme::ThemeStyles;
+    use crate::widgets::chat::markdown::md_lines;
+
+    #[test]
+    fn render_markdown_table_basic() {
+        let md = "| Name | Age |\n|---|---|
+| Alice | 30 |
+| Bob | 25 |";
+        let lines = render_markdown_table(md, 80, &Symbols::unicode());
+        assert!(!lines.is_empty(), "Expected table lines, got empty");
+        let text = lines.iter().map(|l| l.to_string()).collect::<String>();
+        assert!(text.contains('┌'), "Expected top border, got: {}", text);
+        assert!(text.contains('│'), "Expected cell separator, got: {}", text);
+        assert!(text.contains('└'), "Expected bottom border, got: {}", text);
+    }
+
+    #[test]
+    fn md_lines_with_table() {
+        let md = "| Name | Age |
+|---|---|---|
+| Alice | 30 |
+| Bob | 25 |";
+        let lines = md_lines(md, 80, &ThemeStyles::default());
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn md_lines_without_table() {
+        let md = "Hello **world**";
+        let lines = md_lines(md, 80, &ThemeStyles::default());
+        assert!(!lines.is_empty());
+    }
+    #[test]
+    fn test_empty_cells() {
+        let md = "| Name | Value | Extra |
+|---|---|---|
+| Alice | | 100 |";
+        let out = render_markdown_table(md, 60, &Symbols::unicode());
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
+        assert!(text.contains("Alice"), "Has Alice");
+        assert!(text.contains("┌"), "Has border");
+    }
+
+    #[test]
+    fn test_single_column() {
+        let md = "| Only |
+|---|
+| One |
+| Two |";
+        let out = render_markdown_table(md, 30, &Symbols::unicode());
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
+        assert!(text.contains("Only"), "Has header");
+        assert!(text.contains("One"), "Has data");
+        println!("text={}", text);
+        assert!(
+            text.contains("└──────┘") || text.contains("└──┘"),
+            "Has bottom border"
+        );
+    }
+
+    #[test]
+    fn test_wide_characters() {
+        let md = "| Name | Age | City |
+|---|---|---|
+| Alice | 30 | London |";
+        let out = render_markdown_table(md, 60, &Symbols::unicode());
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
+        assert!(text.contains("Name"), "Has table header");
+        assert!(text.contains("Alice"), "Has table data");
+    }
+
+    #[test]
+    fn test_special_characters_in_cells() {
+        let md = "| Name | Desc |
+|---|---|
+| Test | `code` |";
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
+        assert!(text.contains("Test"), "Has Test");
+    }
+
+    #[test]
+    fn test_no_header_row_separator_at_end() {
+        let md = "| A | B |
+|---|---|
+| 1 | 2 |";
+        let out = render_markdown_table(md, 30, &Symbols::unicode());
+        // Should have: top border, header, sep, body, bottom border
+        assert!(out.len() >= 5, "Should have at least 5 lines");
+    }
+
+    #[test]
+    fn test_exact_output_format() {
+        let md = "| A | B |
+|---|---|
+| X | Y |";
+        let out = render_markdown_table(md, 30, &Symbols::unicode());
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
+        // Check exact format
+        assert_eq!(
+            text,
+            "┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ X │ Y │
+└───┴───┘
+"
+        );
+    }
+}
+
+#[cfg(test)]
+mod complete_table_verification {
+    use crate::symbols::Symbols;
+    use crate::table_renderer::render_markdown_table;
+
+    #[test]
+    fn test_mixed_content_before_table() {
+        let md = "Check out this table:\n\n| Name | Value |\n|---|---|\n| Alpha | 100 |";
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Check out"), "Before table");
+        assert!(text.contains('┌'), "Table top");
+        assert!(text.contains("Alpha"), "Table data");
+    }
+
+    #[test]
+    fn test_mixed_content_after_table() {
+        let md = "| A | B |\n|---|---|\n| X | Y |\n\nThat was the table.";
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains('┌'), "Table top");
+        assert!(text.contains("That was the table"), "After table");
+    }
+
+    #[test]
+    fn test_mixed_content_both_sides() {
+        let md = "Start\n\n| H1 | H2 | H3 |\n|---|---|---|\n| C1 | C2 | C3 |\n\nEnd";
+        let out = render_markdown_table(md, 60, &Symbols::unicode());
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Start"), "Before");
+        assert!(text.contains("End"), "After");
+        assert!(text.contains('┌'), "Table");
+    }
+
+    #[test]
+    fn test_narrow_terminal() {
+        let md = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seoul |";
+        let out = render_markdown_table(md, 20, &Symbols::unicode());
+        assert!(!out.is_empty());
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Name") || text.contains("┌") || text.contains("Alice"));
+    }
+
+    #[test]
+    fn test_cell_wrapping() {
+        let md = "| Short | Very Long Header Text Here |\n|---|---|\n| Data | Another long cell that needs wrapping |";
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains('┌'), "Table rendered");
+        assert!(text.contains('│'), "Has cell separators");
+    }
+
+    #[test]
+    fn test_multiple_rows_separators() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |";
+        let out = render_markdown_table(md, 40, &Symbols::unicode());
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Count separator lines (lines containing ├ or ┼)
+        let separator_lines: Vec<&str> = text
+            .lines()
+            .filter(|l| l.contains('├') || l.contains('┼'))
+            .collect();
+        // 4 data rows → 3 separators between them
+        println!("\n{}", text);
+        assert_eq!(separator_lines.len(), 3, "Should have 4 separator lines");
+        // Check it's a proper table
+        assert!(text.contains("┌"), "Has top border");
+        assert!(text.contains("└"), "Has bottom border");
+    }
+
+    #[test]
+    fn test_header_bold_styling() {
+        let md = "| Name | Value |\n|---|---|\n| X | Y |";
+        let out = render_markdown_table(md, 50, &Symbols::unicode());
+        assert!(
+            out.len() >= 4,
+            "Should have top border + header + separator + body"
+        );
+    }
+
+    #[test]
+    fn table_renders_in_ascii_glyph_set() {
+        // Glyph-set policy: when the user picks ASCII mode, table
+        // borders must use '+', '-', '|' — never the Unicode
+        // box-drawing chars that the renderer hardcoded before.
+        let symbols = crate::symbols::Symbols::ascii();
+        let out = render_markdown_table("| A | B |\n|---|---|\n| 1 | 2 |\n", 30, &symbols);
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains('+'),
+            "ascii table should use '+', got:\n{text}"
+        );
+        assert!(
+            text.contains('-'),
+            "ascii table should use '-', got:\n{text}"
+        );
+        assert!(
+            text.contains('|'),
+            "ascii table should use '|', got:\n{text}"
+        );
+        // And no box-drawing characters should leak through.
+        for forbidden in ['┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼', '─', '│']
+        {
+            assert!(
+                !text.contains(forbidden),
+                "ascii table must not contain {forbidden:?}, got:\n{text}"
+            );
+        }
+    }
+}

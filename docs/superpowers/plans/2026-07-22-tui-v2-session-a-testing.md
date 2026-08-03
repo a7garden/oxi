@@ -1,16 +1,16 @@
-# Session A: oxi-tui v2 테스트 + 벤치마크 + 하드닝
+# Session A: oxicode-tui v2 테스트 + 벤치마크 + 하드닝
 
 > **독립 세션용 문서.** 이 문서만 읽고 작업할 수 있도록 작성됨.
-> **수정 파일**: `oxi-tui/tests/`, `oxi-tui/benches/`, `oxi-tui/src/` (doc comments only)
-> **금지 파일**: `oxi-cli/src/` (Session B가 작업 중)
+> **수정 파일**: `oxicode-tui/tests/`, `oxicode-tui/benches/`, `oxicode-tui/src/` (doc comments only)
+> **금지 파일**: `oxicode-cli/src/` (Session B가 작업 중)
 
 ## 전제 상태
 
-브랜치 `oxi-tui-v2-plan-a` (44+ commits). oxi-tui v2 라이브러리 완성 (42 파일, 9.7K LOC, 222 테스트). 모든 게이트 통과.
+브랜치 `oxicode-tui-v2-plan-a` (44+ commits). oxicode-tui v2 라이브러리 완성 (42 파일, 9.7K LOC, 222 테스트). 모든 게이트 통과.
 
 ```bash
-cargo nextest run -p oxi-tui   # 222 tests pass
-cargo clippy -p oxi-tui -- -D warnings  # clean
+cargo nextest run -p oxicode-tui   # 222 tests pass
+cargo clippy -p oxicode-tui -- -D warnings  # clean
 cargo fmt --all -- --check     # clean
 ```
 
@@ -18,17 +18,17 @@ cargo fmt --all -- --check     # clean
 
 ### 목표
 
-`portable-pty` crate으로 가상 PTY를 열어 oxi 바이너리를 spawn하고, 실제 터미널에 출력되는 ANSI bytes를 검증. 단위 테스트(TestBackend)로는 잡을 수 없는 회귀(OSC8 escape, CSI 2026 sync, 커서 깜빡임)를 방지.
+`portable-pty` crate으로 가상 PTY를 열어 oxicode 바이너리를 spawn하고, 실제 터미널에 출력되는 ANSI bytes를 검증. 단위 테스트(TestBackend)로는 잡을 수 없는 회귀(OSC8 escape, CSI 2026 sync, 커서 깜빡임)를 방지.
 
 ### 파일
 
-- `oxi-tui/Cargo.toml` — `[dev-dependencies]`에 `portable-pty = "0.8"` 추가
-- `oxi-tui/tests/pty_e2e.rs` — 신규
+- `oxicode-tui/Cargo.toml` — `[dev-dependencies]`에 `portable-pty = "0.8"` 추가
+- `oxicode-tui/tests/pty_e2e.rs` — 신규
 
 ### 구현
 
 ```rust
-// oxi-tui/tests/pty_e2e.rs
+// oxicode-tui/tests/pty_e2e.rs
 use portable_pty::{native_pty_system, CommandBuilder};
 
 fn spawn_pty(args: &[&str]) -> (Box<dyn portable_pty::Master>, Box<dyn portable_pty::Child>) {
@@ -36,7 +36,7 @@ fn spawn_pty(args: &[&str]) -> (Box<dyn portable_pty::Master>, Box<dyn portable_
         portable_pty::PtySize { rows: 24, cols: 80, ..Default::default() }
     ).unwrap();
     let cmd = CommandBuilder::new("cargo");
-    cmd.args(&["run", "--bin", "oxi", "--"]);
+    cmd.args(&["run", "--bin", "oxicode", "--"]);
     cmd.args(args);
     let child = pty.slave.spawn_command(cmd).unwrap();
     (pty.master, child)
@@ -53,10 +53,10 @@ fn read_until(master: &mut dyn portable_pty::Master, pattern: &str, timeout_ms: 
 ```rust
 #[test]
 fn pty_minimal_boot() {
-    // oxi --version 실행 후 출력에 "oxi" 포함 확인
+    // oxicode --version 실행 후 출력에 "oxicode" 포함 확인
     let (mut master, mut child) = spawn_pty(&["--version"]);
-    let output = read_until(&mut *master, "oxi", 30000);
-    assert!(output.contains("oxi"));
+    let output = read_until(&mut *master, "oxicode", 30000);
+    assert!(output.contains("oxicode"));
 }
 
 #[test]
@@ -88,16 +88,16 @@ fn pty_csi_2026_wraps_frame() {
 
 ### 파일
 
-- `oxi-tui/Cargo.toml` — `[[bench]]` 섹션 추가, `criterion = "0.5"` dev-dep
-- `oxi-tui/benches/streaming_memoization.rs` — 신규
-- `oxi-tui/benches/cursor_dedup.rs` — 신규
+- `oxicode-tui/Cargo.toml` — `[[bench]]` 섹션 추가, `criterion = "0.5"` dev-dep
+- `oxicode-tui/benches/streaming_memoization.rs` — 신규
+- `oxicode-tui/benches/cursor_dedup.rs` — 신규
 
 ### 벤치마크 1: 스트리밍 메모이제이션
 
 ```rust
 // benches/streaming_memoization.rs
 use criterion::{criterion_group, criterion_main, Criterion};
-use oxi_tui::widget::{RetainedChild, Renderable, Text};
+use oxicode_tui::widget::{RetainedChild, Renderable, Text};
 
 fn bench_streaming_skip(c: &mut Criterion) {
     c.bench_function("retained_child_skip_unchanged", |b| {
@@ -150,33 +150,33 @@ fn bench_cursor_dedup(c: &mut Criterion) {
 
 ---
 
-## 작업 3: oxi-tui v2 API 문서화 (~반나절)
+## 작업 3: oxicode-tui v2 API 문서화 (~반나절)
 
 ### 목표
 
-crate-level doc comment와 각 public 모듈에 `#![doc = "..."]` 추가. `cargo doc -p oxi-tui` 결과가 newcomers에게 유용한 레퍼런스가 되도록.
+crate-level doc comment와 각 public 모듈에 `#![doc = "..."]` 추가. `cargo doc -p oxicode-tui` 결과가 newcomers에게 유용한 레퍼런스가 되도록.
 
 ### 파일 (doc comments only, 로직 변경 없음)
 
-- `oxi-tui/src/lib.rs` — crate overview, module map, quick start
-- `oxi-tui/src/pipeline/mod.rs` — draw_frame vs draw_frame_closure 설명
-- `oxi-tui/src/widget/renderable.rs` — Renderable trait 사용 가이드
-- `oxi-tui/src/widget/retained_child.rs` — RetainedChild 사용 패턴
-- `oxi-tui/src/widget/tree.rs` — RetainedTree + CursorSlot lifecycle
-- `oxi-tui/src/content/chat_log.rs` — ChatLog 사용 예제
-- `oxi-tui/src/text/streaming_md.rs` — checkpoint 모델 설명
+- `oxicode-tui/src/lib.rs` — crate overview, module map, quick start
+- `oxicode-tui/src/pipeline/mod.rs` — draw_frame vs draw_frame_closure 설명
+- `oxicode-tui/src/widget/renderable.rs` — Renderable trait 사용 가이드
+- `oxicode-tui/src/widget/retained_child.rs` — RetainedChild 사용 패턴
+- `oxicode-tui/src/widget/tree.rs` — RetainedTree + CursorSlot lifecycle
+- `oxicode-tui/src/content/chat_log.rs` — ChatLog 사용 예제
+- `oxicode-tui/src/text/streaming_md.rs` — checkpoint 모델 설명
 
 ### 예시 (lib.rs)
 
 ```rust
-//! # oxi-tui v2 — Terminal-First Rendering Pipeline
+//! # oxicode-tui v2 — Terminal-First Rendering Pipeline
 //!
 //! ## Quick Start
 //!
 //! ```no_run
-//! use oxi_tui::pipeline::{draw_frame_closure, CursorState};
-//! use oxi_tui::widget::FocusTarget;
-//! use oxi_tui::theme::{Theme, TerminalCaps};
+//! use oxicode_tui::pipeline::{draw_frame_closure, CursorState};
+//! use oxicode_tui::widget::FocusTarget;
+//! use oxicode_tui::theme::{Theme, TerminalCaps};
 //!
 //! let mut terminal = /* Terminal::new(DiffBackend::new(stdout))? */;
 //! let mut cursor = CursorState::new();
@@ -199,10 +199,10 @@ crate-level doc comment와 각 public 모듈에 `#![doc = "..."]` 추가. `cargo
 
 ### 목표
 
-oxi-tui v2 크레이트 내에 `oxi_tui_legacy` 참조가 있는지 확인. 있으면 제거 (oxi-tui는 순수 위젯 라이브러리, legacy 의존 없음).
+oxicode-tui v2 크레이트 내에 `oxicode_tui_legacy` 참조가 있는지 확인. 있으면 제거 (oxicode-tui는 순수 위젯 라이브러리, legacy 의존 없음).
 
 ```bash
-grep -rn 'oxi_tui_legacy\|oxi-tui-legacy' oxi-tui/src/
+grep -rn 'oxicode_tui_legacy\|oxicode-tui-legacy' oxicode-tui/src/
 # 예상 결과: 0 hits (이미 완료됨 — 확인용)
 ```
 
@@ -210,7 +210,7 @@ grep -rn 'oxi_tui_legacy\|oxi-tui-legacy' oxi-tui/src/
 
 ```bash
 # workspace 전체에서 legacy 참조 카운트
-grep -rn 'oxi_tui_legacy' --include='*.rs' . | grep -v 'target/' | grep -v 'oxi-tui-legacy/' | wc -l
+grep -rn 'oxicode_tui_legacy' --include='*.rs' . | grep -v 'target/' | grep -v 'oxicode-tui-legacy/' | wc -l
 # 이 숫자는 Session B가 렌더링 마이그레이션을 진행하면서 줄어들어야 함
 ```
 
@@ -220,11 +220,11 @@ grep -rn 'oxi_tui_legacy' --include='*.rs' . | grep -v 'target/' | grep -v 'oxi-
 
 ## 체크리스트
 
-- [x] 작업 1: PTY e2e — **기존 구현 확인 (신규 파일 없음)** — oxi-tui는 순수 leaf lib라 oxi 바이너리 spawn 불가; 실제 harness는 `oxi-cli/tests/`에 존재, OSC8/CSI2026은 DiffBackend 바이트 단위 테스트로 이미 커버
+- [x] 작업 1: PTY e2e — **기존 구현 확인 (신규 파일 없음)** — oxicode-tui는 순수 leaf lib라 oxicode 바이너리 spawn 불가; 실제 harness는 `oxicode-cli/tests/`에 존재, OSC8/CSI2026은 DiffBackend 바이트 단위 테스트로 이미 커버
 - [x] 작업 2: 벤치마크 — criterion 0.5 + `streaming_memoization`/`cursor_dedup` (composite **13.9×** 달성)
 - [x] 작업 3: API 문서화 — crate Quick Start(doctest) + module docs, 내 파일 0 warning
-- [x] 작업 4: legacy 참조 감사 — oxi-tui/src 코드 수준 의존 0건 (7 hit 전부 doc 인용)
-- [x] 최종: `cargo nextest run -p oxi-tui` (222) + `cargo clippy -p oxi-tui --all-targets -- -D warnings` (clean) + `cargo fmt --all -- --check` (clean)
+- [x] 작업 4: legacy 참조 감사 — oxicode-tui/src 코드 수준 의존 0건 (7 hit 전부 doc 인용)
+- [x] 최종: `cargo nextest run -p oxicode-tui` (222) + `cargo clippy -p oxicode-tui --all-targets -- -D warnings` (clean) + `cargo fmt --all -- --check` (clean)
 
 ---
 
@@ -232,13 +232,13 @@ grep -rn 'oxi_tui_legacy' --include='*.rs' . | grep -v 'target/' | grep -v 'oxi-
 
 ### 작업 1: PTY e2e — 기존 구현 확인 (신규 파일 없음)
 
-- `oxi-tui/tests/pty_e2e.rs` 생성 금지: oxi-tui는 순수 leaf 라이브러리(oxi-* 의존 0)라 oxi 바이너리를 spawn할 수 없음.
-- 실제 위치: `oxi-cli/tests/pty_harness.rs`(`PtySession` + `read_until` 완전 구현, `oxi_binary_available()` skip guard) + `oxi-cli/tests/pty_e2e.rs`(`test_pty_minimal_boot`).
-- OSC8 짝 / CSI 2026 wrapping 회귀는 `oxi-tui/src/pipeline/diff_backend/mod.rs`의 바이트 단위 단위 테스트(`csi_2026_emits_sync_wrappers_around_diff_writes`, OSC8 begin/end pairing)가 PTY 실바이너리 테스트보다 deterministic·CI-safe하게 이미 컵버.
+- `oxicode-tui/tests/pty_e2e.rs` 생성 금지: oxicode-tui는 순수 leaf 라이브러리(oxicode-* 의존 0)라 oxicode 바이너리를 spawn할 수 없음.
+- 실제 위치: `oxicode-cli/tests/pty_harness.rs`(`PtySession` + `read_until` 완전 구현, `oxicode_binary_available()` skip guard) + `oxicode-cli/tests/pty_e2e.rs`(`test_pty_minimal_boot`).
+- OSC8 짝 / CSI 2026 wrapping 회귀는 `oxicode-tui/src/pipeline/diff_backend/mod.rs`의 바이트 단위 단위 테스트(`csi_2026_emits_sync_wrappers_around_diff_writes`, OSC8 begin/end pairing)가 PTY 실바이너리 테스트보다 deterministic·CI-safe하게 이미 컵버.
 
 ### 작업 2: 벤치마크 (criterion 0.5)
 
-신규: `oxi-tui/benches/streaming_memoization.rs`, `oxi-tui/benches/cursor_dedup.rs`. 결과(Apple M4, release):
+신규: `oxicode-tui/benches/streaming_memoization.rs`, `oxicode-tui/benches/cursor_dedup.rs`. 결과(Apple M4, release):
 
 | 벤치마크 | 시간 | 비고 |
 |---|---|---|
@@ -259,12 +259,12 @@ grep -rn 'oxi_tui_legacy' --include='*.rs' . | grep -v 'target/' | grep -v 'oxi-
 - `widget/tree.rs`: `any_hash_changed` → render → cursor resolve lifecycle.
 - `content/chat_log.rs`: append-only 모델 + content hash 설명.
 - `renderable.rs`, `retained_child.rs`, `streaming_md.rs`는 기존 문서 충실 → 유지.
-- `cargo doc -p oxi-tui` 빌드 성공(내 파일 0 warning). 6개 pre-existing warning은 `row.rs`/`serializer.rs`의 `private_intra_doc_links`(scope 외).
+- `cargo doc -p oxicode-tui` 빌드 성공(내 파일 0 warning). 6개 pre-existing warning은 `row.rs`/`serializer.rs`의 `private_intra_doc_links`(scope 외).
 
 ### 작업 4: legacy 참조 감사
 
-- `oxi-tui/src/`: 7 hit — **전부 `//!` doc-comment의 clean-room migration 출처 인용**. 코드 수준 의존 0건. oxi-tui v2는 legacy-free 확정.
-- workspace 전체(`oxi-cli/src/`): ~70+ hit — Session B 렌더링 마이그레이션 영역. 예상대로 감소 대상(Session B Phase 5).
+- `oxicode-tui/src/`: 7 hit — **전부 `//!` doc-comment의 clean-room migration 출처 인용**. 코드 수준 의존 0건. oxicode-tui v2는 legacy-free 확정.
+- workspace 전체(`oxicode-cli/src/`): ~70+ hit — Session B 렌더링 마이그레이션 영역. 예상대로 감소 대상(Session B Phase 5).
 
 ### 하드닝 (pre-commit `cargo clippy --all-targets` 통과용 사전 수정)
 

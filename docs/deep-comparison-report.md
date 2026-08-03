@@ -1,4 +1,4 @@
-# pi-mono vs oxi — Deep Architecture Comparison & Fix Report
+# pi-mono vs oxicode — Deep Architecture Comparison & Fix Report
 
 Generated from exhaustive subagent analysis of all source files.
 
@@ -8,28 +8,28 @@ Generated from exhaustive subagent analysis of all source files.
 
 ### 1. `should_terminate_batch` — Wrong Logic (FIXED ✅)
 - **pi-mono**: ALL tool results must have `terminate === true` → batch terminates
-- **oxi (before)**: ANY tool result with `terminate` → batch terminates
-- **oxi (after)**: Changed to `all(|f| f.result.terminate)` ✅
+- **oxicode (before)**: ANY tool result with `terminate` → batch terminates
+- **oxicode (after)**: Changed to `all(|f| f.result.terminate)` ✅
 
 ### 2. `ToolExecutionUpdate` Never Emitted (FIXED ✅)
 - **pi-mono**: Tool progress callback emits structured partial results
-- **oxi (before)**: Created `progress_cb` but immediately discarded (`let _ = progress_cb`)
-- **oxi (after)**: Now wires up `tool.on_progress()` with the callback ✅
+- **oxicode (before)**: Created `progress_cb` but immediately discarded (`let _ = progress_cb`)
+- **oxicode (after)**: Now wires up `tool.on_progress()` with the callback ✅
 
 ### 3. Provider Error Missing `MessageEnd` (FIXED ✅)
 - **pi-mono**: On stream error, always emits `message_end` before error
-- **oxi (before)**: Emits `Error` event, breaks loop, NO `MessageEnd`
-- **oxi (after)**: If `message_started`, emits `MessageEnd` with error message first ✅
+- **oxicode (before)**: Emits `Error` event, breaks loop, NO `MessageEnd`
+- **oxicode (after)**: If `message_started`, emits `MessageEnd` with error message first ✅
 
 ### 4. `AgentEnd` Event (FIXED ✅)
 - **pi-mono**: Emits `agent_end` at end of run (always)
-- **oxi (before)**: Only emitted `Complete`, not `AgentEnd`
-- **oxi (after)**: Now emits `AgentEnd { messages, stop_reason }` before `Complete` ✅
+- **oxicode (before)**: Only emitted `Complete`, not `AgentEnd`
+- **oxicode (after)**: Now emits `AgentEnd { messages, stop_reason }` before `Complete` ✅
 
 ### 5. `AgentStart` Event (FIXED ✅)
 - **pi-mono**: Emits `agent_start` at beginning
-- **oxi (before)**: Only emitted legacy `Start { prompt }`
-- **oxi (after)**: Now emits `AgentStart { prompts, session_id }` ✅
+- **oxicode (before)**: Only emitted legacy `Start { prompt }`
+- **oxicode (after)**: Now emits `AgentStart { prompts, session_id }` ✅
 
 ---
 
@@ -39,7 +39,7 @@ Generated from exhaustive subagent analysis of all source files.
 
 **pi-mono**: `message_update` carries full `AssistantMessage` snapshot PLUS `assistantMessageEvent` (typed streaming event: `text_delta`, `thinking_delta`, `toolcall_delta`). This tells consumers EXACTLY what changed at each step.
 
-**oxi**: `MessageUpdate { message, delta: Option<String> }` — `delta` is only the text string. Consumers cannot distinguish text streaming from thinking streaming from tool-call events from `message_update` alone.
+**oxicode**: `MessageUpdate { message, delta: Option<String> }` — `delta` is only the text string. Consumers cannot distinguish text streaming from thinking streaming from tool-call events from `message_update` alone.
 
 **Impact**: TUI cannot show "thinking" visual state during reasoning blocks. Tool call streaming (when provider streams partial arguments) is invisible to consumers.
 
@@ -56,7 +56,7 @@ pub enum MessageUpdateDetail {
 
 ### B. Two Divergent Agent Implementations
 
-**oxi has TWO agent loops** with different behavior:
+**oxicode has TWO agent loops** with different behavior:
 1. `agent.rs::Agent` — inline loop, uses legacy events (`Start`, `Complete`, `ToolStart`, `ToolComplete`, `TextChunk`)
 2. `agent_loop/mod.rs::AgentLoop` — separate module, uses structured events (`MessageStart`, `MessageUpdate`, `MessageEnd`)
 
@@ -74,7 +74,7 @@ The TUI uses `Agent.run_with_channel()` (the inline one from agent.rs), NOT `Age
 
 **pi-mono**: Receives `{ message, toolResults, context, newMessages }` — full state snapshot.
 
-**oxi (agent.rs)**: Receives dummy `AssistantMessage` with empty content + empty `tool_results`.
+**oxicode (agent.rs)**: Receives dummy `AssistantMessage` with empty content + empty `tool_results`.
 
 **Fix needed**: Build actual context before calling hook:
 ```rust
@@ -90,7 +90,7 @@ let ctx = ShouldStopAfterTurnContext {
 
 **pi-mono**: On `message_start(user)` with text matching a queued message → remove from queue → emit `queue_update`.
 
-**oxi**: Queues are drained by agent hooks, but the event forwarder doesn't detect this (the agent hook doesn't emit a corresponding event). Added `SteeringMessage`/`FollowUpMessage` event forwarding but it checks queues AFTER the event (race condition possible).
+**oxicode**: Queues are drained by agent hooks, but the event forwarder doesn't detect this (the agent hook doesn't emit a corresponding event). Added `SteeringMessage`/`FollowUpMessage` event forwarding but it checks queues AFTER the event (race condition possible).
 
 **Fix needed**: The proper fix is in `agent.rs`:
 ```rust
@@ -103,7 +103,7 @@ Currently no such event is emitted when `drain_steering_messages()` returns item
 
 **pi-mono**: `runWithLifecycle` has `finally` block that always calls `finishRun()` — clears `isStreaming`, `streamingMessage`, `pendingToolCalls`.
 
-**oxi (agent.rs)**: No `finally` block. If `run_with_channel` panics mid-stream, state is left dirty.
+**oxicode (agent.rs)**: No `finally` block. If `run_with_channel` panics mid-stream, state is left dirty.
 
 **Fix needed**: Add `std::panic::catch_unwind` or reorganize with a cleanup guard.
 
@@ -111,7 +111,7 @@ Currently no such event is emitted when `drain_steering_messages()` returns item
 
 **pi-mono**: If `afterToolCall` throws, creates error tool result.
 
-**oxi (AgentLoop)**: `after_tool_call` returns `Result<Option<AgentToolResult>>`, errors are flattened with `.ok().flatten()` — silently dropped.
+**oxicode (AgentLoop)**: `after_tool_call` returns `Result<Option<AgentToolResult>>`, errors are flattened with `.ok().flatten()` — silently dropped.
 
 **Fix needed**: Change error handling to create error result on hook failure.
 
@@ -119,7 +119,7 @@ Currently no such event is emitted when `drain_steering_messages()` returns item
 
 **pi-mono**: Even on error/abort, emits `turn_end` with the assistant message.
 
-**oxi (agent.rs)**: On `StopReason::Error`, breaks outer loop, does NOT emit `TurnEnd`.
+**oxicode (agent.rs)**: On `StopReason::Error`, breaks outer loop, does NOT emit `TurnEnd`.
 
 **Fix needed**: Add `TurnEnd` emission before error exit.
 
@@ -129,39 +129,39 @@ Currently no such event is emitted when `drain_steering_messages()` returns item
 
 ### H. No `transformContext` / `convertToLlm` Hooks
 - pi-mono: Optional context transformation before LLM call
-- oxi: No equivalent
+- oxicode: No equivalent
 
 ### I. Static API Key Only
 - pi-mono: `getApiKey(provider)` hook per-call
-- oxi: Static `api_key` in config — can't refresh expiring tokens
+- oxicode: Static `api_key` in config — can't refresh expiring tokens
 
 ### J. Argument Validation Missing
 - pi-mono: `validateToolArguments(tool, preparedArgs)`
-- oxi: Passes raw JSON args without schema validation
+- oxicode: Passes raw JSON args without schema validation
 
 ### K. Queue Drain Modes Missing
 - pi-mono: `"all"` vs `"one-at-a-time"` per queue
-- oxi: Always drains all
+- oxicode: Always drains all
 
 ### L. No `prepareNextTurn` Hook
 - pi-mono: Can replace context/model/thinkingLevel between turns
-- oxi: No equivalent
+- oxicode: No equivalent
 
 ### M. `isStreaming` / `streamingMessage` Not Tracked
 - pi-mono: Exposes streaming state for consumers to introspect
-- oxi: No tracking of in-flight streaming state
+- oxicode: No tracking of in-flight streaming state
 
 ### N. `abort()` Only on AgentLoop, Not Agent
 - pi-mono: `agent.abort()` cancels running loop
-- oxi: `Agent` has no abort; `AgentLoop` has `cancel_auto_retry()` only
+- oxicode: `Agent` has no abort; `AgentLoop` has `cancel_auto_retry()` only
 
 ### O. `waitForIdle()` Missing
 - pi-mono: `agent.waitForIdle()` returns promise after `agent_end` settles
-- oxi: No equivalent
+- oxicode: No equivalent
 
 ### P. Message Start/End for User Prompts Missing
 - pi-mono: Emits `message_start/end` for initial user prompts
-- oxi (AgentLoop)`: Does NOT emit events for initial user prompts
+- oxicode (AgentLoop)`: Does NOT emit events for initial user prompts
 
 ---
 
@@ -169,23 +169,23 @@ Currently no such event is emitted when `drain_steering_messages()` returns item
 
 ### Q. No Serial Event Processing Queue
 - pi-mono: `_agentEventQueue` — promise chain serializes all async processing
-- oxi: Events processed in parallel paths (prompt batch vs streaming)
+- oxicode: Events processed in parallel paths (prompt batch vs streaming)
 
 ### R. Extension Event Delivery Order Reversed
 - pi-mono: Extensions FIRST, then UI listeners
-- oxi: UI listeners FIRST, then extensions
+- oxicode: UI listeners FIRST, then extensions
 
 ### S. Message Replacement by Extensions Missing
 - pi-mono: `message_end` extensions can return replacement message
-- oxi: No equivalent
+- oxicode: No equivalent
 
 ### T. Overflow Recovery Incomplete
 - pi-mono: One-shot overflow recovery with guard
-- oxi: Field exists but no logic
+- oxicode: Field exists but no logic
 
 ### U. Compaction Disconnect/Reconnect Missing
 - pi-mono: Disconnects from agent events during compaction
-- oxi: No disconnect pattern
+- oxicode: No disconnect pattern
 
 ---
 

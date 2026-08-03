@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest a feature for oxi
+description: Suggest a feature for oxicode
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -30,14 +30,14 @@ body:
     id: component
     attributes:
       label: Component
-      description: Which part of oxi does this affect?
+      description: Which part of oxicode does this affect?
       options:
-        - oxi-ai (LLM providers)
-        - oxi-agent (tools, agent loop)
-        - oxi-tui (terminal UI)
-        - oxi-hashline (patch format)
-        - oxi-sdk (multi-agent SDK)
-        - oxi-cli (binary, CLI interface)
+        - oxicode-ai (LLM providers)
+        - oxicode-agent (tools, agent loop)
+        - oxicode-tui (terminal UI)
+        - oxicode-hashline (patch format)
+        - oxicode-sdk (multi-agent SDK)
+        - oxicode-cli (binary, CLI interface)
         - Extensions / Skills
         - Documentation
         - CI/CD

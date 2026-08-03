@@ -1,4 +1,4 @@
-# 세부 설계 ⑧ — LSP 통합 (oxi-lsp 독립 크레이트)
+# 세부 설계 ⑧ — LSP 통합 (oxicode-lsp 독립 크레이트)
 
 > 상태: 설계 **v2** (코드 검증 개정 — [`00-design-revisions.md`](./00-design-revisions.md) §1·§10 참조)
 > 작성: 2026-06-19 (v1), 개정 (v2)
@@ -15,7 +15,7 @@ omp의 LSP 서브시스템은 **두 가지 얼굴**을 가진다:
 1. **LspTool** — 모델이 직접 호출하는 14개 오퍼레이션 (diagnostics, definition, references, rename, code_actions...).
 2. **writethrough 훅** — `write`/`edit` 도구가 파일 저장 직후 자동으로 끌어쓰는 포맷 + 진단 주입.
 
-oxi는 LSP가 **완전히 부재**다. 본 설계는 **`oxi-lsp` 독립 크레이트**를 신규 생성하고, feature 게이트로 `oxi-cli`에 통합한다.
+oxicode는 LSP가 **완전히 부재**다. 본 설계는 **`oxicode-lsp` 독립 크레이트**를 신규 생성하고, feature 게이트로 `oxicode-cli`에 통합한다.
 
 **설계 원칙**: omp의 `types.ts` (LSP 3.16 스펙)는 거의 그대로 Rust struct로 옮기고, `client.ts`의 JSON-RPC 메시지 리더(chunk-list 프레이밍)와 진단 버전 정책이 핵심 이식 대상이다.
 
@@ -122,20 +122,20 @@ class DiagnosticsLedger {
 
 소스 우선순위 (높→낮):
 1. 프로젝트 루트 `lsp.json` / `.lsp.json` / `.yaml`
-2. `.oxi/lsp.*`
-3. `~/.oxi/lsp.*`
+2. `.oxicode/lsp.*`
+3. `~/.oxicode/lsp.*`
 4. 번들 `defaults.json` (40+ 서버)
 
 자동감지: rootMarkers 존재 + `resolveCommand` (node_modules/.bin, .venv/bin, $PATH) 통과 시만 활성화.
 
 ---
 
-## 2. oxi화 설계: `oxi-lsp` 크레이트
+## 2. oxicode화 설계: `oxicode-lsp` 크레이트
 
 ### 2.1 크레이트 구조
 
 ```
-oxi-lsp/  (feature-gated, oxi-cli가 --features lsp로 활성화)
+oxicode-lsp/  (feature-gated, oxicode-cli가 --features lsp로 활성화)
 ├── Cargo.toml          의존: lsp-server, lsp-types, serde, tokio, parking_lot
 ├── src/
 │   ├── lib.rs          공개 API
@@ -156,7 +156,7 @@ oxi-lsp/  (feature-gated, oxi-cli가 --features lsp로 활성화)
 
 ```toml
 [package]
-name = "oxi-lsp"
+name = "oxicode-lsp"
 version = "0.1.0"
 edition = "2024"
 
@@ -530,11 +530,11 @@ impl LspWritethrough {
 
 ---
 
-## 3. oxi-agent 통합: `lsp` 도구
+## 3. oxicode-agent 통합: `lsp` 도구
 
 ### 3.1 도구 정의
 
-`oxi-agent/src/tools/lsp.rs` (oxi-lsp 브릿지):
+`oxicode-agent/src/tools/lsp.rs` (oxicode-lsp 브릿지):
 
 ```rust
 pub struct LspTool {
@@ -584,7 +584,7 @@ impl AgentTool for LspTool {
 
 ### 3.2 write/edit 통합
 
-`oxi-agent/src/tools/write.rs` / `edit.rs`에 writethrough 훅 추가:
+`oxicode-agent/src/tools/write.rs` / `edit.rs`에 writethrough 훅 추가:
 
 ```rust
 // write.rs — 파일 저장 후
@@ -617,16 +617,16 @@ pub struct Settings {
     pub lsp_enabled: bool,                  // 기본 false (무거운 의존)
     pub lsp_format_on_write: bool,          // 기본 true (lsp_enabled 시)
     pub lsp_diagnostics_on_write: bool,     // 기본 true
-    pub lsp_config_path: Option<PathBuf>,   // 기본 .oxi/lsp.json
+    pub lsp_config_path: Option<PathBuf>,   // 기본 .oxicode/lsp.json
     pub lsp_idle_timeout_secs: u64,         // 기본 300 (5분)
 }
 ```
 
-`oxi-cli/Cargo.toml`:
+`oxicode-cli/Cargo.toml`:
 ```toml
 [features]
 default = []
-lsp = ["oxi-lsp"]
+lsp = ["oxicode-lsp"]
 ```
 
 ---
@@ -635,7 +635,7 @@ lsp = ["oxi-lsp"]
 
 | 서브태스크 | 산출물 | 의존 |
 |:-:|---|---|
-| N4.16 | `oxi-lsp` 크레이트 스캐폴드 + Cargo.toml | — |
+| N4.16 | `oxicode-lsp` 크레이트 스캐폴드 + Cargo.toml | — |
 | N4.17 | `types.rs` (LSP 3.17 타입 — lsp-types 크레이트 활용) | N4.16 |
 | N4.18 | `client.rs` (JSON-RPC 클라이언트 + 메시지 리더) | N4.17 |
 | N4.19 | `manager.rs` (다중 서버 관리 + 캐시 + 네거티브 캐시) | N4.18 |
@@ -648,7 +648,7 @@ lsp = ["oxi-lsp"]
 | N4.26 | `diagnostics.rs` (DiagnosticsLedger + 버전 추적) | N4.18 |
 | N4.27 | `writethrough.rs` (write/edit 훅) | N4.26 |
 | N4.28 | `render.rs` (결과 포맷 — omp render.ts 이식) | N4.21 |
-| N4.29 | `lsp` 도구 (oxi-agent 브릿지) | N4.28 |
+| N4.29 | `lsp` 도구 (oxicode-agent 브릿지) | N4.28 |
 | N4.30 | write/edit writethrough 통합 | N4.27, N4.29 |
 | N4.31 | ⑪ Commit rename_file 연동 | N4.24, ⑪ |
 | N4.32 | 단위 테스트 (omp 계약 이식) | N4.29 |
@@ -721,22 +721,22 @@ mod tests {
 
 ---
 
-## 8. 부록: omp → oxi 매핑
+## 8. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `lsp/index.ts` (2,481) | `oxi-lsp/src/operations.rs` + `oxi-agent/src/tools/lsp.rs` |
-| `lsp/client.ts` (1,194) | `oxi-lsp/src/client.rs` |
-| `lsp/types.ts` (445) | `oxi-lsp/src/types.rs` (또는 `lsp-types` 크레이트 직접 사용) |
-| `lsp/utils.ts` (719) | `oxi-lsp/src/utils.rs` |
-| `lsp/render.ts` (669) | `oxi-lsp/src/render.rs` |
-| `lsp/config.ts` (503) | `oxi-lsp/src/config.rs` |
-| `lsp/edits.ts` (279) | `oxi-lsp/src/edits.rs` |
-| `lsp/lspmux.ts` (204) | 후순위 (oxi-lsp/src/manager.rs에 통합) |
-| `lsp/defaults.json` (500) | `oxi-lsp/defaults.json` (직접 복사) |
-| `lsp/format-options.ts` (122) | `oxi-lsp/src/format_options.rs` |
-| `lsp/diagnostics-ledger.ts` (53) | `oxi-lsp/src/diagnostics.rs` |
-| `lsp/startup-events.ts` (16) | `oxi-lsp/src/events.rs` |
+| `lsp/index.ts` (2,481) | `oxicode-lsp/src/operations.rs` + `oxicode-agent/src/tools/lsp.rs` |
+| `lsp/client.ts` (1,194) | `oxicode-lsp/src/client.rs` |
+| `lsp/types.ts` (445) | `oxicode-lsp/src/types.rs` (또는 `lsp-types` 크레이트 직접 사용) |
+| `lsp/utils.ts` (719) | `oxicode-lsp/src/utils.rs` |
+| `lsp/render.ts` (669) | `oxicode-lsp/src/render.rs` |
+| `lsp/config.ts` (503) | `oxicode-lsp/src/config.rs` |
+| `lsp/edits.ts` (279) | `oxicode-lsp/src/edits.rs` |
+| `lsp/lspmux.ts` (204) | 후순위 (oxicode-lsp/src/manager.rs에 통합) |
+| `lsp/defaults.json` (500) | `oxicode-lsp/defaults.json` (직접 복사) |
+| `lsp/format-options.ts` (122) | `oxicode-lsp/src/format_options.rs` |
+| `lsp/diagnostics-ledger.ts` (53) | `oxicode-lsp/src/diagnostics.rs` |
+| `lsp/startup-events.ts` (16) | `oxicode-lsp/src/events.rs` |
 | `lsp/clients/` (biome, swiftlint) | 후순위 |
-| `tools/write.ts` (writethrough) | `oxi-lsp/src/writethrough.rs` + `oxi-agent/src/tools/write.rs` |
-| `edit/index.ts` (writethrough) | `oxi-lsp/src/writethrough.rs` + `oxi-agent/src/tools/edit.rs` |
+| `tools/write.ts` (writethrough) | `oxicode-lsp/src/writethrough.rs` + `oxicode-agent/src/tools/write.rs` |
+| `edit/index.ts` (writethrough) | `oxicode-lsp/src/writethrough.rs` + `oxicode-agent/src/tools/edit.rs` |

@@ -1,6 +1,6 @@
 # 04. 관측 가능성 (Observability)
 
-모듈 경로: `oxi-sdk/src/observability/`
+모듈 경로: `oxicode-sdk/src/observability/`
 
 ---
 
@@ -333,12 +333,12 @@ Agent Run
 ## 4.8 사용 예시
 
 ```rust
-use oxi_sdk::observability::*;
+use oxicode_sdk::observability::*;
 
 let tracer = Arc::new(Tracer::new());
 let audit = Arc::new(AuditLog::new(2048));
 let cost_tracker = Arc::new(CostTracker::new(
-    oxi.models(),
+    oxicode.models(),
     CostTrackerConfig {
         per_agent_budget: Some(5.0),  // 에이전트당 $5
         global_budget: Some(50.0),     // 전체 $50
@@ -346,7 +346,7 @@ let cost_tracker = Arc::new(CostTracker::new(
 ));
 
 // AgentBuilder에 통합
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .tracer(tracer.clone())
     .audit_log(audit.clone())
     .cost_tracker(cost_tracker.clone())

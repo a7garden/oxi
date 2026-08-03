@@ -2,7 +2,7 @@
 
 > ⚠️ **HISTORICAL SNAPSHOT.** This survey was generated 2026-05-31 and reflects
 > the repo state *at that time*. It is **not current** — the edition is now 2024,
-> the crate set is `oxi-hashline` (not `oxi-store`), the model catalog is
+> the crate set is `oxicode-hashline` (not `oxicode-store`), the model catalog is
 > materialized from models.dev (5000+ models / 70+ providers), and the clippy
 > gate status has changed. Treat the numbers below as a point-in-time record,
 > not a live status report. For current state, inspect HEAD directly.
@@ -13,7 +13,7 @@
 > **How to use:** Open a new agent session, point it at the brief file, and let it run.
 
 **Generated:** 2026-05-31 (last regenerated 2026-06-03)
-**Project:** oxi
+**Project:** oxicode
 **Version:** 0.26.2 (latest released: 0.25.7)
 
 ## Survey Summary
@@ -23,7 +23,7 @@
 | Language | Rust 2021 |
 | Source files | 290 `.rs` files |
 | Lines of Rust code | 112,933 (code) / 132,600 (total) |
-| Workspace crates | 6 (oxi-ai, oxi-agent, oxi-store, oxi-tui, oxi-sdk, oxi-cli) |
+| Workspace crates | 6 (oxicode-ai, oxicode-agent, oxicode-store, oxicode-tui, oxicode-sdk, oxicode-cli) |
 | Tests | 2131 passing, 0 failing |
 | Clippy warnings | 0 |
 | `cargo audit` vulnerabilities | 0 |
@@ -67,8 +67,8 @@
 2. **06 Extension Safety** — `unsafe` blocks without `SAFETY` comments are a maintenance hazard.
 3. **03 Code Quality** — Quick audit, potentially zero changes needed.
 4. **02 Dependency Maintenance** — Low effort, check for updates and suppress warnings.
-5. **05 Error Handling Consistency** — Document convention, optionally add typed errors to oxi-store.
-6. **04 Observability Gaps** — Add tracing subscriber init in oxi-cli.
+5. **05 Error Handling Consistency** — Document convention, optionally add typed errors to oxicode-store.
+6. **04 Observability Gaps** — Add tracing subscriber init in oxicode-cli.
 
 ## Quick Wins (< 1 hour each)
 

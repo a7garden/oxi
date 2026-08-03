@@ -2,7 +2,7 @@
 
 > **Status:** ✅ Implemented
 > **Depends on:** Phase 1 (툴 progress callback 연결) ✅, Phase 2 (ToolCallContext) ✅
-> **Scope:** oxi-agent (engine.rs, oxibrowser_backend.rs, browse tools, tool_exec.rs)
+> **Scope:** oxicode-agent (engine.rs, oxibrowser_backend.rs, browse tools, tool_exec.rs)
 > **oxibrowser-core 변경:** 없음. 이미 충분한 데이터를 보내고 있음.
 > **Tests:** 2108/2108 pass, 0 clippy errors
 
@@ -24,7 +24,7 @@ BrowserEvent::DocumentReady {
 }
 ```
 
-하지만 OxiBrowserEngine의 drain task에서 전부 문자열로 압축된다:
+하지만 OxicodeBrowserEngine의 drain task에서 전부 문자열로 압축된다:
 
 ```rust
 progress_clone.invoke(&tab_id, event.short_label());
@@ -84,7 +84,7 @@ progress_clone.invoke(&tab_id, event.short_label());
 ### 3.1 현재 (끊긴 파이프라인)
 
 ```
-oxibrowser-core                OxiBrowserEngine drain       TabCallbackRegistry       tool_exec.rs callback
+oxibrowser-core                OxicodeBrowserEngine drain       TabCallbackRegistry       tool_exec.rs callback
                                                                                                
 BrowserEvent ──────→  event.short_label() ──────────→  Fn(String) ──────────→  ToolExecutionUpdate
    ↑                           │                                                     {
@@ -96,7 +96,7 @@ BrowserEvent ──────→  event.short_label() ────────
 ### 3.2 변경 후 (완전한 파이프라인)
 
 ```
-oxibrowser-core                OxiBrowserEngine drain       TabCallbackRegistry       tool_exec.rs callbacks
+oxibrowser-core                OxicodeBrowserEngine drain       TabCallbackRegistry       tool_exec.rs callbacks
                                                                                                
 BrowserEvent ──────→  event.short_label() ────────→  Fn(String) ────────→  ToolExecutionUpdate
    │                       │                                                     {
@@ -120,7 +120,7 @@ BrowserEvent ──────→  event.short_label() ────────
 
 ### Step 1: BrowseProgress enum 정의
 
-**파일:** `oxi-agent/src/tools/browse/engine.rs`
+**파일:** `oxicode-agent/src/tools/browse/engine.rs`
 
 ```rust
 /// 브라우저 탐색의 구조적 진행 이벤트.
@@ -165,7 +165,7 @@ pub enum BrowseProgress {
 
 ### Step 2: TabCallbackRegistry에 BrowseProgress 맵 추가
 
-**파일:** `oxi-agent/src/tools/browse/engine.rs`
+**파일:** `oxicode-agent/src/tools/browse/engine.rs`
 
 ```rust
 pub struct TabCallbackRegistry {
@@ -201,7 +201,7 @@ impl TabCallbackRegistry {
 
 ### Step 3: BrowserTab trait에 browse callback 메서드 추가
 
-**파일:** `oxi-agent/src/tools/browse/engine.rs`
+**파일:** `oxicode-agent/src/tools/browse/engine.rs`
 
 ```rust
 // BrowserTab trait에 추가 (default no-op)
@@ -211,12 +211,12 @@ fn clear_browse_progress_callback(&self) {}
 
 **LoC:** ~3
 
-### Step 4: OxiTab에 browse callback 구현
+### Step 4: OxicodeTab에 browse callback 구현
 
-**파일:** `oxi-agent/src/tools/browse/oxibrowser_backend.rs`
+**파일:** `oxicode-agent/src/tools/browse/oxibrowser_backend.rs`
 
 ```rust
-impl OxiTab {
+impl OxicodeTab {
     pub fn set_browse_progress_callback(&self, cb: Arc<dyn Fn(BrowseProgress) + Send + Sync>) {
         self.registry.set_browse(self.tab_id, cb);
     }
@@ -237,9 +237,9 @@ fn clear_browse_progress_callback(&self) {
 
 **LoC:** ~15
 
-### Step 5: OxiBrowserEngine drain task에서 BrowseProgress 변환
+### Step 5: OxicodeBrowserEngine drain task에서 BrowseProgress 변환
 
-**파일:** `oxi-agent/src/tools/browse/oxibrowser_backend.rs`
+**파일:** `oxicode-agent/src/tools/browse/oxibrowser_backend.rs`
 
 ```rust
 Ok(event) => {
@@ -288,7 +288,7 @@ fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<B
 
 ### Step 6: ToolCallContext에 결과 필드 추가
 
-**파일:** `oxi-agent/src/events.rs`
+**파일:** `oxicode-agent/src/events.rs`
 
 ```rust
 PageVisit {
@@ -322,7 +322,7 @@ DataExtraction {
 
 ### Step 7: tool_exec.rs에 공유 context cell + browse callback 생성
 
-**파일:** `oxi-agent/src/agent_loop/tool_exec.rs`
+**파일:** `oxicode-agent/src/agent_loop/tool_exec.rs`
 
 ```rust
 // 기존 context를 공유 셀에 넣음
@@ -389,7 +389,7 @@ tool.on_browse_progress(browse_cb);
 
 ### Step 8: AgentTool trait에 on_browse_progress 추가
 
-**파일:** `oxi-agent/src/tools.rs`
+**파일:** `oxicode-agent/src/tools.rs`
 
 ```rust
 /// 브라우저 진행 이벤트 콜백.
@@ -422,13 +422,13 @@ fn on_browse_progress(&self, callback: crate::tools::BrowseProgressCallback) {
 그리고 탭 열 때:
 
 ```rust
-// BrowseTool (OxiTab downcast 경로)
-if let Some(oxi_tab) = raw_tab.as_any().downcast_ref::<OxiTab>() {
+// BrowseTool (OxicodeTab downcast 경로)
+if let Some(oxicode_tab) = raw_tab.as_any().downcast_ref::<OxicodeTab>() {
     if let Some(cb) = self.pending_callback.lock().take() {
-        oxi_tab.set_progress_callback(cb);
+        oxicode_tab.set_progress_callback(cb);
     }
     if let Some(bcb) = self.pending_browse_callback.lock().take() {
-        oxi_tab.set_browse_progress_callback(bcb);
+        oxicode_tab.set_browse_progress_callback(bcb);
     }
 }
 
@@ -443,7 +443,7 @@ if let Some(bcb) = self.pending_browse_callback.lock().take() {
 
 ### Step 10: TabGuard close에서 browse callback도 정리
 
-**파일:** `oxi-agent/src/tools/browse/tab_guard.rs`
+**파일:** `oxicode-agent/src/tools/browse/tab_guard.rs`
 
 ```rust
 // close() 메서드에 추가
@@ -464,7 +464,7 @@ pub async fn close(self) {
 | 파일 | 변경 | LoC |
 |------|------|-----|
 | `engine.rs` | BrowseProgress enum, TabCallbackRegistry browse 맵, BrowserTab trait 메서드 | ~60 |
-| `oxibrowser_backend.rs` | BrowserEvent → BrowseProgress 변환, OxiTab 구현, drain task 수정 | ~50 |
+| `oxibrowser_backend.rs` | BrowserEvent → BrowseProgress 변환, OxicodeTab 구현, drain task 수정 | ~50 |
 | `events.rs` | ToolCallContext 결과 필드 | ~15 |
 | `tools.rs` | BrowseProgressCallback 타입, on_browse_progress trait 메서드 | ~10 |
 | `tool_exec.rs` | 공유 context_cell, BrowseProgress 콜백 생성 | ~45 |
@@ -483,9 +483,9 @@ pub async fn close(self) {
 |-----------|------|
 | `oxibrowser-core` | 이미 충분한 데이터를 보냄 |
 | `ProgressCallback = Fn(String)` | BashTool, ReadTool, SubagentTool이 사용. 변경 안 함 |
-| `oxi-ai` | ProgressCallback 타입 변경 없음 |
-| `oxi-sdk` | 재export만 업데이트 (BrowseProgress, BrowseProgressCallback) |
-| `oxi-cli` | context 필드의 새 옵션 필드는 `..`로 무시됨 |
+| `oxicode-ai` | ProgressCallback 타입 변경 없음 |
+| `oxicode-sdk` | 재export만 업데이트 (BrowseProgress, BrowseProgressCallback) |
+| `oxicode-cli` | context 필드의 새 옵션 필드는 `..`로 무시됨 |
 
 ---
 
@@ -495,7 +495,7 @@ pub async fn close(self) {
 
 ```
 1. oxibrowser: BrowserEvent::NavigationStarted { tab_id, url: "https://example.com" }
-2. OxiBrowserEngine: invoke(tab_id, "Opening https://example.com…")
+2. OxicodeBrowserEngine: invoke(tab_id, "Opening https://example.com…")
                      invoke_browse(tab_id, BrowseProgress::NavigationStarted { url })
 3. browse_cb: context_cell.enrich()  ← 아직 enrich할 필드 없음 (URL은 이미 있음)
 4. progress_cb: emit(ToolExecutionUpdate {
@@ -508,7 +508,7 @@ pub async fn close(self) {
 
 ```
 1. oxibrowser: BrowserEvent::DocumentReady { tab_id, title: "Example", status: 200, bytes: 12400, duration: 245ms }
-2. OxiBrowserEngine: invoke(tab_id, "Loaded \"Example\" — 200 · 12KB · 245ms")
+2. OxicodeBrowserEngine: invoke(tab_id, "Loaded \"Example\" — 200 · 12KB · 245ms")
                      invoke_browse(tab_id, BrowseProgress::DocumentReady { title, status, bytes, duration_ms })
 3. browse_cb: context_cell →
      PageVisit { url, page_title: Some("Example"), page_status: Some(200),
@@ -551,7 +551,7 @@ pub async fn close(self) {
 ## 8. 시퀀스 다이어그램
 
 ```
-oxibrowser    OxiBrowserEngine    TabCallbackRegistry    BrowseTool    tool_exec.rs
+oxibrowser    OxicodeBrowserEngine    TabCallbackRegistry    BrowseTool    tool_exec.rs
     │                │                     │                 │              │
     │ BrowserEvent   │                     │                 │              │
     │ (DocumentReady)│                     │                 │              │
@@ -597,7 +597,7 @@ oxibrowser    OxiBrowserEngine    TabCallbackRegistry    BrowseTool    tool_exec
 Step 1: BrowseProgress enum                    (engine.rs)
 Step 2: TabCallbackRegistry browse 맵           (engine.rs)
 Step 3: BrowserTab trait 메서드 추가             (engine.rs)
-Step 4: OxiTab 구현                             (oxibrowser_backend.rs)
+Step 4: OxicodeTab 구현                             (oxibrowser_backend.rs)
 Step 5: BrowserEvent → BrowseProgress 변환       (oxibrowser_backend.rs)
 Step 6: ToolCallContext 결과 필드               (events.rs)
 Step 7: tool_exec.rs 공유 context cell          (tool_exec.rs)

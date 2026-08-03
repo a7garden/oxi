@@ -1,10 +1,10 @@
-# Feature Request: Fallback Event Observability for oxi-sdk Routing
+# Feature Request: Fallback Event Observability for oxicode-sdk Routing
 
 **Date**: 2026-05-30
 **Requested by**: Oxios (won@oxios.ai)
-**Crate**: `oxi-sdk` / `oxi-ai` (MultiProvider)
-**Status**: ✅ **Implemented** (oxi-sdk 0.25.0 / oxi-ai 0.25.0, 2026-05-31)
-**Related**: RFC-011 (oxi-sdk 0.24 migration + Model Routing UI)
+**Crate**: `oxicode-sdk` / `oxicode-ai` (MultiProvider)
+**Status**: ✅ **Implemented** (oxicode-sdk 0.25.0 / oxicode-ai 0.25.0, 2026-05-31)
+**Related**: RFC-011 (oxicode-sdk 0.24 migration + Model Routing UI)
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### 1.1 Current State
 
-oxi-sdk 0.24.0 provides `MultiProvider` with fallback chain support and `ComplexityRouter` for automatic model routing. The routing configuration (`RoutingConfig`, `RoutingControl`) works well for **control** (toggle on/off, add/remove fallback models, exclude models).
+oxicode-sdk 0.24.0 provides `MultiProvider` with fallback chain support and `ComplexityRouter` for automatic model routing. The routing configuration (`RoutingConfig`, `RoutingControl`) works well for **control** (toggle on/off, add/remove fallback models, exclude models).
 
 However, there is **no way to observe fallback events** from the SDK consumer side.
 
@@ -49,7 +49,7 @@ But `record_fallback()` is never called — because the SDK does not emit fallba
 Extend the existing `ProviderEvent` enum (already used for usage tracking) with fallback variants:
 
 ```rust
-// In oxi-ai/src/providers/event.rs
+// In oxicode-ai/src/providers/event.rs
 
 /// Event emitted by providers during inference.
 #[derive(Debug, Clone)]
@@ -144,9 +144,9 @@ impl MultiProviderBuilder {
 
 ## 5. Implementation Summary (2026-05-31)
 
-### What Shipped in oxi-ai 0.25.0
+### What Shipped in oxicode-ai 0.25.0
 
-**`ProviderEvent` extension** (`oxi-ai/src/providers/event.rs`):
+**`ProviderEvent` extension** (`oxicode-ai/src/providers/event.rs`):
 
 ```rust
 // ── Routing / Fallback events ─────────────────────────────────────────
@@ -163,11 +163,11 @@ FallbackExhausted {
 
 **`FallbackReason`** enum with **8 variants**: `RateLimit`, `ContextOverflow`, `AuthError`, `NetworkError`, `ServerError`, `ModelError`, `CircuitBreaker`, `Unknown`. More comprehensive than what was proposed.
 
-**`FallbackStream` wrapper** (`oxi-ai/src/multi_provider.rs`): A stream wrapper that emits `FallbackStart` first, then delegates to the inner stream. Used when `MultiProvider` switches from one model to another in the candidate chain.
+**`FallbackStream` wrapper** (`oxicode-ai/src/multi_provider.rs`): A stream wrapper that emits `FallbackStart` first, then delegates to the inner stream. Used when `MultiProvider` switches from one model to another in the candidate chain.
 
 **`FallbackExhaustedStream` wrapper**: Emits `FallbackExhausted` and terminates. Used when all fallback candidates have been exhausted without success.
 
-**`AgentEvent::Fallback`** (`oxi-agent/src/events.rs`): Wraps `ProviderEvent::FallbackStart` for consumer convenience:
+**`AgentEvent::Fallback`** (`oxicode-agent/src/events.rs`): Wraps `ProviderEvent::FallbackStart` for consumer convenience:
 
 ```rust
 Fallback {
@@ -200,15 +200,15 @@ The circular buffer (`RoutingStats::fallbacks`, max 200 entries) stores fallback
 
 | File | Change |
 |------|--------|
-| `Cargo.toml` | `oxi-sdk = "0.24.0"` → `"0.25.0"` |
+| `Cargo.toml` | `oxicode-sdk = "0.24.0"` → `"0.25.0"` |
 | `agent_runtime.rs` | Added `AgentEvent::Fallback` handler in `run_agent()` callback |
 
 ---
 
 ## 6. Related Context
 
-- Oxios RFC-011: `https://github.com/oxios-org/oxios/blob/main/docs/rfc-011-oxi-sdk-0.24-migration.md`
-- oxi-sdk `multi_provider.rs`: FallbackChain + MultiProvider + FallbackStream
-- oxi-sdk `routing.rs`: RoutingControl provides runtime control
-- oxi-ai `ProviderEvent`: Existing event channel for usage tracking, extended with fallback variants
-- oxi-agent `events.rs`: `AgentEvent::Fallback` wraps `ProviderEvent::FallbackStart`
+- Oxios RFC-011: `https://github.com/oxios-org/oxios/blob/main/docs/rfc-011-oxicode-sdk-0.24-migration.md`
+- oxicode-sdk `multi_provider.rs`: FallbackChain + MultiProvider + FallbackStream
+- oxicode-sdk `routing.rs`: RoutingControl provides runtime control
+- oxicode-ai `ProviderEvent`: Existing event channel for usage tracking, extended with fallback variants
+- oxicode-agent `events.rs`: `AgentEvent::Fallback` wraps `ProviderEvent::FallbackStart`

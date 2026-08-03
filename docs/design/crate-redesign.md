@@ -1,4 +1,4 @@
-# oxi 크레이트 재설계
+# oxicode 크레이트 재설계
 
 > 버전: 2026-05-14
 > 상태: ✅ 완료
@@ -17,59 +17,59 @@
 ```
 전 (4개)                          후 (5개)
 ─────────────────────             ─────────────────────
-oxi-ai       28K                  oxi-ai       28K
-oxi-agent    17K                  oxi-agent    17K
-oxi-tui       4K                  oxi-tui       4K
-oxi-cli      55K                  oxi-store    12K  ← 신규 추출
-                                  oxi-cli      73K  ← 모듈 정리 완료
+oxicode-ai       28K                  oxicode-ai       28K
+oxicode-agent    17K                  oxicode-agent    17K
+oxicode-tui       4K                  oxicode-tui       4K
+oxicode-cli      55K                  oxicode-store    12K  ← 신규 추출
+                                  oxicode-cli      73K  ← 모듈 정리 완료
 ─────────────────────             ─────────────────────
 총 104K / 4개                     총 134K / 5개
 ```
 
-**참고**: oxi-cli가 73K로 증가한 것은 모듈 디렉토리 구조화가 완료되어 파일 집합이
-정확히 반영된 것임. 핵심 모듈(session, settings, auth 등 약 12K)이 oxi-store로 분리됨.
+**참고**: oxicode-cli가 73K로 증가한 것은 모듈 디렉토리 구조화가 완료되어 파일 집합이
+정확히 반영된 것임. 핵심 모듈(session, settings, auth 등 약 12K)이 oxicode-store로 분리됨.
 
 ## 3. 의존성 DAG
 
 ```
-oxi-ai
+oxicode-ai
   ↑
-oxi-store   ← session, settings, auth, model_registry
+oxicode-store   ← session, settings, auth, model_registry
   ↑
-oxi-agent   oxi-tui
+oxicode-agent   oxicode-tui
   ↑
-  └──→ oxi-cli (binary)
+  └──→ oxicode-cli (binary)
 ```
 
 순환 없음. 각 화살표는 아래 크레이트가 위 크레이트에 의존함을 뜻한다.
 
 ## 4. 각 크레이트 정의
 
-### 4.1 `oxi-ai` — LLM API 추상화 (변경 없음)
+### 4.1 `oxicode-ai` — LLM API 추상화 (변경 없음)
 
 - **역할**: 다중 프로바이더 LLM 스트리밍 API
 - **의존**: 외부 크레이트만 (tokio, reqwest, serde, ...)
-- **소비자**: oxi-agent, oxi-store, oxi-cli
+- **소비자**: oxicode-agent, oxicode-store, oxicode-cli
 - **파일**: 40개
 
-### 4.2 `oxi-agent` — 에이전트 런프 + 도구 (변경 없음)
+### 4.2 `oxicode-agent` — 에이전트 런프 + 도구 (변경 없음)
 
 - **역할**: 도구 호출 루프, MCP 프로토콜, 내장 도구 16개
-- **의존**: oxi-ai
-- **소비자**: oxi-cli
+- **의존**: oxicode-ai
+- **소비자**: oxicode-cli
 - **파일**: 47개
 
-### 4.3 `oxi-tui` — 순수 TUI 위젯 (변경 없음)
+### 4.3 `oxicode-tui` — 순수 TUI 위젯 (변경 없음)
 
 - **역할**: 비즈니스 로직 없는 순수 UI 컴포넌트
-- **의존**: ratatui, crossterm (oxi-ai, oxi-agent 의존 없음)
-- **소비자**: oxi-cli
+- **의존**: ratatui, crossterm (oxicode-ai, oxicode-agent 의존 없음)
+- **소비자**: oxicode-cli
 - **파일**: 10개
 
-### 4.4 `oxi-store` — 공유 영속 상태 (신규)
+### 4.4 `oxicode-store` — 공유 영속 상태 (신규)
 
 ```
-oxi-store/
+oxicode-store/
 ├── src/
 │   ├── lib.rs
 │   ├── session.rs            # SessionEntry, SessionManager, 직렬화 (3K+)
@@ -77,7 +77,7 @@ oxi-store/
 │   ├── session_cwd.rs        # 세션 작업 디렉토리
 │   ├── settings.rs           # Settings 스키마, 로드/저장/병합
 │   ├── settings_validation.rs
-│   ├── model_registry.rs     # 모델 발견/등록 (oxi-ai model_db 래핑)
+│   ├── model_registry.rs     # 모델 발견/등록 (oxicode-ai model_db 래핑)
 │   ├── model_resolver.rs     # model_id → (provider, model) 매핑
 │   ├── auth_storage.rs       # API 키 영속 저장
 │   └── auth_guidance.rs      # 인증 안내 텍스트
@@ -85,14 +85,14 @@ oxi-store/
 ```
 
 - **역할**: 디스크에서 읽고 디스크에 쓰는 공유 상태
-- **의존**: oxi-ai (model_db, Model 타입만)
-- **소비자**: oxi-cli
+- **의존**: oxicode-ai (model_db, Model 타입만)
+- **소비자**: oxicode-cli
 - **파일**: 10개
 
-### 4.5 `oxi-cli` — 진입점 + 애플리케이션 (내부 재정리)
+### 4.5 `oxicode-cli` — 진입점 + 애플리케이션 (내부 재정리)
 
 ```
-oxi-cli/src/
+oxicode-cli/src/
 ├── main.rs                  # 바이너리 진입점
 ├── lib.rs                   # App, InteractiveSession, CompactionContext
 ├── cli.rs                   # clap 정의
@@ -172,7 +172,7 @@ oxi-cli/src/
     └── sleep.rs
 ```
 
-- **의존**: oxi-ai, oxi-agent, oxi-store, oxi-tui
+- **의존**: oxicode-ai, oxicode-agent, oxicode-store, oxicode-tui
 - **파일**: 131개 (모듈 디렉토리 13개)
 
 ## 5. 마이그레이션 기록
@@ -182,19 +182,19 @@ oxi-cli/src/
 - 파일 이동 + import 경로 업데이트
 - templates/ → prompt/templates/ 이동
 
-### Phase 2: oxi-store 추출 (완료)
-- oxi-store 크레이트 생성
+### Phase 2: oxicode-store 추출 (완료)
+- oxicode-store 크레이트 생성
 - 9개 모듈 이동: session, session_navigation, session_cwd, settings, settings_validation, auth_storage, auth_guidance, model_registry, model_resolver
-- oxi-cli의 모든 crate::session/settings/auth_storage/model_registry → oxi_store:: 로 변경
-- oxi-cli Cargo.toml에 oxi-store 의존성 추가
+- oxicode-cli의 모든 crate::session/settings/auth_storage/model_registry → oxicode_store:: 로 변경
+- oxicode-cli Cargo.toml에 oxicode-store 의존성 추가
 
 ## 6. 하지 않은 것
 
 | 항목 | 이유 |
 |---|---|
-| `oxi-app` 분리 | 소비자가 oxi-cli뿐 — 나중에 임베드/RPC 독립 배포 필요하면 그때 |
-| `oxi-util` 분리 | 모듈 30개 중 25개가 소비자 0~1개 — 크레이트 관리 비용이 이점보다 큼 |
-| 기존 크레이트 리네임 | oxi-ai, oxi-agent, oxi-tui 모두 명확하고 Rust 관례에 부합 |
+| `oxicode-app` 분리 | 소비자가 oxicode-cli뿐 — 나중에 임베드/RPC 독립 배포 필요하면 그때 |
+| `oxicode-util` 분리 | 모듈 30개 중 25개가 소비자 0~1개 — 크레이트 관리 비용이 이점보다 큼 |
+| 기존 크레이트 리네임 | oxicode-ai, oxicode-agent, oxicode-tui 모두 명확하고 Rust 관례에 부합 |
 | root-level 파일 정리 | Phase 1에서 일부만 처리됨. 다음에 정리 가능 |
 
 ## 7. 다음 작업 (선택)

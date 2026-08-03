@@ -1,4 +1,4 @@
-# oxi
+# oxicode
 
 Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI coding assistant. Multi-crate workspace providing multi-provider LLM access, an agent tool-calling loop, a terminal UI, a port-based adapter system, and an SDK for building multi-agent systems.
 
@@ -13,59 +13,59 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
 | Workflows | `ci.yml` (8 jobs: fmt/clippy/clippy-native-browser/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `publish.yml` (crates.io, unified), `build-binaries.yml`, `sbom.yml`, `labels.yml` |
 
-> The legacy `oxi-store` crate (settings, sessions, auth) was absorbed
-> into `oxi-cli/src/store/` as a self-contained sub-module. The legacy
-> `oxi-fs` crate (file-based port adapters) was absorbed into
-> `oxi-sdk/src/ports/fs/`. See the refactor history in CHANGELOG.md.
+> The legacy `oxicode-store` crate (settings, sessions, auth) was absorbed
+> into `oxicode-cli/src/store/` as a self-contained sub-module. The legacy
+> `oxicode-fs` crate (file-based port adapters) was absorbed into
+> `oxicode-sdk/src/ports/fs/`. See the refactor history in CHANGELOG.md.
 
 ## Workspace Layout
 
 ```
-oxi/
-├── oxi-ai/            Unified LLM API — streaming, multi-provider abstraction (foundation)
-├── oxi-agent/         Agent runtime — tool-calling loop, MCP client, built-in tools
-├── oxi-sdk/           Multi-agent SDK + port contract: 15 port traits + reference impls
-├── oxi-cli/           CLI binary — composition root (TUI + RPC + print modes)
-├── oxi-hashline/      Line-anchored patch format for AI-assisted code editing
-├── oxi-lsp/           LSP bridge
-├── oxi-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
-├── oxi-snapcompact/   Context compaction via PNG rasterization (fontdue)
-├── oxi-tui/           Terminal UI — widgets, theme, glyph, render (ratatui + DiffBackend)
+oxicode/
+├── oxicode-ai/            Unified LLM API — streaming, multi-provider abstraction (foundation)
+├── oxicode-agent/         Agent runtime — tool-calling loop, MCP client, built-in tools
+├── oxicode-sdk/           Multi-agent SDK + port contract: 15 port traits + reference impls
+├── oxicode-cli/           CLI binary — composition root (TUI + RPC + print modes)
+├── oxicode-hashline/      Line-anchored patch format for AI-assisted code editing
+├── oxicode-lsp/           LSP bridge
+├── oxicode-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
+├── oxicode-snapcompact/   Context compaction via PNG rasterization (fontdue)
+├── oxicode-tui/           Terminal UI — widgets, theme, glyph, render (ratatui + DiffBackend)
 ```
 
-> The grok-inspired `oxi-tui` v2 crate was retired (P2.1, 2026-07-29).
-> The legacy crate was renamed to `oxi-tui` as the sole TUI crate.
+> The grok-inspired `oxicode-tui` v2 crate was retired (P2.1, 2026-07-29).
+> The legacy crate was renamed to `oxicode-tui` as the sole TUI crate.
 > Production chat rendering now uses the main-screen `TapeEngine`
-> (`oxi-tui/src/tape/`); ratatui remains only for transient overlays and
+> (`oxicode-tui/src/tape/`); ratatui remains only for transient overlays and
 > off-screen line formatting.
 
 ### Dependency Flow
 
-Leaf crates (zero internal `oxi-*` deps): `oxi-ai`, `oxi-hashline`, `oxi-lsp`,
-`oxi-mnemopi`, `oxi-snapcompact`, `oxi-tui`.
+Leaf crates (zero internal `oxicode-*` deps): `oxicode-ai`, `oxicode-hashline`, `oxicode-lsp`,
+`oxicode-mnemopi`, `oxicode-snapcompact`, `oxicode-tui`.
 
 ```
-oxi-ai  (foundation)              oxi-hashline (independent)
+oxicode-ai  (foundation)              oxicode-hashline (independent)
   ↓                                 ↓
-oxi-agent  ←  oxi-ai, oxi-hashline
+oxicode-agent  ←  oxicode-ai, oxicode-hashline
   ↓
-oxi-sdk  ←  oxi-ai, oxi-agent, oxi-snapcompact
+oxicode-sdk  ←  oxicode-ai, oxicode-agent, oxicode-snapcompact
   ↓
-oxi-cli  ←  oxi-ai, oxi-agent, oxi-sdk, oxi-lsp, oxi-mnemopi, oxi-tui
+oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-mnemopi, oxicode-tui
 ```
 
-`oxi-ai` is the foundation layer with zero internal dependencies.
-`oxi-cli` is the integration layer that depends on all other crates.
+`oxicode-ai` is the foundation layer with zero internal dependencies.
+`oxicode-cli` is the integration layer that depends on all other crates.
 Never create circular dependencies between crates.
 
-## Port System (oxi-sdk)
+## Port System (oxicode-sdk)
 
-`oxi-sdk` defines **15 port traits** as the contract between the SDK
+`oxicode-sdk` defines **15 port traits** as the contract between the SDK
 and product-specific infrastructure. Each port has a noop default;
-products register their own implementations via `OxiBuilder::with_port_*`
+products register their own implementations via `OxicodeBuilder::with_port_*`
 or `with_ports(PortRegistry)`.
 
-| Port | Purpose | oxi-cli uses | oxios (sister repo) uses |
+| Port | Purpose | oxicode-cli uses | oxios (sister repo) uses |
 |---|---|:-:|:-:|
 | `StateStore` | Durable key-value / append-only | ✅ `FileStateStore` | 🔜 TBD |
 | `ConfigStore` | Layered configuration | ✅ `FileConfigStore` | 🔜 TBD |
@@ -83,20 +83,20 @@ or `with_ports(PortRegistry)`.
 | `RuleRegistry` | Project steering rules (TTSR) | ✅ wired | 🔜 TBD |
 | `EmbeddingProvider` | Vector embeddings for memory | ✅ `MnemopiEmbeddingBridge` | 🔜 TBD |
 
-(Plus `ModelCatalog` in `ports/catalog.rs` for catalog/model-data access.) See `oxi-sdk/src/ports/mod.rs` for the canonical trait list.
+(Plus `ModelCatalog` in `ports/catalog.rs` for catalog/model-data access.) See `oxicode-sdk/src/ports/mod.rs` for the canonical trait list.
 
-Reference implementations live in `oxi-sdk/src/ports/fs/` (file-based)
-and `oxi-sdk/src/ports/inmem/` (in-memory). See `docs/PORT_GUIDE.md`
+Reference implementations live in `oxicode-sdk/src/ports/fs/` (file-based)
+and `oxicode-sdk/src/ports/inmem/` (in-memory). See `docs/PORT_GUIDE.md`
 for the full contract, the noop-fallback semantics, and patterns for
 writing new impls.
 
-> See also [`docs/oxi-sdk-ownership.md`](docs/oxi-sdk-ownership.md) for the
+> See also [`docs/oxicode-sdk-ownership.md`](docs/oxicode-sdk-ownership.md) for the
 > behavior↔policy ownership contract that prevents parallel evolution between
 > the SDK and consumers (oxios).
 
 ## Architecture Overview
 
-### oxi-ai — Unified LLM API
+### oxicode-ai — Unified LLM API
 
 Provider-agnostic streaming interface. Core trait in `providers/trait_def.rs`:
 
@@ -121,20 +121,20 @@ across 70+ providers, with models.dev as the source of truth (see
 `data/catalog/README.md`):
 - **SNAP (Layer 1)** — embedded models.dev snapshot `_snapshot.json.gz`
   (`include_bytes!`-ed; works fully offline on first run).
-- **LIVE (Layer 2.5)** — runtime cache `~/.oxi/cache/models-dev.json` (ETag-aware
+- **LIVE (Layer 2.5)** — runtime cache `~/.oxicode/cache/models-dev.json` (ETag-aware
   conditional GET, ~1h mtime window). `catalog/models_dev.rs`.
-- **Layer 2** — user overrides (`~/.oxi/catalog/overrides.toml`).
+- **Layer 2** — user overrides (`~/.oxicode/catalog/overrides.toml`).
 - **LOCAL (Layer 3)** — runtime `/v1/models` discovery for local servers
   (ollama/lmstudio/vllm/sglang).
-  Gates: `OXI_MODELS_DEV`, `OXI_MODELS_DEV_URL`, `OXI_MODELS_DEV_DISABLE_FETCH`,
-  `OXI_MODELS_DEV_MTIME_WINDOW`, `OXI_MODELS_DEV_FORCE_REFRESH`,
-  `OXI_MODELS_DEV_CACHE_PATH`, `OXI_CATALOG_SNAPSHOT`.
+  Gates: `OXICODE_MODELS_DEV`, `OXICODE_MODELS_DEV_URL`, `OXICODE_MODELS_DEV_DISABLE_FETCH`,
+  `OXICODE_MODELS_DEV_MTIME_WINDOW`, `OXICODE_MODELS_DEV_FORCE_REFRESH`,
+  `OXICODE_MODELS_DEV_CACHE_PATH`, `OXICODE_CATALOG_SNAPSHOT`.
 `compaction.rs` summarizes old messages when context grows too large.
 `ProviderRegistry` in `mod.rs` supports both custom providers (via `register()`) and built-in fallback (via `register_builtins.rs`).
 
 Key types: `Model`, `Context`, `Message`, `ContentBlock`, `Tool`, `ProviderEvent`, `ProviderError`, `ProviderRegistry`.
 
-### oxi-agent — Agent Runtime
+### oxicode-agent — Agent Runtime
 
 Manages the LLM tool-calling loop. Core trait in `src/tools.rs`:
 
@@ -156,7 +156,7 @@ pub trait AgentTool: Send + Sync {
 }
 ```
 
-**~21 tools** across `src/tools/` (registered by `ToolRegistry::with_builtins_cwd`, plus `ask` wired by the `oxi-cli` composition root): read, write, edit, bash, grep, find, ls, todo, ask, web_search, get_search_results, github, subagent, memory_recall, memory_reflect, memory_retain, memory_edit, mcp, context7 (2 sub-tools), generate_image, commit.
+**~21 tools** across `src/tools/` (registered by `ToolRegistry::with_builtins_cwd`, plus `ask` wired by the `oxicode-cli` composition root): read, write, edit, bash, grep, find, ls, todo, ask, web_search, get_search_results, github, subagent, memory_recall, memory_reflect, memory_retain, memory_edit, mcp, context7 (2 sub-tools), generate_image, commit.
 **7 essential tools** (cannot be disabled): read, write, edit, bash, grep, find, ls.
 `agent_loop/` contains streaming, tool execution, retry logic, and queue management.
 `mcp/` implements Model Context Protocol client.
@@ -164,11 +164,11 @@ pub trait AgentTool: Send + Sync {
 
 Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 
-### oxi-tui — Terminal UI
+### oxicode-tui — Terminal UI
 
-`oxi-tui` provides ratatui-based TUI widgets, theme system, glyph system,
-and the OMP-aligned tape engine. **No oxi-* dependencies** — pure widget
-library. Production oxi-cli renders chat transcripts on the terminal main
+`oxicode-tui` provides ratatui-based TUI widgets, theme system, glyph system,
+and the OMP-aligned tape engine. **No oxicode-* dependencies** — pure widget
+library. Production oxicode-cli renders chat transcripts on the terminal main
 screen through `tape::TapeEngine`; ratatui is retained for transient
 overlay sessions and off-screen line formatting. See
 `docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`.
@@ -191,65 +191,65 @@ overlay sessions and off-screen line formatting. See
 
 Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`, `GlyphSet`, `Symbols`.
 
-### oxi-sdk — Multi-Agent SDK + Port Contract
+### oxicode-sdk — Multi-Agent SDK + Port Contract
 
-`OxiBuilder` is the entry point:
+`OxicodeBuilder` is the entry point:
 
 ```rust
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .with_state(Arc::new(my_state_store))
     .with_auth(Arc::new(my_auth))
     .build();
-let agent = oxi.agent(AgentConfig { /* ... */ }).build()?;
+let agent = oxicode.agent(AgentConfig { /* ... */ }).build()?;
 ```
 
 `AgentGroup` supports parallel, sequential, and fan-out strategies.
 `MessageBus` provides pub/sub inter-agent communication.
 `KernelToolProvider` bridges SDK agents to the host tool registry.
 
-The SDK is **re-exported through the oxi-sdk crate** — products do
-not depend on `oxi-ai` or `oxi-agent` directly. See `docs/PORT_GUIDE.md`
+The SDK is **re-exported through the oxicode-sdk crate** — products do
+not depend on `oxicode-ai` or `oxicode-agent` directly. See `docs/PORT_GUIDE.md`
 for the full port contract and "single dependency" pattern
-(`oxios → oxi-sdk`, no `oxi-ai` direct dep).
+(`oxios → oxicode-sdk`, no `oxicode-ai` direct dep).
 
-Key types: `Oxi`, `OxiBuilder`, `AgentBuilder`, `AgentGroup`, `MessageBus`, `PortRegistry`.
+Key types: `Oxicode`, `OxicodeBuilder`, `AgentBuilder`, `AgentGroup`, `MessageBus`, `PortRegistry`.
 
-### oxi-cli — CLI Binary
+### oxicode-cli — CLI Binary
 
 Single binary with three run modes: **TUI** (interactive), **print**
 (plain or JSON), **RPC** (JSON-over-stdin/stdout for IDE integration).
 
-Composition root: `oxi-cli/src/main.rs` is the binary entry point. The
+Composition root: `oxicode-cli/src/main.rs` is the binary entry point. The
 top-level `main()` is a thin dispatcher (12 lines) that routes
 to either `handle_subcommand(command)` for non-interactive
-subcommands or `oxi::bootstrap::run_with_args(args)` for the
+subcommands or `oxicode::bootstrap::run_with_args(args)` for the
 default TUI/print/RPC modes. **However**, `handle_subcommand`
 itself is a large match arm (~90 lines) that delegates each
 subcommand to an inline `handle_*` function declared in the same
 file (F-5 audit 2026-06-21). Those `handle_*` functions together
 add ~1,400 LOC to `main.rs` — contradicting the older "12-line
 dispatcher" claim that this paragraph originally made. The
-follow-up refactor (move each `handle_*` to `oxi-cli/src/cli/commands/*.rs`,
-see audit F-5 in `oxi-code-audit-report.html`) is non-trivial because
+follow-up refactor (move each `handle_*` to `oxicode-cli/src/cli/commands/*.rs`,
+see audit F-5 in `oxicode-code-audit-report.html`) is non-trivial because
 clap's `Subcommand`-derived enums can hit generic-bound surprises when
 referenced from a sibling module — a structural split should be done in
 a dedicated PR with explicit testing of every subcommand.
 
 All wiring (settings merge, custom-provider registration, router
 registration, built-in tool registration, WASM extension loading) lives
-in `oxi-cli/src/bootstrap.rs`. The run-mode dispatcher
+in `oxicode-cli/src/bootstrap.rs`. The run-mode dispatcher
 (`dispatch_run_mode`) routes to TUI / print / RPC based on flags.
 
-The `App` struct is built via `App::from_oxi(oxi, settings)` from
-the wired `Oxi` engine — no manual `Agent::new(provider, config, ...)`
+The `App` struct is built via `App::from_oxicode(oxicode, settings)` from
+the wired `Oxicode` engine — no manual `Agent::new(provider, config, ...)`
 calls anymore. Subcommand handlers (config, session, export, share,
 setup, models) stay in `main.rs` because they are dispatch targets,
 not bootstrap.
 
-Self-contained submodules in `oxi-cli/src/`:
+Self-contained submodules in `oxicode-cli/src/`:
 
-- `store/` — domain types and file-based adapters (was `oxi-store`):
+- `store/` — domain types and file-based adapters (was `oxicode-store`):
   `session.rs` (JSONL session persistence), `settings.rs` (layered
   config), `auth_storage.rs` (API keys + OAuth), `router_config.rs`
   (auto-routing rules), `session_cwd.rs` (cwd binding).
@@ -259,7 +259,7 @@ Self-contained submodules in `oxi-cli/src/`:
   `tui/overlay/*`).
 - `app/agent_session*.rs` — single-shot session wrapper around
   `Agent`.
-- `setup_wizard.rs` — interactive `oxi setup`.
+- `setup_wizard.rs` — interactive `oxicode setup`.
 - `rpc_mode/` — JSON-RPC mode.
 - `extensions/` — WASM / native extension loading.
 - `storage/packages.rs` — built-in package manager (ClawHub-style).
@@ -283,15 +283,15 @@ Extension system (`src/extensions/types.rs`):
   (non-test) code still `warn`s on `unwrap_used`. Every other lint
   (correctness, suspicious, style, complexity) is enforced even in tests.
 - **`native-browser` feature must always compile.** The `ci.yml`
-  `clippy-native-browser` job runs `cargo clippy -p oxi-sdk --features
+  `clippy-native-browser` job runs `cargo clippy -p oxicode-sdk --features
   native-browser -- -D warnings` on every PR. This feature compiles
   `oxibrowser_backend.rs` — if you change `BrowserTab`/`BrowserEngine`
   traits or their impls, this job catches edition-2024 lifetime bugs
   that `cargo clippy --workspace` (default features) cannot see. To
   verify locally:
   ```bash
-  cargo clippy -p oxi-sdk --features native-browser -- -D warnings
-  cargo build -p oxi-agent --features native-browser
+  cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
+  cargo build -p oxicode-agent --features native-browser
   ```
 - **Pre-commit hooks** — `.pre-commit-config.yaml` mirrors the ci.yml
   gate. Install once: `pre-commit install`. On every `git commit`,
@@ -301,21 +301,21 @@ Extension system (`src/extensions/types.rs`):
   locally fail remotely too.
 - Module structure: `mod.rs` re-exports public API, implementation in sibling files.
 - Prefer `anyhow::Result` for application code, custom error enums (`thiserror`) for library crates.
-  - **Library crates** (oxi-ai, oxi-agent, oxi-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
-  - **Application crate** (oxi-cli): use `anyhow::Result` everywhere.
-  - **Leaf crate** (oxi-tui): `anyhow` is acceptable — no public error types needed.
+  - **Library crates** (oxicode-ai, oxicode-agent, oxicode-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
+  - **Application crate** (oxicode-cli): use `anyhow::Result` everywhere.
+  - **Leaf crate** (oxicode-tui): `anyhow` is acceptable — no public error types needed.
   - Never create a shared workspace error crate. Each library owns its own error type.
 - Use `parking_lot::RwLock` instead of `std::sync::RwLock`. (But
   `parking_lot::MutexGuard` is `!Send` — drop the guard before any
   `.await` or use `tokio::sync::Mutex` instead.)
 - Atomic file writes: use the `temp + rename` pattern
-  (e.g. `oxi-sdk/src/ports/fs/session.rs::FileStateStore`).
+  (e.g. `oxicode-sdk/src/ports/fs/session.rs::FileStateStore`).
 - Async: `tokio` runtime with `#[tokio::main]`. Use `async_trait` for trait objects.
 
 ### Testing
 
 - Unit tests in `#[cfg(test)] mod tests` within each module.
-- Integration tests in `<crate>/tests/*.rs` (e.g., `oxi-agent/tests/agent_loop_full.rs`).
+- Integration tests in `<crate>/tests/*.rs` (e.g., `oxicode-agent/tests/agent_loop_full.rs`).
 - Mock providers (`MockProvider`) for agent/loop testing.
 - **Test runner: `cargo-nextest`** — parallel execution, per-test timeouts.
 - Config: `.config/nextest.toml` (profiles: `default`, `ci`, `release`).
@@ -323,36 +323,36 @@ Extension system (`src/extensions/types.rs`):
 
 ### Adding a New LLM Provider
 
-1. Create `oxi-ai/src/providers/<name>.rs`.
+1. Create `oxicode-ai/src/providers/<name>.rs`.
 2. Implement the `Provider` trait.
-3. Add `BuiltinProvider` entry in `oxi-ai/src/providers/register_builtins.rs`.
-4. The model catalog is powered by models.dev (see `oxi-ai/data/catalog/README.md`).
+3. Add `BuiltinProvider` entry in `oxicode-ai/src/providers/register_builtins.rs`.
+4. The model catalog is powered by models.dev (see `oxicode-ai/data/catalog/README.md`).
    If the provider exists on models.dev, its models appear automatically once the
    embedded snapshot is refreshed (regenerate `data/catalog/_snapshot.json.gz`).
-   Add oxi-specific provider metadata (extra HTTP headers, etc.) to
+   Add oxicode-specific provider metadata (extra HTTP headers, etc.) to
    `data/catalog/product-meta.toml`.
 
 ### Adding a New Tool
 
-1. Create `oxi-agent/src/tools/<name>.rs`.
+1. Create `oxicode-agent/src/tools/<name>.rs`.
 2. Implement the `AgentTool` trait.
-3. Add module declaration in `oxi-agent/src/tools.rs`.
+3. Add module declaration in `oxicode-agent/src/tools.rs`.
 4. Register in `ToolRegistry::with_builtins_cwd()`.
 5. Mark `essential()` as `true` if it cannot be disabled.
 
 ### Adding a New Port Implementation
 
-1. Implement the port trait from `oxi_sdk::ports::*`.
+1. Implement the port trait from `oxicode_sdk::ports::*`.
 2. The SDK does not include concrete adapters (beyond `fs/` and
    `inmem/`) — products write their own.
-3. Register via `OxiBuilder::with_port_*(Arc::new(my_impl))` in your
+3. Register via `OxicodeBuilder::with_port_*(Arc::new(my_impl))` in your
    composition root.
 
 ### Adding a New Extension Type
 
-1. Define types in `oxi-cli/src/extensions/types.rs`.
-2. Implement loading in `oxi-cli/src/extensions/loading.rs` (native) or `wasm.rs` (WASM).
-3. Register hooks in `oxi-cli/src/extensions/registry.rs`.
+1. Define types in `oxicode-cli/src/extensions/types.rs`.
+2. Implement loading in `oxicode-cli/src/extensions/loading.rs` (native) or `wasm.rs` (WASM).
+3. Register hooks in `oxicode-cli/src/extensions/registry.rs`.
 
 ## Common Commands
 
@@ -361,7 +361,7 @@ Extension system (`src/extensions/types.rs`):
 cargo build                          # Debug build
 cargo build --release                # Release binary
 cargo nextest run --workspace        # Run all tests (parallel)
-cargo nextest run -p oxi-agent       # Test single crate
+cargo nextest run -p oxicode-agent       # Test single crate
 cargo nextest run --profile ci       # CI profile (retries, no fail-fast)
 cargo nextest run -j 1               # Sequential (debug race conditions)
 
@@ -378,14 +378,14 @@ cargo test --workspace --doc         # Doc tests
 
 | Purpose | Path |
 |---------|------|
-| Global config | `~/.oxi/settings.toml` |
-| Project config | `.oxi/settings.toml` |
-| Sessions | `~/.oxi/sessions/` |
-| Extensions | `~/.oxi/extensions/` |
-| Skills | `~/.oxi/skills/<name>/SKILL.md` |
-| **models.dev cache** | `~/.oxi/cache/models-dev.json` (5-min TTL, atomic writes) |
-| MCP config | `~/.config/oxi/mcp.json` or `.oxi/mcp.json` |
-| Logs | `~/.oxi/logs/` |
+| Global config | `~/.oxicode/settings.toml` |
+| Project config | `.oxicode/settings.toml` |
+| Sessions | `~/.oxicode/sessions/` |
+| Extensions | `~/.oxicode/extensions/` |
+| Skills | `~/.oxicode/skills/<name>/SKILL.md` |
+| **models.dev cache** | `~/.oxicode/cache/models-dev.json` (5-min TTL, atomic writes) |
+| MCP config | `~/.config/oxicode/mcp.json` or `.oxicode/mcp.json` |
+| Logs | `~/.oxicode/logs/` |
 | Nextest config | `.config/nextest.toml` |
 | Pre-commit config | `.pre-commit-config.yaml` |
 | Issue labels | `.github/labels.yml` (synced by `labels.yml` workflow) |
@@ -393,7 +393,7 @@ cargo test --workspace --doc         # Doc tests
 
 ## CI/CD & Release Pipeline
 
-oxi ships a multi-stage pipeline. The full source is under
+oxicode ships a multi-stage pipeline. The full source is under
 `.github/workflows/`:
 
 | Workflow | Trigger | Purpose |
@@ -433,24 +433,24 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
 5. **Sandboxed extensions** — WASM extensions get zero host access by default. Permissions must be explicitly requested.
 6. **Atomic I/O** — file writes go through temp+rename to prevent corruption on crash.
 7. **Port-based adapters** — infrastructure (state, auth, events, memory, skills, …) is **opt-in**. Products register only the ports they care about; the SDK provides noop fallbacks for the rest.
-8. **SDK is the contract, not the implementation** — `oxi-sdk` defines port traits and ships small reference impls. Products (oxi-cli, oxios) write their own domain-specific impls.
-9. **Composition root in one place** — each binary has a single module that wires its `Oxi` engine. Wiring code does not leak into business logic.
+8. **SDK is the contract, not the implementation** — `oxicode-sdk` defines port traits and ships small reference impls. Products (oxicode-cli, oxios) write their own domain-specific impls.
+9. **Composition root in one place** — each binary has a single module that wires its `Oxicode` engine. Wiring code does not leak into business logic.
 
 ## Pitfalls
 
-- `oxi-ai` has no dependency on other oxi crates. Do not import `oxi_agent` or `oxi_store` from it.
+- `oxicode-ai` has no dependency on other oxicode crates. Do not import `oxicode_agent` or `oxicode_store` from it.
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
 - Provider message formats differ significantly (Anthropic vs OpenAI). Use `transform.rs` for conversion.
 - The tool-calling loop in `agent_loop/` has retry logic — tool implementations must be idempotent.
 - **Issue-system ownership identity (Phase 0 / defect #13).** The local `issue`
   tool's `start`/`close` ownership checks use `ToolContext.session_id` as the
   caller identity, and `is_session_alive` checks a per-session `flock` under
-  `.oxi/issues/.alive/<session_id>`. For this to actually protect anything,
+  `.oxicode/issues/.alive/<session_id>`. For this to actually protect anything,
   the identity must (a) be **non-empty** and (b) **match a flock the process
-  holds**. `oxi-cli` enforces both by construction:
+  holds**. `oxicode-cli` enforces both by construction:
   - `bootstrap.rs::build_app` picks the identity — `liveness::TUI_OWNERSHIP_ID`
     ("tui") in TUI mode, `proc-<pid>-<uuid>` otherwise.
-  - `App::from_oxi(..., ownership_session_id)` acquires the flock for `App`'s
+  - `App::from_oxicode(..., ownership_session_id)` acquires the flock for `App`'s
     lifetime AND sets `AgentConfig.session_id = Some(ownership_session_id)`,
     which `agent.rs` threads into `AgentLoopConfig.session_id` →
     `ToolContext.session_id`.
@@ -460,8 +460,8 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   - **Do NOT** re-introduce a hardcoded `session_id: None` in `agent.rs`'s
     `AgentLoopConfig` construction (that was the #13 bug — it made every agent
     `start` write an empty-string owner that was instantly reclaimable).
-    Regression coverage: `session_id_wiring_tests` (oxi-agent) +
-    `start_with_distinct_live_owners_collides` (oxi-cli).
+    Regression coverage: `session_id_wiring_tests` (oxicode-agent) +
+    `start_with_distinct_live_owners_collides` (oxicode-cli).
 - **Issue-system CAS: strict store, recovery in the tool (Phase 2 / #2).** The
   store's `update` is deliberately strict — it returns raw `IssueError::Conflict`
   and **never retries on its own**. Only the `issue` agent tool wraps mutations in
@@ -469,7 +469,7 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   path; on conflict it re-reads a fresh hash and retries). Consequence: **a
   stale `content_hash` from an earlier `read` is advisory, not fatal** — the tool
   auto-reconciles. If you add a new mutating store op the agent can call, route
-  it through `cas_retry` (see `issue_tool.rs`). Direct `oxi issue` CLI calls do
+  it through `cas_retry` (see `issue_tool.rs`). Direct `oxicode issue` CLI calls do
   **not** retry (CLI is a single-shot caller; re-read manually on conflict).
   `IssuePatch` (absent=keep, `Some([])`=clear labels, `Some`=replace) is the
   precise mutation surface — prefer `apply_patch`/`reopen`/`close` over
@@ -480,31 +480,31 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   `updated_at` or the dir mtime.
 - The catalog is models.dev-sourced, not hand-written. The embedded snapshot
   `data/catalog/_snapshot.json.gz` is the source of truth (regenerate per
-  `oxi-ai/data/catalog/README.md`); per-provider TOML no longer exists.
-  oxi-specific provider metadata lives in `data/catalog/product-meta.toml`.
-  Set `OXI_MODELS_DEV=off` to test the embedded snapshot alone.
+  `oxicode-ai/data/catalog/README.md`); per-provider TOML no longer exists.
+  oxicode-specific provider metadata lives in `data/catalog/product-meta.toml`.
+  Set `OXICODE_MODELS_DEV=off` to test the embedded snapshot alone.
 - SSE parsing handles partial UTF-8 lines. Do not assume line boundaries are clean.
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.
 - Port trait methods are **async**. `MutexGuard`s held across `.await` will not compile (`!Send`). Use `tokio::sync::Mutex` or scope the lock.
-- The legacy `oxi-store` crate no longer exists. If a new file needs session/settings/auth, put it in `oxi-cli/src/store/` (or in a sibling product's store).
-- The `oxi-cli` crate is a **monorepo monolith** by design (~66K lines as of 2026-07-25; was ~17K when this rationale was written — the crate has grown 4× since). Do not split it into more crates unless the 4 separation conditions (independent reuse, independent versioning, build isolation, team boundary) genuinely hold — re-evaluate at ~80K LOC.
+- The legacy `oxicode-store` crate no longer exists. If a new file needs session/settings/auth, put it in `oxicode-cli/src/store/` (or in a sibling product's store).
+- The `oxicode-cli` crate is a **monorepo monolith** by design (~66K lines as of 2026-07-25; was ~17K when this rationale was written — the crate has grown 4× since). Do not split it into more crates unless the 4 separation conditions (independent reuse, independent versioning, build isolation, team boundary) genuinely hold — re-evaluate at ~80K LOC.
 - **Language policy settings were removed in P4.3.** Do not reintroduce
   `language_policy_enabled`, `output_languages`, `KNOWN_CHANNELS`, or prompt
   directives for them without a new product decision. `/settings` exposes only
   live settings that still exist; print, RPC, and TUI share no hidden language
   policy behavior.
-- **Theme system: background slots must be consumed by render code, not just defined.** `ColorScheme` (oxi-tui/src/theme.rs) has 28 color slots — 21 original + 7 Phase-1 background slots (`response_bg`, `thinking_bg`, `surface_bg`, `panel_bg`, `diff_add_bg`, `diff_remove_bg`, `diff_hunk_bg`). The 7 new slots AND the 3 previously-dead slots (`user_bg`, `code_bg`, `selection_bg`) are now **wired into render code** as of the theme redesign (2026-06-24). If you add a new `ColorScheme` field, you MUST also:
+- **Theme system: background slots must be consumed by render code, not just defined.** `ColorScheme` (oxicode-tui/src/theme.rs) has 28 color slots — 21 original + 7 Phase-1 background slots (`response_bg`, `thinking_bg`, `surface_bg`, `panel_bg`, `diff_add_bg`, `diff_remove_bg`, `diff_hunk_bg`). The 7 new slots AND the 3 previously-dead slots (`user_bg`, `code_bg`, `selection_bg`) are now **wired into render code** as of the theme redesign (2026-06-24). If you add a new `ColorScheme` field, you MUST also:
   - Add it to `ThemeStyles` + `to_styles()` (pack as `Style::default().bg(color)` or `.fg(color)`).
   - Add it to `ThemeFileColors` + `into_theme()` resolve.
   - Populate it in all 6 `ColorScheme::*()` constructors (`dark`, `light`, `nord`, `catppuccin`, `github_dark`, `monokai`).
   - **Consume it in the render code** — a defined-but-unconsumed slot is a dead field that makes the theme feel unchangeable. Use `buf.set_style(rect, self.styles.<field>)` for area fills or `Style::patch()` for per-Span composition.
   - The brightness hierarchy is `background ≤ response_bg < thinking_bg < surface_bg < user_bg < panel_bg` — new slots must respect this ordering. See `docs/THEME_GUIDE.md` for the derivation rules.
   - **`DashboardWidget` takes `&Theme`** (not `Theme::dark()`). The MCP dashboard overlay constructs it fresh in `render()` with the live theme. Do not re-introduce a hardcoded `Theme::dark()` in any widget — pass the theme through.
-  - **`OxiStyleSheet` is theme-aware** — constructed via `OxiStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
+  - **`OxicodeStyleSheet` is theme-aware** — constructed via `OxicodeStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
 
-## oxi-tui v2 — RETIRED; tape cutover — LIVE (2026-07-29)
+## oxicode-tui v2 — RETIRED; tape cutover — LIVE (2026-07-29)
 
-The grok-inspired `oxi-tui` v2 crate (terminal-first pipeline with
+The grok-inspired `oxicode-tui` v2 crate (terminal-first pipeline with
 `RetainedTree`, `draw_frame_closure`, cell-level `DiffBackend`) has been
 retired and deleted. The production TUI now renders chat transcripts on the
 main screen through `tape::TapeEngine` with memoized transcript components.

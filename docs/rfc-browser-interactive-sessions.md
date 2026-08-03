@@ -1,7 +1,7 @@
 # RFC: Browser Interactive Sessions
 
 > **Status**: Proposed
-> **Affects**: `oxi-agent/src/tools/browse/`, `oxi-sdk/src/agent_builder.rs`, `oxi-sdk/src/tool_factory.rs`
+> **Affects**: `oxicode-agent/src/tools/browse/`, `oxicode-sdk/src/agent_builder.rs`, `oxicode-sdk/src/tool_factory.rs`
 > **Depends on**: existing `BrowserEngine` / `BrowserTab` trait layer, `TabGuard`
 
 ## Problem
@@ -173,7 +173,7 @@ All actions return a JSON result. The `content` field of `AgentToolResult` conta
 
 ### New file
 
-`oxi-agent/src/tools/browse/browse_session_tool.rs`
+`oxicode-agent/src/tools/browse/browse_session_tool.rs`
 
 ```rust
 pub struct BrowseSessionTool {
@@ -311,7 +311,7 @@ No new trait methods required. All session actions delegate to existing `Browser
 
 ## Registration changes
 
-### `oxi-sdk/src/agent_builder.rs`
+### `oxicode-sdk/src/agent_builder.rs`
 
 Add a new builder method alongside existing `browsing()`:
 
@@ -332,7 +332,7 @@ pub fn browsing_with_session(self, engine: Arc<dyn BrowserEngine>) -> Self {
 
 Note: This also registers `BrowseScriptTool`, which the current `browsing()` method does **not** include. This is intentional — `browsing_with_session` is the "full browser suite" registration.
 
-### `oxi-sdk/src/tool_factory.rs`
+### `oxicode-sdk/src/tool_factory.rs`
 
 Add session-aware factory functions:
 
@@ -347,26 +347,26 @@ pub fn browsing_tools_with_session(engine: Arc<dyn BrowserEngine>) -> Arc<ToolRe
 }
 ```
 
-### `oxi-sdk/src/lib.rs`
+### `oxicode-sdk/src/lib.rs`
 
 Add re-export:
 
 ```rust
 #[cfg(feature = "native-browser")]
-pub use oxi_agent::tools::browse::BrowseSessionTool;
+pub use oxicode_agent::tools::browse::BrowseSessionTool;
 ```
 
 ## Registration pattern (SDK consumer side)
 
 ```rust
 // Full browser suite with session support
-let engine = Arc::new(OxiBrowserEngine::new()?);
-let agent = oxi.agent(config)
+let engine = Arc::new(OxicodeBrowserEngine::new()?);
+let agent = oxicode.agent(config)
     .browsing_with_session(engine)  // browse + browse_extract + browse_script + browse_session
     .build()?;
 
 // Without session (current behavior — browse + browse_extract only)
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .browsing(engine)
     .build()?;
 

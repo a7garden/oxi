@@ -12,7 +12,7 @@
 
 omp의 **Hindsight**는 세션 간 메모리(retain/recall/reflect/learn)로, 에이전트가 코드베이스 사실을 기억한다. 프로젝트 스코프 — 이 repo에서 배운 것이 다른 repo로 새지 않는다.
 
-**oxi의 핵심 자산**: `MemoryStore` 포트(`ports/mod.rs:683`)가 이미 `put/search/list`를 정의하고 `NoopMemoryStore` 폴백을 갖춘다. **포트만 충전하면 됨** — oxi 도입 기능 중 가장 적은 설계 변경.
+**oxicode의 핵심 자산**: `MemoryStore` 포트(`ports/mod.rs:683`)가 이미 `put/search/list`를 정의하고 `NoopMemoryStore` 폴백을 갖춘다. **포트만 충전하면 됨** — oxicode 도입 기능 중 가장 적은 설계 변경.
 
 ### omp가 검증한 가치
 - **재학습 비용 제거** — 빌드 명령, 프로젝트 구조, 사용자 선호를 세션마다 재발견하지 않음.
@@ -47,11 +47,11 @@ SQLite 기반 (`bun:sqlite`):
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
 ### 2.1 기존 포트 재활용 (변경 최소)
 
-`oxi-sdk/src/ports/mod.rs:683` (이미 정의됨):
+`oxicode-sdk/src/ports/mod.rs:683` (이미 정의됨):
 
 ```rust
 pub trait MemoryStore: Send + Sync + 'static {
@@ -79,7 +79,7 @@ pub struct MemoryEntry {
 
 ### 2.2 신규 구현: `SqliteMemoryStore`
 
-`oxi-cli/src/store/memory_sqlite.rs`:
+`oxicode-cli/src/store/memory_sqlite.rs`:
 
 ```rust
 pub struct SqliteMemoryStore {
@@ -151,7 +151,7 @@ CREATE INDEX idx_memories_kind ON memories(kind);
 
 | 옵션 | 설명 | 비고 |
 |---|---|---|
-| (a) 기존 채팅 제공자 embeddings API | OpenAI/Google 등 embeddings 엔드포인트 | 빠른 도입. oxi-ai 확장 |
+| (a) 기존 채팅 제공자 embeddings API | OpenAI/Google 등 embeddings 엔드포인트 | 빠른 도입. oxicode-ai 확장 |
 | (b) 로컬 모델 | omp `tiny-models` (작은 임베딩 모델) | 오프라인. 의존 무거움 |
 | (c) `EmbeddingProvider` 신규 포트 | 다중 제품 지원 | 가장 유연 but 설계 추가 |
 
@@ -166,11 +166,11 @@ pub trait EmbeddingProvider: Send + Sync + 'static {
 pub struct NoopEmbeddingProvider;   // Err(PortNotConfigured)
 ```
 
-> **결정 필요**: 포트 추가 여부. M2b.1에서 합의. (a)만으로 시작하면 oxi-ai에 embeddings API 클라이언트 추가.
+> **결정 필요**: 포트 추가 여부. M2b.1에서 합의. (a)만으로 시작하면 oxicode-ai에 embeddings API 클라이언트 추가.
 
-### 2.4 4개 메모리 도구 (oxi-agent)
+### 2.4 4개 메모리 도구 (oxicode-agent)
 
-`oxi-agent/src/tools/memory_*.rs`:
+`oxicode-agent/src/tools/memory_*.rs`:
 
 ```rust
 // memory_retain.rs
@@ -208,7 +208,7 @@ impl AgentTool for MemoryRetainTool {
 세션 첫 턴:
 ```rust
 if settings.memory_enabled {
-    let store = oxi.memory_store();
+    let store = oxicode.memory_store();
     let memories = store.list(&project_id).await.unwrap_or_default();
     if !memories.is_empty() {
         let memory_block = format_memory_for_prompt(&memories);
@@ -232,7 +232,7 @@ if settings.memory_enabled && settings.memory_reflect {
 pub struct Settings {
     pub memory_enabled: bool,            // 기본 false
     pub memory_reflect: bool,            // 세션 종료 자동 요약, 기본 false
-    pub memory_db_path: Option<PathBuf>, // 기본 ~/.oxi/memory/<project>.db
+    pub memory_db_path: Option<PathBuf>, // 기본 ~/.oxicode/memory/<project>.db
 }
 ```
 
@@ -242,7 +242,7 @@ pub struct Settings {
 
 | 서브태스크 | 산출물 | 의존 |
 |:-:|---|---|
-| M2b.1 | 임베딩 제공자 결정 — `EmbeddingProvider` 포트 또는 oxi-ai 확장 | — |
+| M2b.1 | 임베딩 제공자 결정 — `EmbeddingProvider` 포트 또는 oxicode-ai 확장 | — |
 | M2b.2 | `SqliteMemoryStore` + 스키마 + 마이그레이션 | M2b.1 |
 | M2b.3 | 코사인 search (순수 SQL) | M2b.2 |
 | M2b.4 | 4개 메모리 도구 (retain/recall/reflect/edit) | M2b.2 |
@@ -263,21 +263,21 @@ pub struct Settings {
 | 코사인 search 성능 | 🟢 순수 SQL | 수천 건까지 충분. 대규모는 `sqlite-vec` 확장 (후속) |
 | 프라이버시 | 🟡 프로젝트 스코프 | 코드베이스 사실이 디스크 저장. `memory_enabled` 기본 false로 옵트인 |
 | reflect 요약 품질 | 🟢 별도 모델 호출 | 세션 종료 시 별도 LLM 호출로 요약. 비용 발생 but 설정 토글 |
-| MCP 서버 (외부 접근) | 🟢 범위 외 | omp는 mnemopi MCP 서버 포함. oxi는 MCP 브릿지 별도 |
+| MCP 서버 (외부 접근) | 🟢 범위 외 | omp는 mnemopi MCP 서버 포함. oxicode는 MCP 브릿지 별도 |
 | `sqlite-vec` 확장 | 🔴 후속 | 대규모 벡터 검색. M2b 완료 후 평가 |
 
 ---
 
-## 5. 부록: omp → oxi 매핑
+## 5. 부록: omp → oxicode 매핑
 
-| omp 파일 | oxi 위치 |
+| omp 파일 | oxicode 위치 |
 |---|---|
-| `packages/mnemopi/src/db.ts` | `oxi-cli/src/store/memory_sqlite.rs` (러스트 러웨핑) |
-| `packages/mnemopi/src/migrations/` | `oxi-cli/src/store/memory_migrations/` |
-| `packages/mnemopi/src/types.ts` | `oxi-sdk/src/ports/mod.rs` (`MemoryEntry`) — 이미 정의 |
-| `tools/memory-retain.ts` | `oxi-agent/src/tools/memory_retain.rs` |
-| `tools/memory-recall.ts` | `oxi-agent/src/tools/memory_recall.rs` |
-| `tools/memory-reflect.ts` | `oxi-agent/src/tools/memory_reflect.rs` |
-| `tools/memory-edit.ts` | `oxi-agent/src/tools/memory_edit.rs` |
+| `packages/mnemopi/src/db.ts` | `oxicode-cli/src/store/memory_sqlite.rs` (러스트 러웨핑) |
+| `packages/mnemopi/src/migrations/` | `oxicode-cli/src/store/memory_migrations/` |
+| `packages/mnemopi/src/types.ts` | `oxicode-sdk/src/ports/mod.rs` (`MemoryEntry`) — 이미 정의 |
+| `tools/memory-retain.ts` | `oxicode-agent/src/tools/memory_retain.rs` |
+| `tools/memory-recall.ts` | `oxicode-agent/src/tools/memory_recall.rs` |
+| `tools/memory-reflect.ts` | `oxicode-agent/src/tools/memory_reflect.rs` |
+| `tools/memory-edit.ts` | `oxicode-agent/src/tools/memory_edit.rs` |
 | `tools/learn.ts` | (검토 — 능동 학습 UX) |
 | `mnemopi/src/mcp-server.ts` | (범위 외 — MCP 브릿지 별도) |

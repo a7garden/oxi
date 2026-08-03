@@ -2,7 +2,7 @@
 
 > **Status:** Design
 > **Supersedes:** `2026-06-05-exploration-transparency.md` (해당 설계의 문제 인식은 유효하나, 해결책의 배치 레이어가 코드와 불일치)
-> **Scope:** oxi-agent (`events.rs`, `agent_loop/tool_exec.rs`, browse tools)
+> **Scope:** oxicode-agent (`events.rs`, `agent_loop/tool_exec.rs`, browse tools)
 > **Depends on:** v0.27 browser observability (shipped — per-tab routing, `tab_id` on `ToolExecutionUpdate`)
 > **Estimated effort:** ~200 LoC + tests. 3–4 days.
 
@@ -239,7 +239,7 @@ ToolExecutionStart {
 ### 4.1 `infer_context` — 순수 함수
 
 ```rust
-// oxi-agent/src/agent_loop/tool_exec.rs
+// oxicode-agent/src/agent_loop/tool_exec.rs
 
 /// 툴 이름과 인자로부터 의미론적 맥락을 추론.
 ///
@@ -406,13 +406,13 @@ UI 측 로직:
 
 ### 7.1 `ToolContext` + `VisitReason` 타입 정의
 
-**파일:** `oxi-agent/src/events.rs`
+**파일:** `oxicode-agent/src/events.rs`
 
 `AgentEvent` enum 앞에 두 개의 타입을 추가.
 
 ### 7.2 `AgentEvent` variant에 `context` 필드 추가
 
-**파일:** `oxi-agent/src/events.rs`
+**파일:** `oxicode-agent/src/events.rs`
 
 `ToolExecutionStart`와 `ToolExecutionUpdate`에 `context: Option<ToolContext>` 추가.
 
@@ -420,26 +420,26 @@ UI 측 로직:
 
 ### 7.3 `infer_context` 함수
 
-**파일:** `oxi-agent/src/agent_loop/tool_exec.rs`
+**파일:** `oxicode-agent/src/agent_loop/tool_exec.rs`
 
 순수 함수. 툴 이름 + args → `Option<ToolContext>`.
 
 ### 7.4 `execute_prepared_tool_call` 수정
 
-**파일:** `oxi-agent/src/agent_loop/tool_exec.rs`
+**파일:** `oxicode-agent/src/agent_loop/tool_exec.rs`
 
 `infer_context` 호출 + progress callback에 context 전달.
 
 ### 7.5 sequential/parallel 실행 경로에 context 전달
 
-**파일:** `oxi-agent/src/agent_loop/tool_exec.rs`
+**파일:** `oxicode-agent/src/agent_loop/tool_exec.rs`
 
 `execute_tool_calls_sequential`과 `execute_tool_calls_parallel` 모두에서
 `ToolExecutionStart` emit 시 context를 포함.
 
 ### 7.6 `execute_prepared_tool_call_static` (병렬 경로) 수정
 
-**파일:** `oxi-agent/src/agent_loop/tool_exec.rs`
+**파일:** `oxicode-agent/src/agent_loop/tool_exec.rs`
 
 병렬 실행에서는 `on_progress`가 연결되지 않는다 — `execute_prepared_tool_call_static`이
 progress callback을 설정하지 않기 때문. 여기도 동일하게 context를 포함하려면
@@ -467,13 +467,13 @@ callback 설정이 필요하지만, 병렬 경로는 현재 progress emit을 지
 
 | 프로젝트 | 파일 | 액션 |
 |----------|------|------|
-| **oxi-agent** | `src/events.rs` | `ToolContext`, `VisitReason` 타입 추가. `ToolExecutionStart`, `ToolExecutionUpdate`에 `context` 필드 추가 |
+| **oxicode-agent** | `src/events.rs` | `ToolContext`, `VisitReason` 타입 추가. `ToolExecutionStart`, `ToolExecutionUpdate`에 `context` 필드 추가 |
 | | `src/agent_loop/tool_exec.rs` | `infer_context()` 함수 추가. progress callback에 context 전달. Start emit에 context 포함 |
 | | `src/tools/browse/browse_session_tool.rs` | Phase 1에서 이미 완료 (callback 연결) |
 | | `src/tools/browse/browse_extract_tool.rs` | Phase 1에서 이미 완료 (callback 연결) |
 | | `src/tools/browse/browse_script_tool.rs` | Phase 1에서 이미 완료 (callback + 스텝 progress) |
 | **oxibrowser** | *(변경 없음)* | — |
-| **oxi-sdk** | *(변경 없음 — 재export 불필요)* | — |
+| **oxicode-sdk** | *(변경 없음 — 재export 불필요)* | — |
 | **oxios-kernel** | *(변경 없음 — 기존 KernelEvent 매핑이 AgentEvent를 그대로 전달)* | — |
 | **oxios-web** | *(나중에 — context 인식 렌더링)* | — |
 
@@ -581,7 +581,7 @@ callback 설정이 필요하지만, 병렬 경로는 현재 progress emit을 지
 | `parent_step_id` 트리 | 툴콜 = 스텝이므로 불필요 |
 | `StepGuard` RAII + `mem::forget` | 코드베이스의 `TabGuard` 철학(명시적 close)과 충돌 |
 | oxibrowser 변경 | 처음부터 불필요했음. 의미는 툴 레이어가 아닌 루프 레이어에서 생성 |
-| oxi-sdk 재export | 새 타입이 범용 `ToolContext`이므로 `AgentEvent`와 함께 이미 노출됨 |
+| oxicode-sdk 재export | 새 타입이 범용 `ToolContext`이므로 `AgentEvent`와 함께 이미 노출됨 |
 | oxios-kernel `KernelEvent::ExplorationStep` | 기존 매핑이 `AgentEvent`를 그대로 전달하므로 불필요 |
 
 ### 11.2 가져간 것
@@ -609,10 +609,10 @@ callback 설정이 필요하지만, 병렬 경로는 현재 progress emit을 지
 
 ## 13. 열린 질문
 
-1. **`ToolContext`를 oxi-ai로 옮길까?**
-   - 현재 `AgentEvent`가 `oxi-agent`에 정의되어 있으므로 `ToolContext`도 같은 크레이트에.
-   - 하지만 미래에 다른 크레이트에서 재사용하려면 `oxi-ai`로 옮기는 게 좋을 수 있음.
-   - **추천:** 일단 `oxi-agent`에. 필요시 이동.
+1. **`ToolContext`를 oxicode-ai로 옮길까?**
+   - 현재 `AgentEvent`가 `oxicode-agent`에 정의되어 있으므로 `ToolContext`도 같은 크레이트에.
+   - 하지만 미래에 다른 크레이트에서 재사용하려면 `oxicode-ai`로 옮기는 게 좋을 수 있음.
+   - **추천:** 일단 `oxicode-agent`에. 필요시 이동.
 
 2. **`ToolContext`를 툴이 직접 제공하게 할까?**
    - `AgentTool` trait에 `fn infer_context(&self, args: &Value) -> Option<ToolContext>` 추가.

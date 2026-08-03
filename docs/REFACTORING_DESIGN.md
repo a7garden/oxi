@@ -1,4 +1,4 @@
-# oxi 리팩터링 설계 문서
+# oxicode 리팩터링 설계 문서
 
 > **버전**: 0.23.0  
 > **작성일**: 2025-05-30  
@@ -29,8 +29,8 @@ v0.23.0 기준 빌드/테스트/린트는 모두 통과하지만, 코드베이�
 
 | 위치 | 시그니처 | 전달 옵션 | 호출처 |
 |------|----------|-----------|--------|
-| `oxi-cli/src/lib.rs:221` | `fn build_system_prompt(thinking_level, skill_contents: &[String])` | `custom_prompt`, `skills`, `cwd` | `App` (TUI 모드) |
-| `oxi-cli/src/app/agent_session_runtime.rs:747` | `fn build_system_prompt(thinking_level: ThinkingLevel)` | `custom_prompt`, `selected_tools`, `tool_snippets`, `cwd` | `AgentSession` (에이전트 루프) |
+| `oxicode-cli/src/lib.rs:221` | `fn build_system_prompt(thinking_level, skill_contents: &[String])` | `custom_prompt`, `skills`, `cwd` | `App` (TUI 모드) |
+| `oxicode-cli/src/app/agent_session_runtime.rs:747` | `fn build_system_prompt(thinking_level: ThinkingLevel)` | `custom_prompt`, `selected_tools`, `tool_snippets`, `cwd` | `AgentSession` (에이전트 루프) |
 
 #### 문제점
 
@@ -40,7 +40,7 @@ v0.23.0 기준 빌드/테스트/린트는 모두 통과하지만, 코드베이�
 
 #### 설계: 통합 `build_system_prompt`
 
-`oxi-cli/src/prompt/system_prompt.rs`에 이미 `BuildSystemPromptOptions`와 `build_system_prompt()`가 존재한다.
+`oxicode-cli/src/prompt/system_prompt.rs`에 이미 `BuildSystemPromptOptions`와 `build_system_prompt()`가 존재한다.
 중간 래퍼 함수들을 제거하고, 호출처에서 직접 `BuildSystemPromptOptions`를 빌드하도록 변경한다.
 
 ```
@@ -87,9 +87,9 @@ v0.23.0 기준 빌드/테스트/린트는 모두 통과하지만, 코드베이�
 
 #### 영향 범위
 
-- `oxi-cli/src/lib.rs` (~50줄 삭제)
-- `oxi-cli/src/app/agent_session_runtime.rs` (~60줄 삭제)
-- `oxi-cli/src/prompt/system_prompt.rs` (~15줄 추가)
+- `oxicode-cli/src/lib.rs` (~50줄 삭제)
+- `oxicode-cli/src/app/agent_session_runtime.rs` (~60줄 삭제)
+- `oxicode-cli/src/prompt/system_prompt.rs` (~15줄 추가)
 - 기능 변경 없음 — 동일 입력에 동일 출력
 
 #### 위험도: **낮음**
@@ -168,8 +168,8 @@ resource_loader.rs (통합)
 
 #### 영향 범위
 
-- `oxi-cli/src/storage/resource_loader.rs` — 512줄 흡수
-- `oxi-cli/src/storage/resource_loader_compat.rs` — 삭제 (512줄)
+- `oxicode-cli/src/storage/resource_loader.rs` — 512줄 흡수
+- `oxicode-cli/src/storage/resource_loader_compat.rs` — 삭제 (512줄)
 - 외부 크레이트 영향 없음 — 모두 `pub(crate)`
 
 #### 위험도: **중간**
@@ -186,7 +186,7 @@ resource_loader.rs (통합)
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `oxi-ai/src/router/classifier.rs` (22줄) |
+| 파일 | `oxicode-ai/src/router/classifier.rs` (22줄) |
 | 타입 | `LlmClassifier` |
 | 상태 | 스텁 — `classify()` 호출 시 항상 `bail!()` |
 | 설정 연결 | `RouterConfig.classifier_model` — 설정 파일에서 읽기 가능 |
@@ -206,9 +206,9 @@ RouterConfig (규칙: high/medium/low)
 
 관련 타입 (이미 구현됨):
 
-- `oxi-ai/src/router/types.rs` — `ClassifierType::LlmClassifier`, `RoutingDecision.classifier_confidence`
-- `oxi-store/src/router_config.rs` — `classifier_model` 필드, TOML 파싱
-- `oxi-cli/src/main.rs` — 설정에서 `classifier_model` 읽기
+- `oxicode-ai/src/router/types.rs` — `ClassifierType::LlmClassifier`, `RoutingDecision.classifier_confidence`
+- `oxicode-store/src/router_config.rs` — `classifier_model` 필드, TOML 파싱
+- `oxicode-cli/src/main.rs` — 설정에서 `classifier_model` 읽기
 
 ### 3.2 목표
 
@@ -349,7 +349,7 @@ pub struct ClassifierInput {
 ### 3.4 설정 스키마 (이미 구현됨)
 
 ```toml
-# .oxi/settings.toml 또는 ~/.oxi/settings.toml
+# .oxicode/settings.toml 또는 ~/.oxicode/settings.toml
 
 [router]
 enabled = true
@@ -368,10 +368,10 @@ low.model = "google/gemini-2.0-flash"
 
 | Phase | 내용 | 예상 공수 | 파일 |
 |-------|------|-----------|------|
-| **Phase 1** | `HeuristicClassifier` 구현 | 2-3시간 | `oxi-ai/src/router/classifier.rs` |
+| **Phase 1** | `HeuristicClassifier` 구현 | 2-3시간 | `oxicode-ai/src/router/classifier.rs` |
 | **Phase 2** | `LlmClassifier` 구현 | 3-4시간 | 동일 파일 |
-| **Phase 3** | `Router`에 통합 | 1-2시간 | `oxi-ai/src/router/mod.rs` |
-| **Phase 4** | 테스트 + 설정 연동 | 2시간 | `oxi-ai/src/router/`, `oxi-store/` |
+| **Phase 3** | `Router`에 통합 | 1-2시간 | `oxicode-ai/src/router/mod.rs` |
+| **Phase 4** | 테스트 + 설정 연동 | 2시간 | `oxicode-ai/src/router/`, `oxicode-store/` |
 
 #### Phase 1 상세
 

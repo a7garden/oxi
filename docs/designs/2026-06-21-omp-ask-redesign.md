@@ -1,16 +1,16 @@
-# omp `ask` 표절 설계 — oxi questionnaire → ask 재설계
+# omp `ask` 표절 설계 — oxicode questionnaire → ask 재설계
 
 > **작성:** 2026-06-21
 > **표절 대상:** [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi) 의 `ask` 도구 + `HookSelectorComponent` + `framedBlock` 렌더 체계
 > **분석 소스:** `/tmp/omp` 클론(`packages/coding-agent/src/tools/ask.ts`, `modes/components/hook-selector.ts`, `tui/output-block.ts`, `tui/status-line.ts`, `modes/theme/theme.ts`)
-> **관련 기존 트랙:** [`omp-adoption`](./omp-adoption/) · [`omp-adoption-2`](./omp-adoption-2/) · [`2026-06-20-omp-vs-oxi-tui-analysis.md`](./2026-06-20-omp-vs-oxi-tui-analysis.md)
+> **관련 기존 트랙:** [`omp-adoption`](./omp-adoption/) · [`omp-adoption-2`](./omp-adoption-2/) · [`2026-06-20-omp-vs-oxicode-tui-analysis.md`](./2026-06-20-omp-vs-oxicode-tui-analysis.md)
 > **범위:** 본 설계는 **`ask`/questionnaire 도구와 그 셀렉터 위젯·트랜스크립트 렌더링**에 한정. 렌더링 엔진(스크롤백 네이티브·DECCARA·SGR delta)은 위 분석 트랙에서 이미 다루므로 여기서 다루지 않는다.
 
 ---
 
 ## 0. 한 줄 결론
 
-oxi의 `questionnaire`는 **화면을 덮는 모달 탭 오버레이**다. omp의 `ask`는 **하나의 범용 셀렉터(`HookSelectorComponent`)를 재사용**해 질문을 **한 번에 하나씩** 보여주고, ←/→ 로 이동하며, 답변 후엔 **채워진 메뉴(filled menu)** 모양으로 트랜스크립트에 남는다.
+oxicode의 `questionnaire`는 **화면을 덮는 모달 탭 오버레이**다. omp의 `ask`는 **하나의 범용 셀렉터(`HookSelectorComponent`)를 재사용**해 질문을 **한 번에 하나씩** 보여주고, ←/→ 로 이동하며, 답변 후엔 **채워진 메뉴(filled menu)** 모양으로 트랜스크립트에 남는다.
 
 표절의 핵심은 두 가지다:
 1. **모달 탭 → 범용 셀렉터 1회 호출의 순차 반복**(질문 N개 = 셀렉터 N번 호출 + ←/→ 네비게이션).
@@ -40,12 +40,12 @@ oxi의 `questionnaire`는 **화면을 덮는 모달 탭 오버레이**다. omp�
 | 결과 렌더 | **모든 옵션을 재출력하되 선택된 것만 마커 채움** + 커스텀 입력 + "auto-selected after timeout" 각주 | `renderAnswerOptionLines` (`ask.ts:786-816`) |
 | 프롬프트 규율 | "Other 넣지 마라(UI가 넣는다)", "2-5 옵션", "default to action" | `prompts/tools/ask.md` |
 
-### oxi `questionnaire` (현재)
+### oxicode `questionnaire` (현재)
 
-| 측면 | oxi 구현 | 소스 |
+| 측면 | oxicode 구현 | 소스 |
 |------|----------|------|
 | 흐름 | **모달 탭 오버레이**, 상단 탭바(Q1…Qn, Submit), 화면 중앙 | `questionnaire.rs`(overlay) `48-311` |
-| 브리지 | `QuestionnaireBridge`(Arc-Mutex) — agent 스레드↔TUI 메인 스레드, oneshot 채널 | `oxi-agent/src/tools/questionnaire.rs:26-93` |
+| 브리지 | `QuestionnaireBridge`(Arc-Mutex) — agent 스레드↔TUI 메인 스레드, oneshot 채널 | `oxicode-agent/src/tools/questionnaire.rs:26-93` |
 | 행 마커 | **오버레이 행에 마커 없음**. 트랜스크립트 프리뷰에만 `radio_off`/`nav_selected(★)` 사용 | `tool_renderer.rs:700-715` |
 | "Other" | `allow_other` 플래그 → 별도 인라인 편집 모드(`input_mode`) | overlay `31-46` |
 | 탐색 | 탭 전환(숫자키/Tab), 엔터 선택/토글, Submit 탭 | overlay `343-505` |
@@ -56,7 +56,7 @@ oxi의 `questionnaire`는 **화면을 덮는 모달 탭 오버레이**다. omp�
 ### 격차 요약
 
 ```
-omp ask                            oxi questionnaire
+omp ask                            oxicode questionnaire
 ─────────────────────────          ─────────────────────────────
 순차 1문항 (←/→ 네비)      ◀︎▶︎    탭 모달 (화면 강탈)
 범용 셀렉터 재사용          ◀︎▶︎    전용 QuestionnaireOverlay (재사용성 無)
@@ -68,41 +68,41 @@ filled-menu 결과            ◀︎▶︎    "id → 답" 한 줄 요약
 framed block 병합 렌더      ◀︎▶︎    call/result 분리 렌더
 ```
 
-> **주의:** omp는 **스크롤백 네이티브**라 셀렉터가 "트랜스크립트 흐름 속"에 등장한다. oxi는 **ratatui 대체 화면**이라 진짜 인라인은 불가능(이것은 렌더링 엔진 트랙의 범위). 따라서 oxi에서는 **"오버레이 기구는 유지하되 omp의 셀렉터 미학 + 순차 흐름으로 재설계"** 하고, **완료 후 트랜스크립트 블록만 omp의 filled-menu 미학**으로 바꾼다. 이 차이는 아래 설계 전체의 전제다.
+> **주의:** omp는 **스크롤백 네이티브**라 셀렉터가 "트랜스크립트 흐름 속"에 등장한다. oxicode는 **ratatui 대체 화면**이라 진짜 인라인은 불가능(이것은 렌더링 엔진 트랙의 범위). 따라서 oxicode에서는 **"오버레이 기구는 유지하되 omp의 셀렉터 미학 + 순차 흐름으로 재설계"** 하고, **완료 후 트랜스크립트 블록만 omp의 filled-menu 미학**으로 바꾼다. 이 차이는 아래 설계 전체의 전제다.
 
 ---
 
 ## 2. 설계 원칙 (omp에서 가져올 것·가져오지 않을 것)
 
 ### 가져올 것
-1. **범용 셀렉터 단일화** — omp처럼 모든 리스트형 오버레이(ask·model·session·resume·logout·provider)가 **하나의 `ListSelector` 프리미티브**를 공유. oxi는 현재 각 오버레이가 `List`+`Paragraph`를 직접 조립(`model_select.rs`, `resume_select.rs`, …).
+1. **범용 셀렉터 단일화** — omp처럼 모든 리스트형 오버레이(ask·model·session·resume·logout·provider)가 **하나의 `ListSelector` 프리미티브**를 공유. oxicode는 현재 각 오버레이가 `List`+`Paragraph`를 직접 조립(`model_select.rs`, `resume_select.rs`, …).
 2. **순차 1문항 흐름** — N개 질문 = 셀렉터 N회 호출, ←/→ 로 이동, `progress_text "(k/N)"`. 탭 모달 폐기.
-3. **행 마커 칼럼** — 라디오(단일)/체크박스(멀티) 마커를 **셀렉터 행 자체에** 그린다. oxi는 심볼(`radio_on/off`, `checkbox_on/off`)을 이미 가지고 있으나 호출처가 없다.
+3. **행 마커 칼럼** — 라디오(단일)/체크박스(멀티) 마커를 **셀렉터 행 자체에** 그린다. oxicode는 심볼(`radio_on/off`, `checkbox_on/off`)을 이미 가지고 있으나 호출처가 없다.
 4. **"Other" 자동 추가 + 인라인 편집기** — `allow_other=true` 가 의미가 있게(현재는 별도 input_mode 분기).
 5. **"(Recommended)" 접미사 + 초기 커서** — recommended 인덱스 라벨에 접미사, 커서 시작 위치.
 6. **filled-menu 결과 렌더** — 결과를 모든 옵션 재출력 + 선택 마커 채움 + 커스텀 입력 + 타임아웃 각주.
-7. **카운트다운 타임아웃** — 타이틀에 `(Ns)`, 만료 시 recommended 자동 선택(oxi는 `auto_select_defaults`가 이미 있으나 카운트다운 표시 無).
-8. **컴팩트 + 퍼지** — 옵션 ≥ 임계치면 라벨만 + 하이라이트 설명 + 타이핑 검색. (oxi는 model_select에 filter 문자열이 있으나 ask에는 없다.)
+7. **카운트다운 타임아웃** — 타이틀에 `(Ns)`, 만료 시 recommended 자동 선택(oxicode는 `auto_select_defaults`가 이미 있으나 카운트다운 표시 無).
+8. **컴팩트 + 퍼지** — 옵션 ≥ 임계치면 라벨만 + 하이라이트 설명 + 타이핑 검색. (oxicode는 model_select에 filter 문자열이 있으나 ask에는 없다.)
 
-### 가져오지 않을 것 (oxi 스택 한계 / 이미 우위)
+### 가져오지 않을 것 (oxicode 스택 한계 / 이미 우위)
 - **스크롤백 인라인 등장** — ratatui 대체 화면 한계. 범위 밖.
-- **omp의 chalk 함수형 테마** — oxi의 타입화된 `ThemeStyles` + `Symbols` 구조체가 **유지보수 면에서 우위**(기존 분석 TL;DR 확인). 그대로 유지.
-- **omp의 arkType 스키마** — oxi는 `serde` + 트레이트. Rust 관습 유지.
+- **omp의 chalk 함수형 테마** — oxicode의 타입화된 `ThemeStyles` + `Symbols` 구조체가 **유지보수 면에서 우위**(기존 분석 TL;DR 확인). 그대로 유지.
+- **omp의 arkType 스키마** — oxicode는 `serde` + 트레이트. Rust 관습 유지.
 
 ---
 
-## 3. 파일 매핑 (omp 소스 → oxi 대상)
+## 3. 파일 매핑 (omp 소스 → oxicode 대상)
 
-| omp 소스 (`/tmp/omp`) | 역할 | oxi 대상 (신규/수정) |
+| omp 소스 (`/tmp/omp`) | 역할 | oxicode 대상 (신규/수정) |
 |---|---|---|
-| `modes/components/hook-selector.ts` (660줄) | 범용 셀렉터 컴포넌트 | **신규** `oxi-cli/src/tui/overlay/list_selector.rs` (범용 `ListSelectorOverlay`) |
-| `tools/ask.ts:190-391` (`askSingleQuestion`) | 순차 질문 상태기계 | **수정** `oxi-cli/src/tui/overlay/questionnaire.rs` → 순차 흐름으로 재작성 (또는 `ask.rs`로 개명) |
-| `tools/ask.ts:418-670` (`AskTool`) | 도구 본체 | **수정** `oxi-agent/src/tools/questionnaire.rs` → `name="ask"`, `label="Ask"`, 순차 호출 |
-| `tools/ask.ts:786-816` (`renderAnswerOptionLines`) | filled-menu 결과 렌더 | **수정** `oxi-tui/src/widgets/tool_renderer.rs::format_questionnaire_result` |
+| `modes/components/hook-selector.ts` (660줄) | 범용 셀렉터 컴포넌트 | **신규** `oxicode-cli/src/tui/overlay/list_selector.rs` (범용 `ListSelectorOverlay`) |
+| `tools/ask.ts:190-391` (`askSingleQuestion`) | 순차 질문 상태기계 | **수정** `oxicode-cli/src/tui/overlay/questionnaire.rs` → 순차 흐름으로 재작성 (또는 `ask.rs`로 개명) |
+| `tools/ask.ts:418-670` (`AskTool`) | 도구 본체 | **수정** `oxicode-agent/src/tools/questionnaire.rs` → `name="ask"`, `label="Ask"`, 순차 호출 |
+| `tools/ask.ts:786-816` (`renderAnswerOptionLines`) | filled-menu 결과 렌더 | **수정** `oxicode-tui/src/widgets/tool_renderer.rs::format_questionnaire_result` |
 | `tools/ask.ts:818-883` (`renderCall`) | 호출 프리뷰 | **수정** `format_questionnaire_call` (마커 + 접미사) |
-| `tui/output-block.ts` (`framedBlock`) + `status-line.ts` | 프레임/상태헤더 | oxi는 이미 `chat/render.rs:96-136`에 상태별 프레임 구현 → **재활용**, 섹션 분리자만 추가 |
-| `modes/theme/theme.ts:234-431` (UNICODE_SYMBOLS) | 심볼 테이블 | oxi `symbols.rs` 이미 상응 필드 보유 → **확장 불필요**(아래 §5) |
-| `prompts/tools/ask.md` | 도구 프롬프트 규율 | **신규** `oxi-agent` 시스템 프롬프트의 questionnaire 설명을 ask.md 규율로 교체 |
+| `tui/output-block.ts` (`framedBlock`) + `status-line.ts` | 프레임/상태헤더 | oxicode는 이미 `chat/render.rs:96-136`에 상태별 프레임 구현 → **재활용**, 섹션 분리자만 추가 |
+| `modes/theme/theme.ts:234-431` (UNICODE_SYMBOLS) | 심볼 테이블 | oxicode `symbols.rs` 이미 상응 필드 보유 → **확장 불필요**(아래 §5) |
+| `prompts/tools/ask.md` | 도구 프롬프트 규율 | **신규** `oxicode-agent` 시스템 프롬프트의 questionnaire 설명을 ask.md 규율로 교체 |
 
 ---
 
@@ -112,7 +112,7 @@ framed block 병합 렌더      ◀︎▶︎    call/result 분리 렌더
 
 **목표:** omp `HookSelectorComponent`의 ratatui 판. 모든 리스트 오버레이의 공통 조상.
 
-**대상:** 신규 `oxi-cli/src/tui/overlay/list_selector.rs`
+**대상:** 신규 `oxicode-cli/src/tui/overlay/list_selector.rs`
 
 **API (계약):**
 ```rust
@@ -180,7 +180,7 @@ pub struct SelectionResult { /* 선택된 인덱스/라벨, Other 여부, cancel
 
 ### Phase B — `ask` 도구 본체 재설계
 
-**대상:** `oxi-agent/src/tools/questionnaire.rs` (개명 검토: `questionnaire` → `ask`)
+**대상:** `oxicode-agent/src/tools/questionnaire.rs` (개명 검토: `questionnaire` → `ask`)
 
 **변경:**
 1. `AgentTool::name()` → `"ask"` (하위호환: `questionnaire` 별칭 레지스트리는 제거 — clean cutover 원칙). `label` → `"Ask"`, 요약 → `"Ask the user a clarifying question"`.
@@ -189,7 +189,7 @@ pub struct SelectionResult { /* 선택된 인덱스/라벨, Other 여부, cancel
    - `nav = Back` → 이전 질문 재표시(이전 답을 `initialSelection`로 사전 채움, omp `initialSelection` 대응).
    - `nav = Forward` 또는 Enter → 다음.
 3. **"Other" 자동**: 도구가 "Other" 행을 옵션 끝에 주입하지 않음 → **셀렉터가 자동 추가**(`auto_other`). 모델이 "Other"를 옵션에 넣으면 중복이므로 프롬프트로 금지(ask.md 규율).
-4. **타임아웃**: `Settings::questionnaire_timeout_secs` → 유지. plan-mode일 때 omp처럼 비활성(`ask.ts:516-520` 참고 — oxi에 plan-mode가 있으면 동일 적용, 없으면 스킵).
+4. **타임아웃**: `Settings::questionnaire_timeout_secs` → 유지. plan-mode일 때 omp처럼 비활성(`ask.ts:516-520` 참고 — oxicode에 plan-mode가 있으면 동일 적용, 없으면 스킵).
 5. **동시성**: omp `concurrency="exclusive"` 대응 — `QuestionnaireBridge`는 이미 단일 pending만 허용(`set()`이 `false` 반환)하므로 동등. 다만 `Agent::is_running` 검사는 별도(AGENTS.md pitfall).
 6. **결과 포맷**: omp `formatQuestionResult`(`ask.ts:393-404`) 이식 — `id: "답"` / `id: [a, b]` / `id: "커스텀"` / `(auto-selected after timeout)` 접미사. 이 문자열이 트랜스크립트 렌더러 입력이 된다.
 
@@ -201,7 +201,7 @@ pub struct SelectionResult { /* 선택된 인덱스/라벨, Other 여부, cancel
 
 ### Phase C — 트랜스크립트 렌더 재설계 (filled menu)
 
-**대상:** `oxi-tui/src/widgets/tool_renderer.rs::format_questionnaire_call` / `_result`
+**대상:** `oxicode-tui/src/widgets/tool_renderer.rs::format_questionnaire_call` / `_result`
 
 **결과 렌더(omp `renderAnswerOptionLines` `ask.ts:786-816` 이식):**
 ```
@@ -213,8 +213,8 @@ pub struct SelectionResult { /* 선택된 인덱스/라벨, Other 여부, cancel
   ✔ 커스텀 입력: "둘 다"                         ← custom: status_success + 본문
   auto-selected after timeout — not a user choice  ← 타임아웃 각주(dim)
 ```
-- 선택 마커 색: omp처럼 `success`(선택)/`dim`(미선택) 대비. oxi는 `radio_on`/`checkbox_on` + `success`, `radio_off`/`checkbox_off` + `dim`.
-- 취소 시: `⚠ Cancelled` (이미 oxi에 있음).
+- 선택 마커 색: omp처럼 `success`(선택)/`dim`(미선택) 대비. oxicode는 `radio_on`/`checkbox_on` + `success`, `radio_off`/`checkbox_off` + `dim`.
+- 취소 시: `⚠ Cancelled` (이미 oxicode에 있음).
 - 멀티: `☑`/`☐` + 다중 행.
 
 **호출 렌더(omp `renderCall` `ask.ts:820-883` 이식):**
@@ -222,13 +222,13 @@ pub struct SelectionResult { /* 선택된 인덱스/라벨, Other 여부, cancel
 - 단일: `? Ask · options:N` + 질문 + 빈 마커 옵션(`radio_off` dim).
 - "(Recommended)" 접미사는 호출 프리뷰에는 붙이지 않음(omp 동작) — 결과에서만 실제 선택이 드러남.
 
-**마커 일관성:** 호출 프리뷰(미선택 `radio_off`/`checkbox_off` dim) ↔ 결과(선택 `radio_on`/`checkbox_on` success). oxi는 현재 호출에 `nav_selected(★)`/`radio_off` 혼용(`tool_renderer.rs:702-706`) → omp처럼 recommended는 **접미사**로, 마커는 **상태**로 분리.
+**마커 일관성:** 호출 프리뷰(미선택 `radio_off`/`checkbox_off` dim) ↔ 결과(선택 `radio_on`/`checkbox_on` success). oxicode는 현재 호출에 `nav_selected(★)`/`radio_off` 혼용(`tool_renderer.rs:702-706`) → omp처럼 recommended는 **접미사**로, 마커는 **상태**로 분리.
 
 **수용 기준:** 렌더 스냅샷 테스트(단일/다중/멀티/Other/취소/타임아웃 6케이스).
 
 ### Phase D — 프롬프트 규율 + 설정 정리
 
-1. **시스템 프롬프트**: omp `ask.md` 규율 이식 — "default to action", "Other 넣지 마라", "2-5 옵션", "recommended로 기본 표시", "questions 배열로 한 번에". oxi의 `Question.allow_other` 기본값은 `true` 유지(이제 실제로 의미 있게 됨).
+1. **시스템 프롬프트**: omp `ask.md` 규율 이식 — "default to action", "Other 넣지 마라", "2-5 옵션", "recommended로 기본 표시", "questions 배열로 한 번에". oxicode의 `Question.allow_other` 기본값은 `true` 유지(이제 실제로 의미 있게 됨).
 2. **설정명**: `questionnaire_timeout_secs` → `ask_timeout_secs` (별칭 마이그레이션 또는 clean cutover). `Settings` 필드명 정리.
 3. **`/settings` 오버레이** 라벨 정리.
 
@@ -236,9 +236,9 @@ pub struct SelectionResult { /* 선택된 인덱스/라벨, Other 여부, cancel
 
 ## 5. 심볼/테마 격차 — 추가 불필요 (이미 보유)
 
-omp의 ask가 쓰는 모든 글리프가 oxi `Symbols`에 이미 존재한다:
+omp의 ask가 쓰는 모든 글리프가 oxicode `Symbols`에 이미 존재한다:
 
-| omp 심볼 | omp 값 | oxi 필드 | oxi 값(unicode) | 상태 |
+| omp 심볼 | omp 값 | oxicode 필드 | oxicode 값(unicode) | 상태 |
 |---|---|---|---|---|
 | `radio.selected` | `◉` | `radio_on` | `◉` | ✅ 동일 |
 | `radio.unselected` | `○` | `radio_off` | `○` | ✅ 동일 |
@@ -249,16 +249,16 @@ omp의 ask가 쓰는 모든 글리프가 oxi `Symbols`에 이미 존재한다:
 | `nav.cursor` | `❯` | `cursor` | `❯ ` | ✅ 동일 |
 | `tool.ask` | `?` | `tool_ask` | `?` | ✅ 동일 |
 | `sep.dot` | ` · ` | `sep_dot` | ` · ` | ✅ 동일 |
-| `format.bracketLeft/Right` | `⟦`/`⟧` | (oxi에 **없음**) | — | ⚠️ 추가 후보(메타용) |
+| `format.bracketLeft/Right` | `⟦`/`⟧` | (oxicode에 **없음**) | — | ⚠️ 추가 후보(메타용) |
 
-> **유일한 갭:** omp의 `[id]` 메타 표기용 괄호 글리프(`⟦`/`⟧`, `format.bracketLeft/Right`). oxi는 일반 괄호로 대체 가능하므로 **심볼 추가는 선택**. 추가 시 `Symbols`에 `bracket_left`/`bracket_right` 필드 + 3 프리셋 생성자 채우기(AGENTS.md "Adding a glyph" 절차).
+> **유일한 갭:** omp의 `[id]` 메타 표기용 괄호 글리프(`⟦`/`⟧`, `format.bracketLeft/Right`). oxicode는 일반 괄호로 대체 가능하므로 **심볼 추가는 선택**. 추가 시 `Symbols`에 `bracket_left`/`bracket_right` 필드 + 3 프리셋 생성자 채우기(AGENTS.md "Adding a glyph" 절차).
 
 ---
 
 ## 6. 아키텍처 메모 — ratatui 제약 하의 적응
 
-### omp "인라인 등장"을 oxi에서 흉내내는 법
-omp는 스크롤백 네이티브라 셀렉터가 트랜스크립트 흐름에 직접 나타난다. oxi(ratatui 대체 화면)는 불가능. 대신:
+### omp "인라인 등장"을 oxicode에서 흉내내는 법
+omp는 스크롤백 네이티브라 셀렉터가 트랜스크립트 흐름에 직접 나타난다. oxicode(ratatui 대체 화면)는 불가능. 대신:
 - **진행 중**: `ListSelectorOverlay`가 기존 모달처럼 화면 위 합성(OverlayComponent). omp 미학(동적 보더·마커·카운트다운)으로 스타일.
 - **완료 후**: 트랜스크립트 블록이 Phase C의 filled-menu로 렌더. 사용자 경험은 "오버레이가 닫히며 아래에 채워진 메뉴가 남는" 형태 — omp와 시각적으로 근접.
 
@@ -298,7 +298,7 @@ Phase A (ListSelectorOverlay)  ←─ 토대, 독립
 - [ ] `lsp references` `Question` / `QuestionnaireBridge` / `QuestionnaireResponse` → 도구·설정·세션 직렬화
 - [ ] `Settings::questionnaire_timeout_secs` 사용처 전수
 - [ ] `format_questionnaire_call/_result` 호출처(`format_tool_call/_result` 디스패치 + 테스트)
-- [ ] oxi에 plan-mode 존재 여부(omp 타임아웃 비활화 조건)
+- [ ] oxicode에 plan-mode 존재 여부(omp 타임아웃 비활화 조건)
 - [ ] 기존 `2026-05-14-questionnaire-tool-design.md` 원 설계 의도 보존 포인트 확인
 
 ---
@@ -324,4 +324,4 @@ ask(questions: Vec<Q>)
 
 ## 부록 B — omp 심볼 프리셋 교차 참조
 
-oxi 3 프리셋(unicode/ascii/nerd)이 omp 3 프리셋(unicode/nerd/ascii)과 거의 동일. oxi는 이미 `radio_on: "(*)"`/`radio_off: "( )"`(ascii) 등 보유. ask 재설계에 **새 심볼 필드 불필요** (bracket_left/right만 선택적).
+oxicode 3 프리셋(unicode/ascii/nerd)이 omp 3 프리셋(unicode/nerd/ascii)과 거의 동일. oxicode는 이미 `radio_on: "(*)"`/`radio_off: "( )"`(ascii) 등 보유. ask 재설계에 **새 심볼 필드 불필요** (bracket_left/right만 선택적).

@@ -1,6 +1,6 @@
 # Release Process
 
-Release workflow for the oxi workspace. 모든 크레이트가 동시에 같은 버전으로 출시된다.
+Release workflow for the oxicode workspace. 모든 크레이트가 동시에 같은 버전으로 출시된다.
 
 ## Prerequisites
 
@@ -17,14 +17,14 @@ Release workflow for the oxi workspace. 모든 크레이트가 동시에 같은 
 
 **바꿀 파일 (6개 Cargo.toml + 내부 의존성 버전):**
 
-- `oxi-ai/Cargo.toml` — `version = "current"`
-- `oxi-agent/Cargo.toml` — `version = "current"` + `oxi-ai`, `oxi-hashline` deps
-- `oxi-sdk/Cargo.toml` — `version = "current"` + `oxi-ai`, `oxi-agent` deps
-- `oxi-tui/Cargo.toml` — `version = "current"` (독립적, oxi-* 의존성 없음)
-- `oxi-cli/Cargo.toml` — `version = "current"` + `oxi-ai`, `oxi-agent`, `oxi-sdk`, `oxi-tui` deps
-- `oxi-hashline/Cargo.toml` — `version = "current"`
+- `oxicode-ai/Cargo.toml` — `version = "current"`
+- `oxicode-agent/Cargo.toml` — `version = "current"` + `oxicode-ai`, `oxicode-hashline` deps
+- `oxicode-sdk/Cargo.toml` — `version = "current"` + `oxicode-ai`, `oxicode-agent` deps
+- `oxicode-tui/Cargo.toml` — `version = "current"` (독립적, oxicode-* 의존성 없음)
+- `oxicode-cli/Cargo.toml` — `version = "current"` + `oxicode-ai`, `oxicode-agent`, `oxicode-sdk`, `oxicode-tui` deps
+- `oxicode-hashline/Cargo.toml` — `version = "current"`
 
-각 `Cargo.toml`의 `version = "X.Y.Z"`와 `oxi-* = { version = "X.Y.Z", path = "..." }` 내부 의존성을 함께 올려야 한다. workspace `Cargo.toml`에는 버전 필드가 없으므로 건드리지 않는다.
+각 `Cargo.toml`의 `version = "X.Y.Z"`와 `oxicode-* = { version = "X.Y.Z", path = "..." }` 내부 의존성을 함께 올려야 한다. workspace `Cargo.toml`에는 버전 필드가 없으므로 건드리지 않는다.
 
 ### 2. CHANGELOG Update
 
@@ -42,8 +42,8 @@ cargo nextest run --workspace --profile ci    # 전체 테스트 (~5분)
 `cargo clippy --workspace --all-targets -- -D warnings`도 통과해야 하지만, CI에서 이미 PR 단계에서 검증하므로 생략 가능. Native-browser feature도 항상 컴파일되어야 함:
 
 ```bash
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
-cargo build -p oxi-agent --features native-browser
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
+cargo build -p oxicode-agent --features native-browser
 ```
 
 ### 4. Commit & Tag
@@ -71,7 +71,7 @@ git push origin vX.Y.Z
 2. **package-check** — `cargo package`로 모든 크레이트의 패키징 건전성 검증
 3. **verify** — fmt + clippy + nextest (MSRV 1.96 전체 게이트)
 4. **publish** — 의존성 순서대로 crates.io에 순차 게시 (max-parallel: 1):
-   `oxi-hashline → oxi-ai → oxi-tui → oxi-agent → oxi-sdk → oxi-cli`
+   `oxicode-hashline → oxicode-ai → oxicode-tui → oxicode-agent → oxicode-sdk → oxicode-cli`
 
 각 크레이트 게시 전 의존성 크레이트의 crates.io 인덱스 전파를 폴링(최대 60회×10초)한다. 게시는 멱등적 — `already exists`면 스킵.
 
@@ -79,8 +79,8 @@ git push origin vX.Y.Z
 
 ```bash
 # 바이너리가 정상 설치되는지 확인
-cargo install oxi-cli --version X.Y.Z
-oxi --version
+cargo install oxicode-cli --version X.Y.Z
+oxicode --version
 ```
 
 ### Heavy Dependency Policy
@@ -97,8 +97,8 @@ binary) requires:
 
 Two signals are layered for surface that may change between minor releases:
 
-1. **Tier annotation** — `#[oxi_unstable(feature = "...")]` (from
-   `oxi-api-stability`) renders a colored badge in `cargo doc` for
+1. **Tier annotation** — `#[oxicode_unstable(feature = "...")]` (from
+   `oxicode-api-stability`) renders a colored badge in `cargo doc` for
    discoverability. This is **documentation only** — a proc-macro attribute
    cannot register a custom lint, so consumers cannot turn on a
    `#![warn(unstable_used)]` that fails builds on tier annotations.
@@ -107,20 +107,20 @@ Two signals are layered for surface that may change between minor releases:
    consumer that doesn't enable the feature cannot accidentally build on the
    surface; the symbols don't exist in their dependency.
 
-**Rule:** every `#[oxi_unstable]` re-export MUST also carry a matching
+**Rule:** every `#[oxicode_unstable]` re-export MUST also carry a matching
 `#[cfg(feature = "...")]` gate. The badge alone is a known failure mode
 (the original R3 spec asked for it, and the doc-only implementation
-doesn't deliver the contract). See `docs/oxi-sdk-ownership.md` §6.1 for
+doesn't deliver the contract). See `docs/oxicode-sdk-ownership.md` §6.1 for
 the full rationale.
 
-**Current unstable surface (oxi-sdk):** the `unstable` umbrella feature
+**Current unstable surface (oxicode-sdk):** the `unstable` umbrella feature
 enables all of these, each off by default — `circuit-breaker`,
 `mcp-spawn-validator`, `mcp-transport`, `delegation`, `url-resolver`,
 `workflow-dsl`, `role-routing`, `role-switching`, `router`, `advisor`,
-`memory`, `subagent`, `agent-hub`, `lsp`, `browser`. oxi-cli enables the
+`memory`, `subagent`, `agent-hub`, `lsp`, `browser`. oxicode-cli enables the
 subset it consumes (`router`, `role-routing`, `role-switching`,
 `url-resolver`); external consumers (oxios) opt in via
-`oxi-sdk = { features = ["unstable"] }`.
+`oxicode-sdk = { features = ["unstable"] }`.
 
 The CI `cargo-public-api` gate
 (`.github/workflows/api-diff.yml`) captures the public API surface per
@@ -164,7 +164,7 @@ git pull --rebase origin main
 #   edit CHANGELOG.md (Unreleased → dated)
 cargo check
 cargo nextest run --workspace --profile ci
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 git add -A && git commit -m "Release ${VERSION}"
 git tag "${VERSION}"
 

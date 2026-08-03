@@ -30,7 +30,7 @@
 | 순위 | 작업 | 영향 | 예상 규모 | 비고 |
 |------|------|------|-----------|------|
 | 1 | P3 프롬프트 & CLI | 사용자 경험 + 코드 품질 | ~2000 lines | **현재 진행중** |
-| 2 | P4 oxi-original 정리 | 코드 품질 | ~1500 lines | **현재 진행중** |
+| 2 | P4 oxicode-original 정리 | 코드 품질 | ~1500 lines | **현재 진행중** |
 | 3 | P1.6a debug 재등록 | 도구 기능 | ~600 lines | DAP 프록시 필요 |
 | 4 | P0.5 remote-AGENT | provider 3개 | ~2000 lines | 요청 시 |
 | 5 | P2 TUI 재정렬 | UI | ~10000 lines | 마지막 |
@@ -39,11 +39,11 @@
 
 ## Phase 3 — 프롬프트 & CLI 재정렬
 
-**대상 크레이트**: `oxi-cli/`, `oxi-ai/`
+**대상 크레이트**: `oxicode-cli/`, `oxicode-ai/`
 
 ### P3.1 — `.md` 기반 시스템 프롬프트 [진행중]
 
-현재 inline Rust 문자열(`oxi-cli/src/prompt/system_prompt.rs` 736줄) → `.md` 파일 `include_str!()`으로 전환.
+현재 inline Rust 문자열(`oxicode-cli/src/prompt/system_prompt.rs` 736줄) → `.md` 파일 `include_str!()`으로 전환.
 
 **omp 참조**: `/tmp/omp/packages/coding-agent/src/prompts/`
 
@@ -57,17 +57,17 @@
 
 ---
 
-## Phase 4 — oxi-original 처리
+## Phase 4 — oxicode-original 처리
 
-**대상 크레이트**: `oxi-cli/`
+**대상 크레이트**: `oxicode-cli/`
 
 ### P4.1 — Issue 시스템 격리
 
-Issue 관련 코드를 `oxi-cli/src/store/issues/`로 이동, agent loop에서 port로 추상화.
+Issue 관련 코드를 `oxicode-cli/src/store/issues/`로 이동, agent loop에서 port로 추상화.
 
 ### P4.2 — Package manager → omp 플러그인 모델
 
-`oxi-cli/src/storage/packages.rs`(3096 lines)를 omp `extensibility/plugins/` 모델에 맞춤.
+`oxicode-cli/src/storage/packages.rs`(3096 lines)를 omp `extensibility/plugins/` 모델에 맞춤.
 
 ### P4.3 — Language policy 제거 [진행중]
 
@@ -82,6 +82,6 @@ Issue 관련 코드를 `oxi-cli/src/store/issues/`로 이동, agent loop에서 p
 ## 변경 시 주의사항
 
 - dialect `xml.rs`에 literal XML 태그 금지 — `concat!("<", "invoke")` 형태 사용
-- `cargo clippy -p oxi-sdk --features native-browser` 잊지 말 것
+- `cargo clippy -p oxicode-sdk --features native-browser` 잊지 말 것
 - P1.6 debug 재등록: `tools.rs`에서 주석 해제 + `tests/tools.rs` 카운트 37→38
 - Config 필드 추가 시 `Default::default()`에도 기본값 추가

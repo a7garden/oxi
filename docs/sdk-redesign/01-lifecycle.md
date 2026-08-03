@@ -1,6 +1,6 @@
 # 01. 에이전트 수명 주기 (Agent Lifecycle)
 
-모듈 경로: `oxi-sdk/src/lifecycle/`
+모듈 경로: `oxicode-sdk/src/lifecycle/`
 
 ---
 
@@ -10,7 +10,7 @@
 
 ```rust
 // 현재: 생성 → 실행 → 끝. 재사용은 continue_with()로 대화만 이어감
-let agent = oxi.agent(config).build()?;
+let agent = oxicode.agent(config).build()?;
 let (response, _) = agent.run(prompt).await?;
 ```
 
@@ -773,9 +773,9 @@ impl SupervisorPolicy {
 
 ---
 
-## 1.9 기존 oxi-agent 변경 사항
+## 1.9 기존 oxicode-agent 변경 사항
 
-`oxi-agent/src/agent.rs`에 최소 변경만 필요:
+`oxicode-agent/src/agent.rs`에 최소 변경만 필요:
 
 ```rust
 // 추가 1: config getter (이미 내부에 config() 있으나 pub이 아님)
@@ -800,14 +800,14 @@ impl Agent {
 ## 1.10 사용 예시
 
 ```rust
-use oxi_sdk::prelude::*;
-use oxi_sdk::lifecycle::*;
+use oxicode_sdk::prelude::*;
+use oxicode_sdk::lifecycle::*;
 
 // 1. Supervisor 생성
-let oxi = OxiBuilder::new().with_builtins().build();
-let supervisor = oxi.supervisor()
+let oxicode = OxicodeBuilder::new().with_builtins().build();
+let supervisor = oxicode.supervisor()
     .policy(SupervisorPolicy::default())
-    .snapshot_dir("/data/oxi/snapshots")
+    .snapshot_dir("/data/oxicode/snapshots")
     .build();
 
 // 2. 에이전트 spawn

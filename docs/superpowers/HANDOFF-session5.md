@@ -1,4 +1,4 @@
-# oxi omp-정렬 — Session 5 Handoff
+# oxicode omp-정렬 — Session 5 Handoff
 
 > **작성일**: 2026-07-28 (session 5 종료 시점)
 > **작성 위치**: docs/superpowers/HANDOFF-session5.md
@@ -19,10 +19,10 @@
 
 | 항목 | 상태 |
 |---|---|
-| **소스 위치** | `/Volumes/MERCURY/PROJECTS/oxi` |
+| **소스 위치** | `/Volumes/MERCURY/PROJECTS/oxicode` |
 | **Git 브랜치** | `main` |
 | **미커밋 변경** | 있음 (P3.3 + P4.1 + P4.2 + P1.6a + RESUMING.md update) |
-| **테스트 기준선** | **1907 tests passing** (oxi-cli 763, oxi-agent 746, oxi-sdk 398) |
+| **테스트 기준선** | **1907 tests passing** (oxicode-cli 763, oxicode-agent 746, oxicode-sdk 398) |
 | **clippy** | clean (-D warnings) |
 | **fmt** | clean |
 | **마지막 커밋** | `6bda2f9f docs: update RESUMING.md for session 3` |
@@ -38,11 +38,11 @@
 
 ### 1.1 P3.3 — main.rs 핸들러 분리 (F-5) ✅
 
-**문제**: `oxi-cli/src/main.rs` 1779줄에 handler 함수 ~1400 LOC가 inline 정의됨.
+**문제**: `oxicode-cli/src/main.rs` 1779줄에 handler 함수 ~1400 LOC가 inline 정의됨.
 
 **변경**:
-- `oxi-cli/src/main.rs` → **62줄** (main + handle_subcommand match arm만)
-- `oxi-cli/src/cli/commands/` 디렉토리 신규 생성 (10개 파일):
+- `oxicode-cli/src/main.rs` → **62줄** (main + handle_subcommand match arm만)
+- `oxicode-cli/src/cli/commands/` 디렉토리 신규 생성 (10개 파일):
   - `mod.rs` (24줄) — module declarations + re-exports
   - `sessions.rs` — `handle_sessions` / `handle_tree` / `handle_fork` / `handle_delete`
   - `issue.rs` — `handle_issue`
@@ -53,20 +53,20 @@
   - `reset.rs` — `handle_reset` + `ResetTarget` struct + 6개 helper
   - `export.rs` — `handle_export` / `handle_import` / `handle_share`
   - `misc.rs` — `handle_completions` / `handle_install` / `handle_update` / `handle_commit` / `handle_refresh` / `handle_models` / `build_catalog_for_cli`
-- `oxi-cli/src/cli.rs` — `pub mod commands;` 추가
-- `oxi-cli/src/main.rs` — `use oxi::cli::commands::*;`
+- `oxicode-cli/src/cli.rs` — `pub mod commands;` 추가
+- `oxicode-cli/src/main.rs` — `use oxicode::cli::commands::*;`
 
 **함정이슈 (다음 세션이 같은 실수 안 하게)**:
-- handler 파일이 **library crate 내부**에 있으므로 `oxi::` 경로 → `crate::` 로 일괄 변경 필요 (sed로 처리함)
+- handler 파일이 **library crate 내부**에 있으므로 `oxicode::` 경로 → `crate::` 로 일괄 변경 필요 (sed로 처리함)
 - `commands` 모듈은 `pub mod` (binary main.rs에서 접근 가능), `pub use` re-export는 `pub(crate)` 함수도 widen 가능
 
 ### 1.2 P4.1 — Issue 시스템 격리 ✅
 
-**문제**: `oxi-cli/src/store/issues.rs` 2020줄 단일 파일.
+**문제**: `oxicode-cli/src/store/issues.rs` 2020줄 단일 파일.
 
 **변경**:
-- `oxi-cli/src/store/issues.rs` 삭제
-- `oxi-cli/src/store/issues/` 디렉토리 신규 생성 (7개 파일):
+- `oxicode-cli/src/store/issues.rs` 삭제
+- `oxicode-cli/src/store/issues/` 디렉토리 신규 생성 (7개 파일):
   - `mod.rs` — module declarations + public re-exports
   - `error.rs` — `IssueError` enum
   - `types.rs` — `Status` / `Priority` / `Assignment` / `GithubRef` / `IssueMeta` / `Issue` / `IssuePatch`
@@ -79,21 +79,21 @@
 
 ### 1.3 P1.6a — debug 도구 재등록 ✅
 
-**문제**: `oxi-agent/src/tools.rs`의 `all_tools.push(Box::new(debug_tool::DebugTool));` 라인이 주석 처리되어 있어서 debug 도구가 등록 안 됨.
+**문제**: `oxicode-agent/src/tools.rs`의 `all_tools.push(Box::new(debug_tool::DebugTool));` 라인이 주석 처리되어 있어서 debug 도구가 등록 안 됨.
 
 **변경**:
-- `oxi-agent/src/tools.rs:1157-1159` — 주석 해제, debug 도구 등록
-- `oxi-agent/tests/tools.rs:1100,1107` — 도구 카운트 `37` → `38`
+- `oxicode-agent/src/tools.rs:1157-1159` — 주석 해제, debug 도구 등록
+- `oxicode-agent/tests/tools.rs:1100,1107` — 도구 카운트 `37` → `38`
 
 **현재 tool count**: 38 (debug 도구 포함)
 
 ### 1.4 P4.2 — Package manager 모듈화 ✅
 
-**문제**: `oxi-cli/src/storage/packages.rs` 3096줄 단일 파일.
+**문제**: `oxicode-cli/src/storage/packages.rs` 3096줄 단일 파일.
 
 **변경**:
-- `oxi-cli/src/storage/packages.rs` 삭제
-- `oxi-cli/src/storage/packages/` 디렉토리 신규 생성 (9개 파일, 총 3214줄):
+- `oxicode-cli/src/storage/packages.rs` 삭제
+- `oxicode-cli/src/storage/packages/` 디렉토리 신규 생성 (9개 파일, 총 3214줄):
 
 | 파일 | 줄 | 내용 |
 |------|------|------|
@@ -112,7 +112,7 @@
 - manager.rs에서 `use super::{LOCKFILE_NAME, MANIFEST_NAME, NPM_MANIFEST_NAME};` 로 가져와야 함
 - (subagent 초기 PR에서 빠뜨려서 컴파일 실패 → fix함)
 
-**호환성**: `crate::storage::packages::*` 모든 경로 그대로 사용 가능. `oxi::storage::packages::PackageManager`, `oxi::storage::packages::ResourceKind` re-export도 lib.rs에서 그대로 살아있음.
+**호환성**: `crate::storage::packages::*` 모든 경로 그대로 사용 가능. `oxicode::storage::packages::PackageManager`, `oxicode::storage::packages::ResourceKind` re-export도 lib.rs에서 그대로 살아있음.
 
 ### 1.5 omp plugins 모델 정렬 상태
 
@@ -140,7 +140,7 @@
 
 ### 2.2 현재 상태 (탐색 가이드)
 
-**Api enum 위치**: `oxi-catalog/src/api.rs:25-68`
+**Api enum 위치**: `oxicode-catalog/src/api.rs:25-68`
 
 ```rust
 pub enum Api {
@@ -155,19 +155,19 @@ pub enum Api {
 }
 ```
 
-**Transport dispatch 위치**: `oxi-ai/src/providers/register_builtins.rs`
+**Transport dispatch 위치**: `oxicode-ai/src/providers/register_builtins.rs`
 
 - `build_builtin_transport(builtin) -> Option<Box<dyn Provider>>` — line 284-368
 - `build_builtin_transport_with_options(...)` — line 392-507
 - 두 함수 모두 마지막에 `_ => None` (line 366, 505) — 미구현 dialect는 None 반환
 
 **기존 transport 참고 (복붙 + 수정 패턴)**:
-- `oxi-ai/src/providers/ollama.rs` — NDJSON streaming의 좋은 예시 (가장 단순)
-- `oxi-ai/src/providers/google_shared.rs` — Gemini 공유 SSE 파싱 로직
-- `oxi-ai/src/providers/anthropic.rs` — SSE + thinking block 처리
-- `oxi-ai/src/providers/openai.rs` — 가장 표준적인 OpenAI 호환 transport
+- `oxicode-ai/src/providers/ollama.rs` — NDJSON streaming의 좋은 예시 (가장 단순)
+- `oxicode-ai/src/providers/google_shared.rs` — Gemini 공유 SSE 파싱 로직
+- `oxicode-ai/src/providers/anthropic.rs` — SSE + thinking block 처리
+- `oxicode-ai/src/providers/openai.rs` — 가장 표준적인 OpenAI 호환 transport
 
-**Api 매핑 table 위치**: `oxi-ai/src/providers/register_builtins.rs:155-165`
+**Api 매핑 table 위치**: `oxicode-ai/src/providers/register_builtins.rs:155-165`
 ```rust
 ("google-generative-ai", Api::GoogleGenerativeAi),
 ("google-vertex", Api::GoogleVertex),
@@ -199,11 +199,11 @@ remote-AGENT entry를 여기에 추가해야 함.
    ```
 
 2. **Provider 구현** (각각):
-   - `oxi-ai/src/providers/cursor.rs` — CursorProvider
-   - `oxi-ai/src/providers/devin.rs` — DevinProvider
-   - `oxi-ai/src/providers/gitlab_duo.rs` — GitLabDuoProvider
+   - `oxicode-ai/src/providers/cursor.rs` — CursorProvider
+   - `oxicode-ai/src/providers/devin.rs` — DevinProvider
+   - `oxicode-ai/src/providers/gitlab_duo.rs` — GitLabDuoProvider
 
-3. **mod.rs 등록**: `oxi-ai/src/providers/mod.rs`에 `pub mod cursor; pub mod devin; pub mod gitlab_duo;` 추가
+3. **mod.rs 등록**: `oxicode-ai/src/providers/mod.rs`에 `pub mod cursor; pub mod devin; pub mod gitlab_duo;` 추가
 
 4. **Transport dispatch 확장** (`build_builtin_transport` 와 `build_builtin_transport_with_options`):
    ```rust
@@ -217,11 +217,11 @@ remote-AGENT entry를 여기에 추가해야 함.
    - `parse_*_events()` 함수 테스트
    - 401/403/429 에러 처리 테스트
 
-6. **KnownApi 직렬화** (필요 시): `oxi-ai/src/dialect/known_api.rs`에 새 dialect 추가
+6. **KnownApi 직렬화** (필요 시): `oxicode-ai/src/dialect/known_api.rs`에 새 dialect 추가
 
 ### 2.5 위험 요소
 
-- **WebSocket** (Cursor/Devin): oxi는 현재 SSE/HTTP만 지원. WebSocket 추가가 필요할 수 있음 → `tokio-tungstenite` 이미 의존성에 있음 (Cargo.lock 확인)
+- **WebSocket** (Cursor/Devin): oxicode는 현재 SSE/HTTP만 지원. WebSocket 추가가 필요할 수 있음 → `tokio-tungstenite` 이미 의존성에 있음 (Cargo.lock 확인)
 - **인증**: Cursor/Devin는 OAuth 토큰 필요. `env_api_keys.rs`에 키 추출 함수 추가
 - **스트리밍 형식 차이**: 각 provider의 SSE event 형식이 다름 → 각 provider마다 `parse_*_events()` 작성
 
@@ -230,9 +230,9 @@ remote-AGENT entry를 여기에 추가해야 함.
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
-cargo nextest run -p oxi-ai
+cargo nextest run -p oxicode-ai
 ```
 
 ---
@@ -241,14 +241,14 @@ cargo nextest run -p oxi-ai
 
 ### 3.1 목표
 
-`oxi-tui-legacy` (22499 lines) → omp `tui.ts` (4270 lines) 렌더링 모델로 정렬. 핵심은 **append-only "tape"** 렌더링과 3-전략 차등 렌더링 (memoization / native scrollback / ED3 replay).
+`oxicode-tui-legacy` (22499 lines) → omp `tui.ts` (4270 lines) 렌더링 모델로 정렬. 핵심은 **append-only "tape"** 렌더링과 3-전략 차등 렌더링 (memoization / native scrollback / ED3 replay).
 
 ### 3.2 현재 구조 (탐색 가이드)
 
-**oxi-tui-legacy 총량**: 22499 lines, 27+ 파일
+**oxicode-tui-legacy 총량**: 22499 lines, 27+ 파일
 
 ```
-oxi-tui-legacy/src/
+oxicode-tui-legacy/src/
 ├── lib.rs (45)                          # 모듈 진입점
 ├── theme.rs (1906)                      # 28-slot ColorScheme
 ├── symbols.rs (905)                     # Unicode/Ascii/Nerd glyph set
@@ -274,7 +274,7 @@ oxi-tui-legacy/src/
 └── keybindings/                         # 4 files
 ```
 
-**oxi-tui v2 (신규, 4608 lines, 이미 작동 중)**: `oxi-tui/src/`
+**oxicode-tui v2 (신규, 4608 lines, 이미 작동 중)**: `oxicode-tui/src/`
 ```
 ├── pipeline/         # draw_frame(), CursorState, DiffBackend
 ├── widget/           # Renderable trait, RetainedTree, RetainedChild
@@ -284,17 +284,17 @@ oxi-tui-legacy/src/
 └── input/            # textarea wrapper
 ```
 
-**oxi-cli에서 tui 사용 위치**:
-- `oxi-cli/src/tui/app.rs` (2128 lines) — 메인 App struct
-- `oxi-cli/src/tui/handlers.rs` (1637 lines) — 키/이벤트 핸들러
-- `oxi-cli/src/tui/render.rs` (779 lines) — 메인 렌더링 함수
-- `oxi-cli/src/tui/v2_bridge.rs` (57) — v2 파이프라인 진입점
-- `oxi-cli/src/tui/v2_overlay_adapter.rs` (341) — legacy overlay를 v2로 어댑트
-- `oxi-cli/src/tui/v2_render.rs` (35) — v2 렌더
-- `oxi-cli/src/tui/welcome.rs` (144)
+**oxicode-cli에서 tui 사용 위치**:
+- `oxicode-cli/src/tui/app.rs` (2128 lines) — 메인 App struct
+- `oxicode-cli/src/tui/handlers.rs` (1637 lines) — 키/이벤트 핸들러
+- `oxicode-cli/src/tui/render.rs` (779 lines) — 메인 렌더링 함수
+- `oxicode-cli/src/tui/v2_bridge.rs` (57) — v2 파이프라인 진입점
+- `oxicode-cli/src/tui/v2_overlay_adapter.rs` (341) — legacy overlay를 v2로 어댑트
+- `oxicode-cli/src/tui/v2_render.rs` (35) — v2 렌더
+- `oxicode-cli/src/tui/welcome.rs` (144)
 
 **현재 상태** (AGENTS.md 2026-07-22 메모):
-- v2 파이프라인은 **이미 작동** (oxi-cli가 `draw_frame_closure`로 cutover 완료)
+- v2 파이프라인은 **이미 작동** (oxicode-cli가 `draw_frame_closure`로 cutover 완료)
 - `LegacyOverlayAdapter` + `ClosureRoot` 가 legacy 렌더링을 v2 파이프라인으로 bridge
 - "Remaining: full rendering migration (Phase 5), legacy removal (Plan D)"
 
@@ -328,57 +328,57 @@ ttyid.ts
 utils.ts
 ```
 
-핵심 차이점 (omP vs oxi):
+핵심 차이점 (omP vs oxicode):
 - omp: 4270 lines 단일 `tui.ts` + 23개 컴포넌트 파일
-- oxi: 22499 lines (`oxi-tui-legacy` 27+ 파일) + 4608 lines (v2 신규)
+- oxicode: 22499 lines (`oxicode-tui-legacy` 27+ 파일) + 4608 lines (v2 신규)
 
-→ oxi는 **합쳐서 ~27000 lines**, omp는 **~6500 lines** (components 합산). 약 4배 큰 차이. 이유: oxi가 많은 dead code / 디버그 빌드 / 과도한 추상화 보유.
+→ oxicode는 **합쳐서 ~27000 lines**, omp는 **~6500 lines** (components 합산). 약 4배 큰 차이. 이유: oxicode가 많은 dead code / 디버그 빌드 / 과도한 추상화 보유.
 
 ### 3.4 P2 작업 분해 (예상)
 
 **Phase 1 — 정렬 (의존성 없음)**:
-1. `oxi-tui-legacy/widgets/tool_renderer.rs` (1725) 분해 → 다중 파일
-2. `oxi-tui-legacy/widgets/list_selector.rs` (920) 분해
-3. `oxi-tui-legacy/theme.rs` (1906) 분해 → palette / construct / cap-detect 3개로
-4. `oxi-tui-legacy/render/mod.rs` (743) 분해
+1. `oxicode-tui-legacy/widgets/tool_renderer.rs` (1725) 분해 → 다중 파일
+2. `oxicode-tui-legacy/widgets/list_selector.rs` (920) 분해
+3. `oxicode-tui-legacy/theme.rs` (1906) 분해 → palette / construct / cap-detect 3개로
+4. `oxicode-tui-legacy/render/mod.rs` (743) 분해
 
 **Phase 2 — omp 정렬 (의존: Phase 1)**:
-1. **Append-only "tape" 렌더링**: oxi의 `oxi-tui/src/content/chat_log.rs` (185) 를 omp 모델로 강화
+1. **Append-only "tape" 렌더링**: oxicode의 `oxicode-tui/src/content/chat_log.rs` (185) 를 omp 모델로 강화
 2. **3-전략 차등 렌더링**: `Renderable` trait + `RetainedTree` 가 이미 있음 → component memoization 활성화, ED3 replay 추가
 3. **입력 시스템**: omp `keys.ts` / `kitty-keyboard.ts` / `bracketed-paste.ts` / `kill-ring.ts` 정렬
-4. **Glyph 시스템 단일화**: 이미 Unicode/Ascii/Nerd 분리됨 (oxi-tui-legacy/symbols.rs 905) → 그 외 dead symbols 통합
-5. **LaTeX / mermaid / image**: 이미 oxi-tui-legacy/render/ 에 구현됨 (latex.rs, mermaid.rs, image.rs) → 통합
+4. **Glyph 시스템 단일화**: 이미 Unicode/Ascii/Nerd 분리됨 (oxicode-tui-legacy/symbols.rs 905) → 그 외 dead symbols 통합
+5. **LaTeX / mermaid / image**: 이미 oxicode-tui-legacy/render/ 에 구현됨 (latex.rs, mermaid.rs, image.rs) → 통합
 
 **Phase 3 — legacy 제거 (의존: Phase 1+2)**:
 1. `LegacyOverlayAdapter` 가 더 이상 legacy를 안 쓰게 전환
-2. `oxi-tui-legacy` crate 전체 삭제
-3. `oxi-tui` 단일 v2 crate가 모든 TUI 책임
+2. `oxicode-tui-legacy` crate 전체 삭제
+3. `oxicode-tui` 단일 v2 crate가 모든 TUI 책임
 4. `Cargo.toml` / `lib.rs` / `tui/` 모듈에서 legacy 의존성 제거
 
 ### 3.5 위험 요소
 
 - **UI 회귀**: TUI는 시각적 인터페이스 → 테스트 자동화가 어려움. 변경 후 smoke test 필수
-- **Catastrophic regression**: `oxi-tui-legacy` 22499 lines 중 dead code가 많을 수 있음. 본격 작업 전 `cargo +nightly udeps` 또는 `cargo-machete` 로 dead import 확인
-- **TUI 라이브러리 migration**: ratatui 0.x ↔ 0.y 호환성 (현재 oxi-tui v2가 어떤 버전 쓰는지 확인 필요)
-- **테스트 인프라**: `oxi-tui/src/`에 222 tests 있다고 AGENTS.md 메모 있음. legacy의 테스트는 일부만 이전됨
+- **Catastrophic regression**: `oxicode-tui-legacy` 22499 lines 중 dead code가 많을 수 있음. 본격 작업 전 `cargo +nightly udeps` 또는 `cargo-machete` 로 dead import 확인
+- **TUI 라이브러리 migration**: ratatui 0.x ↔ 0.y 호환성 (현재 oxicode-tui v2가 어떤 버전 쓰는지 확인 필요)
+- **테스트 인프라**: `oxicode-tui/src/`에 222 tests 있다고 AGENTS.md 메모 있음. legacy의 테스트는 일부만 이전됨
 
 ### 3.6 회귀 게이트 (변경 후)
 
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
-cargo nextest run -p oxi-tui -p oxi-tui-legacy  # v2 + legacy 둘 다
+cargo nextest run -p oxicode-tui -p oxicode-tui-legacy  # v2 + legacy 둘 다
 # 그리고 visual regression test (PTY 기반):
-cargo nextest run -p oxi-cli --test pty_e2e
+cargo nextest run -p oxicode-cli --test pty_e2e
 ```
 
 ### 3.7 권장 작업 순서
 
-1. **첫 단계**: `oxi-tui-legacy` dead code 제거 (`tool_renderer.rs` 1725 lines, `theme.rs` 1906 lines 부터)
-2. **두번째**: `oxi-tui` v2의 `draw_frame_closure` 가 legacy를 거의 다 어댑트 했으므로, 미어댑트 영역만 마이그레이션
-3. **세번째**: `oxi-tui-legacy` 제거
+1. **첫 단계**: `oxicode-tui-legacy` dead code 제거 (`tool_renderer.rs` 1725 lines, `theme.rs` 1906 lines 부터)
+2. **두번째**: `oxicode-tui` v2의 `draw_frame_closure` 가 legacy를 거의 다 어댑트 했으므로, 미어댑트 영역만 마이그레이션
+3. **세번째**: `oxicode-tui-legacy` 제거
 4. **네번째**: omp 정렬 (tape 렌더, 3-전략, 입력 시스템 통합)
 
 ---
@@ -387,12 +387,12 @@ cargo nextest run -p oxi-cli --test pty_e2e
 
 ### 4.1 정렬 안 된 기능
 
-`oxi-cli/src/storage/packages/` 가 omp `extensibility/plugins/` 모델과 아직 차이:
+`oxicode-cli/src/storage/packages/` 가 omp `extensibility/plugins/` 모델과 아직 차이:
 
-| omp 기능 | oxi 현재 상태 | 필요한 작업 |
+| omp 기능 | oxicode 현재 상태 | 필요한 작업 |
 |----------|-------------|-----------|
 | `PluginRuntimeConfig` (per-plugin enabled state) | `Settings::extensions` 배열 (Vec<String>) | `RuntimeConfig` 타입 추가, `packages/runtime_config.rs` 생성 |
-| `ProjectPluginOverrides` (per-project) | 없음 | `.oxi/plugin-overrides.json` 로딩 로직 |
+| `ProjectPluginOverrides` (per-project) | 없음 | `.oxicode/plugin-overrides.json` 로딩 로직 |
 | `Doctor` (health checks) | `PackageManager::validate_package` (warning list) | 분리된 `doctor.rs` 모듈 + `DoctorCheck` 타입 |
 | `validatePackageName` (shell metachar) | 미적용 | `source.rs`에 `validate_package_name` + `validate_git_spec` 추가 |
 | `plugin-overrides.json` 로딩 | 없음 | `manager.rs` 에서 cwd 스캔 |
@@ -402,7 +402,7 @@ cargo nextest run -p oxi-cli --test pty_e2e
 1. **`packages/runtime_config.rs`** (신규):
    - `RuntimeConfig` struct (mirrors `omp::PluginRuntimeConfig`)
    - `ProjectOverrides` struct (mirrors `omp::ProjectPluginOverrides`)
-   - `oxi-plugins.lock.json` 로딩/저장 (현재는 `oxi-lock.json`)
+   - `oxicode-plugins.lock.json` 로딩/저장 (현재는 `oxicode-lock.json`)
 
 2. **`packages/doctor.rs`** (신규):
    - `DoctorCheck` struct
@@ -420,7 +420,7 @@ cargo nextest run -p oxi-cli --test pty_e2e
 
 ### 4.3 위험 요소
 
-- **Lockfile 포맷 변경**: `oxi-lock.json` → `oxi-plugins.lock.json` 이름 변경 시 사용자 데이터 마이그레이션 필요. **이름은 유지하고 구조만 확장** 권장
+- **Lockfile 포맷 변경**: `oxicode-lock.json` → `oxicode-plugins.lock.json` 이름 변경 시 사용자 데이터 마이그레이션 필요. **이름은 유지하고 구조만 확장** 권장
 - **Public API 호환**: `PackageManager::install` / `uninstall` / `list` 등의 시그니처는 그대로 유지. 새 메서드만 추가
 
 ---
@@ -432,34 +432,34 @@ cargo nextest run -p oxi-cli --test pty_e2e
 ```bash
 $ git status --short
  M docs/superpowers/RESUMING.md
- M oxi-agent/src/tools.rs
- M oxi-agent/tests/tools.rs
- M oxi-cli/src/cli.rs
- M oxi-cli/src/main.rs
- D oxi-cli/src/storage/packages.rs
- D oxi-cli/src/store/issues.rs
-?? oxi-cli/src/cli/
-?? oxi-cli/src/storage/packages/
-?? oxi-cli/src/store/issues/
+ M oxicode-agent/src/tools.rs
+ M oxicode-agent/tests/tools.rs
+ M oxicode-cli/src/cli.rs
+ M oxicode-cli/src/main.rs
+ D oxicode-cli/src/storage/packages.rs
+ D oxicode-cli/src/store/issues.rs
+?? oxicode-cli/src/cli/
+?? oxicode-cli/src/storage/packages/
+?? oxicode-cli/src/store/issues/
 ```
 
 **권장 커밋 분할** (논리적 단위):
 
 ```bash
 # 1. P3.3 — main.rs 핸들러 분리
-git add oxi-cli/src/main.rs oxi-cli/src/cli.rs oxi-cli/src/cli/
+git add oxicode-cli/src/main.rs oxicode-cli/src/cli.rs oxicode-cli/src/cli/
 git commit -m "refactor(cli): P3.3 — extract main.rs handlers to cli/commands/"
 
 # 2. P4.1 — Issue 시스템 격리
-git add oxi-cli/src/store/issues.rs oxi-cli/src/store/issues/
+git add oxicode-cli/src/store/issues.rs oxicode-cli/src/store/issues/
 git commit -m "refactor(store): P4.1 — split issues.rs into directory module"
 
 # 3. P4.2 — Package manager 모듈화
-git add oxi-cli/src/storage/packages.rs oxi-cli/src/storage/packages/
+git add oxicode-cli/src/storage/packages.rs oxicode-cli/src/storage/packages/
 git commit -m "refactor(storage): P4.2 — split packages.rs into directory module"
 
 # 4. P1.6a — debug 도구 재등록
-git add oxi-agent/src/tools.rs oxi-agent/tests/tools.rs
+git add oxicode-agent/src/tools.rs oxicode-agent/tests/tools.rs
 git commit -m "feat(agent): P1.6a — re-enable debug tool (37→38 tools)"
 
 # 5. Docs
@@ -471,10 +471,10 @@ git commit -m "docs: update RESUMING for sessions 4-5 (P3.3, P4.1, P4.2, P1.6a)"
 
 ```bash
 # 1. 상태 확인
-cd /Volumes/MERCURY/PROJECTS/oxi
+cd /Volumes/MERCURY/PROJECTS/oxicode
 git status --short
 cargo build --workspace  # 깨끗한지 확인
-cargo nextest run -p oxi-cli -p oxi-agent -p oxi-sdk  # 1907 통과 확인
+cargo nextest run -p oxicode-cli -p oxicode-agent -p oxicode-sdk  # 1907 통과 확인
 
 # 2. 미커밋 커밋 (위 가이드대로)
 # 3. main 브랜치에 push (push 권한 있으면)
@@ -493,12 +493,12 @@ cargo build --workspace
 
 # Clippy
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 
 # 테스트
-cargo nextest run -p oxi-cli      # 763 tests
-cargo nextest run -p oxi-agent    # 746 tests
-cargo nextest run -p oxi-sdk      # 398 tests
+cargo nextest run -p oxicode-cli      # 763 tests
+cargo nextest run -p oxicode-agent    # 746 tests
+cargo nextest run -p oxicode-sdk      # 398 tests
 # 합계: 1907 tests
 
 # 포맷
@@ -509,15 +509,15 @@ cargo fmt --all -- --check
 
 | 항목 | 경로 |
 |------|------|
-| Api enum | `oxi-catalog/src/api.rs:25-68` |
-| Transport dispatch | `oxi-ai/src/providers/register_builtins.rs:284-368` (no-options) + `392-507` (with-options) |
-| Api 매핑 table | `oxi-ai/src/providers/register_builtins.rs:155-165` |
-| Issue 시스템 | `oxi-cli/src/store/issues/` (P4.1 완료) |
-| Package 시스템 | `oxi-cli/src/storage/packages/` (P4.2 완료) |
-| CLI commands | `oxi-cli/src/cli/commands/` (P3.3 완료) |
-| Debug tool | `oxi-agent/src/tools/debug_tool.rs` (P1.6a 재등록 완료) |
-| TUI v2 | `oxi-tui/src/` (작동 중) |
-| TUI legacy | `oxi-tui-legacy/src/` (2026-07-28 당시 P2 미착수; 현재 retired) |
+| Api enum | `oxicode-catalog/src/api.rs:25-68` |
+| Transport dispatch | `oxicode-ai/src/providers/register_builtins.rs:284-368` (no-options) + `392-507` (with-options) |
+| Api 매핑 table | `oxicode-ai/src/providers/register_builtins.rs:155-165` |
+| Issue 시스템 | `oxicode-cli/src/store/issues/` (P4.1 완료) |
+| Package 시스템 | `oxicode-cli/src/storage/packages/` (P4.2 완료) |
+| CLI commands | `oxicode-cli/src/cli/commands/` (P3.3 완료) |
+| Debug tool | `oxicode-agent/src/tools/debug_tool.rs` (P1.6a 재등록 완료) |
+| TUI v2 | `oxicode-tui/src/` (작동 중) |
+| TUI legacy | `oxicode-tui-legacy/src/` (2026-07-28 당시 P2 미착수; 현재 retired) |
 | omp plugins | `/tmp/omp/packages/coding-agent/src/extensibility/plugins/` |
 | omp tui | `/tmp/omp/packages/tui/src/` |
 | omp providers | `/tmp/omp/packages/coding-agent/src/providers/` (remote-agent/ 하위) |
@@ -540,25 +540,25 @@ ls /tmp/omp/packages/coding-agent/src/providers/
 ls /tmp/omp/packages/coding-agent/src/providers/remote-agent/ 2>/dev/null || echo "directory missing"
 
 # 3. Api 매핑 table 위치
-grep -n "google-vertex" oxi-ai/src/providers/register_builtins.rs
+grep -n "google-vertex" oxicode-ai/src/providers/register_builtins.rs
 
 # 4. 첫 번째 패치 위치
-grep -n "_ => None" oxi-ai/src/providers/register_builtins.rs
+grep -n "_ => None" oxicode-ai/src/providers/register_builtins.rs
 ```
 
 ---
 
 ## 7. 알려진 이슈 / 함정 메모
 
-1. **WebSocket 의존성**: oxi는 현재 `tokio-tungstenite` 가 이미 있지만, Cursor/Devin의 WebSocket 프로토콜이 표준이 아닐 수 있음 → omp `cursor.ts` 코드 보고 따라가기
+1. **WebSocket 의존성**: oxicode는 현재 `tokio-tungstenite` 가 이미 있지만, Cursor/Devin의 WebSocket 프로토콜이 표준이 아닐 수 있음 → omp `cursor.ts` 코드 보고 따라가기
 
-2. **dialect XML literal 태그**: `oxi-agent/src/dialect/xml.rs`에서 literal XML 태그 금지 (`concat!("<", "invoke")` 형태 사용). 새 dialect 추가 시 동일 패턴 유지
+2. **dialect XML literal 태그**: `oxicode-agent/src/dialect/xml.rs`에서 literal XML 태그 금지 (`concat!("<", "invoke")` 형태 사용). 새 dialect 추가 시 동일 패턴 유지
 
-3. **`oxi-catalog` 과 `oxi-ai` 경계**: `Api` enum은 `oxi-catalog` 에 있고 provider impl은 `oxi-ai`에 있음. 새 Api variant 추가는 `oxi-catalog/src/api.rs`의 enum + `oxi-ai/src/providers/register_builtins.rs`의 dispatch 둘 다 수정
+3. **`oxicode-catalog` 과 `oxicode-ai` 경계**: `Api` enum은 `oxicode-catalog` 에 있고 provider impl은 `oxicode-ai`에 있음. 새 Api variant 추가는 `oxicode-catalog/src/api.rs`의 enum + `oxicode-ai/src/providers/register_builtins.rs`의 dispatch 둘 다 수정
 
-4. **Cargo.lock**: oxi-catalog 버전이 oxi-ai와 sync 되어야 함. 새 의존성 추가 시 둘 다 업데이트
+4. **Cargo.lock**: oxicode-catalog 버전이 oxicode-ai와 sync 되어야 함. 새 의존성 추가 시 둘 다 업데이트
 
-5. **테스트 fixture**: SSE / WebSocket fixture는 `mockito` (HTTP) 또는 직접 tokio::sync::mpsc (WebSocket) 사용. 기존 `oxi-ai/src/providers/anthropic.rs::tests` 가 SSE fixture 패턴의 좋은 예시
+5. **테스트 fixture**: SSE / WebSocket fixture는 `mockito` (HTTP) 또는 직접 tokio::sync::mpsc (WebSocket) 사용. 기존 `oxicode-ai/src/providers/anthropic.rs::tests` 가 SSE fixture 패턴의 좋은 예시
 
 ---
 

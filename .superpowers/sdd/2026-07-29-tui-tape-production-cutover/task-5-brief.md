@@ -15,8 +15,8 @@ Prerequisites: Tasks 1-4 complete and reviewed.
 
 ## TDD
 - Overlay transition tests first, then sticky interaction tests, then raw image row tests; observe RED for missing behavior.
-- GREEN: focused module tests plus `cargo nextest run -p oxi-cli --test pty_e2e` tests relevant to overlays if already available.
-- Lint/format: oxi-cli and oxi-tui clippy all-targets, fmt check.
+- GREEN: focused module tests plus `cargo nextest run -p oxicode-cli --test pty_e2e` tests relevant to overlays if already available.
+- Lint/format: oxicode-cli and oxicode-tui clippy all-targets, fmt check.
 
 ## Report
 Write task-5-report.md in this plan workspace with status, RED/GREEN evidence, image row design, overlay transition proof, commits, self-review, concerns. Commit changes.

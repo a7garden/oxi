@@ -4,23 +4,23 @@
 
 **Goal:** Wire the three standalone P2 modules (KillRing, LaTeX-to-Unicode, Kitty keyboard) into the TUI without changing the render path or breaking existing behavior.
 
-**Architecture:** Additive only — no modifications to `terminal.draw()` or the render loop. Each integration is gated by environment variable (`OXI_KILL_RING=1`, `OXI_LATEX_INLINE=1`, `OXI_KITTY_KEYBOARD=1`) defaulting to off. This lets the user opt in incrementally and roll back instantly by unsetting a variable.
+**Architecture:** Additive only — no modifications to `terminal.draw()` or the render loop. Each integration is gated by environment variable (`OXICODE_KILL_RING=1`, `OXICODE_LATEX_INLINE=1`, `OXICODE_KITTY_KEYBOARD=1`) defaulting to off. This lets the user opt in incrementally and roll back instantly by unsetting a variable.
 
-**Tech Stack:** Rust, ratatui 0.30, crossterm, oxi-tui 0.60
+**Tech Stack:** Rust, ratatui 0.30, crossterm, oxicode-tui 0.60
 
 ## Global Constraints
 
 - Every task ends with `cargo build --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo nextest run --workspace` green.
-- `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` must pass.
+- `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` must pass.
 - `cargo fmt --all -- --check` must pass.
 - The PTY TUI render test (`test_pty_tui_renders_and_exits`) must pass after every task — it's the primary guardrail.
 - Feature gating: each integration reads an env var once at startup and stores the result. No runtime toggling.
-- `Action` enum variants added to `oxi-tui/src/keybindings/registry.rs` MUST be matched exhaustively in `oxi-cli/src/tui/handlers.rs::dispatch_action` — failing to match is a compile error, which is the desired guardrail.
-- No new dependencies. All modules are already implemented in `oxi-tui/src/input/` and `oxi-tui/src/render/latex_unicode.rs`.
+- `Action` enum variants added to `oxicode-tui/src/keybindings/registry.rs` MUST be matched exhaustively in `oxicode-cli/src/tui/handlers.rs::dispatch_action` — failing to match is a compile error, which is the desired guardrail.
+- No new dependencies. All modules are already implemented in `oxicode-tui/src/input/` and `oxicode-tui/src/render/latex_unicode.rs`.
 
 ## What This Plan Explicitly Does NOT Do
 
-- **No OXI_TAPE_RENDER feature flag.** The tape engine writes to the main screen (native scrollback, no alt screen). The current TUI uses alt screen (1049h). These are incompatible terminal session modes — you cannot runtime-switch between them. The tape module remains standalone in `oxi-tui/src/tape/` for future dedicated integration.
+- **No OXICODE_TAPE_RENDER feature flag.** The tape engine writes to the main screen (native scrollback, no alt screen). The current TUI uses alt screen (1049h). These are incompatible terminal session modes — you cannot runtime-switch between them. The tape module remains standalone in `oxicode-tui/src/tape/` for future dedicated integration.
 - **No modification to the render loop.** The `terminal.draw()` + `CursorState::reconcile()` path stays untouched.
 - **No mermaid/image/markdown engine changes.** Those are in P2.5 integration which is deferred.
 
@@ -29,18 +29,18 @@
 ### Task 1: KillRing into Input Editor
 
 **Files:**
-- Modify: `oxi-tui/src/keybindings/registry.rs` — add `KillToLineEnd`, `KillToLineStart`, `Yank`, `YankPop` to `Action` enum
-- Modify: `oxi-tui/src/keybindings/registry.rs` — add default keybindings and `parse_action` entries
-- Modify: `oxi-cli/src/tui/app.rs` — add `kill_ring: oxi_tui::input::KillRing` field to `AppState`
-- Modify: `oxi-cli/src/tui/handlers.rs` — add match arms in `dispatch_action` for the 4 new actions
+- Modify: `oxicode-tui/src/keybindings/registry.rs` — add `KillToLineEnd`, `KillToLineStart`, `Yank`, `YankPop` to `Action` enum
+- Modify: `oxicode-tui/src/keybindings/registry.rs` — add default keybindings and `parse_action` entries
+- Modify: `oxicode-cli/src/tui/app.rs` — add `kill_ring: oxicode_tui::input::KillRing` field to `AppState`
+- Modify: `oxicode-cli/src/tui/handlers.rs` — add match arms in `dispatch_action` for the 4 new actions
 
 **Interfaces:**
-- Consumes: `oxi_tui::input::KillRing` (already exists with `new`, `kill`, `yank`, `yank_pop`, `len`)
-- Produces: Kill/yank/yank-pop behavior in the input editor, gated by `OXI_KILL_RING=1`
+- Consumes: `oxicode_tui::input::KillRing` (already exists with `new`, `kill`, `yank`, `yank_pop`, `len`)
+- Produces: Kill/yank/yank-pop behavior in the input editor, gated by `OXICODE_KILL_RING=1`
 
 - [ ] **Step 1: Add Action variants to registry**
 
-In `oxi-tui/src/keybindings/registry.rs`, add after the existing `DeleteToLineEnd` variant (find the `DeleteToLineEnd,` line and insert after it):
+In `oxicode-tui/src/keybindings/registry.rs`, add after the existing `DeleteToLineEnd` variant (find the `DeleteToLineEnd,` line and insert after it):
 
 ```rust
 /// Kill (cut) from cursor to line end into the kill ring.
@@ -104,27 +104,27 @@ fn test_parse_kill_actions() {
 
 - [ ] **Step 5: Add KillRing field to AppState**
 
-In `oxi-cli/src/tui/app.rs`, add after the `cursor_state: CursorState,` field:
+In `oxicode-cli/src/tui/app.rs`, add after the `cursor_state: CursorState,` field:
 
 ```rust
 /// Emacs-style kill ring. Populated by KillToLineEnd/Start actions,
-/// consumed by Yank/YankPop. Gated by `OXI_KILL_RING=1`.
-kill_ring: oxi_tui::input::KillRing,
+/// consumed by Yank/YankPop. Gated by `OXICODE_KILL_RING=1`.
+kill_ring: oxicode_tui::input::KillRing,
 ```
 
 In `AppState::new()`, add to the struct initializer after `cursor_state: CursorState::new(),`:
 
 ```rust
-kill_ring: oxi_tui::input::KillRing::new(16),
+kill_ring: oxicode_tui::input::KillRing::new(16),
 ```
 
 - [ ] **Step 6: Wire dispatch arms in handlers.rs**
 
-In `oxi-cli/src/tui/handlers.rs`, in the `dispatch_action` match, add these arms BEFORE the existing `KAction::DeleteToLineEnd` arm (order doesn't matter, but grouping kill-ring actions together helps readability):
+In `oxicode-cli/src/tui/handlers.rs`, in the `dispatch_action` match, add these arms BEFORE the existing `KAction::DeleteToLineEnd` arm (order doesn't matter, but grouping kill-ring actions together helps readability):
 
 ```rust
 KAction::KillToLineEnd => {
-    if std::env::var("OXI_KILL_RING").as_deref() == Ok("1") {
+    if std::env::var("OXICODE_KILL_RING").as_deref() == Ok("1") {
         let killed = state.input.delete_to_end();
         if !killed.is_empty() {
             state.kill_ring.kill(killed);
@@ -135,7 +135,7 @@ KAction::KillToLineEnd => {
     None
 }
 KAction::KillToLineStart => {
-    if std::env::var("OXI_KILL_RING").as_deref() == Ok("1") {
+    if std::env::var("OXICODE_KILL_RING").as_deref() == Ok("1") {
         let killed = state.input.delete_to_start();
         if !killed.is_empty() {
             state.kill_ring.kill(killed);
@@ -146,7 +146,7 @@ KAction::KillToLineStart => {
     None
 }
 KAction::Yank => {
-    if std::env::var("OXI_KILL_RING").as_deref() == Ok("1") {
+    if std::env::var("OXICODE_KILL_RING").as_deref() == Ok("1") {
         if let Some(text) = state.kill_ring.yank() {
             state.input.insert_str(text);
         }
@@ -154,7 +154,7 @@ KAction::Yank => {
     None
 }
 KAction::YankPop => {
-    if std::env::var("OXI_KILL_RING").as_deref() == Ok("1") {
+    if std::env::var("OXICODE_KILL_RING").as_deref() == Ok("1") {
         // Yank-pop replaces the just-yanked text with the previous entry.
         // Simplest impl: delete the last yank length, then insert previous.
         if let Some(prev) = state.kill_ring.yank_pop() {
@@ -165,15 +165,15 @@ KAction::YankPop => {
 }
 ```
 
-**IMPORTANT**: Verify that `state.input` has `delete_to_end()` / `delete_to_start()` / `insert_str()` methods. Check `oxi-tui/src/widgets/input.rs`. If the method names differ, adapt the code to match the actual API. If `insert_str` doesn't exist, use `state.input.insert_char()` in a loop or find the equivalent.
+**IMPORTANT**: Verify that `state.input` has `delete_to_end()` / `delete_to_start()` / `insert_str()` methods. Check `oxicode-tui/src/widgets/input.rs`. If the method names differ, adapt the code to match the actual API. If `insert_str` doesn't exist, use `state.input.insert_char()` in a loop or find the equivalent.
 
 - [ ] **Step 7: Build and test**
 
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run -p oxi-cli --test pty_e2e test_pty_tui_renders_and_exits
-cargo nextest run -p oxi-tui keybindings
+cargo nextest run -p oxicode-cli --test pty_e2e test_pty_tui_renders_and_exits
+cargo nextest run -p oxicode-tui keybindings
 ```
 
 Expected: all green. The new `Action` variants will cause a compile error in `dispatch_action` if any arm is missing — that's the guardrail.
@@ -182,7 +182,7 @@ Expected: all green. The new `Action` variants will cause a compile error in `di
 
 ```bash
 git add -A
-git commit -m "feat(tui): wire KillRing into input editor (OXI_KILL_RING=1)
+git commit -m "feat(tui): wire KillRing into input editor (OXICODE_KILL_RING=1)
 
 Adds Emacs-style kill ring behavior to the TUI input editor:
 - Ctrl+Shift+k: kill to line end (adds to ring)
@@ -190,7 +190,7 @@ Adds Emacs-style kill ring behavior to the TUI input editor:
 - Ctrl+y: yank (paste most recent kill)
 - Alt+y: yank-pop (cycle to previous kill)
 
-Gated by OXI_KILL_RING=1 env var. When unset, Ctrl+Shift+k falls
+Gated by OXICODE_KILL_RING=1 env var. When unset, Ctrl+Shift+k falls
 back to delete-to-end without populating the ring (safe default).
 
 Ctrl+y was previously bound to CopyCodeBlock — reassigned to Yank
@@ -205,16 +205,16 @@ PTY TUI render test still passes (no render path changes)."
 ### Task 2: LaTeX-to-Unicode in Markdown Renderer
 
 **Files:**
-- Modify: `oxi-tui/src/widgets/chat/markdown.rs` — call `latex_to_unicode` on text spans before rendering
-- Modify: `oxi-cli/src/tui/render.rs` — call `latex_to_unicode` on chat message text before display
+- Modify: `oxicode-tui/src/widgets/chat/markdown.rs` — call `latex_to_unicode` on text spans before rendering
+- Modify: `oxicode-cli/src/tui/render.rs` — call `latex_to_unicode` on chat message text before display
 
 **Interfaces:**
-- Consumes: `oxi_tui::render::latex_unicode::latex_to_unicode` (already exists)
-- Produces: Inline LaTeX symbols in chat messages rendered as Unicode characters, gated by `OXI_LATEX_INLINE=1`
+- Consumes: `oxicode_tui::render::latex_unicode::latex_to_unicode` (already exists)
+- Produces: Inline LaTeX symbols in chat messages rendered as Unicode characters, gated by `OXICODE_LATEX_INLINE=1`
 
 - [ ] **Step 1: Read the current markdown renderer**
 
-Read `oxi-tui/src/widgets/chat/markdown.rs` to understand how text spans are processed. Identify the function that converts source markdown to rendered `Line`/`Span` values.
+Read `oxicode-tui/src/widgets/chat/markdown.rs` to understand how text spans are processed. Identify the function that converts source markdown to rendered `Line`/`Span` values.
 
 - [ ] **Step 2: Find the text preprocessing hook**
 
@@ -225,10 +225,10 @@ Look for where raw markdown text is converted to display text. The most common p
 At the top of the text-to-spans function (before markdown parsing), add:
 
 ```rust
-use oxi_tui::render::latex_unicode;
+use oxicode_tui::render::latex_unicode;
 
 // At the start of the rendering function:
-let processed_text = if std::env::var("OXI_LATEX_INLINE").as_deref() == Ok("1") {
+let processed_text = if std::env::var("OXICODE_LATEX_INLINE").as_deref() == Ok("1") {
     latex_unicode::latex_to_unicode(input)
 } else {
     input.to_string()
@@ -239,7 +239,7 @@ Then use `processed_text` instead of `input` for the rest of the rendering.
 
 - [ ] **Step 4: Also patch the chat message display path**
 
-In `oxi-cli/src/tui/render.rs`, find where chat message text is rendered to the frame. Apply the same `latex_to_unicode` pass to user and assistant message text before styling. Gate by the same `OXI_LATEX_INLINE=1` env var.
+In `oxicode-cli/src/tui/render.rs`, find where chat message text is rendered to the frame. Apply the same `latex_to_unicode` pass to user and assistant message text before styling. Gate by the same `OXICODE_LATEX_INLINE=1` env var.
 
 If the chat messages are rendered via the markdown renderer (Step 3), this step may be redundant — verify by reading the call chain.
 
@@ -248,9 +248,9 @@ If the chat messages are rendered via the markdown renderer (Step 3), this step 
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run -p oxi-cli --test pty_e2e test_pty_tui_renders_and_exits
-cargo nextest run -p oxi-tui markdown
-cargo nextest run -p oxi-tui latex_unicode
+cargo nextest run -p oxicode-cli --test pty_e2e test_pty_tui_renders_and_exits
+cargo nextest run -p oxicode-tui markdown
+cargo nextest run -p oxicode-tui latex_unicode
 ```
 
 Expected: all green. The latex_unicode tests verify the conversion logic; the PTY test verifies the render path still works.
@@ -259,9 +259,9 @@ Expected: all green. The latex_unicode tests verify the conversion logic; the PT
 
 ```bash
 git add -A
-git commit -m "feat(tui): inline LaTeX-to-Unicode in markdown renderer (OXI_LATEX_INLINE=1)
+git commit -m "feat(tui): inline LaTeX-to-Unicode in markdown renderer (OXICODE_LATEX_INLINE=1)
 
-When OXI_LATEX_INLINE=1 is set, text in chat messages and markdown
+When OXICODE_LATEX_INLINE=1 is set, text in chat messages and markdown
 rendering is preprocessed through latex_to_unicode() before display.
 
 Example: \"\\alpha + \\beta = \\gamma\" renders as \"α + β = γ\"
@@ -278,29 +278,29 @@ changes)."
 ### Task 3: Kitty Keyboard Protocol Parser in Event Loop
 
 **Files:**
-- Modify: `oxi-cli/src/tui/handlers.rs` — in the key event handler, before falling through to ratatui's `KeyEvent`, try `parse_kitty_key` on the raw input bytes
+- Modify: `oxicode-cli/src/tui/handlers.rs` — in the key event handler, before falling through to ratatui's `KeyEvent`, try `parse_kitty_key` on the raw input bytes
 
 **Interfaces:**
-- Consumes: `oxi_tui::input::kitty::parse_kitty_key` (already exists, returns `Option<ParsedKey>`)
-- Produces: Kitty protocol key events translated to ratatui `KeyEvent`, gated by `OXI_KITTY_KEYBOARD=1`
+- Consumes: `oxicode_tui::input::kitty::parse_kitty_key` (already exists, returns `Option<ParsedKey>`)
+- Produces: Kitty protocol key events translated to ratatui `KeyEvent`, gated by `OXICODE_KITTY_KEYBOARD=1`
 
 - [ ] **Step 1: Find the raw input read site**
 
-In `oxi-cli/src/tui/app.rs`, find where crossterm events are read (the main event loop). Look for `crossterm::event::read()` or `event::poll()`. The raw bytes need to be captured BEFORE crossterm parses them into a `KeyEvent`.
+In `oxicode-cli/src/tui/app.rs`, find where crossterm events are read (the main event loop). Look for `crossterm::event::read()` or `event::poll()`. The raw bytes need to be captured BEFORE crossterm parses them into a `KeyEvent`.
 
 NOTE: crossterm does not expose raw bytes — it parses bytes into `KeyEvent` internally. To get raw bytes, we need to either:
 - (a) Switch to raw byte reading (bypassing crossterm's event parser) and use our own parser
 - (b) Use crossterm's `KeyboardEnhancementFlags` to detect Kitty protocol and let crossterm handle it
 
-For this integration, use approach (a) but ONLY when `OXI_KITTY_KEYBOARD=1`. In that mode, replace `event::read()` with a raw byte read + `parse_kitty_key` + manual `KeyEvent` construction.
+For this integration, use approach (a) but ONLY when `OXICODE_KITTY_KEYBOARD=1`. In that mode, replace `event::read()` with a raw byte read + `parse_kitty_key` + manual `KeyEvent` construction.
 
-- [ ] **Step 2: Read oxi-tui/src/input/kitty.rs public API**
+- [ ] **Step 2: Read oxicode-tui/src/input/kitty.rs public API**
 
 Check what `parse_kitty_key` returns and how `ParsedKey` maps to ratatui `KeyCode`/`KeyModifiers`. Write a helper `fn parsed_to_crossterm(p: ParsedKey) -> crossterm::event::KeyEvent` that translates.
 
 - [ ] **Step 3: Implement the raw read path**
 
-In the main event loop, when `OXI_KITTY_KEYBOARD=1`:
+In the main event loop, when `OXICODE_KITTY_KEYBOARD=1`:
 1. Read raw bytes from stdin
 2. If the bytes look like a Kitty sequence (`\x1b[>...`), call `parse_kitty_key`
 3. If parsed, convert to crossterm `KeyEvent` and feed to the handler
@@ -313,8 +313,8 @@ This is the hardest of the three integrations. If the implementation gets comple
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run -p oxi-cli --test pty_e2e test_pty_tui_renders_and_exits
-cargo nextest run -p oxi-tui kitty
+cargo nextest run -p oxicode-cli --test pty_e2e test_pty_tui_renders_and_exits
+cargo nextest run -p oxicode-tui kitty
 ```
 
 Expected: all green.
@@ -323,9 +323,9 @@ Expected: all green.
 
 ```bash
 git add -A
-git commit -m "feat(tui): Kitty keyboard protocol parser in event loop (OXI_KITTY_KEYBOARD=1)
+git commit -m "feat(tui): Kitty keyboard protocol parser in event loop (OXICODE_KITTY_KEYBOARD=1)
 
-When OXI_KITTY_KEYBOARD=1 is set, the event loop reads raw stdin
+When OXICODE_KITTY_KEYBOARD=1 is set, the event loop reads raw stdin
 bytes and routes Kitty protocol sequences (\\x1b[>...u) through
 parse_kitty_key(). Parsed events are translated to crossterm
 KeyEvent and fed to the normal keybinding dispatcher.
@@ -333,7 +333,7 @@ KeyEvent and fed to the normal keybinding dispatcher.
 Falls back to crossterm's native event parser for non-Kitty input
 (legacy compatibility).
 
-20 new tests in oxi-tui/src/input/kitty.rs cover the parser.
+20 new tests in oxicode-tui/src/input/kitty.rs cover the parser.
 PTY TUI render test still passes (no render path changes)."
 ```
 
@@ -346,7 +346,7 @@ PTY TUI render test still passes (no render path changes)."
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
 ```
@@ -356,18 +356,18 @@ Expected: all green. Total test count should be 3529 + new tests from this plan 
 - [ ] **Step 2: Run the PTY TUI test one more time**
 
 ```bash
-cargo nextest run -p oxi-cli --test pty_e2e test_pty_tui_renders_and_exits
+cargo nextest run -p oxicode-cli --test pty_e2e test_pty_tui_renders_and_exits
 ```
 
 Expected: PASS. This is the final guardrail — the TUI must render and exit cleanly.
 
-- [ ] **Step 3: Verify no oxi-tui-legacy references remain**
+- [ ] **Step 3: Verify no oxicode-tui-legacy references remain**
 
 ```bash
-grep -rn 'oxi.tui.legacy' --include='*.rs' --include='*.toml' . 2>/dev/null | grep -v target | grep -v '.git' | grep -v docs/ | grep -v '.superpowers/'
+grep -rn 'oxicode.tui.legacy' --include='*.rs' --include='*.toml' . 2>/dev/null | grep -v target | grep -v '.git' | grep -v docs/ | grep -v '.superpowers/'
 ```
 
-Expected: empty output. All references should say `oxi-tui` now.
+Expected: empty output. All references should say `oxicode-tui` now.
 
 - [ ] **Step 4: Update CHANGELOG**
 
@@ -375,11 +375,11 @@ Add entries under `[Unreleased]` > `### Added`:
 
 ```markdown
 - **TUI: KillRing in input editor (P2 integration)** — Emacs-style kill ring
-  (kill to line end/start, yank, yank-pop) gated by `OXI_KILL_RING=1`.
+  (kill to line end/start, yank, yank-pop) gated by `OXICODE_KILL_RING=1`.
 - **TUI: LaTeX-to-Unicode in markdown (P2 integration)** — Inline LaTeX symbols
-  rendered as Unicode (145 mappings) gated by `OXI_LATEX_INLINE=1`.
+  rendered as Unicode (145 mappings) gated by `OXICODE_LATEX_INLINE=1`.
 - **TUI: Kitty keyboard protocol (P2 integration)** — Kitty protocol parser in
-  the event loop gated by `OXI_KITTY_KEYBOARD=1`.
+  the event loop gated by `OXICODE_KITTY_KEYBOARD=1`.
 - **TUI: PTY render verification test** — Guards the P2.1 render path
   (`terminal.draw()` + `CursorState::reconcile()`) against regression.
 ```
@@ -391,9 +391,9 @@ git add CHANGELOG.md
 git commit -m "docs: CHANGELOG P2 integration entries
 
 All three safe additive P2 integrations shipped behind env var gates:
-- KillRing: OXI_KILL_RING=1
-- LaTeX: OXI_LATEX_INLINE=1
-- Kitty: OXI_KITTY_KEYBOARD=1
+- KillRing: OXICODE_KILL_RING=1
+- LaTeX: OXICODE_LATEX_INLINE=1
+- Kitty: OXICODE_KITTY_KEYBOARD=1
 
 PTY TUI render test added as permanent guardrail."
 ```
@@ -406,7 +406,7 @@ PTY TUI render test added as permanent guardrail."
 |---|---|
 | Unmatched `Action` variant causes runtime panic | `Action` is `#[derive(.., strum::EnumIter)]` — Rust's exhaustive match is a compile error, not a runtime error. The advisory about stacking changes on unverified base was caught because adding variants without matching arms broke the build. |
 | KillRing leaks memory if user kills without yanking | `KillRing::new(16)` capacity-bounded. Worst case: ring fills with old kills, old ones overwritten. |
-| LaTeX-to-Unicode mangles non-LaTeX text | `OXI_LATEX_INLINE=1` is opt-in. The function only matches known LaTeX commands (`\alpha`, `\times`, etc.) — text without backslash commands is unchanged. Tested in 18 latex_unicode tests. |
+| LaTeX-to-Unicode mangles non-LaTeX text | `OXICODE_LATEX_INLINE=1` is opt-in. The function only matches known LaTeX commands (`\alpha`, `\times`, etc.) — text without backslash commands is unchanged. Tested in 18 latex_unicode tests. |
 | Kitty parser misinterprets non-Kitty escape sequences | Parser checks for `\x1b[>` prefix (Kitty CSI > introducer). Non-Kitty sequences return `None` and fall through to crossterm. |
 | PTY test is flaky (timing-dependent) | Test uses 5s timeout for alt-screen enter (generous). If flaky, increase timeout — the test's purpose is to catch hard failures (hang, panic, no-render), not timing races. |
 
@@ -414,9 +414,9 @@ PTY TUI render test added as permanent guardrail."
 
 - [ ] `cargo build --workspace` clean
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean
-- [ ] `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` clean
+- [ ] `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` clean
 - [ ] `cargo fmt --all -- --check` clean
 - [ ] `cargo nextest run --workspace` all pass
 - [ ] `test_pty_tui_renders_and_exits` passes
-- [ ] No `oxi_tui_legacy` references in source
+- [ ] No `oxicode_tui_legacy` references in source
 - [ ] CHANGELOG updated

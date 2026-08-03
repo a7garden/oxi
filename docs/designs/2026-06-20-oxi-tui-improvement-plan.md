@@ -1,9 +1,9 @@
-# oxi-tui 개선 — 구현 계획 (omp TUI 격차 해소)
+# oxicode-tui 개선 — 구현 계획 (omp TUI 격차 해소)
 
 > **작성:** 2026-06-20
-> **전제 분석:** [`2026-06-20-omp-vs-oxi-tui-analysis.md`](./2026-06-20-omp-vs-oxi-tui-analysis.md)
+> **전제 분석:** [`2026-06-20-omp-vs-oxicode-tui-analysis.md`](./2026-06-20-omp-vs-oxicode-tui-analysis.md)
 > **원칙:** ratatui 0.30 + `DiffBackend` 스택을 유지. 스크롤백 네이티브 전환은 범위 밖.
-> **정정 전제:** oxi는 **이미** 상태별 툴 블록 테두리/배경/보더타입/아이콘을 구현(`chat/render.rs:96-136`)했으므로, 본 계획에서 제외. 남은 진짜 격차(DECCARA·캡 탐지·SGR 효율·섹션 분리·결과 캐시·리치 미디어)만 다룬다.
+> **정정 전제:** oxicode는 **이미** 상태별 툴 블록 테두리/배경/보더타입/아이콘을 구현(`chat/render.rs:96-136`)했으므로, 본 계획에서 제외. 남은 진짜 격차(DECCARA·캡 탐지·SGR 효율·섹션 분리·결과 캐시·리치 미디어)만 다룬다.
 
 ---
 
@@ -29,7 +29,7 @@
 
 **목표:** modifier 변경 시 `SetAttribute(Reset)` + fg/bg 재적용(`render/mod.rs:267-315`) 대신 **비트 delta만 송출**해 SGR 바이트를 줄인다. 시각적 결과는 동일.
 
-**대상:** `oxi-tui/src/render/mod.rs` (diff 셀 기록 루프)
+**대상:** `oxicode-tui/src/render/mod.rs` (diff 셀 기록 루프)
 
 **구현:**
 1. 현재 셀 루프는 `last_mod != Some(modifier)`일 때 Reset 후 전체 재적용. 이것을 delta로 교체.
@@ -54,7 +54,7 @@ fn modifier_delta(prev: Modifier, curr: Modifier) -> Vec<(&'static str, bool)> {
 
 **검증:**
 - 단위 테스트: `bold → italic` 전환 시 송출 SGR이 `"\x1b[22m\x1b[3m"`(bold off + italic on) 임을 단언.
-- `oxi-tui/tests`에 `diffbackend_byte_count` 통합 테스트 추가 — 동일 버퍼 2프레임에서 송출 바이트 측정.
+- `oxicode-tui/tests`에 `diffbackend_byte_count` 통합 테스트 추가 — 동일 버퍼 2프레임에서 송출 바이트 측정.
 
 ---
 
@@ -62,7 +62,7 @@ fn modifier_delta(prev: Modifier, curr: Modifier) -> Vec<(&'static str, bool)> {
 
 **목표:** 완료된 툴 블록은 매 프레임 재포맷되므로(`format_tool_call`/`format_tool_result`), `(name, args, result, status, expanded, width)`가 같으면 캐시된 `Vec<Line>`을 반환.
 
-**대상:** `oxi-tui/src/widgets/tool_renderer.rs` + `chat/render.rs:146-243`(`content_lines` 구축부)
+**대상:** `oxicode-tui/src/widgets/tool_renderer.rs` + `chat/render.rs:146-243`(`content_lines` 구축부)
 
 **구현:**
 1. `tool_renderer.rs`에 캐시 구조 추가:
@@ -101,7 +101,7 @@ impl ToolBlockCache {
 
 **목표:** 콜/결과 사이의 평 `rule`(`render.rs:187-191`)을 상태색 tee 분리자로 교체해 박스가 단일 프레임처럼 보이게(omp `renderOutputBlock`의 `teeRight/teeLeft`).
 
-**대상:** `oxi-tui/src/symbols.rs`(`Symbols` 테이블) + `chat/render.rs:185-191`
+**대상:** `oxicode-tui/src/symbols.rs`(`Symbols` 테이블) + `chat/render.rs:185-191`
 
 **구현:**
 1. `Symbols`에 필드 2개 추가: `tee_right`, `tee_left`(Unicode `╟`/`╢` 또는 `├`/`┤`, ASCII `+`/`+`, Nerd 동일).
@@ -118,7 +118,7 @@ impl ToolBlockCache {
 
 **목표:** 환경변수 스니핑만(`render/terminal.rs`)에서 **live DA/XTGETTCAP/XTVERSION 질의**로 확장. 결과 플래그로 CSI2026/DECCARA/Sixel을 실제 지원 터미널에서만 켠다.
 
-**대상:** `oxi-tui/src/render/terminal.rs`(전면 확장), `render/mod.rs`(CSI2026 게이트)
+**대상:** `oxicode-tui/src/render/terminal.rs`(전면 확장), `render/mod.rs`(CSI2026 게이트)
 
 **구현 단계:**
 1. `TerminalCapabilities` 필드 확장: `synchronized_output: bool`, `deccara: bool`, `sixel: bool`(기존 `image_protocol/true_color/hyperlinks/kitty_protocol` 유지).
@@ -131,9 +131,9 @@ impl ToolBlockCache {
 4. `DiffBackend`에 `capabilities` 참조 전달(`Arc<TerminalCapabilities>` 또는 `Box<dyn Fn() -> bool>` 게이트). `mod.rs:215,327`의 CSI2026 송출을 `if caps.synchronized_output`으로 감싸고, 에러 무시 제거.
 
 **주의/위험 (핵심):**
-- **DA 질의는 표준 입력을 읽어야 한다.** crossterm raw 모드에서 `\x1b[c` 송출 후 응답을 동기적으로 읽는 것은 입력 큐 오염 위험(사용자 키 입력과 섞임). omp는 별도 stdin-buffer로 분리(`stdin-buffer.ts` 20KB). oxi는:
-  - 옵션 A(안전): **probe는 시작 시 1회만**, 짧은 타임아웃, 응답 바이트를 이벤트 루프 진입 전에 소비. `Tui::new()`(`oxi-cli/src/tui/app.rs:54`)에서 한 번 수행 후 키보드 입력 시작.
-  - 옵션 B(보수): probe를 opt-in(`OXI_TERM_PROBE=1`), 기본은 환경변수만. → 1차 출하는 B 권장.
+- **DA 질의는 표준 입력을 읽어야 한다.** crossterm raw 모드에서 `\x1b[c` 송출 후 응답을 동기적으로 읽는 것은 입력 큐 오염 위험(사용자 키 입력과 섞임). omp는 별도 stdin-buffer로 분리(`stdin-buffer.ts` 20KB). oxicode는:
+  - 옵션 A(안전): **probe는 시작 시 1회만**, 짧은 타임아웃, 응답 바이트를 이벤트 루프 진입 전에 소비. `Tui::new()`(`oxicode-cli/src/tui/app.rs:54`)에서 한 번 수행 후 키보드 입력 시작.
+  - 옵션 B(보수): probe를 opt-in(`OXICODE_TERM_PROBE=1`), 기본은 환경변수만. → 1차 출하는 B 권장.
 - tmux/screen은 DA를 가로채거나 변형 → 화이트리스트/블랙리스트 보정표 필요.
 
 **수용 기준:**
@@ -148,7 +148,7 @@ impl ToolBlockCache {
 
 **목표:** 단색 배경 행의 trailing-space 패딩을 사각형 escape 1개로 치환. **Phase 1의 `caps.deccara`가 참일 때만 활성.**
 
-**대상:** 신규 `oxi-tui/src/render/deccara.rs` + `render/mod.rs`(diff 행 기록부 통합)
+**대상:** 신규 `oxicode-tui/src/render/deccara.rs` + `render/mod.rs`(diff 행 기록부 통합)
 
 **구현 단계:**
 1. omp `deccara.ts`의 세 함수를 Rust로 포팅(증명 기반 보수 설계 유지):
@@ -171,7 +171,7 @@ impl ToolBlockCache {
 
 **검증:**
 - `render/deccara.rs` 단위 테스트: omp의 동형 케이스(전체 배경 행/부분 배경 행/혼합 bg/hyperlink 셀) port.
-- 통합: 가상 버퍼 backend로 "배경 카드 10줄" 프레임의 송출 바이트 비교 벤치(`oxi-tui/benches` 또는 테스트).
+- 통합: 가상 버퍼 backend로 "배경 카드 10줄" 프레임의 송출 바이트 비교 벤치(`oxicode-tui/benches` 또는 테스트).
 
 ---
 
@@ -181,8 +181,8 @@ impl ToolBlockCache {
 |------|------|-----------|
 | **LaTeX-to-unicode** | 신규 `render/latex.rs` + `render/markdown.rs` | omp `latex-to-unicode.ts` 매핑(그리스/위첨자/아래첨자/연산자) 서브셋 포팅; `pulldown-cmark` 텍스트 노드의 `$...$`/`$$...$$` 후처리. |
 | **Sixel** | `render/image.rs` + `terminal.rs::ImageProtocol::Sixel` | PNG→Sixel 인코딩(외부 crate 또는 최소 인코더); `caps.sixel`(Phase 1)에서만. |
-| **렌더 루프 와치독** | `oxi-cli/src/tui/app.rs` 이벤트 루프 | 프레임 시간 측정; 임계치(예: 16ms) 연속 초과 시 `request_render` 쓰로틀/백오프 + `tracing` 경고. omp `loop-watchdog.ts` 참조. |
-| **대용량 paste 마커** | `oxi-cli/src/tui/` 입력 처리 | bracketed paste 시퀀스(`\x1b[200~ … \x1b[201~`)에서 줄 수 세어 >10이면 `[paste #N +M lines]` 마커(omp `bracketed-paste.ts`). oxi는 paste 모드는 이미 활성화. |
+| **렌더 루프 와치독** | `oxicode-cli/src/tui/app.rs` 이벤트 루프 | 프레임 시간 측정; 임계치(예: 16ms) 연속 초과 시 `request_render` 쓰로틀/백오프 + `tracing` 경고. omp `loop-watchdog.ts` 참조. |
+| **대용량 paste 마커** | `oxicode-cli/src/tui/` 입력 처리 | bracketed paste 시퀀스(`\x1b[200~ … \x1b[201~`)에서 줄 수 세어 >10이면 `[paste #N +M lines]` 마커(omp `bracketed-paste.ts`). oxicode는 paste 모드는 이미 활성화. |
 
 ---
 
@@ -233,7 +233,7 @@ graph LR
 ## 마일스톤 제안
 
 1. **MR-1 (Phase 0):** SGR delta + 결과 캐시 + tee 분리자. 단일 PR. 단위/스냅샷 테스트 포함.
-2. **MR-2 (Phase 1):** 캡 live probe(opt-in `OXI_TERM_PROBE`로 안전 출발) + CSI2026 게이트. 캡 매트릭스 문서 포함.
+2. **MR-2 (Phase 1):** 캡 live probe(opt-in `OXICODE_TERM_PROBE`로 안전 출발) + CSI2026 게이트. 캡 매트릭스 문서 포함.
 3. **MR-3 (Phase 2):** DECCARA 최적화(MR-2 게이트 뒤). 벤치 포함.
 4. **MR-4 (Phase 3, 개별):** LaTeX / Sixel / 와치독 / paste 마커 — 각각 별도 PR.
 

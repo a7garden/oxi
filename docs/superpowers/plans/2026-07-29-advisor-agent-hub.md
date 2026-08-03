@@ -2,74 +2,74 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a fullscreen TUI Agent Hub overlay that shows the main agent, advisor reviewer, and any subagents in a table, with live transcript viewer for each — built on the already-ported `oxi-agent/src/advisor/` engine (1,846 LOC) plus out-of-process subagent `.jsonl` files.
+**Goal:** Add a fullscreen TUI Agent Hub overlay that shows the main agent, advisor reviewer, and any subagents in a table, with live transcript viewer for each — built on the already-ported `oxicode-agent/src/advisor/` engine (1,846 LOC) plus out-of-process subagent `.jsonl` files.
 
-**Architecture:** Pull-based mtime polling on `__advisor.jsonl` (advisor) and `<id>.jsonl` (subagent) inside the session directory. oxi-sdk's existing `AgentPool` stores `Arc<Agent>` keyed by id; a new `HubRegistry` in oxi-cli adds display metadata (kind, last_activity, current_task, session_file) keyed by the same id. The Hub overlay polls both at 250ms.
+**Architecture:** Pull-based mtime polling on `__advisor.jsonl` (advisor) and `<id>.jsonl` (subagent) inside the session directory. oxicode-sdk's existing `AgentPool` stores `Arc<Agent>` keyed by id; a new `HubRegistry` in oxicode-cli adds display metadata (kind, last_activity, current_task, session_file) keyed by the same id. The Hub overlay polls both at 250ms.
 
-**Tech Stack:** Rust 2024, ratatui 0.30, crossterm 0.29, oxi-tui (tape), oxi-sdk AgentPool, oxi-agent AdvisorRuntime.
+**Tech Stack:** Rust 2024, ratatui 0.30, crossterm 0.29, oxicode-tui (tape), oxicode-sdk AgentPool, oxicode-agent AdvisorRuntime.
 
 ## Global Constraints
 
-- Every task ends with: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`, `cargo fmt --all -- --check`, `cargo nextest run --workspace` all green.
+- Every task ends with: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`, `cargo fmt --all -- --check`, `cargo nextest run --workspace` all green.
 - No new external dependencies.
-- oxi-sdk `AgentPool` API stays additive: only add new methods, do not change existing signatures.
+- oxicode-sdk `AgentPool` API stays additive: only add new methods, do not change existing signatures.
 - Hub overlay uses `OverlayComponent` trait (same as 19 existing overlays); fullscreen via `terminal_host` alt-screen path.
 - Transcript parsing handles two JSONL formats: `SessionEntry` (subagent) and `{"ts":N,"messages":[…]}` (advisor). Discriminated by `ts` field presence.
-- All Hub keys (`Ctrl+h`, `j`/`k`, `Enter`, `Esc`) integrated into `oxi-tui/src/keybindings/registry.rs` Action enum; missing-match in `dispatch_action` is a compile error (existing guardrail).
+- All Hub keys (`Ctrl+h`, `j`/`k`, `Enter`, `Esc`) integrated into `oxicode-tui/src/keybindings/registry.rs` Action enum; missing-match in `dispatch_action` is a compile error (existing guardrail).
 - Tests are unit-level for components with edge cases (parsing, refresh, sort, format_age). A single PTY end-to-end test for the hub open/close gesture.
 - Attribution: this implementation is a Rust port of `oh-my-pi` (omp) Agent Hub. Original MIT-licensed by Mario Zechner and Can Bölük.
 
 ## File Structure
 
 ```
-oxi-cli/src/tui/overlay/agent_hub/    [NEW] ~500 LOC
+oxicode-cli/src/tui/overlay/agent_hub/    [NEW] ~500 LOC
 ├── mod.rs              AgentHubOverlay struct + OverlayComponent impl
 ├── state.rs            HubRow, HubView, sort logic, format_age
 ├── table.rs            render_table, status_badge, key hints
 ├── transcript.rs       TranscriptReader + TranscriptLine + parse_jsonl
 └── keys.rs             handle_key, mode transitions
 
-oxi-cli/src/tui/slash/builtin/agents.rs   [NEW] /agents slash command
-oxi-cli/src/app/agent_hub_registry.rs     [NEW] HubRegistry (display metadata)
-oxi-cli/src/app/agent_hub_bridge.rs       [NEW] Advisor + persisted-subagent registration
-oxi-cli/src/tui/overlay/mod.rs            [MOD] register agent_hub module
-oxi-cli/src/tui/slash/builtin/mod.rs       [MOD] register AgentsCommand
-oxi-cli/src/tui/handlers.rs               [MOD] ToggleAgentHub dispatch + AdvisorCard UI event
-oxi-cli/src/tui/app.rs                    [MOD] UiEvent::AdvisorCard variant + content insertion
-oxi-cli/src/tui/overlay/issues_panel/     [REF] none — keep as-is (template pattern only)
-oxi-cli/src/app/agent_session.rs          [MOD] expose HubRegistry + transcript paths
-oxi-tui/src/widgets/chat/types.rs         [MOD] ContentBlock::Advisory variant
-oxi-tui/src/widgets/chat/markdown.rs      [MOD] Advisory severity-colored card render
-oxi-tui/src/widgets/chat/render.rs        [MOD] route ContentBlock::Advisory through transcript
-oxi-tui/src/widgets/chat/state.rs         [MOD] `advisory_count` helper if needed
-oxi-tui/src/keybindings/registry.rs       [MOD] ToggleAgentHub action + binding + parse_action
-oxi-sdk/src/lifecycle/agent_pool.rs       [MOD] add `for_each_row` (snapshot method)
-oxi-sdk/src/lifecycle/supervisor.rs       [MOD] pub use of status constants (re-export)
-oxi-agent/src/advisor/runtime.rs          [MOD] `transcript_path()` getter on AdvisorRuntime
-oxi-agent/src/advisor/types.rs            [MOD] expose severity copy for transcript card
-oxi-cli/tests/pty_e2e.rs                  [MOD] add test_pty_hub_opens_and_lists_advisor
+oxicode-cli/src/tui/slash/builtin/agents.rs   [NEW] /agents slash command
+oxicode-cli/src/app/agent_hub_registry.rs     [NEW] HubRegistry (display metadata)
+oxicode-cli/src/app/agent_hub_bridge.rs       [NEW] Advisor + persisted-subagent registration
+oxicode-cli/src/tui/overlay/mod.rs            [MOD] register agent_hub module
+oxicode-cli/src/tui/slash/builtin/mod.rs       [MOD] register AgentsCommand
+oxicode-cli/src/tui/handlers.rs               [MOD] ToggleAgentHub dispatch + AdvisorCard UI event
+oxicode-cli/src/tui/app.rs                    [MOD] UiEvent::AdvisorCard variant + content insertion
+oxicode-cli/src/tui/overlay/issues_panel/     [REF] none — keep as-is (template pattern only)
+oxicode-cli/src/app/agent_session.rs          [MOD] expose HubRegistry + transcript paths
+oxicode-tui/src/widgets/chat/types.rs         [MOD] ContentBlock::Advisory variant
+oxicode-tui/src/widgets/chat/markdown.rs      [MOD] Advisory severity-colored card render
+oxicode-tui/src/widgets/chat/render.rs        [MOD] route ContentBlock::Advisory through transcript
+oxicode-tui/src/widgets/chat/state.rs         [MOD] `advisory_count` helper if needed
+oxicode-tui/src/keybindings/registry.rs       [MOD] ToggleAgentHub action + binding + parse_action
+oxicode-sdk/src/lifecycle/agent_pool.rs       [MOD] add `for_each_row` (snapshot method)
+oxicode-sdk/src/lifecycle/supervisor.rs       [MOD] pub use of status constants (re-export)
+oxicode-agent/src/advisor/runtime.rs          [MOD] `transcript_path()` getter on AdvisorRuntime
+oxicode-agent/src/advisor/types.rs            [MOD] expose severity copy for transcript card
+oxicode-cli/tests/pty_e2e.rs                  [MOD] add test_pty_hub_opens_and_lists_advisor
 ```
 
 ---
 
-### Task 1: oxi-sdk AgentPool snapshot + AgentKind/HubStatus types
+### Task 1: oxicode-sdk AgentPool snapshot + AgentKind/HubStatus types
 
 **Files:**
-- Modify: `oxi-sdk/src/lifecycle/agent_pool.rs`
-- Modify: `oxi-sdk/src/lifecycle/mod.rs` (re-exports if needed)
-- Modify: `oxi-sdk/src/lifecycle/supervisor.rs` (pub use of `STATUS_RUNNING` etc.)
-- Test: `oxi-sdk/src/lifecycle/agent_pool.rs` (inline `#[cfg(test)]`)
+- Modify: `oxicode-sdk/src/lifecycle/agent_pool.rs`
+- Modify: `oxicode-sdk/src/lifecycle/mod.rs` (re-exports if needed)
+- Modify: `oxicode-sdk/src/lifecycle/supervisor.rs` (pub use of `STATUS_RUNNING` etc.)
+- Test: `oxicode-sdk/src/lifecycle/agent_pool.rs` (inline `#[cfg(test)]`)
 
 **Interfaces:**
 - Consumes: existing `AgentPool::insert/get/list/ids/len/contains` (no changes to signatures)
 - Produces: `AgentPool::for_each_row<F: FnMut(&str, &Arc<Agent>)>(&self, f: F)`
-- Produces: re-export of status constants from `supervisor` as `pub use supervisor::AgentKind` and `pub use supervisor::HubStatus` if placed there; OR new file `oxi-sdk/src/lifecycle/hub.rs` for the `AgentKind` and `HubStatus` enums (preferred — keeps lifecycle cohesive)
+- Produces: re-export of status constants from `supervisor` as `pub use supervisor::AgentKind` and `pub use supervisor::HubStatus` if placed there; OR new file `oxicode-sdk/src/lifecycle/hub.rs` for the `AgentKind` and `HubStatus` enums (preferred — keeps lifecycle cohesive)
 
-**Decision: put `AgentKind`/`HubStatus` in a new file** `oxi-sdk/src/lifecycle/hub.rs` to keep `supervisor.rs` focused on lifecycle state. Re-export from `oxi-sdk/src/lifecycle/mod.rs`.
+**Decision: put `AgentKind`/`HubStatus` in a new file** `oxicode-sdk/src/lifecycle/hub.rs` to keep `supervisor.rs` focused on lifecycle state. Re-export from `oxicode-sdk/src/lifecycle/mod.rs`.
 
 - [ ] **Step 1: Write failing test for `for_each_row`**
 
-In `oxi-sdk/src/lifecycle/agent_pool.rs` `#[cfg(test)] mod tests`:
+In `oxicode-sdk/src/lifecycle/agent_pool.rs` `#[cfg(test)] mod tests`:
 ```rust
 #[test]
 fn for_each_row_visits_all_agents() {
@@ -80,7 +80,7 @@ fn for_each_row_visits_all_agents() {
 }
 ```
 
-NOTE: `Agent::new` requires a `Provider` impl. The existing `agent_pool.rs` test module has a `MockProvider` in `oxi-sdk`. Check it; if absent, we skip this micro-test and rely on M3 integration. Replace the test above with:
+NOTE: `Agent::new` requires a `Provider` impl. The existing `agent_pool.rs` test module has a `MockProvider` in `oxicode-sdk`. Check it; if absent, we skip this micro-test and rely on M3 integration. Replace the test above with:
 
 ```rust
 #[test]
@@ -97,12 +97,12 @@ fn for_each_row_visits_all_inserted() {
 
 - [ ] **Step 2: Run test to verify RED**
 
-Run: `cargo nextest run -p oxi-sdk lifecycle::agent_pool::tests::for_each_row_visits_all_inserted`
+Run: `cargo nextest run -p oxicode-sdk lifecycle::agent_pool::tests::for_each_row_visits_all_inserted`
 Expected: FAIL with "no method named `for_each_row` found for struct `AgentPool`".
 
 - [ ] **Step 3: Implement `for_each_row`**
 
-In `oxi-sdk/src/lifecycle/agent_pool.rs`, add method to `impl AgentPool`:
+In `oxicode-sdk/src/lifecycle/agent_pool.rs`, add method to `impl AgentPool`:
 ```rust
 /// Snapshot iteration over all (id, agent) pairs. Holds the read lock for
 /// the duration of the closure; do not call back into the pool from `f`.
@@ -116,12 +116,12 @@ pub fn for_each_row<F: FnMut(&str, &Arc<Agent>)>(&self, mut f: F) {
 
 - [ ] **Step 4: Run test to verify GREEN**
 
-Run: `cargo nextest run -p oxi-sdk lifecycle::agent_pool::tests::for_each_row_visits_all_inserted`
+Run: `cargo nextest run -p oxicode-sdk lifecycle::agent_pool::tests::for_each_row_visits_all_inserted`
 Expected: PASS.
 
 - [ ] **Step 5: Add `HubKind` and `HubStatus` enums**
 
-Create `oxi-sdk/src/lifecycle/hub.rs`:
+Create `oxicode-sdk/src/lifecycle/hub.rs`:
 ```rust
 //! Display metadata for the Agent Hub overlay (advisor + subagent monitoring).
 //! Kept separate from supervisor.rs (lifecycle state machine) so display
@@ -187,7 +187,7 @@ impl HubStatus {
 }
 ```
 
-In `oxi-sdk/src/lifecycle/mod.rs`, add:
+In `oxicode-sdk/src/lifecycle/mod.rs`, add:
 ```rust
 pub mod hub;
 pub use hub::{HubKind, HubStatus};
@@ -196,15 +196,15 @@ pub use hub::{HubKind, HubStatus};
 - [ ] **Step 6: Run build + test**
 
 ```bash
-cargo build -p oxi-sdk
-cargo nextest run -p oxi-sdk lifecycle
+cargo build -p oxicode-sdk
+cargo nextest run -p oxicode-sdk lifecycle
 ```
 Expected: green.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-sdk/src/lifecycle/agent_pool.rs oxi-sdk/src/lifecycle/hub.rs oxi-sdk/src/lifecycle/mod.rs
+git add oxicode-sdk/src/lifecycle/agent_pool.rs oxicode-sdk/src/lifecycle/hub.rs oxicode-sdk/src/lifecycle/mod.rs
 git commit -m "feat(sdk): add HubKind/HubStatus + AgentPool::for_each_row
 
 Foundation for the Agent Hub overlay (advisor + subagent monitoring):
@@ -219,19 +219,19 @@ Foundation for the Agent Hub overlay (advisor + subagent monitoring):
 
 ---
 
-### Task 2: oxi-cli HubRegistry — display metadata store
+### Task 2: oxicode-cli HubRegistry — display metadata store
 
 **Files:**
-- Create: `oxi-cli/src/app/agent_hub_registry.rs`
-- Modify: `oxi-cli/src/app/mod.rs` (re-export)
+- Create: `oxicode-cli/src/app/agent_hub_registry.rs`
+- Modify: `oxicode-cli/src/app/mod.rs` (re-export)
 
 **Interfaces:**
-- Consumes: `oxi_sdk::lifecycle::AgentPool`, `oxi_sdk::HubKind`, `oxi_sdk::HubStatus`
+- Consumes: `oxicode_sdk::lifecycle::AgentPool`, `oxicode_sdk::HubKind`, `oxicode_sdk::HubStatus`
 - Produces: `pub struct HubRegistry { inner: parking_lot::RwLock<HashMap<String, HubEntry>> }`
 - Produces: `pub struct HubEntry { pub kind: HubKind, pub status: HubStatus, pub display_name: String, pub current_task: Option<String>, pub last_activity_ms: u64, pub session_file: Option<PathBuf> }`
 - Produces: `HubRegistry::new()`, `register(id, entry)`, `update(id, f)`, `unregister(id)`, `snapshot() -> Vec<(String, HubEntry)>` (sorted)
 
-**Why a separate registry and not extending AgentPool**: AgentPool stores `Arc<Agent>` for runtime state. The hub needs display metadata (kind, last_activity, current_task) that is TUI-specific and should not pollute the SDK's lifecycle surface. A parallel `HashMap<String, HubEntry>` in oxi-cli keeps the boundary clean. The agent id is the shared key.
+**Why a separate registry and not extending AgentPool**: AgentPool stores `Arc<Agent>` for runtime state. The hub needs display metadata (kind, last_activity, current_task) that is TUI-specific and should not pollute the SDK's lifecycle surface. A parallel `HashMap<String, HubEntry>` in oxicode-cli keeps the boundary clean. The agent id is the shared key.
 
 - [ ] **Step 1: Write failing tests for `HubRegistry`**
 
@@ -240,7 +240,7 @@ In the new file:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_sdk::{HubKind, HubStatus};
+    use oxicode_sdk::{HubKind, HubStatus};
 
     fn entry(kind: HubKind, status: HubStatus) -> HubEntry {
         HubEntry {
@@ -297,21 +297,21 @@ mod tests {
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cargo nextest run -p oxi-cli app::agent_hub_registry::tests`
+Run: `cargo nextest run -p oxicode-cli app::agent_hub_registry::tests`
 Expected: FAIL with "cannot find module `agent_hub_registry`".
 
 - [ ] **Step 3: Implement `HubRegistry`**
 
-Create `oxi-cli/src/app/agent_hub_registry.rs`:
+Create `oxicode-cli/src/app/agent_hub_registry.rs`:
 ```rust
 //! Display metadata for the Agent Hub overlay.
 //!
-//! Parallel to `oxi_sdk::AgentPool` but stores TUI display fields
+//! Parallel to `oxicode_sdk::AgentPool` but stores TUI display fields
 //! (kind, status, last_activity, current_task, session_file) keyed by
 //! the same agent id. AgentPool is the runtime owner; HubRegistry is
 //! the display projection.
 
-use oxi_sdk::{HubKind, HubStatus};
+use oxicode_sdk::{HubKind, HubStatus};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -404,20 +404,20 @@ pub type SharedHubRegistry = Arc<HubRegistry>;
 
 - [ ] **Step 4: Add module declaration**
 
-In `oxi-cli/src/app/mod.rs`, add `pub mod agent_hub_registry;`.
+In `oxicode-cli/src/app/mod.rs`, add `pub mod agent_hub_registry;`.
 
 - [ ] **Step 5: Run tests to verify GREEN**
 
-Run: `cargo nextest run -p oxi-cli app::agent_hub_registry::tests`
+Run: `cargo nextest run -p oxicode-cli app::agent_hub_registry::tests`
 Expected: all 4 PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-cli/src/app/agent_hub_registry.rs oxi-cli/src/app/mod.rs
+git add oxicode-cli/src/app/agent_hub_registry.rs oxicode-cli/src/app/mod.rs
 git commit -m "feat(cli): HubRegistry — display metadata for Agent Hub
 
-Parallel to oxi-sdk AgentPool but stores TUI display fields
+Parallel to oxicode-sdk AgentPool but stores TUI display fields
 (kind, status, last_activity_ms, current_task, session_file).
 AgentPool owns runtime state; HubRegistry is the display projection.
 Snapshot is sorted Running→Idle→Parked→Aborted, then by recency,
@@ -429,7 +429,7 @@ matching omp's AgentHub table layout."
 ### Task 3: TranscriptReader + JSONL parsing
 
 **Files:**
-- Create: `oxi-cli/src/tui/overlay/agent_hub/transcript.rs`
+- Create: `oxicode-cli/src/tui/overlay/agent_hub/transcript.rs`
 - Test: inline `#[cfg(test)]`
 
 **Interfaces:**
@@ -522,7 +522,7 @@ mod tests {
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cargo nextest run -p oxi-cli tui::overlay::agent_hub::transcript::tests`
+Run: `cargo nextest run -p oxicode-cli tui::overlay::agent_hub::transcript::tests`
 Expected: FAIL with module not found.
 
 - [ ] **Step 3: Implement `TranscriptReader`**
@@ -669,14 +669,14 @@ impl TranscriptReader {
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
-Run: `cargo nextest run -p oxi-cli tui::overlay::agent_hub::transcript::tests`
+Run: `cargo nextest run -p oxicode-cli tui::overlay::agent_hub::transcript::tests`
 Expected: 5 PASS.
 
-NOTE: The `SessionLine` JSON shape is approximate; the actual `SessionEntry` schema may differ (e.g. `role` instead of `kind`, `text` instead of `content`). If tests fail due to schema mismatch, adapt `SessionLine` to match what `oxi-cli/src/store/session.rs::SessionEntry` actually serializes. The shape should be inspected with:
+NOTE: The `SessionLine` JSON shape is approximate; the actual `SessionEntry` schema may differ (e.g. `role` instead of `kind`, `text` instead of `content`). If tests fail due to schema mismatch, adapt `SessionLine` to match what `oxicode-cli/src/store/session.rs::SessionEntry` actually serializes. The shape should be inspected with:
 
 ```bash
-ls ~/.oxi/sessions/  # find any existing .jsonl
-head -1 ~/.oxi/sessions/<some>.jsonl  # see actual keys
+ls ~/.oxicode/sessions/  # find any existing .jsonl
+head -1 ~/.oxicode/sessions/<some>.jsonl  # see actual keys
 ```
 
 Adjust `SessionLine` to deserialize those exact keys. The point is: parse whatever the SessionManager writes, don't invent a new format.
@@ -684,7 +684,7 @@ Adjust `SessionLine` to deserialize those exact keys. The point is: parse whatev
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-cli/src/tui/overlay/agent_hub/transcript.rs
+git add oxicode-cli/src/tui/overlay/agent_hub/transcript.rs
 git commit -m "feat(tui): TranscriptReader — mtime-based JSONL reader
 
 Parses both advisor ({\"ts\":N,\"messages\":[…]}) and SessionEntry
@@ -697,9 +697,9 @@ format on the first non-empty line and caches for the file's lifetime."
 ### Task 4: AgentSession HubRegistry wiring
 
 **Files:**
-- Modify: `oxi-cli/src/app/agent_session.rs` (add hub field, register main+advisor, scan session dir for subagent .jsonl)
-- Modify: `oxi-cli/src/app/agent_hub_bridge.rs` (new helper module with `register_persisted_subagents` and `register_advisor`)
-- Modify: `oxi-cli/src/app/mod.rs` (declare new module)
+- Modify: `oxicode-cli/src/app/agent_session.rs` (add hub field, register main+advisor, scan session dir for subagent .jsonl)
+- Modify: `oxicode-cli/src/app/agent_hub_bridge.rs` (new helper module with `register_persisted_subagents` and `register_advisor`)
+- Modify: `oxicode-cli/src/app/mod.rs` (declare new module)
 
 **Interfaces:**
 - Consumes: `HubRegistry` from Task 2
@@ -708,12 +708,12 @@ format on the first non-empty line and caches for the file's lifetime."
 
 - [ ] **Step 1: Write failing test for `register_persisted_subagents`**
 
-In `oxi-cli/src/app/agent_hub_bridge.rs`:
+In `oxicode-cli/src/app/agent_hub_bridge.rs`:
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_sdk::{HubKind, HubStatus};
+    use oxicode_sdk::{HubKind, HubStatus};
 
     #[test]
     fn registers_subagent_jsonl_excluding_main_and_advisor() {
@@ -757,17 +757,17 @@ mod tests {
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cargo nextest run -p oxi-cli app::agent_hub_bridge::tests`
+Run: `cargo nextest run -p oxicode-cli app::agent_hub_bridge::tests`
 Expected: FAIL with module not found.
 
 - [ ] **Step 3: Implement `agent_hub_bridge.rs`**
 
 ```rust
-//! Bridges oxi-cli's AgentSession to the HubRegistry display store.
+//! Bridges oxicode-cli's AgentSession to the HubRegistry display store.
 
 use std::path::Path;
 
-use oxi_sdk::{HubKind, HubStatus};
+use oxicode_sdk::{HubKind, HubStatus};
 
 use super::agent_hub_registry::{now_ms, HubEntry, HubRegistry};
 
@@ -871,16 +871,16 @@ pub fn register_advisor(
 
 - [ ] **Step 4: Add module declaration**
 
-In `oxi-cli/src/app/mod.rs`, add `pub mod agent_hub_bridge;`.
+In `oxicode-cli/src/app/mod.rs`, add `pub mod agent_hub_bridge;`.
 
 - [ ] **Step 5: Run tests to verify GREEN**
 
-Run: `cargo nextest run -p oxi-cli app::agent_hub_bridge::tests`
+Run: `cargo nextest run -p oxicode-cli app::agent_hub_bridge::tests`
 Expected: 3 PASS.
 
 - [ ] **Step 6: Wire into `AgentSession`**
 
-In `oxi-cli/src/app/agent_session.rs`:
+In `oxicode-cli/src/app/agent_session.rs`:
 
 Add to `pub struct AgentSession { ... }`:
 ```rust
@@ -918,15 +918,15 @@ If `AgentSession::new` has a different signature (e.g. takes a pre-built `Agent`
 - [ ] **Step 7: Build + test**
 
 ```bash
-cargo build -p oxi-cli
-cargo nextest run -p oxi-cli app
+cargo build -p oxicode-cli
+cargo nextest run -p oxicode-cli app
 ```
 Expected: green.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add oxi-cli/src/app/agent_session.rs oxi-cli/src/app/agent_hub_bridge.rs oxi-cli/src/app/mod.rs
+git add oxicode-cli/src/app/agent_session.rs oxicode-cli/src/app/agent_hub_bridge.rs oxicode-cli/src/app/mod.rs
 git commit -m "feat(cli): wire HubRegistry into AgentSession
 
 AgentSession owns a HubRegistry populated at session start with:
@@ -943,20 +943,20 @@ AgentSession owns a HubRegistry populated at session start with:
 ### Task 5: ToggleAgentHub keybinding + UI events
 
 **Files:**
-- Modify: `oxi-tui/src/keybindings/registry.rs`
-- Modify: `oxi-cli/src/tui/handlers.rs` (dispatch_action arm)
-- Modify: `oxi-cli/src/tui/app.rs` (AdvisorCard UI event variant)
+- Modify: `oxicode-tui/src/keybindings/registry.rs`
+- Modify: `oxicode-cli/src/tui/handlers.rs` (dispatch_action arm)
+- Modify: `oxicode-cli/src/tui/app.rs` (AdvisorCard UI event variant)
 
 **Interfaces:**
-- Produces: `Action::ToggleAgentHub` enum variant in `oxi-tui/src/keybindings/registry.rs`
+- Produces: `Action::ToggleAgentHub` enum variant in `oxicode-tui/src/keybindings/registry.rs`
 - Produces: `KeybindingsManager` default binding `Ctrl+h` for `ToggleAgentHub`
 - Produces: `parse_action("toggleagenthub") => Some(ToggleAgentHub)`
-- Produces: `KAction::ToggleAgentHub => { … }` in `oxi-cli/src/tui/handlers.rs::dispatch_action`
-- Produces: `UiEvent::AdvisorCard { body, severity, timestamp_ms }` in `oxi-cli/src/tui/app.rs`
+- Produces: `KAction::ToggleAgentHub => { … }` in `oxicode-cli/src/tui/handlers.rs::dispatch_action`
+- Produces: `UiEvent::AdvisorCard { body, severity, timestamp_ms }` in `oxicode-cli/src/tui/app.rs`
 
 - [ ] **Step 1: Add `Action::ToggleAgentHub` to keybinding enum**
 
-In `oxi-tui/src/keybindings/registry.rs`, find the `pub enum Action` block and add at the end of the appropriate section (after `ToggleRouting`):
+In `oxicode-tui/src/keybindings/registry.rs`, find the `pub enum Action` block and add at the end of the appropriate section (after `ToggleRouting`):
 ```rust
 /// Toggle the Agent Hub overlay (advisor + subagent monitor).
 ToggleAgentHub,
@@ -986,13 +986,13 @@ fn test_toggle_agent_hub_binding() {
 - [ ] **Step 2: Run test to verify RED then GREEN**
 
 ```bash
-cargo nextest run -p oxi-tui keybindings::tests::test_toggle_agent_hub_binding
+cargo nextest run -p oxicode-tui keybindings::tests::test_toggle_agent_hub_binding
 ```
 Expected: FAIL first, then PASS after the additions.
 
 - [ ] **Step 3: Add `KAction::ToggleAgentHub` dispatch arm**
 
-In `oxi-cli/src/tui/handlers.rs`, find `fn dispatch_action(...)` and add a match arm:
+In `oxicode-cli/src/tui/handlers.rs`, find `fn dispatch_action(...)` and add a match arm:
 ```rust
 KAction::ToggleAgentHub => {
     use crate::tui::overlay::agent_hub::AgentHubOverlay;
@@ -1009,14 +1009,14 @@ To keep the build green at each task: wrap the arm in a `#[cfg(feature = "agent-
 
 - [ ] **Step 4: Add `UiEvent::AdvisorCard` variant**
 
-In `oxi-cli/src/tui/app.rs`, find `pub(crate) enum UiEvent` and add:
+In `oxicode-cli/src/tui/app.rs`, find `pub(crate) enum UiEvent` and add:
 ```rust
 /// Advisor advice routed to a persistent transcript card (alongside the
 /// existing toast). Emitted by the session-event dispatcher for aside/
 /// preserve channel advice.
 AdvisorCard {
     body: String,
-    severity: oxi_agent::advisor::AdvisorSeverity,
+    severity: oxicode_agent::advisor::AdvisorSeverity,
     timestamp_ms: u64,
 },
 ```
@@ -1025,14 +1025,14 @@ AdvisorCard {
 
 ```bash
 cargo build --workspace
-cargo nextest run -p oxi-tui keybindings
+cargo nextest run -p oxicode-tui keybindings
 ```
 Expected: green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-tui/src/keybindings/registry.rs oxi-cli/src/tui/app.rs
+git add oxicode-tui/src/keybindings/registry.rs oxicode-cli/src/tui/app.rs
 git commit -m "feat(registry): add ToggleAgentHub action + AdvisorCard UI event
 
 - Action::ToggleAgentHub bound to Ctrl+h (matches omp's app.agents.hub).
@@ -1048,12 +1048,12 @@ git commit -m "feat(registry): add ToggleAgentHub action + AdvisorCard UI event
 ### Task 6: AgentHubOverlay — table view + transcript view
 
 **Files:**
-- Create: `oxi-cli/src/tui/overlay/agent_hub/mod.rs`
-- Create: `oxi-cli/src/tui/overlay/agent_hub/state.rs`
-- Create: `oxi-cli/src/tui/overlay/agent_hub/table.rs`
-- Create: `oxi-cli/src/tui/overlay/agent_hub/keys.rs`
-- Modify: `oxi-cli/src/tui/overlay/mod.rs` (register module)
-- Modify: `oxi-cli/src/tui/handlers.rs` (uncomment the `ToggleAgentHub` arm from Task 5)
+- Create: `oxicode-cli/src/tui/overlay/agent_hub/mod.rs`
+- Create: `oxicode-cli/src/tui/overlay/agent_hub/state.rs`
+- Create: `oxicode-cli/src/tui/overlay/agent_hub/table.rs`
+- Create: `oxicode-cli/src/tui/overlay/agent_hub/keys.rs`
+- Modify: `oxicode-cli/src/tui/overlay/mod.rs` (register module)
+- Modify: `oxicode-cli/src/tui/handlers.rs` (uncomment the `ToggleAgentHub` arm from Task 5)
 
 **Interfaces:**
 - Produces: `pub struct AgentHubOverlay { state: HubState, registry: SharedHubRegistry, readers: HashMap<String, TranscriptReader> }`
@@ -1075,7 +1075,7 @@ git commit -m "feat(registry): add ToggleAgentHub action + AdvisorCard UI event
 //! View state and sorting logic for the Agent Hub.
 
 use std::path::PathBuf;
-use oxi_sdk::{HubKind, HubStatus};
+use oxicode_sdk::{HubKind, HubStatus};
 use crate::app::agent_hub_registry::{HubEntry, HubRegistry};
 
 /// One row in the table, precomputed for rendering.
@@ -1127,7 +1127,7 @@ impl HubState {
 ```rust
 //! Table rendering for Agent Hub.
 
-use oxi_tui::Theme;
+use oxicode_tui::Theme;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
@@ -1169,7 +1169,7 @@ pub fn render_table(f: &mut Frame, area: Rect, state: &HubState, theme: &Theme) 
 }
 ```
 
-NOTE: `theme.selection_bg()` may not exist — check `oxi-tui::Theme` for the actual selector method. Adapt to whatever's available (e.g. `Style::default().add_modifier(Modifier::REVERSED)` if no helper).
+NOTE: `theme.selection_bg()` may not exist — check `oxicode-tui::Theme` for the actual selector method. Adapt to whatever's available (e.g. `Style::default().add_modifier(Modifier::REVERSED)` if no helper).
 
 - [ ] **Step 3: Create `keys.rs` with `handle_key`**
 
@@ -1276,7 +1276,7 @@ pub mod transcript;
 
 use std::collections::HashMap;
 
-use oxi_tui::Theme;
+use oxicode_tui::Theme;
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
@@ -1435,7 +1435,7 @@ NOTE: This is a first pass. The transcript view's scroll/tail-follow logic in `r
 
 - [ ] **Step 5: Add `agent_hub` to `overlay/mod.rs`**
 
-In `oxi-cli/src/tui/overlay/mod.rs`, add:
+In `oxicode-cli/src/tui/overlay/mod.rs`, add:
 ```rust
 pub mod agent_hub;
 ```
@@ -1448,15 +1448,15 @@ pub use agent_hub::AgentHubOverlay;
 - [ ] **Step 6: Build + test**
 
 ```bash
-cargo build -p oxi-cli
-cargo nextest run -p oxi-cli
+cargo build -p oxicode-cli
+cargo nextest run -p oxicode-cli
 ```
 Expected: green (or with borrow-checker errors that need fixing — adjust).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-cli/src/tui/overlay/agent_hub/ oxi-cli/src/tui/overlay/mod.rs
+git add oxicode-cli/src/tui/overlay/agent_hub/ oxicode-cli/src/tui/overlay/mod.rs
 git commit -m "feat(tui): AgentHubOverlay — table + transcript views
 
 Fullscreen alt-screen overlay listing the main agent, advisor, and
@@ -1477,8 +1477,8 @@ the keybinding change in M5 to keep the build green at each step)."
 ### Task 7: /agents slash command + dispatch action
 
 **Files:**
-- Create: `oxi-cli/src/tui/slash/builtin/agents.rs`
-- Modify: `oxi-cli/src/tui/slash/builtin/mod.rs` (register)
+- Create: `oxicode-cli/src/tui/slash/builtin/agents.rs`
+- Modify: `oxicode-cli/src/tui/slash/builtin/mod.rs` (register)
 
 **Interfaces:**
 - Produces: `pub(crate) struct AgentsCommand`
@@ -1515,7 +1515,7 @@ impl SlashCommand for AgentsCommand {
 
 - [ ] **Step 2: Register in `mod.rs`**
 
-In `oxi-cli/src/tui/slash/builtin/mod.rs`:
+In `oxicode-cli/src/tui/slash/builtin/mod.rs`:
 ```rust
 mod agents;
 // ... in register_builtin_slash_commands:
@@ -1539,14 +1539,14 @@ KAction::ToggleAgentHub => {
 
 ```bash
 cargo build --workspace
-cargo nextest run -p oxi-cli
+cargo nextest run -p oxicode-cli
 ```
 Expected: green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-cli/src/tui/slash/builtin/agents.rs oxi-cli/src/tui/slash/builtin/mod.rs oxi-cli/src/tui/handlers.rs
+git add oxicode-cli/src/tui/slash/builtin/agents.rs oxicode-cli/src/tui/slash/builtin/mod.rs oxicode-cli/src/tui/handlers.rs
 git commit -m "feat(tui): /agents slash command + Ctrl+h dispatch
 
 Both /agents (slash) and Ctrl+h (keybinding) open the Agent Hub
@@ -1558,9 +1558,9 @@ overlay. /agents is aliasable as /hub."
 ### Task 8: ContentBlock::Advisory + severity-colored card render
 
 **Files:**
-- Modify: `oxi-tui/src/widgets/chat/types.rs` (add `Advisory` variant)
-- Modify: `oxi-tui/src/widgets/chat/markdown.rs` (render Advisory as a card)
-- Modify: `oxi-cli/src/tui/app.rs` (handle `UiEvent::AdvisorCard`)
+- Modify: `oxicode-tui/src/widgets/chat/types.rs` (add `Advisory` variant)
+- Modify: `oxicode-tui/src/widgets/chat/markdown.rs` (render Advisory as a card)
+- Modify: `oxicode-cli/src/tui/app.rs` (handle `UiEvent::AdvisorCard`)
 
 **Interfaces:**
 - Produces: `ContentBlock::Advisory { body: String, severity: AdvisorSeverity, timestamp_ms: u64 }`
@@ -1569,9 +1569,9 @@ overlay. /agents is aliasable as /hub."
 
 - [ ] **Step 1: Add `Advisory` variant to `ContentBlock`**
 
-In `oxi-tui/src/widgets/chat/types.rs`, add (and import `oxi_agent::advisor::AdvisorSeverity`):
+In `oxicode-tui/src/widgets/chat/types.rs`, add (and import `oxicode_agent::advisor::AdvisorSeverity`):
 ```rust
-use oxi_agent::advisor::AdvisorSeverity;
+use oxicode_agent::advisor::AdvisorSeverity;
 
 #[derive(Debug, Clone)]
 pub enum ContentBlock {
@@ -1610,7 +1610,7 @@ Adapt `theme.dim()/warning()/error()` to the actual Theme API. Use `Style::defau
 Find the `UiEvent` handler (likely in a function like `handle_ui_event` or via `match event`). Add:
 ```rust
 UiEvent::AdvisorCard { body, severity, timestamp_ms } => {
-    use oxi_tui::widgets::chat::{ChatMessage, ContentBlock, MessageRole};
+    use oxicode_tui::widgets::chat::{ChatMessage, ContentBlock, MessageRole};
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = if timestamp_ms > 0 { timestamp_ms as i64 } else {
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
@@ -1625,18 +1625,18 @@ UiEvent::AdvisorCard { body, severity, timestamp_ms } => {
 
 - [ ] **Step 4: Wire SessionEvent::Advisor → UiEvent::AdvisorCard**
 
-In `oxi-cli/src/tui/handlers.rs`, find the existing `SessionEvent::Advisor` handler (Task 4 / M5 work shows it at line 967). Extend to emit BOTH the SystemMessage toast AND the AdvisorCard:
+In `oxicode-cli/src/tui/handlers.rs`, find the existing `SessionEvent::Advisor` handler (Task 4 / M5 work shows it at line 967). Extend to emit BOTH the SystemMessage toast AND the AdvisorCard:
 ```rust
 SessionEvent::Advisor { channel, body, severity } => {
     // Existing toast
     let _ = ui_tx.send(UiEvent::SystemMessage(format!("Advisor ({:?}): {body}", channel)));
     // New persistent card for aside/preserve channels
-    if matches!(channel, oxi_agent::advisor::AdvisorDeliveryChannel::Aside | oxi_agent::advisor::AdvisorDeliveryChannel::Preserve) {
+    if matches!(channel, oxicode_agent::advisor::AdvisorDeliveryChannel::Aside | oxicode_agent::advisor::AdvisorDeliveryChannel::Preserve) {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let sev = severity.unwrap_or(oxi_agent::advisor::AdvisorSeverity::Nit);
+        let sev = severity.unwrap_or(oxicode_agent::advisor::AdvisorSeverity::Nit);
         let _ = ui_tx.send(UiEvent::AdvisorCard { body: body.clone(), severity: sev, timestamp_ms: ts });
     }
 }
@@ -1655,7 +1655,7 @@ Expected: green.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add oxi-tui/src/widgets/chat/types.rs oxi-tui/src/widgets/chat/markdown.rs oxi-cli/src/tui/app.rs oxi-cli/src/tui/handlers.rs
+git add oxicode-tui/src/widgets/chat/types.rs oxicode-tui/src/widgets/chat/markdown.rs oxicode-cli/src/tui/app.rs oxicode-cli/src/tui/handlers.rs
 git commit -m "feat(tui): ContentBlock::Advisory + persistent advisor cards
 
 Advisor aside/preserve advice now appears in the chat transcript
@@ -1669,7 +1669,7 @@ inject directly into the primary agent and is not carded."
 ### Task 9: PTY end-to-end test
 
 **Files:**
-- Modify: `oxi-cli/tests/pty_e2e.rs`
+- Modify: `oxicode-cli/tests/pty_e2e.rs`
 
 **Interfaces:**
 - Produces: `test_pty_hub_opens_and_lists_advisor` test
@@ -1678,7 +1678,7 @@ inject directly into the primary agent and is not carded."
 - [ ] **Step 1: Find the existing PTY test pattern**
 
 ```bash
-grep -n "fn test_pty\|spawn_oxi\|PTY" oxi-cli/tests/pty_e2e.rs | head -20
+grep -n "fn test_pty\|spawn_oxicode\|PTY" oxicode-cli/tests/pty_e2e.rs | head -20
 ```
 
 Look at the existing test setup for `test_pty_tui_renders_and_exits` (from production tape cutover). Use the same spawn helper, with shorter timeouts.
@@ -1689,7 +1689,7 @@ Look at the existing test setup for `test_pty_tui_renders_and_exits` (from produ
 #[test]
 fn test_pty_hub_opens_and_lists_advisor() {
     // The PTY harness depends on the existing test helper. Re-use it.
-    let mut pty = spawn_oxi_in_pty(/* with -p advisor.enabled=true */);
+    let mut pty = spawn_oxicode_in_pty(/* with -p advisor.enabled=true */);
     // Wait for prompt
     pty.expect(">").expect("prompt appears");
     // Send /agents
@@ -1706,12 +1706,12 @@ fn test_pty_hub_opens_and_lists_advisor() {
 }
 ```
 
-Adapt the API names (`spawn_oxi_in_pty`, `pty.expect`, etc.) to whatever the existing tests use. If the helpers differ substantially, copy the pattern from `test_pty_tui_renders_and_exits`.
+Adapt the API names (`spawn_oxicode_in_pty`, `pty.expect`, etc.) to whatever the existing tests use. If the helpers differ substantially, copy the pattern from `test_pty_tui_renders_and_exits`.
 
 - [ ] **Step 3: Run the test**
 
 ```bash
-cargo nextest run -p oxi-cli --test pty_e2e test_pty_hub_opens_and_lists_advisor
+cargo nextest run -p oxicode-cli --test pty_e2e test_pty_hub_opens_and_lists_advisor
 ```
 Expected: PASS.
 
@@ -1720,7 +1720,7 @@ If the PTY test is flaky or environment-dependent, mark it `#[ignore]` and docum
 - [ ] **Step 4: Commit**
 
 ```bash
-git add oxi-cli/tests/pty_e2e.rs
+git add oxicode-cli/tests/pty_e2e.rs
 git commit -m "test(pty): cover /agents open + close gesture
 
 PTY end-to-end test for the Agent Hub slash command. Verifies the
@@ -1741,7 +1741,7 @@ test is the integration guardrail."
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
 ```
@@ -1758,8 +1758,8 @@ Add to `## [Unreleased]` under `### Added`:
   on a row opens a live transcript viewer (mtime-polled at 250ms)
   for the underlying `.jsonl` file. The advisor's `aside`/`preserve`
   advice is now also surfaced as a severity-colored card in the chat
-  transcript (in addition to the existing toast). oxi-sdk's
-  `AgentPool` is now actually wired in oxi-cli via a new
+  transcript (in addition to the existing toast). oxicode-sdk's
+  `AgentPool` is now actually wired in oxicode-cli via a new
   `HubRegistry` display projection.
 ```
 
@@ -1780,7 +1780,7 @@ In `docs/superpowers/RESUMING.md`, update the deferred-items table to remove Age
 ## Self-Review
 
 **Spec coverage:**
-- §3.1 AgentHandle fields → simplified to separate `HubRegistry` in oxi-cli (avoids polluting oxi-sdk with TUI display concerns). Documented in Task 2.
+- §3.1 AgentHandle fields → simplified to separate `HubRegistry` in oxicode-cli (avoids polluting oxicode-sdk with TUI display concerns). Documented in Task 2.
 - §3.2 AgentPool connection → covered by `HubRegistry` (Task 2) + `agent_hub_bridge` (Task 4).
 - §3.3 AdvisorRuntime hook → `transcript_path()` getter (Task 4 step 6).
 - §3.4 Transcript polling → Task 3.

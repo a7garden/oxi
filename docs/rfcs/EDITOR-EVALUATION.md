@@ -19,9 +19,9 @@ pi-tui uses a ~76KB custom editor built for the specific needs of an AI chat inp
 | Selection | ✅ | Shift+movement |
 | Multi-line | ✅ | Full multi-line editing |
 
-## 2. oxi Current Editor (ratatui-textarea)
+## 2. oxicode Current Editor (ratatui-textarea)
 
-`ratatui-textarea` (used via `oxi-tui/src/widgets/input.rs`, ~350 LOC wrapper):
+`ratatui-textarea` (used via `oxicode-tui/src/widgets/input.rs`, ~350 LOC wrapper):
 
 | Feature | Status | Implementation |
 |---------|--------|---------------|
@@ -38,7 +38,7 @@ pi-tui uses a ~76KB custom editor built for the specific needs of an AI chat inp
 
 ## 3. Gap Analysis
 
-| Feature | pi | oxi | Gap | Impact |
+| Feature | pi | oxicode | Gap | Impact |
 |---------|-----|-----|-----|--------|
 | Kill-ring | ✅ | ❌ | **Missing** | Low — most users don't use kill-ring; standard clipboard (Ctrl+C/V) is sufficient |
 | Yank-pop | ✅ | ❌ | **Missing** | Low — depends on kill-ring |

@@ -1,10 +1,10 @@
-# oxi-tui Phase 1 (v0.56 patch) Implementation Plan
+# oxicode-tui Phase 1 (v0.56 patch) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship three independent v0.56 patch deliverables that improve rendering stability and establish the PTY safety net required by W1 in Phase 2a — (1) color level adaptation for non-truecolor terminals, (2) layout cache tuning to reduce re-render storms during streaming, (3) PTY e2e test harness.
 
-**Architecture:** All three are additive — no existing public API changes. Color level detection uses the `supports-color` crate wrapped in a `OnceLock`-cached free function. Layout cache tuning removes `spinner_frame` from invalidation triggers and switches `streaming_text_len` from char-count to line-count for stable thresholds. PTY harness lives in `oxi-cli/tests/` as dev-only infrastructure using `portable-pty`.
+**Architecture:** All three are additive — no existing public API changes. Color level detection uses the `supports-color` crate wrapped in a `OnceLock`-cached free function. Layout cache tuning removes `spinner_frame` from invalidation triggers and switches `streaming_text_len` from char-count to line-count for stable thresholds. PTY harness lives in `oxicode-cli/tests/` as dev-only infrastructure using `portable-pty`.
 
 **Tech Stack:** Rust 2024 edition, ratatui 0.30, crossterm 0.29, parking_lot 0.12, `supports-color` 3.0 (new), `portable-pty` 0.9 (new dev-dep).
 
@@ -16,7 +16,7 @@
 - Lint gate: `cargo clippy --workspace --all-targets -- -D warnings` MUST pass clean (relaxes `unwrap_used`/`field_reassign_with_default` ONLY under `cfg(test)`)
 - Test runner: `cargo nextest run --workspace` MUST pass
 - Pre-commit: `cargo fmt --check`, `cargo clippy --all-targets`, trailing whitespace, EOF, YAML/TOML lint, merge-conflict, large files, private-key scan
-- Native-browser feature MUST still compile: `cargo build -p oxi-agent --features native-browser`
+- Native-browser feature MUST still compile: `cargo build -p oxicode-agent --features native-browser`
 - `parking_lot::MutexGuard` is `!Send` — drop guard before `.await`
 
 ---
@@ -26,14 +26,14 @@
 | File | Action | Responsibility |
 |---|---|---|
 | `Cargo.toml` | Modify | Add `supports-color`, `portable-pty` to `[workspace.dependencies]` |
-| `oxi-tui/Cargo.toml` | Modify | Add `supports-color` dep |
-| `oxi-tui/src/render/color_level.rs` | Create | `ColorLevel` enum, `detect_color_level()`, `adapt_color()` free function, RGB→Ansi256 cube mapping, Ansi256→Basic fallback |
-| `oxi-tui/src/render/mod.rs` | Modify | Add `pub mod color_level;` + re-exports |
-| `oxi-tui/src/lib.rs` | Modify | Re-export `ColorLevel`, `detect_color_level`, `adapt_color` |
-| `oxi-tui/src/widgets/chat/state.rs` | Modify | A4 — remove `spinner_frame` from invalidation, switch `streaming_text_len` to line count |
-| `oxi-cli/Cargo.toml` | Modify | Add `portable-pty` to `[dev-dependencies]` |
-| `oxi-cli/tests/pty_harness.rs` | Create | `PtySession` struct with `spawn`, `read_until`, `assert_output_contains`, `resize` |
-| `oxi-cli/tests/pty_e2e.rs` | Create | First e2e scenario: boot + prompt display |
+| `oxicode-tui/Cargo.toml` | Modify | Add `supports-color` dep |
+| `oxicode-tui/src/render/color_level.rs` | Create | `ColorLevel` enum, `detect_color_level()`, `adapt_color()` free function, RGB→Ansi256 cube mapping, Ansi256→Basic fallback |
+| `oxicode-tui/src/render/mod.rs` | Modify | Add `pub mod color_level;` + re-exports |
+| `oxicode-tui/src/lib.rs` | Modify | Re-export `ColorLevel`, `detect_color_level`, `adapt_color` |
+| `oxicode-tui/src/widgets/chat/state.rs` | Modify | A4 — remove `spinner_frame` from invalidation, switch `streaming_text_len` to line count |
+| `oxicode-cli/Cargo.toml` | Modify | Add `portable-pty` to `[dev-dependencies]` |
+| `oxicode-cli/tests/pty_harness.rs` | Create | `PtySession` struct with `spawn`, `read_until`, `assert_output_contains`, `resize` |
+| `oxicode-cli/tests/pty_e2e.rs` | Create | First e2e scenario: boot + prompt display |
 
 ---
 
@@ -41,15 +41,15 @@
 
 **Files:**
 - Modify: `Cargo.toml` (workspace deps section, currently only has `thiserror = "2"`)
-- Modify: `oxi-tui/Cargo.toml` (add supports-color to `[dependencies]`)
-- Modify: `oxi-cli/Cargo.toml` (add portable-pty to `[dev-dependencies]`)
+- Modify: `oxicode-tui/Cargo.toml` (add supports-color to `[dependencies]`)
+- Modify: `oxicode-cli/Cargo.toml` (add portable-pty to `[dev-dependencies]`)
 
 **Interfaces:**
 - Produces: `supports-color` and `portable-pty` available workspace-wide
 
 - [ ] **Step 1: Add workspace deps to root Cargo.toml**
 
-In `/Volumes/MERCURY/PROJECTS/oxi/Cargo.toml`, the `[workspace.dependencies]` section currently has only `thiserror = "2"`. Add the two new deps after it:
+In `/Volumes/MERCURY/PROJECTS/oxicode/Cargo.toml`, the `[workspace.dependencies]` section currently has only `thiserror = "2"`. Add the two new deps after it:
 
 ```toml
 [workspace.dependencies]
@@ -58,17 +58,17 @@ supports-color = "3.0"
 portable-pty = "0.9"
 ```
 
-- [ ] **Step 2: Add supports-color to oxi-tui**
+- [ ] **Step 2: Add supports-color to oxicode-tui**
 
-In `oxi-tui/Cargo.toml`, under `[dependencies]`, add (after the existing `ratatui-textarea = "0.9"` line):
+In `oxicode-tui/Cargo.toml`, under `[dependencies]`, add (after the existing `ratatui-textarea = "0.9"` line):
 
 ```toml
 supports-color = { workspace = true }
 ```
 
-- [ ] **Step 3: Add portable-pty to oxi-cli dev-deps**
+- [ ] **Step 3: Add portable-pty to oxicode-cli dev-deps**
 
-In `oxi-cli/Cargo.toml`, the `[dev-dependencies]` section currently has:
+In `oxicode-cli/Cargo.toml`, the `[dev-dependencies]` section currently has:
 
 ```toml
 [dev-dependencies]
@@ -100,13 +100,13 @@ Expected: succeeds.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Cargo.toml oxi-tui/Cargo.toml oxi-cli/Cargo.toml Cargo.lock
+git add Cargo.toml oxicode-tui/Cargo.toml oxicode-cli/Cargo.toml Cargo.lock
 git commit -m "chore(deps): add supports-color and portable-pty workspace deps
 
 supports-color 3.0 — terminal color capability detection for the
-upcoming color level adaptation in oxi-tui (v3 spec candidate 3).
+upcoming color level adaptation in oxicode-tui (v3 spec candidate 3).
 
-portable-pty 0.9 — PTY allocation for the e2e test harness in oxi-cli
+portable-pty 0.9 — PTY allocation for the e2e test harness in oxicode-cli
 (v3 spec candidate 5, W1 prerequisite)."
 ```
 
@@ -115,9 +115,9 @@ portable-pty 0.9 — PTY allocation for the e2e test harness in oxi-cli
 ## Task 2: Color level detection module
 
 **Files:**
-- Create: `oxi-tui/src/render/color_level.rs`
-- Modify: `oxi-tui/src/render/mod.rs` (add module declaration)
-- Modify: `oxi-tui/src/lib.rs` (re-exports)
+- Create: `oxicode-tui/src/render/color_level.rs`
+- Modify: `oxicode-tui/src/render/mod.rs` (add module declaration)
+- Modify: `oxicode-tui/src/lib.rs` (re-exports)
 
 **Interfaces:**
 - Produces:
@@ -127,7 +127,7 @@ portable-pty 0.9 — PTY allocation for the e2e test harness in oxi-cli
 
 - [ ] **Step 1: Write the failing test for detect_color_level**
 
-Create `oxi-tui/src/render/color_level.rs` with test stub:
+Create `oxicode-tui/src/render/color_level.rs` with test stub:
 
 ```rust
 //! Terminal color capability detection and color downgrade utilities.
@@ -192,7 +192,7 @@ fn detect_color_level_inner() -> ColorLevel {
 
     let level = match supports_color::on(supports_color::Stream::Stdout) {
         // Not a TTY (tests, piped) — default to TrueColor.
-        // oxi-tui is a widget library; the actual TUI runtime decides.
+        // oxicode-tui is a widget library; the actual TUI runtime decides.
         None => ColorLevel::TrueColor,
         Some(level) => {
             if level.has_16m {
@@ -414,7 +414,7 @@ mod tests {
 
 - [ ] **Step 2: Register the module in render/mod.rs**
 
-In `oxi-tui/src/render/mod.rs`, find the existing module declarations (around line 15-23, after `pub mod ansi;`):
+In `oxicode-tui/src/render/mod.rs`, find the existing module declarations (around line 15-23, after `pub mod ansi;`):
 
 ```rust
 pub mod ansi;
@@ -445,7 +445,7 @@ pub mod terminal;
 
 - [ ] **Step 3: Re-export from lib.rs**
 
-In `oxi-tui/src/lib.rs`, find the existing re-export block (around lines 28-43). Add color_level exports after the existing `pub use text::truncate_to_width;`:
+In `oxicode-tui/src/lib.rs`, find the existing re-export block (around lines 28-43). Add color_level exports after the existing `pub use text::truncate_to_width;`:
 
 ```rust
 /// Color level detection: terminal capability detection + downgrade conversions.
@@ -454,12 +454,12 @@ pub use render::color_level::{ColorLevel, detect_color_level};
 
 - [ ] **Step 4: Run tests, verify they pass**
 
-Run: `cargo nextest run -p oxi-tui --test-threads=1`
+Run: `cargo nextest run -p oxicode-tui --test-threads=1`
 Expected: All 12 color_level tests PASS. (Single-threaded because env var tests need isolation.)
 
 - [ ] **Step 5: Verify clippy clean**
 
-Run: `cargo clippy -p oxi-tui --all-targets -- -D warnings`
+Run: `cargo clippy -p oxicode-tui --all-targets -- -D warnings`
 Expected: No warnings.
 
 - [ ] **Step 6: Verify fmt**
@@ -470,8 +470,8 @@ Expected: No diff.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-tui/src/render/color_level.rs oxi-tui/src/render/mod.rs oxi-tui/src/lib.rs
-git commit -m "feat(oxi-tui): add color level detection module
+git add oxicode-tui/src/render/color_level.rs oxicode-tui/src/render/mod.rs oxicode-tui/src/lib.rs
+git commit -m "feat(oxicode-tui): add color level detection module
 
 Implements v3 spec candidate 3 (part 1): ColorLevel enum (None/Basic/
 Ansi256/TrueColor), detect_color_level() with OnceLock cache,
@@ -491,7 +491,7 @@ and terminal detection isolation."
 ## Task 3: Color adaptation function (free function on ratatui Color)
 
 **Files:**
-- Modify: `oxi-tui/src/render/color_level.rs` (add `adapt_color` function)
+- Modify: `oxicode-tui/src/render/color_level.rs` (add `adapt_color` function)
 
 **Interfaces:**
 - Consumes: `crate::cell::Color` (already imported)
@@ -576,12 +576,12 @@ Append to the `#[cfg(test)] mod tests` block in `color_level.rs`:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo nextest run -p oxi-tui adapt_color`
+Run: `cargo nextest run -p oxicode-tui adapt_color`
 Expected: FAIL with "cannot find function `adapt_color`".
 
 - [ ] **Step 3: Implement adapt_color**
 
-Add `adapt_color` to `oxi-tui/src/render/color_level.rs` after `ansi256_to_basic` (and before the `#[cfg(test)] mod tests` block):
+Add `adapt_color` to `oxicode-tui/src/render/color_level.rs` after `ansi256_to_basic` (and before the `#[cfg(test)] mod tests` block):
 
 ```rust
 /// Downgrade a ratatui `Color` to fit the terminal's color level.
@@ -622,12 +622,12 @@ pub fn adapt_color(color: Color, level: ColorLevel) -> Color {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo nextest run -p oxi-tui adapt_color`
+Run: `cargo nextest run -p oxicode-tui adapt_color`
 Expected: All 9 adapt_color tests PASS.
 
 - [ ] **Step 5: Re-export from lib.rs**
 
-In `oxi-tui/src/lib.rs`, update the color_level re-export to include `adapt_color`:
+In `oxicode-tui/src/lib.rs`, update the color_level re-export to include `adapt_color`:
 
 ```rust
 /// Color level detection: terminal capability detection + downgrade conversions.
@@ -636,19 +636,19 @@ pub use render::color_level::{ColorLevel, adapt_color, detect_color_level};
 
 - [ ] **Step 6: Run full test suite for the crate**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: All tests pass (color_level + existing).
 
 - [ ] **Step 7: Verify clippy + fmt**
 
-Run: `cargo clippy -p oxi-tui --all-targets -- -D warnings && cargo fmt --all -- --check`
+Run: `cargo clippy -p oxicode-tui --all-targets -- -D warnings && cargo fmt --all -- --check`
 Expected: Clean.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add oxi-tui/src/render/color_level.rs oxi-tui/src/lib.rs
-git commit -m "feat(oxi-tui): add adapt_color() for terminal color level downgrade
+git add oxicode-tui/src/render/color_level.rs oxicode-tui/src/lib.rs
+git commit -m "feat(oxicode-tui): add adapt_color() for terminal color level downgrade
 
 Implements v3 spec candidate 3 (part 2): adapt_color(color, level)
 takes a ratatui Color and downgrades it for the active terminal level.
@@ -669,8 +669,8 @@ maps them to the basic 16.
 ## Task 4: A4 Part 1 — Remove spinner_frame from layout cache invalidation
 
 **Files:**
-- Modify: `oxi-tui/src/widgets/chat/state.rs:68-94` (LayoutCache struct + comment)
-- Modify: `oxi-tui/src/widgets/chat/state.rs:561-611` (get_layout function)
+- Modify: `oxicode-tui/src/widgets/chat/state.rs:68-94` (LayoutCache struct + comment)
+- Modify: `oxicode-tui/src/widgets/chat/state.rs:561-611` (get_layout function)
 
 **Interfaces:**
 - Consumes: existing LayoutCache, get_layout
@@ -680,7 +680,7 @@ maps them to the basic 16.
 
 - [ ] **Step 1: Write the failing test**
 
-In `oxi-tui/src/widgets/chat/state.rs`, find the existing `#[cfg(test)] mod tests` block (or add one at the end). Add:
+In `oxicode-tui/src/widgets/chat/state.rs`, find the existing `#[cfg(test)] mod tests` block (or add one at the end). Add:
 
 ```rust
 #[cfg(test)]
@@ -732,12 +732,12 @@ mod layout_cache_tests {
 
 - [ ] **Step 2: Run the test to verify it fails (or passes spuriously)**
 
-Run: `cargo nextest run -p oxi-tui layout_cache_tests`
+Run: `cargo nextest run -p oxicode-tui layout_cache_tests`
 Expected: May pass spuriously since the test only checks length equality. The real verification is in the implementation change.
 
 - [ ] **Step 3: Modify LayoutCache struct comment**
 
-In `oxi-tui/src/widgets/chat/state.rs:68-74`, the comment says:
+In `oxicode-tui/src/widgets/chat/state.rs:68-74`, the comment says:
 
 ```rust
 // Caches the result of compute_layout(). Invalidated when any of these change:
@@ -762,7 +762,7 @@ Change to:
 
 - [ ] **Step 4: Remove spinner_frame from invalidation check in get_layout**
 
-In `oxi-tui/src/widgets/chat/state.rs`, find the `get_layout` function around line 561. The current invalidation check (around line 582-585):
+In `oxicode-tui/src/widgets/chat/state.rs`, find the `get_layout` function around line 561. The current invalidation check (around line 582-585):
 
 ```rust
             if cache.msg_count == msg_count
@@ -806,7 +806,7 @@ Now also remove the unused `let spinner = self.spinner_frame;` line around line 
 
 - [ ] **Step 5: Remove spinner_frame field from LayoutCache struct**
 
-In `oxi-tui/src/widgets/chat/state.rs:78-94`:
+In `oxicode-tui/src/widgets/chat/state.rs:78-94`:
 
 ```rust
 #[derive(Default)]
@@ -854,19 +854,19 @@ In the `impl std::fmt::Debug for LayoutCache` (around line 96-108), remove the `
 
 - [ ] **Step 7: Verify build + tests**
 
-Run: `cargo build -p oxi-tui && cargo nextest run -p oxi-tui`
+Run: `cargo build -p oxicode-tui && cargo nextest run -p oxicode-tui`
 Expected: Compiles clean, all tests pass.
 
 - [ ] **Step 8: Verify clippy + fmt**
 
-Run: `cargo clippy -p oxi-tui --all-targets -- -D warnings && cargo fmt --all -- --check`
+Run: `cargo clippy -p oxicode-tui --all-targets -- -D warnings && cargo fmt --all -- --check`
 Expected: Clean.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add oxi-tui/src/widgets/chat/state.rs
-git commit -m "perf(oxi-tui): exclude spinner_frame from layout cache invalidation
+git add oxicode-tui/src/widgets/chat/state.rs
+git commit -m "perf(oxicode-tui): exclude spinner_frame from layout cache invalidation
 
 Implements v3 spec A4 (part 1): spinner_frame is no longer a cache key.
 
@@ -884,8 +884,8 @@ without triggering layout recompute."
 ## Task 5: A4 Part 2 — Switch streaming_text_len from char count to line count
 
 **Files:**
-- Modify: `oxi-tui/src/widgets/chat/state.rs:84-85` (field comment)
-- Modify: `oxi-tui/src/widgets/chat/state.rs:568-576` (streaming_text_len computation in get_layout)
+- Modify: `oxicode-tui/src/widgets/chat/state.rs:84-85` (field comment)
+- Modify: `oxicode-tui/src/widgets/chat/state.rs:568-576` (streaming_text_len computation in get_layout)
 
 **Interfaces:**
 - Consumes: existing LayoutCache
@@ -944,12 +944,12 @@ Append to `layout_cache_tests` module in `state.rs`:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo nextest run -p oxi-tui streaming_text`
+Run: `cargo nextest run -p oxicode-tui streaming_text`
 Expected: FAIL with "streaming_text_len is char-based, not line-based".
 
 - [ ] **Step 3: Update field comment**
 
-In `oxi-tui/src/widgets/chat/state.rs:84-85`:
+In `oxicode-tui/src/widgets/chat/state.rs:84-85`:
 
 ```rust
     /// Last known streaming text character count (detects content growth)
@@ -970,7 +970,7 @@ Change to:
 
 - [ ] **Step 4: Switch get_layout to use line count**
 
-In `oxi-tui/src/widgets/chat/state.rs:568-576`, the current `streaming_text_len` computation:
+In `oxicode-tui/src/widgets/chat/state.rs:568-576`, the current `streaming_text_len` computation:
 
 ```rust
         let streaming_text_len = self
@@ -1005,24 +1005,24 @@ Replace with line count (count newlines + 1 across all text content blocks):
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo nextest run -p oxi-tui streaming_text`
+Run: `cargo nextest run -p oxicode-tui streaming_text`
 Expected: Both tests PASS.
 
 - [ ] **Step 6: Run full crate tests**
 
-Run: `cargo nextest run -p oxi-tui`
+Run: `cargo nextest run -p oxicode-tui`
 Expected: All tests pass.
 
 - [ ] **Step 7: Verify clippy + fmt**
 
-Run: `cargo clippy -p oxi-tui --all-targets -- -D warnings && cargo fmt --all -- --check`
+Run: `cargo clippy -p oxicode-tui --all-targets -- -D warnings && cargo fmt --all -- --check`
 Expected: Clean.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add oxi-tui/src/widgets/chat/state.rs
-git commit -m "perf(oxi-tui): switch streaming_text_len from char count to line count
+git add oxicode-tui/src/widgets/chat/state.rs
+git commit -m "perf(oxicode-tui): switch streaming_text_len from char count to line count
 
 Implements v3 spec A4 (part 2): cache invalidation trigger is now
 line-based instead of char-based.
@@ -1043,12 +1043,12 @@ invalidate.
 ## Task 6: PTY e2e harness scaffolding
 
 **Files:**
-- Create: `oxi-cli/tests/pty_harness.rs`
+- Create: `oxicode-cli/tests/pty_harness.rs`
 
 **Interfaces:**
 - Produces:
   - `pub struct PtySession` — owns a `portable_pty::PtyPair` + child + reader
-  - `pub fn spawn(args: &[str]) -> std::io::Result<PtySession>` — spawn `oxi` binary
+  - `pub fn spawn(args: &[str]) -> std::io::Result<PtySession>` — spawn `oxicode` binary
   - `pub fn read_until(pattern: &str, timeout: Duration) -> std::io::Result<String>` — read PTY output until pattern or timeout
   - `pub fn assert_output_contains(haystack: &str, needle: &str)` — assertion helper
   - `pub fn send_line(text: &str)` — write input + Enter
@@ -1057,12 +1057,12 @@ invalidate.
 
 - [ ] **Step 1: Write the harness with smoke test**
 
-Create `oxi-cli/tests/pty_harness.rs`:
+Create `oxicode-cli/tests/pty_harness.rs`:
 
 ```rust
-//! PTY-based e2e test harness for oxi-cli.
+//! PTY-based e2e test harness for oxicode-cli.
 //!
-//! Spawns the `oxi` binary in a real PTY and reads/writes through it.
+//! Spawns the `oxicode` binary in a real PTY and reads/writes through it.
 //! Tests using this harness can verify actual ANSI byte output, escape
 //! sequences (OSC8, CSI 2026 sync, etc.), and interaction patterns
 //! that ratatui's TestBackend cannot exercise.
@@ -1076,7 +1076,7 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
-/// A spawned oxi process in its own PTY.
+/// A spawned oxicode process in its own PTY.
 pub struct PtySession {
     pty_pair: portable_pty::PtyPair,
     child: Box<dyn portable_pty::Child + Send>,
@@ -1085,10 +1085,10 @@ pub struct PtySession {
 }
 
 impl PtySession {
-    /// Spawn the `oxi` binary with the given args in a new PTY.
+    /// Spawn the `oxicode` binary with the given args in a new PTY.
     ///
-    /// Assumes the `oxi` binary is in PATH or has been built via
-    /// `cargo build -p oxi-cli`. Tests should ensure the binary exists
+    /// Assumes the `oxicode` binary is in PATH or has been built via
+    /// `cargo build -p oxicode-cli`. Tests should ensure the binary exists
     /// before calling this — they can short-circuit with `return` if not.
     pub fn spawn(args: &[&str]) -> io::Result<Self> {
         let pty_system = native_pty_system();
@@ -1101,10 +1101,10 @@ impl PtySession {
             })
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-        let mut cmd = CommandBuilder::new("oxi");
+        let mut cmd = CommandBuilder::new("oxicode");
         cmd.args(args);
         // Disable config file loading to isolate tests from user config.
-        cmd.env("OXI_NO_USER_CONFIG", "1");
+        cmd.env("OXICODE_NO_USER_CONFIG", "1");
         cmd.cwd(".");
 
         let child = pty_pair
@@ -1225,9 +1225,9 @@ pub fn assert_output_contains(haystack: &str, needle: &str) {
     );
 }
 
-/// Check if the `oxi` binary is available (cargo build -p oxi-cli succeeded).
-pub fn oxi_binary_available() -> bool {
-    Command::new("oxi")
+/// Check if the `oxicode` binary is available (cargo build -p oxicode-cli succeeded).
+pub fn oxicode_binary_available() -> bool {
+    Command::new("oxicode")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -1250,44 +1250,44 @@ mod tests {
         assert_output_contains("hello world", "missing");
     }
 
-    // Note: We don't test spawn() here — it requires the oxi binary.
+    // Note: We don't test spawn() here — it requires the oxicode binary.
     // The pty_e2e.rs file tests it.
 }
 ```
 
 - [ ] **Step 2: Build the harness (it's not a test file itself but a helper)**
 
-Run: `cargo build --tests -p oxi-cli`
+Run: `cargo build --tests -p oxicode-cli`
 Expected: Builds clean.
 
 - [ ] **Step 3: Run the harness unit tests**
 
-Run: `cargo nextest run -p oxi-cli --test pty_harness`
+Run: `cargo nextest run -p oxicode-cli --test pty_harness`
 Expected: Both helper tests PASS.
 
 - [ ] **Step 4: Verify clippy + fmt**
 
-Run: `cargo clippy -p oxi-cli --all-targets -- -D warnings && cargo fmt --all -- --check`
+Run: `cargo clippy -p oxicode-cli --all-targets -- -D warnings && cargo fmt --all -- --check`
 Expected: Clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add oxi-cli/tests/pty_harness.rs
-git commit -m "test(oxi-cli): add PTY e2e harness scaffolding
+git add oxicode-cli/tests/pty_harness.rs
+git commit -m "test(oxicode-cli): add PTY e2e harness scaffolding
 
 Implements v3 spec candidate 5 (part 1): PtySession struct wrapping
-portable-pty for spawning oxi in a real PTY.
+portable-pty for spawning oxicode in a real PTY.
 
 API:
-- PtySession::spawn(args) — open PTY, spawn oxi, return reader/writer
+- PtySession::spawn(args) — open PTY, spawn oxicode, return reader/writer
 - read_until(pattern, timeout) — read PTY output until match
 - send_line(text) — write input + Enter (PTY uses \\r)
 - send_raw(bytes) — write control sequences (Ctrl+C, etc.)
 - resize(cols, rows) — SIGWINCH simulation
 - try_wait() / kill() — child lifecycle
 - assert_output_contains(haystack, needle) — assertion helper
-- oxi_binary_available() — preflight check
+- oxicode_binary_available() — preflight check
 
 The harness is a helper module — actual e2e scenarios live in
 pty_e2e.rs. Drop impl kills the child on session end."
@@ -1298,7 +1298,7 @@ pty_e2e.rs. Drop impl kills the child on session end."
 ## Task 7: First PTY e2e scenario — minimal boot
 
 **Files:**
-- Create: `oxi-cli/tests/pty_e2e.rs`
+- Create: `oxicode-cli/tests/pty_e2e.rs`
 
 **Interfaces:**
 - Consumes: `super::pty_harness::*` (via `mod pty_harness;` declaration)
@@ -1306,60 +1306,60 @@ pty_e2e.rs. Drop impl kills the child on session end."
 
 - [ ] **Step 1: Write the e2e test scenario**
 
-Create `oxi-cli/tests/pty_e2e.rs`:
+Create `oxicode-cli/tests/pty_e2e.rs`:
 
 ```rust
-//! PTY-based e2e test scenarios for oxi-cli.
+//! PTY-based e2e test scenarios for oxicode-cli.
 //!
-//! These tests spawn the actual `oxi` binary in a PTY and verify
+//! These tests spawn the actual `oxicode` binary in a PTY and verify
 //! the byte-level terminal output. They complement the unit tests
-//! in oxi-tui (which use ratatui's TestBackend).
+//! in oxicode-tui (which use ratatui's TestBackend).
 //!
-//! Run with: cargo nextest run -p oxi-cli --test pty_e2e
+//! Run with: cargo nextest run -p oxicode-cli --test pty_e2e
 
 mod pty_harness;
 
 use std::time::Duration;
 
-use pty_harness::{PtySession, assert_output_contains, oxi_binary_available};
+use pty_harness::{PtySession, assert_output_contains, oxicode_binary_available};
 
-/// Boot the oxi binary, verify it starts up and emits recognizable UI output.
+/// Boot the oxicode binary, verify it starts up and emits recognizable UI output.
 ///
-/// Skips if the oxi binary is not built or not in PATH.
+/// Skips if the oxicode binary is not built or not in PATH.
 #[test]
 fn test_pty_minimal_boot() {
-    if !oxi_binary_available() {
-        eprintln!("skipping: oxi binary not in PATH");
+    if !oxicode_binary_available() {
+        eprintln!("skipping: oxicode binary not in PATH");
         return;
     }
 
     let mut session = match PtySession::spawn(&["--version"]) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("skipping: failed to spawn oxi: {e}");
+            eprintln!("skipping: failed to spawn oxicode: {e}");
             return;
         }
     };
 
     // --version should print and exit. Read for the version prefix.
     let output = session
-        .read_until("oxi", Duration::from_secs(5))
+        .read_until("oxicode", Duration::from_secs(5))
         .expect("read should not error");
 
-    // The --version output should contain "oxi" and a version number pattern.
-    assert_output_contains(&output, "oxi");
+    // The --version output should contain "oxicode" and a version number pattern.
+    assert_output_contains(&output, "oxicode");
 
     // The process should exit cleanly within 5 seconds.
     let start = std::time::Instant::now();
     loop {
         if let Ok(Some(code)) = session.try_wait() {
-            assert_eq!(code, 0, "oxi --version should exit 0");
+            assert_eq!(code, 0, "oxicode --version should exit 0");
             break;
         }
         if start.elapsed() > Duration::from_secs(5) {
             // Force kill and fail.
             let _ = session.kill();
-            panic!("oxi --version did not exit within 5 seconds");
+            panic!("oxicode --version did not exit within 5 seconds");
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -1367,11 +1367,11 @@ fn test_pty_minimal_boot() {
 
 /// Verify the PTY harness itself can spawn any binary and read its output.
 ///
-/// This is a smoke test for the harness — it doesn't depend on oxi.
+/// This is a smoke test for the harness — it doesn't depend on oxicode.
 #[test]
 fn test_pty_harness_spawns_echo() {
     // Use /bin/echo via the harness's lower-level primitives.
-    // Since PtySession::spawn hardcodes "oxi", we can't directly use it here.
+    // Since PtySession::spawn hardcodes "oxicode", we can't directly use it here.
     // Instead, we test the portable-pty integration manually.
     let pty_system = portable_pty::native_pty_system();
     let pty_pair = pty_system
@@ -1419,17 +1419,17 @@ fn test_pty_harness_spawns_echo() {
 
 - [ ] **Step 2: Build the test**
 
-Run: `cargo build --tests -p oxi-cli`
+Run: `cargo build --tests -p oxicode-cli`
 Expected: Compiles clean.
 
 - [ ] **Step 3: Run the e2e tests**
 
-Run: `cargo nextest run -p oxi-cli --test pty_e2e`
-Expected: Both tests PASS (test_pty_minimal_boot may skip if oxi not built — that's OK).
+Run: `cargo nextest run -p oxicode-cli --test pty_e2e`
+Expected: Both tests PASS (test_pty_minimal_boot may skip if oxicode not built — that's OK).
 
 - [ ] **Step 4: Verify clippy + fmt**
 
-Run: `cargo clippy -p oxi-cli --all-targets -- -D warnings && cargo fmt --all -- --check`
+Run: `cargo clippy -p oxicode-cli --all-targets -- -D warnings && cargo fmt --all -- --check`
 Expected: Clean.
 
 - [ ] **Step 5: Run the full workspace test suite**
@@ -1439,23 +1439,23 @@ Expected: All tests pass.
 
 - [ ] **Step 6: Verify native-browser still compiles**
 
-Run: `cargo build -p oxi-agent --features native-browser`
+Run: `cargo build -p oxicode-agent --features native-browser`
 Expected: Compiles clean.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add oxi-cli/tests/pty_e2e.rs
-git commit -m "test(oxi-cli): add first PTY e2e scenario — minimal boot
+git add oxicode-cli/tests/pty_e2e.rs
+git commit -m "test(oxicode-cli): add first PTY e2e scenario — minimal boot
 
 Implements v3 spec candidate 5 (part 2): two e2e tests.
 
-- test_pty_minimal_boot: spawns 'oxi --version' in PTY, verifies
-  output contains 'oxi' and exit code is 0 within 5 seconds.
+- test_pty_minimal_boot: spawns 'oxicode --version' in PTY, verifies
+  output contains 'oxicode' and exit code is 0 within 5 seconds.
 - test_pty_harness_spawns_echo: smoke test that the portable-pty
   integration can spawn any binary and read its output (uses echo).
 
-Both tests gracefully skip if the oxi binary is not in PATH.
+Both tests gracefully skip if the oxicode binary is not in PATH.
 
 This is the regression infrastructure W1 (Phase 2a of UX spec)
 will rely on for visual change verification."
@@ -1497,7 +1497,7 @@ All Phase 1 deliverables covered. Phase 2a (W1, B5, B7, OSC8, tmTheme) and later
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-07-19-oxi-tui-phase1-v0.56-patch.md`. Two execution options:
+Plan complete and saved to `docs/superpowers/plans/2026-07-19-oxicode-tui-phase1-v0.56-patch.md`. Two execution options:
 
 **1. Subagent-Driven (recommended)** — dispatch a fresh subagent per task, review between tasks, fast iteration.
 

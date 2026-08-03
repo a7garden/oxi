@@ -1,4 +1,4 @@
-# cargo-nextest configuration for oxi workspace
+# cargo-nextest configuration for oxicode workspace
 # Docs: https://nexte.st/book/configuration.html
 
 [store]

@@ -71,7 +71,7 @@ RFC-006 (SDK) ────────────── 기존 34모듈/6서브
 ### Sprint 1-3 (P0 + P1 병렬)
 
 ```
-Week 1-2:  RFC-001 Phase 1 (키바인딩: oxi-tui에 keybindings/ 모듈)
+Week 1-2:  RFC-001 Phase 1 (키바인딩: oxicode-tui에 keybindings/ 모듈)
            RFC-002 Phase 1 (이미지 생성 API)
 
 Week 3-4:  RFC-001 Phase 2 (차동 렌더링: DiffBackend)
@@ -122,7 +122,7 @@ Week 10-12: RFC-003 Phase 5 (에디트 강화)
 
 ---
 
-## oxi가 pi를 능가하는 영역 (v1.0 이후)
+## oxicode가 pi를 능가하는 영역 (v1.0 이후)
 
 1. **성능**: 네이티브 바이너리 vs Node.js 런타임
 2. **Compaction**: LLM 기반 컨텍스트 압축 (pi에 없음)

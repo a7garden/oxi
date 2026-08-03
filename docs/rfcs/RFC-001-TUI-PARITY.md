@@ -9,20 +9,20 @@
 
 ## 1. Problem Definition
 
-The oxi TUI layer totals **15,602 LOC** across two crates:
+The oxicode TUI layer totals **15,602 LOC** across two crates:
 
 | Crate | Path | LOC |
 |-------|------|-----|
-| `oxi-tui` | `oxi-tui/src/` | 6,601 |
-| `oxi-cli` | `oxi-cli/src/tui/` | 9,001 |
+| `oxicode-tui` | `oxicode-tui/src/` | 6,601 |
+| `oxicode-cli` | `oxicode-cli/src/tui/` | 9,001 |
 | **Total** | | **15,602** |
 
 pi-tui uses a custom rendering engine at ~11,300 LOC. The core gaps:
 
-| Area | pi | oxi (current) | Gap |
+| Area | pi | oxicode (current) | Gap |
 |------|----|---------------|-----|
 | Differential rendering | Line-level diff (60fps cap) | ratatui full-frame redraw | Performance |
-| Editor | 76KB full-featured (undo, kill-ring, history, jump) | `ratatui-textarea` wrapping (oxi-tui `widgets/input.rs`, 330 LOC) | ~50% feature coverage |
+| Editor | 76KB full-featured (undo, kill-ring, history, jump) | `ratatui-textarea` wrapping (oxicode-tui `widgets/input.rs`, 330 LOC) | ~50% feature coverage |
 | Keybindings | 31 bindings + dynamic rebinding + conflict detection | Hardcoded in `handlers.rs` (1,492 LOC) | Critical |
 | Slash completion | 23KB (slash commands, file paths, fuzzy) | **Existing system** in `slash.rs` (1,030 LOC) + `app.rs` (completion state, ~50 LOC) — slash commands only, no file path or fuzzy | Moderate |
 | Overlay | 9-direction anchor + z-index + focus | **Existing system**: `OverlayComponent` trait + 7 components (3,585 LOC), but center-only placement, no anchor positioning | Moderate (extend, don't replace) |
@@ -31,11 +31,11 @@ pi-tui uses a custom rendering engine at ~11,300 LOC. The core gaps:
 
 **Existing implementations the previous draft missed:**
 
-1. **Overlay system** (`oxi-cli/src/tui/overlay/`, 3,585 LOC): `OverlayComponent` trait with `handle_key()`, `render()`, `hint()` methods. 10 implementations across 7 files: `provider_select` (765 LOC), `model_select` (214 LOC), `questionnaire` (650 LOC), `resume_select` (196 LOC), `logout_select` (150 LOC), `router_setup` (701 LOC), plus `factories.rs` (684 LOC) with 4 implementations: `ModelSelectOverlay`, `LogoutSelectOverlay`, `ResumeSelectOverlay`, `RoutingOverlay`. `router_integration.rs` (146 LOC) provides helper functions, not a component.
+1. **Overlay system** (`oxicode-cli/src/tui/overlay/`, 3,585 LOC): `OverlayComponent` trait with `handle_key()`, `render()`, `hint()` methods. 10 implementations across 7 files: `provider_select` (765 LOC), `model_select` (214 LOC), `questionnaire` (650 LOC), `resume_select` (196 LOC), `logout_select` (150 LOC), `router_setup` (701 LOC), plus `factories.rs` (684 LOC) with 4 implementations: `ModelSelectOverlay`, `LogoutSelectOverlay`, `ResumeSelectOverlay`, `RoutingOverlay`. `router_integration.rs` (146 LOC) provides helper functions, not a component.
 
-2. **Slash completion system** (`oxi-cli/src/tui/slash.rs`, 1,030 LOC + `app.rs` state): `SlashCompletion` type, `update_slash_completions()`, `selected_slash_command()`, `next_slash_completion()`, `prev_slash_completion()`. Popup rendering in `render.rs:render_slash_popup_overlay()` (~60 LOC). Covers slash commands only — no file path completion or fuzzy file search.
+2. **Slash completion system** (`oxicode-cli/src/tui/slash.rs`, 1,030 LOC + `app.rs` state): `SlashCompletion` type, `update_slash_completions()`, `selected_slash_command()`, `next_slash_completion()`, `prev_slash_completion()`. Popup rendering in `render.rs:render_slash_popup_overlay()` (~60 LOC). Covers slash commands only — no file path completion or fuzzy file search.
 
-3. **Render pipeline** (`oxi-cli/src/tui/render.rs`, 1,207 LOC): `draw()` function (starts at line 432) called via `tui.draw(|f| render::draw(f, &mut state, &theme))` at `app.rs:1238`. Manages layout chunks, overlay dispatch (`render_overlay`), slash popup overlay (line 475, defined at line 765), status line, queue panel, input area.
+3. **Render pipeline** (`oxicode-cli/src/tui/render.rs`, 1,207 LOC): `draw()` function (starts at line 432) called via `tui.draw(|f| render::draw(f, &mut state, &theme))` at `app.rs:1238`. Manages layout chunks, overlay dispatch (`render_overlay`), slash popup overlay (line 475, defined at line 765), status line, queue panel, input area.
 
 4. **App overlay state** (`app.rs:284-340`): Dual overlay system — legacy `AppOverlay` enum (ModelSelect, LogoutSelect, ResumeSelect, RoutingStatus) and migrated `overlay_state: Option<Box<dyn OverlayComponent>>`. Integration in `handlers.rs` lines 767-785: `handle_key` dispatches to `OverlayComponent::handle_key()`, processes `OverlayAction` variants (Close, SwitchSession, NewSession, OpenRouterSetup).
 
@@ -46,7 +46,7 @@ pi-tui uses a custom rendering engine at ~11,300 LOC. The core gaps:
 ## 2. Design Principles
 
 1. **Extend, don't replace**: The existing overlay system (`OverlayComponent` trait) and slash completion system are functional. Extend them with missing capabilities (anchor positioning, file completion) rather than building parallel systems.
-2. **Respect crate boundaries**: Per AGENTS.md dependency flow: `oxi-tui (independent) ← oxi-cli`. Overlays and completion depend on `AgentSession`, `Settings`, `auth_storage` — they stay in `oxi-cli/src/tui/`. Only shared interfaces (e.g., `OverlayAnchor` enum) belong in `oxi-tui`.
+2. **Respect crate boundaries**: Per AGENTS.md dependency flow: `oxicode-tui (independent) ← oxicode-cli`. Overlays and completion depend on `AgentSession`, `Settings`, `auth_storage` — they stay in `oxicode-cli/src/tui/`. Only shared interfaces (e.g., `OverlayAnchor` enum) belong in `oxicode-tui`.
 3. **Layered rendering**: Rendering backend (differential) / widget layer (interfaces) / application layer (logic). The `DifferentialRenderer` coexists with ratatui by replacing the `crossterm` Backend — ratatui's `Terminal::draw()` continues to work; only the write-to-terminal step is optimized.
 4. **Zero-copy rendering**: Send only changed lines to the terminal. Port pi's differential algorithm directly to Rust.
 5. **Unicode correctness**: CJK, emoji (ZWJ sequences), combining characters handled via grapheme clusters. Rust's `unicode-segmentation` + `unicode-width` crates.
@@ -59,7 +59,7 @@ pi-tui uses a custom rendering engine at ~11,300 LOC. The core gaps:
 ### 3.1 Crate Responsibility (Corrected)
 
 ```
-oxi-tui/src/                    # Shared types and widgets — NO dependency on oxi-cli
+oxicode-tui/src/                    # Shared types and widgets — NO dependency on oxicode-cli
 ├── render/
 │   ├── mod.rs                  # DifferentialRenderer
 │   ├── diff.rs                 # Line diff algorithm
@@ -83,7 +83,7 @@ oxi-tui/src/                    # Shared types and widgets — NO dependency on 
     ├── routing.rs              # Existing (keep)
     └── tool_renderer.rs        # Existing (keep)
 
-oxi-cli/src/tui/                # Application layer — depends on oxi-tui
+oxicode-cli/src/tui/                # Application layer — depends on oxicode-tui
 ├── app.rs                      # Existing AppState + main loop (1,530 LOC)
 ├── handlers.rs                 # Existing key dispatch (1,492 LOC) — refactor to use keybindings/
 ├── render.rs                   # Existing draw() pipeline (1,207 LOC) — integrate DifferentialRenderer
@@ -106,7 +106,7 @@ oxi-cli/src/tui/                # Application layer — depends on oxi-tui
     └── fuzzy_file.rs           # Fuzzy file search (fd integration)
 ```
 
-**Key difference from previous draft**: `overlay/` and `completion/` live in `oxi-cli/src/tui/`, not `oxi-tui/src/`. They depend on CLI types (`AgentSession`, `Settings`, `auth_storage`). Only the `OverlayAnchor` enum lives in `oxi-tui` as a shared type.
+**Key difference from previous draft**: `overlay/` and `completion/` live in `oxicode-cli/src/tui/`, not `oxicode-tui/src/`. They depend on CLI types (`AgentSession`, `Settings`, `auth_storage`). Only the `OverlayAnchor` enum lives in `oxicode-tui` as a shared type.
 
 ### 3.2 Core Type Design
 
@@ -187,7 +187,7 @@ pub enum ImageProtocol { Kitty, ITerm2 }
 
 ```rust
 /// Declarative keybinding definitions — port of pi's TUI_KEYBINDINGS
-/// Lives in oxi-tui (no CLI dependencies)
+/// Lives in oxicode-tui (no CLI dependencies)
 pub struct KeybindingsManager {
     defaults: HashMap<Action, Vec<KeyId>>,
     user_overrides: HashMap<Action, Vec<KeyId>>,
@@ -239,7 +239,7 @@ This replaces hardcoded key matching with declarative bindings while preserving 
 
 #### Overlay System (Extended)
 
-The existing `OverlayComponent` trait in `oxi-cli/src/tui/overlay/mod.rs` already provides:
+The existing `OverlayComponent` trait in `oxicode-cli/src/tui/overlay/mod.rs` already provides:
 
 ```rust
 // EXISTING — keep unchanged
@@ -260,7 +260,7 @@ pub enum OverlayAction {
 **What's missing** (and what to add):
 
 ```rust
-// NEW in oxi-tui/src/overlay_anchor.rs — shared type
+// NEW in oxicode-tui/src/overlay_anchor.rs — shared type
 #[derive(Debug, Clone, Copy)]
 pub enum OverlayAnchor {
     Center, TopLeft, TopRight, BottomLeft, BottomRight,
@@ -276,7 +276,7 @@ pub struct OverlayLayout {
     pub offset_y: i16,
 }
 
-// NEW in oxi-cli/src/tui/overlay/anchor.rs
+// NEW in oxicode-cli/src/tui/overlay/anchor.rs
 /// Resolve overlay Rect from anchor + constraints (port of pi's resolveOverlayLayout)
 pub fn resolve_overlay_layout(layout: &OverlayLayout, term_w: u16, term_h: u16) -> Rect {
     // 1. Compute available area from margins
@@ -320,7 +320,7 @@ fn render_slash_popup_overlay(f, input_area, state, theme);
 **What's missing**: File path completion and fuzzy file search. Add these as new modules that plug into the existing completion state:
 
 ```rust
-// NEW in oxi-cli/src/tui/completion/mod.rs
+// NEW in oxicode-cli/src/tui/completion/mod.rs
 pub struct CompletionManager {
     // Wraps existing slash completion + adds new providers
     slash: SlashProvider,          // delegates to existing slash.rs
@@ -335,7 +335,7 @@ pub enum CompletionKind {
     FuzzyFile { query: String },   // NEW
 }
 
-// NEW in oxi-cli/src/tui/completion/path.rs
+// NEW in oxicode-cli/src/tui/completion/path.rs
 fn complete_path(prefix: &str, cwd: &Path) -> Vec<CompletionItem> {
     // 1. ~/ expansion
     // 2. directory/prefix split
@@ -344,7 +344,7 @@ fn complete_path(prefix: &str, cwd: &Path) -> Vec<CompletionItem> {
     // 5. directory-first sort
 }
 
-// NEW in oxi-cli/src/tui/completion/fuzzy_file.rs
+// NEW in oxicode-cli/src/tui/completion/fuzzy_file.rs
 async fn fuzzy_file_search(query: &str, base_dir: &Path) -> Vec<CompletionItem> {
     // 1. resolve_scoped_query
     // 2. Command::new("fd") --base-directory --max-results 100 --type f --type d --follow --hidden --exclude .git
@@ -373,7 +373,7 @@ pub fn detect_dimensions(data: &[u8]) -> Option<ImageDimensions>;
 
 #### Editor (Deferred — See Section 6)
 
-`ratatui-textarea` (used by `oxi-tui/src/widgets/input.rs`, 330 LOC) already provides:
+`ratatui-textarea` (used by `oxicode-tui/src/widgets/input.rs`, 330 LOC) already provides:
 - Undo/redo
 - Word movement (forward/backward)
 - CJK input support
@@ -391,23 +391,23 @@ The RFC's original proposal for a 76KB custom editor at 3 weeks cost is **deferr
 
 | Task | Deliverable | Location | Dependencies |
 |------|-------------|----------|-------------|
-| Key parsing + Kitty protocol | `KeyId`, `parse_kitty_sequence()` | `oxi-tui/src/keybindings/keys.rs` | None |
-| Action registry | `KeybindingsManager`, `Action` enum | `oxi-tui/src/keybindings/registry.rs` | None |
-| Conflict detection | `detect_conflicts()` | `oxi-tui/src/keybindings/conflict.rs` | None |
-| Settings integration | Load user bindings from `settings.toml` | `oxi-cli/src/tui/` (app.rs) | Phase 1 |
-| Handlers refactor | Replace hardcoded match with Action dispatch | `oxi-cli/src/tui/handlers.rs` | Phase 1 |
+| Key parsing + Kitty protocol | `KeyId`, `parse_kitty_sequence()` | `oxicode-tui/src/keybindings/keys.rs` | None |
+| Action registry | `KeybindingsManager`, `Action` enum | `oxicode-tui/src/keybindings/registry.rs` | None |
+| Conflict detection | `detect_conflicts()` | `oxicode-tui/src/keybindings/conflict.rs` | None |
+| Settings integration | Load user bindings from `settings.toml` | `oxicode-cli/src/tui/` (app.rs) | Phase 1 |
+| Handlers refactor | Replace hardcoded match with Action dispatch | `oxicode-cli/src/tui/handlers.rs` | Phase 1 |
 
-**Crate boundary**: `keybindings/` goes in `oxi-tui` — it has no CLI dependencies (just key parsing and action mapping). `handlers.rs` in `oxi-cli` consumes the `KeybindingsManager`.
+**Crate boundary**: `keybindings/` goes in `oxicode-tui` — it has no CLI dependencies (just key parsing and action mapping). `handlers.rs` in `oxicode-cli` consumes the `KeybindingsManager`.
 
 ### Phase 2: Differential Rendering (2 weeks)
 
 | Task | Deliverable | Location | Dependencies |
 |------|-------------|----------|-------------|
-| `DiffBackend` | `impl ratatui::Backend for DiffBackend<W>` | `oxi-tui/src/render/mod.rs` | None |
-| Buffer diff algorithm | Line comparison, skip identical | `oxi-tui/src/render/diff.rs` | None |
-| ANSI tracker | `AnsiTracker` | `oxi-tui/src/render/ansi.rs` | None |
-| Terminal capabilities | `TerminalCapabilities::detect()` | `oxi-tui/src/render/terminal.rs` | None |
-| Integration | Swap `CrosstermBackend` → `DiffBackend` in `app.rs` | `oxi-cli/src/tui/app.rs` | Phase 2 |
+| `DiffBackend` | `impl ratatui::Backend for DiffBackend<W>` | `oxicode-tui/src/render/mod.rs` | None |
+| Buffer diff algorithm | Line comparison, skip identical | `oxicode-tui/src/render/diff.rs` | None |
+| ANSI tracker | `AnsiTracker` | `oxicode-tui/src/render/ansi.rs` | None |
+| Terminal capabilities | `TerminalCapabilities::detect()` | `oxicode-tui/src/render/terminal.rs` | None |
+| Integration | Swap `CrosstermBackend` → `DiffBackend` in `app.rs` | `oxicode-cli/src/tui/app.rs` | Phase 2 |
 
 **Integration point**: In `app.rs`, change:
 ```rust
@@ -426,10 +426,10 @@ All `tui.draw(|f| render::draw(f, &mut state, &theme))` calls continue to work u
 
 | Task | Deliverable | Location | Dependencies |
 |------|-------------|----------|-------------|
-| `OverlayAnchor` enum + layout resolver | Shared anchor type | `oxi-tui/src/overlay_anchor.rs` | None |
-| `resolve_overlay_layout()` | 9-direction anchor positioning | `oxi-cli/src/tui/overlay/anchor.rs` | Phase 3 |
-| Line compositing | `composite_line_at()` | `oxi-cli/src/tui/overlay/anchor.rs` | Phase 3 |
-| Upgrade existing overlays | Add `OverlayLayout` to 7 components | `oxi-cli/src/tui/overlay/*.rs` | Phase 3 |
+| `OverlayAnchor` enum + layout resolver | Shared anchor type | `oxicode-tui/src/overlay_anchor.rs` | None |
+| `resolve_overlay_layout()` | 9-direction anchor positioning | `oxicode-cli/src/tui/overlay/anchor.rs` | Phase 3 |
+| Line compositing | `composite_line_at()` | `oxicode-cli/src/tui/overlay/anchor.rs` | Phase 3 |
+| Upgrade existing overlays | Add `OverlayLayout` to 7 components | `oxicode-cli/src/tui/overlay/*.rs` | Phase 3 |
 
 **No trait changes**. Each overlay component gets an `OverlayLayout` field and uses `resolve_overlay_layout()` in its `render()` method instead of `centered_popup()`.
 
@@ -437,11 +437,11 @@ All `tui.draw(|f| render::draw(f, &mut state, &theme))` calls continue to work u
 
 | Task | Deliverable | Location | Dependencies |
 |------|-------------|----------|-------------|
-| `CompletionManager` | Unified completion dispatch | `oxi-cli/src/tui/completion/mod.rs` | None |
-| File path completion | `complete_path()` | `oxi-cli/src/tui/completion/path.rs` | None |
-| Fuzzy file search | `fuzzy_file_search()` via fd | `oxi-cli/src/tui/completion/fuzzy_file.rs` | None |
-| AppState integration | Extend `update_slash_completions()` pattern | `oxi-cli/src/tui/app.rs` | Phase 4 |
-| Render integration | Generalize `render_slash_popup_overlay()` | `oxi-cli/src/tui/render.rs` | Phase 4 |
+| `CompletionManager` | Unified completion dispatch | `oxicode-cli/src/tui/completion/mod.rs` | None |
+| File path completion | `complete_path()` | `oxicode-cli/src/tui/completion/path.rs` | None |
+| Fuzzy file search | `fuzzy_file_search()` via fd | `oxicode-cli/src/tui/completion/fuzzy_file.rs` | None |
+| AppState integration | Extend `update_slash_completions()` pattern | `oxicode-cli/src/tui/app.rs` | Phase 4 |
+| Render integration | Generalize `render_slash_popup_overlay()` | `oxicode-cli/src/tui/render.rs` | Phase 4 |
 
 **Builds on existing**: `slash.rs` (1,030 LOC) and `app.rs` completion state are the foundation. New providers plug into the same pattern.
 
@@ -449,10 +449,10 @@ All `tui.draw(|f| render::draw(f, &mut state, &theme))` calls continue to work u
 
 | Task | Deliverable | Location | Dependencies |
 |------|-------------|----------|-------------|
-| Kitty image protocol | `encode_kitty()` + chunk splitting | `oxi-tui/src/render/image.rs` | Phase 2 (TerminalCapabilities) |
-| iTerm2 image protocol | `encode_iterm2()` | `oxi-tui/src/render/image.rs` | Phase 2 |
-| Dimension detection | `detect_dimensions()` (PNG, JPEG, GIF, WebP) | `oxi-tui/src/render/image.rs` | None |
-| Chat widget integration | Image rendering in message bubbles | `oxi-tui/src/widgets/chat.rs` | Phase 5 |
+| Kitty image protocol | `encode_kitty()` + chunk splitting | `oxicode-tui/src/render/image.rs` | Phase 2 (TerminalCapabilities) |
+| iTerm2 image protocol | `encode_iterm2()` | `oxicode-tui/src/render/image.rs` | Phase 2 |
+| Dimension detection | `detect_dimensions()` (PNG, JPEG, GIF, WebP) | `oxicode-tui/src/render/image.rs` | None |
+| Chat widget integration | Image rendering in message bubbles | `oxicode-tui/src/widgets/chat.rs` | Phase 5 |
 
 ### Phase 6: Editor Evaluation (Research, 1 week)
 
@@ -469,7 +469,7 @@ All `tui.draw(|f| render::draw(f, &mut state, &theme))` calls continue to work u
 ## 5. New Dependencies
 
 ```toml
-# oxi-tui/Cargo.toml
+# oxicode-tui/Cargo.toml
 [dependencies]
 unicode-segmentation = "1"      # Grapheme cluster segmentation (editor/input)
 unicode-width = "0.2"           # Already used (extend)
@@ -487,7 +487,7 @@ Existing dependencies preserved: `ratatui`, `crossterm`, `pulldown-cmark`.
 |------|--------|------------|
 | **ratatui + DifferentialRenderer coexistence** | ratatui's `Terminal::draw()` computes a full `Buffer` every frame — the `DiffBackend` must intercept at the Backend level, not replace `Terminal::draw()` | `DiffBackend` implements `ratatui::Backend` trait, wrapping `CrosstermBackend`. ratatui's `Terminal` and all widget code unchanged. Integration: swap `CrosstermBackend::new(stdout)` → `DiffBackend::new(CrosstermBackend::new(stdout))` in `app.rs`. Verified: `render::draw()` at `render.rs:432` calls only `f.render_widget()` — no direct terminal writes. |
 | **Kitty protocol environment dependency** | Hard to test outside Kitty/Ghostty/WezTerm | Virtual terminal mock + CI skip. `TerminalCapabilities::detect()` gracefully falls back to no-image mode. |
-| **Crate boundary violations** | Previous draft put `overlay/` and `completion/` in `oxi-tui`, but these depend on `AgentSession`, `Settings`, `auth_storage` (CLI types) | All overlay and completion code stays in `oxi-cli/src/tui/`. Only `OverlayAnchor` enum and `DiffBackend` go in `oxi-tui`. Verified against AGENTS.md: `oxi-tui (independent) ← oxi-cli`. |
+| **Crate boundary violations** | Previous draft put `overlay/` and `completion/` in `oxicode-tui`, but these depend on `AgentSession`, `Settings`, `auth_storage` (CLI types) | All overlay and completion code stays in `oxicode-cli/src/tui/`. Only `OverlayAnchor` enum and `DiffBackend` go in `oxicode-tui`. Verified against AGENTS.md: `oxicode-tui (independent) ← oxicode-cli`. |
 | **Overlay migration disruption** | 7 existing overlay components (3,585 LOC) work today | Extend, don't replace. Add `OverlayLayout` field to each component. `OverlayComponent` trait unchanged. No parallel system. |
 | **Editor replacement ROI** | 3-week custom editor with unclear benefit over `ratatui-textarea` | Deferred to Phase 6. Audit existing textarea first. If gaps are minor, enhance textarea instead of replacing. |
 | **CJK/emoji edge cases** | Cursor positioning errors | `unicode-segmentation` implements full UAX #29. Same algorithm as pi. |
@@ -504,4 +504,4 @@ Existing dependencies preserved: `ratatui`, `crossterm`, `pulldown-cmark`.
 - [ ] **Terminal image**: Kitty + iTerm2 protocol with auto-detection. Image display in chat widget.
 - [ ] **Editor evaluation**: Documented gap analysis of `ratatui-textarea` vs pi editor. Decision on custom editor vs enhancement.
 - [ ] **No regressions**: All existing overlay components (provider_select, model_select, questionnaire, resume_select, logout_select, router_setup, router_integration) continue working.
-- [ ] **Crate boundaries clean**: `oxi-tui` has zero imports from `oxi-cli`. Verified by `cargo clippy --workspace`.
+- [ ] **Crate boundaries clean**: `oxicode-tui` has zero imports from `oxicode-cli`. Verified by `cargo clippy --workspace`.

@@ -1,7 +1,7 @@
-# 작업: oxi-sdk Composition Layer 구현
+# 작업: oxicode-sdk Composition Layer 구현
 
 ## 프로젝트 위치
-/Volumes/MERCURY/PROJECTS/oxi/oxi-sdk/
+/Volumes/MERCURY/PROJECTS/oxicode/oxicode-sdk/
 
 ## 설계 문서
 docs/sdk-redesign/ 폴더의 설계 문서를 참고할 것. 특히:
@@ -12,7 +12,7 @@ docs/sdk-redesign/ 폴더의 설계 문서를 참고할 것. 특히:
 - 06-integration.md §6.3 (RoutingControl), §6.4-6.5 (builder 확장)
 
 ## 컨텍스트
-oxi는 Rust 코딩 에이전트이자 Agent OS(oxios)의 엔진 SDK이다.
+oxicode는 Rust 코딩 에이전트이자 Agent OS(oxios)의 엔진 SDK이다.
 Session 1에서 기초 레이어(error.rs, lifecycle/, observability/)를 이미 구현했다.
 이번 작업은 그 기초 위에 **조합 레이어**를 구현하는 것이다.
 
@@ -101,7 +101,7 @@ MiddlewarePipeline 핵심:
 - 첫 non-Continue 결과에서 체인 중단
 
 MiddlewareBridge 핵심 (이 설계의 가장 중요한 부분):
-- oxi-agent의 AgentHooks는 before_tool_call: Option<Box<dyn Fn>> 하나만 지원
+- oxicode-agent의 AgentHooks는 before_tool_call: Option<Box<dyn Fn>> 하나만 지원
 - 여러 middleware를 하나의 AgentHooks로 컴파일해야 함
 - into_hooks(pipeline, agent_id, terminate_flag) → AgentHooks
 - before_tool_call 클로저 내에서 pipeline.execute(BeforeTool) 호출
@@ -124,7 +124,7 @@ RoutingControl struct:
 
 ### 5. 기존 모듈 확장
 builder.rs:
-- OxiBuilder에 supervisor() → SupervisorBuilder 메서드 추가
+- OxicodeBuilder에 supervisor() → SupervisorBuilder 메서드 추가
 - SupervisorBuilder: policy(), snapshot_dir(), with_audit(), with_authorizer(), with_tracer(), with_cost_tracker(), build()
 
 agent_builder.rs:
@@ -142,11 +142,11 @@ lib.rs / prelude.rs:
 
 ## 규칙
 1. cargo fmt --all -- --check 통과해야 함
-2. cargo clippy -p oxi-sdk -- -D warnings 통과해야 함
-3. cargo test -p oxi-sdk 통과해야 함
+2. cargo clippy -p oxicode-sdk -- -D warnings 통과해야 함
+3. cargo test -p oxicode-sdk 통과해야 함
 4. 기존 테스트 44개가 모두 계속 통과해야 함 (regression 금지)
 5. 각 모듈에 #[cfg(test)] mod tests 작성
-6. oxi-ai, oxi-agent의 기존 코드를 수정하지 않음
+6. oxicode-ai, oxicode-agent의 기존 코드를 수정하지 않음
 7. 코드 스타일: parking_lot::RwLock, async_trait, thiserror 사용
 8. 설계 문서의 타입 이름과 API를 정확히 따를 것
 9. CoordinatedGroup에서 절대 agent.model_id()를 에이전트 식별자로 사용하지 말 것. AgentHandle::agent_id() 사용.

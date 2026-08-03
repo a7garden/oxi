@@ -12,7 +12,7 @@
 
 omp의 **TTSR**은 스트리밍 중 모델 출력이 **프로젝트 룰을 위반**하면 (예: Rust에서 `Box::leak` 작성) 즉시 스트림을 **중단**하고, 룰을 **시스템 리마인더로 주입**한 뒤 **같은 지점에서 재시도**한다. "컨텍스트 세금 없는 교정" — 매 턴 룰을 프롬프트에 넣지 않고도 위반 시에만 발동.
 
-**oxi의 핵심 자산**: `agent_loop/streaming.rs`의 토큰 처리 루프(이미 delta마다
+**oxicode의 핵심 자산**: `agent_loop/streaming.rs`의 토큰 처리 루프(이미 delta마다
 이벤트를 처리)에 TTSR 체크를 **인라인 주입**할 수 있다. 단, **`cancel_signal`과
 `retry.rs`를 직접 재사용하는 것은 의미가 다르다**:
 - `cancel_signal` / `external_stop`은 **"사용자가 중단을 원함(Ctrl+C)"** → 스트림
@@ -71,7 +71,7 @@ InjectionRecord { lastInjectedAt: turn }   // 반복 게이팅 (같은 턴/인�
 
 ```
 1. 스트리밍 중 checkDelta 매치 → Rule 발견
-2. 스트림 abort (omp는 자체, oxi는 `StreamOutcome::RuleInterrupt` 반환)
+2. 스트림 abort (omp는 자체, oxicode는 `StreamOutcome::RuleInterrupt` 반환)
 3. ttsr-interrupt.md 템플릿으로 시스템 메시지 주입:
    "<system-interrupt reason="rule_violation" rule="{{name}}" path="{{path}}">
     Your output was interrupted because it violated a user-defined rule.
@@ -82,16 +82,16 @@ InjectionRecord { lastInjectedAt: turn }   // 반복 게이팅 (같은 턴/인�
 
 ### 1.4 룰 discovery (`discovery/`)
 
-- `.oxi/rules/*.mdc`, `.cursorrules`, `.clinerules`, `AGENTS.md` 섹션 → `Rule` 정규화.
+- `.oxicode/rules/*.mdc`, `.cursorrules`, `.clinerules`, `AGENTS.md` 섹션 → `Rule` 정규화.
 - 번들 기본 룰 (`builtin-rules/`) — omp는 19개 (Rust 7 + TS 12). 최하위 우선순위, `ttsr.builtinRules`로 게이트.
 
 ---
 
-## 2. oxi화 설계
+## 2. oxicode화 설계
 
 ### 2.1 새 포트: `RuleRegistry` (포트 13)
 
-`oxi-sdk/src/ports/mod.rs`:
+`oxicode-sdk/src/ports/mod.rs`:
 
 ```rust
 // Port 13 — RuleRegistry: TTSR + always-apply 룰 소스.
@@ -136,7 +136,7 @@ impl RuleRegistry for NoopRuleRegistry {
 }
 ```
 
-### 2.2 TtsrEngine (`oxi-agent/src/agent_loop/ttsr.rs`) — 신규
+### 2.2 TtsrEngine (`oxicode-agent/src/agent_loop/ttsr.rs`) — 신규
 
 omp `TtsrManager` 포팅. **포트가 아닌 에이전트 루프 내부 컴포넌트** (스트림 훅 필요).
 
@@ -324,7 +324,7 @@ loop {
 > TTSR retry는 **컨텍스트에 메시지 2개(부분 출력 + 룰 주입)를 추가한 새 요청**이다.
 > 이것이 별도 제어 흐름이 필요한 이유다.
 
-### 2.4 인터럽트 템플릿 (`oxi-agent/src/prompts/ttsr-interrupt.md`)
+### 2.4 인터럽트 템플릿 (`oxicode-agent/src/prompts/ttsr-interrupt.md`)
 
 omp `ttsr-interrupt.md` 번역:
 
@@ -353,13 +353,13 @@ if !injected_rules.is_empty() {
 }
 ```
 
-### 2.6 룰 discovery (`oxi-cli/src/discovery/rules.rs`)
+### 2.6 룰 discovery (`oxicode-cli/src/discovery/rules.rs`)
 
 omp `discovery/` 포팅:
-- `.oxi/rules/*.mdc` — frontmatter YAML + 본문.
+- `.oxicode/rules/*.mdc` — frontmatter YAML + 본문.
 - `.cursorrules`, `.clinerules` — 레거시 형식 정규화.
 - `AGENTS.md`의 "Rules" 섹션 (있다면).
-- 번들 기본 룰 — omp 19개 중 Rust 관련 7개를 oxi 컨텍스트로 이식 (`rs-box-leak`, `rs-parking-lot`, `rs-result-type`, `rs-lazylock`, `rs-future-prelude`, `rs-match-ergonomics` 등은 oxi AGENTS.md 관례와 정합).
+- 번들 기본 룰 — omp 19개 중 Rust 관련 7개를 oxicode 컨텍스트로 이식 (`rs-box-leak`, `rs-parking-lot`, `rs-result-type`, `rs-lazylock`, `rs-future-prelude`, `rs-match-ergonomics` 등은 oxicode AGENTS.md 관례와 정합).
 
 ### 2.7 ToolContext / AgentConfig 확장
 
@@ -407,7 +407,7 @@ pub struct Settings {
 | M3a.2 | `TtsrEngine` (정규식 매칭, 소스별 버퍼, 반복 게이팅) | M3a.1 |
 | M3a.3 | `StreamOutcome` 반환 타입 + 스트리밍 루프 TTSR 체크 + mod.rs interrupt/retry 제어 흐름 | M3a.2 |
 | M3a.4 | `ttsr-interrupt.md` 템플릿 + compaction 생존 훅 | M3a.3 |
-| M3a.5 | `discovery/rules.rs` (`.oxi/rules/*.mdc` + 레거시 정규화) | M3a.1 |
+| M3a.5 | `discovery/rules.rs` (`.oxicode/rules/*.mdc` + 레거시 정규화) | M3a.1 |
 | M3a.6 | 번들 기본 룰 (Rust 7개 이식) | M3a.5 |
 | M3a.7 | settings (`ttsr_enabled` 등) + 시스템 프롬프트 | M3a.6 |
 
@@ -424,20 +424,20 @@ pub struct Settings {
 | 중단 토큰 비용 (제공자별 과금) | 🔴 확인 필요 | 중단된 응답의 부분 토큰이 과금되는지. omp는 감수. 주요 제공자 정책 조사 |
 | astCondition (ast-grep) | 🟢 후순위 (본 로드맵 범위 외) | 정규식은 false positive 가능. AST는 정확하지만 tree-sitter 의존. 본 로드맵 후 별도 검토 |
 | 무한 재시도 | 🟢 `max_retries_per_turn` | 같은 룰 3회 시 사용자 알림 |
-| 룰 임포트 다중 포맷 | 🟢 `.oxi/rules/*.mdc` 우선 | Cursor/Cline/Copilot는 후속 |
-| 번들 룰과 oxi AGENTS.md 관례 충돌 | 🟡 검토 | `rs-parking-lot` 등은 oxi AGENTS.md와 일치 — 검증 후 번들 |
-| omfg (모델 생성 룰) | 🔴 별도 | omp는 모델이 룰을 생성/수정. oxi는 M3a 범위 외 (도구 추가 필요) |
+| 룰 임포트 다중 포맷 | 🟢 `.oxicode/rules/*.mdc` 우선 | Cursor/Cline/Copilot는 후속 |
+| 번들 룰과 oxicode AGENTS.md 관례 충돌 | 🟡 검토 | `rs-parking-lot` 등은 oxicode AGENTS.md와 일치 — 검증 후 번들 |
+| omfg (모델 생성 룰) | 🔴 별도 | omp는 모델이 룰을 생성/수정. oxicode는 M3a 범위 외 (도구 추가 필요) |
 
 ---
 
-## 6. 부록: omp → oxi 매핑
+## 6. 부록: omp → oxicode 매핑
 
-| omp 파일 | oxi 위치 |
+| omp 파일 | oxicode 위치 |
 |---|---|
-| `export/ttsr.ts` (`TtsrManager`) | `oxi-agent/src/agent_loop/ttsr.rs` (`TtsrEngine`) |
-| `capability/rule.ts` (`Rule`) | `oxi-sdk/src/ports/mod.rs` (Rule 타입) |
-| `capability/rule-buckets.ts` | `oxi-cli/src/discovery/rules.rs` |
-| `discovery/builtin-rules/*.md` | `oxi-cli/src/discovery/builtin_rules/` |
-| `discovery/helpers.ts` | `oxi-cli/src/discovery/rules.rs` |
-| `prompts/system/ttsr-interrupt.md` | `oxi-agent/src/prompts/ttsr-interrupt.md` |
+| `export/ttsr.ts` (`TtsrManager`) | `oxicode-agent/src/agent_loop/ttsr.rs` (`TtsrEngine`) |
+| `capability/rule.ts` (`Rule`) | `oxicode-sdk/src/ports/mod.rs` (Rule 타입) |
+| `capability/rule-buckets.ts` | `oxicode-cli/src/discovery/rules.rs` |
+| `discovery/builtin-rules/*.md` | `oxicode-cli/src/discovery/builtin_rules/` |
+| `discovery/helpers.ts` | `oxicode-cli/src/discovery/rules.rs` |
+| `prompts/system/ttsr-interrupt.md` | `oxicode-agent/src/prompts/ttsr-interrupt.md` |
 | `modes/controllers/omfg-rule.ts` | (별도 — 모델 생성 룰, 범위 외) |

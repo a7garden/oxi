@@ -1,15 +1,15 @@
 # RFC-007: BrowseProgress Enrichment 확장 — 전체 이벤트 타입 ToolCallContext 반영
 
-**상태**: 구현 완료 (oxi-agent 0.29.1)
+**상태**: 구현 완료 (oxicode-agent 0.29.1)
 **우선순위**: P1 — oxios Web UI 브라우징 투명성 리치 렌더링의 전제 조건
-**영역**: oxi-agent (`agent_loop/tool_exec.rs`, `events.rs`)
+**영역**: oxicode-agent (`agent_loop/tool_exec.rs`, `events.rs`)
 **의존**: RFC-015 (oxios chat transparency)  
 
 ---
 
 ## 1. 동기
 
-oxi-agent 0.29에서 `BrowseProgress` enum은 5종의 구조화된 이벤트를 방출합니다:
+oxicode-agent 0.29에서 `BrowseProgress` enum은 5종의 구조화된 이벤트를 방출합니다:
 
 | `BrowseProgress` variant | `make_browse_enrichment_cb` 처리 여부 |
 |---|---|
@@ -25,7 +25,7 @@ oxi-agent 0.29에서 `BrowseProgress` enum은 5종의 구조화된 이벤트를 
 2. **스크린샷** 촬영 여부와 메타데이터
 3. CSS 셀렉터 **대기** 상태
 
-oxios 프론트엔드는 이미 이 필드들을 렌더링할 준비가 되어 있습니다(`ToolCallContext` 타입에 `navigation_error`, `screenshot`, `waiting_for_selector` 필드 추가 완료). oxi-agent 측 enrichment만 추가되면 즉시 작동합니다.
+oxios 프론트엔드는 이미 이 필드들을 렌더링할 준비가 되어 있습니다(`ToolCallContext` 타입에 `navigation_error`, `screenshot`, `waiting_for_selector` 필드 추가 완료). oxicode-agent 측 enrichment만 추가되면 즉시 작동합니다.
 
 ## 2. 제안
 
@@ -143,9 +143,9 @@ WaitingForSelector {
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/events.rs` | `ToolCallContext::PageVisit`에 `navigation_error`, `screenshot` 필드 추가. `ScreenshotMeta` 구조체 추가. `WaitingForSelector` variant 추가 (옵션). |
-| `oxi-agent/src/agent_loop/tool_exec.rs` | `make_browse_enrichment_cb`에 `NavigationFailed` → `navigation_error`, `ScreenshotCaptured` → `screenshot` 매치 암 추가 |
-| `oxi-sdk/src/lib.rs` | re-export 변경 없음 (`ToolCallContext`는 이미 re-export됨) |
+| `oxicode-agent/src/events.rs` | `ToolCallContext::PageVisit`에 `navigation_error`, `screenshot` 필드 추가. `ScreenshotMeta` 구조체 추가. `WaitingForSelector` variant 추가 (옵션). |
+| `oxicode-agent/src/agent_loop/tool_exec.rs` | `make_browse_enrichment_cb`에 `NavigationFailed` → `navigation_error`, `ScreenshotCaptured` → `screenshot` 매치 암 추가 |
+| `oxicode-sdk/src/lib.rs` | re-export 변경 없음 (`ToolCallContext`는 이미 re-export됨) |
 
 ## 4. 하위 호환성
 
@@ -163,9 +163,9 @@ WaitingForSelector {
 | `page_visit.screenshot` | ✅ 타입 정의됨, 📷 아이콘 + 상세 정보 구현 완료 |
 | `waiting_for_selector` | ✅ 타입 정의됨, 셀렉터/타임아웃 뱃지/상세 구현 완료 |
 
-oxios는 이미 `AgentEvent::ToolExecutionUpdate { context }`를 `serde_json::Value`로 pass-through하므로, **oxios 커널 변경은 필요 없습니다.** oxi-agent에서 enrichment만 추가되면 WS를 통해 그대로 흘러갑니다.
+oxios는 이미 `AgentEvent::ToolExecutionUpdate { context }`를 `serde_json::Value`로 pass-through하므로, **oxios 커널 변경은 필요 없습니다.** oxicode-agent에서 enrichment만 추가되면 WS를 통해 그대로 흘러갑니다.
 
-### oxi-cli / oxi-tui
+### oxicode-cli / oxicode-tui
 
 `ToolCallContext`의 새 필드와 variant는 `#[serde(skip_serializing_if)]`와 `#[non_exhaustive]`로 보호되므로 영향 없음.
 

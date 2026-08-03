@@ -1,4 +1,4 @@
-# oxi-sdk Dormant 모듈 활성화 요청 — 2차
+# oxicode-sdk Dormant 모듈 활성화 요청 — 2차
 
 > **요청자**: oxios 팀
 > **날짜**: 2026-06-03
@@ -20,7 +20,7 @@ dormant 모듈을 사용할 수 없어 Phase C 이후 진행이 막혀 있다.
 ### 🔴 Step 1. Cargo.toml에 의존 추가
 
 ```toml
-# oxi-sdk/Cargo.toml [dependencies]에 추가
+# oxicode-sdk/Cargo.toml [dependencies]에 추가
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
@@ -30,7 +30,7 @@ glob = "0.3"
 - `chrono`: `audit_trail.rs`, `rbac.rs`, `audit_sink.rs`가 타임스탬프에 사용
 - `glob`: `permissions.rs`가 경로 패턴 매칭에 사용
 
-> 참고: `chrono`는 이미 `oxi-ai`에 있고 `glob`은 이미 `oxi-agent`에 있으므로
+> 참고: `chrono`는 이미 `oxicode-ai`에 있고 `glob`은 이미 `oxicode-agent`에 있으므로
 > 실제 새 다운로드는 `blake3` 하나뿐이다.
 
 ### 🔴 Step 2. EventBus 활성화
@@ -243,14 +243,14 @@ Step 1 (Cargo.toml) ────────────────────
 
 oxios는 EventBus와 AgentPool만 활성화되어도 Phase C, E를 진행할 수 있다:
 
-| oxi Step | oxios Phase | 내용 |
+| oxicode Step | oxios Phase | 내용 |
 |----------|------------|------|
 | Step 2 (EventBus) | Phase C | event_bus.rs 간소화 (~475줄 절감) |
 | Step 3 (AgentPool) | Phase E | supervisor의 AgentPool을 SDK에서 가져오기 |
 
 나머지 Phase는 전체 활성화 후 진행:
 
-| oxi Step | oxios Phase | 내용 |
+| oxicode Step | oxios Phase | 내용 |
 |----------|------------|------|
 | Step 4 (AuditTrail) | Phase F | audit_trail.rs 중복 제거 (~1134줄 절감) |
 | Step 6 (Security) | Phase D | AgentBuilder에 capabilities/authorizer 통합 |

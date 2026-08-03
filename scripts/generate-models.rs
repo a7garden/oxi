@@ -3,7 +3,7 @@
 //! Reads `scripts/models.json` and prints `model_db.rs` to stdout.
 //!
 //! Usage:
-//!   cargo run --manifest-path scripts/Cargo.toml --bin generate-models > oxi-ai/src/model_db.rs
+//!   cargo run --manifest-path scripts/Cargo.toml --bin generate-models > oxicode-ai/src/model_db.rs
 
 use serde::Deserialize;
 use std::io::{self, Read};
@@ -101,14 +101,14 @@ fn main() {
 
     // ── Module doc comment ──
     out.push_str(&format!(
-        "//! Comprehensive model database for oxi-ai\n\
+        "//! Comprehensive model database for oxicode-ai\n\
          //!\n\
          //! Contains {} models across {} providers.\n\
          //!\n\
          //! # Usage\n\
          //!\n\
          //! ```ignore\n\
-         //! use oxi_ai::model_db::{{get_model_entry, get_provider_models, get_all_models}};\n\
+         //! use oxicode_ai::model_db::{{get_model_entry, get_provider_models, get_all_models}};\n\
          //!\n\
          //! // Look up a specific model\n\
          //! let entry = get_model_entry(\"anthropic\", \"claude-sonnet-4-20250514\");\n\
@@ -277,7 +277,7 @@ fn main() {
          ///\n\
          /// # Example\n\
          /// ```ignore\n\
-         /// use oxi_ai::model_db::get_model_entry;\n\
+         /// use oxicode_ai::model_db::get_model_entry;\n\
          /// let m = get_model_entry(\"openai\", \"gpt-4o\").unwrap();\n\
          /// assert_eq!(m.name, \"GPT-4o\");\n\
          /// ```\n\

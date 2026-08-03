@@ -1,4 +1,4 @@
-# oxi cargo-audit configuration
+# oxicode cargo-audit configuration
 #
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  UPGRADE TRACKER — When extism ≥ 1.22 (wasmtime ≥ 43) ships,  ║
@@ -11,8 +11,8 @@
 #
 # Risk assessment:
 #   - These vulns are only exploitable when a MALICIOUS WASM plugin is loaded.
-#   - oxi extensions are user-installed and explicitly trusted.
-#   - There is no untrusted plugin input path in oxi.
+#   - oxicode extensions are user-installed and explicitly trusted.
+#   - There is no untrusted plugin input path in oxicode.
 #   - Removing extism would disable WASM extensions entirely, which is not acceptable.
 #
 # This file is the single source of truth for advisory ignores.
@@ -65,14 +65,14 @@ ignore = [
     "RUSTSEC-2024-0436",
 
     # ttf-parser 0.21.1 — unmaintained, transitive via fontdue 0.9.3 (latest)
-    # → oxi-snapcompact (snapcompact_render.rs rasterizer). fontdue pins
+    # → oxicode-snapcompact (snapcompact_render.rs rasterizer). fontdue pins
     # ttf-parser ^0.21; fontdue's newest release still requires it, so no
     # upgrade path exists. Informational (unmaintained), no known exploit.
-    # Re-evaluate when fontdue ships a ttf-parser ≥0.22 or oxi-snapcompact
+    # Re-evaluate when fontdue ships a ttf-parser ≥0.22 or oxicode-snapcompact
     # switches rasterizers.
     "RUSTSEC-2026-0192",
 
-    # quick-xml 0.23.1 — transitive via self_update → oxi-cli.
+    # quick-xml 0.23.1 — transitive via self_update → oxicode-cli.
     # RUSTSEC-2026-0194 (quadratic attribute-check DoS) and
     # RUSTSEC-2026-0195 (unbounded namespace-decl memory DoS).
     # Both require attacker-controlled XML. self_update is behind the
@@ -83,10 +83,10 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
     # bincode 1.3.3 — unmaintained (RUSTSEC-2025-0141), transitive via
-    # syntect 5.x → oxi-vtui. No safe upgrade; syntect pins bincode 1.3.3.
+    # syntect 5.x → oxicode-vtui. No safe upgrade; syntect pins bincode 1.3.3.
     "RUSTSEC-2025-0141",
     # yaml-rust 0.4.5 — unmaintained (RUSTSEC-2024-0320), transitive via
-    # syntect 5.x → oxi-vtui. yaml-rust2 is the maintained fork but
+    # syntect 5.x → oxicode-vtui. yaml-rust2 is the maintained fork but
     # syntect has not switched.
     "RUSTSEC-2024-0320",
 ]

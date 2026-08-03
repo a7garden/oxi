@@ -4,9 +4,9 @@ Plan: `docs/superpowers/plans/2026-07-29-tui-tape-production-cutover.md`
 Prerequisites: Tasks 1-2 complete and reviewed.
 
 ## Files
-- Create `oxi-cli/src/tui/terminal_host.rs`
-- Modify `oxi-cli/src/tui/mod.rs`, `app.rs`, `render.rs`
-- Test terminal_host module and `oxi-cli/tests/pty_e2e.rs` only where required for this lifecycle task
+- Create `oxicode-cli/src/tui/terminal_host.rs`
+- Modify `oxicode-cli/src/tui/mod.rs`, `app.rs`, `render.rs`
+- Test terminal_host module and `oxicode-cli/tests/pty_e2e.rs` only where required for this lifecycle task
 
 ## Required interfaces
 - `TerminalHost` owns `TapeEngine<io::Stdout>` in production and supports an injectable writer/backend in tests.
@@ -25,8 +25,8 @@ Prerequisites: Tasks 1-2 complete and reviewed.
 ## TDD
 - Injectable writer lifecycle tests first; observe RED.
 - Assertions: ordinary lifecycle lacks 1049h/1049l; flags balanced; overlay has exactly one pair; restore idempotent; panic byte fallback restores all modes.
-- GREEN: `cargo nextest run -p oxi-cli terminal_host`.
-- Lint/format: `cargo clippy -p oxi-cli --all-targets -- -D warnings`; `cargo fmt --all -- --check`.
+- GREEN: `cargo nextest run -p oxicode-cli terminal_host`.
+- Lint/format: `cargo clippy -p oxicode-cli --all-targets -- -D warnings`; `cargo fmt --all -- --check`.
 
 ## Report
 Write `.superpowers/sdd/2026-07-29-tui-tape-production-cutover/task-3-report.md` with status, RED/GREEN evidence, lifecycle state machine, commits, self-review, concerns. Commit changes.

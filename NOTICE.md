@@ -1,6 +1,6 @@
 # Attribution
 
-oxi is a Rust port of [pi](https://github.com/earendil-works/pi) by
+oxicode is a Rust port of [pi](https://github.com/earendil-works/pi) by
 [Mario Zechner](https://github.com/badlogicgames), licensed under the MIT License.
 
 The original pi project is a TypeScript-based AI agent toolkit providing:
@@ -9,7 +9,7 @@ The original pi project is a TypeScript-based AI agent toolkit providing:
 - A terminal UI library with differential rendering
 - An interactive coding agent CLI
 
-oxi re-implements these concepts in Rust with the following key differences:
+oxicode re-implements these concepts in Rust with the following key differences:
 - **Language**: Rust (edition 2021) instead of TypeScript
 - **Async runtime**: Tokio instead of Node.js
 - **Rendering**: Ratatui instead of Ink

@@ -3,11 +3,11 @@
 ## 🔴 Critical: libc 의존성 누락
 
 항목 4(Abort)에서 `libc::kill(pid, SIGTERM)`을 사용하지만,
-`oxi-agent/Cargo.toml`에 `libc`가 없습니다.
+`oxicode-agent/Cargo.toml`에 `libc`가 없습니다.
 
 **현재 의존성:**
 ```toml
-# oxi-agent/Cargo.toml
+# oxicode-agent/Cargo.toml
 [target.'cfg(unix)'.dependencies]
 # libc = "0.2"   ← 없음
 ```
@@ -19,7 +19,7 @@
 libc = "0.2"
 ```
 
-oxi-cli에는 이미 `libc = "0.2"`가 있으므로 워크스페이스에 새로 추가되는 의존성은 아님.
+oxicode-cli에는 이미 `libc = "0.2"`가 있으므로 워크스페이스에 새로 추가되는 의존성은 아님.
 
 ---
 
@@ -27,15 +27,15 @@ oxi-cli에는 이미 `libc = "0.2"`가 있으므로 워크스페이스에 새로
 
 설계서:
 ```rust
-let app = oxi::App::new(settings).await?;
+let app = oxicode::App::new(settings).await?;
 let tools = app.agent_tools();
-let builtins = oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone());
+let builtins = oxicode_agent::ToolRegistry::with_builtins_cwd(cwd.clone());
 ```
 
 그런데 `cwd`는 `main.rs`의 로컬 변수입니다. 현재 main.rs에서:
 ```rust
 let prompt = args.prompt.join(" ");
-let app = oxi::App::new(settings).await?;
+let app = oxicode::App::new(settings).await?;
 ```
 
 `std::env::current_dir()`를 main.rs에서 아직 호출하지 않습니다.
@@ -45,12 +45,12 @@ TUI 모드는 `tui_interactive.rs` 내부에서 `std::env::current_dir()`를 호
 
 ```rust
 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-let app = oxi::App::new(settings).await?;
+let app = oxicode::App::new(settings).await?;
 
 let builtin_registry = if let Some(ref tools_str) = args.tools {
-    oxi_agent::ToolRegistry::with_selected_tools(cwd.clone(), &names)
+    oxicode_agent::ToolRegistry::with_selected_tools(cwd.clone(), &names)
 } else {
-    oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone())
+    oxicode_agent::ToolRegistry::with_builtins_cwd(cwd.clone())
 };
 ```
 
@@ -74,12 +74,12 @@ let append_prompt = args.append_system_prompt.as_ref()
     .map(|p| std::fs::read_to_string(p))
     .transpose()?;
 
-let app = oxi::App::new_with_append(settings, append_prompt.as_deref()).await?;
+let app = oxicode::App::new_with_append(settings, append_prompt.as_deref()).await?;
 ```
 
 또는 App 생성 후:
 ```rust
-let app = oxi::App::new(settings).await?;
+let app = oxicode::App::new(settings).await?;
 if let Some(ref prompt_path) = args.append_prompt {
     let content = std::fs::read_to_string(prompt_path)?;
     let current = app.agent().config().system_prompt.clone().unwrap_or_default();
@@ -98,7 +98,7 @@ if let Some(ref prompt_path) = args.append_prompt {
 
 설계서:
 ```rust
-let tmp_dir = TempDirGuard::new("oxi-subagent")?;
+let tmp_dir = TempDirGuard::new("oxicode-subagent")?;
 ```
 
 `?` 연산자가 `io::Error`를 `String`으로 변환하려면 `From` 구현이 필요.
@@ -107,7 +107,7 @@ let tmp_dir = TempDirGuard::new("oxi-subagent")?;
 **해결:**
 
 ```rust
-let tmp_dir = TempDirGuard::new("oxi-subagent")
+let tmp_dir = TempDirGuard::new("oxicode-subagent")
     .map_err(|e| format!("Failed to create temp dir: {}", e))?;
 ```
 

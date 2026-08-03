@@ -1,14 +1,14 @@
-# Design: Questionnaire Tool for oxi
+# Design: Questionnaire Tool for oxicode
 
 **Date:** 2026-05-14
 **Status:** Final — Approved
-**Author:** oxi team
+**Author:** oxicode team
 
 ---
 
 ## 1. Overview
 
-AI 코딩 에이전트가 작업 중 사용자의 결정이 필요할 때(예: 기술 스택 선택, 아키텍처 방향 결정, 설정 옵션 선택 등) 대화형 질문 UI를 표시하는 도구. pi-agent의 `questionnaire` 확장과 동일한 UX를 oxi에 내장 도구로 제공.
+AI 코딩 에이전트가 작업 중 사용자의 결정이 필요할 때(예: 기술 스택 선택, 아키텍처 방향 결정, 설정 옵션 선택 등) 대화형 질문 UI를 표시하는 도구. pi-agent의 `questionnaire` 확장과 동일한 UX를 oxicode에 내장 도구로 제공.
 
 ### Goals
 
@@ -126,10 +126,10 @@ LLM tool_call(questionnaire)
 
 ### 3.2 Bridge Plumbing — 생성 및 주입 흐름
 
-Bridge는 `oxi-cli`에서 생성되어 `Arc`로 양쪽에 전달됩니다.
+Bridge는 `oxicode-cli`에서 생성되어 `Arc`로 양쪽에 전달됩니다.
 
 ```
-                    oxi-cli (lib.rs / main.rs)
+                    oxicode-cli (lib.rs / main.rs)
                            │
                    Arc<QuestionnaireBridge>::new()
                            │
@@ -142,20 +142,20 @@ Bridge는 `oxi-cli`에서 생성되어 `Arc`로 양쪽에 전달됩니다.
 **주입 경로 — 상세 코드:**
 
 ```rust
-// ── oxi-cli/src/lib.rs — App::new() 또는 초기화 시점 ──
+// ── oxicode-cli/src/lib.rs — App::new() 또는 초기화 시점 ──
 
 impl App {
     pub fn new(/* ... */) -> Result<Self> {
         // ... existing setup ...
 
         let questionnaire_bridge = Arc::new(
-            oxi_agent::tools::questionnaire::QuestionnaireBridge::new()
+            oxicode_agent::tools::questionnaire::QuestionnaireBridge::new()
         );
 
         // Tool에 bridge 주입 (ToolRegistry에 등록)
         let tools = self.agent.tools();
         tools.register_arc(Arc::new(
-            oxi_agent::tools::questionnaire::QuestionnaireTool::new(
+            oxicode_agent::tools::questionnaire::QuestionnaireTool::new(
                 questionnaire_bridge.clone()
             )
         ));
@@ -167,7 +167,7 @@ impl App {
     }
 }
 
-// ── oxi-cli/src/tui/app.rs — run_tui_interactive_impl() ──
+// ── oxicode-cli/src/tui/app.rs — run_tui_interactive_impl() ──
 
 async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
     let tools = app.agent().tools();
@@ -201,10 +201,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
 ### 3.3 Core Types
 
-#### 3.3.1 `QuestionnaireBridge` (oxi-agent)
+#### 3.3.1 `QuestionnaireBridge` (oxicode-agent)
 
 ```rust
-// oxi-agent/src/tools/questionnaire.rs
+// oxicode-agent/src/tools/questionnaire.rs
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -213,7 +213,7 @@ use parking_lot::Mutex;
 /// Shared bridge between the questionnaire tool (agent thread)
 /// and the TUI overlay (main thread).
 ///
-/// Created in oxi-cli, injected into both QuestionnaireTool and AppState.
+/// Created in oxicode-cli, injected into both QuestionnaireTool and AppState.
 pub struct QuestionnaireBridge {
     pending: Mutex<Option<PendingQuestionnaire>>,
 }
@@ -289,7 +289,7 @@ pub struct Answer {
 }
 ```
 
-#### 3.3.2 `QuestionnaireTool` (oxi-agent)
+#### 3.3.2 `QuestionnaireTool` (oxicode-agent)
 
 ```rust
 pub struct QuestionnaireTool {
@@ -380,16 +380,16 @@ async fn await_abort_signal(signal: Option<tokio::sync::oneshot::Receiver<()>>) 
 }
 ```
 
-#### 3.3.3 `QuestionnaireOverlay` (oxi-cli)
+#### 3.3.3 `QuestionnaireOverlay` (oxicode-cli)
 
 ```rust
-// oxi-cli/src/tui/overlay/questionnaire.rs
+// oxicode-cli/src/tui/overlay/questionnaire.rs
 
 use super::{OverlayAction, OverlayComponent};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_agent::tools::questionnaire::{Answer, Question, QuestionnaireResponse};
+use oxicode_agent::tools::questionnaire::{Answer, Question, QuestionnaireResponse};
 use ratatui::{Frame, layout::Rect};
-use oxi_tui::Theme;
+use oxicode_tui::Theme;
 use std::collections::HashMap;
 
 pub struct QuestionnaireOverlay {
@@ -943,10 +943,10 @@ LLM이 복잡한 분기 로직을 처리합니다:
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/tools/questionnaire.rs` | **신규** — types + Bridge + Tool 골격 (execute는 빈 응답 반환) |
-| `oxi-agent/src/tools.rs` | `pub mod questionnaire;` 추가 (with_builtins에는 아직 등록 안 함) |
-| `oxi-cli/src/lib.rs` | App에 `questionnaire_bridge: Option<Arc<...>>` 필드 + 접근자 |
-| `oxi-cli/src/tui/app.rs` | AppState에 `questionnaire_bridge` 필드 추가 |
+| `oxicode-agent/src/tools/questionnaire.rs` | **신규** — types + Bridge + Tool 골격 (execute는 빈 응답 반환) |
+| `oxicode-agent/src/tools.rs` | `pub mod questionnaire;` 추가 (with_builtins에는 아직 등록 안 함) |
+| `oxicode-cli/src/lib.rs` | App에 `questionnaire_bridge: Option<Arc<...>>` 필드 + 접근자 |
+| `oxicode-cli/src/tui/app.rs` | AppState에 `questionnaire_bridge` 필드 추가 |
 
 **완료 기준:** `cargo build` 성공
 
@@ -956,12 +956,12 @@ LLM이 복잡한 분기 로직을 처리합니다:
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/tools/questionnaire.rs` | parse_questions, format_answers, Tool execute (full) |
-| `oxi-agent/src/tools.rs` | with_builtins에 QuestionnaireTool 등록 |
-| `oxi-cli/src/lib.rs` | App::new에서 bridge 생성 → Tool 등록 → 필드 저장 |
-| `oxi-cli/src/tui/overlay/questionnaire.rs` | **신규** — 단일 질문 오버레이 (옵션 탐색, 선택, 취소) |
-| `oxi-cli/src/tui/overlay/mod.rs` | `pub mod questionnaire;` + factory 함수 |
-| `oxi-cli/src/tui/app.rs` | 메인 루프에 bridge 폴링 추가 |
+| `oxicode-agent/src/tools/questionnaire.rs` | parse_questions, format_answers, Tool execute (full) |
+| `oxicode-agent/src/tools.rs` | with_builtins에 QuestionnaireTool 등록 |
+| `oxicode-cli/src/lib.rs` | App::new에서 bridge 생성 → Tool 등록 → 필드 저장 |
+| `oxicode-cli/src/tui/overlay/questionnaire.rs` | **신규** — 단일 질문 오버레이 (옵션 탐색, 선택, 취소) |
+| `oxicode-cli/src/tui/overlay/mod.rs` | `pub mod questionnaire;` + factory 함수 |
+| `oxicode-cli/src/tui/app.rs` | 메인 루프에 bridge 폴링 추가 |
 
 **완료 기준:** LLM이 `questionnaire` 호출 → TUI에 옵션 목록 표시 → 선택 → 결과 반환
 
@@ -971,7 +971,7 @@ LLM이 복잡한 분기 로직을 처리합니다:
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-cli/src/tui/overlay/questionnaire.rs` | 탭 바 렌더링, Submit 탭, 답변 상태 추적, 인라인 에디터 |
+| `oxicode-cli/src/tui/overlay/questionnaire.rs` | 탭 바 렌더링, Submit 탭, 답변 상태 추적, 인라인 에디터 |
 
 **완료 기준:** 다중 질문에서 탭 네비게이션, 모든 질문 답변 후 Submit
 
@@ -981,8 +981,8 @@ LLM이 복잡한 분기 로직을 처리합니다:
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-cli/src/tui/overlay/questionnaire.rs` | Space 토글, ☑/☐ 렌더링, 복수 답변 저장 |
-| `oxi-agent/src/tools/questionnaire.rs` | format_answers에 multiSelect 결과 포맷 추가 |
+| `oxicode-cli/src/tui/overlay/questionnaire.rs` | Space 토글, ☑/☐ 렌더링, 복수 답변 저장 |
+| `oxicode-agent/src/tools/questionnaire.rs` | format_answers에 multiSelect 결과 포맷 추가 |
 
 **완료 기준:** multiSelect 질문에서 여러 옵션 선택, 결과에 모든 선택 포함
 
@@ -999,15 +999,15 @@ LLM이 복잡한 분기 로직을 처리합니다:
 - 이벤트 파이프라인은 단방향 (agent → TUI) → 역방향 채널이 필요
 - Bridge는 양방향 통신을 캡슐화하면서 기존 아키텍처를 침범하지 않음
 
-### 7.2 Bridge 생성 위치: oxi-cli
+### 7.2 Bridge 생성 위치: oxicode-cli
 
-**결정:** Bridge는 `oxi-cli`에서 생성, `Arc`로 Tool과 AppState에 각각 주입
+**결정:** Bridge는 `oxicode-cli`에서 생성, `Arc`로 Tool과 AppState에 각각 주입
 
 **이유:**
 - Agent 루프는 별도 스레드에서 실행 (`std::thread::spawn` in `app.rs`)
 - TUI 메인 루프는 또 다른 스레드
 - 둘 다 bridge에 접근해야 하므로, 생성자(App)에서 Arc로 분배
-- `oxi-agent`는 bridge 타입만 정의, 인스턴스화는 `oxi-cli`가 담당
+- `oxicode-agent`는 bridge 타입만 정의, 인스턴스화는 `oxicode-cli`가 담당
 - `with_builtins`에 questionnaire를 포함하지 않고, `App::new`에서 개별 등록
 
 ### 7.3 Tool Blocking: tokio::select!

@@ -1,7 +1,7 @@
 # 라우팅 시스템 비교 분석 보고서
 
 > **작성일**: 2025-05-30  
-> **대상**: oxi 라우팅 시스템 vs claude-code-router, oh-my-openagent, pi-model-router  
+> **대상**: oxicode 라우팅 시스템 vs claude-code-router, oh-my-openagent, pi-model-router  
 > **방법**: 각 리포지토리 클론 후 전체 소스코드 분석
 
 ---
@@ -156,7 +156,7 @@ Reasoning: [one short sentence]
 
 ## 2. 기능 매트릭스
 
-| 기능 | oxi (현재) | CCR | OmO | pi-model-router |
+| 기능 | oxicode (현재) | CCR | OmO | pi-model-router |
 |------|-----------|-----|-----|-----------------|
 | **사용자 메시지 분석** | ❌ | ❌ | ❌ | ✅ 키워드 |
 | **시그널 기반 스코어링** | ✅ 구조/행동/예산/비전 | ❌ | ❌ | ❌ |
@@ -201,7 +201,7 @@ Reasoning: [one short sentence]
 
 ---
 
-## 4. oxi 현재 시스템의 강점과 갭
+## 4. oxicode 현재 시스템의 강점과 갭
 
 ### 강점 (그대로 유지)
 - ✅ 4개 시그널 (structural, behavioral, context/budget, vision)
@@ -300,7 +300,7 @@ pi-model-router가 **메시지 분석** 측면에서 가장 정교하지만, 키
 CCR은 **메타데이터 기반**으로 가장 단순하지만 메시지 내용을 완전히 무시한다.
 OmO는 **에이전트 중심**으로 라우팅과 에이전트가 동일하다.
 
-**oxi의 최적 전략**:
+**oxicode의 최적 전략**:
 기존 시그널 아키텍처(이미 vision, budget, structural을 갖춤)에
 **언어 독립적인 구조적 메시지 분석**을 추가하고,
 애매한 케이스는 **LLM 분류기**가 의미를 파악하는 하이브리드 방식.

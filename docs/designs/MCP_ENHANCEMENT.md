@@ -1,14 +1,14 @@
 # MCP 기능 고도화 설계서
 
 > **참고:** [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 아키텍처를 기반으로,
-> oxi의 기존 MCP 구현을 확장하고 TUI 대시보드를 추가하는 설계.
+> oxicode의 기존 MCP 구현을 확장하고 TUI 대시보드를 추가하는 설계.
 > **리뷰 피드백 반영 (v2) + SDK 레이어 추가 (v3).**
 
 ---
 
 ## 1. 현황 분석 (Gap Analysis)
 
-### 1.1 oxi MCP — 이미 구현된 것
+### 1.1 oxicode MCP — 이미 구현된 것
 
 | 영역 | 상태 | 비고 |
 |------|------|------|
@@ -17,14 +17,14 @@
 | `tools/list` · `tools/call` | ✅ | prefixed name 라우팅 |
 | `resources/list` · `resources/read` | ✅ | |
 | `prompts/list` · `prompts/get` | ✅ | |
-| 4-파일 설정 병합 | ✅ | shared global → oxi global → shared project → oxi project |
+| 4-파일 설정 병합 | ✅ | shared global → oxicode global → shared project → oxicode project |
 | Lazy connect | ✅ | 첫 호출 시 연결 |
 | Failure backoff | ✅ | 30초 기본 |
 | 프록시 툴 (`mcp`) | ✅ | 단일 게이트웨이 tool |
 | 툴 검색 (search/describe) | ✅ | fuzzy + regex |
 | 우아한 종료 | ✅ | SIGTERM → 5s → SIGKILL |
 
-### 1.2 oxi MCP — 미구현 (pi-mcp-adapter 대비)
+### 1.2 oxicode MCP — 미구현 (pi-mcp-adapter 대비)
 
 | 영역 | 중요도 | pi-mcp-adapter | 설명 |
 |------|--------|----------------|------|
@@ -44,20 +44,20 @@
 ### 1.3 크레이트 경계 제약
 
 ```
-oxi-ai  ←  oxi-agent  ←  oxi-sdk  ←  oxi-cli
-oxi-tui  (독립, oxi-* 의존 없음)  ←  oxi-cli
+oxicode-ai  ←  oxicode-agent  ←  oxicode-sdk  ←  oxicode-cli
+oxicode-tui  (독립, oxicode-* 의존 없음)  ←  oxicode-cli
 ```
 
-- **oxi-agent**: MCP 클라이언트 핵심 로직 (연결, 캐시, lifecycle, direct tools)
-- **oxi-tui**: 제네릭 대시보드 위젯 (MCP 도메인 지식 없이 순수 위젯)
-- **oxi-cli**: MCP 전용 뷰 모델 + TUI 오버레이 + bootstrap 연결
+- **oxicode-agent**: MCP 클라이언트 핵심 로직 (연결, 캐시, lifecycle, direct tools)
+- **oxicode-tui**: 제네릭 대시보드 위젯 (MCP 도메인 지식 없이 순수 위젯)
+- **oxicode-cli**: MCP 전용 뷰 모델 + TUI 오버레이 + bootstrap 연결
 
 ### 1.4 기존 코드의 핵심 제약
 
 > 리뷰에서 발견한 구현 시 반드시 고려해야 할 사항.
 
 1. **`McpManager` 생성 위치:** `ToolRegistry::with_builtins_cwd()` 내부에서 `OnceCell`로 생성.
-   oxi-cli는 `McpManager`에 직접 접근할 수 없음 → getter 또는 생성 패턴 변경 필요.
+   oxicode-cli는 `McpManager`에 직접 접근할 수 없음 → getter 또는 생성 패턴 변경 필요.
 
 2. **`McpManagerInner`는 `tokio::sync::Mutex` 보호:** idle timer 콜백이 다시 뮤텍스를 잡으면
    데드락 → lifecycle 이벤트는 mpsc 채널 + 백그라운드 태스크로 분리.
@@ -73,22 +73,22 @@ oxi-tui  (독립, oxi-* 의존 없음)  ←  oxi-cli
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                           oxi-cli                               │
+│                           oxicode-cli                               │
 │  ┌──────────────┐  ┌────────────────────┐  ┌────────────────┐  │
 │  │  Bootstrap    │  │  TUI               │  │  Print/RPC     │  │
 │  │              │  │  ┌──────────────┐  │  │  Mode          │  │
 │  │  McpManager  │  │  │ McpDashboard │  │  │                │  │
 │  │  생성/주입    │  │  │ Overlay      │  │  │  동일          │  │
-│  │  (spawn)     │  │  │ (oxi-cli)    │  │  │  McpManager    │  │
+│  │  (spawn)     │  │  │ (oxicode-cli)    │  │  │  McpManager    │  │
 │  │  DirectTool  │  │  └──────┬───────┘  │  │  사용          │  │
 │  │  등록        │  │  McpDashboardWidget │  │                │  │
-│  │              │  │  (oxi-tui, 제네릭) │  │                │  │
+│  │              │  │  (oxicode-tui, 제네릭) │  │                │  │
 │  └──────┬───────┘  └────────┬───────────┘  └───────┬────────┘  │
 └─────────┼──────────────────┼───────────────────────┼───────────┘
           │                  │                       │
           ▼                  ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         oxi-agent                               │
+│                         oxicode-agent                               │
 │  ┌────────────────────────────────────────────────────────────┐ │
 │  │                      McpManager                            │ │
 │  │  ┌─────────────┐  ┌──────────┐  ┌──────────────────────┐  │ │
@@ -107,10 +107,10 @@ oxi-tui  (독립, oxi-* 의존 없음)  ←  oxi-cli
 
 ### 2.2 파일 배치 계획
 
-#### oxi-agent (핵심 로직)
+#### oxicode-agent (핵심 로직)
 
 ```
-oxi-agent/src/mcp/
+oxicode-agent/src/mcp/
 ├── mod.rs                  # McpManager (확장: spawn(), dashboard_data(), 채널 기반 lifecycle)
 ├── client.rs               # McpClient (확장: Transport 위임, ping)
 ├── config.rs               # 설정 로드 (확장: 검증 강화)
@@ -126,21 +126,21 @@ oxi-agent/src/mcp/
     └── stdio.rs            # [NEW] 기존 stdio 로직 추출 (Phase 1에서 래핑)
 ```
 
-#### oxi-tui (순수 위젯, MCP 도메인 지식 없음)
+#### oxicode-tui (순수 위젯, MCP 도메인 지식 없음)
 
 ```
-oxi-tui/src/widgets/
+oxicode-tui/src/widgets/
 ├── dashboard.rs            # [NEW] 제네릭 섹션 기반 대시보드 위젯
 ```
 
-#### oxi-cli (MCP 전용 뷰 모델 + 오버레이 + Bootstrap)
+#### oxicode-cli (MCP 전용 뷰 모델 + 오버레이 + Bootstrap)
 
 ```
-oxi-cli/src/tui/overlay/
+oxicode-cli/src/tui/overlay/
 ├── mcp_dashboard.rs        # [NEW] OverlayComponent 구현체 + MCP 뷰 모델 변환
 
-oxi-cli/src/tui/slash.rs    # "/mcp" 명령 추가
-oxi-cli/src/tui/handlers.rs # OverlayAction::McpAction, TuiNextAction 확장
+oxicode-cli/src/tui/slash.rs    # "/mcp" 명령 추가
+oxicode-cli/src/tui/handlers.rs # OverlayAction::McpAction, TuiNextAction 확장
 ```
 
 ---
@@ -163,7 +163,7 @@ oxi-cli/src/tui/handlers.rs # OverlayAction::McpAction, TuiNextAction 확장
 /// prefixed name은 런타임에 현재 설정의 `tool_prefix`로 계산.
 /// 이렇게 하면 설정 변경 시 캐시 무효화가 필요 없음.
 pub struct MetadataCache {
-    /// 캐시 파일 경로 (dirs::config_dir()/oxi/mcp-cache.json)
+    /// 캐시 파일 경로 (dirs::config_dir()/oxicode/mcp-cache.json)
     cache_path: PathBuf,
     /// 인메모리 캐시 (서버 이름 → 툴 목록)
     cache: parking_lot::RwLock<CacheStore>,
@@ -207,7 +207,7 @@ impl MetadataCache {
 }
 ```
 
-**캐시 파일 구조 (`{config_dir}/oxi/mcp-cache.json`):**
+**캐시 파일 구조 (`{config_dir}/oxicode/mcp-cache.json`):**
 ```json
 {
   "version": 1,
@@ -500,12 +500,12 @@ pub struct ToolRegistry {
 │         │                                                     │
 │         ▼                                                     │
 │  ┌──────────────────────────────────────────────────────┐     │
-│  │              McpDashboardOverlay (oxi-cli)            │     │
+│  │              McpDashboardOverlay (oxicode-cli)            │     │
 │  │  handle_key() → OverlayAction::McpAction(McpAction)  │     │
 │  │  render() → build_dashboard_data() → widget.update() │     │
 │  │                                                      │     │
 │  │  ┌──────────────────────────────────────────────┐    │     │
-│  │  │  DashboardWidget (oxi-tui, 제네릭)            │    │     │
+│  │  │  DashboardWidget (oxicode-tui, 제네릭)            │    │     │
 │  │  │  MCP 도메인 지식 없이 순수 렌더링만           │    │     │
 │  │  └──────────────────────────────────────────────┘    │     │
 │  └──────────────────────────────────────────────────────┘     │
@@ -526,14 +526,14 @@ pub struct ToolRegistry {
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### 3.2.2 oxi-tui: 제네릭 `DashboardWidget`
+#### 3.2.2 oxicode-tui: 제네릭 `DashboardWidget`
 
-> **리뷰 반영:** oxi-tui에 MCP 전용 타입을 넣지 않음.
+> **리뷰 반영:** oxicode-tui에 MCP 전용 타입을 넣지 않음.
 > 제네릭 섹션/아이템 기반 위젯으로 MCP 독립성 유지.
 
 ```rust
 /// 제네릭 섹션 기반 대시보드 위젯.
-/// MCP에 특화되지 않은 범용 구조이므로 oxi-tui에 배치.
+/// MCP에 특화되지 않은 범용 구조이므로 oxicode-tui에 배치.
 pub struct DashboardWidget {
     sections: Vec<DashboardSection>,
     state: DashboardState,
@@ -594,10 +594,10 @@ pub enum DashboardMode {
 └───────────────────────────────────────────────────────────┘
 ```
 
-#### 3.2.3 oxi-cli: `McpDashboardOverlay` + 뷰 모델 변환
+#### 3.2.3 oxicode-cli: `McpDashboardOverlay` + 뷰 모델 변환
 
 ```rust
-/// MCP 전용 뷰 모델 변환 로직 (oxi-cli에 배치, oxi-tui 독립성 유지)
+/// MCP 전용 뷰 모델 변환 로직 (oxicode-cli에 배치, oxicode-tui 독립성 유지)
 pub struct McpDashboardOverlay {
     /// 제네릭 대시보드 위젯
     widget: DashboardWidget,
@@ -744,13 +744,13 @@ pub enum McpAction {
 /mcp refresh      → 캐시 새로고침
 ```
 
-#### 3.2.7 `McpDashboardData` — oxi-agent에 정의
+#### 3.2.7 `McpDashboardData` — oxicode-agent에 정의
 
 ```rust
-// types.rs (oxi-agent)
+// types.rs (oxicode-agent)
 /// TUI 대시보드용 구조적 상태 데이터.
-/// oxi-tui의 제네릭 DashboardWidget에 맵핑하기 위해
-/// oxi-cli에서 DashboardSection/Item으로 변환.
+/// oxicode-tui의 제네릭 DashboardWidget에 맵핑하기 위해
+/// oxicode-cli에서 DashboardSection/Item으로 변환.
 #[derive(Debug, Clone)]
 pub struct McpDashboardData {
     pub servers: Vec<McpServerInfo>,
@@ -972,23 +972,23 @@ impl McpTransport for HttpSseTransport {
 
 ### 4.1 Cargo.toml 변경
 
-#### oxi-agent
+#### oxicode-agent
 ```toml
 [dependencies]
 # 기존 유지 — 새 의존 불필요 (tokio, serde, parking_lot으로 충분)
 ```
 
-#### oxi-tui
+#### oxicode-tui
 ```toml
 [dependencies]
 # 기존 유지 — 새 의존 불필요
 ```
 
-#### oxi-cli
+#### oxicode-cli
 ```toml
 [dependencies]
-oxi-agent = { path = "../oxi-agent" }
-oxi-tui = { path = "../oxi-tui" }
+oxicode-agent = { path = "../oxicode-agent" }
+oxicode-tui = { path = "../oxicode-tui" }
 # 기존 유지 — 새 의존 불필요
 ```
 
@@ -996,18 +996,18 @@ oxi-tui = { path = "../oxi-tui" }
 
 | 크레이트 | 변경 | 영향 |
 |---------|------|------|
-| oxi-agent | `McpManager::new()` → `Arc<Self>` 반환 | `ToolRegistry`에서 `Arc` 감싸기 제거 |
-| oxi-agent | `McpManager::spawn()` (신규) | `ToolRegistry`에서 사용 |
-| oxi-agent | `McpManager::dashboard_data()` (신규) | TUI에서 상태 조회 |
-| oxi-agent | `McpManager::direct_tools_from_cache()` (신규) | Direct tool 등록용 |
-| oxi-agent | `McpDirectTool` pub | `ToolRegistry`에서 등록 |
-| oxi-agent | `McpDashboardData` 등 뷰 타입들 pub | CLI에서 TUI로 변환 |
-| oxi-agent | `ToolRegistry::mcp_manager()` (신규 getter) | TUI에서 McpManager 접근 |
-| oxi-sdk | `McpManager`, `McpTool`, `McpDirectTool` re-export | SDK 컨슈머가 MCP 직접 사용 |
-| oxi-sdk | `OxiBuilder::with_mcp_config()` (신규) | 커스텀 MCP 설정 주입 |
-| oxi-sdk | `mcp_tools()` 팩토리 (신규) | `coding_tools()`와 동일 패턴 |
-| oxi-tui | `DashboardWidget`, `DashboardSection/Item` pub | CLI에서 MCP 데이터 주입 |
-| oxi-cli | `McpDashboardOverlay`, `McpAction` | 내부 구현 |
+| oxicode-agent | `McpManager::new()` → `Arc<Self>` 반환 | `ToolRegistry`에서 `Arc` 감싸기 제거 |
+| oxicode-agent | `McpManager::spawn()` (신규) | `ToolRegistry`에서 사용 |
+| oxicode-agent | `McpManager::dashboard_data()` (신규) | TUI에서 상태 조회 |
+| oxicode-agent | `McpManager::direct_tools_from_cache()` (신규) | Direct tool 등록용 |
+| oxicode-agent | `McpDirectTool` pub | `ToolRegistry`에서 등록 |
+| oxicode-agent | `McpDashboardData` 등 뷰 타입들 pub | CLI에서 TUI로 변환 |
+| oxicode-agent | `ToolRegistry::mcp_manager()` (신규 getter) | TUI에서 McpManager 접근 |
+| oxicode-sdk | `McpManager`, `McpTool`, `McpDirectTool` re-export | SDK 컨슈머가 MCP 직접 사용 |
+| oxicode-sdk | `OxicodeBuilder::with_mcp_config()` (신규) | 커스텀 MCP 설정 주입 |
+| oxicode-sdk | `mcp_tools()` 팩토리 (신규) | `coding_tools()`와 동일 패턴 |
+| oxicode-tui | `DashboardWidget`, `DashboardSection/Item` pub | CLI에서 MCP 데이터 주입 |
+| oxicode-cli | `McpDashboardOverlay`, `McpAction` | 내부 구현 |
 
 ---
 
@@ -1108,9 +1108,9 @@ Phase 5 (HTTP/SSE) — 선택
 | 1 | `transport/mod.rs` (trait 정의) | ~40 | 🔴 P0 | 0.5일 |
 | 1 | `McpManager::spawn()` 리팩터링 | ~200 수정 | 🔴 P0 | 1.5일 |
 | 1 | 단위 테스트 | ~300 | 🔴 P0 | 1일 |
-| 2 | oxi-tui `DashboardWidget` | ~350 | 🔴 P0 | 1.5일 |
-| 2 | oxi-agent `McpDashboardData` | ~100 | 🔴 P0 | 0.5일 |
-| 2 | oxi-cli `McpDashboardOverlay` | ~250 | 🔴 P0 | 1.5일 |
+| 2 | oxicode-tui `DashboardWidget` | ~350 | 🔴 P0 | 1.5일 |
+| 2 | oxicode-agent `McpDashboardData` | ~100 | 🔴 P0 | 0.5일 |
+| 2 | oxicode-cli `McpDashboardOverlay` | ~250 | 🔴 P0 | 1.5일 |
 | 2 | OverlayAction + 핸들러 | ~120 | 🔴 P0 | 0.5일 |
 | 2 | 슬래시 명령 | ~60 | 🔴 P0 | 0.5일 |
 | 3 | `direct_tool.rs` | ~200 | 🟡 P1 | 1일 |
@@ -1132,21 +1132,21 @@ Phase 5 (HTTP/SSE) — 선택
 ## 8. 핵심 설계 결정 (Design Decisions)
 
 ### D0: MCP를 SDK에 어떻게 노출할 것인가 (v3 추가)
-- **결정:** Port가 아닌 **OxiBuilder API + Factory + Re-export** 3계층 노출.
+- **결정:** Port가 아닌 **OxicodeBuilder API + Factory + Re-export** 3계층 노출.
 - **이유:** MCP는 인프라가 아닌 에이전트 기능. `coding_tools()`와 동일한 패턴으로
   일관성 유지. 커스텀 백엔드 필요 시에만 Port로 승격.
 - **참고:** §9에서 상세 설명.
 
 ### D1: 캐시 저장 위치
-- **결정:** `dirs::config_dir()/oxi/mcp-cache.json`
+- **결정:** `dirs::config_dir()/oxicode/mcp-cache.json`
 - **이유:** `config::config_paths()`와 동일한 `dirs::config_dir()` 기반으로 일관성 유지.
-  macOS에서는 `~/Library/Application Support/oxi/mcp-cache.json`.
+  macOS에서는 `~/Library/Application Support/oxicode/mcp-cache.json`.
 
 ### D2: 캐시는 원본 이름만 저장
 - **결정:** 캐시 파일에는 unprefixed 원본 툴 이름만 저장. prefixed name은 런타임에 `ToolPrefix` 설정으로 계산.
 - **이유:** `tool_prefix` 설정을 변경해도 캐시 무효화가 필요 없음.
 - **pi-mcp-adapter와의 차이:** pi-mcp-adapter는 prefixed name을 캐시에 저장하지만,
-  oxi는 원본만 저장하여 설정 변경에 강건함.
+  oxicode는 원본만 저장하여 설정 변경에 강건함.
 
 ### D3: Direct tools 등록 시점
 - **결정:** `ToolRegistry::with_builtins_cwd()` 내부에서 캐시 기반 등록.
@@ -1162,11 +1162,11 @@ Phase 5 (HTTP/SSE) — 선택
   다시 `tokio::sync::Mutex`를 잡아야 해서 데드락 발생.
 - **trade-off:** 약간의 복잡도 증가 vs 데드락 방어. 채널 패턴이 더 안전.
 
-### D5: oxi-tui에는 MCP 전용 타입 없음
-- **결정:** oxi-tui에는 제네릭 `DashboardWidget`만 배치.
-  MCP 뷰 모델(`McpServerInfo` 등)은 oxi-agent에 정의,
-  oxi-cli에서 제네릭 위젯의 `DashboardSection/Item`으로 변환.
-- **이유:** oxi-tui의 "oxi-* 의존 없음" 원칙 준수.
+### D5: oxicode-tui에는 MCP 전용 타입 없음
+- **결정:** oxicode-tui에는 제네릭 `DashboardWidget`만 배치.
+  MCP 뷰 모델(`McpServerInfo` 등)은 oxicode-agent에 정의,
+  oxicode-cli에서 제네릭 위젯의 `DashboardSection/Item`으로 변환.
+- **이유:** oxicode-tui의 "oxicode-* 의존 없음" 원칙 준수.
   향후 다른 대시보드(extensions, skills 등)에도 재사용 가능.
 
 ### D6: McpManager 접근 경로
@@ -1199,32 +1199,32 @@ Phase 5 (HTTP/SSE) — 선택
   크래시 시에도 캐시 손실을 방지.
 
 ### D11: MCP Port 승격 보류 (v3 추가)
-- **결정:** MCP를 port trait이 아닌 OxiBuilder API로 제공.
+- **결정:** MCP를 port trait이 아닌 OxicodeBuilder API로 제공.
 - **이유:** MCP는 툴(기능)이지 인프라(state, auth)가 아님.
   `coding_tools()` 패턴과 일관성 유지.
   커스텀 백엔드 필요 시에만 Port 12로 승격.
 
 ---
 
-## 9. SDK 레이어 — oxi-sdk를 통한 MCP 제공
+## 9. SDK 레이어 — oxicode-sdk를 통한 MCP 제공
 
-> **문제:** 현재 설계는 MCP가 `oxi-agent` 내부에만 존재하고, oxi-sdk 컨슈머(oxios 등)가
+> **문제:** 현재 설계는 MCP가 `oxicode-agent` 내부에만 존재하고, oxicode-sdk 컨슈머(oxios 등)가
 > MCP를 사용하거나 커스터마이즈할 방법이 없음.
-> oxi-sdk의 "single dependency" 원칙(oxios → oxi-sdk, oxi-agent 직접 의존 없음)에 위배.
+> oxicode-sdk의 "single dependency" 원칙(oxios → oxicode-sdk, oxicode-agent 직접 의존 없음)에 위배.
 
 ### 9.1 현황 — SDK에서 MCP가 보이지 않음
 
 ```
 현재:
-  oxi-agent/src/mcp/*     ← MCP 전체 구현 (여기에만 있음)
-  oxi-sdk/src/lib.rs       ← McpManager re-export 없음
-  oxi-sdk/src/tool_factory ← mcp_tools() 없음
-  oxi-sdk/src/builder.rs   ← OxiBuilder에 MCP 설정 API 없음
-  oxi-sdk/src/ports/mod.rs  ← MCP 관련 port trait 없음
+  oxicode-agent/src/mcp/*     ← MCP 전체 구현 (여기에만 있음)
+  oxicode-sdk/src/lib.rs       ← McpManager re-export 없음
+  oxicode-sdk/src/tool_factory ← mcp_tools() 없음
+  oxicode-sdk/src/builder.rs   ← OxicodeBuilder에 MCP 설정 API 없음
+  oxicode-sdk/src/ports/mod.rs  ← MCP 관련 port trait 없음
 ```
 
 SDK 컨슈머가 겪는 문제:
-1. `OxiBuilder::new().with_builtins().build()` → MCP 툴 포함 여부를 제어할 수 없음
+1. `OxicodeBuilder::new().with_builtins().build()` → MCP 툴 포함 여부를 제어할 수 없음
 2. `coding_tools()` 팩토리에는 MCP가 없음 → MCP를 추가하려면 `ToolRegistry` 직접 조작
 3. MCP 설정(서버 목록, lifecycle, direct tools)을 프로그래밍적으로 구성할 수 없음
 4. `McpManager`에 접근할 수 없어 상태 조회, 연결 관리 불가
@@ -1233,21 +1233,21 @@ SDK 컨슈머가 겪는 문제:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Layer 1: Re-export (oxi-sdk/src/lib.rs)                           │
+│  Layer 1: Re-export (oxicode-sdk/src/lib.rs)                           │
 │  MCP 핵심 타입과 McpManager를 SDK 표면에 노출                      │
 │  → SDK 컨슈머가 MCP를 직접 사용 가능                              │
 └─────────────────────────────────────────────────────────────────────┘
           │
           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Layer 2: OxiBuilder API (oxi-sdk/src/builder.rs)                  │
+│  Layer 2: OxicodeBuilder API (oxicode-sdk/src/builder.rs)                  │
 │  MCP 설정을 프로그래밍적으로 주입                                   │
 │  → 설정 파일 없이도 MCP 서버 구성 가능                              │
 └─────────────────────────────────────────────────────────────────────┘
           │
           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Layer 3: Tool Factory (oxi-sdk/src/tool_factory.rs)               │
+│  Layer 3: Tool Factory (oxicode-sdk/src/tool_factory.rs)               │
 │  `mcp_tools()` 팩토리 함수                                         │
 │  → coding_tools(), browsing_tools()와 동일한 패턴                   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -1256,17 +1256,17 @@ SDK 컨슈머가 겪는 문제:
 #### Layer 1: Re-export
 
 ```rust
-// oxi-sdk/src/lib.rs에 추가
+// oxicode-sdk/src/lib.rs에 추가
 
 // ── MCP (Model Context Protocol) ──────────────────────────────────────
 //
 // SDK consumers can use MCP servers alongside built-in tools.
 // McpManager is created via `McpManager::spawn()` and injected into
-// the tool registry. Use `OxiBuilder::with_mcp_config()` for
+// the tool registry. Use `OxicodeBuilder::with_mcp_config()` for
 // programmatic configuration, or let `mcp_tools()` auto-discover
 // from standard config files.
 
-pub use oxi_agent::mcp::{
+pub use oxicode_agent::mcp::{
     McpManager, McpTool, McpDirectTool,
     McpConfig, McpSettings, ServerEntry, LifecycleMode, ToolPrefix,
     McpDashboardData, McpServerInfo, McpConnectionStatus, McpToolInfo,
@@ -1274,19 +1274,19 @@ pub use oxi_agent::mcp::{
 };
 ```
 
-#### Layer 2: OxiBuilder API
+#### Layer 2: OxicodeBuilder API
 
 ```rust
-// oxi-sdk/src/builder.rs — OxiBuilder에 추가
+// oxicode-sdk/src/builder.rs — OxicodeBuilder에 추가
 
-impl OxiBuilder {
+impl OxicodeBuilder {
     /// MCP 서버 설정을 프로그래밍적으로 주입.
     /// 설정 파일 무시하고 이 설정만 사용.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// use oxi_sdk::{OxiBuilder, McpConfig, ServerEntry, LifecycleMode};
+    /// use oxicode_sdk::{OxicodeBuilder, McpConfig, ServerEntry, LifecycleMode};
     ///
     /// let mut mcp = McpConfig::default();
     /// mcp.mcp_servers.insert("my-server".into(), ServerEntry {
@@ -1296,7 +1296,7 @@ impl OxiBuilder {
     ///     ..Default::default()
     /// });
     ///
-    /// let oxi = OxiBuilder::new()
+    /// let oxicode = OxicodeBuilder::new()
     ///     .with_builtins()
     ///     .with_mcp_config(mcp)
     ///     .build();
@@ -1316,9 +1316,9 @@ impl OxiBuilder {
 }
 ```
 
-**OxiBuilder 필드 추가:**
+**OxicodeBuilder 필드 추가:**
 ```rust
-pub struct OxiBuilder {
+pub struct OxicodeBuilder {
     // 기존 필드...
 
     // NEW
@@ -1327,10 +1327,10 @@ pub struct OxiBuilder {
 }
 ```
 
-**`Oxi::build()`에서 MCP 연동:**
+**`Oxicode::build()`에서 MCP 연동:**
 ```rust
-impl OxiBuilder {
-    pub fn build(self) -> Oxi {
+impl OxicodeBuilder {
+    pub fn build(self) -> Oxicode {
         // ...
 
         // MCP: 설정이 제공되면 해당 설정으로 McpManager 생성
@@ -1345,7 +1345,7 @@ impl OxiBuilder {
             None
         };
 
-        Oxi {
+        Oxicode {
             // 기존 필드...
             mcp_manager, // NEW
         }
@@ -1353,9 +1353,9 @@ impl OxiBuilder {
 }
 ```
 
-**`Oxi`에 MCP 접근자 추가:**
+**`Oxicode`에 MCP 접근자 추가:**
 ```rust
-impl Oxi {
+impl Oxicode {
     /// McpManager에 접근. MCP가 비활성화되면 None.
     pub fn mcp(&self) -> Option<Arc<McpManager>> {
         self.mcp_manager.clone()
@@ -1366,9 +1366,9 @@ impl Oxi {
 #### Layer 3: Tool Factory
 
 ```rust
-// oxi-sdk/src/tool_factory.rs에 추가
+// oxicode-sdk/src/tool_factory.rs에 추가
 
-use oxi_agent::mcp::{McpManager, McpTool, McpDirectTool};
+use oxicode_agent::mcp::{McpManager, McpTool, McpDirectTool};
 
 /// MCP 프록시 툴 + Direct tools를 등록한 ToolRegistry 생성.
 ///
@@ -1378,7 +1378,7 @@ use oxi_agent::mcp::{McpManager, McpTool, McpDirectTool};
 /// # Example
 ///
 /// ```ignore
-/// use oxi_sdk::mcp_tools;
+/// use oxicode_sdk::mcp_tools;
 ///
 /// // 자동 발견 (표준 설정 파일 사용)
 /// let tools = mcp_tools(Path::new("/workspace"), None);
@@ -1416,7 +1416,7 @@ pub fn mcp_tools(cwd: &Path, config: Option<McpConfig>) -> Arc<ToolRegistry> {
 ### 9.3 AgentBuilder 통합
 
 ```rust
-// oxi-sdk/src/agent_builder.rs — MCP 지원 추가
+// oxicode-sdk/src/agent_builder.rs — MCP 지원 추가
 
 impl<'a> AgentBuilder<'a> {
     /// 코딩 툴 + MCP 툴을 모두 등록.
@@ -1424,7 +1424,7 @@ impl<'a> AgentBuilder<'a> {
     pub fn coding_tools_with_mcp(mut self) -> Self {
         self = self.coding_tools();
         // MCP 툴 추가
-        if let Some(mcp) = self.oxi.mcp() {
+        if let Some(mcp) = self.oxicode.mcp() {
             let direct_tools = mcp.direct_tools_from_cache();
             for def in &direct_tools {
                 self.registry.register(
@@ -1445,30 +1445,30 @@ impl<'a> AgentBuilder<'a> {
 ```
 ox-sdk/src/
 ├── lib.rs             # MCP re-export 추가
-├── builder.rs         # OxiBuilder에 with_mcp_config(), with_mcp() 추가
-│                      # Oxi에 mcp_manager 필드, mcp() 접근자 추가
+├── builder.rs         # OxicodeBuilder에 with_mcp_config(), with_mcp() 추가
+│                      # Oxicode에 mcp_manager 필드, mcp() 접근자 추가
 ├── tool_factory.rs    # mcp_tools() 팩토리 추가
 └── agent_builder.rs   # coding_tools_with_mcp() 추가
 ```
 
 ### 9.5 사용 예시 — SDK 컨슈머 관점
 
-#### 예시 1: 표준 설정 파일 사용 (oxi-cli 패턴)
+#### 예시 1: 표준 설정 파일 사용 (oxicode-cli 패턴)
 
 ```rust
-use oxi_sdk::OxiBuilder;
+use oxicode_sdk::OxicodeBuilder;
 
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .build(); // MCP 자동 활성화, 표준 설정 파일에서 로드
 
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .workspace("/project")
     .coding_tools_with_mcp()  // MCP 포함
     .build()?;
 
 // MCP 상태 조회
-if let Some(mcp) = oxi.mcp() {
+if let Some(mcp) = oxicode.mcp() {
     let status = mcp.status().await;
     println!("{}", status);
 }
@@ -1477,7 +1477,7 @@ if let Some(mcp) = oxi.mcp() {
 #### 예시 2: 프로그래밍 설정 (oxios 패턴)
 
 ```rust
-use oxi_sdk::{OxiBuilder, McpConfig, ServerEntry, LifecycleMode};
+use oxicode_sdk::{OxicodeBuilder, McpConfig, ServerEntry, LifecycleMode};
 
 let mut mcp_config = McpConfig::default();
 mcp_config.mcp_servers.insert("database".into(), ServerEntry {
@@ -1487,19 +1487,19 @@ mcp_config.mcp_servers.insert("database".into(), ServerEntry {
     ..Default::default()
 });
 
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .with_mcp_config(mcp_config)  // 커스텀 설정 주입
     .build();
 
 // 커스텀 설정으로 생성된 McpManager에 접근
-let mcp = oxi.mcp().expect("MCP should be enabled");
+let mcp = oxicode.mcp().expect("MCP should be enabled");
 ```
 
 #### 예시 3: MCP 비활성화
 
 ```rust
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .with_mcp(false)  // MCP 툴 등록 안 함
     .build();
@@ -1508,7 +1508,7 @@ let oxi = OxiBuilder::new()
 #### 예시 4: 독립 MCP 툴 팩토리
 
 ```rust
-use oxi_sdk::mcp_tools;
+use oxicode_sdk::mcp_tools;
 
 // 다른 툴 세트와 조합
 let coding = coding_tools(Path::new("/workspace"));
@@ -1523,7 +1523,7 @@ combined.extend_from(&mcp);
 
 **검토:** MCP 설정을 Port 12(`McpConfigProvider`)로 정의할지 고려함.
 
-**결정:** Port가 아닌 **OxiBuilder API + Factory**로 제공.
+**결정:** Port가 아닌 **OxicodeBuilder API + Factory**로 제공.
 
 이유:
 1. MCP는 인프라(state, auth, config)가 아니라 **에이전트 기능**(툴).
@@ -1577,7 +1577,7 @@ Phase 1 구현 후 Phase 2와 병렬로 진행 가능.
   `#[deprecated]` 어노테이션으로 마이그레이션 안내.
 
 ### 10.6 SDK 컨슈머의 MCP 의존성 (v3 추가)
-→ oxi-sdk가 oxi-agent의 MCP 모듈을 re-export하면,
-  oxi-agent 의존이 있는 SDK 컨슈머는 MCP 없이도 oxi-agent를 직접 의존할 수 있음.
-  → re-export는 oxi-sdk의 lib.rs에서 opt-in 아님. `use oxi_sdk::McpManager`로
-  필요할 때만 사용. 불필요한 의존 트리 증가 없음 (oxi-sdk는 이미 oxi-agent에 의존).
+→ oxicode-sdk가 oxicode-agent의 MCP 모듈을 re-export하면,
+  oxicode-agent 의존이 있는 SDK 컨슈머는 MCP 없이도 oxicode-agent를 직접 의존할 수 있음.
+  → re-export는 oxicode-sdk의 lib.rs에서 opt-in 아님. `use oxicode_sdk::McpManager`로
+  필요할 때만 사용. 불필요한 의존 트리 증가 없음 (oxicode-sdk는 이미 oxicode-agent에 의존).

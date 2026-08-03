@@ -1,4 +1,4 @@
-# oxi TUI 개선 설계
+# oxicode TUI 개선 설계
 
 ## 개요
 
@@ -20,7 +20,7 @@ ratatui 프레임워크에 맞는 3가지 실용적 개선.
 - 테마 색상(`muted`, `accent`) 사용
 
 ### 변경 파일
-- `oxi-tui/src/widgets/chat.rs` — ScrollView 설정 + Scrollbar 위젯 추가
+- `oxicode-tui/src/widgets/chat.rs` — ScrollView 설정 + Scrollbar 위젯 추가
 
 ### 난이도: ★☆☆ (낮음)
 
@@ -52,9 +52,9 @@ ratatui 프레임워크에 맞는 3가지 실용적 개선.
 - `Constraint::Percentage()`로 반응형 너비
 
 ### 변경 파일
-- `oxi-cli/src/tui/render.rs` — `render_resume_select()` 재작성
-- `oxi-cli/src/tui/app.rs` — `ResumeSelect` 오버레이에 `TableState` 추가
-- `oxi-cli/src/tui/handlers.rs` — 테이블 네비게이션 키 처리 (거의 동일)
+- `oxicode-cli/src/tui/render.rs` — `render_resume_select()` 재작성
+- `oxicode-cli/src/tui/app.rs` — `ResumeSelect` 오버레이에 `TableState` 추가
+- `oxicode-cli/src/tui/handlers.rs` — 테이블 네비게이션 키 처리 (거의 동일)
 
 ### 난이도: ★★☆ (중간)
 
@@ -140,10 +140,10 @@ pub(crate) enum AppOverlay {
 → 기존 명령어는 유지하되, 인터랙티브 패널로 라우팅
 
 ### 변경 파일
-- `oxi-cli/src/tui/app.rs` — `SettingsPanelState`, AppOverlay 확장
-- `oxi-cli/src/tui/render.rs` — `render_settings_panel()` 새 함수 + 탭별 렌더러
-- `oxi-cli/src/tui/handlers.rs` — 탭 전환/선택 키 핸들러
-- `oxi-cli/src/tui/slash.rs` — 명령어를 패널로 라우팅
+- `oxicode-cli/src/tui/app.rs` — `SettingsPanelState`, AppOverlay 확장
+- `oxicode-cli/src/tui/render.rs` — `render_settings_panel()` 새 함수 + 탭별 렌더러
+- `oxicode-cli/src/tui/handlers.rs` — 탭 전환/선택 키 핸들러
+- `oxicode-cli/src/tui/slash.rs` — 명령어를 패널로 라우팅
 
 ### 난이도: ★★★ (높음)
 

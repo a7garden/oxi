@@ -1,0 +1,126 @@
+[package]
+name = "oxicode-cli"
+version = "0.64.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
+readme = "README.md"
+license = "MIT"
+authors = ["a7garden <a7garden@icloud.com>"]
+repository = "https://github.com/project-oxi/oxicode"
+keywords = ["ai", "coding", "assistant", "llm", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["target/", "benches/"]
+
+[[bin]]
+name = "oxicode"
+path = "src/main.rs"
+
+[lib]
+name = "oxicode"
+path = "src/lib.rs"
+
+[dependencies]
+oxicode-ai = { version = "0.64.0", path = "../oxicode-ai" }
+oxicode-agent = { version = "0.64.0", path = "../oxicode-agent" }
+oxicode-sdk = { version = "0.64.0", path = "../oxicode-sdk", features = ["router", "role-routing", "role-switching", "url-resolver"] }
+oxicode-vtui = { version = "0.64.0", path = "../oxicode-vtui" }
+oxicode-vtui-compat = { version = "0.64.0", path = "../oxicode-vtui-compat" }
+oxicode-mnemopi = { version = "0.64.0", path = "../oxicode-mnemopi", features = ["remote-embeddings"] }
+oxicode-lsp = { version = "0.64.0", path = "../oxicode-lsp" }
+lsp-types = "0.95"
+
+# Async
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = { workspace = true }
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+parking_lot = "0.12"
+crossterm = "0.29"
+ratatui = { version = "0.30", features = ["crossterm"] }
+unicode-width = "0.2"
+anstyle = "1"
+base64 = "0.22"
+rand = "0.9"
+sha2 = "0.10"
+url = "2"
+
+# Image processing
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+
+# Dynamic loading for extensions
+libloading = "0.9"
+# Pinned to extism 1.21.0 (wasmtime 41.x).
+#
+# extism 1.30.0 (published 2026-06-04) is uncompilable: it assumes
+# `wasmtime::Error: std::error::Error`, but wasmtime 43 deliberately
+# removed that impl (see `wasmtime-internal-core-43.0.2/src/error/error.rs`).
+# Result: 41 E0277 errors in extism's own code, not in oxicode.
+#
+# This pin also defends against the `cargo install` resolution issue
+# (rust-lang/cargo#7169) where `cargo install --path` ignores the
+# workspace `Cargo.lock` and resolves to the latest matching version.
+# `^1.21` (= >=1.21, <2.0) lets cargo pick the broken 1.30.0; `=1.21.0`
+# does not. See deny.toml and .cargo/audit.toml for the wasmtime-41
+# CVE tracking that motivates staying on 1.21.x until extism ships a
+# working wasmtime-43 release.
+extism = { version = "=1.21.0", default-features = false }
+tempfile = "3"
+regex = "1"
+# Semver
+semver = { version = "1", features = ["serde"] }
+
+# HTTP client for version check
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Self-update (optional)
+self_update = { version = "0.41", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"], optional = true }
+serde_yaml = "0.9"
+
+# OAuth support
+urlencoding = "2.1"
+
+# Filesystem watching
+notify = "8"
+
+# Archive extraction for tools-manager
+flate2 = "1"
+tar = "0.4"
+zip = "8"
+
+# Unix primitives for SIGTSTP
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = ["self-update"]
+self-update = ["dep:self_update"]
+native-browser = ["oxicode-agent/native-browser", "oxicode-sdk/native-browser"]
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+portable-pty = { workspace = true }

@@ -1,21 +1,21 @@
-# oxi omp-정렬 분석 증거 (Scout Findings)
+# oxicode omp-정렬 분석 증거 (Scout Findings)
 
 - **날짜**: 2026-07-27
-- **출처**: omp v17.1.5 (`/tmp/omp`) vs oxi v0.60.0 (`/Volumes/MERCURY/PROJECTS/oxi`)의 6개 도메인 병렬 분석 (ScoutProviders, ScoutCatalog, ScoutAgent, ScoutCli, ScoutTui, ScoutSupport)
+- **출처**: omp v17.1.5 (`/tmp/omp`) vs oxicode v0.60.0 (`/Volumes/MERCURY/PROJECTS/oxicode`)의 6개 도메인 병렬 분석 (ScoutProviders, ScoutCatalog, ScoutAgent, ScoutCli, ScoutTui, ScoutSupport)
 - **목적**: `2026-07-27-omp-realignment-design.md`의 설계 근거
-- **검증**: P0 프로바이더 발견은 advisor가 oxi 소스(`register_builtins.rs:548-551`, omp `registry.ts:73-79`)에서 직접 교차 검증.
+- **검증**: P0 프로바이더 발견은 advisor가 oxicode 소스(`register_builtins.rs:548-551`, omp `registry.ts:73-79`)에서 직접 교차 검증.
 
 ---
 
 ## 1. PROVIDERS / AI 층 (사용자 핵심 pain)
 
-**평가**: Drifting — 핵심은 어느 정도 충실하나 싵각한 oxi-original 추가와 치명적 gap.
+**평가**: Drifting — 핵심은 어느 정도 충실하나 싵각한 oxicode-original 추가와 치명적 gap.
 
 ### 1.1 정체성 붕괴 (advisor 직접 검증 완료)
 
-**증거**: `oxi-ai/src/providers/register_builtins.rs:548-551`이 단정:
+**증거**: `oxicode-ai/src/providers/register_builtins.rs:548-551`이 단정:
 ```rust
-// (oxi 자체 테스트)
+// (oxicode 자체 테스트)
 create_builtin_provider("deepseek").name() == "openai"   // :548-551
 create_builtin_provider("minimax").name()  == "anthropic" // :554-557
 ```
@@ -53,7 +53,7 @@ OXI는 8개만 (`Anthropic`, `OpenAiCompletions`, `OpenAiResponses`, `Google`, `
 - **StreamOptions 얇음**: OMP 25+ 필드(signal, watchdog timeout, middleware hook, per-provider options) → OXI 9 필드.
 - **SSE 파싱 8중 복제**: 모든 프로바이더(`openai.rs`, `anthropic.rs`, `google.rs`, `bedrock.rs`, `mistral.rs`, `openai_responses.rs`, `vertex.rs`, `azure.rs`)가 private `parse_sse_events()` 보유. OMP는 `readSseEvents()`로 중앙화.
 - **에러 평면화**: `ProviderError::HttpError(u16, String)` vs OMP 깊은 계층(`AnthropicApiError` request-id 파싱, `OpenAIHttpError` body envelope, `BedrockApiError`, `GoogleApiError`, `OllamaApiError`, `DevinApiError`, `CodexProviderStreamError`).
-- **Catalog coupling 역전**: OMP는 `pi-catalog`/`pi-ai` 엄격 분리. OXI는 catalog materialization을 oxi-ai에 임베드.
+- **Catalog coupling 역전**: OMP는 `pi-catalog`/`pi-ai` 엄격 분리. OXI는 catalog materialization을 oxicode-ai에 임베드.
 - **Model 타입 gap**: `request_model_id`(alias용), `supports_tools`, `transport`(pi-native) 누락. `context_window`/`max_tokens`이 non-nullable `usize` vs OMP `number | null`.
 - **`parse_api()` silent coercion**: 알 수 없는 API가 조용히 `Api::OpenAiCompletions`로 fallthrough.
 
@@ -91,33 +91,33 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 - `packages/ai/src/error/classes.ts` — 에러 계층
 
 **OXI**:
-- `oxi-ai/src/providers/trait_def.rs` — Provider trait (stream, name) ← 융합의 원인
-- `oxi-ai/src/providers/register_builtins.rs` — data-driven factory, `parse_api()` coercion, identity-collapse 단정(:548-551, :554-557)
-- `oxi-ai/src/providers/event.rs` — ProviderEvent 15 변형 (ImageEnd 누락)
-- `oxi-ai/src/providers/options.rs` — StreamOptions 9 필드
-- `oxi-ai/src/providers/openai.rs` — 1460줄, manual HTTP
-- `oxi-ai/src/providers/anthropic.rs` — 1668줄
-- `oxi-ai/src/error.rs` — 평면화 에러
-- `oxi-ai/src/transform.rs` — 1254줄
-- `oxi-ai/src/messages.rs` — ContentBlock/AssistantMessage
-- `oxi-ai/src/multi_provider.rs` — 1284줄 OXI-original
+- `oxicode-ai/src/providers/trait_def.rs` — Provider trait (stream, name) ← 융합의 원인
+- `oxicode-ai/src/providers/register_builtins.rs` — data-driven factory, `parse_api()` coercion, identity-collapse 단정(:548-551, :554-557)
+- `oxicode-ai/src/providers/event.rs` — ProviderEvent 15 변형 (ImageEnd 누락)
+- `oxicode-ai/src/providers/options.rs` — StreamOptions 9 필드
+- `oxicode-ai/src/providers/openai.rs` — 1460줄, manual HTTP
+- `oxicode-ai/src/providers/anthropic.rs` — 1668줄
+- `oxicode-ai/src/error.rs` — 평면화 에러
+- `oxicode-ai/src/transform.rs` — 1254줄
+- `oxicode-ai/src/messages.rs` — ContentBlock/AssistantMessage
+- `oxicode-ai/src/multi_provider.rs` — 1284줄 OXI-original
 
 ---
 
 ## 2. CATALOG
 
-**평가**: Boundary 역전 — OMP는 별도 패키지(단일 소스), OXI는 oxi-ai에 임베디드.
+**평가**: Boundary 역전 — OMP는 별도 패키지(단일 소스), OXI는 oxicode-ai에 임베디드.
 
 ### 핵심 발견
 - OMP `@oh-my-pi/pi-catalog`는 자기完結적 npm 패키지. 모델 데이터/identity/descriptor의 단일 소스. sub-entrypoint: `identity`, `provider-models`, `models.json`, `discovery/*`.
 - **의존성 방향 역전 확인**: catalog source에서 `@oh-my-pi/pi-ai`로의 import **제로** (devDependency의 `generate-models.ts` 스크립트용만). **pi-ai가 catalog 타입을 소비**, 역방향 아님.
 - OMP `models.json`: ~1199 provider 엔트리, 번들된 스냅샷.
-- OXI는 catalog를 oxi-ai에 임베드 (`catalog/`, `data/catalog/`, `model_db.rs`). 4-계층 모델: SNAP(임베디드) → LIVE(런타임 캐시) → Layer 2(override) → LOCAL(로컬 서버). `OXI_MODELS_DEV*` 환경 게이트.
+- OXI는 catalog를 oxicode-ai에 임베드 (`catalog/`, `data/catalog/`, `model_db.rs`). 4-계층 모델: SNAP(임베디드) → LIVE(런타임 캐시) → Layer 2(override) → LOCAL(로컬 서버). `OXICODE_MODELS_DEV*` 환경 게이트.
 - OMP의 catalog 분리가 주는 이점: 단일 소스, 재사용성, AI 패키지와의 명확한 계약. OXI는 이 boundary를 잃음.
 
 ### 키 파일
 - OMP: `packages/catalog/src/{types.ts, models.ts, model-cache.ts, model-manager.ts, identity/*.ts, provider-models/descriptors.ts, variant-collapse.ts, model-thinking.ts, build.ts, effort.ts}`
-- OXI: `oxi-ai/src/catalog/{mod.rs, model.rs, models_dev.rs, runtime.rs, materialize.rs, provider.rs, override_.rs}`, `oxi-ai/src/model_db.rs`, `oxi-ai/data/catalog/{_snapshot.json.gz, product-meta.toml}`
+- OXI: `oxicode-ai/src/catalog/{mod.rs, model.rs, models_dev.rs, runtime.rs, materialize.rs, provider.rs, override_.rs}`, `oxicode-ai/src/model_db.rs`, `oxicode-ai/data/catalog/{_snapshot.json.gz, product-meta.toml}`
 
 ---
 
@@ -126,7 +126,7 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 **평가**: DRIFTING — 핵심 런타임 충실도 ~40-50%, 도구 parity ~30%.
 
 ### 핵심 발견
-- **아키텍처**: OMP는 agent 런타임을 `packages/agent`(코어 루프)와 `packages/coding-agent`(도구, MCP)로 분리. OXI는 `oxi-agent` 하나로 통합 (48 파일, ~25K줄).
+- **아키텍처**: OMP는 agent 런타임을 `packages/agent`(코어 루프)와 `packages/coding-agent`(도구, MCP)로 분리. OXI는 `oxicode-agent` 하나로 통합 (48 파일, ~25K줄).
 - **도구 parity**: OMP 23개 도구. 7개 정확히 매칭 (read, write, edit, bash, grep, todo, github). 6개 OXI-original (ls, get_search_results, github_search, generate_image, commit, context7). **16개 OMP 도구 누락**: ast_grep, ast_edit, debug, eval, computer, checkpoint, rewind, hub, learn, manage_skill, inspect_image, yield, goal, review, tts, vibe.
 - **도구 인터페이스**: MODERATE DRIFT — OMP `AgentTool`은 18+ optional 필드; OXI trait은 ~10 메서드. 누락: intent tracing(`i` 필드), per-call concurrency/resolver, per-call interruptibility, approval 시스템, TTSR matcher hook, custom wire 이름, rich streaming `onUpdate` 콜백.
 - **에이전트 루프**: SIGNIFICANT SIMPLIFICATION. 6개 high-severity gap:
@@ -143,7 +143,7 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 
 ### 키 파일
 - OMP: `packages/agent/src/{agent.ts (56KB), agent-loop.ts (102KB), types.ts (35KB)}`, `packages/coding-agent/src/tools/{builtin-names.ts, essential-tools.ts, index.ts (663줄)}`
-- OXI: `oxi-agent/src/{agent.rs (1133줄), tools.rs (1095줄), agent_loop/mod.rs (1495줄), events.rs (480줄), state.rs (~250줄)}`
+- OXI: `oxicode-agent/src/{agent.rs (1133줄), tools.rs (1095줄), agent_loop/mod.rs (1495줄), events.rs (480줄), state.rs (~250줄)}`
 
 ---
 
@@ -161,11 +161,11 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
   - 14 위젯 (editor 117.7KB, markdown 98.1KB, input, select-list, settings-list, image, box, scroll-view, tab-bar, loader, cancellable-loader, Text, TruncatedText, Spacer).
   - LaTeX(42.6KB + 51.7KB), mermaid, deccara, kitty-graphics, fuzzy, autocomplete(37.3KB), stdin-buffer(27.4KB), keys(16.5KB), keybindings, mouse, terminal(62.7KB), terminal-capabilities(43.8KB).
 
-- **OXI `oxi-tui` v2 상태**: greenfield 9.7K LOC, 222 테스트. ratatui + crossterm 기반. 3 기둥: (1) terminal-first pipeline (`draw_frame`); (2) RetainedTree + content_hash memoization; (3) capability detection + consumption 동일 모듈. 위젯: ChatView, Footer, Sticky, Overlay, Border, List(virtualized), Scrollbar, Text. Theme: 28 ColorScheme 슬롯 (legacy와 스키마 다름). **glyph 시스템 v2에 없음** (doc/code 모순).
+- **OXI `oxicode-tui` v2 상태**: greenfield 9.7K LOC, 222 테스트. ratatui + crossterm 기반. 3 기둥: (1) terminal-first pipeline (`draw_frame`); (2) RetainedTree + content_hash memoization; (3) capability detection + consumption 동일 모듈. 위젯: ChatView, Footer, Sticky, Overlay, Border, List(virtualized), Scrollbar, Text. Theme: 28 ColorScheme 슬롯 (legacy와 스키마 다름). **glyph 시스템 v2에 없음** (doc/code 모순).
 
-- **OXI `oxi-tui-legacy`**: ~74K LOC. theme.rs(75KB, 26 슬롯), symbols.rs(34KB, GlyphSet Unicode/Ascii/Nerd, 50+ 필드), widgets/chat/(~167KB), tool_renderer(61.9KB), list_selector(30.6KB), render/mermaid(85.3KB), render/color_level(DEAD), keybindings/.
+- **OXI `oxicode-tui-legacy`**: ~74K LOC. theme.rs(75KB, 26 슬롯), symbols.rs(34KB, GlyphSet Unicode/Ascii/Nerd, 50+ 필드), widgets/chat/(~167KB), tool_renderer(61.9KB), list_selector(30.6KB), render/mermaid(85.3KB), render/color_level(DEAD), keybindings/.
 
-- **Revert 이력 (`.git/logs/HEAD`로 확인)**: `c37b6a3f "revert: roll back grok-build port, restore oxi-cli + oxi-tui baseline"` 직전에 ~20개 grok-build 포팅 커밋. revert 직후 같은 세션에서 `e73b5cb5 "docs(tui-v2): spec + Plan A"` → `oxi-tui-v2-plan-a` 브랜치 → 37 커밋 → v0.58에 main으로 merge. **v2 crate 자체는 vendored 코드로 오염되지 않음** (clean-room). 하지만 설계는 grok에서 영감.
+- **Revert 이력 (`.git/logs/HEAD`로 확인)**: `c37b6a3f "revert: roll back grok-build port, restore oxicode-cli + oxicode-tui baseline"` 직전에 ~20개 grok-build 포팅 커밋. revert 직후 같은 세션에서 `e73b5cb5 "docs(tui-v2): spec + Plan A"` → `oxicode-tui-v2-plan-a` 브랜치 → 37 커밋 → v0.58에 main으로 merge. **v2 crate 자체는 vendored 코드로 오염되지 않음** (clean-room). 하지만 설계는 grok에서 영감.
 
 ### Gap (HIGH)
 1. **Theme 스키마 비호환** — v2 ColorScheme이 legacy와 다름 (다른 필드, "derived" 값). theme 파일 이식 불가.
@@ -187,7 +187,7 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 **평가**: 부분 충실 포팅에서 creative reimagining으로 표류.
 
 ### 핵심 발견
-- **Composition root**: OMP `main.ts`(1648줄) 단일 함수 + `sdk.ts`(3549줄). OXI는 `bootstrap.rs`(601) + `services.rs`(~539) + `lib.rs`(603) 3분할. OXI가 testability엔 더 나으나 `lib.rs::App::from_oxi`가 `bootstrap.rs::build_app`과 중복 wiring (tool 등록, MCP credential). **경계 혼란**.
+- **Composition root**: OMP `main.ts`(1648줄) 단일 함수 + `sdk.ts`(3549줄). OXI는 `bootstrap.rs`(601) + `services.rs`(~539) + `lib.rs`(603) 3분할. OXI가 testability엔 더 나으나 `lib.rs::App::from_oxicode`가 `bootstrap.rs::build_app`과 중복 wiring (tool 등록, MCP credential). **경계 혼란**.
 - **CLI 명령**: OMP 33개 명령 lazy-loaded table. OXI clap derive 17개 (Issue, Pkg, Ext, Refresh, Share는 OXI-original). subcommand 핸들러가 main.rs에 inline (1623줄) — F-5 audit 미해결. **OXI가 ~20개 OMP 명령 누락**.
 - **Run mode**: OMP는 TUI/print/RPC/ACP. OXI는 TUI/print/RPC (ACP 미포팅). dispatch는 OXI가 더 깔끔 (bootstrap.rs).
 - **Session 모델**: 핵심 JSONL 트리 모델은 충실 포팅. OXI가 blob store, session stats, rewind/checkpoint 엔트리, agent lifecycle registry, session handoff, 확장 엔트리 타입(TTSR, service tier, goal mode) 누락.
@@ -196,7 +196,7 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 - **Auth**: OXI가 더 발전 (`auth_storage.rs` 1953줄, typed `AuthCredential` enum, Debug redaction, keyring scaffolding). OMP의 secret 난독화 subsystem(115KB)은 누락.
 - **Extensions**: OXI가 깔끔 (WASM-first via extism, native `.so`/`.dylib`, 권한 시스템, legacy shim 없음). OMP가 더 강력 (npm plugin, marketplace, hooks, custom commands, dual JS/WASM, 다수 legacy shim).
 - **OXI-original 비대**:
-  - Issue 시스템 (`store/issues.rs` 2020줄 + 통합 지점 합산 ~10K줄) — CAS/flock ownership, `.oxi/issues/` 마크다운, OMP 대응 없음. 잘 설계됐으나 bolted-on.
+  - Issue 시스템 (`store/issues.rs` 2020줄 + 통합 지점 합산 ~10K줄) — CAS/flock ownership, `.oxicode/issues/` 마크다운, OMP 대응 없음. 잘 설계됐으나 bolted-on.
   - Package manager (`storage/packages.rs` 106.7KB) — npm 기반, 통합 깊이 불투명.
   - Language policy — TUI-only opt-in, AGENTS.md ~200줄 할애, OMP 대응 없음. "strong default, NOT hard guarantee" 자인.
 
@@ -207,25 +207,25 @@ Provider identity = **name string** (`model.provider`), but trait의 `name()`이
 **평가**: 직접 포팅 3개는 충실, major gap은 stats/collab/wire.
 
 ### 핵심 발견
-- **충실한 포팅**: `oxi-mnemopi` ★★★★★, `oxi-snapcompact` ★★★★★, `oxi-hashline` ★★★★☆.
+- **충실한 포팅**: `oxicode-mnemopi` ★★★★★, `oxicode-snapcompact` ★★★★★, `oxicode-hashline` ★★★★☆.
 - **미포팅**: stats dashboard (HIGH, 사용자 노출), collab web client (MEDIUM), wire protocol types (MEDIUM).
-- **pi-natives 분석 정정**: 순수 Rust 논리는 필요한 곳에 흡수됨 (snapcompact renderer → oxi-snapcompact; grep/find/ls → oxi-agent native 도구; syntect → workspace dep). OXI는 N-API가 필요 없음 (Rust 자체이므로).
+- **pi-natives 분석 정정**: 순수 Rust 논리는 필요한 곳에 흡수됨 (snapcompact renderer → oxicode-snapcompact; grep/find/ls → oxicode-agent native 도구; syntect → workspace dep). OXI는 N-API가 필요 없음 (Rust 자체이므로).
 - **진짜 미포팅**: OS-integration ops (clipboard는 shell-out pbcopy/xclip, desktop capture, audio, WebRTC, SIXEL, power, keyboard simulation 없음).
-- `oxi-sdk`: net-new 제품 표면 (15 port traits, security, coordination, workflow engine).
-- `oxi-lsp`: XAI grok에서 온 net-new.
+- `oxicode-sdk`: net-new 제품 표면 (15 port traits, security, coordination, workflow engine).
+- `oxicode-lsp`: XAI grok에서 온 net-new.
 - Utils: Rust 생태계로 흡수.
 - **"이상한" UX의 원인 추정**: clipboard subprocess 취약성, TUI용 native 텍스트 측정 누락, 속도용 `grep-*` crate 미사용, stats dashboard 부재.
 
 ### 키 파일
 - OMP: `packages/mnemopi/src/types.ts`, `crates/pi-natives/src/lib.rs` (30+ 모듈)
-- OXI: `oxi-mnemopi/src/types.rs` (충실), `oxi-agent/src/tools/grep.rs`, `oxi-cli/src/media/clipboard_write.rs`, `oxi-cli/src/extensions/loading.rs`
-- 설계 문서: `oxi/docs/designs/omp-adoption-2/00-design-revisions.md:300-318` (pi-natives snapcompact renderer 흡수 확인)
+- OXI: `oxicode-mnemopi/src/types.rs` (충실), `oxicode-agent/src/tools/grep.rs`, `oxicode-cli/src/media/clipboard_write.rs`, `oxicode-cli/src/extensions/loading.rs`
+- 설계 문서: `oxicode/docs/designs/omp-adoption-2/00-design-revisions.md:300-318` (pi-natives snapcompact renderer 흡수 확인)
 
 ---
 
 ## 요약: "이상함" 진단
 
-oxi는 pi 포팅으로 시작 → omp 기능 흡수 → grok-build TUI 포팅 시도(revert)의 3층이 누적됐으나 조율 안 됨. 결과: omp 포팅도, 깔끔한 Rust-native도 아닌, 충돌하는 아키텍처 논제들이 싸우는 하이브리드.
+oxicode는 pi 포팅으로 시작 → omp 기능 흡수 → grok-build TUI 포팅 시도(revert)의 3층이 누적됐으나 조율 안 됨. 결과: omp 포팅도, 깔끔한 Rust-native도 아닌, 충돌하는 아키텍처 논제들이 싸우는 하이브리드.
 
 **프로바이더 "이상함"의 정확한 진단** (advisor 교차 검증): `Provider` trait + `BuiltinProvider` struct가 스트리밍 transport + auth/login wiring + model/host 메타데이터 **세 우려**를 동시에 담당하도록 융합된 결과. OMP는 이 셋을 `StreamFunction`(transport, identity 없음) / `ProviderDefinition` registry(auth/login) / `ProviderDescriptor`(catalog, 메타데이터+discovery)로 분리. "trait를 Api로 keying"만으로는 정체성 붕괴가 안 고쳐지고, identity/auth/메타데이터를 trait에서 빼서 (2)·(3)으로 올리는 것이 유일한 수정. 추가로 omp의 `KnownApi` 14개 dialect(그중 cursor/devin/gitlab-duo는 remote-AGENT 프로토콜)가 P0 scope.
 

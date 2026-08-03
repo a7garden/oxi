@@ -1,28 +1,28 @@
-# oxi-vtui TUI Harness Implementation Plan
+# oxicode-vtui TUI Harness Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans.
 
-**Goal:** Replace oxi's broken TUI with a working ratatui-based harness using the vendored vtcode-ui (design/theme/protocol).
+**Goal:** Replace oxicode's broken TUI with a working ratatui-based harness using the vendored vtcode-ui (design/theme/protocol).
 
-**Architecture:** oxi-cli → spawn_core_session() → InlineSession (channel) → event loop rendering ratatui widgets against oxi-vtui theme. AgentSession subscribes SessionEvent, maps to InlineCommand. Keyboard events map to InlineEvent.
+**Architecture:** oxicode-cli → spawn_core_session() → InlineSession (channel) → event loop rendering ratatui widgets against oxicode-vtui theme. AgentSession subscribes SessionEvent, maps to InlineCommand. Keyboard events map to InlineEvent.
 
-**Tech Stack:** Rust 2024, ratatui 0.30, crossterm 0.29, oxi-vtui (vendored), oxi-vtui-compat (stubs)
+**Tech Stack:** Rust 2024, ratatui 0.30, crossterm 0.29, oxicode-vtui (vendored), oxicode-vtui-compat (stubs)
 
 ## Global Constraints
 
 - Ship clean: 0 new clippy warnings, 0 test regressions.
-- oxi-tui crate and oxi-cli/src/tui/ are deleted only after the new harness works end-to-end.
+- oxicode-tui crate and oxicode-cli/src/tui/ are deleted only after the new harness works end-to-end.
 
 ---
 
 ### Task 1: Boot Entry (mod.rs + bootstrap.rs wiring)
 
 **Files:**
-- Create: `oxi-cli/src/tui_vt/mod.rs`
-- Modify: `oxi-cli/src/bootstrap.rs` (dispatch to new TUI)
+- Create: `oxicode-cli/src/tui_vt/mod.rs`
+- Modify: `oxicode-cli/src/bootstrap.rs` (dispatch to new TUI)
 
 **Interfaces:**
-- Consumes: `crate::App` from bootstrap, `oxi_vtui::tui::core::*`
+- Consumes: `crate::App` from bootstrap, `oxicode_vtui::tui::core::*`
 - Produces: `pub async fn run_tui(app: App) -> Result<()>` entry point
 
 **Content needed:**
@@ -47,7 +47,7 @@ Add `--new-tui` flag to `CliArgs`. In `dispatch_run_mode`, route to `tui_vt::run
 ### Task 2: Terminal Lifecycle (RAII + panic safety)
 
 **Files:**
-- Modify: `oxi-cli/src/tui_vt/main_loop.rs`
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs`
 
 **Content needed:**
 - `struct Tui { terminal, tty_ok }` — crossterm setup/teardown
@@ -71,7 +71,7 @@ struct Tui {
 ### Task 3: Main Event Loop (biased tokio::select!)
 
 **Files:**
-- Modify: `oxi-cli/src/tui_vt/main_loop.rs`
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs`
 
 **Content needed:**
 
@@ -111,7 +111,7 @@ loop {
 ### Task 4: AentEvent → InlineCommand Mapping
 
 **Files:**
-- Modify: `oxi-cli/src/tui_vt/main_loop.rs`
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs`
 
 **Allocation budget:** Streaming tokens MUST NOT allocate per-character. Pre-allocate InlineSegment buffers.
 
@@ -137,7 +137,7 @@ loop {
 ### Task 5: Ratatui Rendering (transcript, composer, footer)
 
 **Files:**
-- Modify: `oxi-cli/src/tui_vt/main_loop.rs`
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs`
 
 **Layout (vertical split):**
 ```
@@ -179,7 +179,7 @@ loop {
 ### Task 6: Keyboard Input → InlineEvent Mapping
 
 **Files:**
-- Modify: `oxi-cli/src/tui_vt/main_loop.rs`
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs`
 
 **Input thread:** Spawned at startup. Polls crossterm::event::poll(50ms) in loop. Sends InlineEvent over channel.
 
@@ -208,9 +208,9 @@ loop {
 ### Task 7: Theme Integration
 
 **Files:**
-- Modify: `oxi-cli/src/tui_vt/main_loop.rs`
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs`
 
-**Theme activation:** On startup call `oxi_vtui::theme::runtime::set_active_theme(theme_id)`. On `/theme` command, call same. Active styles from `active_styles()`.
+**Theme activation:** On startup call `oxicode_vtui::theme::runtime::set_active_theme(theme_id)`. On `/theme` command, call same. Active styles from `active_styles()`.
 
 **Style references:**
 ```rust
@@ -231,14 +231,14 @@ let style = match kind {
 ### Task 8: Cleanup — Remove Old TUI
 
 **Files:**
-- Delete: `oxi-cli/src/tui/` directory
-- Delete: `oxi-tui/` crate directory
-- Modify: `Cargo.toml` workspace members (remove oxi-tui)
-- Modify: `oxi-cli/Cargo.toml` (remove oxi-tui dep, make oxi-vtui primary)
+- Delete: `oxicode-cli/src/tui/` directory
+- Delete: `oxicode-tui/` crate directory
+- Modify: `Cargo.toml` workspace members (remove oxicode-tui)
+- Modify: `oxicode-cli/Cargo.toml` (remove oxicode-tui dep, make oxicode-vtui primary)
 
-- [ ] **Step 1: Remove oxi-tui from workspace members**
-- [ ] **Step 2: Remove oxi-cli/src/tui/ and add oxi-tui crate deletion**
-- [ ] **Step 3: Update all oxi_tui:: imports in oxi-cli to oxi_vtui::**
+- [ ] **Step 1: Remove oxicode-tui from workspace members**
+- [ ] **Step 2: Remove oxicode-cli/src/tui/ and add oxicode-tui crate deletion**
+- [ ] **Step 3: Update all oxicode_tui:: imports in oxicode-cli to oxicode_vtui::**
 - [ ] **Step 4: Full workspace build pass: `cargo check --workspace`**
 - [ ] **Step 5: `cargo clippy --workspace -- -D warnings`**
 - [ ] **Step 6: `cargo nextest run --workspace`**

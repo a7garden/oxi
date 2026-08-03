@@ -1,22 +1,22 @@
 # Master Design: native-browser 부활 및 트라이앵글 정렬
 
 > **Status:** Proposal
-> **Scope:** `oxi` (oxi-agent, oxi-sdk) · `oxibrowser` · `oxios`
+> **Scope:** `oxicode` (oxicode-agent, oxicode-sdk) · `oxibrowser` · `oxios`
 > **Date:** 2026-06-15
 > **Trigger:** oxios의 workspace-wide edition 2024 전환이 `--all-features`에서
-> `oxi-agent`의 27개 컴파일 에러를 드러냄.
+> `oxicode-agent`의 27개 컴파일 에러를 드러냄.
 
 ---
 
 ## 0. TL;DR
 
-`native-browser` feature가 **oxi CI에서 단 한 번도 컴파일된 적 없어서**
+`native-browser` feature가 **oxicode CI에서 단 한 번도 컴파일된 적 없어서**
 edition 2024 수명 규칙에 맞지 않는 코드가 crates.io 0.32.0까지 배포되었다.
 이 설계는 세 가지를 동시에 해결한다:
 
 1. **버그 수정** — `BrowserTab`/`BrowserEngine`을 `#[async_trait]`로 전환
    (이미 의존성이고 sibling 4개가 쓰는 중)
-2. **버전 정렬** — `oxibrowser-core` 0.14.1 → 0.15, oxi 0.34.0 배포
+2. **버전 정렬** — `oxibrowser-core` 0.14.1 → 0.15, oxicode 0.34.0 배포
 3. **CI 경화** — `native-browser`를 매 빌드마다 컴파일하여 재부패 영구 차단
 
 ---
@@ -27,13 +27,13 @@ edition 2024 수명 규칙에 맞지 않는 코드가 crates.io 0.32.0까지 배
 
 ```
 oxios (0.32.0 사용)
-  └─ oxi-sdk 0.32.0 (crates.io)
-       └─ oxi-agent 0.32.0 (crates.io)
+  └─ oxicode-sdk 0.32.0 (crates.io)
+       └─ oxicode-agent 0.32.0 (crates.io)
             └─ [native-browser] oxibrowser_backend.rs ← 27 errors
 
-oxi (local, 0.34.0 — 미배포)
-  ├─ oxi-sdk 0.34.0    → oxibrowser-core "0.14.1" ← STALE
-  └─ oxi-agent 0.34.0  → oxibrowser-core "0.15"   ← current
+oxicode (local, 0.34.0 — 미배포)
+  ├─ oxicode-sdk 0.34.0    → oxibrowser-core "0.14.1" ← STALE
+  └─ oxicode-agent 0.34.0  → oxibrowser-core "0.15"   ← current
 
 oxibrowser (0.15.0 배포중) — 수정 불필요
 ```
@@ -42,22 +42,22 @@ oxibrowser (0.15.0 배포중) — 수정 불필요
 
 | # | 문제 | 위치 |
 |---|------|------|
-| A | native-browser 코드가 edition 2024에서 컴파일 안 됨 | `oxi-agent/.../oxibrowser_backend.rs` |
-| B | oxi-sdk의 oxibrowser-core가 0.14.1 (구버전) | `oxi-sdk/Cargo.toml:22` |
-| C | oxios가 oxi 0.32.0에 고정 (로컬은 0.34.0) | `oxios/Cargo.toml` |
+| A | native-browser 코드가 edition 2024에서 컴파일 안 됨 | `oxicode-agent/.../oxibrowser_backend.rs` |
+| B | oxicode-sdk의 oxibrowser-core가 0.14.1 (구버전) | `oxicode-sdk/Cargo.toml:22` |
+| C | oxios가 oxicode 0.32.0에 고정 (로컬은 0.34.0) | `oxios/Cargo.toml` |
 
 ### 1.2 부패 메커니즘 — 왜 아무도 몰랐나
 
 ```
-oxi/.github/workflows/ci.yml
+oxicode/.github/workflows/ci.yml
   → "native-browser" feature를 컴파일하는 스텝이 없음
-  → oxi-agent --features native-browser가 2년간 미검증
+  → oxicode-agent --features native-browser가 2년간 미검증
   → edition 2024 전환 시에도 default features만 검사
   → 부서진 코드가 그대로 0.32.0, 0.33.0, 0.34.0으로 버전업
 ```
 
 **oxios 쪽에서만 `--all-features`를 돌리다 처음 발견.** 근본 원인은
-oxi의 CI 커버리지 구멍이다.
+oxicode의 CI 커버리지 구멍이다.
 
 ### 1.3 버그 상세 — edition 2024 async lifetime
 
@@ -89,12 +89,12 @@ future에 반영해야 한다. `url: '1`이 future의 `+'a`보다 짧을 수 있
 
 **추가 버그 2종 (같은 파일):**
 - E0261 × 2: `tab_id(&'a self)`, `evaluate_await` 리턴타입에 선언되지 않은 `'a`
-- E0271 × 1: `new_tab`에서 `Box<OxiTab>` → `Box<dyn BrowserTab>` coercion 실패
+- E0271 × 1: `new_tab`에서 `Box<OxicodeTab>` → `Box<dyn BrowserTab>` coercion 실패
 
 ### 1.4 치명적 아이러니 — 이미 해결책이 프로젝트 안에 있다
 
 ```toml
-# oxi-agent/Cargo.toml:33
+# oxicode-agent/Cargo.toml:33
 async-trait = "0.1"     # ← 이미 의존성!
 ```
 ```rust
@@ -176,7 +176,7 @@ pub trait BrowserTab: Send + Sync {
 
 **Before (oxibrowser_backend.rs impl):**
 ```rust
-impl BrowserTabTrait for OxiTab {
+impl BrowserTabTrait for OxicodeTab {
     fn goto<'a>(&'a self, url: &str)
         -> Pin<Box<dyn Future<Output = Result<PageContent, BrowserError>> + Send + 'a>>
     {
@@ -192,7 +192,7 @@ impl BrowserTabTrait for OxiTab {
 **After:**
 ```rust
 #[async_trait]
-impl BrowserTabTrait for OxiTab {
+impl BrowserTabTrait for OxicodeTab {
     async fn goto(&self, url: &str) -> Result<PageContent, BrowserError> {
         let page = self.inner.goto(url).await
             .map_err(|e| BrowserError::Navigation(e.to_string()))?;
@@ -212,20 +212,20 @@ impl BrowserTabTrait for OxiTab {
 
 ```
 ① oxibrowser-core 버전 통일
-   oxi-sdk/Cargo.toml:    "0.14.1" → "0.15"   (oxi-agent과 일치)
+   oxicode-sdk/Cargo.toml:    "0.14.1" → "0.15"   (oxicode-agent과 일치)
 
-② oxi 0.35.0 배포 (bug fix = PATCH/MINOR)
-   oxi-agent 0.35.0  — async_trait 전환 + native-browser 수정
-   oxi-sdk   0.35.0  — oxibrowser-core 정렬 + oxi-agent 0.35.0
+② oxicode 0.35.0 배포 (bug fix = PATCH/MINOR)
+   oxicode-agent 0.35.0  — async_trait 전환 + native-browser 수정
+   oxicode-sdk   0.35.0  — oxibrowser-core 정렬 + oxicode-agent 0.35.0
 
 ③ oxios 업그레이드
-   Cargo.toml: oxi-sdk "0.32.0" → "0.35.0"
+   Cargo.toml: oxicode-sdk "0.32.0" → "0.35.0"
    검증: cargo build --workspace --all-features (드디어 통과)
 ```
 
 > **버전 정책:** 트레이트 시그니처가 `Pin<Box<...>>` → `async fn`으로
 > 바뀌는 것은 API breaking change이지만, `BrowserTab`/`BrowserEngine`의
-> 외부 impl은 존재하지 않으므로 (모두 oxi-agent 내부) downstream에는
+> 외부 impl은 존재하지 않으므로 (모두 oxicode-agent 내부) downstream에는
 > 실질적 영향이 없다. `#[async_trait]`가 내부적으로 동일한 `Pin<Box<...>>`
 > 디슈가를 생성하므로 런타임 동작도 동일. 따라서 **MINOR** 업으로 충분
 > (0.35.0). 단, 확신이 없으면 MAJOR(1.0.0)도 고려 — 하지만 과잉.
@@ -234,15 +234,15 @@ impl BrowserTabTrait for OxiTab {
 
 ## 3. CI 경화 (재부팅 영구 차단)
 
-### 3.1 oxi CI — native-browser 검증 스텝 추가
+### 3.1 oxicode CI — native-browser 검증 스텝 추가
 
 ```yaml
-# .github/workflows/ci.yml (oxi)
+# .github/workflows/ci.yml (oxicode)
 - name: Clippy (native-browser)
-  run: cargo clippy -p oxi-agent --features native-browser -- -D warnings
+  run: cargo clippy -p oxicode-agent --features native-browser -- -D warnings
 
 - name: Test (native-browser)
-  run: cargo test -p oxi-agent --features native-browser
+  run: cargo test -p oxicode-agent --features native-browser
 ```
 
 > `oxibrowser_backend.rs`는 실제 헤드리스 브라우저를 띄우지 않으므로
@@ -256,7 +256,7 @@ impl BrowserTabTrait for OxiTab {
 
 ## 4. 실행 계획 (Task Breakdown)
 
-### Phase 1 — oxi-agent 수정 (핵심, ~2h)
+### Phase 1 — oxicode-agent 수정 (핵심, ~2h)
 
 | Task | 파일 | 내용 |
 |------|------|------|
@@ -265,37 +265,37 @@ impl BrowserTabTrait for OxiTab {
 | 1.3 | `tab_guard.rs` | MockTab → `async fn` |
 | 1.4 | `browse_tool.rs` | MockEngine → `async fn` |
 | 1.5 | `helpers.rs` | `&dyn BrowserTab` 소비처 정리 (`extract_links`) |
-| 1.6 | 검증 | `cargo build -p oxi-agent --features native-browser` |
+| 1.6 | 검증 | `cargo build -p oxicode-agent --features native-browser` |
 
 ### Phase 2 — 버전 정렬 (~30min)
 
 | Task | 파일 | 내용 |
 |------|------|------|
-| 2.1 | `oxi-sdk/Cargo.toml` | `oxibrowser-core "0.14.1"` → `"0.15"` |
-| 2.2 | `oxi-sdk/Cargo.toml` | `oxi-agent` path dep → 버전 일치 확인 |
-| 2.3 | 검증 | `cargo build --workspace --features native-browser` (oxi 전체) |
+| 2.1 | `oxicode-sdk/Cargo.toml` | `oxibrowser-core "0.14.1"` → `"0.15"` |
+| 2.2 | `oxicode-sdk/Cargo.toml` | `oxicode-agent` path dep → 버전 일치 확인 |
+| 2.3 | 검증 | `cargo build --workspace --features native-browser` (oxicode 전체) |
 
 ### Phase 3 — CI 경화 (~20min)
 
 | Task | 파일 | 내용 |
 |------|------|------|
-| 3.1 | `oxi/.github/workflows/ci.yml` | `--features native-browser` 스텝 추가 |
-| 3.2 | `oxi/AGENTS.md` | native-browser CI 의무화 명시 |
+| 3.1 | `oxicode/.github/workflows/ci.yml` | `--features native-browser` 스텝 추가 |
+| 3.2 | `oxicode/AGENTS.md` | native-browser CI 의무화 명시 |
 
 ### Phase 4 — 배포 (~30min)
 
 | Task | 내용 |
 |------|------|
-| 4.1 | oxi 0.35.0 버전업 (`oxi-agent`, `oxi-sdk`) |
-| 4.2 | `cargo test --workspace` (oxi) 전체 통과 확인 |
-| 4.3 | `cargo publish -p oxi-agent` → `cargo publish -p oxi-sdk` (의존순) |
+| 4.1 | oxicode 0.35.0 버전업 (`oxicode-agent`, `oxicode-sdk`) |
+| 4.2 | `cargo test --workspace` (oxicode) 전체 통과 확인 |
+| 4.3 | `cargo publish -p oxicode-agent` → `cargo publish -p oxicode-sdk` (의존순) |
 | 4.4 | CHANGELOG 업데이트 |
 
 ### Phase 5 — oxios 업그레이드 (~20min)
 
 | Task | 파일 | 내용 |
 |------|------|------|
-| 5.1 | `oxios/Cargo.toml` | `oxi-sdk "0.32.0"` → `"0.35.0"` |
+| 5.1 | `oxios/Cargo.toml` | `oxicode-sdk "0.32.0"` → `"0.35.0"` |
 | 5.2 | `oxios/Cargo.lock` | 갱신 |
 | 5.3 | 검증 | `cargo build --workspace --all-features` (oxios) — 드디어 clean |
 | 5.4 | 검증 | oxios CI 게이트 (fmt + clippy + test) 전부 통과 |
@@ -308,19 +308,19 @@ impl BrowserTabTrait for OxiTab {
 |--------|------|------|
 | `#[async_trait]` 전환 시 object-safety 손실 | 매우 낮 | async_trait은 원래 object-safe하도록 디슈가 |
 | default 메서드(`hover` 등)의 JS 빌드 로직 오동작 | 낮음 | 로직 변경 없음, 시그니처만 단순화 |
-| oxibrowser-core 0.14→0.15 API 변경 | 중간 | oxi-agent은 이미 0.15 사용 중이므로 호환 확인됨 |
+| oxibrowser-core 0.14→0.15 API 변경 | 중간 | oxicode-agent은 이미 0.15 사용 중이므로 호환 확인됨 |
 | oxios 0.32→0.35 사이 breaking change | 중간 | Phase 5에서 빌드/테스트로 검증 |
 
 ---
 
 ## 6. 검증 체크리스트 (Definition of Done)
 
-- [ ] `cargo build -p oxi-agent --features native-browser` (oxi) — 0 errors
-- [ ] `cargo clippy -p oxi-agent --features native-browser -- -D warnings` (oxi)
-- [ ] `cargo test -p oxi-agent --features native-browser` (oxi) — 전부 통과
-- [ ] `cargo build --workspace` (oxi) — 0 warnings
-- [ ] oxi CI에 native-browser 스텝 추가됨
-- [ ] oxi-agent 0.35.0 + oxi-sdk 0.35.0 crates.io 배포
+- [ ] `cargo build -p oxicode-agent --features native-browser` (oxicode) — 0 errors
+- [ ] `cargo clippy -p oxicode-agent --features native-browser -- -D warnings` (oxicode)
+- [ ] `cargo test -p oxicode-agent --features native-browser` (oxicode) — 전부 통과
+- [ ] `cargo build --workspace` (oxicode) — 0 warnings
+- [ ] oxicode CI에 native-browser 스텝 추가됨
+- [ ] oxicode-agent 0.35.0 + oxicode-sdk 0.35.0 crates.io 배포
 - [ ] oxios `cargo build --workspace --all-features` — 0 errors (최초!)
 - [ ] oxios CI (fmt + clippy + test) — 전부 통과
 
@@ -329,7 +329,7 @@ impl BrowserTabTrait for OxiTab {
 ## 7. 열린 질문 — 해결 내역
 
 1. **oxibrowser-core re-export 정책** ✅ **해결**
-   oxi-sdk은 `pub use oxibrowser_core::BrowserEvent`만 re-export한다.
+   oxicode-sdk은 `pub use oxibrowser_core::BrowserEvent`만 re-export한다.
    0.14.1 → 0.15 전환 후 `BrowserEvent` variant 구조는 동일
    (`NavigationStarted`, `WaitingForSelector`, `DocumentReady`,
    `ScreenshotCaptured` — `tab_id` 필드 포함). oxibrowser_backend.rs의
@@ -342,7 +342,7 @@ impl BrowserTabTrait for OxiTab {
    0.35.0으로 게시 완료. downstream(oxios)에서 컴파일 + 테스트 통과 확인.
 
 3. **oxios의 `native-browser` feature 활성화** ⚠️ **미해결 (후속 작업)**
-   oxi CI에 `clippy-native-browser` job이 추가되어 oxi 측은 영구 차단됨.
+   oxicode CI에 `clippy-native-browser` job이 추가되어 oxicode 측은 영구 차단됨.
    하지만 oxios의 자체 `oxios-kernel/native-browser` feature는
    oxios CI에서 별도로 검증되지 않는다. 후속으로 oxios CI에
    `cargo build -p oxios-kernel --features native-browser` 검증 스텝 추가 권장.

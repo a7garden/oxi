@@ -1,16 +1,16 @@
 # Port System Guide
 
-> oxi-sdk가 정의하는 **port trait**과 제품별 구현 가이드.
+> oxicode-sdk가 정의하는 **port trait**과 제품별 구현 가이드.
 
-> ⚠️ **업데이트 (2026-06):** `oxi-fs` 크레이트는 `oxi-sdk/src/ports/fs/`로 흡수되었습니다.
-> 아래 예제의 `oxi_fs::` 경로는 이제 `oxi_sdk::ports::fs::`입니다(타입명은 동일).
-> port 수도 11개에서 15개로 늘었습니다(전체 목록은 `oxi-sdk/src/ports/mod.rs`).
+> ⚠️ **업데이트 (2026-06):** `oxicode-fs` 크레이트는 `oxicode-sdk/src/ports/fs/`로 흡수되었습니다.
+> 아래 예제의 `oxicode_fs::` 경로는 이제 `oxicode_sdk::ports::fs::`입니다(타입명은 동일).
+> port 수도 11개에서 15개로 늘었습니다(전체 목록은 `oxicode-sdk/src/ports/mod.rs`).
 
 ## 왜 port인가?
 
-oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/멀티에이전트**(자체)를 제공합니다. 하지만 **영속·인증·이벤트버스·스킬·메모리** 같은 "인프라"는 제품마다 다릅니다:
+oxicode-sdk는 **에이전트 런타임**(oxicode-agent) + **빌더/옵저버빌리티/멀티에이전트**(자체)를 제공합니다. 하지만 **영속·인증·이벤트버스·스킬·메모리** 같은 "인프라"는 제품마다 다릅니다:
 
-- `oxi-cli`는 `~/.oxi/` 디렉토리에 JSONL/TOML/JSON
+- `oxicode-cli`는 `~/.oxicode/` 디렉토리에 JSONL/TOML/JSON
 - `oxios-kernel`은 SQLite + 자체 StateStore
 - 서버리스 신제품은 S3 + DynamoDB
 - 테스트는 in-memory
@@ -18,12 +18,12 @@ oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/�
 이 모든 케이스를 **하나의 SDK가** 모두 구현하면 SDK가 무거워지고, 새 시스템의 진입장벽이 높아집니다. 해결책: **port trait**으로 계약을 정의하고, 각 제품이 자기 구현을 꽂습니다.
 
 ```text
-   oxi-sdk  (defines 15 port traits)
+   oxicode-sdk  (defines 15 port traits)
       │
       │ implements
       ▼
    Product layer
-   ├── oxi-cli        → oxi-sdk::ports::fs  (file-based)
+   ├── oxicode-cli        → oxicode-sdk::ports::fs  (file-based)
    ├── oxios-kernel   → 자체 StateStore, EventBus, MemoryStore
    ├── oxios-mobile   → in-memory
    └── 새 시스템        → 자유 구현
@@ -31,7 +31,7 @@ oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/�
 
 ## 15개 port 빠른 참조
 
-| port | 책임 | oxi-cli가 사용? | oxios가 사용? |
+| port | 책임 | oxicode-cli가 사용? | oxios가 사용? |
 |---|---|:-:|:-:|
 | `StateStore` | 영속 key-value / append-only | ✅ (file-based) | ✅ (자체) |
 | `ConfigStore` | 레이어드 설정 | ✅ (file-based) | ✅ (자체) |
@@ -47,17 +47,17 @@ oxi-sdk는 **에이전트 런타임**(oxi-agent) + **빌더/옵저버빌리티/�
 
 15개 모두 **optional**. 등록 안 하면 SDK가 noop fallback을 사용합니다.
 
-## 기본 사용 패턴 (oxi-cli)
+## 기본 사용 패턴 (oxicode-cli)
 
 ```rust
 use std::sync::Arc;
-use oxi_sdk::OxiBuilder;
-use oxi_sdk::ports::fs::{FileStateStore, FileAuthProvider, FileConfigStore, FileSkillLoader};
+use oxicode_sdk::OxicodeBuilder;
+use oxicode_sdk::ports::fs::{FileStateStore, FileAuthProvider, FileConfigStore, FileSkillLoader};
 
-let home = std::env::var("OXI_HOME")
-    .unwrap_or_else(|_| format!("{}/.oxi", std::env::var("HOME").unwrap()));
+let home = std::env::var("OXICODE_HOME")
+    .unwrap_or_else(|_| format!("{}/.oxicode", std::env::var("HOME").unwrap()));
 
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .with_state(Arc::new(FileStateStore::new(format!("{home}/sessions"))))
     .with_auth(Arc::new(FileAuthProvider::new(format!("{home}/auth.json"))))
@@ -66,7 +66,7 @@ let oxi = OxiBuilder::new()
     .build();
 
 // 이후 어디서든:
-let ports = oxi.ports();
+let ports = oxicode.ports();
 let providers = ports.auth.list_providers().await?;
 let keys = ports.config.list()?;
 let skills = ports.skills.list().await?;
@@ -76,8 +76,8 @@ let skills = ports.skills.list().await?;
 
 ```rust
 use async_trait::async_trait;
-use oxi_sdk::ports::{StateStore, PortId, PortValue};
-use oxi_sdk::SdkError;
+use oxicode_sdk::ports::{StateStore, PortId, PortValue};
+use oxicode_sdk::SdkError;
 
 pub struct S3StateStore {
     client: aws_sdk_s3::Client,
@@ -116,10 +116,10 @@ impl StateStore for S3StateStore {
     }
 }
 
-// 그리고 oxi-cli가 wire하듯:
-let oxi = OxiBuilder::new()
+// 그리고 oxicode-cli가 wire하듯:
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
-    .with_state(Arc::new(S3StateStore { client, bucket: "oxi-prod".into() }))
+    .with_state(Arc::new(S3StateStore { client, bucket: "oxicode-prod".into() }))
     .build();
 ```
 
@@ -130,13 +130,13 @@ let oxi = OxiBuilder::new()
 15개를 일일이 `with_*`로 호출하는 게 번거로우면 `PortRegistry`를 통째로 등록:
 
 ```rust
-use oxi_sdk::{OxiBuilder, PortRegistry};
+use oxicode_sdk::{OxicodeBuilder, PortRegistry};
 
 let mut ports = PortRegistry::noop();
 ports.state = Arc::new(MyStateStore::new());
 ports.auth = Arc::new(MyAuthProvider::new());
 
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .with_ports(ports)
     .build();
@@ -190,13 +190,13 @@ async fn append(&self, entry: PortValue) -> Result<PortId, SdkError>;
 이유:
 1. **타입 독립성** — 각 제품이 자기 도메인 타입을 (de)serialize
 2. **Schema evolution** — 새 필드 추가 시 기존 entry와 호환
-3. **Cross-crate 호환** — `oxi_sdk::Message` 같은 구체 타입을 port가 의존하지 않음
+3. **Cross-crate 호환** — `oxicode_sdk::Message` 같은 구체 타입을 port가 의존하지 않음
 
 단점:
 - 컴파일 타임 타입 안전성 감소
 - 잘못된 키 사용 시 런타임 에러
 
-타협: port 자체는 `Value`로 다루고, **도메인 레이어**에서 typed 변환. oxi-cli의 services layer가 `serde_json::from_value::<SessionEntry>(value)?` 식으로 변환.
+타협: port 자체는 `Value`로 다루고, **도메인 레이어**에서 typed 변환. oxicode-cli의 services layer가 `serde_json::from_value::<SessionEntry>(value)?` 식으로 변환.
 
 ## Noop fallback 동작
 
@@ -218,26 +218,26 @@ async fn append(&self, entry: PortValue) -> Result<PortId, SdkError>;
 
 `AccessGate`의 noop이 `AllowAll`이라는 점에 주의 — **운영 환경에선 반드시 명시적 게이트를 등록**해야 합니다.
 
-## 마이그레이션 가이드 (oxi-cli 기준)
+## 마이그레이션 가이드 (oxicode-cli 기준)
 
 ### 단계 1: 새 진입 경로 추가 (이미 완료)
 ```rust
-// oxi-cli/src/services.rs
-pub fn build_oxi(paths: &OxiPaths) -> Result<Oxi> { ... }
+// oxicode-cli/src/services.rs
+pub fn build_oxicode(paths: &OxicodePaths) -> Result<Oxicode> { ... }
 ```
 
 ### 단계 2: main.rs에서 새 경로를 부르는 CLI 추가
-- `--check` 플래그: `build_oxi()`로 wiring 검증
-- 새 subcommand (예: `oxi run-official <prompt>`): 새 entry point
+- `--check` 플래그: `build_oxicode()`로 wiring 검증
+- 새 subcommand (예: `oxicode run-official <prompt>`): 새 entry point
 - 기존 `App::new()` 기반 TUI는 그대로
 
-### 단계 3: App::new의 wiring을 services::build_oxi 결과로 대체
-- App이 `Oxi`를 보관
-- App이 `oxi.ports().auth`로 API key 조회
-- 직접 `oxi_agent::Agent` 생성 대신 `oxi.agent(config).build()?`
+### 단계 3: App::new의 wiring을 services::build_oxicode 결과로 대체
+- App이 `Oxicode`를 보관
+- App이 `oxicode.ports().auth`로 API key 조회
+- 직접 `oxicode_agent::Agent` 생성 대신 `oxicode.agent(config).build()?`
 
 ### 단계 4: legacy `App` 제거
-- 이 단계는 oxios/oxi-cli 둘 다 안정화 후 진행
+- 이 단계는 oxios/oxicode-cli 둘 다 안정화 후 진행
 - 한 번에 하지 말고 한 모드씩 (TUI → print → RPC 순)
 
 ## oxios-kernel에 port를 도입하는 가이드
@@ -245,8 +245,8 @@ pub fn build_oxi(paths: &OxiPaths) -> Result<Oxi> { ... }
 oxios는 현재 자기 구현을 직접 사용 중 (state_store.rs 793줄, access_manager 5,111줄, memory 12,277줄). 이를 port trait impl로 감싸는 작업:
 
 ```rust
-// oxios-kernel/src/state_store.rs → impl oxi_sdk::ports::StateStore for OxiosStateStore
-// oxios-kernel/src/event_bus.rs → impl oxi_sdk::ports::EventBus for KernelEventBus
+// oxios-kernel/src/state_store.rs → impl oxicode_sdk::ports::StateStore for OxiosStateStore
+// oxios-kernel/src/event_bus.rs → impl oxicode_sdk::ports::EventBus for KernelEventBus
 // ... 등등
 ```
 
@@ -267,7 +267,7 @@ oxios는 현재 자기 구현을 직접 사용 중 (state_store.rs 793줄, acces
 // 잘못된 예
 #[async_trait]
 pub trait StateStore {
-    async fn append(&self, entry: oxi_sdk::Message) -> ...;  // SDK 타입 강제
+    async fn append(&self, entry: oxicode_sdk::Message) -> ...;  // SDK 타입 강제
 }
 
 // 올바른 예
@@ -284,17 +284,17 @@ pub trait StateStore {
 
 ### ❌ port impl이 SDK 구체 타입 import
 ```rust
-// 잘못된 예 (impl이 oxi_sdk::Message를 import)
-use oxi_sdk::Message;
+// 잘못된 예 (impl이 oxicode_sdk::Message를 import)
+use oxicode_sdk::Message;
 
 // 올바른 예
-use oxi_sdk::ports::PortValue;  // JSON Value
+use oxicode_sdk::ports::PortValue;  // JSON Value
 ```
 
-## 디렉토리 레이아웃 (oxi-sdk::ports::fs 기준)
+## 디렉토리 레이아웃 (oxicode-sdk::ports::fs 기준)
 
 ```
-~/.oxi/
+~/.oxicode/
 ├── auth.json         — FileAuthProvider (API keys + OAuth tokens)
 ├── settings.toml     — FileConfigStore (dotted-key nested)
 ├── sessions/         — FileStateStore (JSON append, one file per entry)
@@ -309,7 +309,7 @@ use oxi_sdk::ports::PortValue;  // JSON Value
 
 환경변수 fallback (`FileAuthProvider::resolve_api_key`):
 1. `auth.json`의 `providers[name].api_key`
-2. `OXI_API_KEY_<UPPER>` (예: `OXI_API_KEY_ANTHROPIC`)
+2. `OXICODE_API_KEY_<UPPER>` (예: `OXICODE_API_KEY_ANTHROPIC`)
 3. 표준 env var (7개 provider에 대해):
    - `ANTHROPIC_API_KEY`
    - `OPENAI_API_KEY`
@@ -319,8 +319,8 @@ use oxi_sdk::ports::PortValue;  // JSON Value
 
 ## 참고 파일
 
-- `oxi-sdk/src/ports.rs` — port trait 정의
-- `oxi-sdk/src/builder.rs` — `OxiBuilder::with_port_*` 메서드
-- `oxi-sdk/src/ports/fs/` — file-based 구현
-- `oxi-cli/src/services.rs` — composition root 예제
-- `oxi-sdk/src/error.rs` — `PortNotConfigured` variant
+- `oxicode-sdk/src/ports.rs` — port trait 정의
+- `oxicode-sdk/src/builder.rs` — `OxicodeBuilder::with_port_*` 메서드
+- `oxicode-sdk/src/ports/fs/` — file-based 구현
+- `oxicode-cli/src/services.rs` — composition root 예제
+- `oxicode-sdk/src/error.rs` — `PortNotConfigured` variant

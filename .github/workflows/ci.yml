@@ -73,8 +73,8 @@ jobs:
       # feature always compiles cleanly.  Runtime tests (actual browser
       # execution) run locally only — they need a display/Chromium and
       # are not reproducible in a headless CI runner.
-      - run: cargo clippy -p oxi-sdk --features native-browser -- -D warnings
-      - run: cargo build -p oxi-agent --features native-browser
+      - run: cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
+      - run: cargo build -p oxicode-agent --features native-browser
 
   smoke-test:
     name: Smoke Test (PR only)

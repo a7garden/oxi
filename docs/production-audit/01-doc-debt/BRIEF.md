@@ -8,7 +8,7 @@
 
 ## Context
 
-oxi is a workspace crate intended for public consumption (published to crates.io). Public API documentation quality directly impacts adoption and integrator experience. Currently, 39 doc-tests are explicitly `ignore`d and 34 public items have placeholder `/// TODO` doc comments with no actual content. One doc-test in `oxi-tui/src/keybindings/mod.rs` is **broken** (references undefined `event` variable) and fails on `cargo test --doc`.
+oxicode is a workspace crate intended for public consumption (published to crates.io). Public API documentation quality directly impacts adoption and integrator experience. Currently, 39 doc-tests are explicitly `ignore`d and 34 public items have placeholder `/// TODO` doc comments with no actual content. One doc-test in `oxicode-tui/src/keybindings/mod.rs` is **broken** (references undefined `event` variable) and fails on `cargo test --doc`.
 
 The project uses `#[doc]` attributes on 28 items but has zero `#![deny(missing_docs)]` enforcement.
 
@@ -16,39 +16,39 @@ Current state:
 
 | File | Finding | Count |
 |------|---------|-------|
-| `oxi-ai/src/fallback_chain.rs` | Ignored doc-tests | 14 |
-| `oxi-ai/src/multi_provider.rs` | Ignored doc-tests | 6 |
-| `oxi-ai/src/transform.rs` | Ignored doc-tests | 2 |
-| `oxi-ai/src/model_db.rs` | Ignored doc-tests | 2 |
-| `oxi-ai/src/providers/mod.rs` | Ignored doc-tests | 1 |
-| `oxi-ai/src/secret.rs` | Ignored doc-tests | 1 |
-| `oxi-ai/src/lib.rs` | Ignored doc-tests | 1 |
-| `oxi-agent/src/agent.rs` | Ignored doc-tests | 1 |
-| `oxi-agent/src/agent_loop/mod.rs` | Ignored doc-tests | 1 |
-| `oxi-agent/src/tools.rs` | Ignored doc-tests | 2 |
-| `oxi-agent/src/tools/browse/tab_guard.rs` | Ignored doc-tests | 1 |
-| `oxi-sdk/src/multi_provider.rs` | Ignored doc-tests | 3 |
-| `oxi-sdk/src/tool_factory.rs` | Ignored doc-tests | 2 |
-| `oxi-sdk/src/builder.rs` | Ignored doc-tests | 1 |
-| `oxi-sdk/src/agent_builder.rs` | Ignored doc-tests | 1 |
-| `oxi-sdk/src/kernel_bridge.rs` | Ignored doc-tests | 1 |
-| `oxi-cli/src/cli.rs` | Ignored doc-tests | 1 |
-| `oxi-cli/src/extensions/loading.rs` | Ignored doc-tests | 1 |
-| `oxi-store/src/settings.rs` | Ignored doc-tests | 1 |
-| `oxi-tui/src/widgets/completion.rs` | Ignored doc-tests | 1 |
-| `oxi-tui/src/widgets/table_list.rs` | Ignored doc-tests | 1 |
-| **`oxi-tui/src/keybindings/mod.rs`** | **BROKEN doc-test** (references `event` — undefined) | **1** |
-| `oxi-cli/src/extensions/mod.rs` | Stub `/// TODO: document.` | 34 |
-| `oxi-agent/src/tools.rs` | Stub `/// TODO` / `/// TODO: document this function.` | 5 |
-| `oxi-agent/src/types.rs` | Stub `/// TODO.` | 4 |
-| `oxi-agent/src/agent_loop/mod.rs` | Stub `/// TODO` / `/// TODO: document this function.` | 11 |
-| `oxi-agent/src/tools/tool_definition_wrapper.rs` | Stub `/// TODO: document this function.` | 5 |
+| `oxicode-ai/src/fallback_chain.rs` | Ignored doc-tests | 14 |
+| `oxicode-ai/src/multi_provider.rs` | Ignored doc-tests | 6 |
+| `oxicode-ai/src/transform.rs` | Ignored doc-tests | 2 |
+| `oxicode-ai/src/model_db.rs` | Ignored doc-tests | 2 |
+| `oxicode-ai/src/providers/mod.rs` | Ignored doc-tests | 1 |
+| `oxicode-ai/src/secret.rs` | Ignored doc-tests | 1 |
+| `oxicode-ai/src/lib.rs` | Ignored doc-tests | 1 |
+| `oxicode-agent/src/agent.rs` | Ignored doc-tests | 1 |
+| `oxicode-agent/src/agent_loop/mod.rs` | Ignored doc-tests | 1 |
+| `oxicode-agent/src/tools.rs` | Ignored doc-tests | 2 |
+| `oxicode-agent/src/tools/browse/tab_guard.rs` | Ignored doc-tests | 1 |
+| `oxicode-sdk/src/multi_provider.rs` | Ignored doc-tests | 3 |
+| `oxicode-sdk/src/tool_factory.rs` | Ignored doc-tests | 2 |
+| `oxicode-sdk/src/builder.rs` | Ignored doc-tests | 1 |
+| `oxicode-sdk/src/agent_builder.rs` | Ignored doc-tests | 1 |
+| `oxicode-sdk/src/kernel_bridge.rs` | Ignored doc-tests | 1 |
+| `oxicode-cli/src/cli.rs` | Ignored doc-tests | 1 |
+| `oxicode-cli/src/extensions/loading.rs` | Ignored doc-tests | 1 |
+| `oxicode-store/src/settings.rs` | Ignored doc-tests | 1 |
+| `oxicode-tui/src/widgets/completion.rs` | Ignored doc-tests | 1 |
+| `oxicode-tui/src/widgets/table_list.rs` | Ignored doc-tests | 1 |
+| **`oxicode-tui/src/keybindings/mod.rs`** | **BROKEN doc-test** (references `event` — undefined) | **1** |
+| `oxicode-cli/src/extensions/mod.rs` | Stub `/// TODO: document.` | 34 |
+| `oxicode-agent/src/tools.rs` | Stub `/// TODO` / `/// TODO: document this function.` | 5 |
+| `oxicode-agent/src/types.rs` | Stub `/// TODO.` | 4 |
+| `oxicode-agent/src/agent_loop/mod.rs` | Stub `/// TODO` / `/// TODO: document this function.` | 11 |
+| `oxicode-agent/src/tools/tool_definition_wrapper.rs` | Stub `/// TODO: document this function.` | 5 |
 
 ---
 
 ## Objective
 
-1. **Fix the broken doc-test** in `oxi-tui/src/keybindings/mod.rs` so `cargo test --doc` passes clean.
+1. **Fix the broken doc-test** in `oxicode-tui/src/keybindings/mod.rs` so `cargo test --doc` passes clean.
 2. **Resolve all 34 stub `/// TODO` doc comments** — either write real documentation or mark the items `#[doc(hidden)]` if they are internal.
 3. **Enable or unignore doc-tests** for items where the examples are straightforward enough to compile and run.
 
@@ -78,14 +78,14 @@ It DOES mean:
 
 ### Phase 2: Fix broken doc-test
 
-1. Fix `oxi-tui/src/keybindings/mod.rs` line 11 — the `event` variable is undefined. Replace with a valid `crossterm::event::KeyEvent` construction or use `no_run`.
-2. Verify: `cargo test -p oxi-tui --doc` passes.
+1. Fix `oxicode-tui/src/keybindings/mod.rs` line 11 — the `event` variable is undefined. Replace with a valid `crossterm::event::KeyEvent` construction or use `no_run`.
+2. Verify: `cargo test -p oxicode-tui --doc` passes.
 
 ### Phase 3: Resolve stub doc comments
 
 1. For each `/// TODO` in the files listed above, write a one-sentence description of what the item does, based on its signature and usage.
 2. Focus on **public API items** (pub fn, pub struct, pub trait methods). Private items can be left alone.
-3. For `oxi-cli/src/extensions/mod.rs` (34 stubs in one file), this is likely an extension trait — document each method's purpose and parameters.
+3. For `oxicode-cli/src/extensions/mod.rs` (34 stubs in one file), this is likely an extension trait — document each method's purpose and parameters.
 
 ### Phase 4: Address ignored doc-tests
 

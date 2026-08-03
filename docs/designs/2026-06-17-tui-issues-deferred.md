@@ -74,7 +74,7 @@ greyed-out in the list). Restore via `/issue reopen <id>`.
 - Pro: Zero data loss. Visible undo. Cheap (~20 lines schema).
 - Con: Issue files grow a new field; v5 → v6 migration needed.
 
-#### Option B — `oxi issue reopen <id>` command
+#### Option B — `oxicode issue reopen <id>` command
 No schema change. `close` already sets `closed_at`. `reopen` flips
 `status` back to `Open` and clears `closed_at`.
 
@@ -82,8 +82,8 @@ No schema change. `close` already sets `closed_at`. `reopen` flips
 - Con: No bulk undo. User must remember to type the exact id.
 
 #### Option C — Persistent undo log
-Add `~/.oxi/issues/.undo.jsonl` with `{"op": "close", "id": 12,
-"prev": {...}}` entries. `oxi issue undo` pops the most recent.
+Add `~/.oxicode/issues/.undo.jsonl` with `{"op": "close", "id": 12,
+"prev": {...}}` entries. `oxicode issue undo` pops the most recent.
 
 - Pro: Works for any destructive op. Future-proof.
 - Con: New file format. Cleanup needed on commit. ~80 lines.
@@ -103,14 +103,14 @@ view renders them as plain text. Headers, bullets, and code fences all
 display as literal `#`, `-`, ``` characters.
 
 ### Existing infrastructure
-`oxi_tui/src/widgets/chat/markdown.rs` has a private
+`oxicode_tui/src/widgets/chat/markdown.rs` has a private
 `render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>>`
 function that already handles headers, lists, bold/italic, code spans,
 and tables. It's used by the chat widget but isn't `pub`.
 
 ### Design
 
-1. **Make `render_markdown` `pub`.** Add to `oxi_tui::widgets::chat::markdown`
+1. **Make `render_markdown` `pub`.** Add to `oxicode_tui::widgets::chat::markdown`
    re-export list. ~3 lines.
 2. **Use it for the body in `render_detail`.** Replace the plain-text
    body section with:
@@ -125,8 +125,8 @@ and tables. It's used by the chat widget but isn't `pub`.
 
 ### Cost
 ~30 lines. Touches:
-- `oxi-tui/src/widgets/chat/markdown.rs` (expose)
-- `oxi-cli/src/tui/overlay/issues_panel/render.rs` (use)
+- `oxicode-tui/src/widgets/chat/markdown.rs` (expose)
+- `oxicode-cli/src/tui/overlay/issues_panel/render.rs` (use)
 
 ### Risk
 The private `render_markdown` may not be efficient for long bodies

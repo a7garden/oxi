@@ -2,12 +2,12 @@
 
 > 상태: 설계 **v3** (구현 전). 사용자 합의: 즉시 교체(breaking) + lazy on-call 갱신.
 > 작성: 2026-06-17
-> v2 갱신: 7개 손보기 — `CatalogProtocol` enum 도입, `Oxi::resolve_model` async,
->         `Oxi` convenience 메서드 축소, `Refreshed` → `Updated`,
+> v2 갱신: 7개 손보기 — `CatalogProtocol` enum 도입, `Oxicode::resolve_model` async,
+>         `Oxicode` convenience 메서드 축소, `Refreshed` → `Updated`,
 >         `current_source()` 제거, `init()` 단일화, entry-level `source`.
 > v3 갱신: 구현 전 컴파일/빌드 브레이크 3개 정정 —
->         (1) 의존 방향 수정: bridge layer 를 `oxi-sdk` 에 두고 `as_oxi_api()` 항상
->         노출 (feature flag 제거). "oxi-ai → SDK 의존이 0" 으로 주장 정정.
+>         (1) 의존 방향 수정: bridge layer 를 `oxicode-sdk` 에 두고 `as_oxicode_api()` 항상
+>         노출 (feature flag 제거). "oxicode-ai → SDK 의존이 0" 으로 주장 정정.
 >         (2) `NoopModelCatalog` 의 derive(Debug) + manual impl 충돌 제거.
 >         (3) `ProviderResolver` trait async ripple 명시 (§7.8 신설).
 >         추가: 문서 내부 불일치 6건, SdkError 카탈로그 변종, RefreshOutcome::Failed
@@ -22,33 +22,33 @@
 기존 dynamic-catalog 설계는 데이터 흐름을 단일화했지만, **SDK consumer 가
 새 데이터를 받는 메커니즘**이 빠졌다:
 
-- `oxi_sdk::get_all_models()`, `get_model_entry()` 등은 모두 `&'static` 를 반환한다.
+- `oxicode_sdk::get_all_models()`, `get_model_entry()` 등은 모두 `&'static` 를 반환한다.
 - `&'static` 는 `OnceLock`/`LazyLock` 에서 오므로 **프로세스당 한 번 박히고 끝**.
 - `init_models_dev()` 로 LIVE 캐시를 채워도, 그 데이터는 `OnceLock` 으로 들어가지
-  못한다 (immutable). 결과적으로 oxi-cli 의 `setup_wizard`, `tui/handlers`,
+  못한다 (immutable). 결과적으로 oxicode-cli 의 `setup_wizard`, `tui/handlers`,
   `tui/slash`, `tui/overlay/settings` 가 보는 카탈로그는 **바이너리 빌드 시점의
   SNAP 으로 고정**되어 있다.
 - 11 개 port (StateStore, ConfigStore, AuthProvider, EventBus, ...) 가 SDK 의
   계약인데, 카탈로그만 그 자리에 없다.
 
 **본 설계의 한 문장 (v3)**: 카탈로그를 **12번째 port** 로 만들고 SDK 가 자기
-타입 (`CatalogProtocol` enum) 을 갖게 한다 — `oxi-ai → SDK` 역방향 의존만 없다
-(SDK → oxi-ai 정방향은 이미 존재; bridge layer 가 그 단일 소스). `OnceLock`/
+타입 (`CatalogProtocol` enum) 을 갖게 한다 — `oxicode-ai → SDK` 역방향 의존만 없다
+(SDK → oxicode-ai 정방향은 이미 존재; bridge layer 가 그 단일 소스). `OnceLock`/
 `LazyLock` 글로벌과 `&'static` API 를 **전부 제거**한다. SDK consumer 는
-`Oxi::catalog()` 로 async 조회, `subscribe()` 로 갱신을 받고,
-`Oxi::resolve_model()` 은 dynamic registry 와 catalog 을 자동으로 이어준다.
+`Oxicode::catalog()` 로 async 조회, `subscribe()` 로 갱신을 받고,
+`Oxicode::resolve_model()` 은 dynamic registry 와 catalog 을 자동으로 이어준다.
 
 ## 1. 설계 원칙
 
 | # | 원칙 | 트레이드오프 |
 |---|---|---|
 | 1 | **Port = SDK 의 유일한 카탈로그 진입점** | 기존 free fn (`get_all_models` 등) 제거 — breaking |
-| 2 | **SDK 는 자기 타입을 갖는다** (`CatalogProtocol`, entry structs) | oxi-ai → SDK 역방향 의존만 없음. SDK → oxi-ai 정방향은 이미 존재 (재노출). bridge layer 가 그 단일 소스 (§7.5) |
+| 2 | **SDK 는 자기 타입을 갖는다** (`CatalogProtocol`, entry structs) | oxicode-ai → SDK 역방향 의존만 없음. SDK → oxicode-ai 정방향은 이미 존재 (재노출). bridge layer 가 그 단일 소스 (§7.5) |
 | 3 | **Async + owned + typed** | `&'static` 최적화 + `String` 매칭 둘 다 포기. `Arc<dyn ModelCatalog>` + `CatalogProtocol` enum |
 | 4 | **Lazy 갱신 (수동)** | 백그라운드 task 없음. consumer 가 `refresh().await` 호출 |
 | 5 | **Broadcast 로 변경 통지** | `subscribe()` → `broadcast::Receiver<CatalogEvent>`. UI/캐시 무효화 |
 | 6 | **데이터 흐름 단방향 유지** | models.dev → materialize → snapshot → port → consumer. 역참조 없음 |
-| 7 | **Catalog = "세상", Dynamic = "나"** | `Oxi::resolve_model` 이 dynamic 우선 → catalog fallback. 자동 pre-populate 함정 회피 |
+| 7 | **Catalog = "세상", Dynamic = "나"** | `Oxicode::resolve_model` 이 dynamic 우선 → catalog fallback. 자동 pre-populate 함정 회피 |
 
 > 결정적 트레이드오프: `&'static` 반환 + `String api` 둘 다 포기. lookup 비용은
 > `Arc<dyn Trait>` vtable 한 번 + `RwLock` read guard. microbenchmark 기준 기존보다
@@ -75,7 +75,7 @@ pub struct FileXxxPort;          // 파일 reference impl (fs/)
 
 pub struct PortRegistry { pub xxx: Arc<dyn XxxPort>, ... }
 
-impl OxiBuilder {
+impl OxicodeBuilder {
     pub fn with_xxx(self, x: Arc<dyn XxxPort>) -> Self;
 }
 ```
@@ -83,10 +83,10 @@ impl OxiBuilder {
 카탈로그는 이 11 개 중 어느 것보다 **더 명백히 port 다**:
 
 - **Lookup**: "이 provider 의 모델 목록 줘" — 인프라 어댑터의 전형
-- **Cache**: SNAP + LIVE + user overrides + LOCAL — products 마다 다름 (oxi-cli 는
+- **Cache**: SNAP + LIVE + user overrides + LOCAL — products 마다 다름 (oxicode-cli 는
   파일 캐시, oxios 는 DB 캐시 가능)
-- **Refresh 전략**: oxi-cli 는 models.dev ETag conditional GET, oxios 는 자체 미러
-- **LOCAL discovery**: oxi-cli 는 env var 기반, oxios 는 설정 UI 기반
+- **Refresh 전략**: oxicode-cli 는 models.dev ETag conditional GET, oxios 는 자체 미러
+- **LOCAL discovery**: oxicode-cli 는 env var 기반, oxios 는 설정 UI 기반
 - **Subscription**: UI 가 새 모델 도착을 알아야 함 — port 가 push 채널을 가져야 함
 
 기존 `LazyLock<HashMap<String, Model>>` 박힌 50 개 모델은 "port 가 없는 시절의
@@ -116,34 +116,34 @@ impl OxiBuilder {
               ┌───────────────────────┼───────────────────────┐
               ▼                       ▼                       ▼
       FileModelCatalog         SqlCatalog            MockCatalog
-      (oxi-sdk ports/fs/)      (oxios impl)          (tests)
+      (oxicode-sdk ports/fs/)      (oxios impl)          (tests)
               ▲
-              │ oxi-cli registers via
-              │   OxiBuilder::with_catalog()
+              │ oxicode-cli registers via
+              │   OxicodeBuilder::with_catalog()
               │
    ┌──────────┴───────────────────────────────────────┐
-   │                Oxi (composition root)            │
+   │                Oxicode (composition root)            │
    │                                                  │
-   │   oxi.catalog() -> &Arc<dyn ModelCatalog>       │
-   │   oxi.catalog().list_providers().await           │
-   │   oxi.catalog().get_model(p, m).await            │
-   │   oxi.catalog().subscribe() -> Receiver<Event>   │
-   │   oxi.catalog().refresh().await                  │
-   │   oxi.resolve_model(id).await -> Model           │
+   │   oxicode.catalog() -> &Arc<dyn ModelCatalog>       │
+   │   oxicode.catalog().list_providers().await           │
+   │   oxicode.catalog().get_model(p, m).await            │
+   │   oxicode.catalog().subscribe() -> Receiver<Event>   │
+   │   oxicode.catalog().refresh().await                  │
+   │   oxicode.resolve_model(id).await -> Model           │
    └──────────────┬───────────────────────────────────┘
                   │ delegates
                   ▼
         SDK consumer code (TUI, RPC, agent, ...)
 ```
 
-핵심: **`Oxi` 가 port 의 단일 클라이언트**이고, SDK consumer 는 `Oxi` 만 본다.
-내부 구현(`FileModelCatalog`)은 oxi-cli 의 composition root 가 등록한다.
+핵심: **`Oxicode` 가 port 의 단일 클라이언트**이고, SDK consumer 는 `Oxicode` 만 본다.
+내부 구현(`FileModelCatalog`)은 oxicode-cli 의 composition root 가 등록한다.
 
 ## 4. Port 정의
 
 ### 4.1 트레이트와 타입
 
-위치: `oxi-sdk/src/ports/catalog.rs` (신규 모듈).
+위치: `oxicode-sdk/src/ports/catalog.rs` (신규 모듈).
 
 ```rust
 //! Port 12 — ModelCatalog: source of truth for provider/model metadata.
@@ -162,15 +162,15 @@ use super::AuthMethod;
 
 /// Protocol used to talk to a provider/model.
 ///
-/// 이 enum 은 oxi-ai 가 아니라 SDK 가 정의/소유. oxi-sdk → oxi-ai 정방향
-/// 의존은 이미 존재 (v0.x 부터 `oxi_ai::*` 재노출). 따라서 `as_oxi_api()`
-/// 는 **항상 컴파일** — feature flag 불필요. 핵심은 역방향: oxi-ai 는 SDK
-/// 타입을 보지 않으므로 (oxi-sdk 에 의존하지 않음), port 트레이트가
-/// oxi-ai 내부 타입(`Api`)을 직접 쓰지 않는다. 변환은 SDK bridge layer
+/// 이 enum 은 oxicode-ai 가 아니라 SDK 가 정의/소유. oxicode-sdk → oxicode-ai 정방향
+/// 의존은 이미 존재 (v0.x 부터 `oxicode_ai::*` 재노출). 따라서 `as_oxicode_api()`
+/// 는 **항상 컴파일** — feature flag 불필요. 핵심은 역방향: oxicode-ai 는 SDK
+/// 타입을 보지 않으므로 (oxicode-sdk 에 의존하지 않음), port 트레이트가
+/// oxicode-ai 내부 타입(`Api`)을 직접 쓰지 않는다. 변환은 SDK bridge layer
 /// (§7.5) 에서만 일어난다.
 ///
 /// 새 프로토콜 추가 = SDK 에 variant 추가 + `protocol_for` 매핑 1줄
-/// + `as_oxi_api()` 매핑 1줄 + bridge dispatch 1줄.
+/// + `as_oxicode_api()` 매핑 1줄 + bridge dispatch 1줄.
 /// `OpenAiCompatible` 는 OpenAI Chat Completions 호환 폴백 (대부분의 npm).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CatalogProtocol {
@@ -206,26 +206,26 @@ impl CatalogProtocol {
         }
     }
 
-    /// Convert to oxi-ai's internal `Api` enum.
+    /// Convert to oxicode-ai's internal `Api` enum.
     ///
-    /// **항상 컴파일** — oxi-sdk 는 v0.x 부터 oxi-ai 를 재노출하므로 정방향
+    /// **항상 컴파일** — oxicode-sdk 는 v0.x 부터 oxicode-ai 를 재노출하므로 정방향
     /// 의존이 이미 있다. `#[cfg(feature = ...)]` gate 불필요 (v3 정정).
     ///
-    /// 호출처: 오직 SDK 의 bridge layer (`oxi_sdk::bridge::create_provider_from_entry`,
+    /// 호출처: 오직 SDK 의 bridge layer (`oxicode_sdk::bridge::create_provider_from_entry`,
     /// §7.5). port 구현자(`FileModelCatalog` 등)는 이 메서드를 부르지 않는다.
-    pub fn as_oxi_api(&self) -> oxi_ai::Api {
+    pub fn as_oxicode_api(&self) -> oxicode_ai::Api {
         use CatalogProtocol::*;
         match self {
-            AnthropicMessages => oxi_ai::Api::AnthropicMessages,
-            OpenAiCompletions => oxi_ai::Api::OpenAiCompletions,
-            OpenAiResponses => oxi_ai::Api::OpenAiResponses,
-            AzureOpenAiResponses => oxi_ai::Api::AzureOpenAiResponses,
-            GoogleGenerativeAi => oxi_ai::Api::GoogleGenerativeAi,
-            GoogleVertex => oxi_ai::Api::GoogleVertex,
-            MistralConversations => oxi_ai::Api::MistralConversations,
-            BedrockConverseStream => oxi_ai::Api::BedrockConverseStream,
-            // OpenAI 호환은 oxi-ai 에서 OpenAiCompletions 로 처리
-            OpenAiCompatible => oxi_ai::Api::OpenAiCompletions,
+            AnthropicMessages => oxicode_ai::Api::AnthropicMessages,
+            OpenAiCompletions => oxicode_ai::Api::OpenAiCompletions,
+            OpenAiResponses => oxicode_ai::Api::OpenAiResponses,
+            AzureOpenAiResponses => oxicode_ai::Api::AzureOpenAiResponses,
+            GoogleGenerativeAi => oxicode_ai::Api::GoogleGenerativeAi,
+            GoogleVertex => oxicode_ai::Api::GoogleVertex,
+            MistralConversations => oxicode_ai::Api::MistralConversations,
+            BedrockConverseStream => oxicode_ai::Api::BedrockConverseStream,
+            // OpenAI 호환은 oxicode-ai 에서 OpenAiCompletions 로 처리
+            OpenAiCompatible => oxicode_ai::Api::OpenAiCompletions,
         }
     }
 }
@@ -302,7 +302,7 @@ pub enum RefreshOutcome {
         model_count: usize,
     },
     /// No network attempted; served from stale cache or SNAP.
-    /// (e.g. `OXI_MODELS_DEV_DISABLE_FETCH=1`, mtime 창 내.)
+    /// (e.g. `OXICODE_MODELS_DEV_DISABLE_FETCH=1`, mtime 창 내.)
     Offline { reason: &'static str },
     /// Refresh attempted and failed. Previous snapshot still in effect.
     /// NOT an `Err` — see type-level doc.
@@ -468,7 +468,7 @@ impl std::fmt::Debug for NoopModelCatalog {
 
 ### 4.3 PortRegistry 통합
 
-`oxi-sdk/src/ports/mod.rs` 의 `PortRegistry` 에 12번째 필드 추가:
+`oxicode-sdk/src/ports/mod.rs` 의 `PortRegistry` 에 12번째 필드 추가:
 
 ```rust
 #[derive(Clone)]
@@ -490,10 +490,10 @@ impl PortRegistry {
 
 > `Debug` impl 에 `<dyn ModelCatalog>` 표시 추가 (기존 11개와 동일).
 
-### 4.4 `OxiBuilder::with_catalog()` + `Oxi::catalog()` + `Oxi::resolve_model()`
+### 4.4 `OxicodeBuilder::with_catalog()` + `Oxicode::catalog()` + `Oxicode::resolve_model()`
 
 ```rust
-impl OxiBuilder {
+impl OxicodeBuilder {
     /// Register a model catalog port.
     ///
     /// The catalog is the source of truth for provider/model metadata.
@@ -502,11 +502,11 @@ impl OxiBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// use oxi_sdk::{OxiBuilder, ModelCatalog};
+    /// use oxicode_sdk::{OxicodeBuilder, ModelCatalog};
     /// use std::sync::Arc;
     ///
     /// let catalog: Arc<dyn ModelCatalog> = /* ... */;
-    /// let oxi = OxiBuilder::new()
+    /// let oxicode = OxicodeBuilder::new()
     ///     .with_catalog(catalog)
     ///     .build();
     /// ```
@@ -518,14 +518,14 @@ impl OxiBuilder {
     }
 }
 
-impl Oxi {
+impl Oxicode {
     /// Catalog port accessor. Use this for all catalog queries.
     ///
     /// ```no_run
-    /// # use oxi_sdk::OxiBuilder;
-    /// # async fn doc(oxi: oxi_sdk::Oxi) -> Result<(), oxi_sdk::SdkError> {
-    /// let providers = oxi.catalog().list_providers().await?;
-    /// let model = oxi.catalog().get_model("anthropic", "claude-sonnet-4-20250514").await?;
+    /// # use oxicode_sdk::OxicodeBuilder;
+    /// # async fn doc(oxicode: oxicode_sdk::Oxicode) -> Result<(), oxicode_sdk::SdkError> {
+    /// let providers = oxicode.catalog().list_providers().await?;
+    /// let model = oxicode.catalog().get_model("anthropic", "claude-sonnet-4-20250514").await?;
     /// # Ok(()) }
     /// ```
     pub fn catalog(&self) -> &Arc<dyn ModelCatalog> {
@@ -537,7 +537,7 @@ impl Oxi {
     /// falls back to the catalog port.
     ///
     /// Lookup order:
-    /// 1. **Dynamic registry** — `OxiBuilder::model()` 로 등록한 모델.
+    /// 1. **Dynamic registry** — `OxicodeBuilder::model()` 로 등록한 모델.
     ///    sync, in-memory. 항상 우선.
     /// 2. **Catalog port** — port 의 `get_model()`. async. 없으면 NotFound.
     ///
@@ -576,17 +576,17 @@ fn parse_model_id(model_id: &str) -> (&str, &str) {
 }
 ```
 
-> **노트**: `Oxi` 는 `catalog()` 단일 accessor + `resolve_model()` 단일
-> resolution entry point 만 노출. 모든 catalog 메서드는 `oxi.catalog().*` 로
+> **노트**: `Oxicode` 는 `catalog()` 단일 accessor + `resolve_model()` 단일
+> resolution entry point 만 노출. 모든 catalog 메서드는 `oxicode.catalog().*` 로
 > 직접 호출. pass-through 메서드 6개를 두지 않음 — 표면 비대칭 방지 (기존
-> `Oxi::providers`/`models`/`tools`/`ports` 는 sync getter 한 줄 짜리).
+> `Oxicode::providers`/`models`/`tools`/`ports` 는 sync getter 한 줄 짜리).
 
 ## 5. 데이터 타입: SDK 가 노출하는 entry 모양
 
 ### 5.1 `CatalogProtocol` — SDK 의 자기 enum
 
-`CatalogProtocol` 은 SDK 가 정의·소유하는 프로토콜 분류 enum. oxi-ai 는 consumer
-로서 `as_oxi_api()` 로 변환. 양방향 의존이 단방향(oxi-ai → SDK) 으로 정리됨.
+`CatalogProtocol` 은 SDK 가 정의·소유하는 프로토콜 분류 enum. oxicode-ai 는 consumer
+로서 `as_oxicode_api()` 로 변환. 양방향 의존이 단방향(oxicode-ai → SDK) 으로 정리됨.
 
 ```rust
 let entry: CatalogModelEntry = ...;
@@ -605,7 +605,7 @@ let auth = entry.protocol.default_auth();
 | | `ModelEntry` (기존) | `CatalogModelEntry` (v2) |
 |---|---|---|
 | Lifetime | `&'static` (OnceLock) | owned (Clone) |
-| Protocol | `oxi_ai::Api` enum | `CatalogProtocol` enum (SDK 소유) |
+| Protocol | `oxicode_ai::Api` enum | `CatalogProtocol` enum (SDK 소유) |
 | `auth_method` | provider 에서만 가져옴 (모델 수준 없음) | **삭제**. `entry.protocol.default_auth()` 로 파생 |
 | `base_url` | 없음 | `Option<String>` (모델 수준 override, 55 모델) |
 | `source` | 없음 | `CatalogSource` per-entry (UI 배지, 디버깅) |
@@ -669,7 +669,7 @@ impl std::fmt::Debug for FileModelCatalog {
 
 ## 6. FileModelCatalog — Reference Impl
 
-위치: `oxi-sdk/src/ports/fs/catalog.rs` (신규). 기존 `oxi-ai/src/catalog/*` 의
+위치: `oxicode-sdk/src/ports/fs/catalog.rs` (신규). 기존 `oxicode-ai/src/catalog/*` 의
 로직을 여기로 **이관** (dynamic-catalog §4 의 모든 코드).
 
 ### 6.1 구조
@@ -692,12 +692,12 @@ struct Snapshot {
 
 #[derive(Clone, Debug)]
 pub struct CatalogConfig {
-    pub cache_path: PathBuf,           // ~/.oxi/cache/models-dev.json
-    pub etag_path: PathBuf,            // ~/.oxi/cache/models-dev.json.etag
-    pub override_path: PathBuf,        // ~/.oxi/catalog/overrides.toml
+    pub cache_path: PathBuf,           // ~/.oxicode/cache/models-dev.json
+    pub etag_path: PathBuf,            // ~/.oxicode/cache/models-dev.json.etag
+    pub override_path: PathBuf,        // ~/.oxicode/catalog/overrides.toml
     pub mtime_window: Duration,        // 기본 1h
-    pub fetch_enabled: bool,           // OXI_MODELS_DEV_DISABLE_FETCH
-    pub models_dev_url: String,        // OXI_MODELS_DEV_URL
+    pub fetch_enabled: bool,           // OXICODE_MODELS_DEV_DISABLE_FETCH
+    pub models_dev_url: String,        // OXICODE_MODELS_DEV_URL
     pub user_agent: String,
     pub local_discovery_urls: Vec<String>,  // 비어있으면 skip
 }
@@ -750,7 +750,7 @@ dynamic-catalog §4.3 의 매핑 함수를 SDK 안으로 이관. 출력은 `Api`
 `CatalogProtocol` enum (SDK 자기 타입).
 
 ```rust
-// oxi-sdk/src/ports/fs/catalog.rs (private)
+// oxicode-sdk/src/ports/fs/catalog.rs (private)
 fn protocol_for(npm: &str) -> CatalogProtocol {
     match npm {
         "@ai-sdk/anthropic" => CatalogProtocol::AnthropicMessages,
@@ -814,7 +814,7 @@ impl ModelCatalog for FileModelCatalog {
 }
 ```
 
-> 백그라운드 task 없음. `oxi refresh` CLI 명령은 `oxi.catalog().refresh().await`
+> 백그라운드 task 없음. `oxicode refresh` CLI 명령은 `oxicode.catalog().refresh().await`
 > 호출. SDK consumer 도 같은 메서드.
 
 ### 6.5 LOCAL discovery
@@ -851,20 +851,20 @@ impl std::fmt::Debug for FileModelCatalog {
 
 | 위치 | 심볼 | 이유 |
 |---|---|---|
-| `oxi-ai/src/model_db.rs` | `ALL_PROVIDER_MODELS` (OnceLock), `try_materialize_from_snapshot`, `try_materialize_all`, `all_provider_models()`, `model_index()`, `provider_index()`, `get_all_models()`, `get_model_entry()`, `get_provider_models()`, `model_count()`, `builtin_model_count_sentinel()`, `get_providers()`, `search_models()`, `get_reasoning_models()`, `get_vision_models()`, `get_cheapest_models()`, `ModelEntry` | port 로 대체 |
-| `oxi-ai/src/model_registry.rs` | `STATIC_MODELS` (LazyLock), `add_openai_models()` 등 12개 함수, `ModelRegistry::from_static()`, `ModelRegistry::get()`, `ModelRegistry::get_by_provider()`, `ModelRegistry::all()`, `ModelRegistry::search()`, `ModelRegistry::model_ids()` (해당 부분만), **`ModelRegistry::lookup()`** (§7.3 에서 deprecated → 제거) | port 로 대체. 단 `ModelRegistry` 자체는 dynamic 등록용으로 보존 (register/lookup_dynamic/dynamic_models) |
-| `oxi-ai/src/catalog/{models_dev,materialize,provider,override_,model}.rs` | 전체 (`init_models_dev`, `MdCatalog`, `protocol_for`, `materialize`, `apply_*_overrides`, `load_builtin_providers`, `load_builtin_models`, `load_overrides`, ...) | `oxi-sdk/src/ports/fs/catalog.rs` (FileModelCatalog) 으로 이관 |
-| `oxi-ai/src/providers/register_builtins.rs` | `get_builtin_providers()`, `get_builtin_provider()`, `get_provider_env_key()`, `get_provider_env_keys()`, `is_builtin_provider()`, `get_all_provider_names()`, `get_all_provider_aliases()`, `get_api_mappings()`, `get_provider_api()`, `get_provider_base_url()`, `resolve_provider_name()`, `BuiltinProvider` (struct 자체는 register factory 용으로 부분 보존 가능) | port 의 `get_provider()` 로 대체 |
-| `oxi-ai/src/lib.rs` | 위 re-export 전부 | |
-| `oxi-sdk/src/lib.rs` | `load_builtin_providers`, `builtin_providers_count`, `builtin_model_count`, `builtin_model_count_sentinel`, `BuiltinProviderEntry`, `BuiltinModelEntry`, `AuthMethod`, `OverrideFile`, `apply_*_overrides`, `find_override_files`, `load_overrides`, `discover_all*`, `discover_models`, `model_db::*` re-export 전부 | port 로 대체 |
+| `oxicode-ai/src/model_db.rs` | `ALL_PROVIDER_MODELS` (OnceLock), `try_materialize_from_snapshot`, `try_materialize_all`, `all_provider_models()`, `model_index()`, `provider_index()`, `get_all_models()`, `get_model_entry()`, `get_provider_models()`, `model_count()`, `builtin_model_count_sentinel()`, `get_providers()`, `search_models()`, `get_reasoning_models()`, `get_vision_models()`, `get_cheapest_models()`, `ModelEntry` | port 로 대체 |
+| `oxicode-ai/src/model_registry.rs` | `STATIC_MODELS` (LazyLock), `add_openai_models()` 등 12개 함수, `ModelRegistry::from_static()`, `ModelRegistry::get()`, `ModelRegistry::get_by_provider()`, `ModelRegistry::all()`, `ModelRegistry::search()`, `ModelRegistry::model_ids()` (해당 부분만), **`ModelRegistry::lookup()`** (§7.3 에서 deprecated → 제거) | port 로 대체. 단 `ModelRegistry` 자체는 dynamic 등록용으로 보존 (register/lookup_dynamic/dynamic_models) |
+| `oxicode-ai/src/catalog/{models_dev,materialize,provider,override_,model}.rs` | 전체 (`init_models_dev`, `MdCatalog`, `protocol_for`, `materialize`, `apply_*_overrides`, `load_builtin_providers`, `load_builtin_models`, `load_overrides`, ...) | `oxicode-sdk/src/ports/fs/catalog.rs` (FileModelCatalog) 으로 이관 |
+| `oxicode-ai/src/providers/register_builtins.rs` | `get_builtin_providers()`, `get_builtin_provider()`, `get_provider_env_key()`, `get_provider_env_keys()`, `is_builtin_provider()`, `get_all_provider_names()`, `get_all_provider_aliases()`, `get_api_mappings()`, `get_provider_api()`, `get_provider_base_url()`, `resolve_provider_name()`, `BuiltinProvider` (struct 자체는 register factory 용으로 부분 보존 가능) | port 의 `get_provider()` 로 대체 |
+| `oxicode-ai/src/lib.rs` | 위 re-export 전부 | |
+| `oxicode-sdk/src/lib.rs` | `load_builtin_providers`, `builtin_providers_count`, `builtin_model_count`, `builtin_model_count_sentinel`, `BuiltinProviderEntry`, `BuiltinModelEntry`, `AuthMethod`, `OverrideFile`, `apply_*_overrides`, `find_override_files`, `load_overrides`, `discover_all*`, `discover_models`, `model_db::*` re-export 전부 | port 로 대체 |
 
 ### 7.2 보존 대상
 
 | 위치 | 심볼 | 이유 |
 |---|---|---|
-| `oxi-ai/src/model_registry.rs` | `ModelRegistry::register()`, `unregister()`, **`lookup_dynamic()`** (신규 분리), `dynamic_models()` | runtime 에 추가된 모델은 그대로 (예: oxi-cli 의 `Oxi::model()` builder method) |
-| `oxi-ai/src/types.rs` | `Api` enum, `Model` struct | SDK consumer 도 `Model` 직접 받음 (multi_provider 결과 등) |
-| `oxi-sdk/src/ports/catalog.rs` | `CatalogProtocol` enum, `CatalogModelEntry`, `CatalogProviderEntry` | SDK 의 port 표현. 신규 |
+| `oxicode-ai/src/model_registry.rs` | `ModelRegistry::register()`, `unregister()`, **`lookup_dynamic()`** (신규 분리), `dynamic_models()` | runtime 에 추가된 모델은 그대로 (예: oxicode-cli 의 `Oxicode::model()` builder method) |
+| `oxicode-ai/src/types.rs` | `Api` enum, `Model` struct | SDK consumer 도 `Model` 직접 받음 (multi_provider 결과 등) |
+| `oxicode-sdk/src/ports/catalog.rs` | `CatalogProtocol` enum, `CatalogModelEntry`, `CatalogProviderEntry` | SDK 의 port 표현. 신규 |
 
 ### 7.3 `ModelRegistry::lookup_dynamic()` 분리
 
@@ -876,7 +876,7 @@ impl ModelRegistry {
     /// Look up only in the dynamic registry (runtime-added models).
     ///
     /// The catalog port handles built-in / upstream models. Used by
-    /// `Oxi::resolve_model()` as the first-tier lookup before falling
+    /// `Oxicode::resolve_model()` as the first-tier lookup before falling
     /// back to the catalog.
     pub fn lookup_dynamic(&self, provider: &str, model_id: &str) -> Option<Model> {
         let key = format!("{}/{}", provider, model_id);
@@ -884,29 +884,29 @@ impl ModelRegistry {
     }
 
     // lookup() 자체는 deprecated 후 제거. dynamic + static 결합 뷰는
-    // Oxi::resolve_model() 로 이전 (dynamic 우선, catalog fallback).
+    // Oxicode::resolve_model() 로 이전 (dynamic 우선, catalog fallback).
 }
 ```
 
 `register()` / `unregister()` / `dynamic_models()` 는 그대로 (dynamic 만 다루므로).
 `static_models` 필드 자체가 제거됨 — port 가 그 역할.
 
-### 7.4 oxi-cli 호출처 일괄 이관
+### 7.4 oxicode-cli 호출처 일괄 이관
 
-oxi-cli 는 `oxi_sdk::get_all_models()` 등을 7+ 군데에서 사용 (setup_wizard,
+oxicode-cli 는 `oxicode_sdk::get_all_models()` 등을 7+ 군데에서 사용 (setup_wizard,
 tui/handlers, tui/slash, tui/overlay/settings, main, tui/handlers 등). 모두
 다음 패턴으로 교체:
 
 ```rust
 // before
-let models: Vec<&ModelEntry> = oxi_sdk::get_all_models().collect();
+let models: Vec<&ModelEntry> = oxicode_sdk::get_all_models().collect();
 
 // after
-let all = oxi.catalog().search("").await?;          // 전체
-let per = oxi.catalog().list_models(provider_id).await?;  // 특정 provider
+let all = oxicode.catalog().search("").await?;          // 전체
+let per = oxicode.catalog().list_models(provider_id).await?;  // 특정 provider
 ```
 
-내부 oxi-ai 코드 (`fallback_chain`, `multi_provider::model_from_entry` 등) 는:
+내부 oxicode-ai 코드 (`fallback_chain`, `multi_provider::model_from_entry` 등) 는:
 
 ```rust
 // before
@@ -930,15 +930,15 @@ async fn try_model(
 constructor signature 가 바뀐다. **`MultiProvider::new`/`Agent::new_with_resolver`
 등에 catalog 파라미터 추가**. 변경 범위:
 
-- `oxi-ai/src/multi_provider.rs`: `MultiProviderBuilder` 에 `with_catalog()`
-- `oxi-ai/src/fallback_chain.rs`: `FallbackChain::new` 에 `Arc<dyn ModelCatalog>`
-- `oxi-agent/src/agent_loop/*`: `Agent` 가 `Arc<dyn ModelCatalog>` 보유
-- `oxi-sdk/src/builder.rs`: `Oxi` 가 catalog 를 보유하고 agent 에 전달
+- `oxicode-ai/src/multi_provider.rs`: `MultiProviderBuilder` 에 `with_catalog()`
+- `oxicode-ai/src/fallback_chain.rs`: `FallbackChain::new` 에 `Arc<dyn ModelCatalog>`
+- `oxicode-agent/src/agent_loop/*`: `Agent` 가 `Arc<dyn ModelCatalog>` 보유
+- `oxicode-sdk/src/builder.rs`: `Oxicode` 가 catalog 를 보유하고 agent 에 전달
 
-### 7.5 `Oxi::create_provider` async 화 — bridge layer 는 `oxi-sdk`
+### 7.5 `Oxicode::create_provider` async 화 — bridge layer 는 `oxicode-sdk`
 
 기존 `create_provider(&self, name: &str) -> Result<Arc<dyn Provider>>` 는 sync.
-내부에서 `oxi_ai::create_builtin_provider(name)` 를 호출하는데, 이 함수는
+내부에서 `oxicode_ai::create_builtin_provider(name)` 를 호출하는데, 이 함수는
 `register_builtins::get_builtin_provider()` 로 `&'static BuiltinProvider` 를
 받아 provider 인스턴스를 만든다. 본 설계에서 `&'static BuiltinProvider` 가
 사라지므로, **provider 인스턴스 생성이 catalog 조회에 의존**하게 되고 catalog
@@ -956,24 +956,24 @@ pub async fn create_provider(&self, name: &str) -> SdkResult<Arc<dyn Provider>>;
 
 #### 의존 방향 주의 (v3 정정)
 
-**bridge layer 의 위치: `oxi-sdk/src/bridge.rs` (NOT `oxi-ai`)**.
+**bridge layer 의 위치: `oxicode-sdk/src/bridge.rs` (NOT `oxicode-ai`)**.
 
-`oxi-ai` 는 `oxi-sdk` 에 의존하지 않으므로, `create_provider_from_entry`
-가 `oxi-ai` 에 있으면 `CatalogProviderEntry` (oxi-sdk 타입) 을 볼 수 없어
-**컴파일 에러**. oxi-sdk → oxi-ai 정방향 의존은 이미 존재하므로, bridge 를
-oxi-sdk 에 두면 자연스럽게 모든 타입을 볼 수 있다.
+`oxicode-ai` 는 `oxicode-sdk` 에 의존하지 않으므로, `create_provider_from_entry`
+가 `oxicode-ai` 에 있으면 `CatalogProviderEntry` (oxicode-sdk 타입) 을 볼 수 없어
+**컴파일 에러**. oxicode-sdk → oxicode-ai 정방향 의존은 이미 존재하므로, bridge 를
+oxicode-sdk 에 두면 자연스럽게 모든 타입을 볼 수 있다.
 
 ```rust
-// oxi-sdk/src/bridge.rs (신규)
-//! SDK port types → oxi-ai provider instances.
-//! 이 모듈이 SDK → oxi-ai 정방향 의존의 단일 소스다.
+// oxicode-sdk/src/bridge.rs (신규)
+//! SDK port types → oxicode-ai provider instances.
+//! 이 모듈이 SDK → oxicode-ai 정방향 의존의 단일 소스다.
 
 use std::sync::Arc;
 use crate::ports::catalog::{CatalogProviderEntry, CatalogProtocol};
 
-/// Build a concrete `oxi_ai::Provider` from a catalog entry.
+/// Build a concrete `oxicode_ai::Provider` from a catalog entry.
 ///
-/// Dispatch 는 `entry.protocol.as_oxi_api()` 로 `oxi_ai::Api` 변환 후
+/// Dispatch 는 `entry.protocol.as_oxicode_api()` 로 `oxicode_ai::Api` 변환 후
 /// 해당 provider impl 생성자로 위임. auth 는 `protocol.default_auth()`
 /// 에서 파생, base_url 은 entry 의 것 우선.
 ///
@@ -982,20 +982,20 @@ use crate::ports::catalog::{CatalogProviderEntry, CatalogProtocol};
 pub fn create_provider_from_entry(
     entry: &CatalogProviderEntry,
     api_key: Option<&str>,
-) -> Option<Arc<dyn oxi_ai::Provider>> {
-    use oxi_ai::Api;
+) -> Option<Arc<dyn oxicode_ai::Provider>> {
+    use oxicode_ai::Api;
     let base = entry.base_url.as_deref();
     let auth = entry.protocol.default_auth();
-    let api = entry.protocol.as_oxi_api();
+    let api = entry.protocol.as_oxicode_api();
     match api {
         Api::AnthropicMessages => Some(Arc::new(
-            oxi_ai::AnthropicProvider::with_base_url_and_key(
+            oxicode_ai::AnthropicProvider::with_base_url_and_key(
                 base.unwrap_or("https://api.anthropic.com"),
                 api_key,
             ),
         )),
         Api::OpenAiCompletions | Api::OpenAiResponses => Some(Arc::new(
-            oxi_ai::OpenAiProvider::with_base_url_and_key(
+            oxicode_ai::OpenAiProvider::with_base_url_and_key(
                 base.unwrap_or("https://api.openai.com/v1"),
                 api_key,
             ),
@@ -1006,12 +1006,12 @@ pub fn create_provider_from_entry(
 }
 ```
 
-`Oxi::create_provider` 구현:
+`Oxicode::create_provider` 구현:
 
 ```rust
-// oxi-sdk/src/builder.rs
-pub async fn create_provider(&self, name: &str) -> SdkResult<Arc<dyn oxi_ai::Provider>> {
-    // 1. 커스텀 프로바이더 우선 (OxiBuilder::provider() / provider_factory())
+// oxicode-sdk/src/builder.rs
+pub async fn create_provider(&self, name: &str) -> SdkResult<Arc<dyn oxicode_ai::Provider>> {
+    // 1. 커스텀 프로바이더 우선 (OxicodeBuilder::provider() / provider_factory())
     if let Some(p) = self.providers.get_custom(name) {
         return Ok(p);
     }
@@ -1029,14 +1029,14 @@ pub async fn create_provider(&self, name: &str) -> SdkResult<Arc<dyn oxi_ai::Pro
 
 **변경 정리**:
 
-- `as_oxi_api()` 의 feature flag 제거 (항상 컴파일).
-- `create_provider_from_entry` 는 `oxi_sdk::bridge` 에 위치 (oxi-ai 아님).
-- `oxi-ai` crate 는 catalog port 타입을 import 하지 않음. 역방향 의존 0 유지.
+- `as_oxicode_api()` 의 feature flag 제거 (항상 컴파일).
+- `create_provider_from_entry` 는 `oxicode_sdk::bridge` 에 위치 (oxicode-ai 아님).
+- `oxicode-ai` crate 는 catalog port 타입을 import 하지 않음. 역방향 의존 0 유지.
 
-호출처 (oxi-sdk 테스트 6+ 개, oxi-cli 의 provider resolution 등) 모두
+호출처 (oxicode-sdk 테스트 6+ 개, oxicode-cli 의 provider resolution 등) 모두
 `.await` 추가. PR 3 의 일부.
 
-### 7.6 `Oxi::resolve_model` async 화 (§4.4)
+### 7.6 `Oxicode::resolve_model` async 화 (§4.4)
 
 이미 §4.4 에서 정의. **여기서 추가로**: `AgentBuilder::build()` 가 `resolve_model`
 을 부르므로, 그것도 async 가 됨. 시그니처 변경:
@@ -1053,12 +1053,12 @@ impl AgentBuilder<'_> {
 }
 ```
 
-`Oxi::agent(config)` 자체는 sync builder 반환. `.build()` 만 async.
+`Oxicode::agent(config)` 자체는 sync builder 반환. `.build()` 만 async.
 
-호출처 (oxi-cli 의 `app/agent_session.rs`, oxi-sdk 의 integration tests 등) 모
+호출처 (oxicode-cli 의 `app/agent_session.rs`, oxicode-sdk 의 integration tests 등) 모
 두 `.await` 추가. PR 3 의 일부.
 
-### 7.7 `OxiBuilder::with_builtins()` 처리
+### 7.7 `OxicodeBuilder::with_builtins()` 처리
 
 기존 `with_builtins()` 는 두 가지를 동시에 했다:
 
@@ -1069,7 +1069,7 @@ impl AgentBuilder<'_> {
 가 자연스러움 (catalog 가 있으면 자동 사용). 따라서:
 
 - `with_builtins()` 메서드 자체를 **제거** (deprecated 후).
-- `Oxi::has_builtins()` 도 제거.
+- `Oxicode::has_builtins()` 도 제거.
 - `create_provider()` 가 catalog 미등록 provider 에 대해 `NoopModelCatalog`
   를 감지하면 `ProviderNotFound` 반환 (기존과 동일).
 - 마이그레이션 경고: `with_builtins()` 호출 → `with_catalog(FileModelCatalog::init(default_config()).await?)` 로 대체.
@@ -1078,22 +1078,22 @@ impl AgentBuilder<'_> {
 > `with_catalog(FileModelCatalog::init(...).await?)` 를 호출해야 함. 빠뜨리면
 > 모든 `create_provider()` / `resolve_model()` 이 `ProviderNotFound` /
 > `ModelNotFound` 를 반환. `NoopModelCatalog` 는 진짜 빈 카탈로그라 빈 결과만
-> 준다. CI 에 smoke test (`oxi.catalog().model_count().await? > 0`) 추가 권장.
+> 준다. CI 에 smoke test (`oxicode.catalog().model_count().await? > 0`) 추가 권장.
 
 ### 7.8 `ProviderResolver` trait async 화 (v3 정정 — Critical ripple)
 
-`Oxi::create_provider` (§7.5) 와 `Oxi::resolve_model` (§4.4) 이 async 가
-되면서, `oxi_agent::ProviderResolver` trait 도 async 가 되어야 한다.
+`Oxicode::create_provider` (§7.5) 와 `Oxicode::resolve_model` (§4.4) 이 async 가
+되면서, `oxicode_agent::ProviderResolver` trait 도 async 가 되어야 한다.
 현재 다음과 같이 sync 다:
 
 ```rust
-// oxi-agent/src/agent.rs (현재)
+// oxicode-agent/src/agent.rs (현재)
 pub trait ProviderResolver: Send + Sync {
     fn resolve_provider(&self, name: &str) -> Option<Arc<dyn Provider>>;
     fn resolve_model(&self, model_id: &str) -> Option<Model>;
 }
 
-impl ProviderResolver for Oxi {
+impl ProviderResolver for Oxicode {
     fn resolve_provider(&self, name: &str) -> Option<Arc<dyn Provider>> {
         self.create_provider(name).ok()   // ← sync
     }
@@ -1117,16 +1117,16 @@ pub trait ProviderResolver: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Option<Model>> + Send + 'a>>;
 }
 
-impl ProviderResolver for Oxi {
+impl ProviderResolver for Oxicode {
     fn resolve_provider<'a>(
         &'a self, name: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Option<Arc<dyn oxi_ai::Provider>>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Option<Arc<dyn oxicode_ai::Provider>>> + Send + 'a>> {
         Box::pin(async move { self.create_provider(name).await.ok() })
     }
 
     fn resolve_model<'a>(
         &'a self, model_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Option<oxi_ai::Model>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Option<oxicode_ai::Model>> + Send + 'a>> {
         Box::pin(async move { self.resolve_model(model_id).await.ok() })
     }
 }
@@ -1134,12 +1134,12 @@ impl ProviderResolver for Oxi {
 
 **Ripple 효과** (PR 3 의 일부):
 
-- `oxi-agent/src/agent.rs::Agent::new_with_resolver` → resolver 는 저장만
+- `oxicode-agent/src/agent.rs::Agent::new_with_resolver` → resolver 는 저장만
   하고 (sync 유지), 실제 resolve_* 호출은 `agent_loop` 안에서.
-- `oxi-agent/src/agent_loop/{stream,tool_exec,...}.rs` → provider/model 해상
+- `oxicode-agent/src/agent_loop/{stream,tool_exec,...}.rs` → provider/model 해상
   시점마다 `.await` 추가.
-- `oxi-ai/src/multi_provider.rs::MultiProvider` → 동일.
-- `oxi-ai/src/fallback_chain.rs::FallbackChain` → 동일.
+- `oxicode-ai/src/multi_provider.rs::MultiProvider` → 동일.
+- `oxicode-ai/src/fallback_chain.rs::FallbackChain` → 동일.
 - 테스트: `MockProviderResolver` 도 async signature 로 갱신. 모든 test helper
   에 `.await` 추가.
 
@@ -1149,7 +1149,7 @@ impl ProviderResolver for Oxi {
 > 가 된다. 이 sub-section 이 그 총량을 명시한다. PR 3 은 §7.3 ~ §7.8 전부를
 > 담은 가장 큰 PR 이다.
 
-> **대안 고려 (v3에서 기각)**: `Oxi` 가 두 가지 resolver trait 를 구현하는
+> **대안 고려 (v3에서 기각)**: `Oxicode` 가 두 가지 resolver trait 를 구현하는
 > 방법 — `SyncProviderResolver` (dynamic map 만 본다, sync) 와
 > `AsyncProviderResolver` (catalog fallback, async). Agent 가 하나를 택하도록.
 > 기각 이유: agent 의 resolve 는 built-in 모델도 필요 (catalog fallback),
@@ -1183,9 +1183,9 @@ fn model_count_sync(&self) -> usize { 0 }
 
 | 설계 v3 항목 | v4 상태 | 이유 |
 |---|---|---|
-| §7.3 `ModelRegistry::lookup_dynamic()` 분리 | ❌ 불필요 | `Oxi::resolve_model` 이 catalog sync API 로 직접 조회 |
-| §7.5 `Oxi::create_provider` async 화 | ❌ 불필요 | provider 객체 생성은 factory 기반이라 catalog 와 무관 |
-| §7.6 `Oxi::resolve_model` async 화 | ❌ 불필요 | catalog sync read 로 충분 |
+| §7.3 `ModelRegistry::lookup_dynamic()` 분리 | ❌ 불필요 | `Oxicode::resolve_model` 이 catalog sync API 로 직접 조회 |
+| §7.5 `Oxicode::create_provider` async 화 | ❌ 불필요 | provider 객체 생성은 factory 기반이라 catalog 와 무관 |
+| §7.6 `Oxicode::resolve_model` async 화 | ❌ 불필요 | catalog sync read 로 충분 |
 | §7.7 `AgentBuilder::build()` async 화 | ❌ 불필요 | resolve_model 이 sync 면 build 도 sync |
 | §7.8 `ProviderResolver` trait async 화 | ❌ 불필요 | resolve_* 가 sync 면 trait 도 sync |
 | §7.8 ripple (agent_loop, multi_provider, fallback_chain) | ❌ 불필요 | trait 이 sync 면 `.await` 추가 불필요 |
@@ -1194,9 +1194,9 @@ fn model_count_sync(&self) -> usize { 0 }
 **유지되는 작업** (PR 3 의 실제 내용):
 
 - `bridge.rs` (`crate::bridge`): `catalog_entry_to_model()` + `provider_base_url()`
-  + modality 변환. SDK 소유 (oxi-ai 역방향 의존 방지).
-- `Oxi::resolve_model` 의 catalog fallback 통합: catalog sync API → bridge →
-  `oxi_ai::Model` (sync 유지).
+  + modality 변환. SDK 소유 (oxicode-ai 역방향 의존 방지).
+- `Oxicode::resolve_model` 의 catalog fallback 통합: catalog sync API → bridge →
+  `oxicode_ai::Model` (sync 유지).
 
 **TUI 통합 패턴**: `AppState` 에 `catalog: Option<Arc<dyn ModelCatalog>>`
 필드 추가. TUI 이벤트 핸들러 (sync 컨텍스트) 는 `cat.search_sync(...)` 등으로
@@ -1211,10 +1211,10 @@ async only 가 맞다 (refresh 는 진짜 network I/O). 단 **read** API 는 syn
 ### 8.1 SDK consumer 기본
 
 ```rust
-let oxi = OxiBuilder::new().with_catalog(catalog).build();
+let oxicode = OxicodeBuilder::new().with_catalog(catalog).build();
 
 // Spawn a background task that reacts to updates
-let mut rx = oxi.catalog().subscribe();
+let mut rx = oxicode.catalog().subscribe();
 tokio::spawn(async move {
     while let Ok(event) = rx.recv().await {
         match event {
@@ -1234,9 +1234,9 @@ tokio::spawn(async move {
 });
 ```
 
-### 8.2 oxi-cli 통합
+### 8.2 oxicode-cli 통합
 
-`oxi-cli/src/tui/app.rs` 가 `Oxi` 를 보유하므로, app 시작 시 subscription 한 개
+`oxicode-cli/src/tui/app.rs` 가 `Oxicode` 를 보유하므로, app 시작 시 subscription 한 개
 spawn:
 
 ```rust
@@ -1262,8 +1262,8 @@ impl App {
 
 ```rust
 // CLI 서브커맨드
-async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
-    match oxi.catalog().refresh().await? {
+async fn cmd_refresh(oxicode: &Oxicode) -> Result<()> {
+    match oxicode.catalog().refresh().await? {
         RefreshOutcome::Updated { provider_count, model_count } => {
             println!("✓ {provider_count} providers, {model_count} models (updated)");
         }
@@ -1306,25 +1306,25 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 
 | 테스트 | 내용 |
 |---|---|
-| `oxi_catalog_accessor` | `OxiBuilder::new().with_catalog(c).build().catalog()` 가 등록한 c 와 동일 Arc |
-| `oxi_catalog_delegates_to_registered` | `oxi.catalog().list_providers()` 가 `Arc::clone(c).list_providers()` 와 동일 결과 |
-| `oxi_noop_when_catalog_unset` | `OxiBuilder::new().build()` 의 catalog 는 `NoopModelCatalog` |
-| `oxi_refresh_returns_outcome` | `oxi.catalog().refresh()` 가 RefreshOutcome enum 반환 |
-| `oxi_subscribe_yields_receiver` | `oxi.catalog().subscribe()` 가 broadcast::Receiver 반환, drop 시 unsubscribe |
-| `oxi_resolve_model_dynamic_wins` | `Oxi::model(M)` 로 등록 후 `resolve_model("p/M")` 이 dynamic 반환 |
-| `oxi_resolve_model_catalog_fallback` | dynamic 에 없으면 catalog 의 `get_model` 호출 → 반환 |
-| `oxi_resolve_model_not_found` | 둘 다 없으면 `SdkError::ModelNotFound` |
-| `oxi_resolve_model_bare_id` | `"claude-..."` → `("anthropic", "claude-...")` 로 파싱 |
+| `oxicode_catalog_accessor` | `OxicodeBuilder::new().with_catalog(c).build().catalog()` 가 등록한 c 와 동일 Arc |
+| `oxicode_catalog_delegates_to_registered` | `oxicode.catalog().list_providers()` 가 `Arc::clone(c).list_providers()` 와 동일 결과 |
+| `oxicode_noop_when_catalog_unset` | `OxicodeBuilder::new().build()` 의 catalog 는 `NoopModelCatalog` |
+| `oxicode_refresh_returns_outcome` | `oxicode.catalog().refresh()` 가 RefreshOutcome enum 반환 |
+| `oxicode_subscribe_yields_receiver` | `oxicode.catalog().subscribe()` 가 broadcast::Receiver 반환, drop 시 unsubscribe |
+| `oxicode_resolve_model_dynamic_wins` | `Oxicode::model(M)` 로 등록 후 `resolve_model("p/M")` 이 dynamic 반환 |
+| `oxicode_resolve_model_catalog_fallback` | dynamic 에 없으면 catalog 의 `get_model` 호출 → 반환 |
+| `oxicode_resolve_model_not_found` | 둘 다 없으면 `SdkError::ModelNotFound` |
+| `oxicode_resolve_model_bare_id` | `"claude-..."` → `("anthropic", "claude-...")` 로 파싱 |
 | `catalog_debug_includes_stats` | `FileModelCatalog` 의 `Debug` impl 에 providers/models 카운트 + source 포함 |
 
-### 9.4 oxi-cli 회귀
+### 9.4 oxicode-cli 회귀
 
 | 테스트 | 내용 |
 |---|---|
-| `setup_wizard_uses_catalog_port` | `oxi.catalog().list_providers()` 결과로 wizard 모델 목록 채움 |
-| `tui_model_picker_uses_catalog` | picker 가 `oxi.catalog().search()` 호출 |
-| `cli_models_list_command` | `oxi models list` 가 port 결과 출력 |
-| `cli_models_refresh_command` | `oxi models refresh` 가 `oxi.catalog().refresh().await` |
+| `setup_wizard_uses_catalog_port` | `oxicode.catalog().list_providers()` 결과로 wizard 모델 목록 채움 |
+| `tui_model_picker_uses_catalog` | picker 가 `oxicode.catalog().search()` 호출 |
+| `cli_models_list_command` | `oxicode models list` 가 port 결과 출력 |
+| `cli_models_refresh_command` | `oxicode models refresh` 가 `oxicode.catalog().refresh().await` |
 | `bootstrap_registers_file_catalog` | `bootstrap.rs` 가 반드시 `with_catalog(FileModelCatalog::init(...))` 호출 — smoke assertion |
 | `noop_catalog_smoke_fails_loudly` | `with_catalog()` 빠뜨리면 `create_provider`/`resolve_model` 이 NotFound (CI gate) |
 
@@ -1332,7 +1332,7 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 
 - `cargo fmt --check`
 - `cargo clippy --workspace -- -D warnings`
-- `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`
+- `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`
 - `cargo nextest run --workspace`
 - `cargo audit`
 - `cargo deny check`
@@ -1341,13 +1341,13 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 
 | # | 질문 | 현재 안 | 결정 필요 시점 |
 |---|---|---|---|
-| 1 | `OxiBuilder::build()` 가 `FileModelCatalog` 를 **자동으로** 설치해야 하나? (이전 `init_models_dev()` 와 비슷한 역할) | **아니오**. 명시적 `with_catalog()` 강제. SDK 의 "no global state" 원칙 유지 | oxi-cli composition root 가 항상 `with_catalog(FileModelCatalog::init(...).await?)` 호출 — PR 2 에서 검증 |
-| 2 | `CatalogModelEntry` 가 `CatalogProtocol` enum 을 갖는 트레이드오프 — SDK 가 oxi-ai `Api` 에 약결합? | `CatalogProtocol` 이 SDK 소유. 변환은 `as_oxi_api()` (항상 컴파일, v3 정정). oxi-ai → SDK 역방향 의존 0. SDK → oxi-ai 정방향은 이미 존재 (bridge layer 가 단일 소스, §7.5) | OK (확정) |
-| 3 | `oxi.catalog().refresh()` 가 **blocking** 버전도 필요한가? | 첫 버전은 async only. blocking 은 `tokio::runtime::Handle::block_on` 으로 충분 | 향후 필요 시 추가 |
+| 1 | `OxicodeBuilder::build()` 가 `FileModelCatalog` 를 **자동으로** 설치해야 하나? (이전 `init_models_dev()` 와 비슷한 역할) | **아니오**. 명시적 `with_catalog()` 강제. SDK 의 "no global state" 원칙 유지 | oxicode-cli composition root 가 항상 `with_catalog(FileModelCatalog::init(...).await?)` 호출 — PR 2 에서 검증 |
+| 2 | `CatalogModelEntry` 가 `CatalogProtocol` enum 을 갖는 트레이드오프 — SDK 가 oxicode-ai `Api` 에 약결합? | `CatalogProtocol` 이 SDK 소유. 변환은 `as_oxicode_api()` (항상 컴파일, v3 정정). oxicode-ai → SDK 역방향 의존 0. SDK → oxicode-ai 정방향은 이미 존재 (bridge layer 가 단일 소스, §7.5) | OK (확정) |
+| 3 | `oxicode.catalog().refresh()` 가 **blocking** 버전도 필요한가? | 첫 버전은 async only. blocking 은 `tokio::runtime::Handle::block_on` 으로 충분 | 향후 필요 시 추가 |
 | 4 | LOCAL discovery 를 port 의 **core** 에 둘지, 별도 port 로 뺄지 | core 에 둠 (config 옵션). LOCAL 도 결국 "모델 메타데이터" 니 같은 카테고리 | 향후 다중 백엔드 필요 시 분리 |
 | 5 | `CatalogEvent::Updated` 가 **delta** (변경된 모델 목록) 를 줘야 하나? | 첫 버전은 total count만. delta 는 비용 vs 가치 트레이드오프 — 필요 시 v4 에서 | UI 가 "new!" 뱃지 필요해지면 추가 |
-| 6 | 기존 `Oxi::model(model)` builder method (단일 모델 등록) 와 port 의 관계? | 보존. `ModelRegistry::register` 도 보존. 등록된 모델은 catalog 에 자동 노출? **아니오** — port 의 snapshot 과 dynamic registry 는 별개 lookup tier. `Oxi::resolve_model` 이 dynamic 우선 + catalog fallback (§4.4) | OK (§4.4, §7.3) |
-| 7 | `OxiBuilder::with_catalog()` 가 `FileModelCatalog::init(...)` 로딩 도중 **await** 해야 하나 (현재 builder 는 sync) | builder 는 sync 유지. `FileModelCatalog::init()` 는 사전에 await 해서 Arc 를 받음. 표준 async-before-sync 패턴 | OK |
+| 6 | 기존 `Oxicode::model(model)` builder method (단일 모델 등록) 와 port 의 관계? | 보존. `ModelRegistry::register` 도 보존. 등록된 모델은 catalog 에 자동 노출? **아니오** — port 의 snapshot 과 dynamic registry 는 별개 lookup tier. `Oxicode::resolve_model` 이 dynamic 우선 + catalog fallback (§4.4) | OK (§4.4, §7.3) |
+| 7 | `OxicodeBuilder::with_catalog()` 가 `FileModelCatalog::init(...)` 로딩 도중 **await** 해야 하나 (현재 builder 는 sync) | builder 는 sync 유지. `FileModelCatalog::init()` 는 사전에 await 해서 Arc 를 받음. 표준 async-before-sync 패턴 | OK |
 | 8 | 백그라운드 자동 refresh task 는 정말 안 두나? (사용자 결정: lazy on-call) | 두지 않음. 단, `tokio::spawn(catalog.clone().refresh_loop(interval))` 패턴을 consumer 가 직접 쓸 수 있도록 `FileModelCatalog::refresh_loop(interval)` 메서드 옵션 — port trait 외부, impl 확장 | 구현 시 메서드 시그니처 결정 |
 | 9 | `auth_method` 필드를 entry 에서 완전히 제거하는 게 안전한가? | 모든 known protocol 의 auth 가 `default_auth()` 로 결정됨 (dynamic-catalog §2.3 검증 완료). 예외 없음. 단 향후 models.dev 에 미지의 npm 추가되어 auth 가 다른 경우를 대비해 `provider.auth_override: Option<AuthMethod>` 한정적 override 필드 가능 | OK (현재는 제거 확정) |
 | 10 | `CatalogModelEntry.model_id` 필드명 변경은? (기존 `BuiltinModelEntry::id`) | 필드명 변경. 사용처 명확성 > 기존 일관성. `BuiltinModelEntry` 자체가 제거되니 일관성 부담 없음 | OK (확정) |
@@ -1358,16 +1358,16 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 
 - [ ] `cargo build` / `cargo clippy -D warnings` clean (모든 feature)
 - [ ] `cargo nextest run --workspace` 통과
-- [ ] `oxi-cli` 의 기존 catalog 사용처 (setup_wizard, tui/*, main, models 커맨드) 전부 port 로 이관
-- [ ] `OXI_MODELS_DEV=off` 에서도 SNAP 으로 작동
-- [ ] `OXI_MODELS_DEV_DISABLE_FETCH=1` 에서 network 안 나감
-- [ ] `oxi refresh` 가 `oxi.catalog().refresh().await` 호출, 결과 stdout 출력
-- [ ] subscription: `oxi.catalog().subscribe()` 로 `Updated` 이벤트 수신 확인 (CLI 데모)
+- [ ] `oxicode-cli` 의 기존 catalog 사용처 (setup_wizard, tui/*, main, models 커맨드) 전부 port 로 이관
+- [ ] `OXICODE_MODELS_DEV=off` 에서도 SNAP 으로 작동
+- [ ] `OXICODE_MODELS_DEV_DISABLE_FETCH=1` 에서 network 안 나감
+- [ ] `oxicode refresh` 가 `oxicode.catalog().refresh().await` 호출, 결과 stdout 출력
+- [ ] subscription: `oxicode.catalog().subscribe()` 로 `Updated` 이벤트 수신 확인 (CLI 데모)
 - [ ] `data/catalog/_snapshot.json.gz` 가 그대로 임베드 (FileModelCatalog::init 시)
-- [ ] `~/.oxi/catalog/overrides.toml` 이 Layer 2 로 작동
+- [ ] `~/.oxicode/catalog/overrides.toml` 이 Layer 2 로 작동
 - [ ] local discovery (ollama mock) 가 snapshot 에 merge, entry.source = `Local`
-- [ ] `Oxi::resolve_model("anthropic/claude-...")` 가 catalog fallback 으로 작동
-- [ ] `Cargo.toml` 에서 `oxi-sdk` 가 `oxi-ai` 에 의존하지 않음 (port 트레이트만 oxi-ai-agnostic)
+- [ ] `Oxicode::resolve_model("anthropic/claude-...")` 가 catalog fallback 으로 작동
+- [ ] `Cargo.toml` 에서 `oxicode-sdk` 가 `oxicode-ai` 에 의존하지 않음 (port 트레이트만 oxicode-ai-agnostic)
 - [ ] `cargo audit`, `cargo deny check` clean
 - [ ] `docs/designs/2026-06-17-dynamic-catalog-design.md` 의 §4.3 `protocol_for` 출력 타입과 §4.4 materialize 가 본 설계와 동기화
 - [ ] 외부 consumer (oxios, oxibrowser) changelog/README 에 `with_builtins()` → `with_catalog()` 마이그레이션 명시
@@ -1377,18 +1377,18 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 큰 PR 하나보다 작은 PR 5개가 리뷰/롤백에 유리:
 
 ### PR 1: Port 추가 (additive, breaking 없음)
-- `oxi-sdk/src/ports/catalog.rs` (ModelCatalog trait + noop + `CatalogProtocol` enum + types)
+- `oxicode-sdk/src/ports/catalog.rs` (ModelCatalog trait + noop + `CatalogProtocol` enum + types)
 - `PortRegistry::catalog` 추가
-- `OxiBuilder::with_catalog()`, `Oxi::catalog()`
-- `oxi-sdk/src/ports/fs/catalog.rs` (FileModelCatalog::init, `protocol_for(npm) → CatalogProtocol`)
+- `OxicodeBuilder::with_catalog()`, `Oxicode::catalog()`
+- `oxicode-sdk/src/ports/fs/catalog.rs` (FileModelCatalog::init, `protocol_for(npm) → CatalogProtocol`)
 - 기존 API 는 **전부 유지** (deprecated 표시만)
 - 테스트: §9.1, §9.2
 
-### PR 2: oxi-cli 이관
-- oxi-cli 의 7+ 호출처를 port 로 교체
+### PR 2: oxicode-cli 이관
+- oxicode-cli 의 7+ 호출처를 port 로 교체
 - `bootstrap.rs` 가 `FileModelCatalog::init(...)` 호출하고 `with_catalog()` 로 등록
-- `OxiBuilder::build()` 호출 직후 subscription 한 개 spawn → status bar / picker invalidate
-- `oxi refresh` 명령이 `oxi.catalog().refresh().await` 호출
+- `OxicodeBuilder::build()` 호출 직후 subscription 한 개 spawn → status bar / picker invalidate
+- `oxicode refresh` 명령이 `oxicode.catalog().refresh().await` 호출
 - 기존 API deprecated 경고 활성화
 - 테스트: §9.4
 
@@ -1399,37 +1399,37 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 - `ModelCatalog` trait 에 **sync read API** 6 개 추가 (`*_sync`),
   기본 구현 noop. `FileModelCatalog` 구현.
 - `AppState.catalog: Option<Arc<dyn ModelCatalog>>` 필드 추가, TUI 시작 시 주입
-- `App::oxi()` getter 추가
+- `App::oxicode()` getter 추가
 - `tui/slash`, `tui/handlers`, `tui/overlay/{settings,provider_select}` 호출처
   catalog sync API 로 이관 (legacy fallback 유지)
 - `setup_wizard.rs` `load_providers`/`load_models` catalog-aware, `run()` async
 - `ProviderEntry.env_key` 필드 추가 (catalog 에서 채움)
 - 테스트: catalog_port sync API 2 개 + 회귀
 
-### PR 3: bridge layer + `Oxi::resolve_model` catalog 통합 (v4 축소)
-> **v4 정정 (§7.9)**: 원래 "oxi-ai 내부 이관 + ProviderResolver async ripple"
+### PR 3: bridge layer + `Oxicode::resolve_model` catalog 통합 (v4 축소)
+> **v4 정정 (§7.9)**: 원래 "oxicode-ai 내부 이관 + ProviderResolver async ripple"
 > 이었으나, sync read API 도입으로 **대폭 축소**. async화 ripple 전면 회피.
 
-- **bridge layer 신설** (`oxi-sdk/src/bridge.rs`): `catalog_entry_to_model()`,
-  `provider_base_url()`, modality 변환. SDK 소유 (oxi-ai 역방향 의존 방지).
+- **bridge layer 신설** (`oxicode-sdk/src/bridge.rs`): `catalog_entry_to_model()`,
+  `provider_base_url()`, modality 변환. SDK 소유 (oxicode-ai 역방향 의존 방지).
   7 개 단위 테스트.
-- `Oxi::resolve_model()` 의 catalog fallback 통합: catalog sync read → bridge →
-  `oxi_ai::Model`. **sync 유지** (async화 없음).
+- `Oxicode::resolve_model()` 의 catalog fallback 통합: catalog sync read → bridge →
+  `oxicode_ai::Model`. **sync 유지** (async화 없음).
 - **무효화됨** (§7.9 표): `ModelRegistry::lookup_dynamic()`, `create_provider`
   async 화, `AgentBuilder::build()` async 화, `ProviderResolver` trait async 화,
   agent_loop/multi_provider/fallback_chain ripple — 전부 불필요.
-- `CatalogProtocol::as_oxi_api()` 는 이미 항상 컴파일 (feature flag 없음).
-- 테스트: `oxi_resolve_model_uses_catalog` + bridge 단위 7 개 + 회귀
+- `CatalogProtocol::as_oxicode_api()` 는 이미 항상 컴파일 (feature flag 없음).
+- 테스트: `oxicode_resolve_model_uses_catalog` + bridge 단위 7 개 + 회귀
 
 ### PR 4: 정리 (부분 완료)
 > `SdkError` catalog 변종만 완료. 나머지는 위험/효용 트레이드오프로 연기.
 
 - ✅ **`SdkError` catalog 변종 추가** (§10 Q12): `CatalogUnavailable`,
   `CatalogOverrideParse`, `CatalogRefresh`.
-- ⏸️ `OxiBuilder::with_builtins()` 제거 — provider factory 역할도 하므로
+- ⏸️ `OxicodeBuilder::with_builtins()` 제거 — provider factory 역할도 하므로
   함부러 제거 불가. deprecated 후 다음 메이저로 연기.
-- ⏸️ `oxi-ai/src/catalog/` 모듈 제거 — `FileModelCatalog` 가 `include_bytes!`
-  로 oxi-ai 의 SNAP 파일을 가져오므로 제거 불가 (데이터 위치).
+- ⏸️ `oxicode-ai/src/catalog/` 모듈 제거 — `FileModelCatalog` 가 `include_bytes!`
+  로 oxicode-ai 의 SNAP 파일을 가져오므로 제거 불가 (데이터 위치).
 - ⏸️ deprecated 표시된 SDK API 제거 — custom provider 동적 등록
   (`fetch_models_blocking`/`register_model`) 은 models.dev 와 별개 로직으로
   유지. setup_wizard/agent_session_runtime 의 `get_provider` fallback 도 유지.
@@ -1441,7 +1441,7 @@ async fn cmd_refresh(oxi: &Oxi) -> Result<()> {
 - 외부 SDK consumer 를 위한 마이그레이션 가이드 (간단한 코드 변환 예시)
 
 > 각 PR 은 cargo nextest + clippy 통과 후 머지. PR 1 만으로는 사용자가 볼 변화 0
-> (SDK 새 API 추가만). PR 2 부터 oxi-cli UX 가 동적으로 변함. PR 4 완료 시점에
+> (SDK 새 API 추가만). PR 2 부터 oxicode-cli UX 가 동적으로 변함. PR 4 완료 시점에
 > 모든 free fn 제거. PR 5 는 외부 repo 와의 조율 필요.
 >
 > **v4 상태 (구현 완료)**: PR 1 → PR 2 → PR 2.5 → PR 3 (축소) → PR 4 (부분)
@@ -1459,8 +1459,8 @@ v1 리뷰에서 7개 결함 발견, v2 에서 정정:
 |---|---|---|
 | 1 | `CatalogModelEntry.api: String` — SDK consumer 가 런타임 string 매칭 | `protocol: CatalogProtocol` enum. 컴파일 타임 검증. §4.1 |
 | 2 | `auth_method` 를 entry 에 별도 필드로 저장 | `entry.protocol.default_auth()` 로 파생. 필드 삭제. §4.1 |
-| 3 | `Oxi::resolve_model` 이 sync + dynamic 만 — catalog 자동 fallback 없음 | async 화 + dynamic 우선 + catalog fallback. §4.4 |
-| 4 | `Oxi` 에 6 개 async pass-through (`list_providers` 등) — 표면 비대칭 | `catalog()` accessor 한 개만. 나머지는 `oxi.catalog().*` 로 직접. §4.4 |
+| 3 | `Oxicode::resolve_model` 이 sync + dynamic 만 — catalog 자동 fallback 없음 | async 화 + dynamic 우선 + catalog fallback. §4.4 |
+| 4 | `Oxicode` 에 6 개 async pass-through (`list_providers` 등) — 표면 비대칭 | `catalog()` accessor 한 개만. 나머지는 `oxicode.catalog().*` 로 직접. §4.4 |
 | 5 | `CatalogEvent::Refreshed` 가 `source` 포함 — `current_source()` 와 의미 중복 | `Updated` 로 통일, source 제거. `current_source()` 는 trait 에서 제거, impl 의 `Debug` impl 로 진단 이동. §4.1, §5.6 |
 | 6 | `RefreshOutcome::{NotModified, Stale}` — "안 바뀜" 과 "안 시도함" 의 구분이 모호 | `Unchanged / Offline / Failed`. 의도 명확. §4.1 |
 | 7 | `FileModelCatalog::load` + `load_with_refresh` — 두 메서드가 하는 일이 거의 같음 | 단일 `init()` — load + stale cache 시 1회 refresh 시도. §6.2 |
@@ -1471,13 +1471,13 @@ v1 리뷰에서 7개 결함 발견, v2 에서 정정:
 
 | # | 결함 (v2) | 정정 (v3) |
 |---|---|---|
-| 🔴 C1 | `create_provider_from_entry` 가 oxi-ai 에 위치하면 `CatalogProviderEntry` (oxi-sdk 타입) 을 못 봄 → **컴파일 에러**. 또한 "SDK → oxi-ai 의존 0" 주장이 현실과 불일치 (이미 재노출 중) | bridge layer 를 `oxi-sdk/src/bridge.rs` 에 위치. `as_oxi_api()` feature flag 제거 (항상 컴파일). 주장을 "oxi-ai → SDK 역방향 의존 0" 으로 정정. §4.1, §7.5 |
+| 🔴 C1 | `create_provider_from_entry` 가 oxicode-ai 에 위치하면 `CatalogProviderEntry` (oxicode-sdk 타입) 을 못 봄 → **컴파일 에러**. 또한 "SDK → oxicode-ai 의존 0" 주장이 현실과 불일치 (이미 재노출 중) | bridge layer 를 `oxicode-sdk/src/bridge.rs` 에 위치. `as_oxicode_api()` feature flag 제거 (항상 컴파일). 주장을 "oxicode-ai → SDK 역방향 의존 0" 으로 정정. §4.1, §7.5 |
 | 🔴 C2 | `NoopModelCatalog` 가 `#[derive(Debug)]` + manual `impl Debug` 동시持有 → **컴파일 에러** | `#[derive(Default)]` 만 남기고 `Debug` 는 manual impl 유지. §4.2 |
-| 🔴 C3 | `Oxi::create_provider` / `resolve_model` 이 async 가 되면 `ProviderResolver` trait 도 async — v2 에서 전혀 언급 안 됨 | §7.8 신설: trait async 서명 + ripple (`oxi-agent`, `oxi-ai` 전체 resolve_* 호출부). 기각된 대안 (`SyncProviderResolver` + `AsyncProviderResolver` 분리) 도 명시 |
-| 🟡 U1 | §3 아키텍처 다이어그램이 v1 잔재 (`oxi.list_providers()`, `oxi.refresh_catalog()`) | `oxi.catalog().*` 로 통일 + `oxi.resolve_model()` 추가 |
+| 🔴 C3 | `Oxicode::create_provider` / `resolve_model` 이 async 가 되면 `ProviderResolver` trait 도 async — v2 에서 전혀 언급 안 됨 | §7.8 신설: trait async 서명 + ripple (`oxicode-agent`, `oxicode-ai` 전체 resolve_* 호출부). 기각된 대안 (`SyncProviderResolver` + `AsyncProviderResolver` 분리) 도 명시 |
+| 🟡 U1 | §3 아키텍처 다이어그램이 v1 잔재 (`oxicode.list_providers()`, `oxicode.refresh_catalog()`) | `oxicode.catalog().*` 로 통일 + `oxicode.resolve_model()` 추가 |
 | 🟡 U2 | §5.6 이 존재하지 않는 §4.5 참조 | §6.6 으로 정정 |
-| 🟡 U3 | §9.3 테스트 `oxi_convenience_methods_delegate` 가 v2 에서 제거된 API 테스트 | `oxi_catalog_delegates_to_registered` 로 변경 + resolve_model 테스트 4종 추가 |
-| 🟡 U4 | §9.4 테스트 `Oxi::list_providers()` / `Oxi::search_models()` 가 v2 제거 API | `oxi.catalog().list_providers()` / `oxi.catalog().search()` 로 갱신 + bootstrap smoke test 2종 추가 |
+| 🟡 U3 | §9.3 테스트 `oxicode_convenience_methods_delegate` 가 v2 에서 제거된 API 테스트 | `oxicode_catalog_delegates_to_registered` 로 변경 + resolve_model 테스트 4종 추가 |
+| 🟡 U4 | §9.4 테스트 `Oxicode::list_providers()` / `Oxicode::search_models()` 가 v2 제거 API | `oxicode.catalog().list_providers()` / `oxicode.catalog().search()` 로 갱신 + bootstrap smoke test 2종 추가 |
 | 🟡 U5 | §10 Q5 "v2에서" → 지금이 v3 | v4 로 |
 | 🟡 U6 | §7.1 제거 목록에 `ModelRegistry::lookup()` 누락 (§7.3 에서 deprecated 언급) | §7.1 표에 추가 |
 | 🟢 I1 | `Ok(RefreshOutcome::Failed)` 의미론 이상함 (Ok인데 Failed) — 호출자가 `.await?` 로 못 잡음 | **의도적** 확정. `RefreshOutcome` type-level doc 에 명시 (lazy on-call 원칙). §10 Q11 추가 |
@@ -1493,7 +1493,7 @@ v3 설계는 `ProviderResolver` trait async화를 "대공사 ripple"로 명시�
 | v3 항목 | v4 상태 |
 |---|---|
 | `ModelRegistry::lookup_dynamic()` 분리 | ❌ 불필요 — `resolve_model` 이 catalog sync 직접 조회 |
-| `Oxi::create_provider` / `resolve_model` async 화 | ❌ 불필요 — catalog sync read 로 충분 |
+| `Oxicode::create_provider` / `resolve_model` async 화 | ❌ 불필요 — catalog sync read 로 충분 |
 | `AgentBuilder::build()` async 화 | ❌ 불필요 |
 | `ProviderResolver` trait async 화 | ❌ 불필요 |
 | agent_loop / multi_provider / fallback_chain ripple | ❌ 불필요 |
@@ -1515,14 +1515,14 @@ PR 3 은 "대공사" 에서 **bridge layer + resolve_model 통합만** 으로 �
 
 ## 부록 B: 변경 영향 매트릭스
 
-> **v4 갱신**: sync API 도입으로 영향 강도 하향. oxi-ai/oxi-agent 변경 최소화.
+> **v4 갱신**: sync API 도입으로 영향 강도 하향. oxicode-ai/oxicode-agent 변경 최소화.
 
 | crate | 변경 강도 | 비고 |
 |---|---|---|
-| `oxi-ai` | 🟢 변경 없음 | v3 예상(🔴) 과 달리 catalog 모듈 유지. `FileModelCatalog` 가 `include_bytes!` 로 SNAP 가져옴. legacy API 도 유지 |
-| `oxi-sdk` | 🔴 큰 변경 | 새 port + `CatalogProtocol` enum + builder + `bridge.rs` + `resolve_model` catalog 통합 + `SdkError` 변종 |
-| `oxi-agent` | 🟢 변경 없음 | v3 예상(🟢) 과 동일. `ProviderResolver` async화 회피로 영향 제로 |
-| `oxi-cli` | 🔴 큰 변경 | composition root (services/bootstrap) + TUI plumbing + setup wizard + main 명령. catalog sync API 로 이관 |
-| `oxi-tui` | 🟢 없음 | port 무관, 변경 없음 |
+| `oxicode-ai` | 🟢 변경 없음 | v3 예상(🔴) 과 달리 catalog 모듈 유지. `FileModelCatalog` 가 `include_bytes!` 로 SNAP 가져옴. legacy API 도 유지 |
+| `oxicode-sdk` | 🔴 큰 변경 | 새 port + `CatalogProtocol` enum + builder + `bridge.rs` + `resolve_model` catalog 통합 + `SdkError` 변종 |
+| `oxicode-agent` | 🟢 변경 없음 | v3 예상(🟢) 과 동일. `ProviderResolver` async화 회피로 영향 제로 |
+| `oxicode-cli` | 🔴 큰 변경 | composition root (services/bootstrap) + TUI plumbing + setup wizard + main 명령. catalog sync API 로 이관 |
+| `oxicode-tui` | 🟢 없음 | port 무관, 변경 없음 |
 | `oxios` (sister repo) | 🟢 호환 | 자체 catalog impl 을 port 로 등록 가능. 기존 free fn 의존이 있었다면 이관 |
 | SDK consumer 외부 앱 | 🟢 호환 | `with_catalog(my_impl)` 한 줄로 기존 호환. free fn 의존했다면 이관 필요 |

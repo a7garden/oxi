@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-17
 **Status:** Proposed (awaiting review)
-**Scope:** `oxi-cli/src/tui/slash*`, `oxi-cli/src/tui/completion*`,
-`oxi-cli/src/extensions/*`
+**Scope:** `oxicode-cli/src/tui/slash*`, `oxicode-cli/src/tui/completion*`,
+`oxicode-cli/src/extensions/*`
 
 ---
 
@@ -60,7 +60,7 @@ removes the footgun by construction.
 ## 2. Goals / Non-Goals
 
 **Scope boundary.** Slash commands are a **TUI-only** feature. Neither
-`oxi --print` nor RPC mode parse or dispatch slash commands (verified: no
+`oxicode --print` nor RPC mode parse or dispatch slash commands (verified: no
 `handle_slash` / `starts_with('/')` references in `lib.rs` or `rpc_mode/`; the
 RPC `execute_command` is an unrelated `RpcCommand` dispatcher). This refactor
 stays inside the TUI; the non-TUI asymmetry is pre-existing and out of scope.
@@ -222,7 +222,7 @@ that makes aliases discoverable without duplicating handler logic.
 ## 4. Module Layout
 
 ```
-oxi-cli/src/tui/slash/
+oxicode-cli/src/tui/slash/
 ├── mod.rs            SlashCtx, SlashOutcome, SlashCommand trait, re-exports
 ├── registry.rs       SlashRegistry, CompletionEntry, dispatch/complete
 ├── completion.rs     input → (command completion | argument completion) routing
@@ -241,7 +241,7 @@ oxi-cli/src/tui/slash/
     ├── export_grp/   /export, /share, /import, /copy
     └── info_grp/     /settings, /hotkeys, /keys, /changelog, /reload,
                       /extensions, /ext, /compact
-oxi-cli/src/tui/completion/
+oxicode-cli/src/tui/completion/
 ├── mod.rs           unified CompletionManager (owns slash + path + fuzzy)
 ├── path.rs          (existing) file path completion
 └── fuzzy_file.rs    (existing) fd-based fuzzy search
@@ -581,7 +581,7 @@ Each step leaves the build green and the TUI functional. No big-bang cutover.
   half-populated overlay would be worse than none. A parameterized host-call
   protocol can add it later if a concrete need appears.
 - **C. Trait registry over static-table-with-fnptr or macro.** Matches
-  `oxi-agent::ToolRegistry` (project consistency), lets extensions adapt in at
+  `oxicode-agent::ToolRegistry` (project consistency), lets extensions adapt in at
   runtime, and keeps each command's metadata and behavior in one place —
   eliminating the entire class of "keep in sync" drift that motivated this work.
 

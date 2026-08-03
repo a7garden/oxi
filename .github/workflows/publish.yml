@@ -57,8 +57,8 @@ jobs:
 
   # ── Dry-run packaging check (leaf crates) ────────────────────
   # Runs for every trigger (even dry_run workflow_dispatch).
-  # Only the leaf crates (no oxi-* dependencies) can be packaged
-  # standalone here — the others depend on oxi-* versions that
+  # Only the leaf crates (no oxicode-* dependencies) can be packaged
+  # standalone here — the others depend on oxicode-* versions that
   # aren't on crates.io yet at this point. Their packaging is
   # validated implicitly by `cargo publish` in the publish job.
   package-check:
@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxi-catalog oxi-hashline oxi-api-stability oxi-vtui-compat oxi-mnemopi oxi-lsp oxi-snapcompact; do
+          for crate in oxicode-catalog oxicode-hashline oxicode-api-stability oxicode-vtui-compat oxicode-mnemopi oxicode-lsp oxicode-snapcompact; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -118,18 +118,18 @@ jobs:
       max-parallel: 1
       matrix:
         crate:
-          - oxi-catalog
-          - oxi-hashline
-          - oxi-api-stability
-          - oxi-vtui-compat
-          - oxi-vtui
-          - oxi-mnemopi
-          - oxi-lsp
-          - oxi-snapcompact
-          - oxi-ai
-          - oxi-agent
-          - oxi-sdk
-          - oxi-cli
+          - oxicode-catalog
+          - oxicode-hashline
+          - oxicode-api-stability
+          - oxicode-vtui-compat
+          - oxicode-vtui
+          - oxicode-mnemopi
+          - oxicode-lsp
+          - oxicode-snapcompact
+          - oxicode-ai
+          - oxicode-agent
+          - oxicode-sdk
+          - oxicode-cli
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -141,12 +141,12 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxi-catalog|oxi-hashline|oxi-api-stability|oxi-vtui-compat|oxi-mnemopi|oxi-lsp|oxi-snapcompact) exit 0 ;;
-            oxi-vtui) WAITS="oxi-vtui-compat" ;;
-            oxi-ai) WAITS="oxi-catalog oxi-api-stability" ;;
-            oxi-agent) WAITS="oxi-ai oxi-hashline" ;;
-            oxi-sdk) WAITS="oxi-agent oxi-snapcompact" ;;
-            oxi-cli) WAITS="oxi-sdk oxi-vtui oxi-vtui-compat" ;;
+            oxicode-catalog|oxicode-hashline|oxicode-api-stability|oxicode-vtui-compat|oxicode-mnemopi|oxicode-lsp|oxicode-snapcompact) exit 0 ;;
+            oxicode-vtui) WAITS="oxicode-vtui-compat" ;;
+            oxicode-ai) WAITS="oxicode-catalog oxicode-api-stability" ;;
+            oxicode-agent) WAITS="oxicode-ai oxicode-hashline" ;;
+            oxicode-sdk) WAITS="oxicode-agent oxicode-snapcompact" ;;
+            oxicode-cli) WAITS="oxicode-sdk oxicode-vtui oxicode-vtui-compat" ;;
             *) exit 0 ;;
           esac
           for WAIT in $WAITS; do
@@ -155,7 +155,7 @@ jobs:
             [ -z "$TARGET" ] && echo "::error::Could not determine required version of $WAIT" && exit 1
             echo "Waiting for $WAIT $TARGET on crates.io..."
             for i in $(seq 1 60); do
-              SEEN=$(curl -fsSL -H "User-Agent: oxi-publish-ci/1.0" \
+              SEEN=$(curl -fsSL -H "User-Agent: oxicode-publish-ci/1.0" \
                 "https://crates.io/api/v1/crates/$WAIT" \
                 | grep -oE '"max_stable_version":[[:space:]]*"[^"]+"' \
                 | head -1 | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/')

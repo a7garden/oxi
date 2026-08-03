@@ -1,0 +1,98 @@
+[package]
+name = "oxicode-sdk"
+version = "0.64.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "oxicode AI agent SDK — build isolated, multi-agent AI systems"
+readme = "README.md"
+license = "MIT"
+authors = ["a7garden <a7garden@icloud.com>"]
+repository = "https://github.com/project-oxi/oxicode"
+keywords = ["ai", "agent", "sdk", "llm", "multi-agent"]
+categories = ["api-bindings", "development-tools"]
+exclude = ["target/"]
+
+[dependencies]
+oxicode-ai = { version = "0.64.0", path = "../oxicode-ai" }
+oxicode-agent = { version = "0.64.0", path = "../oxicode-agent" }
+oxicode-hashline = { version = "0.64.0", path = "../oxicode-hashline" }
+oxicode-api-stability = { version = "0.64.0", path = "../oxicode-api-stability" }
+async-trait = "0.1"
+# Re-exported under the `native-browser` feature so downstream consumers
+# can match on `BrowserEvent` variants without depending on oxibrowser-core
+# directly.
+oxibrowser-core = { version = "0.17", optional = true }
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+parking_lot = "0.12"
+tokio-util = "0.7"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+fastrand = "2"
+tracing = "0.1"
+serde_yaml = "0.9"
+dirs = "6"
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+glob = "0.3"
+regex = "1"
+oxicode-snapcompact = { version = "0.64.0", path = "../oxicode-snapcompact" }
+
+# File-based port impls (fs/ sub-module). Always available in default build.
+toml = "0.9"
+walkdir = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+flate2 = "1"
+filetime = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+futures = "0.3"
+fastrand = "2"
+wiremock = "0.6"
+
+
+[features]
+default = []
+native-browser = ["oxicode-agent/native-browser", "dep:oxibrowser-core"]
+# Opt-in gates for surface that the R3 tier annotations flag as `#[unstable]`.
+# These are REAL machine-enforced signals (the consumer cannot reach the
+# symbols without enabling the feature) — not just doc cosmetics.
+# The `unstable` umbrella enables all of them at once.
+unstable = [
+    "circuit-breaker",
+    "mcp-spawn-validator",
+    "mcp-transport",
+    "delegation",
+    "url-resolver",
+    "workflow-dsl",
+    "role-routing",
+    "role-switching",
+    "router",
+    "advisor",
+    "memory",
+    "subagent",
+    "agent-hub",
+    "lsp",
+    "browser",
+]
+circuit-breaker = []
+mcp-spawn-validator = []
+mcp-transport = []
+delegation = []
+url-resolver = []
+workflow-dsl = []
+role-routing = []
+role-switching = []
+router = []
+advisor = []
+memory = []
+subagent = []
+agent-hub = []
+lsp = []
+browser = []
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

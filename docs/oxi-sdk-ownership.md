@@ -1,8 +1,8 @@
-# oxi-sdk Ownership Contract
+# oxicode-sdk Ownership Contract
 
 > **Status:** Approved (Phase 1 of SDK Stability & Ownership Program)
 > **Source:** [`docs/superpowers/specs/2026-08-01-sdk-stability-ownership-program-design.md`](superpowers/specs/2026-08-01-sdk-stability-ownership-program-design.md) §3.1, §5.1, §5.3
-> **Audience:** oxi maintainers and consumer authors (oxios, oxios-kernel, etc.)
+> **Audience:** oxicode maintainers and consumer authors (oxios, oxios-kernel, etc.)
 
 This document is the canonical "who owns what" table for the SDK ↔ consumer
 boundary. It exists because the oxios **P0.2 incident** (2026-08-01) showed that
@@ -109,7 +109,7 @@ When `None`, no circuit breaking occurs (existing behavior preserved).
 
 ```rust
 // In oxios (sister repo):
-use oxi_sdk::{CircuitBreaker, BreakerError};
+use oxicode_sdk::{CircuitBreaker, BreakerError};
 use std::sync::Mutex;
 
 pub struct A2ACircuitBreaker {
@@ -148,7 +148,7 @@ design** and not a bug to collapse:
 | Layer | Owner | Purpose |
 |---|---|---|
 | `MemoryStore` (SDK port) | SDK | Storage contract (`store` / `recall` / `forget`) — the consumer-facing port |
-| `MemoryBackend` (oxi-agent) | SDK | Agent-tool-facing interface (`store` / `search` / `list` / `delete`) |
+| `MemoryBackend` (oxicode-agent) | SDK | Agent-tool-facing interface (`store` / `search` / `list` / `delete`) |
 | `PortMemoryBackend` | SDK | Adapter: bridges `MemoryBackend` → `MemoryStore` port |
 
 Collapsing these would force every consumer into the SDK's storage model. The
@@ -163,7 +163,7 @@ three-layer design lets a consumer:
 
 The SDK ships **both** because they serve different composition roots:
 
-- `oxi-cli` uses option (1): `FileMemoryStore` or `InMemoryMemoryStore` impls
+- `oxicode-cli` uses option (1): `FileMemoryStore` or `InMemoryMemoryStore` impls
   the port, and the agent tools call them through `PortMemoryBackend`.
 - `oxios` uses option (2): its MCP-shaped memory service implements
   `MemoryBackend` directly because its tool surface differs from the SDK's.
@@ -178,7 +178,7 @@ surface); it graduates to `#[stable]` after it proves useful in production.
 
 ## 5. `ToolError` Stability Note
 
-`ToolError` in `oxi-agent/src/tools.rs` is:
+`ToolError` in `oxicode-agent/src/tools.rs` is:
 
 ```rust
 pub type ToolError = String;
@@ -220,7 +220,7 @@ The four enforcement mechanisms below are listed in the order consumers will
 encounter them (and in order of compile-time strictness, from weakest to
 strongest). Each is a layer of defense, not a substitute for the others.
 
-- **Tier annotations** (`oxi-api-stability`): every public symbol gets
+- **Tier annotations** (`oxicode-api-stability`): every public symbol gets
   `#[stable]`, `#[unstable]`, or `#[internal]`. These render as colored
   badges in `cargo doc` and are **discoverability aids, not compile signals**
   — a proc-macro attribute cannot register a custom lint, so consumers cannot
@@ -233,7 +233,7 @@ strongest). Each is a layer of defense, not a substitute for the others.
   `cargo-public-api` CI gate below.
 - **Deprecation convention** (`docs/release-process.md`): a public symbol
   marked for removal gets ≥1 release of `#[deprecated(since, note)]` (emitted
-  natively by the `oxi-api-stability::deprecated` macro) with a migration
+  natively by the `oxicode-api-stability::deprecated` macro) with a migration
   path before physical removal. During the window the API signature and
   semantics are frozen. This is the first **compile signal** a consumer
   hits.
@@ -258,11 +258,11 @@ unstable SDK symbol. That intent is correct; the implemented mechanism
 (doc badges) does not deliver it. The **real** gates consumers have today
 are:
 
-1. `#[cfg(feature = "...")]` on the SDK side (e.g. `oxi-sdk` re-exports
-   `BrowseTool` / `BrowserEngine` only with `oxi-sdk = { features =
+1. `#[cfg(feature = "...")]` on the SDK side (e.g. `oxicode-sdk` re-exports
+   `BrowseTool` / `BrowserEngine` only with `oxicode-sdk = { features =
    ["unstable"] }`). A consumer that doesn't enable the feature cannot
    accidentally build on it.
-2. `#[deprecated(since, note)]` from the `oxi-api-stability::deprecated`
+2. `#[deprecated(since, note)]` from the `oxicode-api-stability::deprecated`
    macro, which the compiler treats as a regular deprecation warning. A
    consumer that ignores the warning keeps the old behavior; a consumer
    that turns on `#![deny(deprecated)]` will fail to compile.

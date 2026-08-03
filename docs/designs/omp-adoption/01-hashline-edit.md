@@ -12,7 +12,7 @@
 
 omp의 **Hashline**은 str_replace 대신 **행 번호 anchor + 콘텐츠 해시 tag**로 편집한다. 모델이 `read`로 본 파일의 정확한 행을 가리켜 변경하므로, "문자열 못 찾음 → 재시도 루프 → 토큰 폭발" 고질병이 사라진다. omp 실측: **Grok 4 Fast 토큰 −61%, MiniMax pass rate 2.1×**.
 
-본 설계는 omp의 `packages/hashline/` (4.7K LOC)를 **`oxi-hashline` 독립 Rust 크레이트**로 이식하고, 기존 `edit.rs`(str_replace)와 **공존**시킨다.
+본 설계는 omp의 `packages/hashline/` (4.7K LOC)를 **`oxicode-hashline` 독립 Rust 크레이트**로 이식하고, 기존 `edit.rs`(str_replace)와 **공존**시킨다.
 
 ### 5개 핵심 메커니즘 (omp에서 그대로 가져올 것)
 
@@ -24,7 +24,7 @@ omp의 **Hashline**은 str_replace 대신 **행 번호 anchor + 콘텐츠 해시
 | 4 | **boundary repair** (5가지 패턴) | `apply.ts:repairReplacementBoundaries` | 모델의 범위 경계 실수 자동 교정 |
 | 5 | **after-insert landing correction** | `apply.ts:resolveShiftedLanding` | 들여쓰기 기반 insert 위치 보정 |
 
-### oxi에 주는 가치 (정량)
+### oxicode에 주는 가치 (정량)
 
 - **토큰 절약**: str_replace는 `oldText` 전문을 재입력해야 함. Hashline은 행 번호 + `+TEXT`만. 큰 블록 교체 시 차이 벌어짐.
 - **재시도 감소**: tag가 발산하면 즉시 거부 → 모델이 `re-read` 후 재시도 (1회). str_replace는 부분 매칭 실패 시 모델이 추측하며 여러 번 재시도.
@@ -35,7 +35,7 @@ omp의 **Hashline**은 str_replace 대신 **행 번호 anchor + 콘텐츠 해시
 
 ## 1. 배경: omp Hashline이 해결하는 5가지 str_replace 한계
 
-### 1.1 oxi의 현재 edit (str_replace)
+### 1.1 oxicode의 현재 edit (str_replace)
 
 ```
 read src/foo.rs          →  "Showing lines 1-50 of 120:" + "{linenum}\t{content}"
@@ -43,7 +43,7 @@ edit (path, oldText, newText)  →  oldText를 파일에서 찾아 newText로 �
                                 expected_hash (DefaultHasher 64-bit)로 충돌 감지
 ```
 
-파일: `oxi-agent/src/tools/edit.rs`, `oxi-agent/src/tools/edit_diff.rs`.
+파일: `oxicode-agent/src/tools/edit.rs`, `oxicode-agent/src/tools/edit_diff.rs`.
 
 ### 1.2 한계 ① — 불안정한 해시
 
@@ -61,7 +61,7 @@ omp는 `Bun.hash.xxHash32(normalized) & 0xffff` → **4-hex, 크로스플랫폼 
 
 ### 1.3 한계 ② — 드리프트 시 거부만
 
-oxi는 `expected_hash` 불일치 시 `"File has been modified since last read. Re-read the file and retry."` 만 응답. 모델이 매번 재시도해야 함.
+oxicode는 `expected_hash` 불일치 시 `"File has been modified since last read. Re-read the file and retry."` 만 응답. 모델이 매번 재시도해야 함.
 
 omp는 **2단계 복구**:
 1. tag가 이름붙인 스냅샷 버전에 edit를 적용 → 그 diff를 live content에 3-way merge (`Diff.applyPatch`, fuzz 0).
@@ -79,7 +79,7 @@ Hashline은 행 번호로 가리키므로 유일성/공백 문제가 없고, bod
 
 ### 1.5 한계 ④ — "안 본 줄" 편집 허용
 
-oxi는 모델이 `read`로 본 적 없는 줄 번호를 anchor로 써도 (기억 착오) 적용 시도 → 파일 훼손.
+oxicode는 모델이 `read`로 본 적 없는 줄 번호를 anchor로 써도 (기억 착오) 적용 시도 → 파일 훼손.
 
 omp는 `SnapshotStore`가 각 tag에 `seenLines: Set<number>`를 기록. patcher가 `#assertSeenLines`로 anchor가 본 줄인지 검증 — **안 본 줄이면 즉시 거부 + "re-read those exact lines"**.
 
@@ -190,24 +190,24 @@ head/tail insert만 있음         →  applyEdits + HEADTAIL_DRIFT_WARNING
 
 ---
 
-## 3. oxi화 설계 — `oxi-hashline` 크레이트
+## 3. oxicode화 설계 — `oxicode-hashline` 크레이트
 
 ### 3.1 크레이트 위치와 의존
 
-**새 크레이트**: `oxi-hashline/` (워크스페이스 루트, `oxi-ai`와 동급).
+**새 크레이트**: `oxicode-hashline/` (워크스페이스 루트, `oxicode-ai`와 동급).
 
 **의존성 흐름**:
 ```
-oxi-ai  ←  oxi-agent  ←  oxi-sdk  ←  oxi-cli
-oxi-hashline  (독립, oxi-* 의존 없음 — 순수 함수 라이브러리)
+oxicode-ai  ←  oxicode-agent  ←  oxicode-sdk  ←  oxicode-cli
+oxicode-hashline  (독립, oxicode-* 의존 없음 — 순수 함수 라이브러리)
               ↑
-              oxi-agent 의존 (edit 도구가 사용)
+              oxicode-agent 의존 (edit 도구가 사용)
 ```
 
 `Cargo.toml`:
 ```toml
 [package]
-name = "oxi-hashline"
+name = "oxicode-hashline"
 version = {workspace}
 edition = "2024"
 rust-version = {workspace}
@@ -234,14 +234,14 @@ three-way-merge = ["dep:similar"]                           # recovery Phase 2 (
 ### 3.2 모듈 구조 (omp 1:1 대응)
 
 ```
-oxi-hashline/src/
+oxicode-hashline/src/
 ├── lib.rs          (재진입점 + 공개 API re-export)
 ├── format.rs       ← omp format.ts        (sigil 상수, compute_file_hash, format_*)
 ├── grammar.rs      ← omp grammar.lark     (토큰/키워드 — Rust enum/const)
 ├── types.rs        ← omp types.ts         (Edit, Anchor, Cursor, ApplyResult, BlockSpan)
 ├── tokenizer.rs    ← omp tokenizer.ts     (LID/range/헤더 라인 토큰화)
 ├── parser.rs       ← omp parser.ts+input.ts (PatchSection::parse, split_patch_input)
-├── normalize.rs    ← omp normalize.ts     (BOM/CRLF — oxi edit_diff.rs 함수 이전)
+├── normalize.rs    ← omp normalize.ts     (BOM/CRLF — oxicode edit_diff.rs 함수 이전)
 ├── snapshots.rs    ← omp snapshots.ts     (SnapshotStore trait + InMemorySnapshotStore)
 ├── apply.rs        ← omp apply.ts         (apply_edits, repair_replacement_boundaries)
 ├── recovery.rs     ← omp recovery.ts      (M1: session chain; M1.5: 3-way merge)
@@ -251,7 +251,7 @@ oxi-hashline/src/
 ├── messages.rs     ← omp messages.ts      (사용자 메시지 템플릿 — 한국어/영어)
 ├── diff_preview.rs ← omp diff-preview.ts  (CompactDiffPreview)
 ├── stream.rs       ← omp stream.ts        (stream_hash_lines — 스트리밍 미리보기)
-└── prompt.md       ← omp prompt.md        (모델용 문법 명세 — oxi 컨텍스트로 번역)
+└── prompt.md       ← omp prompt.md        (모델용 문법 명세 — oxicode 컨텍스트로 번역)
 ```
 
 ### 3.3 핵심 타입 (types.rs)
@@ -593,7 +593,7 @@ impl Patcher {
 }
 ```
 
-> **FS trait 이유**: oxi-hashline 코어는 tokio/fs에 직결하지 않음 — 테스트 시 mock FS, oxi-cli는 `TokioHashlineFs` 구현체 주입. omp의 `Filesystem` interface와 동일 패턴. **PathGuard 보안 검사**는 `TokioHashlineFs` 내부에서 수행 (oxi-cli 레이어).
+> **FS trait 이유**: oxicode-hashline 코어는 tokio/fs에 직결하지 않음 — 테스트 시 mock FS, oxicode-cli는 `TokioHashlineFs` 구현체 주입. omp의 `Filesystem` interface와 동일 패턴. **PathGuard 보안 검사**는 `TokioHashlineFs` 내부에서 수행 (oxicode-cli 레이어).
 
 ### 3.9 parser.rs / tokenizer.rs
 
@@ -640,7 +640,7 @@ pub enum HashlineError {
 
 ---
 
-## 4. oxi-agent 통합 — edit.rs / read.rs 변경
+## 4. oxicode-agent 통합 — edit.rs / read.rs 변경
 
 ### 4.1 read.rs — snapshot tag 발행
 
@@ -674,10 +674,10 @@ async fn apply_edits(root_dir: &Path, input: &EditInput, snapshots: &Arc<dyn Sna
 }
 
 async fn apply_hashline(root: &Path, patch_text: &str, snapshots: &Arc<dyn SnapshotStore>) -> Result<EditOutput, ToolError> {
-    let patch = oxi_hashline::split_patch_input(patch_text, Some(root))
+    let patch = oxicode_hashline::split_patch_input(patch_text, Some(root))
         .map_err(|e| e.to_string())?;
     let fs = Arc::new(TokioHashlineFs::new(root));     // PathGuard 내장
-    let patcher = oxi_hashline::Patcher::new(fs, snapshots.clone(), None /* block_resolver */);
+    let patcher = oxicode_hashline::Patcher::new(fs, snapshots.clone(), None /* block_resolver */);
     let result = patcher.apply(&patch).await.map_err(|e| e.to_string())?;
     // 결과를 EditOutput(diff, first_changed_line, message)로 변환
     Self::format_hashline_result(result)
@@ -704,23 +704,23 @@ async fn apply_hashline(root: &Path, patch_text: &str, snapshots: &Arc<dyn Snaps
 ### 4.3 ToolContext 확장 — SnapshotStore 주입
 
 ```rust
-// oxi-agent/src/tools.rs
+// oxicode-agent/src/tools.rs
 pub struct ToolContext {
     pub workspace_dir: PathBuf,
     pub root_dir: Option<PathBuf>,
     pub session_id: Option<String>,
-    pub snapshot_store: Option<Arc<dyn oxi_hashline::SnapshotStore>>,   // 신규 (Option)
+    pub snapshot_store: Option<Arc<dyn oxicode_hashline::SnapshotStore>>,   // 신규 (Option)
 }
 ```
 
-> **oxi-agent → oxi-hashline 의존 추가**. `oxi-agent/Cargo.toml`에 `oxi-hashline = { path = "../oxi-hashline" }`.
+> **oxicode-agent → oxicode-hashline 의존 추가**. `oxicode-agent/Cargo.toml`에 `oxicode-hashline = { path = "../oxicode-hashline" }`.
 
 **주입 경로**:
 - `AgentConfig`에 `snapshot_store` 필드 추가.
 - `bootstrap.rs`에서 `Arc::new(InMemorySnapshotStore::new())` 생성, `Agent` → `ToolContext`로 스레딩.
 - 세션별 1개 store (omp와 동일 — 세션 내 read/edit 체인).
 
-### 4.4 TokioHashlineFs (oxi-cli 또는 oxi-agent)
+### 4.4 TokioHashlineFs (oxicode-cli 또는 oxicode-agent)
 
 ```rust
 pub struct TokioHashlineFs { root: PathBuf }
@@ -744,7 +744,7 @@ impl HashlineFs for TokioHashlineFs {
 }
 ```
 
-> **file_mutation_queue 재사용**: omp는 자체 직렬화, oxi는 이미 `global_mutation_queue()`가 per-file 직렬화 제공. `TokioHashlineFs::write_text`가 이를 감싸면 omp와 동등 + 기존 인프라 활용.
+> **file_mutation_queue 재사용**: omp는 자체 직렬화, oxicode는 이미 `global_mutation_queue()`가 per-file 직렬화 제공. `TokioHashlineFs::write_text`가 이를 감싸면 omp와 동등 + 기존 인프라 활용.
 
 ---
 
@@ -753,7 +753,7 @@ impl HashlineFs for TokioHashlineFs {
 ### 5.1 설정 기반 선택
 
 ```rust
-// oxi-cli/src/store/settings.rs
+// oxicode-cli/src/store/settings.rs
 pub enum EditFormat {
     StrReplace,       // 기본 (현재 동작)
     Hashline,         // 새 — 시스템 프롬프트가 hashline 문법 가이드
@@ -765,7 +765,7 @@ pub struct Settings {
 }
 ```
 
-**시스템 프롬프트 빌더** (`build_system_prompt`): `edit_format == Hashline`이면 `oxi-hashline/prompt.md`를 edit 도구 설명에 병합, str_replace 스키마는 숨김(또는 fallback 명시).
+**시스템 프롬프트 빌더** (`build_system_prompt`): `edit_format == Hashline`이면 `oxicode-hashline/prompt.md`를 edit 도구 설명에 병합, str_replace 스키마는 숨김(또는 fallback 명시).
 
 ### 5.2 롤아웃 단계
 
@@ -776,7 +776,7 @@ pub struct Settings {
 | M1.2 | StrReplace | 옵션 + 벤치마크 | str_replace vs hashline 토큰/pass 비교 (omp 데이터 재현 확인). |
 | M1.3 | (데이터 기반 결정) | — | 벤치마크가 압도적이면 Hashline 기본 전환 검토. |
 
-> **언어 정책 패턴 재사용**: omp는 모델별 튜닝. oxi는 "기본 OFF + 명시적 토글"로 시작 (AGENTS.md TUI 언어 정책 v6과 동일 철학). 합의 없는 자동 전환 금지.
+> **언어 정책 패턴 재사용**: omp는 모델별 튜닝. oxicode는 "기본 OFF + 명시적 토글"로 시작 (AGENTS.md TUI 언어 정책 v6과 동일 철학). 합의 없는 자동 전환 금지.
 
 ### 5.3 expected_hash 호환성 깨짐
 
@@ -789,7 +789,7 @@ pub struct Settings {
 
 ## 6. 시스템 프롬프트 갱신
 
-`oxi-hashline/src/prompt.md` (omp prompt.md 번역 + oxi 컨텍스트):
+`oxicode-hashline/src/prompt.md` (omp prompt.md 번역 + oxicode 컨텍스트):
 - §"headers" — `[PATH#TAG]`, TAG는 최신 read/search의 것.
 - §"ops" — SWAP/DEL/INS.PRE/POST/HEAD/TAIL (block op `SWAP.BLK` 등은 후순위 확장, 본 프롬프트에서 제외).
 - §"body-rows" — `+TEXT`만, `-old` 없음.
@@ -822,7 +822,7 @@ omp `packages/hashline/src/__tests__/` (있을 경우) + 인라인 테스트를 
 | snapshot fusion | 동일 내용 재읽기 | recency + tag 재사용 |
 | seenLines | 안 본 줄 편집 거부 | 부분 read 후 edit |
 
-### 7.2 oxi 통합 테스트
+### 7.2 oxicode 통합 테스트
 
 - `edit.rs` hashline 모드 e2e (read → edit → read 검증).
 - str_replace regression (기존 테스트 전부 통과).
@@ -832,10 +832,10 @@ omp `packages/hashline/src/__tests__/` (있을 경우) + 인라인 테스트를 
 ### 7.3 CI 게이트 (AGENTS.md 준수)
 
 ```bash
-cargo nextest run -p oxi-hashline                    # 크레이트 단위
-cargo nextest run -p oxi-agent                       # edit.rs 통합
-cargo clippy -p oxi-hashline -- -D warnings
-# block-ops는 후순위 — 도입 시: cargo clippy -p oxi-hashline --features block-ops -- -D warnings
+cargo nextest run -p oxicode-hashline                    # 크레이트 단위
+cargo nextest run -p oxicode-agent                       # edit.rs 통합
+cargo clippy -p oxicode-hashline -- -D warnings
+# block-ops는 후순위 — 도입 시: cargo clippy -p oxicode-hashline --features block-ops -- -D warnings
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
@@ -857,12 +857,12 @@ cargo fmt --all -- --check
 | M1.8b | _(post-M1 / M1.5)_ `recovery.rs` Phase 2 — 3-way merge (`similar` 또는 `dmp`, 프로토타입 선행) | M1.8a 안정화 후 |
 | M1.9 | `mismatch.rs` + `messages.rs` + `diff_preview.rs` | M1.7 |
 | M1.10 | `patcher.rs` (HashlineFs trait + prepare/commit) | M1.5-M1.9 |
-| M1.11 | oxi-agent: ToolContext 확장 + `TokioHashlineFs` | M1.10 |
+| M1.11 | oxicode-agent: ToolContext 확장 + `TokioHashlineFs` | M1.10 |
 | M1.12 | edit.rs hashline 모드 + read.rs tag 발행 | M1.11 |
 | M1.13 | settings (`EditFormat`) + 시스템 프롬프트 | M1.12 |
 | M1.14 | omp 테스트 전수 이식 + 벤치마크 | M1.12 |
 
-> M1.1-M1.10은 **oxi-hashline 크레이트 내부** (기존 코드 영향 없음). M1.11부터 기존 코드 수정 — 이 시점까지 regression 제로.
+> M1.1-M1.10은 **oxicode-hashline 크레이트 내부** (기존 코드 영향 없음). M1.11부터 기존 코드 수정 — 이 시점까지 regression 제로.
 
 ---
 
@@ -880,9 +880,9 @@ cargo fmt --all -- --check
 
 ---
 
-## 10. 부록: omp 파일 → oxi 모듈 매핑 (참조표)
+## 10. 부록: omp 파일 → oxicode 모듈 매핑 (참조표)
 
-| omp 파일 (LOC) | oxi 모듈 | 비고 |
+| omp 파일 (LOC) | oxicode 모듈 | 비고 |
 |---|---|---|
 | `format.ts` (137) | `format.rs` | 상수 + `compute_file_hash` |
 | `grammar.lark` (27) | `grammar.rs` | 토큰 정의 (Rust enum) |
@@ -903,8 +903,8 @@ cargo fmt --all -- --check
 | `fs.ts` (167) | (patcher.rs 내 HashlineFs trait) | FS 추상 |
 | `prompt.md` (143) | `prompt.md` | 모델용 문법 명세 |
 
-**총 omp: ~4.4K LOC TS → oxi 예상 ~3.5K LOC Rust** (타입/제네릭 간결화, 불필요한 JS 패턴 제거).
+**총 omp: ~4.4K LOC TS → oxicode 예상 ~3.5K LOC Rust** (타입/제네릭 간결화, 불필요한 JS 패턴 제거).
 
 ---
 
-> **다음**: M1.1 (크레이트 스캐폴드) 착수. 본 설계 합의 후 `oxi-hashline/` 디렉토리 생성 + `Cargo.toml` 워크스페이스 등록부터.
+> **다음**: M1.1 (크레이트 스캐폴드) 착수. 본 설계 합의 후 `oxicode-hashline/` 디렉토리 생성 + `Cargo.toml` 워크스페이스 등록부터.

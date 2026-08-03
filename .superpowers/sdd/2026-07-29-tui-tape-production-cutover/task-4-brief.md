@@ -4,9 +4,9 @@ Plan: `docs/superpowers/plans/2026-07-29-tui-tape-production-cutover.md`
 Prerequisites: Tasks 1-3 complete and reviewed.
 
 ## Files
-- Create `oxi-cli/src/tui/tape_render.rs`
-- Modify `oxi-cli/src/tui/mod.rs`, `app.rs`, `handlers.rs`, `render.rs`
-- Modify `oxi-tui/src/widgets/chat/state.rs` only for stable revision/introspection APIs needed by the projection
+- Create `oxicode-cli/src/tui/tape_render.rs`
+- Modify `oxicode-cli/src/tui/mod.rs`, `app.rs`, `handlers.rs`, `render.rs`
+- Modify `oxicode-tui/src/widgets/chat/state.rs` only for stable revision/introspection APIs needed by the projection
 
 ## Invariants
 - `ChatViewState.messages` and `.streaming` remain the only conversation state. TapeRenderState is a renderer/projection, never a parallel message store.
@@ -24,8 +24,8 @@ Prerequisites: Tasks 1-3 complete and reviewed.
 ## TDD
 - Event-to-tape tests first using real handle_ui_event sequences; observe RED.
 - Assert no duplicate finalized blocks, live-only changes, correct tool/thinking transitions, cancel marker, resume and replacement behavior.
-- GREEN: `cargo nextest run -p oxi-cli tui::tape_render tui::handlers`.
-- Lint/format: `cargo clippy -p oxi-cli --all-targets -- -D warnings`; `cargo fmt --all -- --check`.
+- GREEN: `cargo nextest run -p oxicode-cli tui::tape_render tui::handlers`.
+- Lint/format: `cargo clippy -p oxicode-cli --all-targets -- -D warnings`; `cargo fmt --all -- --check`.
 
 ## Report
 Write `.superpowers/sdd/2026-07-29-tui-tape-production-cutover/task-4-report.md` with status, RED/GREEN, data-flow decisions, commits, self-review, concerns. Commit changes.

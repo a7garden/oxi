@@ -1,23 +1,23 @@
-# oxi-tui: grok 패턴 additive 도입 설계
+# oxicode-tui: grok 패턴 additive 도입 설계
 
 **날짜**: 2026-07-19
 **상태**: 설계 (사용자 승인 대기)
-**범위**: oxi-tui 단일 크레이트 내. 다중 크레이트 분리는 명시적으로 기각.
+**범위**: oxicode-tui 단일 크레이트 내. 다중 크레이트 분리는 명시적으로 기각.
 **버전 타겟**: v0.56 patch ~ v0.58
 
 ---
 
 ## 배경
 
-`docs/ref-porter/xai-org-grok-build-tui.md` 비교분석에서 식별된 5개 패턴을 oxi-tui에 additive 도입한다. **패턴 도입이 1차 목적, 구조 변경은 부수 효과**. grok의 다중 크레이트 구조(`xai-grok-pager` / `-render` / `xai-ratatui-textarea` / `xai-ratatui-inline` / `xai-grok-markdown` / `xai-grok-mermaid`)는 oxi-tui에 그대로 적용하지 않는다 — AGENTS.md의 4-condition 분리 테스트(독립 재사용 · 독립 버전 · 빌드 격리 · 팀 경계)를 4/5가 실패하기 때문.
+`docs/ref-porter/xai-org-grok-build-tui.md` 비교분석에서 식별된 5개 패턴을 oxicode-tui에 additive 도입한다. **패턴 도입이 1차 목적, 구조 변경은 부수 효과**. grok의 다중 크레이트 구조(`xai-grok-pager` / `-render` / `xai-ratatui-textarea` / `xai-ratatui-inline` / `xai-grok-markdown` / `xai-grok-mermaid`)는 oxicode-tui에 그대로 적용하지 않는다 — AGENTS.md의 4-condition 분리 테스트(독립 재사용 · 독립 버전 · 빌드 격리 · 팀 경계)를 4/5가 실패하기 때문.
 
-oxi-tui와 grok 모두 **동일한 기반**(ratatui 0.29 + crossterm 0.28 + 동일한 CSI 2026 synchronized output 프로토콜) 위에 구축됨을 확인했다. 이 설계는 그 기반을 유지하면서, grok이 보여준 **5가지 패턴**을 oxi-tui의 "순수 위젯 라이브러리" 정체성 안에 흡수한다.
+oxicode-tui와 grok 모두 **동일한 기반**(ratatui 0.29 + crossterm 0.28 + 동일한 CSI 2026 synchronized output 프로토콜) 위에 구축됨을 확인했다. 이 설계는 그 기반을 유지하면서, grok이 보여준 **5가지 패턴**을 oxicode-tui의 "순수 위젯 라이브러리" 정체성 안에 흡수한다.
 
 ---
 
 ## 설계 원칙
 
-1. **단일 크레이트 유지** — `oxi-tui`를 분리하지 않는다. 내부 모듈 구조만 정비.
+1. **단일 크레이트 유지** — `oxicode-tui`를 분리하지 않는다. 내부 모듈 구조만 정비.
 2. **기본 경험 unchanged** — 모든 신규 기능은 opt-in이거나 자동 폴백. 기존 사용자가 설정 변경 없이 동일한 UX를 봐야 한다.
 3. **테스트 우선** — 파괴적 변경(후보 2)에 앞서 회귀 테스트 인프라(후보 5)를 먼저 갖춘다.
 4. **기존 코드 존중** — `highlight.rs` 등 기존 모듈은 제거하지 않고 확장 지점으로 리팩터링.
@@ -27,7 +27,7 @@ oxi-tui와 grok 모두 **동일한 기반**(ratatui 0.29 + crossterm 0.28 + 동�
 ## 모듈 레이아웃 (변경 후)
 
 ```
-oxi-tui/src/
+oxicode-tui/src/
 ├── lib.rs                       [유지]
 ├── cell.rs                      [수정] +adapt_to(level) 메서드 (후보 3)
 ├── theme.rs                     [수정] +code_theme: Option<CodeTheme> 필드 (후보 4)
@@ -53,7 +53,7 @@ oxi-tui/src/
 ├── keybindings/                 [유지]
 └── fuzzy, table_renderer, ...   [유지]
 
-oxi-cli/tests/
+oxicode-cli/tests/
 └── pty_e2e/                     [신규] 후보 5
     ├── mod.rs
     ├── pty_harness.rs           PtySession::spawn + read_until + assert_output_contains
@@ -68,7 +68,7 @@ oxi-cli/tests/
 
 현재 `widgets/chat/markdown.rs`(17KB)는 chat 위젯 내부에 산다. 그러나 마크다운 렌더링은 chat 전용이 아니다:
 - `widgets/tool_renderer.rs`(1725 LOC)도 마크다운을 렌더
-- 장래 `oxi --print` 모드의 단순 렌더링 경로도 재사용 가능
+- 장래 `oxicode --print` 모드의 단순 렌더링 경로도 재사용 가능
 - 후보 2(streaming checkpoint)가 가세하면 ~1500 LOC 추가 — 단일 파일 불가
 
 최상위 `markdown/` 모듈로 승격하면, chat 위젯은 그냥 또 하나의 소비자가 된다. **이것은 내부 모듈 승격일 뿐 크레이트 분리가 아니다** — 외부 API에는 영향 없음.
@@ -79,14 +79,14 @@ oxi-cli/tests/
 - 90줄짜리 `lang_keywords()` 테이블로 ~20개 언어 키워드 매칭
 - `line_comment_prefix()`로 줄 주석 감지
 - PascalCase / `.` 접두로 타입/메서드 감지
-- `TokenType`을 oxi **`ThemeStyles` semantic 슬롯**에 매핑 (`token_style()`)
+- `TokenType`을 oxicode **`ThemeStyles` semantic 슬롯**에 매핑 (`token_style()`)
 
-이것은 syntect 기반 tmTheme와 **완전히 다른 메커니즘**이다. tmTheme가 색을 결정하면 oxi의 semantic 슬롯 일관성이 깨진다. 그래서:
+이것은 syntect 기반 tmTheme와 **완전히 다른 메커니즘**이다. tmTheme가 색을 결정하면 oxicode의 semantic 슬롯 일관성이 깨진다. 그래서:
 - **기본 백엔드는 `highlight.rs` 유지** — 추가 의존성 없이, 기존 사용자 경험 100% 보존
 - **`CodeTheme::TmTheme(PathBuf)` opt-in 시에만** `markdown/tmtheme.rs`가 syntect로 하이라이팅
 - `highlight_code()` 시그니처는 동일, 내부적으로 `CodeTheme`에 따라 분기
 
-이 패턴은 "progressive enhancement" — oxi-tui의 기본 정체성(순수 위젯, 의존성 최소)을 지키면서 원하는 사용자만 syntect를 끌어올 수 있다.
+이 패턴은 "progressive enhancement" — oxicode-tui의 기본 정체성(순수 위젯, 의존성 최소)을 지키면서 원하는 사용자만 syntect를 끌어올 수 있다.
 
 ---
 
@@ -94,7 +94,7 @@ oxi-cli/tests/
 
 ### 후보 3 — 컬러 레벨 적응 (v0.56 patch, 첫 번째)
 
-**근거**: oxi-tui는 현재 truecolor(Rgb)를 가정. `TERM=linux` 콘솔, 16색 터미널, `NO_COLOR=1` 환경에서 색이 깨짐.
+**근거**: oxicode-tui는 현재 truecolor(Rgb)를 가정. `TERM=linux` 콘솔, 16색 터미널, `NO_COLOR=1` 환경에서 색이 깨짐.
 
 **구현**:
 - `render/color_level.rs` 신규 ~250 LOC
@@ -149,17 +149,17 @@ oxi-cli/tests/
 
 ### 후보 4 — tmTheme 코드 하이라이트 (v0.57, 후보 1과 병렬)
 
-**근거**: 사용자가 tokyo-night, dracula, solarized 등 인기 테마를 적용하려면 현재 oxi 포맷으로 다시 정의해야 함. syntect + tmTheme는 사실상 표준이라 수백 개 기존 테마를 그대로 가져올 수 있음.
+**근거**: 사용자가 tokyo-night, dracula, solarized 등 인기 테마를 적용하려면 현재 oxicode 포맷으로 다시 정의해야 함. syntect + tmTheme는 사실상 표준이라 수백 개 기존 테마를 그대로 가져올 수 있음.
 
 **구현**:
 - `markdown/tmtheme.rs` 신규 ~400 LOC
-- `pub enum CodeTheme { Preset(OxiBuiltIn), TmTheme(PathBuf) }` — `Preset`이 기본 (기존 highlight.rs 사용)
+- `pub enum CodeTheme { Preset(OxicodeBuiltIn), TmTheme(PathBuf) }` — `Preset`이 기본 (기존 highlight.rs 사용)
 - `pub struct Syntect { ... }` — syntect ThemeSet 래퍼, `tmTheme` 파일 로드
 - `theme.rs::Theme`에 `pub code_theme: Option<CodeTheme>` 필드 추가 (기본 `None` = Preset)
 - `widgets/chat/highlight.rs::highlight_code()` 수정: `CodeTheme`에 따라 분기
   - `Preset` → 기존 hand-rolled 경로 (변경 없음)
   - `TmTheme(path)` → `markdown/tmtheme.rs`의 syntect 경로
-- **제약**: 코드 블록 전용. UI 색상 슬롯(`primary`, `border`, `code_fg`, `code_bg`)에는 절대 영향 X. `code_fg`/`code_bg`는 oxi `Theme` 소유 유지.
+- **제약**: 코드 블록 전용. UI 색상 슬롯(`primary`, `border`, `code_fg`, `code_bg`)에는 절대 영향 X. `code_fg`/`code_bg`는 oxicode `Theme` 소유 유지.
 
 **외부 의존**: `syntect = "5.3"` (workspace dep, **feature gate**)
 
@@ -183,12 +183,12 @@ syntax = ["dep:syntect"]
 
 ### 후보 5 — PTY e2e 테스트 하네스 (v0.56 말~v0.57.0 초, W1 선행 조건)
 
-**근거**: oxi-tui 테스트는 ratatui의 `TestBackend`로 버퍼 셀 값을 검증. 실제 터미널에 출력되는 ANSI bytes는 검증 안 됨 — crossterm 버전업, OSC8 도입, W1(가상 좌표계 + sticky 헤더) 도입 등 **시각적 변경**을 잡을 회귀 인프라가 필요. **R3 정정**: 원래 "v0.58 독립 인프라"로 분류했으나, UX 스펙의 W1 workstream이 렌더 OUTPUT을 바꾸므로(sticky 헤더 추가, viewport 이동) TestBackend snapshot만으로는 flicker/scroll jank를 못 잡음. W1 안전망으로 PTY가 필수. 단, 후보 2(streaming checkpoint)는 렌더 OUTPUT이 아니라 빈도만 바꾸므로 PTY 없이도 self-contained.
+**근거**: oxicode-tui 테스트는 ratatui의 `TestBackend`로 버퍼 셀 값을 검증. 실제 터미널에 출력되는 ANSI bytes는 검증 안 됨 — crossterm 버전업, OSC8 도입, W1(가상 좌표계 + sticky 헤더) 도입 등 **시각적 변경**을 잡을 회귀 인프라가 필요. **R3 정정**: 원래 "v0.58 독립 인프라"로 분류했으나, UX 스펙의 W1 workstream이 렌더 OUTPUT을 바꾸므로(sticky 헤더 추가, viewport 이동) TestBackend snapshot만으로는 flicker/scroll jank를 못 잡음. W1 안전망으로 PTY가 필수. 단, 후보 2(streaming checkpoint)는 렌더 OUTPUT이 아니라 빈도만 바꾸므로 PTY 없이도 self-contained.
 
 **구현**:
-- `oxi-cli/tests/pty_e2e/` 신규 디렉토리
-- `oxi-cli/tests/pty_harness.rs` ~300 LOC
-  - `PtySession::spawn(args)` → real PTY + `oxi` 바이너리 실행
+- `oxicode-cli/tests/pty_e2e/` 신규 디렉토리
+- `oxicode-cli/tests/pty_harness.rs` ~300 LOC
+  - `PtySession::spawn(args)` → real PTY + `oxicode` 바이너리 실행
   - `read_until(pattern, timeout)` → 출력에서 패턴 매칭
   - `assert_output_contains(substr)` / `assert_osc8_link_present(url)`
   - `resize(cols, rows)` → SIGWINCH 시뮬레이션
@@ -198,9 +198,9 @@ syntax = ["dep:syntect"]
   - `color_level.rs` — 후보 3 회귀 (`NO_COLOR=1`, `TERM=linux` 강제)
   - `resize.rs` — SIGWINCH 후 잔상 없음
 
-**대상**: oxi-tui 단독 spawn이 어려우므로 oxi-cli 바이너리로 테스트. oxi-tui 자체 테스트는 여전히 `TestBackend` 유지.
+**대상**: oxicode-tui 단독 spawn이 어려우므로 oxicode-cli 바이너리로 테스트. oxicode-tui 자체 테스트는 여전히 `TestBackend` 유지.
 
-**외부 의존**: `portable-pty = "0.9"` (oxi-cli [dev-dependencies])
+**외부 의존**: `portable-pty = "0.9"` (oxicode-cli [dev-dependencies])
 
 **CI 환경**: `ubuntu-latest`에서 PTY 할당 가능 (`tty.IsEnabled()` 체크). `#[cfg(unix)]` 게이트로 Windows 일시 제외. macOS runner matrix 확장은 별도 이슈.
 
@@ -237,7 +237,7 @@ syntax = ["dep:syntect"]
 **외부 의존**: 후보 4가 이미 syntect를 끌어옴.
 
 **안전 메커니즘 (자체 완결적, 후보 5에 의존하지 않음)**:
-- **Feature flag 토글**: `RUSTFLAGS="--cfg oxi_legacy_render"`로 마이그레이션 중 언제든 기존 full-frame 렌더러로 롤백 가능. review용이며 최종 PR에서 제거.
+- **Feature flag 토글**: `RUSTFLAGS="--cfg oxicode_legacy_render"`로 마이그레이션 중 언제든 기존 full-frame 렌더러로 롤백 가능. review용이며 최종 PR에서 제거.
 - **CPU baseline 프로파일**: 후보 2 도입 **전**에 100K 토큰 더미 응답으로 baseline 측정해서 저장. 도입 후 동일 워크로드로 비교, 50%+ 절감을 객관적으로 검증.
 - **Snapshot 테스트 (TestBackend)**: 동일 입력에 대해 신/구 렌더러가 byte-identical 출력을 내는지 단위 테스트로 검증. 출력이 다르면 correctness 버그로 간주.
 - **Interleaving unit tests**: tool_call 결과와 assistant text가 섞인 픽스처를 직접构造해 atomicity 단위 테스트. checkpoint가 tool_call 블록 내부에서 발화하지 않는지 검증.
@@ -288,11 +288,11 @@ v0.55.0 (현재)
 
 ## 명시적 비목표 (이번 설계에서 배제)
 
-1. **`oxi-tui` 다중 크레이트 분리** — AGENTS.md 4-condition test 4/5 실패. grok의 5-crate는 제품 경계가 동력이라 oxi에 그대로 적용 안 됨.
-2. **`xai-ratatui-inline` 포크 도입** — RIS 넉백 전략이 보여주듯 터미널 의존도 극심. oxi-tui 정체성(예측 가능한 위젯)과 충돌. oxios 별도 제품에서 실험 권장.
+1. **`oxicode-tui` 다중 크레이트 분리** — AGENTS.md 4-condition test 4/5 실패. grok의 5-crate는 제품 경계가 동력이라 oxicode에 그대로 적용 안 됨.
+2. **`xai-ratatui-inline` 포크 도입** — RIS 넉백 전략이 보여주듯 터미널 의존도 극심. oxicode-tui 정체성(예측 가능한 위젯)과 충돌. oxios 별도 제품에서 실험 권장.
 3. **풀 에디터 위젯 (grok `xai-ratatui-textarea` 408KB급)** — 현재 입력 위젯(466 LOC)과 단절 큼. 마이그레이션 비용이 본 설계 전체 분량. 사용자 요구 명확해질 때까지 보류.
 4. **`prompt_images.rs` 미디어 파이프라인** — Kitty/iTerm2 graphics protocol은 매력적이나 사용자 수요 미확인.
-5. **LSP 진단 / ACP / 음성** — 모두 제품 관심사. oxi-tui는 위젯 라이브러리지 IDE/호스트가 아님.
+5. **LSP 진단 / ACP / 음성** — 모두 제품 관심사. oxicode-tui는 위젯 라이브러리지 IDE/호스트가 아님.
 6. **`widgets/chat/highlight.rs` 제거** — hand-rolled 토크나이저는 기본 백엔드로 유지. tmTheme는 opt-in 대안일 뿐.
 
 ---
@@ -323,7 +323,7 @@ v0.55.0 (현재)
 
 워크스페이스 차원:
 - `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace` 모두 통과
-- `cargo build -p oxi-sdk --features native-browser -- -D warnings` 통과 (oxi-tui 변경이 SDK에 영향 X)
+- `cargo build -p oxicode-sdk --features native-browser -- -D warnings` 통과 (oxicode-tui 변경이 SDK에 영향 X)
 - AGENTS.md의 해당 pitfall 업데이트 (새 제약/패턴 명시)
 
 ---
@@ -345,5 +345,5 @@ v0.55.0 (현재)
 
 - `docs/ref-porter/xai-org-grok-build-tui.md` — 본 설계의 근거가 된 비교분석 보고서
 - `docs/ref-porter/xai-org-grok-build.md` — 1차 보고서 (memory/compaction/permission 중심)
-- `AGENTS.md` — oxi-tui 정체성, 4-condition test, 스타일 가이드
+- `AGENTS.md` — oxicode-tui 정체성, 4-condition test, 스타일 가이드
 - grok source: `xai-grok-pager-render/src/render/osc8.rs`, `xai-grok-markdown/src/{lib.rs,colors.rs,checkpoint.rs}`, `xai-ratatui-inline/README.md`

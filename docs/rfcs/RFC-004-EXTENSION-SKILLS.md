@@ -11,9 +11,9 @@
 
 ### 1.1 현재 구현 현황 (정확한 팩트 체크)
 
-oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래는 코드베이스 기반 정확한 현황입니다.
+oxicode의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래는 코드베이스 기반 정확한 현황입니다.
 
-#### Extension 트레이트 (`oxi-cli/src/extensions/mod.rs`)
+#### Extension 트레이트 (`oxicode-cli/src/extensions/mod.rs`)
 
 현재 Extension 트레이트는 **34개 메서드**를 포함합니다:
 
@@ -34,7 +34,7 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 | 에러 | `on_error()` | ✅ 구현 완료 |
 | 실행 | `bash()`, `input()` | ✅ 구현 완료 |
 
-#### 이벤트 타입 (`oxi-cli/src/extensions/types.rs`)
+#### 이벤트 타입 (`oxicode-cli/src/extensions/types.rs`)
 
 **14개 이벤트 구조체**가 이미 정의되어 있습니다:
 
@@ -55,7 +55,7 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 | `BashEvent` | Bash 명령 실행 |
 | `InputEvent` | 사용자 입력 (변환/핸들 가능) |
 
-#### ExtensionRegistry (`oxi-cli/src/extensions/registry.rs`)
+#### ExtensionRegistry (`oxicode-cli/src/extensions/registry.rs`)
 
 이미 **panic-safe 이벤트 디스패치**가 구현되어 있습니다:
 - `ExtensionRegistry`: 등록/해제/활성화/비활성화 관리
@@ -64,7 +64,7 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 - 이벤트 Emit 결과 타입: `ToolCallEmitResult`, `ToolResultEmitResult`, `ContextEmitResult`, `ProviderRequestEmitResult`, `SessionBeforeEmitResult`
 - 에러 리스너 시스템 (`ExtensionErrorListener`)
 
-#### ExtensionContext (`oxi-cli/src/extensions/context.rs`)
+#### ExtensionContext (`oxicode-cli/src/extensions/context.rs`)
 
 이미 확장에 다양한 제어 표면을 제공합니다:
 - `register_tool()` — 툴 등록
@@ -79,30 +79,30 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 - `read_file()` — 파일 읽기
 - `config_get()` — 설정 조회
 
-#### WASM 샌드박스 (`oxi-cli/src/extensions/wasm.rs`, `wasm_hooks.rs`, `wasm_tool.rs`)
+#### WASM 샌드박스 (`oxicode-cli/src/extensions/wasm.rs`, `wasm_hooks.rs`, `wasm_tool.rs`)
 
 이미 **완전한 WASM 샌드박스**가 구현되어 있습니다:
 - Extism 기반 `.wasm` 확장 로딩
 - `init()`, `register_tools()`, `register_commands()`, `execute_tool()` 프로토콜
-- 호스트 함수: `oxi_http_request` (네트워크 접근)
+- 호스트 함수: `oxicode_http_request` (네트워크 접근)
 - `WasmExtensionManager`로 전체 라이프사이클 관리
 - JSON-in/JSON-out 프로토콜
 
-#### Skills (`oxi-cli/src/skills/mod.rs`)
+#### Skills (`oxicode-cli/src/skills/mod.rs`)
 
 `SkillManager`가 이미 구현되어 있습니다:
 - `load_from_dir()` — 디렉토리 스캔 (`<name>/SKILL.md` 구조)
 - `get()` — 이름으로 조회 (대소문자 무시)
 - `all()` — 전체 목록 (정렬)
 - `search()` — 이름/설명/내용 검색
-- `skills_dir()` — 기본 경로 (`~/.oxi/skills/`)
+- `skills_dir()` — 기본 경로 (`~/.oxicode/skills/`)
 
-#### 패키지 매니저 (`oxi-cli/src/storage/packages.rs`)
+#### 패키지 매니저 (`oxicode-cli/src/storage/packages.rs`)
 
 **매우 정교한** 패키지 시스템이 이미 구현되어 있습니다:
 - **5가지 소스 타입**: npm, git, GitHub shorthand, URL archive, local
-- **Lockfile** (`oxi-lock.json`): 정확한 버전/ref 기록
-- **매니페스트** (`oxi-package.toml`): 확장, 스킬, 프롬프트, 테마 리소스 선언
+- **Lockfile** (`oxicode-lock.json`): 정확한 버전/ref 기록
+- **매니페스트** (`oxicode-package.toml`): 확장, 스킬, 프롬프트, 테마 리소스 선언
 - **자동 리소스 발견**: 매니페스트 없이도 `.so`/`.dylib`/`.dll`, `SKILL.md`, `.md`, `.json` 스캔
 - **의존성 해결**: `resolve_dependencies()`
 - **업데이트 확인**: `check_for_updates()` — npm + git 모두 지원
@@ -112,12 +112,12 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 - **의존성 그래프**: `resolve_dependencies()`
 - **해시 검증**: SHA256 체크섬
 
-### 1.2 Extension 시스템 비교 (pi vs oxi — 수정됨)
+### 1.2 Extension 시스템 비교 (pi vs oxicode — 수정됨)
 
-| 기능 | pi | oxi | 격차 |
+| 기능 | pi | oxicode | 격차 |
 |------|----|-----|------|
-| 로딩 방식 | jiti (TS 직접 로드) | 네이티브 .dylib/.so/.dll + WASM (Extism) | 다름 (oxi가 더 다양) |
-| 샌드박스 | ❌ (Node.js 전체 권한) | ✅ WASM (Extism) | **oxi 우위** |
+| 로딩 방식 | jiti (TS 직접 로드) | 네이티브 .dylib/.so/.dll + WASM (Extism) | 다름 (oxicode가 더 다양) |
+| 샌드박스 | ❌ (Node.js 전체 권한) | ✅ WASM (Extism) | **oxicode 우위** |
 | 이벤트 훅 | 30+ | 34개 트레이트 메서드 + 14개 이벤트 타입 | ⚠️ 약간 부족 (pi의 세분화된 메시지/에이전트 훅 누락) |
 | 커스텀 Provider | ✅ registerProvider() | ✅ register_provider() | 동등 |
 | UI 컨텍스트 | select, confirm, input, editor, notify, widget, status | ⚠️ RPC 브릿지는 있으나 TUI 직접 접근 부족 | ⚠️ 부족 |
@@ -125,34 +125,34 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 | stale 감지 | ✅ 세션 전환 시 자동 무효화 | ❌ ExtensionContext에 수명 관리 없음 | ❌ 누락 |
 | 단축키 등록 | ✅ extension shortcuts | ❌ | ❌ 누락 |
 | 명령어 등록 | ✅ slash commands | ✅ `register_commands()` + `Command` 타입 | 동등 |
-| panic-safe 디스패치 | ❌ (Node.js 예외 전파) | ✅ `catch_unwind` 기반 | **oxi 우위** |
-| 에러 리스너 | ❌ | ✅ `ExtensionErrorListener` + `ExtensionErrorRecord` | **oxi 우위** |
+| panic-safe 디스패치 | ❌ (Node.js 예외 전파) | ✅ `catch_unwind` 기반 | **oxicode 우위** |
+| 에러 리스너 | ❌ | ✅ `ExtensionErrorListener` + `ExtensionErrorRecord` | **oxicode 우위** |
 | 컨텍스트 수정 | ✅ | ✅ `context()` + `ContextEmitResult` | 동등 |
 | 프로바이더 훅 | ✅ | ✅ `before_provider_request()` + `after_provider_response()` | 동등 |
 
 ### 1.3 Skills 비교 (수정됨)
 
-| 기능 | pi | oxi | 격차 |
+| 기능 | pi | oxicode | 격차 |
 |------|----|-----|------|
 | SKILL.md 포맷 | YAML frontmatter + body | 단순 마크다운 (frontmatter 건너뛰기만 구현) | ⚠️ frontmatter 파싱 필요 |
 | disable-model-invocation | ✅ | ❌ | ⚠️ |
 | 조상 디렉토리 검색 | ✅ (.agents/skills/) | ❌ (단일 디렉토리만) | ⚠️ |
 | 충돌 감지 | ✅ canonicalize + 중복 보고 | ❌ | ⚠️ |
 | 이름 검증 | a-z, 0-9, -, max 64 | 기본 (디렉토리명 그대로 사용) | ⚠️ |
-| 검색 기능 | 기본 | ✅ 이름/설명/내용 검색 | **oxi 우위** |
+| 검색 기능 | 기본 | ✅ 이름/설명/내용 검색 | **oxicode 우위** |
 | 발견 규칙 | 글로벌 + 프로젝트 + 조상 | 글로벌 또는 프로젝트 (단일 dir) | ⚠️ |
 
 ### 1.4 패키지 매니저 비교 (수정됨)
 
-| 기능 | pi | oxi | 격차 |
+| 기능 | pi | oxicode | 격차 |
 |------|----|-----|------|
-| 소스 타입 | npm, git, local | npm, git, GitHub, URL archive, local | **oxi 우위** (5 vs 3) |
-| 매니페스트 | package.json (pi.extensions) | oxi-package.toml | 다름 (동등) |
+| 소스 타입 | npm, git, local | npm, git, GitHub, URL archive, local | **oxicode 우위** (5 vs 3) |
+| 매니페스트 | package.json (pi.extensions) | oxicode-package.toml | 다름 (동등) |
 | 업데이트 확인 | 4병렬 npm + 4병렬 git | npm + git 직렬 | ⚠️ 병렬화 필요 |
 | 리소스 필터링 | !제외, +강제포함 | ❌ | ⚠️ |
 | 우선순위 랭킹 | 7단계 (project > user > package) | 2단계 (user, project) | ⚠️ |
-| Lockfile | ❌ | ✅ oxi-lock.json (SHA256 검증) | **oxi 우위** |
-| 자동 리소스 발견 | 기본 | ✅ `.so`/`.dylib`/`.dll`, `SKILL.md`, `.md`, `.json` | **oxi 우위** |
+| Lockfile | ❌ | ✅ oxicode-lock.json (SHA256 검증) | **oxicode 우위** |
+| 자동 리소스 발견 | 기본 | ✅ `.so`/`.dylib`/`.dll`, `SKILL.md`, `.md`, `.json` | **oxicode 우위** |
 | 의존성 해결 | 기본 | ✅ `resolve_dependencies()` | 동등 |
 
 ### 1.5 실제 갭 요약
@@ -174,9 +174,9 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 ## 2. 설계 원칙
 
 1. **기존 구현 위에 증강**: ExtensionRegistry, ExtensionRunner, ExtensionContext는 이미 잘 설계되어 있음. 새로운 "이벤트 버스"를 만들지 않고 기존 시스템을 확장.
-2. **Rust의 타입 시스템 활용**: pi는 TypeScript duck typing + TypeBox로 런타임 검증하지만, oxi는 컴파일 타임에 안전한 트레이트 기반 설계.
+2. **Rust의 타입 시스템 활용**: pi는 TypeScript duck typing + TypeBox로 런타임 검증하지만, oxicode는 컴파일 타임에 안전한 트레이트 기반 설계.
 3. **WASM 샌드박스 강화**: pi보다 안전한 확장 실행 환경 유지.
-4. **점진적 개선**: panic-safe 디스패치, 에러 리스너 등 oxi 우위 기능은 유지하면서, 누락 기능만 채움.
+4. **점진적 개선**: panic-safe 디스패치, 에러 리스너 등 oxicode 우위 기능은 유지하면서, 누락 기능만 채움.
 
 ---
 
@@ -187,7 +187,7 @@ oxi의 Extension & Skills 시스템은 이미 상당히 성숙합니다. 아래�
 현재 Extension 트레이트(34개 메서드)에 **1개 메서드**만 추가:
 
 ```rust
-/// oxi-cli/src/extensions/mod.rs 확장 (기존 34개 메서드에 추가)
+/// oxicode-cli/src/extensions/mod.rs 확장 (기존 34개 메서드에 추가)
 
 pub trait Extension: Send + Sync {
     // ── 기존 34개 메서드 (변경 없음) ──
@@ -228,7 +228,7 @@ pub struct ExtensionShortcut {
 기존 `ExtensionContext`(`context.rs`)에 UI 접근 인터페이스를 추가합니다. 기존의 `set_model()`, `fork_session()`, `register_tool()` 등은 그대로 유지.
 
 ```rust
-/// oxi-cli/src/extensions/context.rs 확장
+/// oxicode-cli/src/extensions/context.rs 확장
 
 /// 확장의 UI 접근 인터페이스 (pi의 ExtensionUIContext 이식)
 pub struct ExtensionUI {
@@ -276,7 +276,7 @@ pub struct ExtensionContext {
 ### 3.3 Stale 감지 시스템
 
 ```rust
-/// oxi-cli/src/extensions/stale.rs — 신규
+/// oxicode-cli/src/extensions/stale.rs — 신규
 
 /// 확장 컨텍스트 수명 관리
 pub struct ExtensionContextGuard {
@@ -308,10 +308,10 @@ pub fn invalidate_all_contexts(invalidator: &Arc<AtomicU64>) {
 
 ### 3.4 Skills 시스템 강화
 
-기존 `SkillManager`(`oxi-cli/src/skills/mod.rs`)를 확장합니다. `load_from_dir()`, `get()`, `all()`, `search()`는 그대로 유지.
+기존 `SkillManager`(`oxicode-cli/src/skills/mod.rs`)를 확장합니다. `load_from_dir()`, `get()`, `all()`, `search()`는 그대로 유지.
 
 ```rust
-/// oxi-cli/src/skills/mod.rs 확장
+/// oxicode-cli/src/skills/mod.rs 확장
 
 use serde::{Deserialize, Serialize};
 
@@ -341,16 +341,16 @@ impl SkillManager {
         let mut skills = HashMap::new();
         let mut seen_paths: HashSet<PathBuf> = HashSet::new();
         
-        // 1. 글로벌: ~/.oxi/skills/
+        // 1. 글로벌: ~/.oxicode/skills/
         Self::discover_from_dir(
             Self::skills_dir()?,
             &mut skills,
             &mut seen_paths,
         )?;
         
-        // 2. 프로젝트: .oxi/skills/
+        // 2. 프로젝트: .oxicode/skills/
         Self::discover_from_dir(
-            cwd.join(".oxi/skills"),
+            cwd.join(".oxicode/skills"),
             &mut skills,
             &mut seen_paths,
         )?;
@@ -502,10 +502,10 @@ impl SkillManager {
 
 ### 3.5 패키지 매니저 강화
 
-기존 `PackageManager`(`oxi-cli/src/storage/packages.rs`)는 이미 npm + git 업데이트 확인, lockfile, 자동 발견 등을 지원합니다. 아래 기능만 추가:
+기존 `PackageManager`(`oxicode-cli/src/storage/packages.rs`)는 이미 npm + git 업데이트 확인, lockfile, 자동 발견 등을 지원합니다. 아래 기능만 추가:
 
 ```rust
-/// oxi-cli/src/storage/packages.rs 확장
+/// oxicode-cli/src/storage/packages.rs 확장
 
 impl PackageManager {
     /// 업데이트 확인 병렬화 (기존 check_for_updates 직렬 → 병렬)

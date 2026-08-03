@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace oxi-cli's alternate-screen, full-frame chat renderer with the existing OMP-aligned main-screen `TapeEngine`, while preserving transient ratatui overlays, current input behavior, rich content, themes, glyph presets, and session semantics.
+**Goal:** Replace oxicode-cli's alternate-screen, full-frame chat renderer with the existing OMP-aligned main-screen `TapeEngine`, while preserving transient ratatui overlays, current input behavior, rich content, themes, glyph presets, and session semantics.
 
-**Architecture:** `ChatViewState` remains the canonical append-only conversation model. A memoized tape transcript renderer converts each `ChatMessage` and the active `StreamingState` into width-aware ANSI rows, then appends mutable sticky rows for todo/input/footer. `TapeEngine` owns normal main-screen output; transient overlays alone enter the alternate screen and render through ratatui, then return to the untouched main screen. There is no dual production path and no `OXI_TAPE_RENDER` flag.
+**Architecture:** `ChatViewState` remains the canonical append-only conversation model. A memoized tape transcript renderer converts each `ChatMessage` and the active `StreamingState` into width-aware ANSI rows, then appends mutable sticky rows for todo/input/footer. `TapeEngine` owns normal main-screen output; transient overlays alone enter the alternate screen and render through ratatui, then return to the untouched main screen. There is no dual production path and no `OXICODE_TAPE_RENDER` flag.
 
-**Tech Stack:** Rust 2024, crossterm 0.29, ratatui 0.30 for transient overlays and off-screen line reuse, oxi-tui `TapeEngine`, cargo-nextest.
+**Tech Stack:** Rust 2024, crossterm 0.29, ratatui 0.30 for transient overlays and off-screen line reuse, oxicode-tui `TapeEngine`, cargo-nextest.
 
 ## Global Constraints
 
@@ -20,19 +20,19 @@
 - Rich-content behavior already supported by the current chat renderer must survive: markdown, code, tables, LaTeX, Mermaid, tool call/results, thinking, errors, dashboard, and image protocol output.
 - Input behavior must survive: Kitty enhancement flags, bracketed paste, SGR 1006 mouse, keybinding conflict resolution, undo, kill/yank/yank-pop, slash/file completion, queue, todo, notifications, and footer status.
 - Significant behavioral work follows red-green-refactor: add a focused failing test, observe the expected failure, implement minimally, and rerun the focused test.
-- Final gates: `cargo build --workspace`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`; `cargo fmt --all -- --check`; `cargo nextest run --workspace`.
+- Final gates: `cargo build --workspace`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`; `cargo fmt --all -- --check`; `cargo nextest run --workspace`.
 
 ---
 
 ### Task 1: Real Component Memoization and Engine Invariants
 
 **Files:**
-- Modify: `oxi-tui/src/tape/component.rs`
-- Modify: `oxi-tui/src/tape/container.rs`
-- Modify: `oxi-tui/src/tape/engine.rs`
-- Modify: `oxi-tui/src/tape/components/text.rs`
-- Modify: `oxi-tui/src/tape/components/streaming.rs`
-- Modify: `oxi-tui/src/tape/components/tool_call.rs`
+- Modify: `oxicode-tui/src/tape/component.rs`
+- Modify: `oxicode-tui/src/tape/container.rs`
+- Modify: `oxicode-tui/src/tape/engine.rs`
+- Modify: `oxicode-tui/src/tape/components/text.rs`
+- Modify: `oxicode-tui/src/tape/components/streaming.rs`
+- Modify: `oxicode-tui/src/tape/components/tool_call.rs`
 
 **Interfaces:**
 - Produces: `Component::revision(&self) -> u64`.
@@ -45,7 +45,7 @@ Add a counting component test proving: first compose renders once; a second comp
 
 - [ ] **Step 2: Run cache tests and verify RED**
 
-Run: `cargo nextest run -p oxi-tui tape::container`
+Run: `cargo nextest run -p oxicode-tui tape::container`
 
 Expected: FAIL because `Container::compose` currently calls every child's `render` every time.
 
@@ -67,7 +67,7 @@ Make replay boundaries explicit and teach the engine to distinguish finalized pr
 
 - [ ] **Step 7: Verify Task 1**
 
-Run: `cargo nextest run -p oxi-tui tape`
+Run: `cargo nextest run -p oxicode-tui tape`
 
 Expected: PASS with cache and engine invariants covered.
 
@@ -76,15 +76,15 @@ Expected: PASS with cache and engine invariants covered.
 ### Task 2: ANSI Style Serialization and Width-Aware Rich Components
 
 **Files:**
-- Create: `oxi-tui/src/tape/style.rs`
-- Create: `oxi-tui/src/tape/markdown.rs`
-- Create: `oxi-tui/src/tape/transcript.rs`
-- Modify: `oxi-tui/src/tape/mod.rs`
-- Modify: `oxi-tui/src/widgets/chat/markdown.rs`
-- Modify: `oxi-tui/src/widgets/chat/highlight.rs`
-- Modify: `oxi-tui/src/widgets/tool_renderer.rs`
-- Modify: `oxi-tui/src/render/mermaid.rs`
-- Modify: `oxi-tui/src/tape/components/tool_call.rs`
+- Create: `oxicode-tui/src/tape/style.rs`
+- Create: `oxicode-tui/src/tape/markdown.rs`
+- Create: `oxicode-tui/src/tape/transcript.rs`
+- Modify: `oxicode-tui/src/tape/mod.rs`
+- Modify: `oxicode-tui/src/widgets/chat/markdown.rs`
+- Modify: `oxicode-tui/src/widgets/chat/highlight.rs`
+- Modify: `oxicode-tui/src/widgets/tool_renderer.rs`
+- Modify: `oxicode-tui/src/render/mermaid.rs`
+- Modify: `oxicode-tui/src/tape/components/tool_call.rs`
 
 **Interfaces:**
 - Consumes: existing `ChatMessage`, `ContentBlock`, `ThemeStyles`, `TerminalCapabilities`, markdown/LaTeX/Mermaid/tool formatting functions.
@@ -98,7 +98,7 @@ Assert foreground/background/modifier transitions, reset behavior, Unicode width
 
 - [ ] **Step 2: Verify ANSI tests RED**
 
-Run: `cargo nextest run -p oxi-tui tape::style`
+Run: `cargo nextest run -p oxicode-tui tape::style`
 
 Expected: FAIL because the serializer does not exist.
 
@@ -108,7 +108,7 @@ Reuse `render::ansi::AnsiTracker` and capability color adaptation. Serialize rat
 
 - [ ] **Step 4: Expose pure width-aware formatting helpers**
 
-Promote existing crate-private markdown/highlight helpers only as far as needed inside `oxi-tui`. Do not duplicate markdown parsing, table layout, code highlighting, Mermaid parsing, or tool formatter logic.
+Promote existing crate-private markdown/highlight helpers only as far as needed inside `oxicode-tui`. Do not duplicate markdown parsing, table layout, code highlighting, Mermaid parsing, or tool formatter logic.
 
 - [ ] **Step 5: Write failing transcript component matrix tests**
 
@@ -124,7 +124,7 @@ Replace `▸`, `⠋`, SGR 36, and SGR 90 in `ToolCallBlock` with `ThemeStyles`/`
 
 - [ ] **Step 8: Verify Task 2**
 
-Run: `cargo nextest run -p oxi-tui tape widgets::chat::markdown widgets::tool_renderer render::mermaid`
+Run: `cargo nextest run -p oxicode-tui tape widgets::chat::markdown widgets::tool_renderer render::mermaid`
 
 Expected: PASS.
 
@@ -133,11 +133,11 @@ Expected: PASS.
 ### Task 3: Main-Screen Terminal Host and Overlay Session
 
 **Files:**
-- Create: `oxi-cli/src/tui/terminal_host.rs`
-- Modify: `oxi-cli/src/tui/mod.rs`
-- Modify: `oxi-cli/src/tui/app.rs`
-- Modify: `oxi-cli/src/tui/render.rs`
-- Test: `oxi-cli/tests/pty_e2e.rs`
+- Create: `oxicode-cli/src/tui/terminal_host.rs`
+- Modify: `oxicode-cli/src/tui/mod.rs`
+- Modify: `oxicode-cli/src/tui/app.rs`
+- Modify: `oxicode-cli/src/tui/render.rs`
+- Test: `oxicode-cli/tests/pty_e2e.rs`
 
 **Interfaces:**
 - Produces: `TerminalHost` owning `TapeEngine<io::Stdout>` and terminal mode state.
@@ -151,7 +151,7 @@ Using an injectable writer/backend, assert ordinary enter/paint/exit never emits
 
 - [ ] **Step 2: Verify lifecycle tests RED**
 
-Run: `cargo nextest run -p oxi-cli terminal_host`
+Run: `cargo nextest run -p oxicode-cli terminal_host`
 
 Expected: FAIL because `TerminalHost` does not exist and current `Tui::enter` always enters alternate screen.
 
@@ -169,7 +169,7 @@ Delete `Tui`, the full-frame `terminal.draw()` path, and transcript `CursorState
 
 - [ ] **Step 6: Verify Task 3**
 
-Run: `cargo nextest run -p oxi-cli terminal_host`
+Run: `cargo nextest run -p oxicode-cli terminal_host`
 
 Expected: PASS.
 
@@ -178,12 +178,12 @@ Expected: PASS.
 ### Task 4: Production Tape Frame and Event Wiring
 
 **Files:**
-- Create: `oxi-cli/src/tui/tape_render.rs`
-- Modify: `oxi-cli/src/tui/mod.rs`
-- Modify: `oxi-cli/src/tui/app.rs`
-- Modify: `oxi-cli/src/tui/handlers.rs`
-- Modify: `oxi-cli/src/tui/render.rs`
-- Modify: `oxi-tui/src/widgets/chat/state.rs`
+- Create: `oxicode-cli/src/tui/tape_render.rs`
+- Modify: `oxicode-cli/src/tui/mod.rs`
+- Modify: `oxicode-cli/src/tui/app.rs`
+- Modify: `oxicode-cli/src/tui/handlers.rs`
+- Modify: `oxicode-cli/src/tui/render.rs`
+- Modify: `oxicode-tui/src/widgets/chat/state.rs`
 
 **Interfaces:**
 - Consumes: canonical `AppState.chat`, todo/input/footer/queue/notification state, `Theme`, terminal size.
@@ -196,7 +196,7 @@ Drive real `UiEvent` sequences through `handle_ui_event`: user message; MessageS
 
 - [ ] **Step 2: Verify event tests RED**
 
-Run: `cargo nextest run -p oxi-cli tui::tape_render`
+Run: `cargo nextest run -p oxicode-cli tui::tape_render`
 
 Expected: FAIL because no production tape render state exists.
 
@@ -218,7 +218,7 @@ Map wheel/page navigation to viewport-tail behavior without mutating committed h
 
 - [ ] **Step 7: Verify Task 4**
 
-Run: `cargo nextest run -p oxi-cli tui::tape_render tui::handlers`
+Run: `cargo nextest run -p oxicode-cli tui::tape_render tui::handlers`
 
 Expected: PASS.
 
@@ -227,12 +227,12 @@ Expected: PASS.
 ### Task 5: Overlay, Completion, Input, and Rich-Media Integration
 
 **Files:**
-- Modify: `oxi-cli/src/tui/terminal_host.rs`
-- Modify: `oxi-cli/src/tui/tape_render.rs`
-- Modify: `oxi-cli/src/tui/app.rs`
-- Modify: `oxi-cli/src/tui/render.rs`
-- Modify: `oxi-tui/src/tape/transcript.rs`
-- Modify: `oxi-tui/src/tape/engine.rs`
+- Modify: `oxicode-cli/src/tui/terminal_host.rs`
+- Modify: `oxicode-cli/src/tui/tape_render.rs`
+- Modify: `oxicode-cli/src/tui/app.rs`
+- Modify: `oxicode-cli/src/tui/render.rs`
+- Modify: `oxicode-tui/src/tape/transcript.rs`
+- Modify: `oxicode-tui/src/tape/engine.rs`
 
 **Interfaces:**
 - Consumes: all existing overlay components and `render_overlay`.
@@ -256,7 +256,7 @@ Represent protocol image rows separately from ordinary terminated text rows, or 
 
 - [ ] **Step 5: Verify Task 5**
 
-Run: `cargo nextest run -p oxi-cli tui oxi_tui`
+Run: `cargo nextest run -p oxicode-cli tui oxicode_tui`
 
 Expected: PASS.
 
@@ -265,11 +265,11 @@ Expected: PASS.
 ### Task 6: PTY Cutover Acceptance and Old-Path Removal
 
 **Files:**
-- Modify: `oxi-cli/tests/pty_e2e.rs`
-- Modify: `oxi-cli/src/tui/app.rs`
-- Modify: `oxi-cli/src/tui/render.rs`
-- Modify: `oxi-tui/src/lib.rs`
-- Modify: `oxi-tui/src/tape/engine.rs`
+- Modify: `oxicode-cli/tests/pty_e2e.rs`
+- Modify: `oxicode-cli/src/tui/app.rs`
+- Modify: `oxicode-cli/src/tui/render.rs`
+- Modify: `oxicode-tui/src/lib.rs`
+- Modify: `oxicode-tui/src/tape/engine.rs`
 - Remove: obsolete transcript-only ratatui render code and stale cursor bridge fields after references reach zero.
 
 **Interfaces:**
@@ -279,7 +279,7 @@ Expected: PASS.
 
 Change the test from expecting `\x1b[?1049h` on launch to asserting it is absent during ordinary chat. Submit a prompt through a deterministic local/mock path, observe rendered transcript output, exit, and assert the conversation remains in main-screen output.
 
-Run: `cargo nextest run -p oxi-cli --test pty_e2e test_pty_tui_renders_and_exits`
+Run: `cargo nextest run -p oxicode-cli --test pty_e2e test_pty_tui_renders_and_exits`
 
 Expected: FAIL against the old alt-screen implementation before Task 3/4, and PASS after cutover.
 
@@ -297,11 +297,11 @@ Resize the PTY and switch/resume a session. Assert ED3 replay occurs only for de
 
 - [ ] **Step 5: Delete old production transcript path**
 
-Remove dead `ChatView` full-frame callsites, stale `last_input_cursor`/transcript `CursorState`, standalone/not-wired comments, and any `OXI_TAPE_RENDER` forward references. Keep reusable ratatui formatting and overlay code.
+Remove dead `ChatView` full-frame callsites, stale `last_input_cursor`/transcript `CursorState`, standalone/not-wired comments, and any `OXICODE_TAPE_RENDER` forward references. Keep reusable ratatui formatting and overlay code.
 
 - [ ] **Step 6: Verify Task 6**
 
-Run: `cargo nextest run -p oxi-cli --test pty_e2e`
+Run: `cargo nextest run -p oxicode-cli --test pty_e2e`
 
 Expected: all PTY tests pass with ordinary chat on main screen.
 
@@ -312,8 +312,8 @@ Expected: all PTY tests pass with ordinary chat on main screen.
 **Files:**
 - Modify: `AGENTS.md`
 - Modify: `CHANGELOG.md`
-- Modify: `oxi-tui/README.md`
-- Modify: `oxi-tui/GUIDE.md`
+- Modify: `oxicode-tui/README.md`
+- Modify: `oxicode-tui/GUIDE.md`
 - Modify: `docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`
 - Modify: status/handoff documents that still describe v2, legacy dual-linking, or standalone tape.
 
@@ -323,11 +323,11 @@ Expected: all PTY tests pass with ordinary chat on main screen.
 - [ ] **Step 1: Run focused TUI gates**
 
 ```bash
-cargo build -p oxi-tui -p oxi-cli
-cargo clippy -p oxi-tui --all-targets -- -D warnings
-cargo clippy -p oxi-cli --all-targets -- -D warnings
-cargo nextest run -p oxi-tui
-cargo nextest run -p oxi-cli --test pty_e2e
+cargo build -p oxicode-tui -p oxicode-cli
+cargo clippy -p oxicode-tui --all-targets -- -D warnings
+cargo clippy -p oxicode-cli --all-targets -- -D warnings
+cargo nextest run -p oxicode-tui
+cargo nextest run -p oxicode-cli --test pty_e2e
 ```
 
 - [ ] **Step 2: Run full repository gates**
@@ -335,18 +335,18 @@ cargo nextest run -p oxi-cli --test pty_e2e
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
 ```
 
 - [ ] **Step 3: Update architecture documentation**
 
-Document: main-screen tape is production; completed rows commit to native scrollback; mutable/sticky suffix diffing; overlays alone use alternate screen; single `oxi-tui`; current test evidence. Remove the obsolete v2 pipeline and always-alt-screen claims.
+Document: main-screen tape is production; completed rows commit to native scrollback; mutable/sticky suffix diffing; overlays alone use alternate screen; single `oxicode-tui`; current test evidence. Remove the obsolete v2 pipeline and always-alt-screen claims.
 
 - [ ] **Step 4: Verify documentation assertions against code**
 
-Search production Rust for `EnterAlternateScreen`, `terminal.draw`, `CursorState`, `OXI_TAPE_RENDER`, and `not wired`. Every remaining occurrence must be overlay-only, test-only, or intentionally reusable and documented.
+Search production Rust for `EnterAlternateScreen`, `terminal.draw`, `CursorState`, `OXICODE_TAPE_RENDER`, and `not wired`. Every remaining occurrence must be overlay-only, test-only, or intentionally reusable and documented.
 
 - [ ] **Step 5: Final differential review**
 

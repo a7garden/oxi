@@ -6,11 +6,11 @@
 
 The 2026-06-30 SDK coverage audit (`docs/audits/2026-06-30-sdk-coverage.md`,
 Gap-0) flagged that `Tracer`, `AuditLog`, `CostTracker`, `Authorizer`, and
-`AccessGate` shipped through `oxi-sdk` are API theater — `AgentBuilder::build`
+`AccessGate` shipped through `oxicode-sdk` are API theater — `AgentBuilder::build`
 and `SupervisorBuilder::build` accept them via fluent setters and silently drop
 them. Consumers writing natural code observe zero runtime effect.
 
-The audit also verified that the gap is **primarily SDK-only** — `oxi-agent`
+The audit also verified that the gap is **primarily SDK-only** — `oxicode-agent`
 already exposes both the `AgentHooks::before_tool_call` / `after_tool_call` hook
 slots (called at `agent_loop/tool_exec.rs:340, 700`) and an `AgentEvent` stream
 emitted by every `Agent::run*` method (per-turn `Usage` / `TurnStart` /
@@ -29,8 +29,8 @@ Hybrid wiring pattern, split by what each observer needs:
 | `CostTracker` | **event-tap** — task subscribed to `AgentEvent`s | `AgentEvent::Usage { input_tokens, output_tokens }` (events.rs:321-326, emitted at `agent_loop/streaming.rs:353`) | SDK spawns one consumer task per `Agent` that dispatches `cost_tracker.record(agent_id, &model, TokenUsage { input_tokens, output_tokens })` on `Usage` |
 | `Tracer` | **event-tap** (turn boundaries) — span open on `TurnStart`, drop on `TurnEnd` | `AgentEvent::TurnStart` (events.rs:154-157) + `TurnEnd` (events.rs:160-167) | Same consumer task as `CostTracker`: `tracer.start("turn")` returns `SpanGuard`; `SpanGuard::drop()` closes on the corresponding `TurnEnd` |
 
-All four bridges live in `oxi-sdk`. Only one minimal change is required in
-`oxi-agent`: an `Agent::set_observability_dispatch(impl Fn(AgentEvent) + Send +
+All four bridges live in `oxicode-sdk`. Only one minimal change is required in
+`oxicode-agent`: an `Agent::set_observability_dispatch(impl Fn(AgentEvent) + Send +
 Sync + 'static)` setter that, if set, is called on every event by every
 existing `Agent::run*` method, in addition to the existing channel/callback.
 
@@ -47,9 +47,9 @@ existing `Agent::run*` method, in addition to the existing channel/callback.
 - CostTracker aggregates across a turn and naturally subscribes to
   `AgentEvent::Usage`, which is emitted exactly once per turn.
 
-## Phase 1 — `oxi-agent` change
+## Phase 1 — `oxicode-agent` change
 
-**File**: `oxi-agent/src/agent.rs`
+**File**: `oxicode-agent/src/agent.rs`
 
 **Add** to `Agent`:
 
@@ -60,9 +60,9 @@ impl Agent {
     /// Multiple calls stack: every registered closure is invoked on every
     /// event. Closures run synchronously on the agent-loop emit thread.
     ///
-    /// Used by `oxi-sdk` to bridge observability types (Tracer,
+    /// Used by `oxicode-sdk` to bridge observability types (Tracer,
     /// CostTracker, ...) into the agent loop without leaking SDK types
-    /// into `oxi-agent`.
+    /// into `oxicode-agent`.
     pub fn add_observability_dispatch(
         &self,
         f: impl Fn(AgentEvent) + Send + Sync + 'static,
@@ -103,13 +103,13 @@ move |event: AgentEvent| {
 }
 ```
 
-This is **5-10 lines of new code** in `oxi-agent` plus the method/field — no
+This is **5-10 lines of new code** in `oxicode-agent` plus the method/field — no
 behavioural change for existing consumers (the dispatch list is empty by
 default).
 
-## Phase 2 — `oxi-sdk` implementation
+## Phase 2 — `oxicode-sdk` implementation
 
-**File**: `oxi-sdk/src/agent_builder.rs`
+**File**: `oxicode-sdk/src/agent_builder.rs`
 
 In `AgentBuilder::build()`, after constructing the `Agent` (line 439) but
 before attaching middleware (line 467), assemble an observability
@@ -172,7 +172,7 @@ pattern `SpanGuard` itself uses internally.
 
 ## Phase 3 — mirror in `SupervisorBuilder::build`
 
-**File**: `oxi-sdk/src/builder.rs:753-766`
+**File**: `oxicode-sdk/src/builder.rs:753-766`
 
 `SupervisorBuilder::build` currently accepts `audit / authorizer / tracer /
 cost_tracker` setters and drops all four. Today the supervisor only manages
@@ -182,7 +182,7 @@ the supervisor path today).
 
 **Decision**: do NOT attempt to retro-fit supervisor-managed agents with
 observability in this PR. The supervisor is a process-management abstraction;
-its agents are spawned through Oxi's internal machinery (`agent_pool`), not
+its agents are spawned through Oxicode's internal machinery (`agent_pool`), not
 through `AgentBuilder`. Forcing observability through supervisor requires
 either (a) reworking the supervisor to use `AgentBuilder` for spawned
 agents, or (b) providing a separate "observer for the supervisor channel"
@@ -200,7 +200,7 @@ via `AgentBuilder`. Supervisor-managed agents stay unchanged.
 
 ## Phase 4 — test coverage
 
-Add a `#[cfg(test)] mod tests` block in `oxi-sdk/src/agent_builder.rs` with
+Add a `#[cfg(test)] mod tests` block in `oxicode-sdk/src/agent_builder.rs` with
 one test per bridged observer, using `MockProvider` (already exists):
 1. `audit_log_records_tool_execution` — Agent runs, calls a single tool,
    assert `audit_log.query(Default::default())` has one ToolExecution entry.
@@ -221,31 +221,31 @@ hook-slot for Authorizer.
 
 **Pattern B — pure hook-slot per concern**. Closes the audit's framing but
 Tracer spans need a turn-boundary slot that doesn't exist in `AgentHooks`.
-Adding a new hook slot to `oxi-agent` is a wider API change than
+Adding a new hook slot to `oxicode-agent` is a wider API change than
 warranted.
 
-**OxiBuilder-managed agents**. A `Oxi::run_agent()` convenience could
+**OxicodeBuilder-managed agents**. A `Oxicode::run_agent()` convenience could
 auto-attach observability. Out of scope — consumers who want observability
-today call `OxiBuilder::agent(...).build()` and the new wiring in this PR
+today call `OxicodeBuilder::agent(...).build()` and the new wiring in this PR
 applies.
 
 ## Files
 
 | File | Change |
 |---|---|
-| `oxi-agent/src/agent.rs` | +`observability_dispatch: Mutex<Vec<Arc<...>>>` on `AgentInner`; +`Agent::add_observability_dispatch`; 3 emit-fun sites call the list. ~20-30 LOC. |
-| `oxi-sdk/src/agent_builder.rs` | `build()` composes audit + authorizer into `AgentHooks` (alongside existing middleware); calls `agent.add_observability_dispatch(...)` for tracer + cost_tracker. +tests. ~80-120 LOC. |
-| `oxi-sdk/src/builder.rs` | Doc-comment on `SupervisorBuilder` setters; no functional change. ~10 LOC. |
-| `oxi-cli/src/app/agent_session_runtime.rs:326,425` (follow-up PR) | Migrate direct `oxi_agent::Agent::new(...)` calls to `oxi.agent(config).build()`. Out of scope for observability wiring per se — separate finding. |
+| `oxicode-agent/src/agent.rs` | +`observability_dispatch: Mutex<Vec<Arc<...>>>` on `AgentInner`; +`Agent::add_observability_dispatch`; 3 emit-fun sites call the list. ~20-30 LOC. |
+| `oxicode-sdk/src/agent_builder.rs` | `build()` composes audit + authorizer into `AgentHooks` (alongside existing middleware); calls `agent.add_observability_dispatch(...)` for tracer + cost_tracker. +tests. ~80-120 LOC. |
+| `oxicode-sdk/src/builder.rs` | Doc-comment on `SupervisorBuilder` setters; no functional change. ~10 LOC. |
+| `oxicode-cli/src/app/agent_session_runtime.rs:326,425` (follow-up PR) | Migrate direct `oxicode_agent::Agent::new(...)` calls to `oxicode.agent(config).build()`. Out of scope for observability wiring per se — separate finding. |
 
 ## Verification plan
 
 1. `cargo fmt --all -- --check`
 2. `cargo clippy --workspace --all-targets -- -D warnings`
-3. `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`
+3. `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`
 4. `cargo nextest run --workspace`
-5. The four new tests in `oxi-sdk/src/agent_builder.rs` pass.
-6. `oxi-cli` still compiles and tests pass (the migration in
+5. The four new tests in `oxicode-sdk/src/agent_builder.rs` pass.
+6. `oxicode-cli` still compiles and tests pass (the migration in
    `agent_session_runtime.rs` is a SEPARATE PR per audit Gap-5
    recommendation).
 
@@ -253,8 +253,8 @@ applies.
 
 - Supervisor-managed agent observability (Phase 3 limitation noted).
 - `GroupStrategy::Orchestrated` stub (audit Gap-3).
-- `RoutingControl` ↔ `oxi_ai::router` bridge (audit Gap-2).
-- `oxi-cli` `Agent::new(...)` migration (audit Gap-5).
+- `RoutingControl` ↔ `oxicode_ai::router` bridge (audit Gap-2).
+- `oxicode-cli` `Agent::new(...)` migration (audit Gap-5).
 - Authorizer/AccessGate richer policy gate (multi-layer) is on the audit's
   recommendations table; this PR wires the existing types, it doesn't extend
   the security model.

@@ -14,7 +14,7 @@
 1. **스코프 현실 점검** — 기존 설계가 omp mnemopi의 ~7.5K줄만 매핑했으나, 실제는 ~20K줄 / 40+ 파일
 2. **v16.1.1 → v16.1.21 드리프트** — 세션 상태 계층, 백엔드 추상화, 18개 고급 모듈이 신규 추가됨
 3. **trait 설계 정정** — `MemoryStore` 포트를 부풀리지 않는 분리 전략 (Advisory 반영)
-4. **기반 정정** — SQLite는 이미 oxi-cli에 있음; fastembed-rs 매핑 명시
+4. **기반 정정** — SQLite는 이미 oxicode-cli에 있음; fastembed-rs 매핑 명시
 
 ---
 
@@ -103,7 +103,7 @@ interface MemoryBackend {
 }
 ```
 
-oxi의 `MemoryBackend` trait (`tools.rs:35-57`)는 `put`/`search`/`list`/`delete`만 있다. omp의 라이프사이클 훅 6개가 없다.
+oxicode의 `MemoryBackend` trait (`tools.rs:35-57`)는 `put`/`search`/`list`/`delete`만 있다. omp의 라이프사이클 훅 6개가 없다.
 
 ---
 
@@ -111,15 +111,15 @@ oxi의 `MemoryBackend` trait (`tools.rs:35-57`)는 `put`/`search`/`list`/`delete
 
 ### 2.1 문제
 
-omp의 Mnemopi 엔진은 remember/recall/sleep/forget/update/scratchpad/banks/consolidate까지 단일 `BeamMemory` 클래스에 가지고 있다. 이를 oxi의 `MemoryStore` 포트에 그대로 올리면 포트가 엔진 구현에 종속된다 — SDK 사용자(oxios 등)가 구현하기 어려워진다.
+omp의 Mnemopi 엔진은 remember/recall/sleep/forget/update/scratchpad/banks/consolidate까지 단일 `BeamMemory` 클래스에 가지고 있다. 이를 oxicode의 `MemoryStore` 포트에 그대로 올리면 포트가 엔진 구현에 종속된다 — SDK 사용자(oxios 등)가 구현하기 어려워진다.
 
 ### 2.2 해결 — 3계층 분리
 
-oxi는 이미 더 깔끔한 단층을 가지고 있다. 이를 **살린다**:
+oxicode는 이미 더 깔끔한 단층을 가지고 있다. 이를 **살린다**:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│ Layer 3: oxi-mnemopi (엔진 내부 API — trait 아님)      │
+│ Layer 3: oxicode-mnemopi (엔진 내부 API — trait 아님)      │
 │                                                        │
 │  Mnemopi                                               │
 │    .remember() / .recall() / .forget() / .update()    │
@@ -127,11 +127,11 @@ oxi는 이미 더 깔끔한 단층을 가지고 있다. 이를 **살린다**:
 │    .banks() / .stats() / .diagnose()                  │
 │                                                        │
 │  → sleep, consolidate, banks, extract는 포트가 아닌    │
-│    엔진의 고유 기능. oxi-mnemopi 크레이트 내부에 캡슐화 │
+│    엔진의 고유 기능. oxicode-mnemopi 크레이트 내부에 캡슐화 │
 └───────────────────────┬──────────────────────────────┘
-                        │ 브리지 (oxi-cli)
+                        │ 브리지 (oxicode-cli)
 ┌───────────────────────▼──────────────────────────────┐
-│ Layer 2: oxi-agent MemoryBackend (도구 계약 — 기존)    │
+│ Layer 2: oxicode-agent MemoryBackend (도구 계약 — 기존)    │
 │                                                        │
 │  put(content, kind, subject) → id                     │
 │  search(query, k) → Vec<MemoryItem>                   │
@@ -144,7 +144,7 @@ oxi는 이미 더 깔끔한 단층을 가지고 있다. 이를 **살린다**:
 └───────────────────────┬──────────────────────────────┘
                         │ 사용
 ┌───────────────────────▼──────────────────────────────┐
-│ Layer 1: oxi-sdk ports (SDK 계약 — 기존, 유지)         │
+│ Layer 1: oxicode-sdk ports (SDK 계약 — 기존, 유지)         │
 │                                                        │
 │  MemoryStore:    put(entry) / list(scope) /            │
 │                  search(query, k, filter?)              │
@@ -157,13 +157,13 @@ oxi는 이미 더 깔끔한 단층을 가지고 있다. 이를 **살린다**:
 
 **핵심 원칙**:
 - `MemoryStore`(저장/검색)와 `EmbeddingProvider`(벡터화)의 분리는 omp보다 깔끔하다 — 유지.
-- sleep/consolidate/extract/banks는 `oxi-mnemopi` 내부 API. SDK 포트나 `MemoryBackend` trait에 넣지 않는다.
-- 세션 라이프사이클 훅(auto-recall, auto-retain, consolidate-on-dispose)은 omp의 `MemoryBackend` interface처럼 trait를 부풀리지 않고, oxi-cli의 `AgentSession` + `CompactionHook`에 직접 와이어링한다.
+- sleep/consolidate/extract/banks는 `oxicode-mnemopi` 내부 API. SDK 포트나 `MemoryBackend` trait에 넣지 않는다.
+- 세션 라이프사이클 훅(auto-recall, auto-retain, consolidate-on-dispose)은 omp의 `MemoryBackend` interface처럼 trait를 부풀리지 않고, oxicode-cli의 `AgentSession` + `CompactionHook`에 직접 와이어링한다.
 
 ### 2.3 MemoryBackend trait 확장 (additive)
 
 ```rust
-// oxi-agent/src/tools.rs — 기존 trait에 default 메서드 추가
+// oxicode-agent/src/tools.rs — 기존 trait에 default 메서드 추가
 
 pub trait MemoryBackend: Send + Sync + std::fmt::Debug {
     // ── 기존 (유지) ──
@@ -214,7 +214,7 @@ omp는 fastembed(JS, ONNX 런타임 래퍼)를 **서브프로세스**(`embed-wor
 
 ### 3.2 Rust 매핑
 
-| omp (JS) | oxi (Rust) | 비고 |
+| omp (JS) | oxicode (Rust) | 비고 |
 |----------|-----------|------|
 | `fastembed` (JS) | `fastembed-rs` (`fastembed` crate) | 동일 ONNX 모델, Rust 네이티브 |
 | `embed-worker.ts` (서브프로세스) | `tokio::task::spawn_blocking` | Rust는 async 런타임에서 블로킹 방지가 더 간단 |
@@ -234,7 +234,7 @@ omp는 fastembed(JS, ONNX 런타임 래퍼)를 **서브프로세스**(`embed-wor
 ### 3.3 의존성
 
 ```toml
-# oxi-mnemopi/Cargo.toml
+# oxicode-mnemopi/Cargo.toml
 [dependencies]
 rusqlite = { version = "0.31", features = ["bundled"] }  # FTS5 포함 (bundled)
 serde = { version = "1", features = ["derive"] }
@@ -250,7 +250,7 @@ local-llm = []                  # 로컬 LLM fact 추출 (별도 feature)
 ```
 
 ```toml
-# oxi-mnemopi/Cargo.toml [target.'cfg(feature = "local-embeddings")'.dependencies]
+# oxicode-mnemopi/Cargo.toml [target.'cfg(feature = "local-embeddings")'.dependencies]
 fastembed = "4"   # BAAI/bge-base-en-v1.5, multilingual-e5 등 지원
 ```
 
@@ -260,17 +260,17 @@ fastembed = "4"   # BAAI/bge-base-en-v1.5, multilingual-e5 등 지원
 
 ## 4. 기반 정정 — SQLite 상태
 
-**Advisory 정정**: SQLite는 이미 oxi-cli에 있다.
+**Advisory 정정**: SQLite는 이미 oxicode-cli에 있다.
 
 ```
-oxi-cli/Cargo.toml:49
+oxicode-cli/Cargo.toml:49
   rusqlite = { version = "0.31", features = ["bundled"] }
 ```
 
-`oxi-cli/src/store/memory_sqlite.rs`가 이미 `rusqlite::{Connection, params}`를 사용 중 (LIKE 검색).
+`oxicode-cli/src/store/memory_sqlite.rs`가 이미 `rusqlite::{Connection, params}`를 사용 중 (LIKE 검색).
 
 **실제 갭**:
-- oxi-cli에는 rusqlite가 있지만, 신규 `oxi-mnemopi` 크레이트는 **자체 의존성**이 필요 (oxi-cli와 별개 크레이트이므로)
+- oxicode-cli에는 rusqlite가 있지만, 신규 `oxicode-mnemopi` 크레이트는 **자체 의존성**이 필요 (oxicode-cli와 별개 크레이트이므로)
 - `rusqlite`의 `bundled` feature에 **FTS5가 포함**되는지 확인 필요 — `rusqlite 0.31`의 bundled SQLite는 FTS5를 기본 활성화함 (SQLite 3.41+ bundled build)
 - WAL 모드 + busy_timeout + foreign_keys PRAGMA는 기존 `SqliteMemoryStore::open`에서 이미 사용하는 패턴 재사용
 
@@ -287,7 +287,7 @@ oxi-cli/Cargo.toml:49
 **산출물**:
 
 ```
-oxi-mnemopi/
+oxicode-mnemopi/
 ├── db.rs           SQLite 핸들 + WAL + PRAGMA + spawn_blocking 패턴
 ├── schema.rs       init_schema (working_memory + FTS5 + 트리거)
 ├── types.rs        MemoryRow, RecallResult, Veracity
@@ -298,7 +298,7 @@ oxi-mnemopi/
 ```
 
 **검증 기준**:
-- `cargo nextest run -p oxi-mnemopi` — remember → recall(FTS) → forget 사이클
+- `cargo nextest run -p oxicode-mnemopi` — remember → recall(FTS) → forget 사이클
 - recall이 임베딩 없이 FTS5 + importance + recency로 동작
 - `MnemopiMemoryBackend: MemoryBackend` 브리지로 `memory_recall` 도구가 beam recall 사용
 
@@ -309,7 +309,7 @@ oxi-mnemopi/
 **산출물**:
 
 ```
-oxi-mnemopi/
+oxicode-mnemopi/
 ├── embeddings.rs       EmbeddingProvider trait + Remote + Local(fastembed-rs)
 ├── vector_index.rs     build_exact_index + search_exact (brute-force top-k)
 ├── beam/helpers.rs     FTS + vec 검색 통합 + 임베딩 스케줄링
@@ -335,7 +335,7 @@ oxi-mnemopi/
 **산출물**:
 
 ```
-oxi-mnemopi/
+oxicode-mnemopi/
 ├── beam/consolidate.rs     sleep (working → episodic 압축) + tier degradation
 ├── annotations.rs          memory ↔ annotation (트리플 스토어)
 ├── triples.rs              SPO 트리플
@@ -348,7 +348,7 @@ oxi-mnemopi/
 └── session.rs              MnemopiSessionState (auto-recall/retain/consolidate/dispose)
 ```
 
-**세션 와이어링 (oxi-cli)**:
+**세션 와이어링 (oxicode-cli)**:
 - `beforeAgentStartPrompt` → 시스템 프롬프트에 recall 블록 주입
 - `maybeRetainOnAgentEnd` → 매 N턴 대화 요약 저장
 - `CompactionHook` → compaction 시 memory 컨텍스트
@@ -381,9 +381,9 @@ oxi-mnemopi/
 
 | # | 항목 | 옵션 | 권고 |
 |---|------|------|------|
-| D1 | `oxi-mnemopi` 크레이트 배치 | workspace 내 / 별도 저장소 | workspace 내 (oxi-hashline 패턴) |
+| D1 | `oxicode-mnemopi` 크레이트 배치 | workspace 내 / 별도 저장소 | workspace 내 (oxicode-hashline 패턴) |
 | D2 | 임베딩 기본 경로 | 원격 API / 로컬 fastembed | 원격 API (경량, 기본 feature off) |
 | D3 | MemoryStore 포트 수정 | search에 filter 파라미터 추가 / 별도 trait | search 시그니처 유지, MemoryBackend에서 recall_text 추가 |
-| D4 | 세션 상태 관리 | oxi-cli AgentSession에 통합 / 별도 SessionState 구조체 | 별도 `MnemopiSessionState` (omp 패턴) |
+| D4 | 세션 상태 관리 | oxicode-cli AgentSession에 통합 / 별도 SessionState 구조체 | 별도 `MnemopiSessionState` (omp 패턴) |
 | D5 | memory_reflect 도구 의미 변경 | recall → 합성 / 기존 요약 저장 유지 | recall → 합성 (omp 정합). 기존 summary 파라미터 deprecated |
 | D6 | embed-worker 서브프로세스 | spawn_blocking / 별도 프로세스 | spawn_blocking (Rust는 JS보다 블로킹 우려 적음) |

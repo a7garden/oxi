@@ -16,7 +16,7 @@ jobs:
           # ── macOS Apple Silicon (only supported target) ──
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact_name: oxi
+            artifact_name: oxicode
             archive_ext: tar.gz
 
     steps:
@@ -34,7 +34,7 @@ jobs:
           cargo build \
             --release \
             --target ${{ matrix.target }} \
-            -p oxi-cli
+            -p oxicode-cli
 
       - name: Strip binary
         run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
@@ -42,9 +42,9 @@ jobs:
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../oxi-${{ matrix.target }}.tar.gz ${{ matrix.artifact_name }}
+          tar czf ../../../oxicode-${{ matrix.target }}.tar.gz ${{ matrix.artifact_name }}
 
       - uses: actions/upload-artifact@v7
         with:
-          name: oxi-${{ matrix.target }}
-          path: oxi-${{ matrix.target }}.${{ matrix.archive_ext }}
+          name: oxicode-${{ matrix.target }}
+          path: oxicode-${{ matrix.target }}.${{ matrix.archive_ext }}

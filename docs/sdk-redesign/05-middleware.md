@@ -1,6 +1,6 @@
 # 05. Middleware & Plugin 시스템
 
-모듈 경로: `oxi-sdk/src/middleware/`
+모듈 경로: `oxicode-sdk/src/middleware/`
 
 ---
 
@@ -145,7 +145,7 @@ pub struct ContentFilterMiddleware { blocked_patterns: Vec<String> }
 
 > **이전 설계에서 누락되었던 핵심 메커니즘.**
 >
-> `oxi-agent`의 `AgentHooks`는 `before_tool_call: Option<Box<dyn Fn>>`으로 **하나의 훅만** 지원.
+> `oxicode-agent`의 `AgentHooks`는 `before_tool_call: Option<Box<dyn Fn>>`으로 **하나의 훅만** 지원.
 > 여러 middleware를 하나의 `AgentHooks`로 컴파일하려면 adapter가 필요함.
 
 ```rust
@@ -299,7 +299,7 @@ impl PluginLoader {
 ## 5.7 사용 예시
 
 ```rust
-use oxi_sdk::middleware::*;
+use oxicode_sdk::middleware::*;
 
 // 1. Pipeline 구성
 let pipeline = Arc::new(MiddlewarePipeline::new()
@@ -317,14 +317,14 @@ let hooks = MiddlewareBridge::into_hooks(
 );
 
 // 3. Agent에 적용
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .workspace("/project")
     .coding_tools()
     .build()?;
 agent.set_hooks(hooks);
 
 // 또는 AgentBuilder에서 직접:
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .workspace("/project")
     .coding_tools()
     .middleware(SecurityMiddleware::new(authorizer))

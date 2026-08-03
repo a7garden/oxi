@@ -2,7 +2,7 @@
 
 > 상태: 설계 v2 (구현 합의용 최종안)
 > 작성: 2026-06-17 (v1 리뷰), 2026-06-17 (v2 — 결함 #13 발견·반영)
-> 선행: `oxi-cli/src/store/issues.rs` (1323줄), `oxi-cli/src/tools/issue_tool.rs` (419줄)
+> 선행: `oxicode-cli/src/store/issues.rs` (1323줄), `oxicode-cli/src/tools/issue_tool.rs` (419줄)
 > 후속: CHANGELOG.md + AGENTS.md Pitfalls 갱신 + 본 문서 §11 체크리스트
 
 ## 0. 핵심 (TL;DR)
@@ -41,9 +41,9 @@ owner로 기록**하고, 결과적으로 **소유권/락 기능이 에이전트 
 ```
 agent ── issue tool ──┐   (ctx.session_id 로 owner 식별)
 TUI panel ────────────┼──► FileIssueStore (Arc<RwLock<Inner>>)
-oxi issue (CLI) ──────┘        │
-                               ├─ .oxi/issues/*.md  (마크다웝 + YAML frontmatter)
-                               └─ .oxi/issues/.alive/<sid>  (flock liveness)
+oxicode issue (CLI) ──────┘        │
+                               ├─ .oxicode/issues/*.md  (마크다웝 + YAML frontmatter)
+                               └─ .oxicode/issues/.alive/<sid>  (flock liveness)
 
 동시성 3계층:
   L1  flock(2)        ─ 프로세스 사망 자동 감지 (kill -9/crash 안전)
@@ -56,7 +56,7 @@ oxi issue (CLI) ──────┘        │
 **증명 코드 경로**:
 
 ```
-oxi-agent/src/agent.rs:496  (그리고 :849)
+oxicode-agent/src/agent.rs:496  (그리고 :849)
     let loop_config = AgentLoopConfig {
         ...
         session_id: None,          // ◄── 항상 None (하드코딩)
@@ -145,7 +145,7 @@ B의 mutator가 `is_session_alive(A)`를 검사하더라도, B가 읽은 시점(
    시맨틱 완화 제안은 **철회** — 동작 변경은 별도 future PR.
 4. **프로세스 단일 liveness identity.** 한 프로세스는 하나의 ownership id로 하나의 flock을
    잡는다. TUI의 여러 AgentSession은 그 id를 공유한다(과제적 한계, §10 참조).
-5. **새 의존성 금지.** `uuid`는 이미 `oxi-cli` 의존성(v4). `libc` 유지.
+5. **새 의존성 금지.** `uuid`는 이미 `oxicode-cli` 의존성(v4). `libc` 유지.
 6. **5 phase는 (P0를 제외하고) 서로 독립.** P1–P4는 임의 순서/병렬 병합 가능. P0는 먼저.
 7. **호환성 보존.** 파일 포맷·기존 action·에러 변형 유지. 새 것은 **추가만**.
 
@@ -157,9 +157,9 @@ B의 mutator가 `is_session_alive(A)`를 검사하더라도, B가 읽은 시점(
 에이전트가 `issue` 도구를 호출할 때, `ctx.session_id`가 **실제 flock 홀더와 일치하는**
 진짜 식별자가 되도록 만든다.
 
-### 3.2 oxi-agent 변경 (식별자 주입 통로)
+### 3.2 oxicode-agent 변경 (식별자 주입 통로)
 
-`oxi-agent/src/config.rs` — `AgentConfig`에 필드 추가(가장 뒤, additive):
+`oxicode-agent/src/config.rs` — `AgentConfig`에 필드 추가(가장 뒤, additive):
 
 ```rust
 pub struct AgentConfig {
@@ -172,7 +172,7 @@ pub struct AgentConfig {
 }
 ```
 
-`oxi-agent/src/agent.rs:496, 849` — 하드코딩 `None`을 config에서 읽도록 수정:
+`oxicode-agent/src/agent.rs:496, 849` — 하드코딩 `None`을 config에서 읽도록 수정:
 
 ```rust
 let loop_config = AgentLoopConfig {
@@ -183,16 +183,16 @@ let loop_config = AgentLoopConfig {
 ```
 
 > **API 영향**: additive. 기존 `AgentConfig` 생성지점은 모두 `..Default::default()`나
-> 리터럴이므로, 필드 추가 시 컴파일 에러가 나는 곳은 점검해야 한다(oxi-cli `lib.rs`,
+> 리터럴이므로, 필드 추가 시 컴파일 에러가 나는 곳은 점검해야 한다(oxicode-cli `lib.rs`,
 > 테스트). `#[serde(default)]` 덕분에 역직렬화 호환 유지.
 
-### 3.3 oxi-cli 변경 — 프로세스 단일 liveness lock + identity
+### 3.3 oxicode-cli 변경 — 프로세스 단일 liveness lock + identity
 
 **핵심**: `App`이 **프로세스 수명 동안 하나의 flock을 잡고**, 그 id를 에이전트에 주입한다.
 TUI의 별도 flock 획득은 제거하고 App이 통합 관리한다(같은 파일에 같은 프로세스가 두 번
 `LOCK_EX NB`는 두 번째가 실패하므로 반드시 하나여야 한다).
 
-`oxi-cli/src/lib.rs` — `App` 필드 추가 + `from_oxi`에서 생성:
+`oxicode-cli/src/lib.rs` — `App` 필드 추가 + `from_oxicode`에서 생성:
 
 ```rust
 pub struct App {
@@ -204,7 +204,7 @@ pub struct App {
 }
 
 impl App {
-    pub async fn from_oxi(oxi: oxi_sdk::Oxi, settings: Settings) -> Result<Self> {
+    pub async fn from_oxicode(oxicode: oxicode_sdk::Oxicode, settings: Settings) -> Result<Self> {
         // ... 기존 ...
 
         // ── 프로세스 단일 ownership identity + liveness lock ──
@@ -237,18 +237,18 @@ impl App {
 }
 ```
 
-> **TUI 모드 판별**: `from_oxi` 시점에는 run-mode가 아직 확정되지 않을 수 있다. 두 가지
-> 안: (a) `from_oxi`에 `mode: RunMode` 인자 추가(명시적, 권장); (b) `App::from_oxi`는
-> 항상 process-scoped id를 쓰고 TUI 시작 시 "tui"로 재발급. **(a) 채택** — `from_oxi(oxi,
+> **TUI 모드 판별**: `from_oxicode` 시점에는 run-mode가 아직 확정되지 않을 수 있다. 두 가지
+> 안: (a) `from_oxicode`에 `mode: RunMode` 인자 추가(명시적, 권장); (b) `App::from_oxicode`는
+> 항상 process-scoped id를 쓰고 TUI 시작 시 "tui"로 재발급. **(a) 채택** — `from_oxicode(oxicode,
 > settings, mode)`로 서명 변경. 호출지점(main.rs, bootstrap.rs) 수정.
 
 ### 3.4 TUI 경로 정리
 
-`oxi-cli/src/tui/app.rs:806-813`의 별도 flock 획득 **제거** (App이 이미 잡음). 단,
+`oxicode-cli/src/tui/app.rs:806-813`의 별도 flock 획득 **제거** (App이 이미 잡음). 단,
 `run_tui_interactive_impl`은 App의 guard가 살아있는 동안에만 실행되므로 소유권 이전 주의:
 guard는 `App` 안에 있고, TUI 루프도 같은 프로세스/같은 수명이므로 OK.
 
-`oxi-cli/src/tui/overlay/issues_panel/mod.rs:159`:
+`oxicode-cli/src/tui/overlay/issues_panel/mod.rs:159`:
 ```rust
 pub fn session_id() -> &'static str { "tui" }   // ← 제거/변경
 ```
@@ -260,7 +260,7 @@ pub fn session_id() -> &'static str { "tui" }   // ← 제거/변경
 ### 3.5 CLI 경로 (main.rs)
 
 `main.rs:189`는 이미 `&session`(Uuid) + flock 획득을 한다. 이 경로는 **그대로 유지**
-(별도 `oxi issue` 서브커맨드이므로 App을 거치지 않음). 단, `App::from_oxi` 도입으로
+(별도 `oxicode issue` 서브커맨드이므로 App을 거치지 않음). 단, `App::from_oxicode` 도입으로
 print/RPC도 이제 flock을 갖게 되므로, CLI 서브커맨드 경로와의 일관성은 유지됨.
 
 ### 3.6 도구 쪽 안전망 (이미 존재, 확인)
@@ -295,7 +295,7 @@ fn app_holds_single_liveness_lock() {
 ```
 
 ### 3.8 규모
-~250줄. oxi-agent(config.rs + agent.rs) ~30줄, oxi-cli(lib.rs + tui/app.rs +
+~250줄. oxicode-agent(config.rs + agent.rs) ~30줄, oxicode-cli(lib.rs + tui/app.rs +
 panel) ~220줄. **P1–P4보다 먼저 병합**.
 
 ---
@@ -309,7 +309,7 @@ write 손실**. `session.rs`도 동일 결함(코드 중복).
 
 ### 4.2 해결: 공유 util `store::fs_util`
 
-새 파일 `oxi-cli/src/store/fs_util.rs`:
+새 파일 `oxicode-cli/src/store/fs_util.rs`:
 
 ```rust
 //! Atomic write helpers shared across `store/*`.
@@ -348,10 +348,10 @@ pub fn atomic_write_bytes(path: &Path, content: &[u8]) -> io::Result<()> {
 
 | 파일 | 변경 |
 |---|---|
-| `oxi-cli/src/store/fs_util.rs` | **신규** |
-| `oxi-cli/src/store/mod.rs` | `pub mod fs_util;` |
-| `oxi-cli/src/store/issues.rs:223-228` | 로컬 `atomic_write` 삭제 → `use super::fs_util::atomic_write;` |
-| `oxi-cli/src/store/session.rs:22-28` | 동일 (PID 결함 동시 수리) |
+| `oxicode-cli/src/store/fs_util.rs` | **신규** |
+| `oxicode-cli/src/store/mod.rs` | `pub mod fs_util;` |
+| `oxicode-cli/src/store/issues.rs:223-228` | 로컬 `atomic_write` 삭제 → `use super::fs_util::atomic_write;` |
+| `oxicode-cli/src/store/session.rs:22-28` | 동일 (PID 결함 동시 수리) |
 
 > **내구성(durability)**: rename은 원자적이되 내구적이지 않다(fsync 필요). 기존 CLI
 > 일관성 모델을 존중해 fsync는 **명시적 옵트인**으로 남김(필요시 `atomic_write_durable`
@@ -376,7 +376,7 @@ pub fn atomic_write_bytes(path: &Path, content: &[u8]) -> io::Result<()> {
 store는 **엄격** 유지. **도구만** 재시도. §1.4 통찰에 따라: 첫 시도는 에이전트 hash(빠른
 경로), conflict 시 fresh hash 재독 후 재시도.
 
-`oxi-cli/src/tools/issue_tool.rs`:
+`oxicode-cli/src/tools/issue_tool.rs`:
 
 ```rust
 const MAX_CAS_ATTEMPTS: u32 = 4;
@@ -436,7 +436,7 @@ async fn start(&self, params: Value, session: &str) -> Result<String, String> {
 > 액션은 assignee 한정이며, hardening은 동작을 유지해야 한다. `apply_patch`는 `caller`를
 > 받아 **기존과 동일하게** 소유권을 강제한다.
 
-`oxi-cli/src/store/issues.rs`:
+`oxicode-cli/src/store/issues.rs`:
 
 ```rust
 /// `update` 변경 묶음. 모든 필드 `Option`: `None`=유지, `Some`=교체.
@@ -522,7 +522,7 @@ where F: FnOnce(Issue) -> Result<Issue, IssueError> + Send + 'static
 {
     let path = self.path_for_id(id).map_err(IssueError::Other)?;
     let store = self.clone();
-    oxi_agent::tools::file_mutation_queue::global_mutation_queue()
+    oxicode_agent::tools::file_mutation_queue::global_mutation_queue()
         .with_queue(&path, move || async move {
             let raw = fs::read_to_string(&path)?;
             if let Some(expected) = expected_hash.as_deref()
@@ -681,7 +681,7 @@ pub fn reap_orphans(issues_dir: &Path) -> std::io::Result<usize> {
 호출 지점:
 - `FileIssueStore::open` 시 1회(lazy, 에러는 warn 로그만).
 - `start`가 dead owner reclaim 후 best-effort.
-- `oxi issue --reap` 수동 플래그(권장).
+- `oxicode issue --reap` 수동 플래그(권장).
 
 ### 7.2 `top_free_priority` (#10)
 
@@ -761,13 +761,13 @@ liveness:
 | 항목 | 결정 |
 |---|---|
 | 새 crate 의존성 | **없음**. `uuid`(이미 v4), `libc` 유지. |
-| oxi-agent API | `AgentConfig.session_id` **추가**(additive, `#[serde(default)]`). `from_oxi` 서명 `+ mode` 인자. |
+| oxicode-agent API | `AgentConfig.session_id` **추가**(additive, `#[serde(default)]`). `from_oxicode` 서명 `+ mode` 인자. |
 | 파일 포맷 | **변경 없음**. 동일 마크다운 + YAML frontmatter. |
 | 스키마 breaking | **없음**. action enum에 `reopen` **추가만**. 기존 필드 유지. |
 | 에러 변형 | **유지**. `Conflict`/`Assigned`/`NotAssigned`/`NotFound`. |
 | 소유권 정책 | **유지**(assignee 한정). v1 완화 제안 철회. |
 | TUI 패널 | `session_id()` 정적 메서드 제거 → `app.ownership_session_id()` 사용. 패널 `reopen` 키(`o`)는 별도 UX PR. |
-| `oxi issue` CLI | 기존 동작 유지; `reopen` 서브커맨드 + `--reap` 플래그 추가 권장. |
+| `oxicode issue` CLI | 기존 동작 유지; `reopen` 서브커맨드 + `--reap` 플래그 추가 권장. |
 
 ---
 
@@ -776,9 +776,9 @@ liveness:
 | 결정 | 리스크 | 완화 |
 |---|---|---|
 | 프로세스 단일 identity(P0) | 한 TUI의 여러 AgentSession이 소유권 공유(구별 불가) | v1 수용; 과제적 한계. per-session 소유권은 future |
-| `from_oxi`에 `mode` 인자 | 서명 변경 → 호출지점 수정 | main.rs/bootstrap.rs만(2곳) |
+| `from_oxicode`에 `mode` 인자 | 서명 변경 → 호출지점 수정 | main.rs/bootstrap.rs만(2곳) |
 | TUI flock을 App으로 이관 | guard 수명 = App 수명 보장 필요 | App이 TUI 루프보다 오래 삶(이미 그럼) |
-| retry를 도구에 한정 | CLI `oxi issue`는 재시도 없음 | CLI에도 `cas_retry` 헬퍼 적용 권장 |
+| retry를 도구에 한정 | CLI `oxicode issue`는 재시도 없음 | CLI에도 `cas_retry` 헬퍼 적용 권장 |
 | `expected_hash` advisory | 엄격 게이트 원하는 호출자 | store `update`는 여전히 엄격; advisory는 도구 한정 |
 | 소유권 정책 유지 | 비-assignee body 편집 불가 | 의도적(기존 동작); 완화는 별도 PR |
 | `fsync` 제외 | rename 직후 정전 시 내구성 미보장 | 기존 모델 유지; `--durable` 옵션 여지 |
@@ -791,18 +791,18 @@ liveness:
 ## 11. 체크리스트 (구현 완료 기준)
 
 - [ ] **P0**: `AgentConfig.session_id` 추가 + `agent.rs`에서 주입 + `App` 단일
-      liveness lock + `from_oxi(mode)` + 패널 identity 통일 + **통합 테스트 3개 통과**
+      liveness lock + `from_oxicode(mode)` + 패널 identity 통일 + **통합 테스트 3개 통과**
 - [ ] **P1**: `fs_util.rs` + issues/session 마이그레이션 + 충돌 테스트
 - [ ] **P2**: `cas_retry` + `IssuePatch`/`apply_patch`(소유권 유지) + `reopen` + no-op 감지 + 회귀 테스트
 - [ ] **P3**: 스키마 description + `validate_size` + github readOnly + 테스트
 - [ ] **P4**: `reap_orphans`(age-gated) + open 시 호출 + `top_free_priority` + flock helper + 테스트
 - [ ] 도구 description에 retry 정책 + reopen 워크플로우 명시
 - [ ] `cargo fmt && cargo clippy --workspace -- -D warnings` clean
-- [ ] `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` clean (P0가 config.rs 건드리므로)
+- [ ] `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` clean (P0가 config.rs 건드리므로)
 - [ ] `cargo nextest run --workspace` 통과
 - [ ] CHANGELOG.md 5항목(P0–P4) 추가
 - [ ] AGENTS.md Pitfalls에 **ownership identity 모델(P0)** + **hash advisory/retry(P2)** 추가
-- [ ] (권장) `oxi issue` CLI에 `reopen` 서브커맨드 + `--reap` 추가
+- [ ] (권장) `oxicode issue` CLI에 `reopen` 서브커맨드 + `--reap` 추가
 
 ---
 

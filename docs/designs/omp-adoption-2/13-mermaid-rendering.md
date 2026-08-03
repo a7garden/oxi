@@ -12,7 +12,7 @@
 
 omp는 에이전트가 ` ```mermaid ` 코드 블록을 출력하면 **터미널에 ASCII 다이어그램으로 렌더**한다. 시퀀스·플로우차트·상태·ER 다이어그램 등을 텍스트 아트로 변환하여 구조를 시각적으로 전달한다.
 
-oxi는 현재 코드 블록 구문 강조만 지원하고 Mermaid 렌더는 없다. 본 설계는 oxi-tui 마크다운 렌더에 Mermaid 블록 감지 + ASCII 변환을 추가한다. **가장 낮은 비용, 가장 빠른 가치 실현** 기능.
+oxicode는 현재 코드 블록 구문 강조만 지원하고 Mermaid 렌더는 없다. 본 설계는 oxicode-tui 마크다운 렌더에 Mermaid 블록 감지 + ASCII 변환을 추가한다. **가장 낮은 비용, 가장 빠른 가치 실현** 기능.
 
 ### omp가 검증한 가치
 - **구조 전달** — 아키텍처·흐름·상태 머신을 텍스트보다 효율적으로 전달.
@@ -87,11 +87,11 @@ function asciiDisplayWidth(ascii: string): number {
 
 ---
 
-## 2. oxi-tui 설계
+## 2. oxicode-tui 설계
 
 ### 2.1 렌더러 선택 — 핵심 결정
 
-omp는 Node.js 생태계의 `@mermaid-js/mermaid-cli`에 의존한다. oxi(Rust)는 세 가지 옵션이 있다:
+omp는 Node.js 생태계의 `@mermaid-js/mermaid-cli`에 의존한다. oxicode(Rust)는 세 가지 옵션이 있다:
 
 | 옵션 | 설명 | 장점 | 단점 |
 |---|---|---|---|
@@ -108,7 +108,7 @@ omp는 Node.js 생태계의 `@mermaid-js/mermaid-cli`에 의존한다. oxi(Rust)
 
 ### 2.2 렌더 인터페이스
 
-`oxi-tui/src/render/mermaid.rs` (신규):
+`oxicode-tui/src/render/mermaid.rs` (신규):
 
 ```rust
 use std::sync::OnceLock;
@@ -260,7 +260,7 @@ fn ascii_display_width(ascii: &str) -> usize {
 
 ### 2.5 마크다운 렌더 통합
 
-`oxi-tui/src/widgets/chat/markdown.rs`의 코드 블록 처리에 Mermaid 분기 추가:
+`oxicode-tui/src/widgets/chat/markdown.rs`의 코드 블록 처리에 Mermaid 분기 추가:
 
 ```rust
 /// 펜스 코드 블록을 처리. ```mermaid 블록은 ASCII 다이어그램으로 렌더.
@@ -404,7 +404,7 @@ fn render_sequence_diagram(source: &str) -> Option<String> {
 | `mmdc` 의존 (Node 필요) | 🟠 위험 | Rust 순수 바이너리 철학과 충돌. 설정으로 비활성화 가능 |
 | 렌더 지연 (프로세스 스폰) | 🟡 최적화 | 캐시로 1회만. 첫 렌더 ~500ms |
 | 복잡한 다이어그램 (gantt, pie) | 🔴 후순위 | 시퀀스/플로우차트/상태 머신 우선 |
-| 터미널 이미지 프로토콜 (Kitty/Sixel) | 🟢 별도 | `oxi-tui/src/render/image.rs`가 이미 있음. PNG 렌더 옵션 추가 가능 |
+| 터미널 이미지 프로토콜 (Kitty/Sixel) | 🟢 별도 | `oxicode-tui/src/render/image.rs`가 이미 있음. PNG 렌더 옵션 추가 가능 |
 | CJK 너비 계산 | 🟢 해결됨 | `unicode_width` 크레이트 사용 |
 
 ---
@@ -452,11 +452,11 @@ mod tests {
 
 ---
 
-## 8. 부록: omp → oxi 매핑
+## 8. 부록: omp → oxicode 매핑
 
-| omp 위치 | oxi 위치 |
+| omp 위치 | oxicode 위치 |
 |---|---|
-| `modes/theme/mermaid-cache.ts` | `oxi-tui/src/render/mermaid.rs` |
+| `modes/theme/mermaid-cache.ts` | `oxicode-tui/src/render/mermaid.rs` |
 | `resolveMermaidAscii` | `render_mermaid_ascii` |
 | `renderMermaidAsciiSafe` (pi-utils) | `render_with_mmdc` / `render_with_builtin` |
 | `asciiDisplayWidth` (Bun.stringWidth) | `ascii_display_width` (unicode_width) |

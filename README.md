@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="logo-readme.png" alt="oxi logo" width="120">
+<img src="logo-readme.png" alt="oxicode logo" width="120">
 
-# oxi
+# oxicode
 
 **A terminal-based AI coding assistant built in Rust.**
 
@@ -11,8 +11,8 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 
 [![CI](https://img.shields.io/github/actions/workflow/status/project-oxi/oxicode/ci.yml?style=flat-square&label=CI)](https://github.com/project-oxi/oxicode/actions)
 [![Test](https://img.shields.io/github/actions/workflow/status/project-oxi/oxicode/test.yml?style=flat-square&label=tests)](https://github.com/project-oxi/oxicode/actions)
-[![Crates.io](https://img.shields.io/crates/v/oxi-cli?style=flat-square&label=crates.io)](https://crates.io/crates/oxi-cli)
-[![docs.rs](https://img.shields.io/docsrs/oxi-cli?style=flat-square&label=docs.rs)](https://docs.rs/oxi-cli)
+[![Crates.io](https://img.shields.io/crates/v/oxicode-cli?style=flat-square&label=crates.io)](https://crates.io/crates/oxicode-cli)
+[![docs.rs](https://img.shields.io/docsrs/oxicode-cli?style=flat-square&label=docs.rs)](https://docs.rs/oxicode-cli)
 [![GitHub release](https://img.shields.io/github/v/release/project-oxi/oxicode?style=flat-square&include_prereleases&label=release)](https://github.com/project-oxi/oxicode/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
 [![GitHub stars](https://img.shields.io/github/stars/project-oxi/oxicode?style=flat-square)](https://github.com/project-oxi/oxicode/stargazers)
@@ -25,9 +25,9 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 
 ---
 
-## Why oxi?
+## Why oxicode?
 
-oxi is a Rust port of [pi](https://github.com/earendil-works/pi), re-implementing its core architecture — unified LLM API, agent runtime, tool calling, terminal UI, and session persistence — in idiomatic Rust with Tokio, Ratatui, and Serde.
+oxicode is a Rust port of [pi](https://github.com/earendil-works/pi), re-implementing its core architecture — unified LLM API, agent runtime, tool calling, terminal UI, and session persistence — in idiomatic Rust with Tokio, Ratatui, and Serde.
 
 It brings the power of LLM-based coding assistants directly to your terminal — fast, private, and fully under your control.
 
@@ -41,7 +41,7 @@ It brings the power of LLM-based coding assistants directly to your terminal —
 | 🧩 **Skill system** | Pluggable prompt skills (brainstorming, deep research, code review, etc.) |
 | 🔌 **Extensions** | Dynamically load native `.so`/`.dylib`/`.dll` or WASM plugins |
 | 📦 **Package manager** | Install, update, and manage skill/extension packages |
-| 🤖 **Multi-agent SDK** | Build multi-agent pipelines with the oxi-sdk builder pattern |
+| 🤖 **Multi-agent SDK** | Build multi-agent pipelines with the oxicode-sdk builder pattern |
 
 ## Getting Started
 
@@ -49,13 +49,13 @@ It brings the power of LLM-based coding assistants directly to your terminal —
 
 **cargo install** (any Rust toolchain ≥ 1.96):
 ```bash
-cargo install oxi-cli
+cargo install oxicode-cli
 ```
 
 **cargo binstall** (10-100x faster — uses prebuilt binary from the GitHub release):
 ```bash
 cargo install cargo-binstall
-cargo binstall oxi-cli
+cargo binstall oxicode-cli
 ```
 
 **Pre-built binary** (macOS Apple Silicon):
@@ -70,8 +70,8 @@ Each release ships with `SHA256SUMS` for integrity verification.
 **Build from source** (last resort):
 ```bash
 git clone https://github.com/project-oxi/oxicode.git
-cd oxi && cargo build --release
-cp target/release/oxi /usr/local/bin/
+cd oxicode && cargo build --release
+cp target/release/oxicode /usr/local/bin/
 ```
 
 ### Verify a downloaded binary
@@ -92,46 +92,46 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 ```bash
 # Interactive mode (default)
-oxi
+oxicode
 
 # Single prompt
-oxi "Explain Rust ownership"
+oxicode "Explain Rust ownership"
 
 # Specify provider and model
-oxi -p openai -m gpt-4o "Design a REST API"
+oxicode -p openai -m gpt-4o "Design a REST API"
 ```
 
-That's it. No config files required — oxi works out of the box.
+That's it. No config files required — oxicode works out of the box.
 
 ## Architecture
 
-oxi is a multi-crate Rust workspace designed for modularity:
+oxicode is a multi-crate Rust workspace designed for modularity:
 
 ```mermaid
 graph LR
-    A[oxi-cli] --> B[oxi-sdk]
-    A --> C[oxi-tui]
-    B --> E[oxi-agent]
-    E --> F[oxi-ai]
+    A[oxicode-cli] --> B[oxicode-sdk]
+    A --> C[oxicode-tui]
+    B --> E[oxicode-agent]
+    E --> F[oxicode-ai]
 ```
 
 | Crate | Purpose |
 |-------|---------|
-| [**oxi-ai**](oxi-ai/) | Unified LLM API — 8 providers, streaming, tool calling, compaction |
-| [**oxi-agent**](oxi-agent/) | Agent runtime — tool-calling loop, event system, MCP client |
-| [**oxi-tui**](oxi-tui/) | Terminal UI — differential rendering, themes, markdown, chat widgets |
-| [**oxi-sdk**](oxi-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |
-| [**oxi-cli**](oxi-cli/) | CLI binary — ties everything together (TUI + RPC + port composition root) |
+| [**oxicode-ai**](oxicode-ai/) | Unified LLM API — 8 providers, streaming, tool calling, compaction |
+| [**oxicode-agent**](oxicode-agent/) | Agent runtime — tool-calling loop, event system, MCP client |
+| [**oxicode-tui**](oxicode-tui/) | Terminal UI — differential rendering, themes, markdown, chat widgets |
+| [**oxicode-sdk**](oxicode-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |
+| [**oxicode-cli**](oxicode-cli/) | CLI binary — ties everything together (TUI + RPC + port composition root) |
 
 ## Configuration
 
 Settings are layered — later layers override earlier ones:
 
 ```
-defaults → ~/.oxi/settings.toml → .oxi/settings.toml → env vars → CLI flags
+defaults → ~/.oxicode/settings.toml → .oxicode/settings.toml → env vars → CLI flags
 ```
 
-Example `~/.oxi/settings.toml`:
+Example `~/.oxicode/settings.toml`:
 
 ```toml
 default_model = "anthropic/claude-sonnet-4-20250514"
@@ -147,16 +147,16 @@ Environment variable overrides:
 
 | Variable | Setting |
 |----------|---------|
-| `OXI_MODEL` | `default_model` |
-| `OXI_PROVIDER` | `default_provider` |
-| `OXI_THEME` | `theme` |
-| `OXI_TEMPERATURE` | `default_temperature` |
-| `OXI_MAX_TOKENS` | `max_response_tokens` |
+| `OXICODE_MODEL` | `default_model` |
+| `OXICODE_PROVIDER` | `default_provider` |
+| `OXICODE_THEME` | `theme` |
+| `OXICODE_TEMPERATURE` | `default_temperature` |
+| `OXICODE_MAX_TOKENS` | `max_response_tokens` |
 
 ## CLI Reference
 
 ```
-oxi [OPTIONS] [PROMPT]
+oxicode [OPTIONS] [PROMPT]
 
 Options:
   -p, --provider <PROVIDER>    Provider (anthropic, openai, google, ...)
@@ -214,35 +214,35 @@ OpenAI, Anthropic, Google, DeepSeek, Mistral, Groq, Cerebras, xAI, OpenRouter, a
 </details>
 
 <details>
-<summary><strong>Can I use oxi as a library?</strong></summary>
+<summary><strong>Can I use oxicode as a library?</strong></summary>
 
-Yes. Each crate is published independently: `oxi-ai` (LLM API), `oxi-agent` (agent runtime), `oxi-tui` (terminal UI), `oxi-sdk` (multi-agent SDK). See individual crate READMEs for details.
+Yes. Each crate is published independently: `oxicode-ai` (LLM API), `oxicode-agent` (agent runtime), `oxicode-tui` (terminal UI), `oxicode-sdk` (multi-agent SDK). See individual crate READMEs for details.
 </details>
 
 <details>
 <summary><strong>How do sessions work?</strong></summary>
 
-Sessions are stored as append-only JSONL files in `~/.oxi/sessions/`. Each session is a tree — you can fork from any point to explore alternative paths without losing history. Use `oxi sessions` to list, `oxi tree` to inspect, and `oxi fork` to branch.
+Sessions are stored as append-only JSONL files in `~/.oxicode/sessions/`. Each session is a tree — you can fork from any point to explore alternative paths without losing history. Use `oxicode sessions` to list, `oxicode tree` to inspect, and `oxicode fork` to branch.
 </details>
 
 <details>
-<summary><strong>Does oxi send my code to third parties?</strong></summary>
+<summary><strong>Does oxicode send my code to third parties?</strong></summary>
 
-oxi only communicates with the LLM provider you select. No telemetry, no analytics, no third-party data collection. Your code stays between you and your chosen provider.
+oxicode only communicates with the LLM provider you select. No telemetry, no analytics, no third-party data collection. Your code stays between you and your chosen provider.
 </details>
 
 ## Attribution
 
-oxi is a Rust port of [pi](https://github.com/earendil-works/pi) by [Mario Zechner](https://github.com/badlogicgames).
+oxicode is a Rust port of [pi](https://github.com/earendil-works/pi) by [Mario Zechner](https://github.com/badlogicgames).
 The architectural design, provider abstraction, tool system, streaming events, and session tree
 are derived from the original pi project (MIT License). See [NOTICE.md](NOTICE.md) for details.
 
 ## License
 
-[MIT](LICENSE.md) © 2025 Mario Zechner, 2025–2026 oxi contributors
+[MIT](LICENSE.md) © 2025 Mario Zechner, 2025–2026 oxicode contributors
 
 ## Sponsorship
 
-oxi is developed and maintained by volunteers. If oxi saves you time or
+oxicode is developed and maintained by volunteers. If oxicode saves you time or
 makes your workflow better, consider [sponsoring the project](https://github.com/sponsors/a7garden)
 to fund continued work on providers, the agent loop, and the TUI.

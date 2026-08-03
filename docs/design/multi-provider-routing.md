@@ -5,7 +5,7 @@
 **Goal**: Provide intelligent multi-provider routing that:
 1. Routes requests to the best-fit model based on task complexity
 2. Falls back to alternative models on failure (with circuit breakers)
-3. Is fully accessible via `oxi-sdk` (mandatory requirement)
+3. Is fully accessible via `oxicode-sdk` (mandatory requirement)
 
 **Non-goal**: Modifying existing single-provider code paths. All routing is opt-in via new types.
 
@@ -25,7 +25,7 @@
                             │ resolves to one concrete provider
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     MultiProvider (oxi-ai)                      │
+│                     MultiProvider (oxicode-ai)                      │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
 │  │ComplexityRouter│ │CircuitBreaker │ │  FallbackChain        │ │
@@ -49,11 +49,11 @@
 
 | Component | Crate | Reason |
 |---|---|---|
-| `MultiProvider` (core) | `oxi-ai` | Provider trait lives here; routing is provider-selection logic |
-| `ComplexityRouter` | `oxi-ai` | Uses `model_db` data (cost, reasoning, context window) |
-| `CircuitBreaker` | `oxi-ai` | Extended into `oxi-ai` for reusability |
-| `FallbackChain` | `oxi-ai` | Promoted to `oxi-ai` |
-| **SDK re-export & ergonomic API** | **`oxi-sdk`** | **Mandatory requirement — must be accessible via SDK** |
+| `MultiProvider` (core) | `oxicode-ai` | Provider trait lives here; routing is provider-selection logic |
+| `ComplexityRouter` | `oxicode-ai` | Uses `model_db` data (cost, reasoning, context window) |
+| `CircuitBreaker` | `oxicode-ai` | Extended into `oxicode-ai` for reusability |
+| `FallbackChain` | `oxicode-ai` | Promoted to `oxicode-ai` |
+| **SDK re-export & ergonomic API** | **`oxicode-sdk`** | **Mandatory requirement — must be accessible via SDK** |
 
 ---
 
@@ -92,8 +92,8 @@ pub trait ComplexityRouter: Send + Sync {
 
 ### 4.3 `CircuitBreaker` — Per-Provider Health Tracking
 
-- `ProviderCircuitBreaker` in `oxi-ai` — tracks health per provider
-- `CircuitBreaker` in `oxi-agent` — backward-compatible wrapper (no provider name)
+- `ProviderCircuitBreaker` in `oxicode-ai` — tracks health per provider
+- `CircuitBreaker` in `oxicode-agent` — backward-compatible wrapper (no provider name)
 - States: Closed → Open → HalfOpen → Closed
 - Configurable: `failure_threshold`, `open_duration`, `half_open_successes`
 
@@ -125,12 +125,12 @@ Implements `Provider` trait. On `stream()`:
 
 ---
 
-## 5. SDK API (`oxi-sdk`)
+## 5. SDK API (`oxicode-sdk`)
 
-### 5.1 Re-export from `oxi-ai`
+### 5.1 Re-export from `oxicode-ai`
 
 ```rust
-pub use oxi_ai::{
+pub use oxicode_ai::{
     Complexity, ComplexityRouter, DefaultRouter,
     MultiProvider, MultiProviderConfig,
     FallbackChain, FallbackChainError,
@@ -155,10 +155,10 @@ impl MultiProviderBuilder {
 }
 ```
 
-### 5.3 `OxiBuilder` Integration (Convenient)
+### 5.3 `OxicodeBuilder` Integration (Convenient)
 
 ```rust
-impl OxiBuilder {
+impl OxicodeBuilder {
     pub fn enable_routing(mut self, config: RoutingConfig) -> Self { ... }
 }
 ```
@@ -194,13 +194,13 @@ Rationale:
 ### 8.1 CLI Flags
 
 ```bash
-oxi --enable-routing                      # Enable automatic routing
-oxi --prefer-cost-efficient               # Prefer cheaper models
-oxi --fallback-chain openai/gpt-4o,anthropic/claude-haiku-3.5
-oxi --disable-fallback                     # Fail fast on errors
+oxicode --enable-routing                      # Enable automatic routing
+oxicode --prefer-cost-efficient               # Prefer cheaper models
+oxicode --fallback-chain openai/gpt-4o,anthropic/claude-haiku-3.5
+oxicode --disable-fallback                     # Fail fast on errors
 ```
 
-### 8.2 Settings (oxi-store)
+### 8.2 Settings (oxicode-store)
 
 ```toml
 enable_routing = true
@@ -225,31 +225,31 @@ Press **Ctrl+R** to toggle routing status panel showing:
 
 | Phase | Work | Crate | Status |
 |---|---|---|---|
-| **1** | Promote `CircuitBreaker` to `oxi-ai` + add per-provider tracking | `oxi-ai` | ✅ Complete |
-| **2** | Promote `FallbackChain` to `oxi-ai` | `oxi-ai` | ✅ Complete |
-| **3** | Implement `Complexity` + `ComplexityRouter` | `oxi-ai` | ✅ Complete |
-| **4** | Implement `MultiProvider` (core routing logic) | `oxi-ai` | ✅ Complete |
-| **5** | Re-export in `oxi-ai/src/lib.rs` | `oxi-ai` | ✅ Complete |
-| **6** | Build `MultiProviderBuilder` in SDK | `oxi-sdk` | ✅ Complete |
-| **7** | Add `OxiBuilder::enable_routing()` + `RoutingConfig` | `oxi-sdk` | ✅ Complete |
-| **8** | Add CLI flags + TUI widget (Ctrl+R) | `oxi-cli`, `oxi-tui` | ✅ Complete |
-| **9** | Migrate `oxi-agent` to import from `oxi-ai` | `oxi-agent` | ✅ Complete |
-| **10** | Add routing config to Settings | `oxi-store` | ✅ Complete |
+| **1** | Promote `CircuitBreaker` to `oxicode-ai` + add per-provider tracking | `oxicode-ai` | ✅ Complete |
+| **2** | Promote `FallbackChain` to `oxicode-ai` | `oxicode-ai` | ✅ Complete |
+| **3** | Implement `Complexity` + `ComplexityRouter` | `oxicode-ai` | ✅ Complete |
+| **4** | Implement `MultiProvider` (core routing logic) | `oxicode-ai` | ✅ Complete |
+| **5** | Re-export in `oxicode-ai/src/lib.rs` | `oxicode-ai` | ✅ Complete |
+| **6** | Build `MultiProviderBuilder` in SDK | `oxicode-sdk` | ✅ Complete |
+| **7** | Add `OxicodeBuilder::enable_routing()` + `RoutingConfig` | `oxicode-sdk` | ✅ Complete |
+| **8** | Add CLI flags + TUI widget (Ctrl+R) | `oxicode-cli`, `oxicode-tui` | ✅ Complete |
+| **9** | Migrate `oxicode-agent` to import from `oxicode-ai` | `oxicode-agent` | ✅ Complete |
+| **10** | Add routing config to Settings | `oxicode-store` | ✅ Complete |
 
-### 9.1 Phase 9: `oxi-agent` Migration — COMPLETED
+### 9.1 Phase 9: `oxicode-agent` Migration — COMPLETED
 
-`oxi-agent/src/recovery.rs` replaced with re-exports from `oxi-ai`. Backward compatibility preserved.
+`oxicode-agent/src/recovery.rs` replaced with re-exports from `oxicode-ai`. Backward compatibility preserved.
 
 ### 9.2 Phase 10: Settings Integration — COMPLETED
 
-`oxi-store/src/settings.rs` includes: `enable_routing`, `prefer_cost_efficient`, `fallback_chain`, `enable_fallback`, `circuit_breaker_failure_threshold`, `circuit_breaker_open_duration_secs`.
+`oxicode-store/src/settings.rs` includes: `enable_routing`, `prefer_cost_efficient`, `fallback_chain`, `enable_fallback`, `circuit_breaker_failure_threshold`, `circuit_breaker_open_duration_secs`.
 
 ---
 
 ## 10. File Layout
 
 ```
-oxi-ai/src/
+oxicode-ai/src/
   ├── circuit_breaker.rs      ← Per-provider circuit breaker + ProviderCircuitBreaker
   ├── fallback_chain.rs       ← Ordered fallback chain (model_db-backed)
   ├── complexity_router.rs    ← ComplexityRouter trait + DefaultRouter
@@ -257,13 +257,13 @@ oxi-ai/src/
   ├── partial_response.rs      ← Partial response accumulator
   └── lib.rs                  ← Re-exports all types
 
-oxi-sdk/src/
+oxicode-sdk/src/
   ├── multi_provider.rs       ← MultiProviderBuilder + RoutingConfig
-  ├── builder.rs              ← OxiBuilder::enable_routing()
+  ├── builder.rs              ← OxicodeBuilder::enable_routing()
   ├── lib.rs                  ← Re-exports
   └── prelude.rs              ← Added to prelude
 
-oxi-cli/src/
+oxicode-cli/src/
   ├── cli.rs                  ← --enable-routing, --fallback-chain, etc.
   └── tui/
       ├── overlay/factories.rs ← routing_status() factory
@@ -271,10 +271,10 @@ oxi-cli/src/
       ├── app.rs              ← RoutingStatus overlay variant
       └── render.rs           ← Routing panel rendering
 
-oxi-store/src/
+oxicode-store/src/
   └── settings.rs             ← enable_routing, fallback_chain, etc.
 
-oxi-tui/src/widgets/
+oxicode-tui/src/widgets/
   └── routing.rs             ← RoutingStatus widget
 ```
 
@@ -286,12 +286,12 @@ oxi-tui/src/widgets/
 
 `MultiProvider` *is* a `Provider`. Backward compatible — any code accepting `Arc<dyn Provider>` works with routing. Can be registered in `ProviderRegistry` directly.
 
-### 11.2 Why promote to `oxi-ai`?
+### 11.2 Why promote to `oxicode-ai`?
 
-- `Provider` trait lives in `oxi-ai`
+- `Provider` trait lives in `oxicode-ai`
 - Routing logic is provider-selection, not agent behavior
-- Putting routing in `oxi-ai` avoids circular dependencies
-- General concepts (circuit breaker, fallback) don't belong in `oxi-agent`
+- Putting routing in `oxicode-ai` avoids circular dependencies
+- General concepts (circuit breaker, fallback) don't belong in `oxicode-agent`
 
 ### 11.3 Why not hardcode models?
 

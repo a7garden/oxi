@@ -1,8 +1,8 @@
-# oxi-sdk 설계 문서: Agent OS를 위한 차세대 SDK
+# oxicode-sdk 설계 문서: Agent OS를 위한 차세대 SDK
 
 **버전:** 0.23.0 Draft  
 **작성일:** 2026-05-25  
-**범위:** oxi-sdk 전체 재설계 + 새로운 Crate 분리 권고
+**범위:** oxicode-sdk 전체 재설계 + 새로운 Crate 분리 권고
 
 ---
 
@@ -16,24 +16,24 @@
 | 03 | `03-coordination.md` | 에이전트 간 조정 (WorkQueue + SharedMemory + Consensus) |
 | 04 | `04-observability.md` | 분산 Tracing + Audit Trail + Event Sourcing |
 | 05 | `05-middleware.md` | Middleware Chain + Dynamic Plugin 시스템 |
-| 06 | `06-integration.md` | 기존 코드와의 통합 방안, OxiBuilder/AgentBuilder 확장, 마이그레이션 |
+| 06 | `06-integration.md` | 기존 코드와의 통합 방안, OxicodeBuilder/AgentBuilder 확장, 마이그레이션 |
 
 ---
 
 ## 0.1 기존 아키텍처와의 정합성
 
 ```
-oxi-ai (provider abstraction) ← oxi-agent (tool loop) ← oxi-sdk (multi-agent orchestration)
+oxicode-ai (provider abstraction) ← oxicode-agent (tool loop) ← oxicode-sdk (multi-agent orchestration)
                                                           ↑
-                                                      oxi-store (session persistence)
+                                                      oxicode-store (session persistence)
 ```
 
-모든 새로운 추상화는 기존 oxi-ai, oxi-agent의 개념을 **확장**하고, **오버라이드**하지 않는다.
+모든 새로운 추상화는 기존 oxicode-ai, oxicode-agent의 개념을 **확장**하고, **오버라이드**하지 않는다.
 
 기존 코드 변경 최소화:
-- `oxi-ai`: 변경 없음
-- `oxi-agent`: `Agent`에 `config()` getter 등 소소한 추가만
-- `oxi-sdk`: 새 모듈 추가 위주
+- `oxicode-ai`: 변경 없음
+- `oxicode-agent`: `Agent`에 `config()` getter 등 소소한 추가만
+- `oxicode-sdk`: 새 모듈 추가 위주
 
 ---
 
@@ -52,7 +52,7 @@ oxi-ai (provider abstraction) ← oxi-agent (tool loop) ← oxi-sdk (multi-agent
 ## 0.3 새 모듈 레이아웃
 
 ```
-oxi-sdk/src/
+oxicode-sdk/src/
 ├── lifecycle/           # NEW: Agent lifecycle management
 │   ├── mod.rs           # AgentSnapshot, AgentStatus, AgentHandle, AgentLifecycleEvent
 │   ├── supervisor.rs    # AgentSupervisor, SupervisorPolicy, SnapshotStore
@@ -80,7 +80,7 @@ oxi-sdk/src/
 │
 │  ── 기존 모듈 (확장) ──
 ├── lib.rs               # re-export 확장
-├── builder.rs           # OxiBuilder에 security/observability/lifecycle 옵션 추가
+├── builder.rs           # OxicodeBuilder에 security/observability/lifecycle 옵션 추가
 ├── agent_builder.rs     # AgentBuilder에 capabilities/middleware 옵션 추가
 ├── kernel_bridge.rs     # KernelToolContext에 capabilities 통합
 ├── agent_group.rs       # 기존 유지
@@ -115,11 +115,11 @@ oxi-sdk/src/
 [dependencies]
 uuid = { version = "1", features = ["v4", "serde"] }
 glob = "0.3"           # capability path matching
-chrono = "0.4"         # timestamps (이미 oxi-ai에서 사용)
+chrono = "0.4"         # timestamps (이미 oxicode-ai에서 사용)
 
 # 기존 유지
-oxi-ai = { version = "0.22.0", path = "../oxi-ai" }
-oxi-agent = { version = "0.22.0", path = "../oxi-agent" }
+oxicode-ai = { version = "0.22.0", path = "../oxicode-ai" }
+oxicode-agent = { version = "0.22.0", path = "../oxicode-agent" }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
@@ -135,7 +135,7 @@ tracing = "0.1"
 
 | Phase | 모듈 | 예상 공수 | 의존성 |
 |-------|------|-----------|--------|
-| **Phase 1** | lifecycle (AgentHandle + Supervisor) | 2-3일 | oxi-agent Agentconfig() 추가 |
+| **Phase 1** | lifecycle (AgentHandle + Supervisor) | 2-3일 | oxicode-agent Agentconfig() 추가 |
 | **Phase 2** | security (Capability + Authorizer + SecurityMiddleware) | 2-3일 | Phase 1 (agent_id) |
 | **Phase 3** | coordination (WorkQueue + SharedMemory) | 2일 | Phase 1 (AgentHandle) |
 | **Phase 4** | observability (Tracer + AuditLog) | 2일 | Phase 2 (security audit) |

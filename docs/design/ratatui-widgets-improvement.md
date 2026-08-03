@@ -1,6 +1,6 @@
 # ratatui 0.30 위젯/API 개선 설계
 
-대상: oxi-tui (oxi-tui crate 내부)
+대상: oxicode-tui (oxicode-tui crate 내부)
 
 ## 항목
 
@@ -349,7 +349,7 @@ impl Widget for EntryWidget<'_> {
 `StatefulList`와 병렬로, 컬럼형 테이블을 제공하는 새 제네릭 구조체.
 
 ```rust
-// 파일: oxi-tui/src/widgets/table_list.rs (신규)
+// 파일: oxicode-tui/src/widgets/table_list.rs (신규)
 
 use ratatui::{
     layout::Constraint,
@@ -396,11 +396,11 @@ pub struct TableListStyles {
 }
 ```
 
-### 6-3. TableItem 구현 예시 (oxi-cli에서)
+### 6-3. TableItem 구현 예시 (oxicode-cli에서)
 
 ```rust
-// oxi-cli 측에서 정의 (oxi-tui는 트레이트만 제공)
-use oxi_tui::widgets::table_list::TableItem;
+// oxicode-cli 측에서 정의 (oxicode-tui는 트레이트만 제공)
+use oxicode_tui::widgets::table_list::TableItem;
 
 struct ModelEntry {
     id: String,           // "anthropic/claude-sonnet-4"
@@ -434,7 +434,7 @@ impl TableItem for ModelEntry {
 ### 6-4. 렌더링 (CompletionPopup과 유사한 오버레이)
 
 ```rust
-// oxi-tui/src/widgets/table_list.rs
+// oxicode-tui/src/widgets/table_list.rs
 
 impl TableListStyles {
     pub fn render<T: TableItem>(
@@ -473,7 +473,7 @@ impl TableListStyles {
 ### 6-5. 파일 구조 변경
 
 ```
-oxi-tui/src/widgets/
+oxicode-tui/src/widgets/
 ├── chat.rs            (기존)
 ├── completion.rs      (기존)
 ├── footer.rs          (기존)
@@ -536,7 +536,7 @@ impl FooterData {
 ```
 ────── separator ──────
 ↑1.2k ↓3.5k  45.2%/200k  Compacting...  2m
-~/oxi (main) *             (anth) claude-sonnet-4 • high
+~/oxicode (main) *             (anth) claude-sonnet-4 • high
 ```
 
 개선: 토큰 행을 확장하여 텍스트 + Sparkline 분할:
@@ -544,7 +544,7 @@ impl FooterData {
 ```
 ────── separator ──────
 ↑1.2k ↓3.5k  45.2%/200k  2m     ▁▂▃▅▇█▇▅▃▂▁▂▃▅
-~/oxi (main) *             (anth) claude-sonnet-4 • high
+~/oxicode (main) *             (anth) claude-sonnet-4 • high
 ```
 
 ### 7-4. 구현
@@ -606,10 +606,10 @@ impl StatefulWidget for Footer<'_> {
 }
 ```
 
-### 7-5. 샘플링 전략 (oxi-cli 측)
+### 7-5. 샘플링 전략 (oxicode-cli 측)
 
 ```rust
-// oxi-cli의 메인 이벤트 루프에서 (FooterData 업데이트 시)
+// oxicode-cli의 메인 이벤트 루프에서 (FooterData 업데이트 시)
 // 이전 output_tokens과의 차이를 계산하여 push
 let delta_tokens = current_output_tokens - prev_output_tokens;
 let elapsed_secs = tick_duration.as_secs().max(1);
@@ -645,5 +645,5 @@ Phase 3 (새 기능):
 
 - 모든 변경은 ratatui 0.30 (현재 Cargo.toml에 지정된 버전) 내에서 동작
 - 추가 크레이트 의존성 없음
-- oxi-tui의 공개 API는 `TableList` 추가를 제외하면 변경 없음 (내부 구현 개선)
+- oxicode-tui의 공개 API는 `TableList` 추가를 제외하면 변경 없음 (내부 구현 개선)
 - `IntoCrossterm`은 `ratatui`의 기본 `crossterm` 피처에 포함됨

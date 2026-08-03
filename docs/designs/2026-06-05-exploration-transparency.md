@@ -1,7 +1,7 @@
 # Exploration Transparency — 검색·탐색 과정의 실시간 시각화
 
 > **Status:** Design
-> **Scope:** oxibrowser-core → oxi-agent → oxi-sdk → oxios-kernel → oxios-web
+> **Scope:** oxibrowser-core → oxicode-agent → oxicode-sdk → oxios-kernel → oxios-web
 > **Precedes:** v0.13.0
 > **Depends on:** v0.12 observability (shipped), per-tab routing (designed, pending)
 
@@ -53,7 +53,7 @@ DocumentReady     → "Loaded "Example" — 200 · 1.2 KB · 0 scripts · 245 ms
 │   "이 URL 열었어. 200 OK. 12KB. 245ms."          │
 │   → 사실 보고(factual). 의도(intent) 없음         │
 ├─────────────────────────────────────────────────┤
-│ 에이전트 레벨 (oxi-agent)                         │
+│ 에이전트 레벨 (oxicode-agent)                         │
 │   "Rust headless browser 검색결과에서             │
 │    상위 3개 링크를 순차적으로 열어서               │
 │    비교 정보를 추출하고 있어."                      │
@@ -69,7 +69,7 @@ DocumentReady     → "Loaded "Example" — 200 · 1.2 KB · 0 scripts · 245 ms
 
 | # | 원칙 | 이유 |
 |---|------|------|
-| P1 | **브라우저는 사실만, 에이전트가 의미 부여** | oxibrowser는 검색엔진이 뭔지 모름. 의미는 oxi-agent가 생성 |
+| P1 | **브라우저는 사실만, 에이전트가 의미 부여** | oxibrowser는 검색엔진이 뭔지 모름. 의미는 oxicode-agent가 생성 |
 | P2 | **선언적 스텝, 명령형 틱** | "검색", "페이지 방문", "데이터 추출"은 스텝. 로딩 퍼센트 같은 틱은 없음 |
 | P3 | **기존 BrowserEvent 재사용** | 새 이벤트 시스템을 만들지 않음. 브라우저 이벤트 위에 의미 레이어를 쌓음 |
 | P4 | **UI는 구조만 받고 렌더링은 자유** | oxiOS WebUI가 카드 디자인을 결정. oxibrowser는 데이터만 보냄 |
@@ -96,7 +96,7 @@ DocumentReady     → "Loaded "Example" — 200 · 1.2 KB · 0 scripts · 245 ms
                         │ subscribe_events()
                         ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ oxi-agent                                                    │
+│ oxicode-agent                                                    │
 │                                                              │
 │  ExplorationTracker (NEW)                                    │
 │    BrowseTool의 고수준 액션을 탐색 스텝으로 변환               │
@@ -116,7 +116,7 @@ DocumentReady     → "Loaded "Example" — 200 · 1.2 KB · 0 scripts · 245 ms
                         │ AgentEvent stream
                         ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ oxi-sdk                                                      │
+│ oxicode-sdk                                                      │
 │                                                              │
 │  ExplorationEvent (re-export)                                │
 │  ExplorationStep (re-export)                                 │
@@ -282,7 +282,7 @@ v0.12의 `BrowserEvent` 4종 + `NavigationFailed` 1종은 **그대로** 사용�
 새 이벤트를 추가하지 않는다. 이유:
 
 1. 브라우저는 검색엔진, "탐색", "추출"의 개념을 모름
-2. 의미는 전부 oxi-agent 레이어에서 부여
+2. 의미는 전부 oxicode-agent 레이어에서 부여
 3. `NavigationStarted.url`에 `google.com/search?q=...`이 들어오면,
    agent가 그걸 해석해서 `ExplorationStep::Searching`으로 변환
 
@@ -303,14 +303,14 @@ BrowserEvent::RedirectChain {
 
 ---
 
-## 5. oxi-agent 변경사항
+## 5. oxicode-agent 변경사항
 
 ### 5.1 ExplorationTracker
 
 BrowseTool 내부에 탐색 상태를 관리하는 트래커를 추가한다.
 
 ```rust
-// oxi-agent/src/tools/browse/exploration.rs (NEW)
+// oxicode-agent/src/tools/browse/exploration.rs (NEW)
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -533,7 +533,7 @@ impl<'a> Drop for StepGuard<'a> {
 ### 5.2 BrowseTool 통합
 
 ```rust
-// oxi-agent/src/tools/browse/browse_tool.rs (수정)
+// oxicode-agent/src/tools/browse/browse_tool.rs (수정)
 
 impl BrowseTool {
     async fn execute(&self, ...) -> Result<AgentToolResult, ToolError> {
@@ -655,7 +655,7 @@ impl BrowseTool {
 ### 5.3 AgentEvent 확장
 
 ```rust
-// oxi-agent/src/events.rs
+// oxicode-agent/src/events.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -697,15 +697,15 @@ tab.set_progress_callback(tab_callback);
 
 ---
 
-## 6. oxi-sdk 변경사항
+## 6. oxicode-sdk 변경사항
 
 ### 6.1 타입 재export
 
 ```rust
-// oxi-sdk/src/lib.rs
+// oxicode-sdk/src/lib.rs
 
 #[cfg(feature = "native-browser")]
-pub use oxi_agent::exploration::{
+pub use oxicode_agent::exploration::{
     ExplorationProgress,
     ExplorationStep,
     StepStatus,
@@ -1075,7 +1075,7 @@ AgentEvent::ExplorationProgress { step, status }            ← 새로운
 
 ### 9.3 하위 호환
 
-- `ExplorationProgress`가 없는 구버전 oxi-agent는 기존 `ToolExecutionUpdate`만 보냄
+- `ExplorationProgress`가 없는 구버전 oxicode-agent는 기존 `ToolExecutionUpdate`만 보냄
 - 구버전 oxios-web은 `exploration_step` chunk를 무시 (unknown type)
 - 신버전은 둘 다 보고, UI가 풍부해짐
 
@@ -1083,23 +1083,23 @@ AgentEvent::ExplorationProgress { step, status }            ← 새로운
 
 ## 10. 구현 순서
 
-### Phase 1 — oxi-agent 탐색 트래커 (3-4일)
+### Phase 1 — oxicode-agent 탐색 트래커 (3-4일)
 
 | 작업 | 파일 | LoC |
 |------|------|-----|
-| `ExplorationStep`, `StepStatus`, `ExplorationProgress` 타입 | `oxi-agent/src/tools/browse/exploration.rs` (NEW) | ~150 |
+| `ExplorationStep`, `StepStatus`, `ExplorationProgress` 타입 | `oxicode-agent/src/tools/browse/exploration.rs` (NEW) | ~150 |
 | `ExplorationTracker` + `StepGuard` | 동일 | ~150 |
-| `AgentEvent::ExplorationProgress` variant 추가 | `oxi-agent/src/events.rs` | ~5 |
-| BrowseTool에 트래커 통합 | `oxi-agent/src/tools/browse/browse_tool.rs` | ~80 |
+| `AgentEvent::ExplorationProgress` variant 추가 | `oxicode-agent/src/events.rs` | ~5 |
+| BrowseTool에 트래커 통합 | `oxicode-agent/src/tools/browse/browse_tool.rs` | ~80 |
 | BrowserEvent → InProgress 브릿지 | 동일 | ~20 |
-| 단위 테스트 | `oxi-agent/src/tools/browse/exploration_tests.rs` (NEW) | ~100 |
+| 단위 테스트 | `oxicode-agent/src/tools/browse/exploration_tests.rs` (NEW) | ~100 |
 
-### Phase 2 — oxi-sdk export (0.5일)
+### Phase 2 — oxicode-sdk export (0.5일)
 
 | 작업 | 파일 | LoC |
 |------|------|-----|
-| 탐색 타입 re-export | `oxi-sdk/src/lib.rs` | ~5 |
-| 버전 bump | `oxi-sdk/Cargo.toml` | 1 |
+| 탐색 타입 re-export | `oxicode-sdk/src/lib.rs` | ~5 |
+| 버전 bump | `oxicode-sdk/Cargo.toml` | 1 |
 
 ### Phase 3 — oxios-kernel 이벤트 파이프라인 (1일)
 
@@ -1129,13 +1129,13 @@ AgentEvent::ExplorationProgress { step, status }            ← 새로운
 
 | 프로젝트 | 파일 | 액션 |
 |----------|------|------|
-| **oxi-agent** | `src/tools/browse/exploration.rs` | **NEW** |
+| **oxicode-agent** | `src/tools/browse/exploration.rs` | **NEW** |
 | | `src/tools/browse/exploration_tests.rs` | **NEW** |
 | | `src/tools/browse/browse_tool.rs` | 수정 |
 | | `src/tools/browse/mod.rs` | 수정 (mod 추가) |
 | | `src/events.rs` | 수정 (variant 추가) |
 | | `Cargo.toml` | 버전 bump |
-| **oxi-sdk** | `src/lib.rs` | 수정 (re-export) |
+| **oxicode-sdk** | `src/lib.rs` | 수정 (re-export) |
 | | `Cargo.toml` | 버전 bump |
 | **oxios-kernel** | `src/event_bus.rs` | 수정 (variant 추가) |
 | | `src/agent_runtime.rs` | 수정 (매핑 추가) |

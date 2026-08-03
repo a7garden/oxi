@@ -1,19 +1,19 @@
-# oxi Extension System Design — Extism/WASM
+# oxicode Extension System Design — Extism/WASM
 
 > Date: 2026-05-09
 > Status: Design
-> Author: oxi team
+> Author: oxicode team
 
 ## 1. 목표
 
-oxi 사용자가 **자신만의 확장을 작성**하여 oxi에 **런타임에 로드**할 수 있게 한다.
-oxi 버전이 업데이트되어도 **기존 확장이 깨지지 않아야** 한다.
+oxicode 사용자가 **자신만의 확장을 작성**하여 oxicode에 **런타임에 로드**할 수 있게 한다.
+oxicode 버전이 업데이트되어도 **기존 확장이 깨지지 않아야** 한다.
 
 ## 2. 왜 Extism/WASM인가
 
 | 대안 | 문제 |
 |------|------|
-| Rust cdylib | ABI 불안정, oxi 업데이트 시 전부 깨짐 |
+| Rust cdylib | ABI 불안정, oxicode 업데이트 시 전부 깨짐 |
 | stabby | 성숙도 낮음, 여전히 Rust 버전 의존 |
 | C ABI + JSON | 복잡도 대비 이점 적음, 샌드박스 없음 |
 | **Extism/WASM** | **ABI 안정, 샌드박스, 다언어, 프로덕션 검증** |
@@ -22,12 +22,12 @@ oxi 버전이 업데이트되어도 **기존 확장이 깨지지 않아야** 한
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                       oxi Core                           │
+│                       oxicode Core                           │
 │                                                          │
 │  ┌────────────────────────────────────────────────────┐  │
 │  │              Extension Manager                     │  │
 │  │                                                    │  │
-│  │  discover() → ~/.oxi/extensions/*.wasm             │  │
+│  │  discover() → ~/.oxicode/extensions/*.wasm             │  │
 │  │  load()     → Extism::Plugin::new()                │  │
 │  │  invoke()   → plugin.call("method", json)          │  │
 │  └────────────────────────────────────────────────────┘  │
@@ -40,7 +40,7 @@ oxi 버전이 업데이트되어도 **기존 확장이 깨지지 않아야** 한
 └──────────────────────────────────────────────────────────┘
 ```
 
-## 4. 확장 인터페이스 (WASM → oxi)
+## 4. 확장 인터페이스 (WASM → oxicode)
 
 확장은 WASM 모듈로 컴파일되며, 다음 **함수들을 export**합니다:
 
@@ -62,23 +62,23 @@ oxi 버전이 업데이트되어도 **기존 확장이 깨지지 않아야** 한
 
 모든 함수는 **JSON in → JSON out**입니다. 함수가 없으면 스킵 (기본값 적용).
 
-## 5. Host Functions (oxi → 확장)
+## 5. Host Functions (oxicode → 확장)
 
-oxi가 확장에게 제공하는 호스트 함수들:
+oxicode가 확장에게 제공하는 호스트 함수들:
 
 | Host 함수 | 목적 |
 |-----------|------|
-| `oxi_read_file(path) → content` | 파일 읽기 (권한 필요) |
-| `oxi_write_file(path, content)` | 파일 쓰기 (권한 필요) |
-| `oxi_exec(cmd, args) → output` | 셸 실행 (권한 필요) |
-| `oxi_http_request(url, method, body) → response` | HTTP 요청 (권한 필요) |
-| `oxi_log(level, message)` | 로그 출력 (항상 허용) |
-| `oxi_get_config(key) → value` | 확장 설정 읽기 (항상 허용) |
+| `oxicode_read_file(path) → content` | 파일 읽기 (권한 필요) |
+| `oxicode_write_file(path, content)` | 파일 쓰기 (권한 필요) |
+| `oxicode_exec(cmd, args) → output` | 셸 실행 (권한 필요) |
+| `oxicode_http_request(url, method, body) → response` | HTTP 요청 (권한 필요) |
+| `oxicode_log(level, message)` | 로그 출력 (항상 허용) |
+| `oxicode_get_config(key) → value` | 확장 설정 읽기 (항상 허용) |
 
 ## 6. 확장 매니페스트
 
 ```json
-// ~/.oxi/extensions/my-ext/manifest.json
+// ~/.oxicode/extensions/my-ext/manifest.json
 {
   "name": "my-ext",
   "version": "1.0.0",
@@ -93,20 +93,20 @@ oxi가 확장에게 제공하는 호스트 함수들:
 
 또는 단일 파일:
 ```
-~/.oxi/extensions/my_ext.wasm    ← manifest 없이도 로드 가능
+~/.oxicode/extensions/my_ext.wasm    ← manifest 없이도 로드 가능
 ```
 
 ## 7. 디렉토리 구조
 
 ```
-~/.oxi/
+~/.oxicode/
 ├── extensions/
 │   ├── my_ext.wasm              # 직접 배치
 │   ├── other-ext/
 │   │   ├── manifest.json
 │   │   └── other_ext.wasm
 │   └── installed/
-│       └── via-oxi-ext-install/
+│       └── via-oxicode-ext-install/
 └── settings.toml                # extensions = ["my_ext", "other-ext"]
 ```
 
@@ -187,10 +187,10 @@ pub fn execute_tool(Json(params): Json<serde_json::Value>) -> FnResult<Json<serd
 ```bash
 cd my-ext
 cargo build --release --target wasm32-unknown-unknown
-cp target/wasm32-unknown-unknown/release/my_ext.wasm ~/.oxi/extensions/
+cp target/wasm32-unknown-unknown/release/my_ext.wasm ~/.oxicode/extensions/
 ```
 
-## 9. oxi 쪽 구현
+## 9. oxicode 쪽 구현
 
 ### Cargo.toml
 
@@ -208,7 +208,7 @@ pub struct ExtensionManager {
 }
 
 impl ExtensionManager {
-    /// ~/.oxi/extensions/ 에서 .wasm 파일 발견
+    /// ~/.oxicode/extensions/ 에서 .wasm 파일 발견
     pub fn discover() -> Vec<PathBuf>;
 
     /// .wasm → extism::Plugin 로드
@@ -264,12 +264,12 @@ impl AgentTool for WasmTool {
 - ❌ 네트워크 접근 불가
 - ❌ 셸 실행 불가
 - ✅ JSON 입출력만 가능
-- ✅ oxi_log()로 로그 출력
+- ✅ oxicode_log()로 로그 출력
 
 ### 권한 부여
 
 ```toml
-# ~/.oxi/settings.toml
+# ~/.oxicode/settings.toml
 [[extension_permissions]]
 name = "my_ext"
 permissions = ["file_read", "network"]
@@ -305,17 +305,17 @@ fn host_read_file(plugin: &mut Plugin, path: &str) -> Result<String> {
 - `extism` 의존성 추가
 - `ExtensionManager` 구현 (discover, load, init, register_tools, execute_tool)
 - `WasmTool` AgentTool 래퍼
-- `~/.oxi/extensions/*.wasm` 자동 발견
+- `~/.oxicode/extensions/*.wasm` 자동 발견
 - `/extensions` 슬래시 명령 (목록, 로드, 언로드)
 
 ### Phase 2: Host Functions
-- `oxi_read_file`, `oxi_write_file` 등 호스트 함수 제공
+- `oxicode_read_file`, `oxicode_write_file` 등 호스트 함수 제공
 - 권한 시스템 구현
 
 ### Phase 3: 생태계
-- `oxi ext init` — 확장 프로젝트 스캐폴딩
-- `oxi ext build` — WASM 빌드
-- `oxi ext install <url>` — 원격 확장 설치
+- `oxicode ext init` — 확장 프로젝트 스캐폴딩
+- `oxicode ext build` — WASM 빌드
+- `oxicode ext install <url>` — 원격 확장 설치
 - 확장 레지스트리 (crates.io 유사)
 
 ### Phase 4: 다언어 지원
@@ -326,7 +326,7 @@ fn host_read_file(plugin: &mut Plugin, path: &str) -> Result<String> {
 ## 13. 기존 코드와의 관계
 
 ### 유지
-- `Extension` 트레잇 → **in-process Rust 확장용** (oxi 자체 기능)
+- `Extension` 트레잇 → **in-process Rust 확장용** (oxicode 자체 기능)
 - `ExtensionRegistry` → in-process 확장 관리용
 - `ExtensionRunner` → 이벤트 디스패치용
 
@@ -343,10 +343,10 @@ fn host_read_file(plugin: &mut Plugin, path: &str) -> Result<String> {
 ## 14. 의존성
 
 ```toml
-# oxi-cli/Cargo.toml
+# oxicode-cli/Cargo.toml
 [dependencies]
 extism = "1.21"          # Host SDK
-# extism-pdk은 확장 작성자만 필요 — oxi 자체는 불필요
+# extism-pdk은 확장 작성자만 필요 — oxicode 자체는 불필요
 # wasmtime은 extism이 내부적으로 관리
 ```
 
@@ -358,5 +358,5 @@ extism = "1.21"          # Host SDK
 |--------|------|
 | wasmtime 바이너리 크기 | release 빌드에서 ~2MB, 허용 가능 |
 | Extism 프로젝트 중단 | wasmtime 직접 사용으로 전환 가능 (Extism은 얇은 래퍼) |
-| WASM 디버깅 어려움 | extism-pdk의 log 함수 + oxi 로그 통합 |
+| WASM 디버깅 어려움 | extism-pdk의 log 함수 + oxicode 로그 통합 |
 | 비동기 지원 | spawn_blocking으로 감싸기, 확장 내부는 동기 |

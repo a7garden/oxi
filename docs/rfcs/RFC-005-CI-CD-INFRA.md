@@ -11,7 +11,7 @@
 
 ### 기존 CI 현황 (이미 구현됨)
 
-oxi는 이미 2개의 종합적인 GitHub Actions 워크플로우를 보유하고 있다:
+oxicode는 이미 2개의 종합적인 GitHub Actions 워크플로우를 보유하고 있다:
 
 #### ci.yml — 품질 게이트 (8개 잡)
 | 잡 | 설명 |
@@ -43,7 +43,7 @@ oxi는 이미 2개의 종합적인 GitHub Actions 워크플로우를 보유하�
 
 ### CI 비교 (수정됨)
 
-| 기능 | pi | oxi | 격차 |
+| 기능 | pi | oxicode | 격차 |
 |------|----|-----|------|
 | CI 워크플로우 | 7개 | 2개 (8+5 잡) | 중간 |
 | 품질 게이트 | ✅ | ✅ (fmt/clippy/test/doc/deny) | 없음 |
@@ -155,30 +155,30 @@ jobs:
           ${{ matrix.use_cross && 'cross' || 'cargo' }} build \
             --release \
             --target ${{ matrix.target }} \
-            -p oxi-cli
+            -p oxicode-cli
       
       - name: Strip binary
         if: runner.os != 'Windows'
         run: |
-          strip target/${{ matrix.target }}/release/oxi${{ matrix.suffix }}
+          strip target/${{ matrix.target }}/release/oxicode${{ matrix.suffix }}
       
       - name: Compress (UPX)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y upx-ucl
-          upx --best target/${{ matrix.target }}/release/oxi
+          upx --best target/${{ matrix.target }}/release/oxicode
       
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/oxi* dist/
+          cp target/${{ matrix.target }}/release/oxicode* dist/
           cp LICENSE README.md dist/
-          cd dist && tar czf oxi-${{ matrix.target }}.tar.gz *
+          cd dist && tar czf oxicode-${{ matrix.target }}.tar.gz *
       
       - uses: actions/upload-artifact@v4
         with:
-          name: oxi-${{ matrix.target }}
-          path: dist/oxi-${{ matrix.target }}.tar.gz
+          name: oxicode-${{ matrix.target }}
+          path: dist/oxicode-${{ matrix.target }}.tar.gz
 ```
 
 #### pr-gate.yml — PR 품질 게이트 (신규)
@@ -212,7 +212,7 @@ jobs:
 ### 3.2 자동 업데이트
 
 ```rust
-/// oxi-cli/src/updater.rs — 신규
+/// oxicode-cli/src/updater.rs — 신규
 
 use self_update::cargo_crate_version;
 
@@ -227,7 +227,7 @@ impl Updater {
         Self {
             current_version: cargo_crate_version!().to_string(),
             repo_owner: "earendil-works".into(),
-            repo_name: "oxi".into(),
+            repo_name: "oxicode".into(),
         }
     }
     
@@ -263,7 +263,7 @@ impl Updater {
             .repo_owner(&self.repo_owner)
             .repo_name(&self.repo_name)
             .target(&target)
-            .bin_name("oxi")
+            .bin_name("oxicode")
             .show_download_progress(true)
             .current_version(cargo_crate_version!())
             .build()?
@@ -334,21 +334,21 @@ opt-level = 3
 ## 설치
 
 # Homebrew (macOS/Linux)
-brew install earendil-works/tap/oxi
+brew install earendil-works/tap/oxicode
 
 # Cargo
-cargo install oxi-cli
+cargo install oxicode-cli
 
 # 직접 다운로드
-curl -fsSL https://github.com/earendil-works/oxi/releases/latest/download/oxi-$(uname -m)-$(uname -s).tar.gz | tar xz
-sudo mv oxi /usr/local/bin/
+curl -fsSL https://github.com/earendil-works/oxicode/releases/latest/download/oxicode-$(uname -m)-$(uname -s).tar.gz | tar xz
+sudo mv oxicode /usr/local/bin/
 
 # Windows (scoop)
-scoop bucket add oxi https://github.com/earendil-works/oxi-scoop
-scoop install oxi
+scoop bucket add oxicode https://github.com/earendil-works/oxicode-scoop
+scoop install oxicode
 
 # 자동 업데이트
-oxi update              # 또는 설정에서 auto_update = true
+oxicode update              # 또는 설정에서 auto_update = true
 ```
 
 ### 3.6 Homebrew Formula 자동 생성
@@ -417,6 +417,6 @@ sha2 = "0.10"                                                # 체크섬
 - [x] 보안 감사: cargo audit + cargo deny 매 PR/푸시마다 자동 실행 (이미 구현됨)
 - [x] 릴리즈: 태그 푸시 시 자동 바이너리 빌드 + GitHub Release 업로드 (이미 구현됨, 5 타겟)
 - [ ] 크로스 컴파일: 8개 타겟 (musl x64/arm64, aarch64-windows 추가)
-- [ ] 자동 업데이트: `oxi update` 실행 시 최신 버전 설치
+- [ ] 자동 업데이트: `oxicode update` 실행 시 최신 버전 설치
 - [ ] 배포: Homebrew + crates.io + 직접 다운로드
 - [ ] PR 게이트: PR 사이즈, 컨벤션 커밋 검사

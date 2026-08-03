@@ -2,10 +2,10 @@
 
 ## 0. tl;dr
 
-| # | 프로젝트 | 라이선스 | 무엇을 주는가 | oxi 재사용 전략 |
+| # | 프로젝트 | 라이선스 | 무엇을 주는가 | oxicode 재사용 전략 |
 |---|----------|----------|---------------|-----------------|
 | 1 | **Codex CLI** (OpenAI) | Apache 2.0 | `Renderable` trait, 셀 단위 diff, terminal color probing, ChatWidget + BottomPane, theme hardcoded | **레퍼런스 코드 베껴오기** — Renderable + ChatWidget + BottomPane 구조는 금방 따라할 수 있고 peer pressure 있는 추적 대상. 라이브러리 재사용 X |
-| 2 | **Grok Build** (xAI) | Apache 2.0 | `xai-grok-pager-render` (테마+렌더), `xai-ratatui-inline` (커스텀 ratatui fork, blink-preserving), `xai-grok-markdown` (스트리밍 markdown + LaTeX + Mermaid), `xai-ratatui-textarea`, 5 built-in themes | **핵심 채택 후보** — 특히 `xai-ratatui-inline`의 blink-preserving flush, `xai-grok-markdown`의 streaming markdown가 oxi의 폭주 방지/스트리밍 UX의 정답에 가까움 |
+| 2 | **Grok Build** (xAI) | Apache 2.0 | `xai-grok-pager-render` (테마+렌더), `xai-ratatui-inline` (커스텀 ratatui fork, blink-preserving), `xai-grok-markdown` (스트리밍 markdown + LaTeX + Mermaid), `xai-ratatui-textarea`, 5 built-in themes | **핵심 채택 후보** — 특히 `xai-ratatui-inline`의 blink-preserving flush, `xai-grok-markdown`의 streaming markdown가 oxicode의 폭주 방지/스트리밍 UX의 정답에 가까움 |
 | 3 | **VT Code** (vinhnx) | Apache 2.0 | `vtcode-ui` 자체가 분리 가능한 TUI 라이브러리. `HostAdapter` trait + `spawn_core_session()` API, 40+ 테마 registry, markdown 렌더러, 디자인 시스템 | **임베드 가능 라이브러리 후보 #1** — `crates/codegen/vtcode-ui`가 단독 dep 가능. 다만 agent loop과 강결합이라서 surface 한정적으로만 |
 | 4 | **rust-code** (fortunto2) | MIT | `sgr-agent-tui` (TUI scaffold: ChatState, FocusLayer, CommandPalette, AppEvent), 채널 기반 event loop | **부분 차용** — `sgr-agent-tui`의 module 분리(FocusLayer, CommandPalette 등)가 깔끔. 테마는 hardcoded라 그대로 못 씀 |
 | 5 | **CodeWhale** (Hmbown) | MIT | 18-crate workspace, `crates/tui` 거대형, `crates/agent` BYOM registry, `crates/state` SQLite persistence, `crates/lsp` post-edit diagnostics, `crates/sandbox` (Seatbelt, bwrap, Landlock) | **Architecture 참고용** — `crates/tui`가 너무 거대(자체 ARCHITECTURE 문서도 "still the live runtime"이라 표기). 직접 dep 비추, BYOM 모델·sandbox 구조는 따라할 것 |
@@ -77,7 +77,7 @@
 - **Terminal detection**: brand, multiplexer, Kitty keyboard, hyperlinks (1.1K lines)
 - **Syntax**: per-theme `.tmTheme` + polarity-safe mapping
 - **crates.io 확인 필요**: 이 크레이트들이 publish 되어 있는지 git log 확인 필요. xai-org는 거의 다 workspace-only일 가능성 높음
-- **재사용 판정** ⭐⭐⭐: **의존성 채택 최우선**. 특히 `xai-ratatui-inline` (blink-preserving flush는 oxi의 streaming tail 종료 시 깜빡임 문제 해결 가능), `xai-grok-markdown` (스트리밍 중간 코드 블록 처리)
+- **재사용 판정** ⭐⭐⭐: **의존성 채택 최우선**. 특히 `xai-ratatui-inline` (blink-preserving flush는 oxicode의 streaming tail 종료 시 깜빡임 문제 해결 가능), `xai-grok-markdown` (스트리밍 중간 코드 블록 처리)
 
 ### 2.3 VT Code (vinhnx) — github.com/vinhnx/vtcode
 
@@ -96,7 +96,7 @@
   - `tui/` — core_tui (session lifecycle, runner loop, widget tree) + ui (markdown, interactive list, search, syntax)
 - **Theming**: 40+ theme (Catppuccin, Gruvbox, Solarized, …), runtime active swap, hot-reload 가능성
 - **Markdown**: custom renderer (pulldown-cmark + syntect) — `tui/ui/markdown/mod.rs`
-- **재사용 판정** ⭐⭐: **embed 가능한 라이브러리 후보 #1**. `HostAdapter` 기반이라 agent loop은 oxi 것을 쓰고 TUI만 빌릴 수 있음. 다만 vtcode-core 의미 모델(`InlineCommand`, `InlineEvent`, `InlineHandle`)과 결속되어 있어 surface 일부만 활용 가능
+- **재사용 판정** ⭐⭐: **embed 가능한 라이브러리 후보 #1**. `HostAdapter` 기반이라 agent loop은 oxicode 것을 쓰고 TUI만 빌릴 수 있음. 다만 vtcode-core 의미 모델(`InlineCommand`, `InlineEvent`, `InlineHandle`)과 결속되어 있어 surface 일부만 활용 가능
 
 ### 2.4 rust-code (fortunto2) — github.com/fortunto2/rust-code
 
@@ -154,7 +154,7 @@
 - **Theme**: 9 static `Style` 함수 — ❌ pluggable 아님 ("full theming arrives in M3")
 - **Critical**: `render() is pub(crate)` — **외부에서 layout 커스터마이즈 불가**
 - **capo-agent coupling**: 미공개 SDK에 강결합
-- **재사용 판정** ⭐: **MVU는 oxi의 state+v2 있었고 비추**. 다만 markdown/highlight 모듈 소스만 빌려오면 됨
+- **재사용 판정** ⭐: **MVU는 oxicode의 state+v2 있었고 비추**. 다만 markdown/highlight 모듈 소스만 빌려오면 됨
 
 ---
 
@@ -177,10 +177,10 @@
 
 ---
 
-## 4. oxi 현재 상태 (v0.62.0)와의 매핑
+## 4. oxicode 현재 상태 (v0.62.0)와의 매핑
 
 ```
-oxi-tui/src/
+oxicode-tui/src/
 ├── lib.rs                    54
 ├── theme.rs              1,906   ← 6 colorschemes + 28 color slots + GlyphSet
 ├── symbols.rs              905   ← Unicode / Ascii / Nerd presets
@@ -199,11 +199,11 @@ oxi-tui/src/
 │   └── …                            7,839
 ├── keybindings/, input/, render/    ~ small
 ─────────────────────────────────────
-oxi-tui total                  ~10K LOC
+oxicode-tui total                  ~10K LOC
 ```
 
 ```
-oxi-cli/src/tui/
+oxicode-cli/src/tui/
 ├── app.rs               2,069    ← root state, dispatch, event loop
 ├── handlers.rs          1,752    ← input → AppEvent
 ├── render.rs                23
@@ -217,41 +217,41 @@ oxi-cli/src/tui/
 ├── slash/                  builtin/~10 commands
 ├── completion/             path, fuzzy_file
 ─────────────────────────────────────
-oxi-cli tui total          ~13K LOC
+oxicode-cli tui total          ~13K LOC
 ```
 
-**현재 oxi의 강점**:
+**현재 oxicode의 강점**:
 - 5종 colorscheme + 28 color slot 이미 wired (재구축 시 또 같은 짓 반복 X)
 - GlyphSet (Unicode/Ascii/Nerd) 분기
 - TapeEngine이 RetainedTree + memoization
 
-**현재 oxi의 약점** (최초 메시지에서 냉정히 진단):
+**현재 oxicode의 약점** (최초 메시지에서 냉정히 진단):
 - **렌더링이 안 뜨다가 Ctrl+C에 flush** ← 사용자 보고. 스트리밍 출력 끝에서 blink/flush 누락이 의심
-- `oxi-cli/src/tui/app.rs` 2,069 + `handlers.rs` 1,752은 monolith
+- `oxicode-cli/src/tui/app.rs` 2,069 + `handlers.rs` 1,752은 monolith
 - widget 분리는 잘 됐지만 event loop이 단순 (단일 채널, biased select도 아님)
 - Markdown streaming 처리가 widgets/chat/markdown.rs 459 LOC 한 곳에 응집
 - BottomPane/overlay가 9K+ LOC로 비대 (overlay는 사실 작은 view들이고, 공유 footer/status widget 없어서 중복)
 
 ---
 
-## 5. oxi TUI 재구축을 위한 구체 추천
+## 5. oxicode TUI 재구축을 위한 구체 추천
 
 ### 5.1 즉시 차용 (코드 베끼기 OK, Apache 2.0 / MIT 둘 다 OK)
 
 | 자원 | 출처 | 어디에 적용 |
 |---|---|---|
-| `Renderable` trait | Codex `tui/src/render/renderable.rs` | oxi의 theme 모듈 옆에 `render/mod.rs` 신설 |
-| ChatWidget + BottomPane 구조 | Codex `tui/src/chatwidget.rs` + `bottom_pane/` | oxi의 `widgets/chat/` + `tui/overlay/` 합리적 분리 |
-| **blink-preserving flush Terminal** | Grok Build `xai-ratatui-inline` | oxi의 main 화면이 alt screen 진입/이탈 + 스트리밍 tail 시 깜빡임 해결 |
+| `Renderable` trait | Codex `tui/src/render/renderable.rs` | oxicode의 theme 모듈 옆에 `render/mod.rs` 신설 |
+| ChatWidget + BottomPane 구조 | Codex `tui/src/chatwidget.rs` + `bottom_pane/` | oxicode의 `widgets/chat/` + `tui/overlay/` 합리적 분리 |
+| **blink-preserving flush Terminal** | Grok Build `xai-ratatui-inline` | oxicode의 main 화면이 alt screen 진입/이탈 + 스트리밍 tail 시 깜빡임 해결 |
 | **Streaming markdown** | Grok Build `xai-grok-markdown` | `widgets/chat/markdown.rs` 교체 (459 LOC → 더 견고) |
-| **Terminal color probing** | Codex `tui/src/terminal_palette.rs` | oxi의 theme.rs에 자동 follow 추가 |
-| `HostAdapter` trait | VT Code `tui/src/tui/host.rs` | oxi-cli ↔ oxi-tui 경계 정리 (현재 App::from_oxi() 보완) |
+| **Terminal color probing** | Codex `tui/src/terminal_palette.rs` | oxicode의 theme.rs에 자동 follow 추가 |
+| `HostAdapter` trait | VT Code `tui/src/tui/host.rs` | oxicode-cli ↔ oxicode-tui 경계 정리 (현재 App::from_oxicode() 보완) |
 | `drive_headless()` 테스트 헬퍼 | capo-tui | nextest 파이프라인에 headless 회귀 |
 | `TerminalGuard` RAII | capo-tui | ratatui raw mode leak 방지 |
 
 ### 5.2 crates.io 의존성 후보 (실사용 전 publish 여부 확인 필수)
 
-| 크레이트 | 확인 포인트 | oxi 채택 가부 |
+| 크레이트 | 확인 포인트 | oxicode 채택 가부 |
 |---|---|---|
 | `xai-grok-pager-render` | xai-org crates.io publish 여부. workspace-only 라면 xai-ratatui-inline, xai-grok-markdown만 따로 추출 가능한지 | 가능 |
 | `xai-ratatui-inline` | ratatui fork — 버전 호환성 확인 필요 | 가능 |
@@ -264,16 +264,16 @@ oxi-cli tui total          ~13K LOC
 
 | 패턴 | 출처 | 이유 |
 |---|---|---|
-| Elm-style MVU | capo-tui | 우리 oxi v2에서 이미 실패한 적 있음 |
+| Elm-style MVU | capo-tui | 우리 oxicode v2에서 이미 실패한 적 있음 |
 | Hardcoded theme | rust-code, Codex, capo-tui | 우리 theme 시스템은 28 color slot + 5 scheme 이미 있음 |
 | 거대 단일 `crates/tui` | CodeWhale | ARCHITECTURE 문서도 "still the live runtime"이라 명시 (자체 한계 인정) |
 | TOML/JSON 선언형 theme 5종만 | Grok Build | 우리 28-slot + 6 scheme이면 더 강력 |
 
-### 5.4 oxi TUI 재구축 권장 아키텍처
+### 5.4 oxicode TUI 재구축 권장 아키텍처
 
 ```
 crates/
-├── oxi-tui/                          (현재 이름 유지, chat_widget / tape는 폐기)
+├── oxicode-tui/                          (현재 이름 유지, chat_widget / tape는 폐기)
 │   ├── lib.rs
 │   ├── render/                       ← NEW: Renderable trait + diff flush + blink-preserving
 │   │   ├── mod.rs
@@ -303,10 +303,10 @@ crates/
 │   ├── event_loop.rs                 (biased tokio::select 3-arm from Codex)
 │   ├── host_adapter.rs               (HostAdapter trait from VT Code)
 │   └── input/                        (keybindings, mouse)
-├── oxi-cli/src/tui/                  (composition root)
+├── oxicode-cli/src/tui/                  (composition root)
 │   ├── app.rs                        (refactor: app state only, widget tree assembly)
 │   ├── handlers.rs                   (smaller; delegate to widgets)
-│   ├── overlay/                      (thin slices delegating to oxi-tui widgets/overlay)
+│   ├── overlay/                      (thin slices delegating to oxicode-tui widgets/overlay)
 │   └── slash/                        (slash commands)
 ```
 
@@ -315,7 +315,7 @@ crates/
 2. **Renderable trait**: 모든 widget이 자체 크기/커서 위치를 선언
 3. **Streaming markdown**: incremental pulldown-cmark + 코드 블록 partial buffer
 4. **Blink-preserving flush**: 매 프레임 `Terminal::flush()`가 bool 반환, 안 바뀌었으면 깜빡임 안 함
-5. **HostAdapter**: oxi-cli ↔ oxi-tui 경계 명확화 (현재 `App::from_oxi()` 보완)
+5. **HostAdapter**: oxicode-cli ↔ oxicode-tui 경계 명확화 (현재 `App::from_oxicode()` 보완)
 6. **Headless drive**: nextest에서 render → snapshot 픽스
 7. **Auto-follow theme**: OSC 10/11로 terminal 색 따라가기
 
@@ -324,10 +324,10 @@ crates/
 ## 6. Risk + Caveat
 
 - **xai-org crates.io publish 상태**: workspace-only일 가능성 높음.  publish 안 됐다면 `xai-ratatui-inline`/`xai-grok-markdown` 만 들고 와서 vendoring. 둘 다 Apache 2.0이라 NOTICE 파일만 잘 달면 OK
-- **ratatui version drift**: Grok Build = 0.29, oxi = 0.30(2026-07).  0.29→0.30 patch 적용 필요
+- **ratatui version drift**: Grok Build = 0.29, oxicode = 0.30(2026-07).  0.29→0.30 patch 적용 필요
 - **Codex는 매일 변하는 코드**: GitHub `codex-rs/tui`를 fork해서 둘 필요 없음. `Renderable`/terminal probing은 안정 API라 그냥 복붙
 - **CodeWhale의 거대 TUI**: "incremental split" 이 ARCHITECTURE 문서 자체가 명시. 참고만
-- **vtcode-ui의 의미 모델**: vtcode-core 강결합 채택 시 의미 모델 두 개(co에 oxi-ai + vtcode-ui) 공존.  `HostAdapter` surface만 빌리는 게 안전
+- **vtcode-ui의 의미 모델**: vtcode-core 강결합 채택 시 의미 모델 두 개(co에 oxicode-ai + vtcode-ui) 공존.  `HostAdapter` surface만 빌리는 게 안전
 
 ---
 
@@ -338,6 +338,6 @@ crates/
 - **VT Code** 의 `HostAdapter` 임베드 API 차용,
 - **capo-tui** 에서 `TerminalGuard` + `drive_headless` 차용,
 - **CodeWhale / rust-code** 는 아키텍처 참고용,
-- **결국 "한 통으로 dep" 라이브러리는 없음** — oxi의 테마 시스템은 우리 것이 더 강력하므로 그냥 유지.
+- **결국 "한 통으로 dep" 라이브러리는 없음** — oxicode의 테마 시스템은 우리 것이 더 강력하므로 그냥 유지.
 
 재구축은 1) chat streaming UX (ClI C 에서 발견된 blink/flush 문제)부터 고치고, 2) Renderable 추상화 깔고, 3) markdown 스트리밍을 pulldown-cmark incremental로 옮기는 순서로.

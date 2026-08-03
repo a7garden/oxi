@@ -18,7 +18,7 @@
 9. [BrowseSessionTool](#9-browsesessiontool)
 10. [BrowseExtractTool](#10-browseextracttool)
 11. [BrowseScriptTool](#11-browsescripttool)
-12. [OxiBrowser Backend](#12-oxibrowser-backend)
+12. [OxicodeBrowser Backend](#12-oxibrowser-backend)
 13. [Tab Guard (RAII)](#13-tab-guard-raii)
 14. [Browse Config](#14-browse-config)
 15. [Helpers](#15-helpers)
@@ -29,7 +29,7 @@
 
 ## 1. AgentEvent System
 
-**File:** `oxi-agent/src/events.rs`
+**File:** `oxicode-agent/src/events.rs`
 
 ### Key Type: `AgentEvent` (enum, `#[non_exhaustive]`)
 
@@ -75,7 +75,7 @@ The `ToolExecutionUpdate` variant already carries an optional `tab_id: Option<uu
 
 ## 2. Agent Tool Trait & Registry
 
-**File:** `oxi-agent/src/tools.rs`
+**File:** `oxicode-agent/src/tools.rs`
 
 ### Key Types
 
@@ -145,7 +145,7 @@ pub struct AgentToolResult {
     pub success: bool,
     pub output: String,
     pub metadata: Option<serde_json::Value>,
-    pub content_blocks: Option<Vec<oxi_ai::ContentBlock>>,
+    pub content_blocks: Option<Vec<oxicode_ai::ContentBlock>>,
     pub terminate: bool,
 }
 ```
@@ -165,13 +165,13 @@ pub struct ToolContext {
 #### `ToolRegistry`
 - `HashMap<String, Arc<dyn AgentTool>>` behind `Arc<parking_lot::RwLock<...>>`
 - `with_builtins_cwd()` registers: ReadTool, WriteTool, EditTool, BashTool, GrepTool, FindTool, LsTool, WebSearchTool, GetSearchResultsTool, GitHubTool, SubagentTool, McpTool, Context7ResolveLibraryIdTool, Context7QueryDocsTool, GenerateImageTool
-- **Browser tools are NOT registered by default** — they're added separately in `oxi-cli/src/bootstrap.rs`
+- **Browser tools are NOT registered by default** — they're added separately in `oxicode-cli/src/bootstrap.rs`
 
 ---
 
 ## 3. Agent Struct & Run Flow
 
-**File:** `oxi-agent/src/agent.rs`
+**File:** `oxicode-agent/src/agent.rs`
 
 ### Key Struct: `Agent`
 
@@ -221,7 +221,7 @@ Agent::run_with_channel(prompt, tx)
 
 ## 4. Agent Loop
 
-**File:** `oxi-agent/src/agent_loop/mod.rs`
+**File:** `oxicode-agent/src/agent_loop/mod.rs`
 
 ### Key Struct: `AgentLoop`
 
@@ -281,7 +281,7 @@ run_messages(prompts, emit)
 
 ## 5. Tool Execution Logic
 
-**File:** `oxi-agent/src/agent_loop/tool_exec.rs`
+**File:** `oxicode-agent/src/agent_loop/tool_exec.rs`
 
 ### Key Function: `execute_tool_calls()`
 
@@ -337,7 +337,7 @@ async fn execute_prepared_tool_call(...) -> ExecutedToolCallOutcome {
 
 ## 6. Browse Module Structure
 
-**File:** `oxi-agent/src/tools/browse/mod.rs`
+**File:** `oxicode-agent/src/tools/browse/mod.rs`
 
 ```
 browse/
@@ -347,7 +347,7 @@ browse/
 ├── browse_extract_tool.rs  — BrowseExtractTool (CSS selector extraction)
 ├── browse_script_tool.rs   — BrowseScriptTool (YAML automation) [feature-gated]
 ├── engine.rs               — BrowserEngine + BrowserTab traits + TabCallbackRegistry
-├── oxibrowser_backend.rs   — OxiBrowserEngine + OxiTab [feature-gated]
+├── oxibrowser_backend.rs   — OxicodeBrowserEngine + OxicodeTab [feature-gated]
 ├── config.rs               — BrowseConfig
 ├── helpers.rs              — JS snippets + result parsing
 └── tab_guard.rs            — RAII tab cleanup
@@ -366,14 +366,14 @@ pub use tab_guard::TabGuard;
 
 #[cfg(feature = "native-browser")]
 pub use browse_script_tool::BrowseScriptTool;
-pub use oxibrowser_backend::OxiBrowserEngine;
+pub use oxibrowser_backend::OxicodeBrowserEngine;
 ```
 
 ---
 
 ## 7. Browser Engine Abstraction
 
-**File:** `oxi-agent/src/tools/browse/engine.rs`
+**File:** `oxicode-agent/src/tools/browse/engine.rs`
 
 ### `BrowserEngine` (trait)
 
@@ -466,7 +466,7 @@ pub struct TabCallbackRegistry {
 
 ## 8. BrowseTool
 
-**File:** `oxi-agent/src/tools/browse/browse_tool.rs`
+**File:** `oxicode-agent/src/tools/browse/browse_tool.rs`
 
 ### Struct
 
@@ -499,9 +499,9 @@ pub struct BrowseTool {
    - Opens a new tab via `engine.new_tab()`
    - Reads `tab_id` from the tab
    - Writes tab_id to `tab_id_slot` (so `tool_exec.rs`'s callback reads it)
-   - On `native-browser` feature: downcasts tab to `OxiTab`, calls `set_progress_callback(cb)`
+   - On `native-browser` feature: downcasts tab to `OxicodeTab`, calls `set_progress_callback(cb)`
    - This registers the callback in `TabCallbackRegistry` keyed by `tab_id`
-4. The background event-drain task in `OxiBrowserEngine` then routes browser events to this callback.
+4. The background event-drain task in `OxicodeBrowserEngine` then routes browser events to this callback.
 
 ### Execute Flow
 
@@ -534,7 +534,7 @@ BrowseTool opens **exactly one tab per request** and closes it before returning.
 
 ## 9. BrowseSessionTool
 
-**File:** `oxi-agent/src/tools/browse/browse_session_tool.rs`
+**File:** `oxicode-agent/src/tools/browse/browse_session_tool.rs`
 
 ### Struct
 
@@ -583,7 +583,7 @@ close → guard.close().await → slot.take()
 
 ## 10. BrowseExtractTool
 
-**File:** `oxi-agent/src/tools/browse/browse_extract_tool.rs`
+**File:** `oxicode-agent/src/tools/browse/browse_extract_tool.rs`
 
 ### Struct
 
@@ -624,7 +624,7 @@ pub struct BrowseExtractTool {
 
 ## 11. BrowseScriptTool
 
-**File:** `oxi-agent/src/tools/browse/browse_script_tool.rs`  
+**File:** `oxicode-agent/src/tools/browse/browse_script_tool.rs`  
 **Feature-gated:** `#[cfg(feature = "native-browser")]`
 
 ### Struct
@@ -667,15 +667,15 @@ pub struct ScriptResult {
 
 ---
 
-## 12. OxiBrowser Backend
+## 12. OxicodeBrowser Backend
 
-**File:** `oxi-agent/src/tools/browse/oxibrowser_backend.rs`  
+**File:** `oxicode-agent/src/tools/browse/oxibrowser_backend.rs`  
 **Feature-gated:** `#[cfg(feature = "native-browser")]`
 
-### `OxiBrowserEngine`
+### `OxicodeBrowserEngine`
 
 ```rust
-pub struct OxiBrowserEngine {
+pub struct OxicodeBrowserEngine {
     browser: oxibrowser_core::Browser,
     config: BrowseConfig,
     progress: Arc<TabCallbackRegistry>,
@@ -686,7 +686,7 @@ pub struct OxiBrowserEngine {
 ### Construction Flow
 
 ```
-OxiBrowserEngine::with_config(config)
+OxicodeBrowserEngine::with_config(config)
   ├── Build oxibrowser_core::BrowserConfig (headless, user_agent, obey_robots, js_timeout_ms)
   ├── oxibrowser_core::Browser::new(config) → browser
   ├── Create TabCallbackRegistry
@@ -697,7 +697,7 @@ OxiBrowserEngine::with_config(config)
   │     extract_event_tab_id(&event) → tab_id
   │     registry.invoke(&tab_id, event.short_label())
   │   }
-  └── Return OxiBrowserEngine
+  └── Return OxicodeBrowserEngine
 ```
 
 ### `BrowserEvent` → `tab_id` Mapping
@@ -714,10 +714,10 @@ fn extract_event_tab_id(event: &BrowserEvent) -> uuid::Uuid {
 }
 ```
 
-### `OxiTab`
+### `OxicodeTab`
 
 ```rust
-pub struct OxiTab {
+pub struct OxicodeTab {
     inner: oxibrowser_core::Tab,
     config: BrowseConfig,
     tab_id: uuid::Uuid,
@@ -738,7 +738,7 @@ oxibrowser-core (Browser)
   │
   ├── broadcast::Sender<BrowserEvent>
   │
-  ├── Subscribe → events_rx (in OxiBrowserEngine)
+  ├── Subscribe → events_rx (in OxicodeBrowserEngine)
   │     │
   │     ├── extract_event_tab_id(event)
   │     │
@@ -757,7 +757,7 @@ oxibrowser-core (Browser)
 
 ## 13. Tab Guard (RAII)
 
-**File:** `oxi-agent/src/tools/browse/tab_guard.rs`
+**File:** `oxicode-agent/src/tools/browse/tab_guard.rs`
 
 ```rust
 pub struct TabGuard {
@@ -780,7 +780,7 @@ Prevents tab leaks. Since `Drop` can't be async, the guard warns but can't actua
 
 ## 14. Browse Config
 
-**File:** `oxi-agent/src/tools/browse/config.rs`
+**File:** `oxicode-agent/src/tools/browse/config.rs`
 
 ### `BrowseConfig`
 
@@ -803,7 +803,7 @@ Prevents tab leaks. Since `Drop` can't be async, the guard warns but can't actua
 
 ## 15. Helpers
 
-**File:** `oxi-agent/src/tools/browse/helpers.rs`
+**File:** `oxicode-agent/src/tools/browse/helpers.rs`
 
 ### Link Extraction
 
@@ -854,9 +854,9 @@ Prevents tab leaks. Since `Drop` can't be async, the guard warns but can't actua
                │
                └── Calls tool.execute(tool_call_id, args, None, ctx)
                    │
-                   ├── engine.new_tab() → raw_tab (OxiTab)
+                   ├── engine.new_tab() → raw_tab (OxicodeTab)
                    ├── Stores tab_id in tab_id_slot
-                   ├── Downcasts to OxiTab → set_progress_callback(cb)
+                   ├── Downcasts to OxicodeTab → set_progress_callback(cb)
                    │   └── registry.set(tab_id, cb) in TabCallbackRegistry
                    │
                    ├── tab.goto(url)

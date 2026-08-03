@@ -146,13 +146,13 @@ RFC에 있는데 코드에 없는 항목: **없음** (모두 존재)
 RFC는 `ImagesContext`, `ImageSize`, `ImageQuality`, `ImagesResult` 등 완전한 타입 체계와 `Provider` 트레이트 확장(`generate_images`)을 제안한다.
 
 **문제점**:
-1. **oxi는 코딩 에이전트**. 이미지 생성은 핵심 기능이 아니다. pi에 있다고 해서 oxi에도 있어야 하는 것은 아님.
+1. **oxicode는 코딩 에이전트**. 이미지 생성은 핵심 기능이 아니다. pi에 있다고 해서 oxicode에도 있어야 하는 것은 아님.
 2. `Provider` 트레이트에 `generate_images`를 추가하면 **모든 8개 프로토콜 구현체**에 이 메서드를 구현하거나 기본 구현을 제공해야 함. 트레이트 파편화 위험.
 3. 실제 사용 사례: DALL-E 3 호출이 코딩 워크플로우에서 얼마나 필요한가?
 
 **개선안**: 
 - 이미지 생성을 `Provider` 트레이트 확장이 아닌 **독립 툴**(AgentTool)로 구현할 것.
-- `oxi-agent/src/tools/image_gen.rs`로 분리. 내부적으로 OpenAI API를 직접 호출.
+- `oxicode-agent/src/tools/image_gen.rs`로 분리. 내부적으로 OpenAI API를 직접 호출.
 - 우선순위를 Phase 1 → **Phase 4 이하**로 강하. 코딩 에이전트 핵심 경로가 아님.
 
 ### 3.2 🔶 WebSocket 스트리밍 — Phase 5 회의적
@@ -162,7 +162,7 @@ RFC는 Phase 5에서 WebSocket 전송을 제안한다.
 **문제점**:
 1. **주요 프로바이더 중 WebSocket을 요구하는 곳이 없다.** OpenAI, Anthropic, Google 모두 SSE로 충분.
 2. SSE가 이미 작동하는데 WebSocket을 추가하면 **이중 유지보수 비용**만 발생.
-3. pi가 WebSocket을 지원한다는 것이 oxi에도 필요하다는 근거가 안 됨.
+3. pi가 WebSocket을 지원한다는 것이 oxicode에도 필요하다는 근거가 안 됨.
 
 **개선안**: 
 - Phase 5를 **전체 삭제** 또는 "Future consideration"로 강하.
@@ -265,4 +265,4 @@ RFC-002는 문제 정의와 방향성은 맞지만, **이미 구현된 기능을
 
 반면 **정말 미구현인 것**들(이미지 생성, WebSocket, Claude 스텔스)은 코딩 에이전트 관점에서 우선순위가 낮다. 실제 가치가 높은 것은 **모델 DB 확대**(Phase 3)인데, 이것조차 자동화 스크립트가 없어 수작업에 의존하고 있다.
 
-**핵심 권고**: "pi에 있는 것을 oxi에도 추가하자"가 아니라 **"oxi 사용자에게 실제 가치가 있는 것"**을 기준으로 우선순위를 재설정하라.
+**핵심 권고**: "pi에 있는 것을 oxicode에도 추가하자"가 아니라 **"oxicode 사용자에게 실제 가치가 있는 것"**을 기준으로 우선순위를 재설정하라.

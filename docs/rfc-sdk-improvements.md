@@ -1,7 +1,7 @@
-# RFC: oxi-sdk 개선 — oxios 컨슈머 관점의 5가지 약점 해소
+# RFC: oxicode-sdk 개선 — oxios 컨슈머 관점의 5가지 약점 해소
 
 > **상태**: 설계 완료, 구현 대기
-> **대상 크레이트**: `oxi-sdk`, `oxi-agent`
+> **대상 크레이트**: `oxicode-sdk`, `oxicode-agent`
 > **영향 범위**: `oxios` (하위 호환 유지)
 
 ---
@@ -10,89 +10,89 @@
 
 | # | 약점 | 심각도 | 근원 크레이트 |
 |---|------|--------|--------------|
-| 1 | `oxi-ai` 직접 의존 잔존 | 중간 | `oxi-sdk` (re-export 불충분) |
-| 2 | `OxiBuilder`에 credential 주입 불가 | 중간 | `oxi-sdk` |
-| 3 | `AgentLoop::run()` 콜백이 `Fn` → Mutex 강제 | 낮음 | `oxi-agent` |
-| 4 | `ToolRegistry`에 내장 도구 팩토리 없음 | 낮음 | `oxi-sdk` |
-| 5 | `CompactionEvent` 콜백에서 비동기 작업 곤란 | 낮음 | `oxi-agent` |
+| 1 | `oxicode-ai` 직접 의존 잔존 | 중간 | `oxicode-sdk` (re-export 불충분) |
+| 2 | `OxicodeBuilder`에 credential 주입 불가 | 중간 | `oxicode-sdk` |
+| 3 | `AgentLoop::run()` 콜백이 `Fn` → Mutex 강제 | 낮음 | `oxicode-agent` |
+| 4 | `ToolRegistry`에 내장 도구 팩토리 없음 | 낮음 | `oxicode-sdk` |
+| 5 | `CompactionEvent` 콜백에서 비동기 작업 곤란 | 낮음 | `oxicode-agent` |
 
 ---
 
-## 해결 1: `oxi-ai` 직접 의존 완전 제거
+## 해결 1: `oxicode-ai` 직접 의존 완전 제거
 
 ### 현황
 
-`oxios-ouroboros`가 `oxi_ai::Context`, `oxi_ai::Message` 등을 직접 import:
+`oxios-ouroboros`가 `oxicode_ai::Context`, `oxicode_ai::Message` 등을 직접 import:
 
 ```rust
 // ouroboros_engine.rs
-use oxi_ai::{Context, Message, Model, Provider, UserMessage};
+use oxicode_ai::{Context, Message, Model, Provider, UserMessage};
 ```
 
-oxi-sdk는 이미 이 타입을 re-export하지만, **`Context` 생성 메서드**가 노출되지 않아 직접 의존이 필요함.
+oxicode-sdk는 이미 이 타입을 re-export하지만, **`Context` 생성 메서드**가 노출되지 않아 직접 의존이 필요함.
 
 ### 설계
 
-**A. `oxi-sdk/src/lib.rs`에 누락된 re-export 추가**
+**A. `oxicode-sdk/src/lib.rs`에 누락된 re-export 추가**
 
 ```rust
 // ── Context builder re-exports ─────────────────────────────────────────
-pub use oxi_ai::Context;
-pub use oxi_ai::UserMessage;
+pub use oxicode_ai::Context;
+pub use oxicode_ai::UserMessage;
 ```
 
 현재 `lib.rs`를 확인:
 
 ```rust
-pub use oxi_ai::{
+pub use oxicode_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, Model,
     ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions, ProviderRegistry,
     StreamOptions, UserMessage,
 };
 ```
 
-`Context`와 `UserMessage`는 이미 re-export되어 있음. 문제는 **oxios의 Cargo.toml**에서 `oxi-ai`를 직접 의존하는 것.
+`Context`와 `UserMessage`는 이미 re-export되어 있음. 문제는 **oxios의 Cargo.toml**에서 `oxicode-ai`를 직접 의존하는 것.
 
 **B. 해결책: oxios 측 import 변경**
 
 ```diff
   // ouroboros_engine.rs
-- use oxi_ai::{Context, Message, Model, Provider, UserMessage};
-+ use oxi_sdk::{Context, Message, Model, Provider, UserMessage};
+- use oxicode_ai::{Context, Message, Model, Provider, UserMessage};
++ use oxicode_sdk::{Context, Message, Model, Provider, UserMessage};
 ```
 
 ```diff
   // Cargo.toml (oxios-kernel)
-- oxi-ai = { workspace = true }
-  # oxi-sdk만 유지. oxi-sdk가 oxi-ai를 re-export하므로 불필요.
+- oxicode-ai = { workspace = true }
+  # oxicode-sdk만 유지. oxicode-sdk가 oxicode-ai를 re-export하므로 불필요.
 ```
 
-oxios-ouroboros의 `Cargo.toml`도 동일하게 `oxi-ai` 의존 제거.
+oxios-ouroboros의 `Cargo.toml`도 동일하게 `oxicode-ai` 의존 제거.
 
 **C. 검증 체크리스트**
 
-oxios에서 `oxi_ai::`를 사용하는 유일한 곳:
+oxios에서 `oxicode_ai::`를 사용하는 유일한 곳:
 
 ```
-crates/oxios-ouroboros/src/ouroboros_engine.rs   → oxi_sdk::로 교체
-crates/oxios-ouroboros/tests/scenario_test.rs     → oxi_sdk::로 교체
+crates/oxios-ouroboros/src/ouroboros_engine.rs   → oxicode_sdk::로 교체
+crates/oxios-ouroboros/tests/scenario_test.rs     → oxicode_sdk::로 교체
 ```
 
-두 파일만 수정하면 `oxi-ai` workspace 의존을 완전히 제거 가능.
+두 파일만 수정하면 `oxicode-ai` workspace 의존을 완전히 제거 가능.
 
 ### 변경 파일
 
 | 파일 | 변경 |
 |------|------|
-| `oxios/crates/oxios-ouroboros/Cargo.toml` | `oxi-ai` 의존 제거, `oxi-sdk`만 유지 |
-| `oxios/crates/oxios-kernel/Cargo.toml` | `oxi-ai` 의존 제거 |
-| `oxios/Cargo.toml` | `[workspace.dependencies]`에서 `oxi-ai` 제거 |
-| `oxios/crates/oxios-ouroboros/src/ouroboros_engine.rs` | `oxi_ai::` → `oxi_sdk::` |
-| `oxios/crates/oxios-ouroboros/tests/scenario_test.rs` | `oxi_ai::` → `oxi_sdk::` |
+| `oxios/crates/oxios-ouroboros/Cargo.toml` | `oxicode-ai` 의존 제거, `oxicode-sdk`만 유지 |
+| `oxios/crates/oxios-kernel/Cargo.toml` | `oxicode-ai` 의존 제거 |
+| `oxios/Cargo.toml` | `[workspace.dependencies]`에서 `oxicode-ai` 제거 |
+| `oxios/crates/oxios-ouroboros/src/ouroboros_engine.rs` | `oxicode_ai::` → `oxicode_sdk::` |
+| `oxios/crates/oxios-ouroboros/tests/scenario_test.rs` | `oxicode_ai::` → `oxicode_sdk::` |
 
 ---
 
-## 해결 2: `OxiBuilder`에 Credential 주입
+## 해결 2: `OxicodeBuilder`에 Credential 주입
 
 ### 현황
 
@@ -109,17 +109,17 @@ AgentLoopConfig {
 
 이 방식은 동작하지만:
 1. 매 실행마다 키를 전달해야 함
-2. `OxiBuilder`에서 생성한 provider는 환경 변수만 참조
+2. `OxicodeBuilder`에서 생성한 provider는 환경 변수만 참조
 3. 커스텀 provider (예: ZAI)에 base_url + key를 주입할 방법이 factory뿐
 
 ### 설계
 
-**A. `OxiBuilder`에 credential 메서드 추가**
+**A. `OxicodeBuilder`에 credential 메서드 추가**
 
 ```rust
-// oxi-sdk/src/builder.rs
+// oxicode-sdk/src/builder.rs
 
-impl OxiBuilder {
+impl OxicodeBuilder {
     /// Register an API key for a specific provider.
     ///
     /// When `create_provider(name)` is called, the key is injected into
@@ -158,13 +158,13 @@ impl OxiBuilder {
 }
 ```
 
-**B. `Oxi` 구조체에 credential 저장 및 provider 생성 시 주입**
+**B. `Oxicode` 구조체에 credential 저장 및 provider 생성 시 주입**
 
 ```rust
-// oxi-sdk/src/builder.rs
+// oxicode-sdk/src/builder.rs
 
 #[derive(Clone)]
-pub struct Oxi {
+pub struct Oxicode {
     providers: Arc<ProviderRegistry>,
     models: Arc<ModelRegistry>,
     tools: Arc<ToolRegistry>,
@@ -175,7 +175,7 @@ pub struct Oxi {
     base_urls: Arc<HashMap<String, String>>,
 }
 
-impl Oxi {
+impl Oxicode {
     pub fn create_provider(&self, name: &str) -> Result<Arc<dyn Provider>> {
         // 1. Custom providers
         if let Some(p) = self.providers.get_custom(name) {
@@ -191,7 +191,7 @@ impl Oxi {
         if self.include_builtins {
             let api_key = self.api_keys.get(name).cloned();
             let base_url = self.base_urls.get(name).cloned();
-            if let Some(p) = oxi_ai::create_builtin_provider_with_options(
+            if let Some(p) = oxicode_ai::create_builtin_provider_with_options(
                 name,
                 api_key.as_deref(),
                 base_url.as_deref(),
@@ -205,10 +205,10 @@ impl Oxi {
 }
 ```
 
-**C. `oxi-ai`에 `create_builtin_provider_with_options` 추가**
+**C. `oxicode-ai`에 `create_builtin_provider_with_options` 추가**
 
 ```rust
-// oxi-ai/src/providers/register_builtins.rs
+// oxicode-ai/src/providers/register_builtins.rs
 
 /// Create a built-in provider with optional credential overrides.
 ///
@@ -248,12 +248,12 @@ pub fn create_builtin_provider_with_options(
 
 ```rust
 // oxios engine.rs — 개선 전
-let builder = OxiBuilder::new().with_builtins();
-let oxi = builder.build();
+let builder = OxicodeBuilder::new().with_builtins();
+let oxicode = builder.build();
 // → 매 실행 시 AgentLoopConfig.api_key로 우회 전달
 
 // oxios engine.rs — 개선 후
-let oxi = OxiBuilder::new()
+let oxicode = OxicodeBuilder::new()
     .with_builtins()
     .api_key("anthropic", credential_store.resolve("anthropic"))
     .api_key("openai", credential_store.resolve("openai"))
@@ -265,10 +265,10 @@ let oxi = OxiBuilder::new()
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-sdk/src/builder.rs` | `api_keys`, `base_urls` 필드 + `api_key()`, `base_url()`, `credential()` 메서드 |
-| `oxi-ai/src/providers/register_builtins.rs` | `create_builtin_provider_with_options()` 추가 |
-| `oxi-ai/src/providers/mod.rs` | 신규 함수 re-export |
-| `oxios/crates/oxios-kernel/src/engine.rs` | `OxiBuilder`에 credential 주입으로 단순화 |
+| `oxicode-sdk/src/builder.rs` | `api_keys`, `base_urls` 필드 + `api_key()`, `base_url()`, `credential()` 메서드 |
+| `oxicode-ai/src/providers/register_builtins.rs` | `create_builtin_provider_with_options()` 추가 |
+| `oxicode-ai/src/providers/mod.rs` | 신규 함수 re-export |
+| `oxios/crates/oxios-kernel/src/engine.rs` | `OxicodeBuilder`에 credential 주입으로 단순화 |
 
 ---
 
@@ -277,7 +277,7 @@ let oxi = OxiBuilder::new()
 ### 현황
 
 ```rust
-// oxi-agent/agent_loop/mod.rs
+// oxicode-agent/agent_loop/mod.rs
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
 pub async fn run(
@@ -303,7 +303,7 @@ agent_loop.run(prompt, move |event| {
 `Fn` 시그니처를 그대로 두고, `FnMut` 버전을 새 메서드로 추가:
 
 ```rust
-// oxi-agent/src/agent_loop/mod.rs
+// oxicode-agent/src/agent_loop/mod.rs
 
 impl AgentLoop {
     /// Run with an `Fn` callback (existing, unchanged).
@@ -413,8 +413,8 @@ Ok((state.final_content, state.steps_completed, state.success))
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/agent_loop/mod.rs` | `run_mut()` 메서드 추가 |
-| `oxi-sdk/src/lib.rs` | `run_mut` 관련 타입 re-export (변경 없을 수도 있음) |
+| `oxicode-agent/src/agent_loop/mod.rs` | `run_mut()` 메서드 추가 |
+| `oxicode-sdk/src/lib.rs` | `run_mut` 관련 타입 re-export (변경 없을 수도 있음) |
 | `oxios/crates/oxios-kernel/src/agent_runtime.rs` | `run_mut()`으로 전환 |
 
 ---
@@ -423,7 +423,7 @@ Ok((state.final_content, state.steps_completed, state.success))
 
 ### 현황
 
-`tool_factory.rs`가 `oxi-sdk`에 존재하며, `AgentBuilder.coding_tools()`를 통해 사용됨. 하지만 `AgentLoop`를 직접 사용하는 oxios는 `ToolRegistry` 수준의 팩토리가 필요:
+`tool_factory.rs`가 `oxicode-sdk`에 존재하며, `AgentBuilder.coding_tools()`를 통해 사용됨. 하지만 `AgentLoop`를 직접 사용하는 oxios는 `ToolRegistry` 수준의 팩토리가 필요:
 
 ```rust
 // oxios는 항상 이렇게 해야 함
@@ -436,7 +436,7 @@ register_tools_from_cspace(&registry, ...);  // oxios 전용 등록 함수
 **A. `ToolRegistry::extend_from()` 메서드 추가**
 
 ```rust
-// oxi-agent/src/tools.rs
+// oxicode-agent/src/tools.rs
 
 impl ToolRegistry {
     /// Extend this registry with all tools from another registry.
@@ -479,7 +479,7 @@ impl ToolRegistry {
 현재 `tool_factory.rs`는 이미 `pub` 함수이지만, `ToolRegistry`의 연관 메서드처럼 보이도록 재배치:
 
 ```rust
-// oxi-sdk/src/tool_factory.rs — 기존 유지, 추가로 연관 메서드 래핑
+// oxicode-sdk/src/tool_factory.rs — 기존 유지, 추가로 연관 메서드 래핑
 
 // 기존 함수 그대로 유지 (하위 호환)
 pub fn coding_tools(cwd: &Path) -> Arc<ToolRegistry> { ... }
@@ -516,8 +516,8 @@ if cspace.has_domain("browser") {
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/tools.rs` | `extend_from()` 메서드 추가 |
-| `oxi-sdk/src/lib.rs` | `extend_from`이 자동 re-export됨 (ToolRegistry through) |
+| `oxicode-agent/src/tools.rs` | `extend_from()` 메서드 추가 |
+| `oxicode-sdk/src/lib.rs` | `extend_from`이 자동 re-export됨 (ToolRegistry through) |
 | `oxios/crates/oxios-kernel/src/tools/registration.rs` | 팩토리 활용으로 단순화 |
 
 ---
@@ -548,7 +548,7 @@ AgentEvent::Compaction { event } => {
 **A. 비동기 compaction 훅 타입 정의**
 
 ```rust
-// oxi-agent/src/agent_loop/config.rs
+// oxicode-agent/src/agent_loop/config.rs
 
 /// Async hook invoked after compaction completes.
 ///
@@ -598,7 +598,7 @@ pub struct AgentLoopConfig {
 **C. `AgentLoop` 내부에서 훅 호출**
 
 ```rust
-// oxi-agent/src/agent_loop/mod.rs (run_loop 내부)
+// oxicode-agent/src/agent_loop/mod.rs (run_loop 내부)
 
 // 기존 compaction 처리 로직 이후에:
 if let Some(ref hook) = self.config.on_compaction {
@@ -653,9 +653,9 @@ let loop_config = AgentLoopConfig {
 
 | 파일 | 변경 |
 |------|------|
-| `oxi-agent/src/agent_loop/config.rs` | `CompactionHook` 타입 + `on_compaction` 필드 |
-| `oxi-agent/src/agent_loop/mod.rs` | compaction 완료 후 훅 호출 로직 |
-| `oxi-sdk/src/lib.rs` | `CompactionHook`, `CompactedContext` re-export |
+| `oxicode-agent/src/agent_loop/config.rs` | `CompactionHook` 타입 + `on_compaction` 필드 |
+| `oxicode-agent/src/agent_loop/mod.rs` | compaction 완료 후 훅 호출 로직 |
+| `oxicode-sdk/src/lib.rs` | `CompactionHook`, `CompactedContext` re-export |
 | `oxios/crates/oxios-kernel/src/agent_runtime.rs` | `on_compaction` 훅으로 전환, `Compaction` 이벤트 매칭 제거 |
 
 ---
@@ -664,10 +664,10 @@ let loop_config = AgentLoopConfig {
 
 | 순서 | 해결 | 난이도 | 영향 | 근거 |
 |------|------|--------|------|------|
-| **1** | #1 `oxi-ai` 의존 제거 | ⭐ | 의존성 감소 | import 변경만으로 완료, 즉각적 효과 |
+| **1** | #1 `oxicode-ai` 의존 제거 | ⭐ | 의존성 감소 | import 변경만으로 완료, 즉각적 효과 |
 | **2** | #4 `ToolRegistry` 팩토리 | ⭐⭐ | API 발견성 | `extend_from()`만 추가, 하위 호환 |
 | **3** | #3 `FnMut` 콜백 | ⭐⭐ | 컨슈머 DX | 신규 메서드, 기존 API 불변 |
-| **4** | #2 Credential 주입 | ⭐⭐⭐ | 아키텍처 | `oxi-ai`에 신규 함수, `Oxi` 구조 변경 |
+| **4** | #2 Credential 주입 | ⭐⭐⭐ | 아키텍처 | `oxicode-ai`에 신규 함수, `Oxicode` 구조 변경 |
 | **5** | #5 Compaction 훅 | ⭐⭐ | 안정성 | `AgentLoopConfig` 확장, 내부 로직 수정 |
 
 ---
@@ -676,8 +676,8 @@ let loop_config = AgentLoopConfig {
 
 모든 변경은 **가산적(additive)**입니다:
 
-- **해결 1**: oxios 측 import 변경만. oxi-sdk 변경 없음.
-- **해결 2**: `OxiBuilder`에 신규 메서드. 기존 `build()` 동작 불변.
+- **해결 1**: oxios 측 import 변경만. oxicode-sdk 변경 없음.
+- **해결 2**: `OxicodeBuilder`에 신규 메서드. 기존 `build()` 동작 불변.
 - **해결 3**: 신규 `run_mut()` 메서드. 기존 `run()` 시그니처 불변.
 - **해결 4**: `ToolRegistry`에 신규 메서드. 기존 API 불변.
 - **해결 5**: `AgentLoopConfig`에 `Option` 필드 추가 (`Default::default()` 불변).
@@ -692,8 +692,8 @@ let loop_config = AgentLoopConfig {
 
 ```
 oxios-kernel
-├── Cargo.toml: oxi-sdk + oxi-ai  ← 2개 의존
-├── engine.rs: OxiBuilder::new().with_builtins().build()  ← credential 없음
+├── Cargo.toml: oxicode-sdk + oxicode-ai  ← 2개 의존
+├── engine.rs: OxicodeBuilder::new().with_builtins().build()  ← credential 없음
 ├── agent_runtime.rs:
 │   ├── Arc<Mutex<ExecuteState>>  ← Fn 콜백 우회
 │   ├── AgentLoopConfig { api_key: Some(...) }  ← 수동 키 주입
@@ -705,16 +705,16 @@ oxios-kernel
 
 ```
 oxios-kernel
-├── Cargo.toml: oxi-sdk  ← 1개 의존!
+├── Cargo.toml: oxicode-sdk  ← 1개 의존!
 ├── engine.rs:
-│   OxiBuilder::new()
+│   OxicodeBuilder::new()
 │     .with_builtins()
 │     .api_key("anthropic", store.resolve("anthropic"))  ← 빌드 시 credential
 │     .build()
 ├── agent_runtime.rs:
 │   ├── ExecuteState (stack)  ← FnMut 콜백, Mutex 없음
 │   ├── AgentLoopConfig { on_compaction: Some(...) }  ← 보장적 비동기 훅
-│   └── (api_key 불필요)  ← OxiBuilder에서 처리
+│   └── (api_key 불필요)  ← OxicodeBuilder에서 처리
 └── tools/registration.rs:
     registry.extend_from(&ToolRegistry::coding_tools(&workspace))  ← 팩토리
 ```

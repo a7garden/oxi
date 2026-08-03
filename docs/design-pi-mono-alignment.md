@@ -1,12 +1,12 @@
 # Design: pi-mono Architecture Alignment
 
-pi-mono를 정답지로 삼아 oxi의 아키텍처를 정렬하는 작업 계획.
+pi-mono를 정답지로 삼아 oxicode의 아키텍처를 정렬하는 작업 계획.
 
 ---
 
 ## 문제 요약
 
-oxi는 6가지 Critical/Important 차이가 있음:
+oxicode는 6가지 Critical/Important 차이가 있음:
 
 1. **TUI가 `MessageUpdate`를 무시** — `TextChunk` 문자열만으로 렌더링 → JSON 섞임
 2. **TUI event forwarder가 핵심 이벤트 스킵** — ToolCall, TurnStart/End 등 무시
@@ -33,7 +33,7 @@ Agent (이벤트 발생)
     → auto-retry / auto-compaction (agent_end 후)
 ```
 
-oxi에서는 thread boundary 때문에 channel을 써야 하지만,
+oxicode에서는 thread boundary 때문에 channel을 써야 하지만,
 event 처리 흐름은 동일하게 만들어야 함.
 
 ---
@@ -92,7 +92,7 @@ pi-mono의 `AgentSession._handleAgentEvent` 구조에 맞춤:
 
 ```rust
 // pi-mono: _handleAgentEvent가 모든 이벤트를 직렬 처리
-// oxi: event_forwarder가 모든 이벤트를 UiEvent로 매핑
+// oxicode: event_forwarder가 모든 이벤트를 UiEvent로 매핑
 match event {
     AgentEvent::AgentStart { .. } => UiEvent::AgentStart,
     AgentEvent::AgentEnd { .. } => UiEvent::AgentEnd,
@@ -219,7 +219,7 @@ async fn process_single_event(&self, event: &AgentEvent) {
 ### 문제
 pi-mono는 `message_start(user)` 이벤트가 오면 steering/follow-up 큐에서
 해당 메시지를 제거하고 `queue_update`를 발행.
-oxi는 enqueue만 알림.
+oxicode는 enqueue만 알림.
 
 ### 해결
 AgentSession의 이벤트 처리에서 queue drain 감지:
@@ -253,7 +253,7 @@ fn check_queue_drain(&self, message: &Message) {
 
 ### 문제
 pi-mono는 `{ message, toolResults, context, newMessages }`를 전달.
-oxi Agent의 hook은 dummy message + 빈 tool_results.
+oxicode Agent의 hook은 dummy message + 빈 tool_results.
 
 ### 해결
 `ShouldStopAfterTurnContext`에 실제 데이터 제공:
@@ -276,13 +276,13 @@ if hooks.should_stop_after_turn.as_ref()?(ctx) {
 
 ### 문제
 pi-mono는 `AbortController`로 provider, tools, hooks에 signal 전파.
-oxi는 cancel 메커니즘 없음.
+oxicode는 cancel 메커니즘 없음.
 
 ### 해결
 `CancellationToken` 패턴 도입:
 
 ```rust
-// oxi-ai에 CancellationToken 추가
+// oxicode-ai에 CancellationToken 추가
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
 }
@@ -325,7 +325,7 @@ Agent는 상태 관리 + lifecycle만 담당.
 | 2 | Phase 2.1-2.2 | agent_session.rs, app.rs | Phase 1 |
 | 3 | Phase 3 | agent_session.rs | Phase 2 |
 | 4 | Phase 4 | agent.rs | 없음 |
-| 5 | Phase 5 | oxi-ai, oxi-agent | Phase 6 후에 자연스럽게 |
-| 6 | Phase 6 | oxi-agent 전체 | Phase 1-3 후 |
+| 5 | Phase 5 | oxicode-ai, oxicode-agent | Phase 6 후에 자연스럽게 |
+| 6 | Phase 6 | oxicode-agent 전체 | Phase 1-3 후 |
 
 Phase 1-4가 사용자 경험에 직접 영향. Phase 5-6은 별도 PR로.

@@ -2,7 +2,7 @@
 
 ## 1. 개요
 
-oxi의 툴 콜 박스를 pi-mono 수준으로 개선한다. 현재는 모든 툴이 동일한 
+oxicode의 툴 콜 박스를 pi-mono 수준으로 개선한다. 현재는 모든 툴이 동일한 
 generic 포맷(아이콘 + 이름 + JSON 키밸류)으로 렌더링된다. 
 개선 후에는 edit의 diff 뷰, bash의 명령어+실행시간 등 툴별 특화 렌더링과 
 자동 콘텐츠 감지를 제공한다.
@@ -12,15 +12,15 @@ generic 포맷(아이콘 + 이름 + JSON 키밸류)으로 렌더링된다.
 ### 데이터 흐름
 
 ```
-[oxi-agent/tools/*]
+[oxicode-agent/tools/*]
     ↓ AgentToolResult { output: String, metadata: Option<Value> }
-[oxi-agent/agent_loop/tool_exec.rs]
+[oxicode-agent/agent_loop/tool_exec.rs]
     ↓ AgentEvent::ToolExecutionEnd { result: ToolResult { content: String } }
-[oxi-cli/tui/app.rs]
+[oxicode-cli/tui/app.rs]
     ↓ UiEvent::ToolExecutionEnd { result: ToolResult { content, is_error } }
-[oxi-cli/tui/handlers.rs]
+[oxicode-cli/tui/handlers.rs]
     ↓ state.chat.stream_tool_result(id, name, result.content[..500], is_error)
-[oxi-tui/widgets/chat.rs]
+[oxicode-tui/widgets/chat.rs]
     ↓ ContentBlock::ToolCall { name, arguments, result: Option<(String, bool)> }
     ↓ LayoutKind::ToolBox → EntryWidget::render
 ```
@@ -42,7 +42,7 @@ generic 포맷(아이콘 + 이름 + JSON 키밸류)으로 렌더링된다.
 
 1. **확장성 부족**: 툴 이름 기반 `match`를 하드코딩하면 커스텀/MCP 툴이 소외됨
 2. **정보 손실**: edit의 diff, bash의 실행시간 등 의미 있는 데이터가 `output: String`에 섞여서 전달됨
-3. **diff 미표시**: pi-mono는 줄번호 + 색상 diff를 보여주지만 oxi는 raw text만
+3. **diff 미표시**: pi-mono는 줄번호 + 색상 diff를 보여주지만 oxicode는 raw text만
 4. **truncation**: 핸들러에서 `result.content.chars().take(500)`으로 잘라버림
 
 ## 4. 설계 원칙
@@ -50,7 +50,7 @@ generic 포맷(아이콘 + 이름 + JSON 키밸류)으로 렌더링된다.
 1. **pi-mono 패턴**: 각 툴이 자체 렌더러를 가질 수 있도록, but Rust에 맞는 방식으로
 2. **점진적 개선**: 최소 변경으로 시작, 나중에 확장 가능
 3. **커스텀 툴 지원**: 내장 툴은 정확한 힌트 제공, 커스텀 툴은 자동 감지 폴백
-4. **레이어 분리**: TUI(oxi-tui)는 agent(oxi-agent)를 모름 — 힌트만으로 소통
+4. **레이어 분리**: TUI(oxicode-tui)는 agent(oxicode-agent)를 모름 — 힌트만으로 소통
 
 ## 5. 핵심 설계: ResultKind 힌트 + 자동 감지
 
@@ -62,11 +62,11 @@ generic 포맷(아이콘 + 이름 + JSON 키밸류)으로 렌더링된다.
 **AgentEvent 확장** — `ToolExecutionEnd`에 `render_hint` 필드 추가:
 
 ```rust
-// oxi-agent/src/events.rs
+// oxicode-agent/src/events.rs
 AgentEvent::ToolExecutionEnd {
     tool_call_id: String,
     tool_name: String,
-    result: oxi_ai::ToolResult,
+    result: oxicode_ai::ToolResult,
     is_error: bool,
     // ↓ 신규 필드
     render_hint: Option<RenderHint>,
@@ -76,7 +76,7 @@ AgentEvent::ToolExecutionEnd {
 ### 5.2 RenderHint 정의
 
 ```rust
-// oxi-tui/src/widgets/chat.rs (ContentBlock 근처에 배치)
+// oxicode-tui/src/widgets/chat.rs (ContentBlock 근처에 배치)
 
 /// 툴 결과 렌더링 힌트.
 /// 에이전트가 제공하면 해당 렌더러를 사용하고,
@@ -133,7 +133,7 @@ pub enum RenderHint {
 ### 5.3 Layer 2: ContentBlock 확장
 
 ```rust
-// oxi-tui/src/widgets/chat.rs — ContentBlock::ToolCall 수정
+// oxicode-tui/src/widgets/chat.rs — ContentBlock::ToolCall 수정
 
 ContentBlock::ToolCall {
     id: String,
@@ -148,13 +148,13 @@ ContentBlock::ToolCall {
 ### 5.4 Layer 3: TUI 렌더러 모듈
 
 ```
-oxi-tui/src/
+oxicode-tui/src/
   widgets/
     tool_renderer.rs  (신규)
 ```
 
 ```rust
-// oxi-tui/src/widgets/tool_renderer.rs
+// oxicode-tui/src/widgets/tool_renderer.rs
 
 use ratatui::text::{Line, Span};
 use crate::theme::ThemeStyles;
@@ -259,7 +259,7 @@ pub fn format_tool_result(
 
 **결과 표시:**
 ```
-│   Compiling oxi v0.10.0
+│   Compiling oxicode v0.10.0
 │   Finished release [optimized]
 │   Took 12.3s
 ```
@@ -323,34 +323,34 @@ pub fn format_tool_result(
 
 | 파일 | 변경 | 설명 |
 |------|------|------|
-| `oxi-tui/src/widgets/chat.rs` | 수정 | `RenderHint` enum, `ContentBlock`에 `render_hint` 필드 추가 |
-| `oxi-tui/src/widgets/tool_renderer.rs` | **신규** | 툴별 포맷터, 자동 감지 로직 |
-| `oxi-tui/src/widgets/mod.rs` | 수정 | `mod tool_renderer` 추가 |
-| `oxi-tui/src/lib.rs` | 수정 | 모듈 노출 |
+| `oxicode-tui/src/widgets/chat.rs` | 수정 | `RenderHint` enum, `ContentBlock`에 `render_hint` 필드 추가 |
+| `oxicode-tui/src/widgets/tool_renderer.rs` | **신규** | 툴별 포맷터, 자동 감지 로직 |
+| `oxicode-tui/src/widgets/mod.rs` | 수정 | `mod tool_renderer` 추가 |
+| `oxicode-tui/src/lib.rs` | 수정 | 모듈 노출 |
 
 ### Phase 2: Agent → TUI 힌트 전달
 
 | 파일 | 변경 | 설명 |
 |------|------|------|
-| `oxi-agent/src/events.rs` | 수정 | `ToolExecutionEnd`에 `render_hint: Option<RenderHint>` 추가 |
-| `oxi-agent/src/agent_loop/tool_exec.rs` | 수정 | 각 툴 결과에 힌트 추가 |
-| `oxi-agent/src/tools/edit.rs` | 수정 | `RenderHint::Diff` 힌트 포함 |
-| `oxi-agent/src/tools/bash.rs` | 수정 | `RenderHint::Command` 힌트 포함 |
-| `oxi-agent/src/tools/read.rs` | 수정 | `RenderHint::FileRead` 힌트 포함 |
-| `oxi-agent/src/tools/write.rs` | 수정 | `RenderHint::FileWrite` 힌트 포함 |
+| `oxicode-agent/src/events.rs` | 수정 | `ToolExecutionEnd`에 `render_hint: Option<RenderHint>` 추가 |
+| `oxicode-agent/src/agent_loop/tool_exec.rs` | 수정 | 각 툴 결과에 힌트 추가 |
+| `oxicode-agent/src/tools/edit.rs` | 수정 | `RenderHint::Diff` 힌트 포함 |
+| `oxicode-agent/src/tools/bash.rs` | 수정 | `RenderHint::Command` 힌트 포함 |
+| `oxicode-agent/src/tools/read.rs` | 수정 | `RenderHint::FileRead` 힌트 포함 |
+| `oxicode-agent/src/tools/write.rs` | 수정 | `RenderHint::FileWrite` 힌트 포함 |
 
 ### Phase 3: CLI 브릿지
 
 | 파일 | 변경 | 설명 |
 |------|------|------|
-| `oxi-cli/src/tui/app.rs` | 수정 | `UiEvent::ToolExecutionEnd`에 `render_hint` 전달 |
-| `oxi-cli/src/tui/handlers.rs` | 수정 | `stream_tool_result`에 `render_hint` 전달 |
+| `oxicode-cli/src/tui/app.rs` | 수정 | `UiEvent::ToolExecutionEnd`에 `render_hint` 전달 |
+| `oxicode-cli/src/tui/handlers.rs` | 수정 | `stream_tool_result`에 `render_hint` 전달 |
 
 ### Phase 4: 렌더링 개선 (chat.rs → tool_renderer.rs 위임)
 
 | 파일 | 변경 | 설명 |
 |------|------|------|
-| `oxi-tui/src/widgets/chat.rs` | 수정 | `measure_kind`, `EntryWidget::render`에서 `tool_renderer` 호출 |
+| `oxicode-tui/src/widgets/chat.rs` | 수정 | `measure_kind`, `EntryWidget::render`에서 `tool_renderer` 호출 |
 
 ## 8. 마이그레이션 전략
 
@@ -396,7 +396,7 @@ Phase 3 (고급 기능)
 AgentToolResult의 `metadata` 필드를 통해 전달:
 
 ```rust
-// oxi-agent/src/tools/edit.rs
+// oxicode-agent/src/tools/edit.rs
 Ok(AgentToolResult {
     success: true,
     output: format!("{}\n\n{}", message, diff),
@@ -412,7 +412,7 @@ Ok(AgentToolResult {
 Agent loop에서 metadata → render_hint 변환:
 
 ```rust
-// oxi-agent/src/agent_loop/tool_exec.rs
+// oxicode-agent/src/agent_loop/tool_exec.rs
 let render_hint = result.metadata
     .as_ref()
     .and_then(|m| serde_json::from_value(m.clone()).ok());
@@ -420,7 +420,7 @@ let render_hint = result.metadata
 emit(AgentEvent::ToolExecutionEnd {
     tool_call_id: finalized.tool_call.id.clone(),
     tool_name: finalized.tool_call.name.clone(),
-    result: oxi_ai::ToolResult { ... },
+    result: oxicode_ai::ToolResult { ... },
     is_error: finalized.is_error,
     render_hint,  // ← 새 필드
 });

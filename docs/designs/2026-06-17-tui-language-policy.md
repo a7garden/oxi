@@ -2,7 +2,7 @@
 
 > 상태: 설계 v2 (구현 전 합의용, 리뷰 반영)
 > 작성: 2026-06-17 (v1), 리뷰 2026-06-17 (v2)
-> 선행: 기존 `Settings::output_languages` 구현 (v5, oxi-cli/src/store/settings.rs)
+> 선행: 기존 `Settings::output_languages` 구현 (v5, oxicode-cli/src/store/settings.rs)
 > 후속: CHANGELOG.md 갱신 + AGENTS.md pitfalls 강화
 
 ## 0. 핵심 (TL;DR)
@@ -34,13 +34,13 @@
 
 | 컴포넌트 | 파일 |
 |---|---|
-| 데이터 정의 | `oxi-cli/src/store/settings.rs:307` (`output_languages: HashMap<String, String>`) |
-| 디렉티브 빌더 | `oxi-cli/src/prompt/system_prompt.rs:227` (`language_directive()`) |
-| TUI 소비 | `oxi-cli/src/app/agent_session_runtime.rs:265, 275, 303, 322` |
-| 라이브 갱신 | `oxi-cli/src/app/agent_session.rs:594` (`rebuild_system_prompt()`) |
-| 오버레이 UI | `oxi-cli/src/tui/overlay/settings.rs:451–462` |
-| 코어 채널 테이블 | `oxi-cli/src/store/settings.rs:31–43` (`KNOWN_CHANNELS`) |
-| 언어 코드 테이블 | `oxi-cli/src/store/settings.rs:46–55` (`KNOWN_LANGS`, 8개: auto/en/ko/ja/zh/es/fr/de) |
+| 데이터 정의 | `oxicode-cli/src/store/settings.rs:307` (`output_languages: HashMap<String, String>`) |
+| 디렉티브 빌더 | `oxicode-cli/src/prompt/system_prompt.rs:227` (`language_directive()`) |
+| TUI 소비 | `oxicode-cli/src/app/agent_session_runtime.rs:265, 275, 303, 322` |
+| 라이브 갱신 | `oxicode-cli/src/app/agent_session.rs:594` (`rebuild_system_prompt()`) |
+| 오버레이 UI | `oxicode-cli/src/tui/overlay/settings.rs:451–462` |
+| 코어 채널 테이블 | `oxicode-cli/src/store/settings.rs:31–43` (`KNOWN_CHANNELS`) |
+| 언어 코드 테이블 | `oxicode-cli/src/store/settings.rs:46–55` (`KNOWN_LANGS`, 8개: auto/en/ko/ja/zh/es/fr/de) |
 
 ### 1.2 UX 갭 3가지
 
@@ -84,7 +84,7 @@
 ### 3.1 신규 필드
 
 ```rust
-// oxi-cli/src/store/settings.rs (Settings 구조체)
+// oxicode-cli/src/store/settings.rs (Settings 구조체)
 /// Master switch for the TUI output language policy.
 ///
 /// **Default: false (opt-in).** Even with non-empty `output_languages`,
@@ -138,7 +138,7 @@ LLM 에이전트가 생성하는 텍스트 카테고리 중 "같은 응답 안�
 ### 4.1 시그니처 변경
 
 ```rust
-// oxi-cli/src/prompt/system_prompt.rs
+// oxicode-cli/src/prompt/system_prompt.rs
 
 // before
 pub fn language_directive(channels: &HashMap<String, String>) -> Option<String>
@@ -172,7 +172,7 @@ pub fn language_directive(
 **v2 결정**: `rebuild_system_prompt()`을 호출하기 직전에 디스크에서 fresh load하여 in-memory 캐시를 교체한다. `persist_changes()`는 디스크만 저장한다.
 
 ```rust
-// oxi-cli/src/app/agent_session.rs — AgentSession::rebuild_system_prompt 확장
+// oxicode-cli/src/app/agent_session.rs — AgentSession::rebuild_system_prompt 확장
 
 pub fn rebuild_system_prompt(&self) {
     // v2: 디스크 fresh load로 in-memory 캐시와 동기화
@@ -205,7 +205,7 @@ pub fn rebuild_system_prompt(&self) {
 ### 5.1 신규 사용자 (default OFF)
 
 ```
-$ oxi
+$ oxicode
   → TUI 시작, language_policy_enabled = false
   → 모든 응답이 모델 자연스러운 언어 (정책 없음)
 
@@ -294,20 +294,20 @@ release_notes = "ko"            # ← 사용자 추가 (코어 아님)
 
 ### 7.1 의도
 
-`oxi --print`와 RPC 모드는 **프로그래매틱/스크립터블 인터페이스**다. 언어 결정성은 caller의 책임이다. caller가 프롬프트를 직접 제어하고, 미리 번역하거나 어떤 언어로든 라우팅할 수 있다.
+`oxicode --print`와 RPC 모드는 **프로그래매틱/스크립터블 인터페이스**다. 언어 결정성은 caller의 책임이다. caller가 프롬프트를 직접 제어하고, 미리 번역하거나 어떤 언어로든 라우팅할 수 있다.
 
 TUI는 **대화형 표면**이며, 이 정책이 가치를 발휘하는 자리다.
 
 ### 7.2 "fix"하지 말 것
 
-**`oxi-cli/src/lib.rs::build_system_prompt`에 디렉티브를 주입하지 말 것** (구현 충동이 들 수 있음). print/RPC에 정책이 필요해지면 **명시적 opt-in**(CLI flag 또는 추가 config field)을 추가하라. 암묵적으로 만들지 말 것.
+**`oxicode-cli/src/lib.rs::build_system_prompt`에 디렉티브를 주입하지 말 것** (구현 충동이 들 수 있음). print/RPC에 정책이 필요해지면 **명시적 opt-in**(CLI flag 또는 추가 config field)을 추가하라. 암묵적으로 만들지 말 것.
 
 ### 7.3 단일 확장 지점 (참고용)
 
 향후 caller가 opt-in을 원할 경우, 주입 지점은 단 한 곳:
 
 ```rust
-// oxi-cli/src/lib.rs::build_system_prompt (line 169)
+// oxicode-cli/src/lib.rs::build_system_prompt (line 169)
 // 현재 language_directive 호출 없음 — 의도된 비대칭
 ```
 
@@ -320,7 +320,7 @@ TUI는 **대화형 표면**이며, 이 정책이 가치를 발휘하는 자리�
 ### 8.2 동작
 
 ```rust
-// oxi-cli/src/store/settings.rs::migrate (확장)
+// oxicode-cli/src/store/settings.rs::migrate (확장)
 
 match current_version {
     5 => {
@@ -359,12 +359,12 @@ ON이었으나(빈 맵이 아니면 자동 활성화), 이번 변경으로 명�
 |---|---|
 | `AGENTS.md` | pitfalls 396 강화 (의도된 비대칭 + `/settings` description 함정 명시) |
 | `CHANGELOG.md` | "TUI 언어 정책 default OFF" 항목 (파일 존재 확인은 구현 시) |
-| `oxi-cli/src/util/slash_commands.rs:120` | `/settings` description 수정 |
-| `oxi-cli/src/store/settings.rs` | `language_policy_enabled` 필드 + v5→v6 마이그레이션 + 테스트 6개 |
-| `oxi-cli/src/prompt/system_prompt.rs` | `language_directive(enabled, channels)` 시그니처 + 테스트 9개 (language_directive 6 + build_system_prompt 3) |
-| `oxi-cli/src/app/agent_session_runtime.rs` | 호출 사이트 4곳에 `enabled` 인자 전달 + `build_compaction_instruction` 시그니처 변경 + 테스트 4개 |
-| `oxi-cli/src/app/agent_session.rs` | `rebuild_system_prompt()`이 디스크 fresh load로 in-memory 교체 |
-| `oxi-cli/src/tui/overlay/settings.rs` | `language_policy` Toggle 추가, `SettingsItem::Choice`에 `disabled` 필드 추가, OFF 시 채널 4개 disabled (회색 + Enter/Space 차단 + "Enable language_policy first." notification), Esc 자동 rebuild, notification 메시지 |
+| `oxicode-cli/src/util/slash_commands.rs:120` | `/settings` description 수정 |
+| `oxicode-cli/src/store/settings.rs` | `language_policy_enabled` 필드 + v5→v6 마이그레이션 + 테스트 6개 |
+| `oxicode-cli/src/prompt/system_prompt.rs` | `language_directive(enabled, channels)` 시그니처 + 테스트 9개 (language_directive 6 + build_system_prompt 3) |
+| `oxicode-cli/src/app/agent_session_runtime.rs` | 호출 사이트 4곳에 `enabled` 인자 전달 + `build_compaction_instruction` 시그니처 변경 + 테스트 4개 |
+| `oxicode-cli/src/app/agent_session.rs` | `rebuild_system_prompt()`이 디스크 fresh load로 in-memory 교체 |
+| `oxicode-cli/src/tui/overlay/settings.rs` | `language_policy` Toggle 추가, `SettingsItem::Choice`에 `disabled` 필드 추가, OFF 시 채널 4개 disabled (회색 + Enter/Space 차단 + "Enable language_policy first." notification), Esc 자동 rebuild, notification 메시지 |
 
 ## 10. 한계와 향후 과제
 
@@ -381,7 +381,7 @@ ON이었으나(빈 맵이 아니면 자동 활성화), 이번 변경으로 명�
 
 1. **응답 후처리 레이어**: 모델 출력 후 디렉티브 위반 패턴을 감지·교정. 정확도 트레이드오프.
 2. **채널별 Confidence**: 모델이 "이건 code_comment입니다"라고 명시하면 강제력 강화 (structured output).
-3. **글로벌 OFF 토글을 환경변수로도 노출**: `OXI_LANGUAGE_POLICY=off` 등 CI 환경 고려.
+3. **글로벌 OFF 토글을 환경변수로도 노출**: `OXICODE_LANGUAGE_POLICY=off` 등 CI 환경 고려.
 
 ## 11. 테스트 전략
 

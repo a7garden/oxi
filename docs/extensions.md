@@ -1,10 +1,10 @@
-# oxi WASM Extension Development Guide
+# oxicode WASM Extension Development Guide
 
-This document describes how to develop, test, and distribute WASM extensions for oxi.
+This document describes how to develop, test, and distribute WASM extensions for oxicode.
 
 ## Overview
 
-oxi extensions are WebAssembly modules that run inside a sandboxed environment powered by [Extism](https://extism.org/). Extensions can:
+oxicode extensions are WebAssembly modules that run inside a sandboxed environment powered by [Extism](https://extism.org/). Extensions can:
 
 - **Register tools** that the AI agent can call during conversations
 - **Register commands** that users can invoke with `/command` in the TUI
@@ -12,8 +12,8 @@ oxi extensions are WebAssembly modules that run inside a sandboxed environment p
 
 Extensions are loaded from:
 
-- `~/.oxi/extensions/*.wasm` (global)
-- `.oxi/extensions/*.wasm` (project-local)
+- `~/.oxicode/extensions/*.wasm` (global)
+- `.oxicode/extensions/*.wasm` (project-local)
 
 ## Quick Start
 
@@ -54,13 +54,13 @@ The output is at `target/wasm32-unknown-unknown/release/my_extension.wasm`.
 ### 4. Install
 
 ```bash
-cp target/wasm32-unknown-unknown/release/my_extension.wasm ~/.oxi/extensions/
+cp target/wasm32-unknown-unknown/release/my_extension.wasm ~/.oxicode/extensions/
 ```
 
 Or use the CLI:
 
 ```bash
-oxi ext install owner/repo
+oxicode ext install owner/repo
 ```
 
 ---
@@ -247,7 +247,7 @@ If the output is not valid JSON with an `output` field, the raw string is displa
 
 Extensions can call the following host functions to interact with the system. All functions use JSON-in/JSON-out via Extism.
 
-### `oxi_http_request` — Make HTTP requests
+### `oxicode_http_request` — Make HTTP requests
 
 ```json
 // Input
@@ -274,7 +274,7 @@ Extensions can call the following host functions to interact with the system. Al
 - Response body truncated at 1 MB
 - SSRF protection blocks private IPs, localhost, and cloud metadata endpoints
 
-### `oxi_read_file` — Read a file
+### `oxicode_read_file` — Read a file
 
 ```json
 // Input
@@ -303,7 +303,7 @@ Extensions can call the following host functions to interact with the system. Al
 - Max 50 KB per read
 - Blocked paths: `/etc`, `/sys`, `/proc`, `/dev`, `/boot`, `/root`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`
 
-### `oxi_write_file` — Write a file
+### `oxicode_write_file` — Write a file
 
 ```json
 // Input
@@ -326,9 +326,9 @@ Extensions can call the following host functions to interact with the system. Al
 | `content` | string | required | Content to write |
 | `create_dirs` | boolean | true | Create parent directories if needed |
 
-Same path restrictions as `oxi_read_file` apply.
+Same path restrictions as `oxicode_read_file` apply.
 
-### `oxi_exec` — Execute a command
+### `oxicode_exec` — Execute a command
 
 ```json
 // Input
@@ -362,7 +362,7 @@ Same path restrictions as `oxi_read_file` apply.
 
 **Output limits:** stdout and stderr are each truncated at 10 KB.
 
-### `oxi_get_env` — Read environment variable
+### `oxicode_get_env` — Read environment variable
 
 ```json
 // Input
@@ -379,7 +379,7 @@ Same path restrictions as `oxi_read_file` apply.
 
 **Blocked keys:** Anything containing `AWS_SECRET`, `PRIVATE_KEY`, `PASSWORD`, `TOKEN`, `SECRET` (case-insensitive).
 
-### `oxi_log` — Write to oxi log
+### `oxicode_log` — Write to oxicode log
 
 ```
 // Input: plain string (not JSON)
@@ -388,23 +388,23 @@ Same path restrictions as `oxi_read_file` apply.
 // No output
 ```
 
-The input is a plain string, not a JSON object. It appears in oxi's debug log output (not shown in TUI). Use `RUST_LOG=debug` to see it.
+The input is a plain string, not a JSON object. It appears in oxicode's debug log output (not shown in TUI). Use `RUST_LOG=debug` to see it.
 
-### `oxi_kv_get` / `oxi_kv_set` — Persistent key-value store
+### `oxicode_kv_get` / `oxicode_kv_set` — Persistent key-value store
 
 ```json
-// oxi_kv_get input
+// oxicode_kv_get input
 {
   "key": "my_extension_state"
 }
 
-// oxi_kv_get output
+// oxicode_kv_get output
 {
   "success": true,
   "value": "saved_data"
 }
 
-// oxi_kv_set input
+// oxicode_kv_set input
 {
   "key": "my_extension_state",
   "value": "updated_data"
@@ -510,10 +510,10 @@ pub fn execute_command(input: String) -> FnResult<String> {
 cargo build --release --target wasm32-unknown-unknown
 
 # Copy to extensions directory
-cp target/wasm32-unknown-unknown/release/echo_tool.wasm ~/.oxi/extensions/
+cp target/wasm32-unknown-unknown/release/echo_tool.wasm ~/.oxicode/extensions/
 
-# Start oxi — the extension loads automatically
-oxi
+# Start oxicode — the extension loads automatically
+oxicode
 ```
 
 When the AI agent calls the `echo` tool with `{"text": "hello"}`, the extension returns `"hello"`.
@@ -522,7 +522,7 @@ When the AI agent calls the `echo` tool with `{"text": "hello"}`, the extension 
 
 ## Advanced Example: HTTP-based Tool
 
-This extension calls an external API using `oxi_http_request`:
+This extension calls an external API using `oxicode_http_request`:
 
 ```rust
 #[plugin_fn]
@@ -541,9 +541,9 @@ pub fn execute_tool(input: String) -> FnResult<String> {
                 "method": "GET"
             });
 
-            // extism-pdk host_call: invoke an oxi host function
+            // extism-pdk host_call: invoke an oxicode host function
             let response = extism_pdk::host_call(
-                "oxi_http_request",
+                "oxicode_http_request",
                 http_req.to_string().as_bytes(),
             ).map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
 
@@ -582,13 +582,13 @@ my-extension/
 Users install with:
 
 ```bash
-oxi ext install owner/my-extension
-oxi ext install owner/my-extension@1.0.0   # specific version
+oxicode ext install owner/my-extension
+oxicode ext install owner/my-extension@1.0.0   # specific version
 ```
 
 ### Registry
 
-The local registry is stored at `~/.oxi/extensions/registry.json`:
+The local registry is stored at `~/.oxicode/extensions/registry.json`:
 
 ```json
 {
@@ -598,7 +598,7 @@ The local registry is stored at `~/.oxi/extensions/registry.json`:
       "version": "1.0.0",
       "source": "owner/my-extension",
       "installed_at": "2025-05-06T12:00:00Z",
-      "wasm_path": "~/.oxi/extensions/my-extension.wasm"
+      "wasm_path": "~/.oxicode/extensions/my-extension.wasm"
     }
   }
 }
@@ -607,13 +607,13 @@ The local registry is stored at `~/.oxi/extensions/registry.json`:
 ### CLI commands
 
 ```bash
-oxi ext install owner/repo       # Install latest release
-oxi ext install owner/repo@1.2.0 # Install specific version
-oxi ext list                      # List installed extensions
-oxi ext update                    # Update all extensions
-oxi ext update my-extension       # Update specific extension
-oxi ext remove my-extension       # Remove an extension
-oxi ext info owner/repo           # Show info without installing
+oxicode ext install owner/repo       # Install latest release
+oxicode ext install owner/repo@1.2.0 # Install specific version
+oxicode ext list                      # List installed extensions
+oxicode ext update                    # Update all extensions
+oxicode ext update my-extension       # Update specific extension
+oxicode ext remove my-extension       # Remove an extension
+oxicode ext info owner/repo           # Show info without installing
 ```
 
 ---
@@ -630,15 +630,15 @@ oxi ext info owner/repo           # Show info without installing
 
 | Function | Restriction |
 |----------|-------------|
-| `oxi_http_request` | Blocks private IPs, localhost, cloud metadata (169.254.169.254) |
-| `oxi_read_file` | Blocks system paths (`/etc`, `/sys`, `/proc`, `/dev`, `/boot`, `/root`) |
-| `oxi_read_file` | Blocks sensitive home dirs (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`) |
-| `oxi_write_file` | Same path restrictions as read |
-| `oxi_exec` | Blocks `sudo`, `su`, `doas`, `rm -rf /`, `mkfs`, `dd if=`, etc. |
-| `oxi_exec` | Timeout capped at 120 seconds |
-| `oxi_get_env` | Blocks keys containing `SECRET`, `PASSWORD`, `TOKEN`, `PRIVATE_KEY` |
-| `oxi_http_request` | Response body truncated at 1 MB |
-| `oxi_read_file` | Max 50 KB per read |
+| `oxicode_http_request` | Blocks private IPs, localhost, cloud metadata (169.254.169.254) |
+| `oxicode_read_file` | Blocks system paths (`/etc`, `/sys`, `/proc`, `/dev`, `/boot`, `/root`) |
+| `oxicode_read_file` | Blocks sensitive home dirs (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`) |
+| `oxicode_write_file` | Same path restrictions as read |
+| `oxicode_exec` | Blocks `sudo`, `su`, `doas`, `rm -rf /`, `mkfs`, `dd if=`, etc. |
+| `oxicode_exec` | Timeout capped at 120 seconds |
+| `oxicode_get_env` | Blocks keys containing `SECRET`, `PASSWORD`, `TOKEN`, `PRIVATE_KEY` |
+| `oxicode_http_request` | Response body truncated at 1 MB |
+| `oxicode_read_file` | Max 50 KB per read |
 
 ### Permissions
 
@@ -728,8 +728,8 @@ tinygo build -o extension.wasm -target=wasi -no-debug -scheduler=none .
 ### Extension not loading
 
 1. Check the file is a valid `.wasm` file: `file extension.wasm`
-2. Check it's in the right directory: `~/.oxi/extensions/` or `.oxi/extensions/`
-3. Run oxi with debug logging: `RUST_LOG=debug oxi`
+2. Check it's in the right directory: `~/.oxicode/extensions/` or `.oxicode/extensions/`
+3. Run oxicode with debug logging: `RUST_LOG=debug oxicode`
 4. Look for `WASM extension loaded:` or `WASM extension error:` messages
 
 ### `init()` returns invalid JSON
@@ -746,7 +746,7 @@ The `init()` output must be valid JSON with at minimum `name` and `version` fiel
 
 1. Check the input JSON matches the expected schema
 2. Check for security restrictions (path blocked, env key blocked, etc.)
-3. Use `oxi_log` to debug from within the extension
+3. Use `oxicode_log` to debug from within the extension
 
 ### WASM memory errors
 

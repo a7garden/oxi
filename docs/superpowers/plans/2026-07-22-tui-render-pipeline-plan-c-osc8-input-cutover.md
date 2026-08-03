@@ -1,11 +1,11 @@
-# oxi-tui v2 — Plan C: OSC8 + Input Textarea + oxi-cli Cutover
+# oxicode-tui v2 — Plan C: OSC8 + Input Textarea + oxicode-cli Cutover
 
-**Goal:** Complete the remaining oxi-tui v2 features (OSC8 hyperlink emission, input textarea) and cut over oxi-cli from oxi-tui-legacy to the new oxi-tui.
+**Goal:** Complete the remaining oxicode-tui v2 features (OSC8 hyperlink emission, input textarea) and cut over oxicode-cli from oxicode-tui-legacy to the new oxicode-tui.
 
 **Tasks:**
 1. PR-7: OSC8 row-write emission inside DiffBackend (inside CSI 2026 window)
 2. PR-8: Input textarea wrapper (stock ratatui-textarea 0.9)
-3. PR-9: oxi-cli cutover — switch from legacy to new pipeline (large)
+3. PR-9: oxicode-cli cutover — switch from legacy to new pipeline (large)
 
 **Spec:** `docs/superpowers/specs/2026-07-21-tui-render-pipeline-redesign.md` §9, §10
 
@@ -13,26 +13,26 @@
 
 Fill in the `set_links()` hook on DiffBackend to actually emit OSC8 escapes inside row writes, inside the CSI 2026 window. Currently `set_links` stores links but doesn't emit.
 
-**Files:** `oxi-tui/src/pipeline/diff_backend/mod.rs`
+**Files:** `oxicode-tui/src/pipeline/diff_backend/mod.rs`
 **LOC:** ~100
 
 ## Task C2: Input textarea wrapper (PR-8)
 
 Thin wrapper around stock ratatui-textarea 0.9. Provides IME, paste, undo.
 
-**Files:** `oxi-tui/src/input/mod.rs`, `oxi-tui/src/input/textarea.rs`
+**Files:** `oxicode-tui/src/input/mod.rs`, `oxicode-tui/src/input/textarea.rs`
 **LOC:** ~200
 
-## Task C3: oxi-cli cutover (PR-9)
+## Task C3: oxicode-cli cutover (PR-9)
 
-Switch oxi-cli's TUI from oxi-tui-legacy to new oxi-tui. THE big integration.
+Switch oxicode-cli's TUI from oxicode-tui-legacy to new oxicode-tui. THE big integration.
 
-**Files:** `oxi-cli/src/tui/app.rs` + 27+ oxi-cli files
+**Files:** `oxicode-cli/src/tui/app.rs` + 27+ oxicode-cli files
 **LOC:** ~3,000
 
 This is the largest single task. It requires:
 - Replacing `terminal.draw(closure)` with `draw_frame()`
-- Converting oxi-cli's AppState to use new ChatView/ChatLog
+- Converting oxicode-cli's AppState to use new ChatView/ChatLog
 - Converting all overlays to Renderable impls (or keeping them as overlay trait impls that call new primitives)
 - Wiring theme + caps through to draw_frame
 

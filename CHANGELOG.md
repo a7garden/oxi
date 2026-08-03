@@ -1,34 +1,43 @@
 # Changelog
 
-All notable changes to the oxi project will be documented in this file.
+All notable changes to the oxicode project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_(nothing yet)_
+### Breaking
+
+- **Project renamed: oxi → oxicode.** All crate names (`oxi-*` → `oxicode-*`),
+  Rust identifiers (`oxi_*` → `oxicode_*`), environment variables (`OXI_*` →
+  `OXICODE_*`), config paths (`~/.oxi/` → `~/.oxicode/`, `.oxi/` → `.oxicode/`),
+  binary name (`oxi` → `oxicode`), type names (`Oxi` → `Oxicode`, `OxiBuilder` →
+  `OxicodeBuilder`), and documentation have been migrated. Sister projects
+  (oxios, oxipage, oxiline, oxinot) and external dependencies (oxibrowser) are
+  unchanged. Users must update their `use` statements, env vars, config paths,
+  and binary invocations.
 
 ## [0.64.0] - 2026-08-02
 
 ### Breaking
 
-- **oxi-sdk: unstable re-export surface moved behind opt-in cargo features.**
-  Every `#[oxi_unstable]` re-export now carries a matching
+- **oxicode-sdk: unstable re-export surface moved behind opt-in cargo features.**
+  Every `#[oxicode_unstable]` re-export now carries a matching
   `#[cfg(feature = "...")]` gate (completes R3 follow-up D). The
   previously always-compiled unstable surface — `router`,
   `role-routing`, `role-switching`, `advisor`, `memory`, `subagent`,
   `agent-hub`, `lsp`, `browser`, `delegation`, `url-resolver`,
   `workflow-dsl` — is now opt-in. Consumers that name these via the
-  `oxi_sdk::` path must enable the matching feature (or the `unstable`
+  `oxicode_sdk::` path must enable the matching feature (or the `unstable`
   umbrella); enable all twelve at once with
-  `oxi-sdk = { features = ["unstable"] }`. Internal callers reach the
+  `oxicode-sdk = { features = ["unstable"] }`. Internal callers reach the
   underlying types via their definition paths
   (`crate::url_resolver::*`, `crate::delegation::*`), so builder
-  methods stay available in default builds. oxi-cli enables the four
+  methods stay available in default builds. oxicode-cli enables the four
   features it consumes (`router`, `role-routing`, `role-switching`,
   `url-resolver`). See `docs/release-process.md` §Stability Tier.
-- **oxi-ai: `OAuthError` is now `#[non_exhaustive]`.** Completes the R7
+- **oxicode-ai: `OAuthError` is now `#[non_exhaustive]`.** Completes the R7
   error-stability policy for the OAuth subsystem. Consumers MUST add a
   catch-all `_ =>` arm when matching `OAuthError`; a new variant
   `InvalidAuthorizationEndpoint` was added in the same change.
@@ -38,21 +47,21 @@ _(nothing yet)_
   `#[unstable]`/consumer-owned, and the SDK provides behavior traits
   (`CircuitBreaker`, `SpawnValidator`) plus reference impls that
   consumers can wire without depending on the removed types:
-  - `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed in 0.61.0
+  - `oxicode_ai::ProviderPool`, `oxicode_ai::RateLimitPolicy` — removed in 0.61.0
     (`provider_pool` module, 203 LOC). No direct replacement; superseded by
-    the `RouterPipeline` in `oxi_ai::router`.
-  - `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` —
+    the `RouterPipeline` in `oxicode_ai::router`.
+  - `oxicode_ai::CircuitBreakerConfig`, `oxicode_ai::ProviderCircuitBreaker` —
     removed in 0.61.0 (`circuit_breaker` module, 944 LOC). A minimal
     `CircuitBreaker` behavior trait + `DefaultCircuitBreaker` reference
     impl are reintroduced in this release (R6).
-  - `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
-    `oxi_ai::MultiProviderConfig` — removed in 0.61.0 (`multi_provider`
+  - `oxicode_ai::MultiProviderBuilder`, `oxicode_ai::RoutingConfig`,
+    `oxicode_ai::MultiProviderConfig` — removed in 0.61.0 (`multi_provider`
     module, 1283 + 359 LOC). Superseded by `RouterPipeline` + the
     `router://local` provider.
 
 ### Deprecated
 
-- **oxi-ai: `oauth::build_authorization_url` is deprecated** (since
+- **oxicode-ai: `oauth::build_authorization_url` is deprecated** (since
   0.64.0; removal slated for 0.66.0). It panics on a malformed
   authorization endpoint. Use the non-panicking
   `build_authorization_url_result` instead, which returns
@@ -61,43 +70,43 @@ _(nothing yet)_
 
 ### Added
 
-- **SDK: behavior↔policy ownership contract** (`docs/oxi-sdk-ownership.md`)
+- **SDK: behavior↔policy ownership contract** (`docs/oxicode-sdk-ownership.md`)
   — R0/R5 of the SDK Stability & Ownership Program. Pinned
-  behavior/policy split between SDK and consumers (oxios, oxi-cli, etc.).
-- **SDK: `oxi-api-stability` proc-macro crate** — `#[stable]` /
+  behavior/policy split between SDK and consumers (oxios, oxicode-cli, etc.).
+- **SDK: `oxicode-api-stability` proc-macro crate** — `#[stable]` /
   `#[unstable]` / `#[internal]` / `#[deprecated]` attribute macros
   for stability tier documentation in `cargo doc` (R3, scope-narrowed
-  from original spec — see `docs/oxi-sdk-ownership.md` §6.1).
-- **oxi-ai: `CircuitBreaker` trait + `DefaultCircuitBreaker`** (R6) —
+  from original spec — see `docs/oxicode-sdk-ownership.md` §6.1).
+- **oxicode-ai: `CircuitBreaker` trait + `DefaultCircuitBreaker`** (R6) —
   composable behavior trait for circuit-breaking resilience with
   threshold + half-open state machine. `BreakerError::Open` is
   non-retryable by design (the breaker's whole purpose is to stop
   hammering a failing upstream).
-- **oxi-agent: `SpawnValidator` trait + `NoopSpawnValidator`** (R6) —
+- **oxicode-agent: `SpawnValidator` trait + `NoopSpawnValidator`** (R6) —
   composable policy hook for MCP server spawn validation. Consumers
   register their own `validate_command` / `sanitize_env` policy;
-  oxi-cli's default wires a permissive policy, oxios can wire its
+  oxicode-cli's default wires a permissive policy, oxios can wire its
   strict impl. The SDK keeps a hardcoded `BLOCKED_ENV_VARS` floor
   (loader-injection vectors) that always applies.
-- **oxi-sdk / oxi-ai: `#[non_exhaustive]` on `SdkError` and
+- **oxicode-sdk / oxicode-ai: `#[non_exhaustive]` on `SdkError` and
   `ProviderError`** (R7) — error type stability. Existing named
   variants are frozen; new variants may be added freely. Consumers
   MUST add a catch-all `_ =>` arm in their matches.
-- **oxi-ai: `oauth::build_authorization_url_result`** — non-panicking
+- **oxicode-ai: `oauth::build_authorization_url_result`** — non-panicking
   PKCE URL builder returning `Result<PkceState, OAuthError>`, plus a new
   `OAuthError::InvalidAuthorizationEndpoint` variant for malformed
   endpoint URLs (R4 follow-up C).
-- **oxi-agent: CircuitBreaker wired into retry path** — `AgentLoopConfig`
+- **oxicode-agent: CircuitBreaker wired into retry path** — `AgentLoopConfig`
   now accepts an optional `SharedBreaker`; the retry loop short-circuits
   when the breaker is open (R6).
-- **oxi-sdk: stability tier annotations on all 17 re-export blocks**
+- **oxicode-sdk: stability tier annotations on all 17 re-export blocks**
   (R3) — every public re-export now carries `#[stable]` / `#[unstable]` /
   `#[internal]`.
-- **oxi-cli (TUI): `/agents` Agent Hub overlay** — `/agents` (alias
+- **oxicode-cli (TUI): `/agents` Agent Hub overlay** — `/agents` (alias
   `/hub`) opens a centered panel listing every registered agent
   (kind/name/status) from the live `AgentSession` hub registry; `q`
   closes it. Completes the VT-TUI cutover (item A).
-- **oxi-cli (TUI): synchronized-output tape rendering** — each frame
+- **oxicode-cli (TUI): synchronized-output tape rendering** — each frame
   flush is wrapped in Begin/End Synchronized Update
   (`\x1b[?2026h` / `\x1b[?2026l`), eliminating mid-frame tearing on the
   main-screen tape.
@@ -107,12 +116,12 @@ _(nothing yet)_
 
 ### Changed
 
-- **oxi-ai: feature-gated protobuf providers** — Devin + Cursor
+- **oxicode-ai: feature-gated protobuf providers** — Devin + Cursor
   providers moved behind a new `protobuf` cargo feature (R8). Default
   builds no longer pull `prost` / `prost-build` / `protoc-bin-vendored`
   (~120 transitive crates). Consumers using those providers enable
   with `--features protobuf`.
-- **oxi-cli (TUI): ordinary chat renders on the main screen** — the TUI
+- **oxicode-cli (TUI): ordinary chat renders on the main screen** — the TUI
   no longer enters alternate screen (`\x1b[?1049h`) for ordinary chat;
   alt screen is reserved for transient overlays, matching the main-screen
   tape design. Ctrl+C now uses a two-press quit (first press arms, second
@@ -120,29 +129,29 @@ _(nothing yet)_
 
 ### Fixed
 
-- **oxi-sdk: structured error promotion + embedding port bridge + smoke
+- **oxicode-sdk: structured error promotion + embedding port bridge + smoke
   tests** — promoted string errors to typed `SdkError` variants, added
   real example code, and wired `MnemopiEmbeddingBridge` to bridge
-  oxi-mnemopi to the SDK async `EmbeddingProvider` port.
-- **oxi-ai / oxi-agent / oxi-sdk: R4 zero-panic enforcement** — audited
+  oxicode-mnemopi to the SDK async `EmbeddingProvider` port.
+- **oxicode-ai / oxicode-agent / oxicode-sdk: R4 zero-panic enforcement** — audited
   and replaced `unwrap()` / `expect()` calls that could panic on
   external input with proper error propagation.
 - **docs: broken intra-doc links** — resolved all `cargo doc -D warnings`
-  failures across oxi-ai, oxi-agent, oxi-sdk, and oxi-cli.
+  failures across oxicode-ai, oxicode-agent, oxicode-sdk, and oxicode-cli.
 
 ## [0.63.0] - 2026-08-01
 
 ### Added
 
-- **VT-based TUI framework** — New `oxi-vtui` and `oxi-vtui-compat` crates
+- **VT-based TUI framework** — New `oxicode-vtui` and `oxicode-vtui-compat` crates
   providing a terminal UI framework based on vtcode-ui, with theme pipeline,
   design system, and full TUI widget support.
 - **grok-build layout system** — Ported the agent view layout system from
   grok-build as the structural foundation for the new TUI.
 - **Slash command registry** — VT TUI slash command system with layout bridge
   for CLI integration.
-- **UI protocol compatibility layer** — `oxi-vtui-compat` bridges the VT UI
-  protocol with oxi's agent/UI types.
+- **UI protocol compatibility layer** — `oxicode-vtui-compat` bridges the VT UI
+  protocol with oxicode's agent/UI types.
 
 ### Changed
 
@@ -151,7 +160,7 @@ _(nothing yet)_
 
 ### Fixed
 
-- **TUI: black screen on launch (oxi-vtui)** — The event loop drew its first
+- **TUI: black screen on launch (oxicode-vtui)** — The event loop drew its first
   frame only *after* the first event arrived, and the keyboard input thread
   exited within ~50 ms of startup: it used `while let Ok(true) =
   event::poll(...)`, which treats the `Ok(false)` poll timeout as loop
@@ -161,17 +170,17 @@ _(nothing yet)_
   poll timeouts (exit only on a read error), (2) drawing an initial frame
   before the loop blocks, and (3) adding a 50 ms render tick so typed input
   is echoed without each keystroke needing to send an event.
-- **TUI: invisible text / wrong colors (oxi-vtui)** — Text rendered
+- **TUI: invisible text / wrong colors (oxicode-vtui)** — Text rendered
   near-black on a dark background and was invisible until the user
   drag-selected it (which inverts colors). Root cause: the
-  `oxi-vtui-compat` color-constant block was a garbled copy of the
+  `oxicode-vtui-compat` color-constant block was a garbled copy of the
   authoritative values — the RGB blend clamp was `[0,1]` instead of
   `[0,255]` (collapsing almost every blend to `(1,1,1)`), "white" was set
   to the luminance coefficients `0.299/0.587/0.114` instead of `1.0`, and
   the relative-luminance constants used NTSC luma rather than sRGB/WCAG.
   The theme pipeline ran every palette through this broken math, so every
   computed color degenerated to near-black. Fixed by correcting the
-  constants to the WCAG/sRGB values already used by `oxi-vtui`'s own
+  constants to the WCAG/sRGB values already used by `oxicode-vtui`'s own
   `ui.rs`. Also paint the theme background across the whole frame so
   fg-only text always sits on the intended surface.
 
@@ -215,31 +224,31 @@ _(nothing yet)_
   restoration on exit.
 
 - **TUI: v2 crate retirement + rename (P2.1)** — Retired the grok-inspired
-  `oxi-tui` v2 crate. Ported cursor dedup (`CursorState`) from v2 to legacy
+  `oxicode-tui` v2 crate. Ported cursor dedup (`CursorState`) from v2 to legacy
   `DiffBackend` (which already had CSI 2026 sync, DECCARA, row-level diffing).
-  Deleted the v2 crate (~9.8K LOC). Renamed `oxi-tui-legacy` → `oxi-tui` as
+  Deleted the v2 crate (~9.8K LOC). Renamed `oxicode-tui-legacy` → `oxicode-tui` as
 
-### Removed — oxi-ai (Breaking Changes — retrospective, 0.61.0)
+### Removed — oxicode-ai (Breaking Changes — retrospective, 0.61.0)
 
 - **ai: P0.2 multi-provider/circuit-breaker modules** (retrospective entry
   per the Breaking Change Policy — these were removed in 0.61.0 without
   adequate advance warning; documenting here so SDK consumers can audit
   impact):
-  - `oxi_ai::ProviderPool`, `oxi_ai::RateLimitPolicy` — removed
+  - `oxicode_ai::ProviderPool`, `oxicode_ai::RateLimitPolicy` — removed
     (`provider_pool` module, 203 LOC). No direct replacement; the router
     pipeline (`RouterPipeline`) supersedes multi-provider routing.
-  - `oxi_ai::CircuitBreakerConfig`, `oxi_ai::ProviderCircuitBreaker` —
+  - `oxicode_ai::CircuitBreakerConfig`, `oxicode_ai::ProviderCircuitBreaker` —
     removed (`circuit_breaker` module, 944 LOC). A minimal
     `CircuitBreaker` trait will be re-introduced (see R6).
-  - `oxi_ai::MultiProviderBuilder`, `oxi_ai::RoutingConfig`,
-    `oxi_ai::MultiProviderConfig` — removed (`multi_provider` module,
+  - `oxicode_ai::MultiProviderBuilder`, `oxicode_ai::RoutingConfig`,
+    `oxicode_ai::MultiProviderConfig` — removed (`multi_provider` module,
     1283+359 LOC). Superseded by `RouterPipeline` + `router://local`
     provider.
 
 ### Added
 
 - **TUI: omp tape engine (P2.2)** — Standalone append-only native-scrollback
-  rendering engine in `oxi-tui/src/tape/`. Component trait with content_hash
+  rendering engine in `oxicode-tui/src/tape/`. Component trait with content_hash
   memoization, TapeEngine with committed prefix / live region / differential
   rendering (scroll-append fast path, chunk commit, in-window diff), ED3
   scrollback clear for resize/session-replace, CSI 2026 synchronized output.
@@ -254,8 +263,8 @@ _(nothing yet)_
   symbol mappings (Greek letters, math operators, arrows, sets, subscripts/
   superscripts, accents, `\frac`, `\sqrt`). 18 tests.
 - **TUI: theme/glyph verification (P2.6)** — Confirmed single-source theme
-  (`oxi-tui/src/theme.rs`) and glyph (`oxi-tui/src/symbols.rs`) systems.
-  Updated all remaining `oxi-tui-legacy` comment references to `oxi-tui`.
+  (`oxicode-tui/src/theme.rs`) and glyph (`oxicode-tui/src/symbols.rs`) systems.
+  Updated all remaining `oxicode-tui-legacy` comment references to `oxicode-tui`.
 
 ### Added (P2 integration)
 
@@ -263,14 +272,14 @@ _(nothing yet)_
   spawns the actual binary in a PTY, verifies synchronized main-screen tape
   output without alternate-screen entry, sends Ctrl+C, confirms cursor
   restoration and clean exit. Permanent guardrail.
-- **TUI: KillRing in input editor (OXI_KILL_RING=1)** — Emacs-style kill ring.
+- **TUI: KillRing in input editor (OXICODE_KILL_RING=1)** — Emacs-style kill ring.
   Ctrl+Shift+k: kill to line end → push to ring. Ctrl+Shift+u: kill to
   line start. Ctrl+y: yank. Alt+y: yank-pop. Gated by env var; default
   behavior (Ctrl+Shift+k = plain delete) preserved when unset.
-- **TUI: LaTeX-to-Unicode in markdown (OXI_LATEX_INLINE=1)** — Preprocesses
+- **TUI: LaTeX-to-Unicode in markdown (OXICODE_LATEX_INLINE=1)** — Preprocesses
   markdown segments through `latex_to_unicode()` (145 symbol mappings)
   before parsing. Code blocks unaffected. Gated by env var.
-- **TUI: Kitty keyboard protocol (OXI_KITTY_KEYBOARD=1)** — When set, terminal
+- **TUI: Kitty keyboard protocol (OXICODE_KITTY_KEYBOARD=1)** — When set, terminal
   setup pushes full `KeyboardEnhancementFlags` (`DISAMBIGUATE_ESCAPE_CODES |
   REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`). crossterm 0.29+ parses
   CSI-u sequences natively; event loop works unchanged.
@@ -295,14 +304,14 @@ _(nothing yet)_
   memory pipeline (per-session extraction + cross-session consolidation
   every 60s). 26 tests.
 - **ai: Snapcompact compaction mode** — `SnapcompactCompactor` implementing
-  the Compactor trait, producing PNG frame renderings via the `oxi-snapcompact`
+  the Compactor trait, producing PNG frame renderings via the `oxicode-snapcompact`
   crate (bundled fonts, text rasterizer). `CompactionStrategy::Snapcompact`
   variant in the compaction engine. 5+15 compactor/renderer tests.
-- **mnemopi: SQLite memory engine** — `oxi-mnemopi` crate with FTS5 full-text
+- **mnemopi: SQLite memory engine** — `oxicode-mnemopi` crate with FTS5 full-text
   search, vector recall (cosine sim + MMR), polyphonic recall, temporal
   decay, episodic graph, veracity consolidation, and MCP server. 40+ source
   files.
-- **lsp: oxi-lsp crate + LSP tool** — `oxi-lsp` thin LSP adapter
+- **lsp: oxicode-lsp crate + LSP tool** — `oxicode-lsp` thin LSP adapter
   (async_lsp + lsp_types), `LspTool` agent tool with 11 operations
   (diagnostics/definition/references/hover/rename/symbols/status/
   code_actions/type_definition/implementation/file_rename), `CliLspProvider`
@@ -369,7 +378,7 @@ _(nothing yet)_
   to `Ask` at the spawn gate, closing the clone-to-RCE surface; the
   per-tool gate keeps its `Allow` default so `direct_tool.rs` is
   unaffected. A one-time migration auto-trusts **only** global config
-  servers (`~/.config/oxi/mcp.json`) — project-local servers from a
+  servers (`~/.config/oxicode/mcp.json`) — project-local servers from a
   cloned repo stay gated. Typed `McpError::ConsentDenied` replaces
   anyhow at the new boundary. 5 new consent tests.
 - **F-1: `AuthCredential` Debug masking** — replaced
@@ -391,13 +400,13 @@ _(nothing yet)_
   streams now use `split_complete_lines` + `pending_bytes` (the same
   pattern as openai/anthropic/google/vertex). SSE `data:` lines split
   across HTTP chunk boundaries are no longer silently dropped.
-- **F-14: Doc drift** — corrected AGENTS.md oxi-cli LOC (17K → 66K),
+- **F-14: Doc drift** — corrected AGENTS.md oxicode-cli LOC (17K → 66K),
   `ProtocolHandler` port status (🔜 TBD → ✅ wired), and README provider
   count (10 → 8).
 
-## [0.58.0] - 2026-07-23 — oxi-tui v2 Terminal-First Pipeline
+## [0.58.0] - 2026-07-23 — oxicode-tui v2 Terminal-First Pipeline
 
-### Added — oxi-agent streaming lifecycle events
+### Added — oxicode-agent streaming lifecycle events
 
 - **`AgentEvent::ToolCallDelta`** (P0) — the provider's streamed tool-arg
   fragments are now forwarded as `AgentEvent::ToolCallDelta { tool_call_id,
@@ -415,11 +424,11 @@ _(nothing yet)_
   dropped by the catch-all). Fires per thinking span, giving the exact
   reasoning↔text boundary for interleaved-reasoning models (Claude 4,
   o-series).
-- **Scope/caveat** — `oxi-agent` only (`events.rs`, `agent_loop/streaming.rs`
-  + unit tests). Oxios consumes `AgentEvent` directly via `oxi-sdk`
+- **Scope/caveat** — `oxicode-agent` only (`events.rs`, `agent_loop/streaming.rs`
+  + unit tests). Oxios consumes `AgentEvent` directly via `oxicode-sdk`
   (re-exported, `lib.rs:192`), so the LobeHub port's already-built
   `AgentEvent → KernelEvent` handler now receives both events with no
-  further oxi change. The JSON-RPC IDE bridge (`agent_event_to_rpc`) now
+  further oxicode change. The JSON-RPC IDE bridge (`agent_event_to_rpc`) now
   also forwards both variants — `RpcEvent::ThinkingEnd` and
   `RpcEvent::ToolCallDelta { tool_call_id, args_delta }` — across the SEND
   path (agent → JSON for IDE clients) and the RECEIVE path (both `RpcClient`
@@ -427,7 +436,7 @@ _(nothing yet)_
   `{"type":"thinking_end"}` and
   `{"type":"tool_call_delta","tool_call_id":…,"args_delta":…}`.
 
-### Architecture — oxi-tui Greenfield Rewrite
+### Architecture — oxicode-tui Greenfield Rewrite
 
 - **Terminal-first rendering pipeline** — `draw_frame()` decomposes ratatui's
   `Terminal::draw()` into `autoresize → hash-skip → render → flush →
@@ -459,7 +468,7 @@ _(nothing yet)_
 - **CJK-aware word wrap** — `unicode-width` based, handles double-width
   characters and soft/hard break tracking.
 
-### oxi-cli Integration
+### oxicode-cli Integration
 
 - **Pipeline LIVE** — main loop uses `draw_frame_closure()` instead of
   `terminal.draw(closure)`. Cursor dedup + CSI 2026 sync + DECCARA bg-fill
@@ -469,7 +478,7 @@ _(nothing yet)_
   legacy `ChatViewState` AND new `ChatLog`. State preparation for rendering
   migration.
 
-- **v2 render path** — `OXI_V2_RENDER=1` env var gates new ChatView widget
+- **v2 render path** — `OXICODE_V2_RENDER=1` env var gates new ChatView widget
   rendering. When enabled, chat area renders via `ChatView::render()` (new
   Renderable API). Footer/input/overlays still legacy (incremental
   migration).
@@ -478,7 +487,7 @@ _(nothing yet)_
   `Renderable`. `LegacyOverlayAdapter` wraps old overlays. `RenderCtx::
   with_frame()` provides temporary Frame access for legacy bridging.
 
-### Module Structure (oxi-tui v2, 42 files, ~9.7K LOC)
+### Module Structure (oxicode-tui v2, 42 files, ~9.7K LOC)
 
 ```
 pipeline/   draw_frame, draw_frame_closure, CursorState, CursorSlot,
@@ -496,17 +505,17 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Legacy Preservation
 
-- `oxi-tui` renamed to `oxi-tui-legacy` — all 27 oxi-cli callsites migrated
-  (`oxi_tui` → `oxi_tui_legacy`). Legacy crate continues to work unchanged.
+- `oxicode-tui` renamed to `oxicode-tui-legacy` — all 27 oxicode-cli callsites migrated
+  (`oxicode_tui` → `oxicode_tui_legacy`). Legacy crate continues to work unchanged.
   Removal planned after full rendering migration (Plan D).
 ## [0.56.0] - 2026-07-19
 
 ### Added
 
-- **Snapcompact renderer** — `oxi-snapcompact` crate with full fontdue-based
+- **Snapcompact renderer** — `oxicode-snapcompact` crate with full fontdue-based
   text→PNG rasterizer ported from pi-natives. Five bundled fonts (BDF + TTF),
-  real PNG output via the `png` crate. `SnapcompactCompactor` in `oxi-sdk`
-  implements `oxi_ai::Compactor` for vision-capable models.
+  real PNG output via the `png` crate. `SnapcompactCompactor` in `oxicode-sdk`
+  implements `oxicode_ai::Compactor` for vision-capable models.
 - **`CompactionStrategy::Snapcompact`** variant — always compacts using the
   snapcompact PNG renderer. Wire via `CompactionManager::set_compactor()`.
 - **RPC mode rewrite** — `RpcActor` replaces the legacy stub with a full
@@ -517,11 +526,11 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   rule, agent, local) wired through `SdkUrlResolver` → `AgentConfig` →
   `ToolContext`. `read`/`grep`/`find` tools resolve internal URLs
   transparently.
-- **oxi-lsp crate** — thin LSP protocol adapter (`async-lsp` + `lsp-types`).
-  `CliLspProvider` in `oxi-cli` bridges to multi-server `LspManager` with
+- **oxicode-lsp crate** — thin LSP protocol adapter (`async-lsp` + `lsp-types`).
+  `CliLspProvider` in `oxicode-cli` bridges to multi-server `LspManager` with
   11 action handlers (definition, references, hover, rename, code_actions,
   file_rename, etc.). Edit/write tools auto-notify LSP after mutations.
-- **WorkflowEngine** — `oxi-sdk` engine that executes `WorkflowDefinition`
+- **WorkflowEngine** — `oxicode-sdk` engine that executes `WorkflowDefinition`
   with 6 step types (Run, Parallel, Chain, ForEach, Vote, SetState).
   `{previous}` substitution and `SharedMemory` integration.
 - **SubagentCoordinator** — lifecycle tracking for subagents
@@ -531,15 +540,15 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   authorizer, tracer, and cost tracker. Replaces the old `SupervisorBuilder`
   no-op setters. `AgentBuilder::tracer()` now fully functional: `SpanGuard`
   owns `Arc<Tracer>`, spans recorded for Run/Turn/Tool lifecycle events.
-- **oxi-tui UX improvements** — `FollowMode` state machine, virtual
+- **oxicode-tui UX improvements** — `FollowMode` state machine, virtual
   coordinate scroll layer, reflow-safe clamp, sticky turn-prompt header,
   mouse scroll normalization with wheel/trackpad detection, color level
   detection + `adapt_color`, terminal support pattern for EPT overrides,
   A4 layout cache.
-- **oxi-tui slash dropdown widget** — nucleo-based fuzzy command matching
+- **oxicode-tui slash dropdown widget** — nucleo-based fuzzy command matching
   with MRU decay (7-day half-life) and inline ghost completion.
 - **Memory pipeline scaffolding** — real Stage 1/Stage 2 worker loops
-  with LLM-backed extraction and consolidation via `Oxi` resolver.
+  with LLM-backed extraction and consolidation via `Oxicode` resolver.
   `/memory status`, `sleep`, `harmonize` commands operational.
 
 ### Changed
@@ -554,14 +563,14 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 - **`tool_call_loop_guard` now live** — detects repetitive tool loops and
   injects a steering message with the `TERMINAL_TOOL_RESULT_ABORT_REASON`
   pattern (inner loop abort only, not full run termination).
-- **`RoutingControl` live in `Oxi::resolve_model`** — exclusion checks
+- **`RoutingControl` live in `Oxicode::resolve_model`** — exclusion checks
   and fallback models are read from the shared `Arc<RoutingControl>`.
 
 ### Fixed
 
 - **`syntect` feature fixed** — `default-fallbacks` → `default-fancy`
   for syntect 5.3 compatibility.
-- **`oxi-tui` module compile fix** — restored `tool_renderer` module
+- **`oxicode-tui` module compile fix** — restored `tool_renderer` module
   declaration.
 - **Workspace version uniformity** — all 9 crates at `0.56.0`.
 
@@ -573,39 +582,39 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   The vestigial `AgentConfig::api_key` field and the `api_key` parameters on
   `Agent::switch_model` / `Agent::switch_to_model` / `Agent::refresh_api_key`
   have been removed. The provider instance is now the sole credential holder,
-  populated exclusively through `OxiBuilder::api_key(...)` (explicit override)
+  populated exclusively through `OxicodeBuilder::api_key(...)` (explicit override)
   or the wired `AuthProvider` port via its new sync fast-path
   (`get_api_key_sync`). This eliminates the leak where a stray per-stream
   `api_key` could override the resolver-baked credential (`Provider stream
   error: Failed to resolve model` / cross-provider 401s).
   `Agent::refresh_credentials()` is the new entry point for picking up
   auth-store updates — it re-resolves the current provider via the resolver.
-  CLI migration: `services.rs::build_oxi` now registers the
+  CLI migration: `services.rs::build_oxicode` now registers the
   `shared_auth_storage()` singleton directly via a new
-  `impl oxi_sdk::ports::AuthProvider for AuthStorage` adapter, eliminating
+  `impl oxicode_sdk::ports::AuthProvider for AuthStorage` adapter, eliminating
   the dual-cache (FileAuthProvider vs AuthStorage) and schema-mismatch
   issues that previously hid behind the explicit per-stream `api_key`.
 
-- **`oxi-sdk` — `Oxi as ProviderResolver` (#39)**. `AgentBuilder::build()`
-  now uses `self.oxi.clone()` directly as the agent loop's resolver
-  (replacing the hand-rolled `OxiResolver` closure). `Oxi::resolve_model`
+- **`oxicode-sdk` — `Oxicode as ProviderResolver` (#39)**. `AgentBuilder::build()`
+  now uses `self.oxicode.clone()` directly as the agent loop's resolver
+  (replacing the hand-rolled `OxicodeResolver` closure). `Oxicode::resolve_model`
   consults the catalog port first and falls back to the static registry,
   so catalog-only models (newer Z.AI / OpenCode / models.dev entries) work
   end-to-end instead of returning `Failed to resolve model` at stream time.
 
 ### Added
 
-- **`oxi-sdk` — `AuthProvider::get_api_key_sync` optional fast-path**.
+- **`oxicode-sdk` — `AuthProvider::get_api_key_sync` optional fast-path**.
   Default returns `Ok(None)`; impls with synchronous backing stores override
   it. `FileAuthProvider` re-reads `path` from disk on every call (so external
-  writers are picked up without restart); `AuthStorage` (oxi-cli) delegates
-  to its existing sync `get_api_key`. Consumed by `Oxi::create_provider`
+  writers are picked up without restart); `AuthStorage` (oxicode-cli) delegates
+  to its existing sync `get_api_key`. Consumed by `Oxicode::create_provider`
   at build / `switch_model` / `refresh_credentials` time.
 
 ### Fixed
 
 - **Workspace version skew.** All six crates now share `0.55.0`. The
-  pre-existing broken `oxibrowser` 0.17 bump in `oxi-agent/Cargo.toml`
+  pre-existing broken `oxibrowser` 0.17 bump in `oxicode-agent/Cargo.toml`
   (added a `browser` feature that 0.17 doesn't expose) was reverted to
   `0.16` so the workspace resolves.
 
@@ -613,7 +622,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Added
 
-- **`oxi-agent` — `AgentConfig` passthrough for `AgentLoopConfig` fields (#32, #33)**.
+- **`oxicode-agent` — `AgentConfig` passthrough for `AgentLoopConfig` fields (#32, #33)**.
   `max_tool_result_bytes`, `subagent_runner`, and `subagent_depth` are now
   exposed on `AgentConfig` as `#[serde(skip, default)]` passthroughs, mirroring
   the existing `memory`/`todo`/`agent_pool` pattern. This unblocks library
@@ -638,14 +647,14 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   5 RustCrypto bumps (sha2/digest/hmac/signature/pkcs8) reverted — incompatible
   with stable rsa 0.9.x (depends on digest 0.10; no stable rsa release supports
   digest 0.11 yet). `self_update` pinned at 0.41 (0.44 has internal compile
-  break; crate is declared but unused in `oxi-cli`).
+  break; crate is declared but unused in `oxicode-cli`).
 - **CI: actions/checkout v5→v7, actions/upload-artifact v4→v7** (#21).
 
 ## [0.53.0] - 2026-07-03
 
 ### Fixed
 
-- **`oxi-agent` — issue #28 gap 2: provider-reported token accounting for
+- **`oxicode-agent` — issue #28 gap 2: provider-reported token accounting for
   compaction** (addresses #28 gap 2 — the smallest, highest-leverage fix;
   gaps 1 and 3 follow in separate PRs). #28 remains open.
 
@@ -658,7 +667,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   growing monotonically across 11 tool rounds). With this fix, compaction
   fires on turn 2+ using the count the provider actually saw.
 
-  - **`oxi-agent/src/state.rs`**: `AgentState` now carries a
+  - **`oxicode-agent/src/state.rs`**: `AgentState` now carries a
     non-cumulative `last_input_tokens: Option<usize>`, plus
     `last_estimate_at_report` and `last_estimate_divergence` for
     observability. New `current_token_source()` returns
@@ -668,7 +677,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
     existing cumulative counters. The existing `AgentState::input_tokens`
     remains cumulative for lifetime accounting.
 
-  - **`oxi-agent/src/agent_loop/streaming.rs`**: the `Done` handler now
+  - **`oxicode-agent/src/agent_loop/streaming.rs`**: the `Done` handler now
     records the provider-reported `usage.input` via
     `AgentState::record_provider_turn` alongside the existing
     `record_usage`. The drift estimate is taken over the **prompt-only
@@ -676,13 +685,13 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
     `Done` is the just-completed assistant message, which the provider
     did not tokenize as input).
 
-  - **`oxi-agent/src/agent_loop/mod.rs`** (`maybe_compact`): now reads
+  - **`oxicode-agent/src/agent_loop/mod.rs`** (`maybe_compact`): now reads
     `current_token_source()` and uses the `Real` value when available;
     falls back to the heuristic only on cold start. Emits a `tracing::warn!`
     when the last `last_estimate_divergence` exceeds 2.0 so the operator
     can see how badly the heuristic is undercounting.
 
-  - **`oxi-agent/src/compaction.rs`**: `CompactionEvent::Triggered` gained
+  - **`oxicode-agent/src/compaction.rs`**: `CompactionEvent::Triggered` gained
     a `source: String` field
     (`"provider-reported"` / `"bytes/4 heuristic (cold start)"` /
     `"empty"`) so consumers can tell whether a trigger is real-token-based
@@ -693,14 +702,14 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
     800-token `Threshold(0.8) * 1000` cutoff.
 
   - **Test infrastructure**: `MockResponse` gained an optional
-    `usage: oxi_ai::Usage` field (default: zero) and a `with_usage(input)`
+    `usage: oxicode_ai::Usage` field (default: zero) and a `with_usage(input)`
     builder; `MockStream` carries it onto the synthetic `Done` event.
     Every existing `MockResponse { content: ... }` literal was migrated
     to `..Default::default()` — no test logic changed.
 
 ### Added — issue #28 gaps 1 + 3
 
-- **Gap 1: tool-result eviction** (`oxi-agent/src/agent_loop/config.rs`,
+- **Gap 1: tool-result eviction** (`oxicode-agent/src/agent_loop/config.rs`,
   `mod.rs`). `AgentLoopConfig` gains `max_tool_result_bytes: Option<usize>`.
   When set, tool results whose text content exceeds the limit are
   truncated before being pushed into the message history, with a marker
@@ -708,19 +717,19 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   (unlimited) — opt-in. This prevents a single large tool output (huge
   file read, verbose bash output) from consuming the context window.
 
-- **Gap 3: library-native delegation** (`oxi-agent/src/tools.rs`,
-  `oxi-agent/src/tools/subagent.rs`, `oxi-sdk/src/delegation.rs`).
+- **Gap 3: library-native delegation** (`oxicode-agent/src/tools.rs`,
+  `oxicode-agent/src/tools/subagent.rs`, `oxicode-sdk/src/delegation.rs`).
   New `SubagentRunner` trait + `ForkResult` type. When wired into
   `ToolContext` via `with_subagent_runner`, the `subagent` tool prefers
   an **in-process** isolated sub-agent run over shelling out to the CLI
-  binary. `oxi-sdk` provides `SdkSubagentRunner` — wraps an `Oxi`
+  binary. `oxicode-sdk` provides `SdkSubagentRunner` — wraps an `Oxicode`
   instance, builds a fresh `Agent` with an empty context per call, runs
   it, and returns only the final text + usage. Library consumers (Oxios)
-  that embed `oxi-agent` without an `oxi` subprocess can now use
+  that embed `oxicode-agent` without an `oxicode` subprocess can now use
   delegation.
 
   - **Depth safety**: the in-process path uses `ToolContext.subagent_depth`
-    (a `u8` field) instead of env vars (`OXI_SUBAGENT_DEPTH`). Concurrent
+    (a `u8` field) instead of env vars (`OXICODE_SUBAGENT_DEPTH`). Concurrent
     `std::env::set_var` is UB and state leaks between sequential forks;
     the config field avoids both. The CLI backend retains its env-var
     mechanism (safe: each subprocess has its own env).
@@ -729,7 +738,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   - The `subagent` tool checks `ctx.subagent_runner` first; if `Some`,
     calls `execute_in_process` (handles single/parallel/chain modes).
     If `None`, falls back to the existing CLI spawn path — no behavior
-    change for `oxi-cli`.
+    change for `oxicode-cli`.
 
 ### Notes
 
@@ -737,8 +746,8 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   PR #29), gap 1 (tool-result eviction), and gap 3 (library-native
   delegation). #28 can be closed.
 - **CI / packaging hygiene** (commit ba7886d9): repaired 4 broken
-  intra-doc links in `oxi-sdk` introduced by PR #31's refactor
-  (`cargo doc -D warnings` had been failing on `crate::OxiBuilder::agent`
+  intra-doc links in `oxicode-sdk` introduced by PR #31's refactor
+  (`cargo doc -D warnings` had been failing on `crate::OxicodeBuilder::agent`
   and `crate::builder::AgentBuilder`); allowlisted two `quick-xml` 0.23.1
   DoS advisories (RUSTSEC-2026-0194/0195) that are unfixable upstream
   (no `self_update` release pulls `quick-xml` ≥0.41) and sit behind the
@@ -749,7 +758,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Fixed
 
-- **`oxi-agent/src/agent_loop/streaming.rs`**: `ProviderEvent::ThinkingStart`
+- **`oxicode-agent/src/agent_loop/streaming.rs`**: `ProviderEvent::ThinkingStart`
   and `ProviderEvent::ThinkingDelta` now emit the discrete
   `AgentEvent::Thinking` and `AgentEvent::ThinkingDelta { text }` events
   in addition to the existing `MessageUpdate`. Previously these variants
@@ -765,7 +774,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Added — Mnemopi memory engine wiring + observability middleware
 
-- **`oxi-mnemopi` crate wired into `oxi-cli` composition root**: the
+- **`oxicode-mnemopi` crate wired into `oxicode-cli` composition root**: the
   SQLite vector memory engine (ported from omp Mnemopi) is now
   constructed at boot via `services::start_memory_pipeline`, providing
   auto-recall on session start, auto-retain on each turn, and
@@ -774,18 +783,18 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   `AuditLogMiddleware`, `CostTrackerMiddleware`, and
   `AuthorizerMiddleware` through `build_hooks`, with event dispatch
   for real-time agent event monitoring.
-- **`publish.yml` now includes `oxi-mnemopi`**: added to the publish
+- **`publish.yml` now includes `oxicode-mnemopi`**: added to the publish
   matrix, package-check leaf list, and wait-step (CI waits for both
-  `oxi-sdk` and `oxi-mnemopi` before publishing `oxi-cli`).
+  `oxicode-sdk` and `oxicode-mnemopi` before publishing `oxicode-cli`).
 
 ### Fixed
 
-- **`oxi-sdk/tests/integration.rs`**: fixed unclosed delimiter in
-  `oxi_instance_isolation()` — orphaned test functions now properly
+- **`oxicode-sdk/tests/integration.rs`**: fixed unclosed delimiter in
+  `oxicode_instance_isolation()` — orphaned test functions now properly
   top-level.
-- **`oxi-mnemopi-mcp.rs`**: `RemoteEmbeddingProvider::new()` returns
+- **`oxicode-mnemopi-mcp.rs`**: `RemoteEmbeddingProvider::new()` returns
   `Self` directly (not `Result`) — removed spurious `match`.
-- **`oxi-mnemopi/src/mcp.rs`**: fixed broken intra-doc link
+- **`oxicode-mnemopi/src/mcp.rs`**: fixed broken intra-doc link
   (`MnemopiDb::with_conn` → `crate::MnemopiDb::with_conn`).
 - **2x `unused mut` lints**: removed stale `mut` from `let mut agent`
   in integration tests where `add_tool` uses interior mutability.
@@ -799,45 +808,45 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   failed the `cargo nextest` compile step on `ubuntu-latest` (undefined
   symbols `SSL_read_ex` / `SSL_write_ex` / `SSL_CTX_ctrl`). `v0.50.0` was
   tagged but **never published** because of this — it is skipped on the
-  registry and `0.51.0` ships its content too. Changes: `oxi-agent` and
-  `oxi-ai` `reqwest` now use `default-features = false` + `rustls-tls`;
-  `oxi-ai` `jsonschema` drops `resolve-http` (only in-memory
-  `Validator::new` is used — no remote `$ref`); `oxi-cli` `self_update`
+  registry and `0.51.0` ships its content too. Changes: `oxicode-agent` and
+  `oxicode-ai` `reqwest` now use `default-features = false` + `rustls-tls`;
+  `oxicode-ai` `jsonschema` drops `resolve-http` (only in-memory
+  `Validator::new` is used — no remote `$ref`); `oxicode-cli` `self_update`
   switches to its `rustls` feature. After the fix `openssl-sys` /
   `native-tls` / `openssl` are absent from the Linux target dependency tree
-  entirely; `btls-sys` (via `oxibrowser`) is retained. (`oxi-sdk` and
-  `oxi-cli`'s own `reqwest` already used rustls.)
-- **`oxi-ai` Anthropic adapter**: strips a trailing `/v1` from the configured
+  entirely; `btls-sys` (via `oxibrowser`) is retained. (`oxicode-sdk` and
+  `oxicode-cli`'s own `reqwest` already used rustls.)
+- **`oxicode-ai` Anthropic adapter**: strips a trailing `/v1` from the configured
   base URL to prevent a double-`/v1` (`/v1/v1/...`) 404 when the base URL
   already includes the version segment.
 
 ### Fixed — `cargo doc -D warnings` CI job
 
 - Resolved 30 broken / private / feature-gated intra-doc links across
-  `oxi-mnemopi`, `oxi-hashline`, `oxi-agent`, `oxi-cli`, and `oxi-tui`
+  `oxicode-mnemopi`, `oxicode-hashline`, `oxicode-agent`, `oxicode-cli`, and `oxicode-tui`
   (file-path refs, private consts, cfg-gated types, cross-crate port types,
-  and `Self::`-scoped method links). The job had been aborting at `oxi-tui`
+  and `Self::`-scoped method links). The job had been aborting at `oxicode-tui`
   and hiding a cascade of pre-existing warnings.
 
 ## [0.50.0] - 2026-06-28
 
-### Fixed — product namespace isolation (`OXI_HOME` unification)
+### Fixed — product namespace isolation (`OXICODE_HOME` unification)
 
-- **`oxi-ai` no longer hardcodes `~/.oxi/`** for its catalog-override probe,
+- **`oxicode-ai` no longer hardcodes `~/.oxicode/`** for its catalog-override probe,
   models.dev cache, and auth store. These three reads now resolve through the
-  `OXI_HOME` environment variable (falling back to `~/.oxi`), matching the
-  convention `oxi-sdk` already used. Previously, every embedder of `oxi-ai`
-  (including `oxios`) involuntarily inherited the `oxi-cli` catalog-override
+  `OXICODE_HOME` environment variable (falling back to `~/.oxicode`), matching the
+  convention `oxicode-sdk` already used. Previously, every embedder of `oxicode-ai`
+  (including `oxios`) involuntarily inherited the `oxicode-cli` catalog-override
   namespace on the provider hot path — a library-layer coupling smell.
-- New module `oxi_ai::product_env` (`home_dir`/`catalog_override_dir`/
-  `cache_dir`/`auth_path`) is the single source of truth; `oxi_sdk::fs::home_dir`
+- New module `oxicode_ai::product_env` (`home_dir`/`catalog_override_dir`/
+  `cache_dir`/`auth_path`) is the single source of truth; `oxicode_sdk::fs::home_dir`
   now delegates to it, removing a duplicated resolution path.
-- **Backward compatible**: with `OXI_HOME` unset, all paths are identical to
-  prior behavior. Embedders isolate with `OXI_HOME=~/.oxios`.
+- **Backward compatible**: with `OXICODE_HOME` unset, all paths are identical to
+  prior behavior. Embedders isolate with `OXICODE_HOME=~/.oxios`.
 - `find_override_files` refactored to a testable `find_override_files_at`
   core (parameterized global dir) — race-free regression tests, no env
   mutation.
-- Fixed pre-existing broken intra-doc links in `oxi-sdk/src/agent_builder.rs`
+- Fixed pre-existing broken intra-doc links in `oxicode-sdk/src/agent_builder.rs`
   (`TodoStateProvider`) that failed the `cargo doc -D warnings` CI job.
 - Design doc: `docs/designs/2026-06-28-product-namespace-isolation.md`.
 
@@ -845,7 +854,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Added — omp-parity browser capabilities (pure-Rust, no Chrome)
 
-- **`oxi-cli` opt-in `native-browser` feature**: building with
+- **`oxicode-cli` opt-in `native-browser` feature**: building with
   `--features native-browser` now constructs the pure-Rust
   `oxibrowser-core` headless engine in `build_app` and registers the
   browse tools (`browse`, `browse_extract`, `browse_script`,
@@ -862,7 +871,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 - **`BrowserTab::observe`** + `Observation`/`ObservedElement` types
   (omp `observe()` parity): the native backend synthesizes the page's
   visible/interactive surface via a JS walk and returns stable
-  `data-oxi-ref="eN"` selectors the agent can `click`/`fill`/`type` by.
+  `data-oxicode-ref="eN"` selectors the agent can `click`/`fill`/`type` by.
   **Experimental / best-effort: the synthesis JS is not yet
   runtime-validated against live boa pages** — the chief risk is
   over-inclusion if `getComputedStyle` returns empty strings for some
@@ -872,7 +881,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Added — Advisor engine (omp parity)
 
-- **Advisor runtime** (`oxi-agent/src/advisor/`): second, read-only LLM agent
+- **Advisor runtime** (`oxicode-agent/src/advisor/`): second, read-only LLM agent
   that watches the primary agent's transcript turn-by-turn and emits advisory
   notes (nit/concern/blocker severity) through configurable delivery channels
   (aside, intercept, post-interrupt).
@@ -881,14 +890,14 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   severity + immune turn state to `intercept`, `aside`, or `post-interrupt`.
 - **Advisor context injection**: `assemble_advisor_system_prompt` discovers
   `AGENTS.md`/`CLAUDE.md` for `<project-context>` and `WATCHDOG.md` for
-  `<attention>` blocks from `cwd` → home + `~/.oxi/WATCHDOG.md`.
-- **Wired into oxi-cli**: the advisor is constructed at session start with
+  `<attention>` blocks from `cwd` → home + `~/.oxicode/WATCHDOG.md`.
+- **Wired into oxicode-cli**: the advisor is constructed at session start with
   its own provider/model, receives turn-end events via `AgentEvent::TurnEnd`,
   and delivers notes through the event bus.
 
 ### Added — Mnemopi memory engine (Rust port from omp)
 
-- **New `oxi-mnemopi` crate**: local SQLite vector memory engine with
+- **New `oxicode-mnemopi` crate**: local SQLite vector memory engine with
   LRU-cached embeddings, semantic search, episodic/semantic memory store,
   and consolidate/reorganize operations.
 
@@ -902,11 +911,11 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 
 ### Changed
 
-- **`oxibrowser`/`oxibrowser-core` 0.15 → 0.16.0** (`oxi-agent`, `oxi-sdk`).
+- **`oxibrowser`/`oxibrowser-core` 0.15 → 0.16.0** (`oxicode-agent`, `oxicode-sdk`).
   Picks up upstream `ChallengeDetector` (Cloudflare/Turnstile/reCAPTCHA/
   hCaptcha — auto-retry on `goto`, transparent to callers), the always-on
   V8-parity stealth bootstrap, the native `extract.rs` engine, and the
-  `wreq` HTTP backend. oxi touches oxibrowser only via `Browser`/`Tab`/
+  `wreq` HTTP backend. oxicode touches oxibrowser only via `Browser`/`Tab`/
   `BrowserConfig`/`BrowserEvent`/`BrowseResult`, so the upstream
   `HttpClient::request() → FetchOutcome` breaking change has zero impact.
 
@@ -918,16 +927,16 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   model-pattern assignments (`model_roles` settings field) with `pi/<role>`
   alias expansion and cycle detection. Defaults are empty, so the existing
   single-model path is unchanged unless a user opts in.
-  - New `oxi-ai` modules: `roles` (registry + resolution), `role_switcher`
+  - New `oxicode-ai` modules: `roles` (registry + resolution), `role_switcher`
     (signal-based decision engine — explicit override → current tool → long
     context → thinking → trivial → default), and `role_routing` (a
     transparent `Provider` wrapper that routes each request to the selected
-    model without changes to `oxi-agent`'s loop).
-  - **`oxi-sdk` re-exports the full surface** (`ModelRole`, `RoleRegistry`,
+    model without changes to `oxicode-agent`'s loop).
+  - **`oxicode-sdk` re-exports the full surface** (`ModelRole`, `RoleRegistry`,
     `RoleRoutingProvider`, `decide_role`, `resolve_role_to_model`, …), so
-    products follow the single-dependency pattern (`oxios → oxi-sdk`, no
-    `oxi-ai` direct dep).
-  - **`oxi-cli` wiring**: the TUI session build path wraps every agent with
+    products follow the single-dependency pattern (`oxios → oxicode-sdk`, no
+    `oxicode-ai` direct dep).
+  - **`oxicode-cli` wiring**: the TUI session build path wraps every agent with
     the role router (edits apply live on the next turn); a configured
     `commit` role upgrades the deterministic `CommitTool` to an LLM-backed
     one; settings migrated v8 → v9 (`model_roles`, defaults empty); new
@@ -947,7 +956,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   `response_bg`, `thinking_bg`, `surface_bg`, `panel_bg`, `diff_add_bg`,
   `diff_remove_bg`, `diff_hunk_bg`. Each is themeable via TOML/JSON and
   populated with derived values across all 6 built-in themes
-  (`oxi-tui/src/theme.rs`).
+  (`oxicode-tui/src/theme.rs`).
 
 ### Fixed — dead theme slots wired to render code
 
@@ -956,7 +965,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   but never consumed) (`chat/render.rs`).
 - **`code_bg`**: fenced code blocks now paint `code_bg` via Line-level
   style in `highlight_code()`; inline `` `code` `` uses theme-aware
-  `OxiStyleSheet` (previously hardcoded to dark-theme amber `#231e14`
+  `OxicodeStyleSheet` (previously hardcoded to dark-theme amber `#231e14`
   regardless of active theme) (`highlight.rs`, `markdown_styles.rs`).
 - **`selection_bg`**: dashboard selection now uses explicit
   `.bg(selection_bg)` instead of `Modifier::REVERSED` (terminal-default
@@ -972,9 +981,9 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 - **`DashboardWidget`**: no longer hardcodes `Theme::dark()` — accepts
   `&Theme` as a parameter, so the MCP dashboard overlay respects the
   active theme (`dashboard.rs`, `mcp_dashboard.rs`).
-- **`OxiStyleSheet`**: now theme-aware — heading, code, link, and
+- **`OxicodeStyleSheet`**: now theme-aware — heading, code, link, and
   blockquote styles derive from the active `ThemeStyles` instead of
-  hardcoded RGB values. Constructed via `OxiStyleSheet::from_styles()`
+  hardcoded RGB values. Constructed via `OxicodeStyleSheet::from_styles()`
   (`markdown_styles.rs`).
 
 ### Docs
@@ -1027,7 +1036,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   (stored credential or `settings.custom_providers` entry) another provider on
   the same upstream host. Hosts with no explicit registration are left
   untouched, so env-keyed builtins keep working without the setup wizard
-  (`oxi-cli/src/tui/slash/builtin/model.rs`, `router.rs`).
+  (`oxicode-cli/src/tui/slash/builtin/model.rs`, `router.rs`).
 
 ### Fixed — session resume loses tool-call history and context (#23)
 
@@ -1036,11 +1045,11 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   assistant, tool-call, and tool-result turns instead of a blank slate. The
   new `resume_messages_from_branch` is the inverse of the persist mapping and
   preserves `tool_call_id` pairing; compaction summaries are honoured
-  (`oxi-cli/src/app/agent_session.rs`).
+  (`oxicode-cli/src/app/agent_session.rs`).
 - **TUI chat restored on resume**: the resume and goto-entry reconstruction
   paths now render tool-call and tool-result blocks (and correct Assistant
   role) instead of collapsing history to user/assistant text. Shared via the
-  new `render_session_branch_to_chat` helper (`oxi-cli/src/tui/app.rs`).
+  new `render_session_branch_to_chat` helper (`oxicode-cli/src/tui/app.rs`).
 - **No double-persist**: the safety-net `persist_session` reconciles against
   the on-disk entry count, so seeded history is never rewritten to the JSONL.
 
@@ -1049,22 +1058,22 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 ### Added
 
 - **4 new built-in color schemes**: Nord, Catppuccin Mocha, GitHub Dark,
-  and Monokai (`oxi-tui/src/theme.rs`). Each is a complete 22-field
+  and Monokai (`oxicode-tui/src/theme.rs`). Each is a complete 22-field
   `ColorScheme` with contrast-checked palette values.
 - **`Theme::by_name()` resolver**: maps `settings.theme` names
-  (`oxi_dark`, `oxi_light`, `nord`, `catppuccin`, `github_dark`, `monokai`)
+  (`oxicode_dark`, `oxicode_light`, `nord`, `catppuccin`, `github_dark`, `monokai`)
   to built-in `Theme` constructors. `THEME_NAMES` constant lists all
   available names for the `/settings` overlay cycle.
 - **`Agent::set_compaction_strategy()`**: updates the compaction strategy
   in `inner.config` so the next agent run picks it up — the strategy is
-  read fresh at the start of each run (`oxi-agent/src/agent.rs`).
+  read fresh at the start of each run (`oxicode-agent/src/agent.rs`).
 
 ### Fixed
 
 - **Theme system was dead code — `settings.theme` is now actually applied.**
   The TUI render loop always hardcoded `Theme::dark()`, ignoring the
   `settings.theme` field entirely. `get_theme_name()` had zero callers,
-  `ThemeManager` was never instantiated in `oxi-cli`, and the `/settings`
+  `ThemeManager` was never instantiated in `oxicode-cli`, and the `/settings`
   overlay's `theme` Choice had no cycling options (`get_choice_options`
   returned `vec![]`). All three are now wired: the render loop
   (`app.rs`) resolves the theme via `Theme::by_name(&settings.get_theme_name())`
@@ -1097,28 +1106,28 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 ### Fixed (settings consistency across interfaces)
 
 - **`/settings` overlay `max_response_tokens` now shows `effective_max_tokens()`.**
-  `oxi config set max_tokens 8192` sets the `max_tokens` (u32) field, but the
+  `oxicode config set max_tokens 8192` sets the `max_tokens` (u32) field, but the
   overlay previously displayed only `max_response_tokens` (usize) — a different
   field. Now merged via `effective_max_tokens()` so CLI and overlay agree.
 - **Setup wizard theme list unified with `THEME_NAMES`.** `load_themes()` in
   `setup_wizard.rs` was a hardcoded copy of the 6 theme names, bound to drift
-  out of sync with `oxi_tui::THEME_NAMES`. Now reads from the canonical
+  out of sync with `oxicode_tui::THEME_NAMES`. Now reads from the canonical
   constant.
-- **`oxi config show` displays resolved theme name.** Previously showed the
+- **`oxicode config show` displays resolved theme name.** Previously showed the
   raw `settings.theme` (e.g. `"default"`) instead of the resolved name
-  (`"oxi_dark"`), inconsistent with the `/settings` overlay which shows
+  (`"oxicode_dark"`), inconsistent with the `/settings` overlay which shows
   `get_theme_name()`.
 - **CLI `config set`/`get` gained keys for overlay-editable settings.**
   `glyph`/`glyph_set`, `enable_routing`/`routing`, and
   `language_policy_enabled`/`language_policy` were editable in the `/settings`
-  overlay but absent from `oxi config set` — attempting `oxi config set glyph
+  overlay but absent from `oxicode config set` — attempting `oxicode config set glyph
   ascii` failed with "Unknown setting". All three are now CLI-settable.
   `extensions` is also accepted as an alias for `extensions_enabled` in
   `config set`.
 - **Overlay `auto_compact` label renamed to `auto_compaction`.** The overlay
-  label didn't match the CLI key (`oxi config set auto_compaction`), making
+  label didn't match the CLI key (`oxicode config set auto_compaction`), making
   cross-reference confusing. Now consistent.
-- **`oxi config show` now displays glyph set and routing status.** Previously
+- **`oxicode config show` now displays glyph set and routing status.** Previously
   absent — the only way to check these was the `/settings` overlay.
 
 ## [0.45.1] - 2026-06-22
@@ -1137,7 +1146,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   constructing a `Model` from the `ModelEntry` catalog (materialized from models.dev
   snapshot). This handles catalog-only providers (e.g. `zai-coding-plan/glm-5-turbo`)
   that have model data but no native `Provider` trait implementation
-  (`oxi-agent/src/model_id.rs`).
+  (`oxicode-agent/src/model_id.rs`).
 
 ## [0.44.0] - 2026-06-22
 
@@ -1147,7 +1156,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   폐지하고 모델 단계와 동일한 상시 라이브 필터 방식으로 통일했다. 입력 즉시
   프로바이더를 필터링하며 필터 입력창은 항상 표시된다. 별도의 검색 모드
   진입 키가 없으므로 모든 인쇄 가능한 문자가 필터에 사용된다
-  (`oxi-cli/src/setup_wizard.rs`).
+  (`oxicode-cli/src/setup_wizard.rs`).
 - **센티넬 행을 스크롤 영역 밖으로 분리**: "+ Add custom provider…" 행을
   프로바이더 리스트(스크롤 영역) 바깥의 영구 1행으로 옮겨 70+ 프로바이더를
   스크롤하더라도 항상 화면에 보이도록 했다. `on_sentinel: bool` 필드가
@@ -1175,7 +1184,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   수집한다. key 추가/삭제 시 `models_dirty` 플래그를 세팅하면 메인 루프가
   2단계 진입 전에 목록을 재구축한다. 구성된 프로바이더가 없으면 빈 상태
   안내("No providers with an API key configured yet. Press Left to go back…")
-  로 1단계로 돌려보낸다 (`oxi-cli/src/setup_wizard.rs`).
+  로 1단계로 돌려보낸다 (`oxicode-cli/src/setup_wizard.rs`).
 - **단계 인디케이터가 사라지던 버그 수정**: 인디케이터가 각 단계 `List`의
   `Borders::NONE` 블록 `.title()`로 들어가 첫 번째 리스트 항목과 같은
   0행을 덮어써 보이지 않았다. 이제 타이틀바 아래 전용 1행(`Length(1)`)
@@ -1194,15 +1203,15 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 ### Changed — 설정 마법사 첫 실행 경험 개선
 
 - **첫 실행 시 설정 마법사 자동 실행**: 모델이 구성되지 않은 상태에서
-  `oxi`를 대화형(TUI) 모드로 실행하면 더 이상 `Error: No model
-  configured. Run \`oxi setup\` to configure.`로 종료되지 않고, 즉시
+  `oxicode`를 대화형(TUI) 모드로 실행하면 더 이상 `Error: No model
+  configured. Run \`oxicode setup\` to configure.`로 종료되지 않고, 즉시
   설정 마법사가 실행된다. `print` / `json` / RPC / 단일 프롬프트 등
-  비대화형 모드에서는 기존대로 에러로 종료한다 (`oxi-cli/src/bootstrap.rs`).
+  비대화형 모드에서는 기존대로 에러로 종료한다 (`oxicode-cli/src/bootstrap.rs`).
   마법사 종료 후 settings를 다시 로드하고 CLI override를 재적용한다.
 - **프로바이더 단계 텍스트 검색 추가**: `/` 키로 검색 모드 진입 후 타이핑으로
   프로바이더를 필터링한다. 필터된 목록을 ↑/↓로 탐색하고 Enter로 선택하여
   API key 편집 다이얼로그로 진입한다. 필터 입력창에 실선 블록 커서 표시
-  (`oxi-cli/src/setup_wizard.rs`).
+  (`oxicode-cli/src/setup_wizard.rs`).
 - **모델 단계 전면 재작성**: 기존 모델 단계는 `Paragraph`로 렌더링되어
   선택 항목 하이라이트가 없었고, 검색 모드에서 ↑/↓ 탐색이 불가해 첫 번째
   매치만 선택 가능했으며, fake `_` 커서가 거의 보이지 않는 문제가 있었다.
@@ -1212,7 +1221,7 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
   타이핑 위치 명확화.
 - **`is_tui_mode` 버그 수정**: `args.prompt.is_empty()`(Vec)를 검사하던 것을
   `dispatch_run_mode`와 일치하게 join된 문자열로 검사하도록 수정. clap의
-  `default_value = ""` 때문에 bare `oxi`가 `prompt == vec![""]`(비어있지 않은
+  `default_value = ""` 때문에 bare `oxicode`가 `prompt == vec![""]`(비어있지 않은
   Vec, 빈 join)이 되어, 대화형 실행을 단일 프롬프트로 오분류하던 잠재
   결함. 기존에는 liveness identity 선택에만 영향했으나 자동 실행 로직에서
   의미를 갖는다.
@@ -1237,11 +1246,11 @@ input/      textarea wrapper (stock ratatui-textarea 0.9)
 ### Security — 코드 감사 보고서 결함 일괄 수정 (audit 2026-06-21)
 
 9개 도메인 분석에서 도출된 15개 결함 중 13건을 수정. 상세 근거와
-file:line 인용은 `oxi-code-audit-report.html` 참조.
+file:line 인용은 `oxicode-code-audit-report.html` 참조.
 
 #### Critical
 
-- **F-1**: Lockfile 무결성 해시가 write-only — `oxi-cli/src/storage/packages.rs`
+- **F-1**: Lockfile 무결성 해시가 write-only — `oxicode-cli/src/storage/packages.rs`
   의 `LockEntry.integrity`가 설치 시에만 계산되고 이후 `load_installed`
   에서 절대 재검증되지 않던 결함. `verify_lockfile_integrity()` 추가 +
   `load_installed()`에서 lockfile-mismatch 발견 시 `installed` 맵에서
@@ -1256,13 +1265,13 @@ file:line 인용은 `oxi-code-audit-report.html` 참조.
 #### High
 
 - **F-3**: 프로바이더 공유 HTTP 클라이언트에 timeout 없음 —
-  `oxi-ai/src/providers/mod.rs::shared_client()`가 `reqwest::Client::new()`
+  `oxicode-ai/src/providers/mod.rs::shared_client()`가 `reqwest::Client::new()`
   로 빌드되어 LLM 스트림이 영원히 hang 가능. `connect_timeout(10s)` +
   `timeout(600s)` 설정 추가. CLI의 동일 함수
-  (`oxi-cli/src/util/http_client.rs:14-22`)와 동일한 패턴.
+  (`oxicode-cli/src/util/http_client.rs:14-22`)와 동일한 패턴.
 - **F-4**: `keyring` feature가 코드에는 있는데 `Cargo.toml`에는 없는
   dead module. `Enable the 'keyring' feature` 경고가 사용자에게 거짓
-  안내. 실제 위치(`~/.oxi/auth.json`)와 옵션(`oxi-auth-keyring` crate)
+  안내. 실제 위치(`~/.oxicode/auth.json`)와 옵션(`oxicode-auth-keyring` crate)
   을 가리키는 정확한 안내로 교체 + `keyring_support` 모듈에
   `#[deprecated(note = ...)]` 추가.
 - **F-6 (partial)**: 8개 프로바이더 SSE 파서의 2-pass scan (`text.split('\n').filter(count)` + `events.reserve()` + parse) 제거.
@@ -1280,7 +1289,7 @@ file:line 인용은 `oxi-code-audit-report.html` 참조.
   시그니처는 변경하지 않음 (additive).
 - **F-9**: `stream_retry.rs::is_retryable`이 `ProviderError::MissingApiKey`를
   transient로 오분류하여 14초 backoff 낭비. early-return 추가:
-  `"missing API key — set the corresponding *_API_KEY env var or run \`oxi setup\`"`.
+  `"missing API key — set the corresponding *_API_KEY env var or run \`oxicode setup\`"`.
   **리뷰 중 추가 수정**: `on_failure()` callback 호출이 MissingApiKey 분기
   *후*에 실행되도록 순서 조정 — 그렇지 않으면 MissingApiKey가
   circuit breaker의 `consecutive_failures`를 증가시켜 5회 반복 시
@@ -1288,7 +1297,7 @@ file:line 인용은 `oxi-code-audit-report.html` 참조.
   모든 요청 거부. Configuration error는 transient가 아니므로
   circuit breaker 카운트에서 제외.
 - **F-10**: `BashTool::is_dangerous_command`가 warn만, 차단 없음.
-  `OXI_STRICT_BASH=1` 환경 변수가 켜져 있으면 실행 전 차단.
+  `OXICODE_STRICT_BASH=1` 환경 변수가 켜져 있으면 실행 전 차단.
   기존 동작은 보존(opt-in).
 - **F-15**: `publish.yml`의 `cargo publish`에 `--locked` 누락.
   `cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"` 로 변경.
@@ -1296,7 +1305,7 @@ file:line 인용은 `oxi-code-audit-report.html` 참조.
 
 #### Medium
 
-- **F-13**: `store/settings.rs`가 `oxi_tui::GlyphSet`을 import (데이터
+- **F-13**: `store/settings.rs`가 `oxicode_tui::GlyphSet`을 import (데이터
   레이어 → UI 레이어 의존). 실제 분리는 on-disk TOML 호환성 + 5개
   call site 변경이 필요하여 **follow-up PR**로 미루고, 같은 파일에
   layering violation 의도를 명시한 doc-comment 추가.
@@ -1336,24 +1345,24 @@ file:line 인용은 `oxi-code-audit-report.html` 참조.
 ## [0.41.0] - 2026-06-21
 ## [0.41.1] - 2026-06-21
 
-### Fixed — `cargo install oxi-cli` failed on v0.41.0 release build
+### Fixed — `cargo install oxicode-cli` failed on v0.41.0 release build
 
 The v0.41.0 release's TUI startup called `AskBridge::attach()`
 directly, which is gated behind
 `#[cfg(any(test, debug_assertions))]` and only exists in debug
 builds. Release builds (`cargo build --release`,
-`cargo install oxi-cli`) failed to compile with
+`cargo install oxicode-cli`) failed to compile with
 `no method named 'attach' found for reference '&Arc<AskBridge>'`.
 
-- **Switched the call site** (`oxi-cli/src/tui/app.rs`) from
+- **Switched the call site** (`oxicode-cli/src/tui/app.rs`) from
   `bridge.attach()` to
   `bridge.attach_with_session(app.ownership_session_id())`.
   `attach_with_session` is the production-bound API (matches the
   ownership-identity invariant from AGENTS.md pitfall
   "Issue-system ownership identity"); `attach()` is the test-only
   convenience and was never meant to ship.
-- **Verified** by `cargo build --release -p oxi-cli` and a
-  full `cargo install oxi-cli --version 0.41.1` smoke test.
+- **Verified** by `cargo build --release -p oxicode-cli` and a
+  full `cargo install oxicode-cli --version 0.41.1` smoke test.
 
 No source-level behavior change beyond the wire: the session
 identity was already bound by the issue-system invariant, this
@@ -1386,16 +1395,16 @@ glyph-set feature whose table shipped in v0.40.0.
 
 기존 TUI 언어 정책(`Settings::output_languages`)은 **사용자 설정이 있어도
 기본적으로 활성화되지 않도록** 변경되었으며, 오버레이 변경이 라이브
-세션에 즉시 반영되도록 개선되었다. `oxi --print` 및 RPC 모드의 비대칭은
+세션에 즉시 반영되도록 개선되었다. `oxicode --print` 및 RPC 모드의 비대칭은
 **의도된 설계**이므로 변경되지 않았다 (AGENTS.md pitfalls 참조).
 
 - **Master toggle 신설** (`Settings::language_policy_enabled: bool`,
-  `oxi-cli/src/store/settings.rs`): default `false`. `output_languages`
+  `oxicode-cli/src/store/settings.rs`): default `false`. `output_languages`
   맵에 값이 있어도 이 플래그가 `false`이면 정책이 주입되지 않는다.
   신규/기존(v5) 사용자 모두 OFF로 시작한다. `/settings` 오버레이에서
   명시적으로 ON 해야 동작.
-- **자동 적용** (`oxi-cli/src/tui/overlay/settings.rs`,
-  `oxi-cli/src/app/agent_session.rs`): `/settings` 오버레이 Esc 시
+- **자동 적용** (`oxicode-cli/src/tui/overlay/settings.rs`,
+  `oxicode-cli/src/app/agent_session.rs`): `/settings` 오버레이 Esc 시
   `changed=true`이면 `persist_changes()` + `AgentSession::rebuild_system_prompt()`
   를 자동 호출한다. 디스크 저장이 `set_system_prompt()`까지 단일 흐름으로
   연결된다. `/reload` 슬래시 명령은 백업 경로로 유지.
@@ -1409,8 +1418,8 @@ glyph-set feature whose table shipped in v0.40.0.
 - **Disabled UI** (`SettingsItem::Choice::disabled: bool`): OFF일 때
   채널 항목 4개는 회색으로 표시되고 `Enter`/`Space`로 순환되지 않는다.
   시도 시 "Enable language_policy first." notification 표시.
-- **시그니처 변경** (`oxi-cli/src/prompt/system_prompt.rs`,
-  `oxi-cli/src/app/agent_session_runtime.rs`):
+- **시그니처 변경** (`oxicode-cli/src/prompt/system_prompt.rs`,
+  `oxicode-cli/src/app/agent_session_runtime.rs`):
   `language_directive(enabled: bool, channels: &HashMap<...>)` —
   마스터 게이트 신규. `build_system_prompt(thinking, enabled, languages)`,
   `build_compaction_instruction(enabled, languages)` — `enabled` 인자 추가.
@@ -1425,7 +1434,7 @@ glyph-set feature whose table shipped in v0.40.0.
 ### Changed — Edition upgrade (2024 edition)
 
 - **Rust edition**: upgraded from 2021 to **2024** across all workspace
-  crates (`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`,
+  crates (`oxicode-ai`, `oxicode-agent`, `oxicode-tui`, `oxicode-sdk`, `oxicode-cli`,
   `scripts`).
 - **MSRV**: bumped from **1.82** to **1.96** (2024 edition requires
   Rust ≥ 1.85; 1.96 is the MSRV floor going forward).
@@ -1438,11 +1447,11 @@ glyph-set feature whose table shipped in v0.40.0.
 - **`set_var`/`remove_var` → unsafe**: wrapped all calls to
   `std::env::set_var` and `std::env::remove_var` in `unsafe {}`
   blocks (these functions became `unsafe fn` in the 2024 edition).
-  Affected files: `oxi-cli/src/store/settings.rs`,
-  `oxi-ai/src/providers/vertex.rs`,
-  `oxi-ai/src/providers/register_builtins.rs`,
-  `oxi-ai/src/env_api_keys.rs`,
-  `oxi-ai/src/provider_registry.rs`.
+  Affected files: `oxicode-cli/src/store/settings.rs`,
+  `oxicode-ai/src/providers/vertex.rs`,
+  `oxicode-ai/src/providers/register_builtins.rs`,
+  `oxicode-ai/src/env_api_keys.rs`,
+  `oxicode-ai/src/provider_registry.rs`.
 - **Clippy 1.96**: auto-fixed `collapsible_if` and `let_and_return`
   lints (new in Rust 1.96 clippy) across the workspace.
 - **CI**: `RUST_VERSION_MSRV` in `.github/workflows/ci.yml` updated
@@ -1473,7 +1482,7 @@ glyph-set feature whose table shipped in v0.40.0.
   - New `tag-check` job rejects tags not reachable from `origin/main`
     (defense against force-pushed stale tags).
   - Release job now generates `SHA256SUMS` next to binaries.
-  - CycloneDX 1.5 SBOM (`oxi.cdx.json`) attached to the GitHub release.
+  - CycloneDX 1.5 SBOM (`oxicode.cdx.json`) attached to the GitHub release.
   - Matrix simplified to a single target (`aarch64-apple-darwin`).
 - **`publish.yml`** (new) — publishes all 6 workspace crates to
   `crates.io` in topological order on `release: published`, with a
@@ -1530,7 +1539,7 @@ AskBridge was wired via `bridge.attach()` — a method annotated
 `#[cfg(any(test, debug_assertions))]` (test-only convenience) — which
 exists in `cargo check` / `cargo clippy` / `cargo test` (debug builds)
 but does not compile in `cargo build --release` or `cargo install`.
-`cargo install oxi-cli --version 0.41.0` fails with
+`cargo install oxicode-cli --version 0.41.0` fails with
 `no method named 'attach' found for reference '&Arc<AskBridge>'`.
 The fix landed the same day as 0.41.1 and switches the call site to
 the production `AskBridge::attach_with_session(session_id)` API with
@@ -1547,7 +1556,7 @@ A full production-readiness audit found the workspace failing its own
 publishing not gated on CI, and several lying stubs. All resolved:
 
 - **Clippy gate restored (115 → 0 errors).** Documented all undocumented
-  public items across `oxi-agent`/`oxi-tui`/`oxi-cli`; fixed correctness
+  public items across `oxicode-agent`/`oxicode-tui`/`oxicode-cli`; fixed correctness
   lints: `await`-holding-a-`MutexGuard` (`mcp/mod.rs`), a dead
   `&& false` branch in the `todo` tool, `unwrap()`/`expect()` panic sites
   in `commit`/`todo`/`discovery` (replaced with `?`/poison-recovery),
@@ -1557,12 +1566,12 @@ publishing not gated on CI, and several lying stubs. All resolved:
   new `verify` job (fmt + clippy + nextest on MSRV 1.96) and `package-check`
   (now `cargo package`, no longer `--no-verify --list`). Broken code can no
   longer reach crates.io via a `v*` tag.
-- **Extension security hardened (default-deny).** `oxi_exec` (WASM) and
+- **Extension security hardened (default-deny).** `oxicode_exec` (WASM) and
   native-extension loading (unsandboxed `libloading`) are now **off by
-  default**, opt-in via `OXI_EXTENSION_EXEC=1` / `OXI_NATIVE_EXTENSIONS=1`.
+  default**, opt-in via `OXICODE_EXTENSION_EXEC=1` / `OXICODE_NATIVE_EXTENSIONS=1`.
   Extension `permissions` are now parsed and logged (no longer dead code).
   The misleading "zero host access by default" docstring was corrected.
-- **`lru` 0.12.5 → 0.18.0** (`oxi-hashline`), dropping the
+- **`lru` 0.12.5 → 0.18.0** (`oxicode-hashline`), dropping the
   RUSTSEC-2026-0002 unsound advisory and unifying a duplicated dependency.
 - **Stubs made honest.** `AgentGroup::run_orchestrated` now returns an
   explicit "not implemented" error instead of silently running only the
@@ -1570,9 +1579,9 @@ publishing not gated on CI, and several lying stubs. All resolved:
   success placeholder for a no-op.
 - **Docs brought current.** AGENTS.md stale counts fixed (11→15 port
   traits, 17→~21 tools incl. the `questionnaire`→`ask` rename, 1099→5000+
-  models / 30+→70+ providers); `oxi-store`/`oxi-fs` references removed from
+  models / 30+→70+ providers); `oxicode-store`/`oxicode-fs` references removed from
   CODEOWNERS, CONTRIBUTING, the issue template, PORT_GUIDE, and the
-  production-audit README (marked historical); `oxi-hashline` gained a
+  production-audit README (marked historical); `oxicode-hashline` gained a
   README and LICENSE file.
 
 ### Added — selectable Unicode / ASCII / Nerd Font glyph set (default: Unicode)
@@ -1582,7 +1591,7 @@ now comes from a pluggable glyph-set table, so the whole UI can switch
 rendering styles from one setting. Based on the omp (oh-my-pi) symbol-preset
 design.
 
-- **New `oxi_tui::symbols` module**: `GlyphSet` enum (`Unicode` / `Ascii` /
+- **New `oxicode_tui::symbols` module**: `GlyphSet` enum (`Unicode` / `Ascii` /
   `Nerd`) + `Symbols` table (`Copy`, all `&'static str`). Three preset
   constructors; `GlyphSet::default()` is `Unicode`. Symbol codepoints are
   standards-defined (Unicode box-drawing range + Nerd Fonts PUA).
@@ -1602,7 +1611,7 @@ design.
   Unicode). Selectable live in `/settings` → `glyph` (cycles the three
   presets, each shown with a live sample) and **applied immediately** — the
   main loop rebuilds the live theme from freshly-loaded settings on the next
-  draw, no restart needed. Also a new step in `oxi setup` (step 4: Glyph Set)
+  draw, no restart needed. Also a new step in `oxicode setup` (step 4: Glyph Set)
   with per-preset sample preview.
 
 ### Changed — `questionnaire` → `ask` (omp-style sequential selector)
@@ -1644,7 +1653,7 @@ design. Full design in `docs/designs/2026-06-21-omp-ask-redesign.md`.
   rename — `overlay/questionnaire.rs` (985 lines), `overlay/model_select.rs`,
   `overlay/resume_select.rs`, `overlay/logout_select.rs` (all three were
   superseded by the `factories.rs` impls and had zero callers), and the
-  legacy `oxi-agent/src/tools/questionnaire.rs` (681 lines).
+  legacy `oxicode-agent/src/tools/questionnaire.rs` (681 lines).
 - **Layer 2 wrapper deferred**: the design doc
   (`2026-06-21-selector-consolidation-refactor.md`) sketches a generic
   `SelectorOverlay` wrapping `ListSelectorState`. That wrapper was drafted but
@@ -1656,7 +1665,7 @@ design. Full design in `docs/designs/2026-06-21-omp-ask-redesign.md`.
 
 Three low-risk improvements to the `DiffBackend` cell writer and tool-block
 rendering, closing the bulk of the byte/CPU gap with omp's TUI. Full design in
-`docs/designs/2026-06-20-oxi-tui-improvement-plan.md`.
+`docs/designs/2026-06-20-oxicode-tui-improvement-plan.md`.
 
 - **SGR attribute delta (`render::mod`)**: the cell writer no longer emits a
   full `SGR 0` reset plus fg/bg re-apply on every modifier change. Instead it
@@ -1684,7 +1693,7 @@ rendering, closing the bulk of the byte/CPU gap with omp's TUI. Full design in
 environment-variable signature and derives a capability set from a built-in
 knowledge table, replacing the shallow ad-hoc env sniff. This is the safe,
 fully unit-tested baseline; a live device-attributes probe (DA1/XTGETTCAP) is
-a follow-up. Design: `docs/designs/2026-06-20-oxi-tui-improvement-plan.md`.
+a follow-up. Design: `docs/designs/2026-06-20-oxicode-tui-improvement-plan.md`.
 
 - **New capability flags**: `synchronized_output`, `deccara`, `sixel`, and
   `terminal_name`, each with a *safe default* for unknown terminals — sync on
@@ -1695,7 +1704,7 @@ a follow-up. Design: `docs/designs/2026-06-20-oxi-tui-improvement-plan.md`.
   SGR extension) — the gate Phase 2's DECCARA bg-fill optimizer will require.
 - **`DiffBackend` gates CSI 2026** on `synchronized_output` (constructed via
   `TerminalCapabilities::detect()`; inject with `DiffBackend::with_capabilities`).
-- **`OXI_NO_SYNC_OUTPUT=1`** manually disables synchronized output for
+- **`OXICODE_NO_SYNC_OUTPUT=1`** manually disables synchronized output for
   terminals that misbehave under it.
 
 ### Added — DECCARA background-fill optimizer (omp parity, Phase 2)
@@ -1716,7 +1725,7 @@ ANSI-string parser).
   EL-clear the previous frame's glyphs from the fill region (DECCARA repaints
   attributes, not glyphs), and emit the coalesced rectangles inside the
   synchronized-update window.
-- **Gated on `caps.deccara`** (Kitty/Ghostty only) with an `OXI_NO_DECCARA=1`
+- **Gated on `caps.deccara`** (Kitty/Ghostty only) with an `OXICODE_NO_DECCARA=1`
   kill switch. No effect on other terminals.
 
 ### Added — LaTeX math → Unicode in markdown (omp parity, Phase 3)
@@ -1749,9 +1758,9 @@ Two small safety / UX features ported from omp.
 
 ### Changed — pure-Rust Mermaid renderer (single-binary, no `mmdc`)
 
-The Mermaid → ASCII renderer in `oxi_tui::render::mermaid` is now a
+The Mermaid → ASCII renderer in `oxicode_tui::render::mermaid` is now a
 self-contained pure-Rust implementation. The previous implementation shelled
-out to the `mmdc` (mermaid-cli) Node binary, which violated oxi's single-
+out to the `mmdc` (mermaid-cli) Node binary, which violated oxicode's single-
 binary / no-runtime-deps design — most users saw diagrams silently fall back
 to a plain code block.
 
@@ -1764,7 +1773,7 @@ to a plain code block.
   etc.) returns `None` so callers fall back to displaying the source as a
   fenced code block, unchanged from before.
 - **Process-level render cache** preserved (keyed by source + options).
-- **`which` crate removed** from `oxi-tui`'s dependencies (it was only used
+- **`which` crate removed** from `oxicode-tui`'s dependencies (it was only used
   to locate `mmdc`).
 - **Public API unchanged**: `render_mermaid_ascii`, `render_ascii_diagram`,
   `clear_mermaid_cache`, `MermaidRenderOptions`, `MermaidColorMode` keep
@@ -1778,25 +1787,25 @@ the char-cell canvas; stylistic directives (`classDef`, `style`,
 ## [0.39.0] - 2026-06-20
 ### Added — SDK consumers can now use the todo tool with observable state
 
-`oxi-sdk` exposes the todo tool (`TodoProvider::default()`) for SDK consumers,
+`oxicode-sdk` exposes the todo tool (`TodoProvider::default()`) for SDK consumers,
 backed by observable state via `RegistrySnapshot`.
 
-- **New `TodoProvider` trait** in `oxi_sdk::tool_providers` (with default impl
+- **New `TodoProvider` trait** in `oxicode_sdk::tool_providers` (with default impl
   that wraps the built-in `TodoState` + `InMemoryTodoStore`).
 - **`RegistrySnapshot` observable state**: SDK consumers can subscribe to
   `AgentGroupState` registries via `.state()`, getting a diff-driven snapshot
   (`RegistrySnapshot`) that includes `todo_state: Vec<String>` for live TUI
   rendering without polling.
-- **Todo tool wiring in `OxiBuilder`**: `with_todo_provider()` to register a
+- **Todo tool wiring in `OxicodeBuilder`**: `with_todo_provider()` to register a
   custom impl; default is `TodoProvider::default()` noop-compatible.
 - **Dependency**: the todo tool (always available, no `essential` flag), crate
-  metadata, and `constants` module are now exported from `oxi-sdk`.
+  metadata, and `constants` module are now exported from `oxicode-sdk`.
 
 
 ## [0.38.0] - 2026-06-20
 ### Changed — HTML export tool 렌더링 재설계 (C1)
 
-`oxi-cli/src/storage/export.rs` 의 도구 호출 렌더링을 구조화된
+`oxicode-cli/src/storage/export.rs` 의 도구 호출 렌더링을 구조화된
 세션 데이터 기반으로 전면 재작성했다.
 
 * **데드 코드 제거**: 이모지 prefix (`🔧`/`📤`/`📄`/`📝`/`✏️`/`🔍`) 를
@@ -1834,7 +1843,7 @@ v0.37.1 릴리스 파이프라인에서 두 가지 자동화 결함이 드러나
   게시된 크레이트에서 `already exists` 에러로 실패해 남은 크레이트에
   도달하지 못하던 것을 수정했다. 각 게시 단계가
   `already exists/already uploaded/already been published` 메시지를
-  감지하면 성공으로 처리하도록 했다. (이번 0.37.1 의 `oxi-cli` 가 이
+  감지하면 성공으로 처리하도록 했다. (이번 0.37.1 의 `oxicode-cli` 가 이
   케이스로 실패했고, 로컬에서 직접 게시해 마무리했다.)
 
 ## [0.37.1] - 2026-06-19
@@ -1844,9 +1853,9 @@ v0.37.1 릴리스 파이프라인에서 두 가지 자동화 결함이 드러나
 v0.37.0 릴리스 시도에서 세 가지 CI 인프라 문제가 드러났다.
 
 * **SBOM** (`sbom.yml`): `cargo cyclonedx` 가 각 워크스페이스 멤버마다
-  `oxi.json` 을 생성하는데 (not `target/`), 워크플로우는 단일
-  `target/oxi.cdx.json` 을 기대해 `find: 'target': No such file` 로
-  실패하던 것을 수정. `oxi-cli` (전체 의존성 트리 포함) 을 단일 SBOM 으로
+  `oxicode.json` 을 생성하는데 (not `target/`), 워크플로우는 단일
+  `target/oxicode.cdx.json` 을 기대해 `find: 'target': No such file` 로
+  실패하던 것을 수정. `oxicode-cli` (전체 의존성 트리 포함) 을 단일 SBOM 으로
   취합.
 * **Sync Labels** (`labels.yml`): 존재하지 않는 `github/issue-labeler@v2`
   태그 + 잘못된 도구 (이슈 분류용) → `.github/labels.yml` 포맷과 정확히
@@ -1857,22 +1866,22 @@ v0.37.0 릴리스 시도에서 세 가지 CI 인프라 문제가 드러났다.
   것을, `release.yml` 에 `trigger-publish` 잡을 추가해 Release 생성 직후
   `gh workflow run` 으로 명시적 dispatch 하도록 수정.
 
-### Fixed — published `oxi-sdk` 0.37.0 가 downstream 에서 컴파일되지 않던 결함 (crates.io 패키징 버그)
+### Fixed — published `oxicode-sdk` 0.37.0 가 downstream 에서 컴파일되지 않던 결함 (crates.io 패키징 버그)
 
-crates.io 에 게시된 `oxi-sdk` 0.37.0 를 의존하는 consumer(oxios 등)가
+crates.io 에 게시된 `oxicode-sdk` 0.37.0 를 의존하는 consumer(oxios 등)가
 컴파일할 수 없었던 치명적 패키징 결함을 수정했다.
 
 ```
-error: couldn't read '.../oxi-sdk-0.37.0/src/ports/fs/../../../../oxi-ai/data/catalog/_snapshot.json.gz':
+error: couldn't read '.../oxicode-sdk-0.37.0/src/ports/fs/../../../../oxicode-ai/data/catalog/_snapshot.json.gz':
        No such file or directory
-  --> oxi-sdk-0.37.0/src/ports/fs/catalog.rs:247
-    include_bytes!("../../../../oxi-ai/data/catalog/_snapshot.json.gz")
+  --> oxicode-sdk-0.37.0/src/ports/fs/catalog.rs:247
+    include_bytes!("../../../../oxicode-ai/data/catalog/_snapshot.json.gz")
 ```
 
-- **근본 원인**: `oxi-sdk/src/ports/fs/catalog.rs::load_snapshot()` 가
-  크레이트 바깥(형제 크레이트 `oxi-ai/data/`)을 가리키는 경로로
-  `include_bytes!` 를 썼다. oxi 워크스페이스 안(in-tree) 에서는 상대경로가
-  해석되어 빌드/테스트가 통과하지만, crates.io 배포판은 `oxi-sdk` 자체
+- **근본 원인**: `oxicode-sdk/src/ports/fs/catalog.rs::load_snapshot()` 가
+  크레이트 바깥(형제 크레이트 `oxicode-ai/data/`)을 가리키는 경로로
+  `include_bytes!` 를 썼다. oxicode 워크스페이스 안(in-tree) 에서는 상대경로가
+  해석되어 빌드/테스트가 통과하지만, crates.io 배포판은 `oxicode-sdk` 자체
   파일만 포함하므로 게시된 tarball 안에서 해당 파일이 존재하지 않는다
   → consumer 컴파일 실패.
 - **왜 게시까지 통과했나**: `publish.yml` 의 게시 단계와 사전 검사 단계가
@@ -1884,14 +1893,14 @@ error: couldn't read '.../oxi-sdk-0.37.0/src/ports/fs/../../../../oxi-ai/data/ca
 
 **수정**:
 
-- **`oxi-ai`**: `catalog::snapshot_gzip_bytes() -> &'static [u8]` 신규
-  공개 접근자. `oxi-ai` 자기 트리 안의 자체 포함 `include_bytes!` 로
+- **`oxicode-ai`**: `catalog::snapshot_gzip_bytes() -> &'static [u8]` 신규
+  공개 접근자. `oxicode-ai` 자기 트리 안의 자체 포함 `include_bytes!` 로
   snapshot 의 단일 진실 소스가 된다 (`catalog/materialize.rs` +
   `catalog/mod.rs` 재내보내기). 기존 `load_snapshot_catalog()` 도 이 접근자를
   사용하도록 통일.
-- **`oxi-sdk`**: `load_snapshot()` 가 직접 `include_bytes!` 하던 것을
-  `oxi_ai::catalog::snapshot_gzip_bytes()` 호출로 교체. 크레이트 바깥으로
-  빠져나가는 경로를 완전히 제거했고, oxi-sdk 의 자체 `MdCatalog` 스키마로
+- **`oxicode-sdk`**: `load_snapshot()` 가 직접 `include_bytes!` 하던 것을
+  `oxicode_ai::catalog::snapshot_gzip_bytes()` 호출로 교체. 크레이트 바깥으로
+  빠져나가는 경로를 완전히 제거했고, oxicode-sdk 의 자체 `MdCatalog` 스키마로
   파싱하는 기존 동작은 그대로 유지.
 - **`publish.yml`**: 게시 단계의 `cargo publish --no-verify` 에서
   `--no-verify` 제거. 이제 각 크레이트가 자기 registry 의존성에 대해
@@ -1900,9 +1909,9 @@ error: couldn't read '.../oxi-sdk-0.37.0/src/ports/fs/../../../../oxi-ai/data/ca
   메타데이터 검사로 유지하되, 실제 컴파일 게이트는 게시 단계임을
   주석로 명시했다.
 
-**검증**: in-workspace 빌드 + 단위테스트 회귀 없음 (oxi-ai 553 / oxi-sdk 314 /
+**검증**: in-workspace 빌드 + 단위테스트 회귀 없음 (oxicode-ai 553 / oxicode-sdk 314 /
 catalog_port 19 전부 통과). `cargo package`(verify) 로 게시 시나리오 재현 —
-`oxi-sdk` 패키지 검증이 `oxi-ai` 0.37.1 의 registry 가시성을 요구함을
+`oxicode-sdk` 패키지 검증이 `oxicode-ai` 0.37.1 의 registry 가시성을 요구함을
 확인(위상 순서 게시로 해결됨).
 
 ## [0.37.0] - 2026-06-18
@@ -1918,17 +1927,17 @@ SDK 에 **catalog port** (`ModelCatalog` trait) 를 추가하여, 모델/프로�
 > sync API 회피 정정 포함). 데이터 흐름은
 > `docs/designs/2026-06-17-dynamic-catalog-design.md`.
 
-- **신규 port** `oxi-sdk/src/ports/catalog.rs`: `ModelCatalog` trait (async
+- **신규 port** `oxicode-sdk/src/ports/catalog.rs`: `ModelCatalog` trait (async
   read + refresh + subscribe) + **sync read API** (`*_sync`, §7.9). noop 기본값.
-  `CatalogProtocol` enum (SDK 소유, oxi-ai `Api` 와 역방향 의존 없음).
+  `CatalogProtocol` enum (SDK 소유, oxicode-ai `Api` 와 역방향 의존 없음).
   `CatalogModelEntry`, `CatalogProviderEntry`, `CatalogEvent`, `RefreshOutcome`.
-- **신규 bridge layer** `oxi-sdk/src/bridge.rs`: `catalog_entry_to_model()`,
-  `provider_base_url()`, modality 변환. SDK 소유 (oxi-ai 역방향 의존 방지).
-- **참조 구현** `oxi-sdk/src/ports/fs/catalog.rs`: `FileModelCatalog` —
+- **신규 bridge layer** `oxicode-sdk/src/bridge.rs`: `catalog_entry_to_model()`,
+  `provider_base_url()`, modality 변환. SDK 소유 (oxicode-ai 역방향 의존 방지).
+- **참조 구현** `oxicode-sdk/src/ports/fs/catalog.rs`: `FileModelCatalog` —
   embedded SNAP + runtime cache + ETag 조건부 GET + user overrides +
   LOCAL `/v1/models` discovery. lazy on-call refresh (백그라운드 작업 없음).
-- **`OxiBuilder::with_catalog()`** / **`Oxi::catalog()`** 접근자.
-- **`Oxi::resolve_model()`** catalog fallback 통합 (sync 유지, §7.9).
+- **`OxicodeBuilder::with_catalog()`** / **`Oxicode::catalog()`** 접근자.
+- **`Oxicode::resolve_model()`** catalog fallback 통합 (sync 유지, §7.9).
 - **`SdkError` catalog 변종** 3개: `CatalogUnavailable`, `CatalogOverrideParse`,
   `CatalogRefresh`.
 
@@ -1938,14 +1947,14 @@ v3 설계가 명시했던 `ProviderResolver` trait async화 ripple (agent_loop /
 multi_provider / fallback_chain 전체) 을 **전면 회피**했다. PR 3 이 "대공사"에서
 bridge layer + resolve_model 통합으로 축소되었다.
 
-**oxi-cli 이관**: composition root (`services::build_oxi`) 가
+**oxicode-cli 이관**: composition root (`services::build_oxicode`) 가
 `FileModelCatalog::init()` + `with_catalog()` 로 catalog 를 등록한다. TUI
-(`AppState.catalog` 필드 주입), setup wizard, `oxi models` / `oxi refresh`
+(`AppState.catalog` 필드 주입), setup wizard, `oxicode models` / `oxicode refresh`
 명령이 모두 catalog port 기반으로 동작한다. legacy `init_models_dev()` 제거.
 
 **하위 호환성**: legacy free fn (`get_all_models`, `get_provider`, 등) 은
 **fallback path 로 유지** (catalog 가 `None` 일 때만). custom provider 동적 등록
-(`fetch_models_blocking`/`register_model`) 과 `oxi-ai/src/catalog/` 모듈은
+(`fetch_models_blocking`/`register_model`) 과 `oxicode-ai/src/catalog/` 모듈은
 SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으로 연기.
 
 **테스트**: catalog port 19개 (sync API 2개, bridge 7개, resolve_model 통합 2개
@@ -1961,20 +1970,20 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 즉시 reclaim 가능했다 (두 에이전트가 같은 이슈를 `start` 하면 마지막이
 조용히 승리).
 
-- **`oxi-agent`**: `AgentConfig.session_id: Option<String>` 신규 필드
+- **`oxicode-agent`**: `AgentConfig.session_id: Option<String>` 신규 필드
   (additive, `#[serde(default)]`, `with_session_id` 빌더). `agent.rs`의
   두 `AgentLoopConfig` 생성지점이 이제 config에서 `session_id`를 주입.
-- **`oxi-cli`**: `bootstrap.rs::build_app`가 run-mode별 ownership identity
+- **`oxicode-cli`**: `bootstrap.rs::build_app`가 run-mode별 ownership identity
   생성 — TUI 모드는 `liveness::TUI_OWNERSHIP_ID`("tui"), 그 외는
-  `proc-<pid>-<uuid>`. `App::from_oxi(..., ownership_session_id)`가 프로세스
+  `proc-<pid>-<uuid>`. `App::from_oxicode(..., ownership_session_id)`가 프로세스
   수명 동안 `flock`을 잡고 `AgentConfig.session_id`에 동일 id 주입.
   `liveness::TUI_OWNERSHIP_ID` 상수가 단일 진실 소스 — 에이전트 도구·
   TUI 패널·`/issue` 슬래시 명령이 모두 같은 flock 홀더를 본다.
 - **`tui/app.rs`**: `run_tui_interactive_impl`의 중복 flock 획득 제거
   (`App`가 이제 보유). `debug_assert!`로 identity 일치 검증.
-- **회귀 테스트**: `session_id_wiring_tests`(oxi-agent,
+- **회귀 테스트**: `session_id_wiring_tests`(oxicode-agent,
   `build_tool_context` 레벨), `start_with_distinct_live_owners_collides` +
-  `empty_session_assignment_is_immediately_reclaimable_documentation`(oxi-cli).
+  `empty_session_assignment_is_immediately_reclaimable_documentation`(oxicode-cli).
 
 > 설계 문서: `docs/designs/2026-06-17-issue-system-hardening.md` (P0–P4 전부).
 
@@ -1984,7 +1993,7 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 `tmp.<pid>`로 명명했다. PID-namespace 재활용(컨테이너)이나 fork+exec에서
 두 프로세스가 같은 PID로 같은 temp 를 덮어 한 쪽 write 가 손실될 수 있었다.
 
-- **신규** `oxi-cli/src/store/fs_util.rs`: `atomic_write`/`atomic_write_bytes`.
+- **신규** `oxicode-cli/src/store/fs_util.rs`: `atomic_write`/`atomic_write_bytes`.
   temp 이름을 `<base>.tmp.<pid>.<uuid-simple>`로 변경 (PID는 디버깅용,
   UUID 가 유일성 보장). rename 실패 시 best-effort orphan 제거.
 - issues/session 양쪽 로컬 복사본 제거 → 공유 헬퍼로 마이그레이션.
@@ -2032,19 +2041,19 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 - 테스트: reap 멱등/최근 dead 보존(age gate)/오래된 dead 제거+live 보존;
   top_free_priority 가 할당·닫힌 이슈 무시.
 
-### Added — `oxi issue` CLI `reopen`·`reap` 서브커맨드
+### Added — `oxicode issue` CLI `reopen`·`reap` 서브커맨드
 
 설계 §11 권장 항목. store와 에이전트 도구에 이미 노출된 `reopen`/
 `reap_orphans`의 CLI 래퍼.
 
-- `oxi issue reopen <id> [--hash]`: 닫힌 이슈 재개(status=Open, closed_at 클리어).
+- `oxicode issue reopen <id> [--hash]`: 닫힌 이슈 재개(status=Open, closed_at 클리어).
   close 와 달리 소유권 락 불필요(닫힌 후엔 owner 없음).
-- `oxi issue reap`: `.oxi/issues/.alive/` dead 파일 수거(age-gated, 멱등) 후
+- `oxicode issue reap`: `.oxicode/issues/.alive/` dead 파일 수거(age-gated, 멱등) 후
   제거 개수 출력. 주의: store 생성자가 자체 lazy reap 을 돌리므로, 이 명령은
   store 를 열지 않고 디렉토리를 직접 reap 해 **정확한 카운트**를 보고한다.
   (없으면 double-reap 으로 0이 된다.)
 
-### Fixed — `oxi issue close` CAS 경쟁 (기존 버그)
+### Fixed — `oxicode issue close` CAS 경쟁 (기존 버그)
 
 `close` 핸들러가 `start`→`close` 호출에 **같은 content_hash** 를 재사용했다.
 `start` 가 assignment 를 쓰면서 파일(와 해시)을 바꾸기 때문에, 이어지는
@@ -2057,11 +2066,11 @@ SNAP 데이터 위치 때문에 제거하지 않고 다음 메이저 버전으�
 main 의 두 CI 잡이 실패 상태였고, 그대로는 crates.io publish 가 막히는
 상황이었다.
 
-* **doc** (ci.yml, `RUSTDOCFLAGS=-D warnings`): oxi-ai 와 oxi-sdk 의
-  깨진 intra-doc 링크 6곳, oxi-cli 의 모호한 링크 1곳 수정.
+* **doc** (ci.yml, `RUSTDOCFLAGS=-D warnings`): oxicode-ai 와 oxicode-sdk 의
+  깨진 intra-doc 링크 6곳, oxicode-cli 의 모호한 링크 1곳 수정.
 * **test-doc** (test.yml, `cargo test --doc`): 컴파일조차 안 되는 doctest
-  2건 수정 — `build_oxi_engine` 이 `async` 가 된 뒤 `.await` 가 누락된 것,
-  `OxiBuilder::with_catalog` 예시의 빈 `/* ... */;` RHS.
+  2건 수정 — `build_oxicode_engine` 이 `async` 가 된 뒤 `.await` 가 누락된 것,
+  `OxicodeBuilder::with_catalog` 예시의 빈 `/* ... */;` RHS.
 
 ### Changed — clippy `--all-targets` 게이트 강화
 
@@ -2076,7 +2085,7 @@ test-idiom lint (`clippy::unwrap_used`, `clippy::field_reassign_with_default`)
 * ci.yml 의 `clippy` 잡과 `.pre-commit-config.yaml` 의 hook 을 `--workspace`
   에서 `--workspace --all-targets` 로 강화 (AGENTS.md 의 "Pre-existing TODO"
   후속 작업 완료).
-* oxi-ai 의 `benches/` exclude 를 제거해 패키지된 크레이트가 벤치마크 소스를
+* oxicode-ai 의 `benches/` exclude 를 제거해 패키지된 크레이트가 벤치마크 소스를
   포함하도록 수정 (`cargo package` 경고 제거).
 
 ## [0.36.0]
@@ -2085,12 +2094,12 @@ test-idiom lint (`clippy::unwrap_used`, `clippy::field_reassign_with_default`)
 
 opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
 `https://models.dev/api.json` 을 런타임에 페치하여 카탈로그를 보강한다.
-이는 oxi-original TOML의 광범위한 `0.0` 가격 결손을 해소한다
+이는 oxicode-original TOML의 광범위한 `0.0` 가격 결손을 해소한다
 (anthropic/openai/azure 등 유료 모델의 cost_input/cost_output이
 대부분 `0.0`으로, 비용 리포트가 부정확했다).
 
-- **신규 모듈** `oxi-ai/src/catalog/models_dev.rs`: models.dev 스키마
-  파서, provider ID 매핑(oxi 지역 변형 collapse), reasoning 보존
+- **신규 모듈** `oxicode-ai/src/catalog/models_dev.rs`: models.dev 스키마
+  파서, provider ID 매핑(oxicode 지역 변형 collapse), reasoning 보존
   allowlist(TEE/tput/compound/FP8 변형), enrich 로직, fetch/캐시
   (5분 TTL, atomic temp→rename, 교차프로세스 Flock, 2회 재시도).
 - **단일 진입점**: `model_db::all_provider_models()`의 OnceLock 클로저에
@@ -2102,9 +2111,9 @@ opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
   `-1.0` 센티넬은 models.dev 양수 도착 시 자동 정상화.
 - **오프라인 안전**: init 미실행/페치 실패 시 `get()`=None →
   Layer 1로 graceful fallback. 기능은 항상 동작, 비용 정확도만 저하.
-- **게이트**: `OXI_MODELS_DEV`(`on`/`auto`/`off`, 기본 `auto`),
-  `OXI_MODELS_DEV_URL`, `OXI_MODELS_DEV_DISABLE_FETCH`(에어갑),
-  `OXI_MODELS_DEV_TTL`, `OXI_MODELS_DEV_CACHE_PATH`.
+- **게이트**: `OXICODE_MODELS_DEV`(`on`/`auto`/`off`, 기본 `auto`),
+  `OXICODE_MODELS_DEV_URL`, `OXICODE_MODELS_DEV_DISABLE_FETCH`(에어갑),
+  `OXICODE_MODELS_DEV_TTL`, `OXICODE_MODELS_DEV_CACHE_PATH`.
 - **테스트**: 단위 10개(스키마/enrich/매핑/allowlist) + end-to-end
   통합 1개(캐시 fixture → init → model_db 조회 검증).
 - **문서**: `docs/MODELS_DEV_SYNC.md`(설계 청사진),
@@ -2114,11 +2123,11 @@ opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
 ### Added — TUI 출력 언어 정책 (TUI-only, per-channel)
 
 `Settings::output_languages`를 신설하여 **TUI 세션**에서 출력
-채널별 언어 정책을 구성할 수 있게 했다. `oxi --print` 및 RPC
+채널별 언어 정책을 구성할 수 있게 했다. `oxicode --print` 및 RPC
 모드는 정책이 있어도 **조용히 무시**된다 (의도적 격리 — TUI
 하네스 전용).
 
-- **데이터 모델** (`oxi-cli/src/store/settings.rs`):
+- **데이터 모델** (`oxicode-cli/src/store/settings.rs`):
   `output_languages: HashMap<String, String>` — 채널 키
   (`response`, `code_comment`, `documentation`,
   `commit_message`)에 ISO 639-1 코드(`en`, `ko`, `ja`, …) 또는
@@ -2128,8 +2137,8 @@ opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
   있다 (예: `pr_description = "en"`). `KNOWN_CHANNELS`는 이제
   prompt label 매핑 테이블로만 사용되며, 알 수 없는 채널은 raw
   키를 label fallback으로 directive에 포함된다.
-- **3레이어 전파** (`oxi-cli/src/app/agent_session_runtime.rs`,
-  `oxi-cli/src/prompt/system_prompt.rs`):
+- **3레이어 전파** (`oxicode-cli/src/app/agent_session_runtime.rs`,
+  `oxicode-cli/src/prompt/system_prompt.rs`):
   1. 시스템 프롬프트의 **마지막 섹션**에 "Output Language
      Policy (enforced)"로 부착 — 모델이 가장 강하게 attend하는
      위치.
@@ -2141,12 +2150,12 @@ opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
      플래그로 자식에게 전달하고 자식은 `set_system_prompt()`로
      통째 replace하므로, **부모 directive가 자식에게 자연
      전파**된다 (추가 코드 불필요).
-- **TUI UX** (`oxi-cli/src/tui/overlay/settings.rs`):
+- **TUI UX** (`oxicode-cli/src/tui/overlay/settings.rs`):
   `/settings` 오버레이에 "Language (TUI)" 섹션 추가. 채널당
   Choice로 `auto → en → ko → ja → zh → es → fr → de → auto` 사이클.
   Esc로 디스크 persist + `OXI`-mode 알림.
-- **Hot-apply** (`oxi-cli/src/app/agent_session.rs`,
-  `oxi-cli/src/tui/slash.rs`): `AgentSession::rebuild_system_prompt()`
+- **Hot-apply** (`oxicode-cli/src/app/agent_session.rs`,
+  `oxicode-cli/src/tui/slash.rs`): `AgentSession::rebuild_system_prompt()`
   신규, `/reload` 슬래시 명령에서 `set_thinking_level`과 함께
   호출. 변경 후 `/reload` 한 번이면 다음 턴부터 적용.
 - **검증**: 알 수 없는 언어 코드는 `tracing::warn!` 후 유지
@@ -2159,7 +2168,7 @@ opencode가 사용하는 동일 진실 소스인 **models.dev** (MIT)에서
   + AGENTS.md Pitfall에 한계 명시. 100% 보장이 필요하면 도구
   출력 wrapping 또는 응답 후처리가 필요 (현재 MVP 범위 외).
 
-### 사용 예시 (`~/.oxi/settings.toml`)
+### 사용 예시 (`~/.oxicode/settings.toml`)
 
 ```toml
 [output_languages]
@@ -2177,34 +2186,34 @@ commit_message = "en"
 발생하던 치명적 버그 수정. 근본 원인은 `BrowserTab`/
 `BrowserEngine` trait가 수동 `Pin<Box<dyn Future + 'a>>` 패턴을
 사용했는데, edition 2024의 정밀한 lifetime 캡처 규칙에 위배되었기
-때문. 이 버그는 oxi CI가 `native-browser` feature를 단 한 번도
+때문. 이 버그는 oxicode CI가 `native-browser` feature를 단 한 번도
 컴파일하지 않아 0.32.0~0.34.0까지 배포된 채 방치되었음.
 
 - **`BrowserTab`/`BrowserEngine` trait를 `#[async_trait]`로 전환**
-  (oxi-agent): 30개 메서드 시그니처를 `async fn`으로 단순화.
+  (oxicode-agent): 30개 메서드 시그니처를 `async fn`으로 단순화.
   `async-trait = "0.1"`은 이미 의존성이었고 sibling `AgentTool`
   trait 4개가 같은 패턴을 사용 중이었으므로 일관성 확보.
   `Pin<Box<...>>` 보일러플레이트 약 480줄 제거.
   `dyn BrowserTab`/`dyn BrowserEngine` object-safety 유지.
 - **oxibrowser_backend.rs impl을 async_trait 기반으로 재작성**
-  (oxi-agent): 27개 메서드 전부 `async fn`으로 변환.
+  (oxicode-agent): 27개 메서드 전부 `async fn`으로 변환.
   `tab_id(&'a self)`, `evaluate_await`의 선언되지 않은 lifetime
   버그(E0261), `new_tab`의 Box coercion 실패(E0271) 동시 해결.
-- **Mock 구현체 3종 동기화** (oxi-agent): `tab_guard.rs::MockTab`,
+- **Mock 구현체 3종 동기화** (oxicode-agent): `tab_guard.rs::MockTab`,
   `browse_tool.rs::MockEngine`, `browse_session_tool.rs::MockTab`/
   `MockEngine` 전부 async_trait 기반으로 변환.
 
 ### Changed
 
-- **`oxibrowser-core` 0.14.1 → 0.15 정렬** (oxi-sdk): oxi-agent은
-  이미 0.15를 사용 중이었으나 oxi-sdk의 re-export만 0.14.1에
+- **`oxibrowser-core` 0.14.1 → 0.15 정렬** (oxicode-sdk): oxicode-agent은
+  이미 0.15를 사용 중이었으나 oxicode-sdk의 re-export만 0.14.1에
   고정되어 있던 버전 불일치 해결.
 
 ### CI — 재부팅 영구 차단
 
 - **`clippy-native-browser` job 추가** (ci.yml): 매 PR마다
-  `cargo clippy -p oxi-sdk --features native-browser -- -D warnings`
-  + `cargo build -p oxi-agent --features native-browser` 실행.
+  `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings`
+  + `cargo build -p oxicode-agent --features native-browser` 실행.
   native-browser 코드 경로가 다시 부서지는 것을 영구 차단.
 - AGENTS.md에 native-browser 컴파일 의무화 명시.
 
@@ -2216,7 +2225,7 @@ commit_message = "en"
 승격. 서버 추가/편집/삭제를 TUI에서 직접 하고 디스크에 저장하면 런타임
 `McpManager`에 핫 리로드. pi-mcp-adapter의 `/mcp` 패널 UX를 참고.
 
-- **`McpConfigOverlay`** (oxi-cli): `/mcp`로 열리는 관리 오버레이.
+- **`McpConfigOverlay`** (oxicode-cli): `/mcp`로 열리는 관리 오버레이.
   - **List 모드**: 라이브 연결 상태 표시(●/○/✗), scope 표시,
     unsaved 배지.
   - **Edit 모드**: 폼 편집기 — name, transport(stdio/http 토글),
@@ -2229,21 +2238,21 @@ commit_message = "en"
     접근 가능. 토글 시 관련 첫 입력 필드로 포커스 이동.
 - **`/mcp` 자동완성**: `BUILTIN_SLASH_COMMANDS`에 추가되어 슬래시
   자동완성 목록에 표시.
-- **Config 저장 헬퍼** (oxi-agent): `save_mcp_config()`(temp+rename
+- **Config 저장 헬퍼** (oxicode-agent): `save_mcp_config()`(temp+rename
   atomic write), `load_or_default()`, `default_write_path_global/project()`.
 
 ### Changed
 
 - **`/mcp` 라우팅 분리**: `/mcp` → 관리 오버레이, `/mcp dashboard` →
   기존 읽기전용 상태 대시보드, `/mcp status` → 상태 알림(변경 없음).
-- **표준 MCP config 포맷 호환** (oxi-agent): serde가 canonical camelCase
+- **표준 MCP config 포맷 호환** (oxicode-agent): serde가 canonical camelCase
   (`mcpServers`, `idleTimeout`, `directTools`, `toolPrefix`, …)로 직렬화.
   역직렬화는 camelCase와 legacy snake_case 모두 허용(`serde alias`)하여
   기존 파일이 그대로 동작.
-- **`McpManager::replace_config()`** (oxi-agent): 런타임 config 핫 교체.
+- **`McpManager::replace_config()`** (oxicode-agent): 런타임 config 핫 교체.
   새로 추가된 서버가 재시작 없이 proxy tool에 도달 가능.
   (direct-tool 등록은 여전히 부팅 시 1회만 수행하므로 재시작 필요.)
-- **`OverlayAction::McpConfigApplied`** (oxi-cli): 오버레이가 디스크에
+- **`OverlayAction::McpConfigApplied`** (oxicode-cli): 오버레이가 디스크에
   쓴 merged config를 라이브 매니저에 반영하고 성공 알림.
 
 ### Fixed
@@ -2261,7 +2270,7 @@ commit_message = "en"
 
 pi-mcp-adapter 아키텍처 기반으로 MCP 기능 대폭 확장.
 
-- **Disk-backed metadata cache** (`~/.oxi/mcp-cache.json`): 서버 연결 없이도
+- **Disk-backed metadata cache** (`~/.oxicode/mcp-cache.json`): 서버 연결 없이도
   `search`/`list`/`describe` 동작. 원본 툴 이름만 저장하여 `tool_prefix`
   설정 변경에도 무효화 불필요.
 - **Channel-based lifecycle manager**: `mpsc` 채널로 idle disconnect 타이머와
@@ -2272,18 +2281,18 @@ pi-mcp-adapter 아키텍처 기반으로 MCP 기능 대폭 확장.
 - **`McpDirectTool`**: 개별 MCP 툴을 `AgentTool`로 직접 등록.
   `directTools`/`excludeTools` 설정으로 제어. Consent system과 연동.
 - **`ConsentManager`**: 툴 실행 전 Allow/Deny 사전 승인.
-  `~/.oxi/mcp-consent.json`에 저장.
-- **Generic `DashboardWidget`** (oxi-tui): MCP 독립적인 제네릭 대시보드.
+  `~/.oxicode/mcp-consent.json`에 저장.
+- **Generic `DashboardWidget`** (oxicode-tui): MCP 독립적인 제네릭 대시보드.
   섹션/아이템/필터/뱃지 지원.
-- **`McpDashboardOverlay`** (oxi-cli): `/mcp` 슬래시 명령으로 열리는
+- **`McpDashboardOverlay`** (oxicode-cli): `/mcp` 슬래시 명령으로 열리는
   인터랙티브 MCP 관리 대시보드. 서버 연결/해제, consent 관리, 필터 지원.
-- **SDK 레이어**: `OxiBuilder::with_mcp_config()`, `Oxi::mcp()`,
-  `mcp_tools()` factory. oxi-sdk re-export로 SDK 컨슈머(oxios 등)가
+- **SDK 레이어**: `OxicodeBuilder::with_mcp_config()`, `Oxicode::mcp()`,
+  `mcp_tools()` factory. oxicode-sdk re-export로 SDK 컨슈머(oxios 등)가
   MCP를 직접 사용 가능.
 - **MCP 디스크 경로 커스터마이징** (SDK 컨슈머용): `McpManager::spawn_with_paths(config, cache, consent)`와
-  `OxiBuilder::with_mcp_paths(cache, consent)` 추가. SDK 컨슈머(oxios 등)가
+  `OxicodeBuilder::with_mcp_paths(cache, consent)` 추가. SDK 컨슈머(oxios 등)가
   자체 디렉토리(`~/.oxios/`) 아래에 MCP 캐시/consent 상태를 self-host할 수 있도록
-  additive API. `oxi_sdk::MetadataCache` 재내보내기 포함. 기존 `spawn()`/
+  additive API. `oxicode_sdk::MetadataCache` 재내보내기 포함. 기존 `spawn()`/
   `spawn_with_config()`는 `spawn_with_paths`의 thin wrapper가 됨 (관측 동작 불변).
   (참고: `docs/proposals/mcp-disk-path-customization.md`)
 
@@ -2300,11 +2309,11 @@ pi-mcp-adapter 아키텍처 기반으로 MCP 기능 대폭 확장.
 ### Fixed
 
 - `McpManager::spawn()` / `spawn_with_paths()`가 Tokio runtime 밖에서
-  호출되면 panic하던 회귀 수정 — `OxiBuilder::build()`를 runtime 없이 부르는
-  단위 테스트(oxi-sdk 6개)가 `tokio::spawn` panic으로 실패했다. runtime
+  호출되면 panic하던 회귀 수정 — `OxicodeBuilder::build()`를 runtime 없이 부르는
+  단위 테스트(oxicode-sdk 6개)가 `tokio::spawn` panic으로 실패했다. runtime
   가드(`Handle::try_current()`)를 추가해 runtime이 없으면 lifecycle/eager
   task를 생략 (`new_no_spawn()` 패턴 차용).
-- `OxiBuilder::build()`에서 MCP paths-only 분기가 빈 `McpConfig`를 사용하던
+- `OxicodeBuilder::build()`에서 MCP paths-only 분기가 빈 `McpConfig`를 사용하던
   풋건 수정 — 이제 `with_mcp_config` 없이 `with_mcp_paths`만 호출해도
   표준 경로에서 config를 자동 발견한다.
 - `McpClient`/`McpPrompt`/`McpLogLevel`/`McpSamplingRequest` 등 공개 API의
@@ -2351,7 +2360,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
   as a bare JSON string, but `flatten` can only merge structs/maps — causing
   `serde_json::to_string` to fail silently. User messages were never written to
   disk, making sessions invisible to `/resume`. Removed `#[serde(flatten)]` from
-  both variants (`oxi-cli/src/store/session.rs`).
+  both variants (`oxicode-cli/src/store/session.rs`).
 - **Silent serialization failures in `_persist()`** now emit `tracing::warn!`
   instead of being silently swallowed.
 - Added regression tests: `test_session_roundtrip_preserves_user_content`,
@@ -2365,7 +2374,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
   59 files replaced with native `async fn` in trait (stable since Rust 1.75).
   Trait methods now return `Pin<Box<dyn Future + Send>>` explicitly, eliminating
   macro expansion overhead and improving debuggability.
-- **`once_cell::sync::Lazy` → `std::sync::LazyLock`**: All 4 uses in `oxi-ai`
+- **`once_cell::sync::Lazy` → `std::sync::LazyLock`**: All 4 uses in `oxicode-ai`
   replaced with the standard library equivalent (stable since Rust 1.80).
 - **Rust 2024 let chains**: 16 nested `if let` patterns flattened to
   `if let A && let B` syntax across the workspace.
@@ -2373,14 +2382,14 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 
 ### Removed dependencies
 
-- `async-trait` — from all 4 crates (oxi-ai, oxi-agent, oxi-sdk, oxi-cli)
-- `once_cell` — from oxi-ai (replaced by `std::sync::LazyLock`)
-- `lazy_static` — from oxi-cli (unused)
-- `tokio-test` — from oxi-ai, oxi-agent (unused)
+- `async-trait` — from all 4 crates (oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-cli)
+- `once_cell` — from oxicode-ai (replaced by `std::sync::LazyLock`)
+- `lazy_static` — from oxicode-cli (unused)
+- `tokio-test` — from oxicode-ai, oxicode-agent (unused)
 
 ## [0.30.0] - 2026-06-06
 
-### Changed — oxi-agent
+### Changed — oxicode-agent
 
 - **Replace `a3s-search` with `oxibrowser` search module**: Web search (`web_search` tool) now uses `oxibrowser::search::dispatch()` instead of the `a3s-search` crate. This consolidates search functionality into the oxibrowser ecosystem and removes the `a3s-search` dependency.
 - **Remove Brave engine**: The `brave` engine option is no longer available. Supported engines: `ddg`, `wiki`, `bing`.
@@ -2388,16 +2397,16 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 
 ### Removed
 
-- `a3s-search` dependency from `oxi-agent`.
+- `a3s-search` dependency from `oxicode-agent`.
 - `RUSTSEC-2025-0057` (fxhash) advisory exception — no longer a transitive dependency.
 
-### Changed — oxi-sdk
+### Changed — oxicode-sdk
 
 - `oxibrowser-core` dependency updated to `0.14.1`.
 
 ## [0.29.1] - 2026-06-06
 
-### Added — oxi-agent
+### Added — oxicode-agent
 
 - **`ScreenshotMeta` struct**: Screenshot metadata (bytes, width, duration_ms) attached to `ToolCallContext::PageVisit`.
 - **`PageVisit.navigation_error`**: Navigation error message from `BrowseProgress::NavigationFailed`.
@@ -2405,13 +2414,13 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Enrichment match arms**: `make_browse_enrichment_cb` now handles `NavigationFailed` and `ScreenshotCaptured` events (previously only `DocumentReady` was processed).
 - **Unit tests**: `browse_enrichment_callback_fills_navigation_error`, `browse_enrichment_callback_fills_screenshot`, `browse_enrichment_callback_navigation_failed_ignores_non_page_visit`.
 
-### Fixed — oxi-cli
+### Fixed — oxicode-cli
 
 - **Clippy `large_enum_variant`**: `SessionEvent::Agent` variant boxed to reduce enum size from 264 bytes.
 
 ## [0.29.0] - 2026-06-06
 
-### Added — oxi-agent
+### Added — oxicode-agent
 
 - **`ToolCallContext` enum**: Semantic context for tool calls (`WebSearch`, `PageVisit`, `DataExtraction`, `SessionAction`, `ScriptStep`). The agent loop infers context from tool name + args via `infer_context()`; tools remain unaware of semantics.
 - **`BrowseProgress` enum**: Structured progress events from browser tab lifecycle (`NavigationStarted`, `WaitingForSelector`, `DocumentReady`, `ScreenshotCaptured`, `NavigationFailed`). Converted from `oxibrowser_core::BrowserEvent` in the backend drain task.
@@ -2429,7 +2438,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **`AgentTool::on_browse_progress`**: Default trait method for structured browse progress callbacks.
 - **`BrowserTab::set_browse_progress_callback`**: Default trait method; only backends with browse callback support override.
 
-### Changed — oxi-agent
+### Changed — oxicode-agent
 
 - **`TabCallbackRegistry` restructured**: Dual `callbacks` + `browse_callbacks` maps → single `entries: HashMap<Uuid, TabCallbacks>` with composite `TabCallbacks { progress, browse }`. `clear()` is now atomic for both callback types.
 - **`BrowserTab::clear_browse_progress_callback` removed**: `TabCallbacks` clearing handles both; no separate method needed.
@@ -2437,18 +2446,18 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **`BrowseScriptTool` YAML parser rewritten**: `parse_steps` now handles the `{ steps: [...] }` map format correctly, with per-step variant dispatch and shorthand support (`- goto: "url"` for single-field struct variants, `screenshot: {}` for unit variants). Fixes 10 previously-failing tests.
 - **`browse_progress_from_event`**: `NavigationFailed` match arm gated behind `oxibrowser-core ≥ 0.14` (crates.io 0.13 compatibility).
 
-### Removed — oxi-agent (Breaking Changes)
+### Removed — oxicode-agent (Breaking Changes)
 
 - **`ToolProgress` enum**: Unused structured progress type (replaced by `BrowseProgress`).
 - **`FileOp` enum**: Unused file operation types (part of `ToolProgress`).
 - **`StructuredProgressCallback` type**: Unused callback type (replaced by `BrowseProgressCallback`).
 - **`AgentTool::on_structured_progress`**: Unused trait method (replaced by `on_browse_progress`).
 
-### Changed — oxi-sdk
+### Changed — oxicode-sdk
 
 - Re-exports `BrowseProgress`, `BrowseProgressCallback`, `ToolCallContext`, `VisitReason`.
 
-### Changed — oxi-cli
+### Changed — oxicode-cli
 
 - `ToolExecutionStart` and `ToolExecutionUpdate` pattern matches updated with `..` for backward compatibility.
 
@@ -2470,13 +2479,13 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - Integration test `engine_routes_events_by_tab_id_concurrent`: opens two tabs,
   registers per-tab callbacks, and verifies event isolation.
 
-### Changed — oxi-agent
+### Changed — oxicode-agent
 
 - `oxibrowser-core` dependency bumped from 0.12 to **0.13**.
 - `BrowseTool::execution_mode` remains `SequentialOnly` (per-tab routing makes
   parallel safe, but no concrete multi-tab use case yet).
 
-### Fixed — oxi-agent
+### Fixed — oxicode-agent
 
 - `AgentEvent::ToolExecutionUpdate.tab_id` is now populated (no longer always `None`).
   The agent loop passes a shared `tab_id_slot` to the tool; `BrowseTool` writes
@@ -2487,17 +2496,17 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 ### Fixed — workspace
 
 - Resolved CI gate violations (12 errors total under `cargo clippy --workspace -- -D warnings` and `RUSTFLAGS="-D warnings" cargo build --workspace`):
-  - **oxi-sdk** (3): removed unused `std::sync::Arc` import in `ports/fs/access.rs`; replaced `let _ = tokio::spawn(...)` with `drop(tokio::spawn(...))` in `ports/mod.rs`; collapsed nested `if` in `ports/fs/capability.rs` wildcard prefix resolution.
-  - **oxi-cli** (9): removed unused `clap::Parser` / `std::sync::Arc` imports in `bootstrap.rs` and `setup_wizard.rs`; removed unused `oxi::extensions::ExtensionRegistry` / `std::path::PathBuf` imports in `main.rs`; silenced `unexpected_cfgs` on the `keyring` placeholder cfg in `store/auth_storage.rs::persist`; deleted dead `run_single_prompt` helper from `bootstrap.rs` (replaced by `crate::main_dispatch::run_single_prompt`); dropped needless `&` on `args` borrow in `register_builtin_tools` call; suppressed unused `Result` from `App::switch_model` call in `lib.rs`; added missing `///` doc comment on `init_logging`; split doc-comment/regular-comment collision before `build_system_prompt` in `lib.rs`.
-  - **oxi-agent** (1): `cargo fmt` trailing blank line in `tools/browse/engine.rs` (auto-fixed by `cargo fmt --all`).
+  - **oxicode-sdk** (3): removed unused `std::sync::Arc` import in `ports/fs/access.rs`; replaced `let _ = tokio::spawn(...)` with `drop(tokio::spawn(...))` in `ports/mod.rs`; collapsed nested `if` in `ports/fs/capability.rs` wildcard prefix resolution.
+  - **oxicode-cli** (9): removed unused `clap::Parser` / `std::sync::Arc` imports in `bootstrap.rs` and `setup_wizard.rs`; removed unused `oxicode::extensions::ExtensionRegistry` / `std::path::PathBuf` imports in `main.rs`; silenced `unexpected_cfgs` on the `keyring` placeholder cfg in `store/auth_storage.rs::persist`; deleted dead `run_single_prompt` helper from `bootstrap.rs` (replaced by `crate::main_dispatch::run_single_prompt`); dropped needless `&` on `args` borrow in `register_builtin_tools` call; suppressed unused `Result` from `App::switch_model` call in `lib.rs`; added missing `///` doc comment on `init_logging`; split doc-comment/regular-comment collision before `build_system_prompt` in `lib.rs`.
+  - **oxicode-agent** (1): `cargo fmt` trailing blank line in `tools/browse/engine.rs` (auto-fixed by `cargo fmt --all`).
 
 ### Changed — workspace
 
-- Bumped all crate versions to 0.27.1 (oxi-ai, oxi-cli, oxi-sdk, oxi-tui). oxi-agent was already at 0.27.1. Inter-crate dependency versions aligned to 0.27.1.
+- Bumped all crate versions to 0.27.1 (oxicode-ai, oxicode-cli, oxicode-sdk, oxicode-tui). oxicode-agent was already at 0.27.1. Inter-crate dependency versions aligned to 0.27.1.
 
-### Fixed — oxi-agent
+### Fixed — oxicode-agent
 
-- `BrowseTool::execution_mode` now returns `SequentialOnly` to prevent the OxiBrowserEngine progress forwarder race. (Future work: per-tool_call_id forwarder.)
+- `BrowseTool::execution_mode` now returns `SequentialOnly` to prevent the OxicodeBrowserEngine progress forwarder race. (Future work: per-tool_call_id forwarder.)
 
 ### Changed — infrastructure
 
@@ -2514,10 +2523,10 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **Cargo audit/deny**: Synced ignore lists across `.cargo/audit.toml` and `deny.toml`; added upgrade tracker comment for extism ≥ 1.22 (wasmtime ≥ 43)
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
-[0.39.0]: https://github.com/a7garden/oxi/compare/v0.38.0...v0.39.0
-[0.62.0]: https://github.com/a7garden/oxi/compare/v0.61.0...v0.62.0
-[0.61.0]: https://github.com/a7garden/oxi/compare/v0.60.0...v0.61.0
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.62.0...HEAD
+[0.39.0]: https://github.com/a7garden/oxicode/compare/v0.38.0...v0.39.0
+[0.62.0]: https://github.com/a7garden/oxicode/compare/v0.61.0...v0.62.0
+[0.61.0]: https://github.com/a7garden/oxicode/compare/v0.60.0...v0.61.0
+[Unreleased]: https://github.com/a7garden/oxicode/compare/v0.62.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 
@@ -2531,21 +2540,21 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 
 ## [0.25.7] - 2026-05-31
 
-### Changed — oxi-cli
+### Changed — oxicode-cli
 
 - **Provider select overlay improvements**: Updated handler logic, factory enhancements, and slash command integration
 - Bumped all crate versions to 0.25.7
 
 ## [0.25.4] - 2026-05-31
 
-### Added — oxi-sdk
+### Added — oxicode-sdk
 
-- `oxi-sdk/examples/builder_demo.rs` — end-to-end SDK usage example
+- `oxicode-sdk/examples/builder_demo.rs` — end-to-end SDK usage example
 
 ### Changed — workspace
 
 - Added proper attribution to original [pi](https://github.com/earendil-works/pi) project (MIT License, Copyright © 2025 Mario Zechner)
-- Updated LICENSE.md with dual copyright notice (pi + oxi contributors)
+- Updated LICENSE.md with dual copyright notice (pi + oxicode contributors)
 - Added NOTICE.md with detailed attribution of derived architecture
 - Updated README.md, AGENTS.md, CONTRIBUTING.md to reflect port provenance
 - Root repository cleaned up: removed 75+ analysis/report markdown files and orphaned source files
@@ -2559,11 +2568,11 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - `docs.rs` metadata added to all library crate Cargo.toml files
 - Bumped all crate versions to 0.25.4
 
-### Fixed — oxi-agent
+### Fixed — oxicode-agent
 
 - `truncate.rs` test updated to use emoji-based multi-byte characters
 
-### Fixed — oxi-tui
+### Fixed — oxicode-tui
 
 - `fuzzy.rs` Unicode match test updated for ASCII pattern
 - `chat.rs` CJK wrapping tests updated with English text
@@ -2572,19 +2581,19 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 
 ## [0.24.0] - 2026-05-19
 
-### Added — oxi-sdk
+### Added — oxicode-sdk
 
-- Re-export `SearchCache`, `CompactionEvent`, `UserMessage` and all built-in tools (`EditTool`, `ReadTool`, `WriteTool`, `GrepTool`, `FindTool`, `LsTool`, `WebSearchTool`, `GetSearchResultsTool`) for single-dependency access via `oxi-sdk`
+- Re-export `SearchCache`, `CompactionEvent`, `UserMessage` and all built-in tools (`EditTool`, `ReadTool`, `WriteTool`, `GrepTool`, `FindTool`, `LsTool`, `WebSearchTool`, `GetSearchResultsTool`) for single-dependency access via `oxicode-sdk`
 
 ## [0.15.1] - 2026-05-16
 
-### Fixed — oxi-agent
+### Fixed — oxicode-agent
 
 - **tool_exec.rs**: Add `+ Send` bound to `FinalizedToolCallEntry::Future` and `pending_futures` type alias, making `AgentLoop::run()` / `run_messages()` / `continue_loop()` futures `Send`-compatible for `tokio::spawn`
 
-### Changed — oxi-sdk, oxi-cli
+### Changed — oxicode-sdk, oxicode-cli
 
-- Bump `oxi-agent` dependency to 0.15.1
+- Bump `oxicode-agent` dependency to 0.15.1
 
 ## [0.15.0] - 2026-05-16
 
@@ -2592,31 +2601,31 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 
 ## [0.14.0] - 2026-05-16
 
-### Added — oxi-sdk (oxios Agent OS Engine)
+### Added — oxicode-sdk (oxios Agent OS Engine)
 
-- **KernelToolProvider trait** (`oxi-sdk/src/kernel_bridge.rs`): Bridge interface for oxios kernel tools (exec, memory, browser, persona) to be plugged into the SDK agent builder
-- **AgentGroup** (`oxi-sdk/src/agent_group.rs`): Multi-agent orchestration with Pipeline/Parallel/Orchestrated strategies
-- **MessageBus** (`oxi-sdk/src/message_bus.rs`): Broadcast-based inter-agent communication for oxios environments
-- **AgentMetrics** (`oxi-sdk/src/metrics.rs`): Atomic counters for tracking runs, tokens, durations with snapshot export
+- **KernelToolProvider trait** (`oxicode-sdk/src/kernel_bridge.rs`): Bridge interface for oxios kernel tools (exec, memory, browser, persona) to be plugged into the SDK agent builder
+- **AgentGroup** (`oxicode-sdk/src/agent_group.rs`): Multi-agent orchestration with Pipeline/Parallel/Orchestrated strategies
+- **MessageBus** (`oxicode-sdk/src/message_bus.rs`): Broadcast-based inter-agent communication for oxios environments
+- **AgentMetrics** (`oxicode-sdk/src/metrics.rs`): Atomic counters for tracking runs, tokens, durations with snapshot export
 
-### Added — oxi-agent
+### Added — oxicode-agent
 
 - **Agent::export_state() / import_state()**: Session persistence via JSON serialization of AgentState
 - **Agent::continue_with()**: Session continuation within same agent instance
 - **Agent::run_tokio_stream()**: Tokio-native event streaming with tokio::sync::mpsc channels (WebSocket/SSE gateway friendly)
-- **StructuredOutput** (`oxi-agent/src/structured_output.rs`): JSON extraction and schema validation from agent responses
+- **StructuredOutput** (`oxicode-agent/src/structured_output.rs`): JSON extraction and schema validation from agent responses
 - **AgentState Serialize/Deserialize**: Full state serialization including messages, tokens, iteration progress
 - **AgentConfig::output_mode**: Optional structured output mode configuration
 
-### Added — oxi-ai
+### Added — oxicode-ai
 
-- **ProviderPool** (`oxi-ai/src/provider_pool.rs`): Rate limiting and concurrency control with semaphore + sliding window RPM for multi-agent shared API key scenarios
+- **ProviderPool** (`oxicode-ai/src/provider_pool.rs`): Rate limiting and concurrency control with semaphore + sliding window RPM for multi-agent shared API key scenarios
 
-### Added — oxi-sdk / oxi-agent
+### Added — oxicode-sdk / oxicode-agent
 
 - **AgentBuilder::kernel_tools()**: Register kernel tools via KernelToolProvider during agent construction
 
-### Fixed — oxi-agent
+### Fixed — oxicode-agent
 
 - **edit_diff.rs**: Detect and reject ambiguous matches (old_text appearing >1 time) with clear error message
 - **edit.rs**: Add serde aliases for `old_text`/`new_text` to fix multi-edit JSON parsing
@@ -2628,36 +2637,36 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **tools.rs**: Fix `test_bash_working_dir` (handle workspace restriction errors), `test_find_path_not_found` (accept 'Cannot read' error)
 - **provider_mock.rs**: Fix `test_empty_stream` expectation (1 Start event, not 0)
 
-### Changed — oxi-agent
+### Changed — oxicode-agent
 
 - **SharedState now Clone + Arc-based**: `SharedState` wraps `Arc<RwLock<AgentState>>` enabling state sharing across async boundaries
 - **AgentInner now Clone**: Inner config/provider cloneable for tokio streaming paths
 
 ## [0.13.0] - 2026-05-15
 
-### Added — oxi-cli / oxi-agent
+### Added — oxicode-cli / oxicode-agent
 
 - **Thinking level display in footer**: Model shown with thinking level indicator (e.g., `(minimax) MiniMax-M2.7 • high`)
 - **Shift+Tab to cycle thinking level**: Press Shift+Tab to cycle through thinking levels: off → minimal → low → medium → high → xhigh → off
 - **Thinking level in TUI footer**: Footer now shows thinking level as secondary info (muted color) next to model name
 
-### Changed — oxi-store
+### Changed — oxicode-store
 
 - **ThinkingLevel enum aligned with pi-agent**: Changed from `none, minimal, standard, thorough` to `off, minimal, low, medium, high, xhigh` to match pi-agent naming conventions
 - **Default thinking level is now `medium`**: Consistent with pi-agent behavior
 
-### Changed — oxi-cli / oxi-ai
+### Changed — oxicode-cli / oxicode-ai
 
 - **Thinking level system prompts updated**: All thinking levels (off, minimal, low, medium, high, xhigh) now have appropriate system prompts with distinct characteristics
 
-### Fixed — oxi-store
+### Fixed — oxicode-store
 
 - **Fixed failing tests**: Updated environment variable tests to reflect that `apply_env()` and `from_env()` are now no-op (env overrides disabled)
 - **Fixed PoisonError in parallel tests**: Removed unnecessary ENV_LOCK usage from tests that don't modify env vars
 
 ## [0.8.0] - 2026-05-06
 
-### Added — oxi-agent
+### Added — oxicode-agent
 
 - **2-level agentic loop** matching pi-mono architecture: outer loop (follow-up messages), inner loop (tool calls + steering)
 - **turn_start / turn_end events** emitted each iteration for lifecycle tracking
@@ -2673,7 +2682,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - **ToolBatchResult** for batch tool execution results
 - **Compaction per iteration**: context window check at each iteration, not just once
 
-### Added — oxi-cli
+### Added — oxicode-cli
 
 - **Tool snippets in system prompt**: Available tools now show descriptions instead of "(none)"
 - **AgentSession queue → Agent hooks connection**: steering/follow-up queues wired to agent loop
@@ -2696,7 +2705,7 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 
 ## [0.5.0] - 2026-05-05
 
-### Fixed — oxi-ai
+### Fixed — oxicode-ai
 
 - **TextDelta double-push bug** in `high_level.rs` `complete()` function. Text was being pushed to `text_buffer` twice at block boundaries, causing double-counting. Fixed by reordering logic to execute `text_buffer.push_str(&delta)` exactly once.
 - **ToolCallStart synthetic ID generation** now uses the actual `tool_call_id` from provider events instead of always generating synthetic IDs.
@@ -2706,28 +2715,28 @@ text-only response (no tool calls) or the user cancels (Ctrl+C).
 - Fixed pre-existing `concat!` macro syntax errors in `providers/anthropic.rs` and `providers/openai.rs`.
 
 
-### Changed — oxi-ai
+### Changed — oxicode-ai
 
 - `ProviderEvent::ToolCallStart` now carries `tool_call_id: Option<String>` for real tool call IDs from providers.
 
 - `ContentBlockStart` (Anthropic) now includes `id` field.
 - `ContentBlockRef` (Bedrock) now includes `id` field.
 
-### Added — oxi-agent
+### Added — oxicode-agent
 
 - **Parallel tool execution**: `execute_tool_calls_parallel` now uses `futures::future::join_all` for concurrent execution while preserving result order.
 - **Circuit breaker integration**: `CircuitBreaker` from `recovery.rs` is now wired into `AgentLoop`. Configurable threshold and open duration with automatic recovery.
 - **18 integration tests** covering multi-turn tool use loop, compaction flow, cross-provider model switching, error recovery scenarios, steering messages, and follow-up queue processing.
 
-### Added — oxi-cli
+### Added — oxicode-cli
 
 - **48 AgentSession tests** covering model cycling, thinking level changes, steering/follow-up queues, compaction trigger logic, session persistence, and event subscriptions.
 
 ## [0.1.0-alpha] - 2025-05-03
 
-Initial alpha release of the oxi workspace.
+Initial alpha release of the oxicode workspace.
 
-### Added — oxi-ai
+### Added — oxicode-ai
 
 - Unified LLM API with provider-agnostic `Context` and `Message` types
 - Streaming response handling via async `ProviderEvent` streams
@@ -2738,7 +2747,7 @@ Initial alpha release of the oxi workspace.
 - Cross-provider message transformation
 - JSON Schema validation for structured outputs
 
-### Added — oxi-agent
+### Added — oxicode-agent
 
 - Agent runtime with streaming event loop
 - `AgentTool` trait for defining LLM-callable tools
@@ -2748,7 +2757,7 @@ Initial alpha release of the oxi workspace.
 - Tool streaming and progress updates
 - Agent event types (thinking, text, tool calls, completion)
 
-### Added — oxi-tui
+### Added — oxicode-tui
 
 - Component-based terminal UI framework
 - Differential rendering (line-level dirty tracking)
@@ -2759,7 +2768,7 @@ Initial alpha release of the oxi workspace.
 - Chat view with streaming display
 - Unified keyboard, mouse, and resize event handling
 
-### Added — oxi (CLI)
+### Added — oxicode (CLI)
 
 - Interactive REPL for chatting with LLMs
 - Session system with persistence and branching
@@ -2782,7 +2791,7 @@ Initial alpha release of the oxi workspace.
 
 ### Infrastructure
 
-- Workspace with 4 crates: oxi, oxi-ai, oxi-agent, oxi-tui
+- Workspace with 4 crates: oxicode, oxicode-ai, oxicode-agent, oxicode-tui
 - Comprehensive test suites for all built-in tools
 - Project README files for each crate
 - MIT license

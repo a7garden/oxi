@@ -8,9 +8,9 @@
 
 ## Context
 
-oxi uses `tracing` throughout the codebase (244 call sites across all crates) for structured logging. However, there is no configured `tracing_subscriber` or exporter — trace events go to the default subscriber (if any). For a CLI application, this is partially acceptable (output goes to stderr), but for SDK consumers and multi-agent deployments, lack of structured export is a gap.
+oxicode uses `tracing` throughout the codebase (244 call sites across all crates) for structured logging. However, there is no configured `tracing_subscriber` or exporter — trace events go to the default subscriber (if any). For a CLI application, this is partially acceptable (output goes to stderr), but for SDK consumers and multi-agent deployments, lack of structured export is a gap.
 
-The project has a `oxi-sdk/src/metrics.rs` module with `AtomicAgentMetrics` for in-process counters, but there is no export mechanism (Prometheus, OTel, or even JSON logging of metrics).
+The project has a `oxicode-sdk/src/metrics.rs` module with `AtomicAgentMetrics` for in-process counters, but there is no export mechanism (Prometheus, OTel, or even JSON logging of metrics).
 
 Current state:
 
@@ -18,10 +18,10 @@ Current state:
 |-----------|--------|--------|
 | `tracing` instrumentation | ✅ Present | 244 call sites across all crates |
 | Subscriber configuration | ❌ Missing | No `tracing_subscriber::fmt()` or structured exporter setup |
-| Metrics collection | ⚠️ Partial | `AtomicAgentMetrics` in `oxi-sdk/src/metrics.rs` — internal counters only |
+| Metrics collection | ⚠️ Partial | `AtomicAgentMetrics` in `oxicode-sdk/src/metrics.rs` — internal counters only |
 | Metrics export | ❌ Missing | No Prometheus, OTel, or JSON metrics output |
 | Health endpoints | ❌ N/A | CLI/TUI application — no HTTP server |
-| Circuit breaker health | ✅ Present | `oxi-ai/src/circuit_breaker.rs` — per-provider health tracking with TUI display |
+| Circuit breaker health | ✅ Present | `oxicode-ai/src/circuit_breaker.rs` — per-provider health tracking with TUI display |
 | Session health | ⚠️ Implicit | Session errors surface via TUI/RPC but no structured health signal |
 
 ---
@@ -32,12 +32,12 @@ Ensure that the tracing infrastructure is properly initialized and that trace ev
 
 This does NOT mean:
 - ❌ Adding OpenTelemetry or Prometheus dependencies (overkill for a CLI tool)
-- ❌ Creating an HTTP health endpoint (oxi is a CLI, not a server)
+- ❌ Creating an HTTP health endpoint (oxicode is a CLI, not a server)
 - ❌ Adding `metrics` crate dependency
 - ❌ Rewriting existing tracing calls
 
 It DOES mean:
-- ✅ oxi CLI initializes a `tracing_subscriber` with appropriate formatting
+- ✅ oxicode CLI initializes a `tracing_subscriber` with appropriate formatting
 - ✅ `RUST_LOG` environment variable is respected for log level control
 - ✅ SDK users can bring their own subscriber without conflicts
 - ✅ Log output is structured (JSON option available for machine parsing)
@@ -48,25 +48,25 @@ It DOES mean:
 
 ### Phase 1: Audit (read-only)
 
-1. Check how tracing is currently initialized (or not) in `oxi-cli/src/main.rs`.
+1. Check how tracing is currently initialized (or not) in `oxicode-cli/src/main.rs`.
 2. Check if `tracing_subscriber` is already a dependency.
 3. Check if `RUST_LOG` is handled anywhere.
-4. Read `oxi-sdk/src/metrics.rs` and understand the metrics model.
+4. Read `oxicode-sdk/src/metrics.rs` and understand the metrics model.
 
 ```bash
 rg "tracing_subscriber" --type rust | grep -v target/
 rg "RUST_LOG" --type rust | grep -v target/
-rg "init" oxi-cli/src/main.rs | head -10
+rg "init" oxicode-cli/src/main.rs | head -10
 ```
 
 ### Phase 2: Implement tracing initialization
 
-1. In `oxi-cli/src/main.rs`, add a `tracing_subscriber::fmt()` initialization:
+1. In `oxicode-cli/src/main.rs`, add a `tracing_subscriber::fmt()` initialization:
    ```rust
    tracing_subscriber::fmt()
        .with_env_filter(
            tracing_subscriber::EnvFilter::from_default_env()
-               .add_directive("oxi=info".parse().unwrap())
+               .add_directive("oxicode=info".parse().unwrap())
        )
        .with_writer(std::io::stderr)
        .init();
@@ -77,8 +77,8 @@ rg "init" oxi-cli/src/main.rs | head -10
 
 ### Phase 3: SDK user opt-out
 
-1. In `oxi-sdk`, document that SDK consumers should initialize their own `tracing_subscriber` before creating agents.
-2. Ensure oxi-sdk never calls `tracing::subscriber::set_global_default()` — leave that to the application layer.
+1. In `oxicode-sdk`, document that SDK consumers should initialize their own `tracing_subscriber` before creating agents.
+2. Ensure oxicode-sdk never calls `tracing::subscriber::set_global_default()` — leave that to the application layer.
 
 ### Phase 4: Verify
 
@@ -93,7 +93,7 @@ rg "init" oxi-cli/src/main.rs | head -10
 - **Do not** add OTel/Prometheus/metrics-exporter dependencies.
 - **Do not** change existing `tracing::info!` / `tracing::debug!` call sites.
 - **Preserve** TUI display — tracing must not interfere with the alternate screen buffer.
-- **Do not** call `set_global_default()` in library crates (oxi-ai, oxi-agent, oxi-sdk, oxi-store, oxi-tui).
+- **Do not** call `set_global_default()` in library crates (oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-store, oxicode-tui).
 
 ## Verification
 

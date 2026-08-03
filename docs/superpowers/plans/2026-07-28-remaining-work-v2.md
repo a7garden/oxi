@@ -11,13 +11,13 @@
 ## 빠른 시작
 
 ```bash
-cd /Volumes/MERCURY/PROJECTS/oxi
+cd /Volumes/MERCURY/PROJECTS/oxicode
 git checkout main
 
 # 회귀 게이트 (각 변경마다)
 cargo nextest run --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 
 # omp 소스 (포팅/참조용)
@@ -42,7 +42,7 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 |------|------|------|-----------|:---:|
 | 1 | P1.6b Meta 6개 도구 | 에이전트 기능 | ~2400 lines | ✅ |
 | 2 | P3 프롬프트 & CLI | 사용자 경험 | ~2000 lines | ⚠️ P1 후 |
-| 3 | P4 oxi-original 정리 | 코드 품질 | ~1500 lines | ✅ (독립) |
+| 3 | P4 oxicode-original 정리 | 코드 품질 | ~1500 lines | ✅ (독립) |
 | 4 | P1.6c 고급 도구 6개 | 에이전트 기능 | ~2400 lines | ✅ (P1.6b 후) |
 | 5 | P1.6a debug 도구 재등록 | 에이전트 기능 | ~600 lines | DAP 프록시 구현 후 |
 | 6 | P0.5 remote-AGENT providers | provider | ~2000 lines | ✅ (요청 시) |
@@ -66,9 +66,9 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 | `review` | `review.ts` | 코드 리뷰 요청 |
 
 **작업**:
-1. 각 도구마다 `oxi-agent/src/tools/<name>.rs` 생성
+1. 각 도구마다 `oxicode-agent/src/tools/<name>.rs` 생성
 2. `AgentTool` trait 구현 (name, label, description, parameters_schema, execute)
-3. `oxi-agent/src/tools.rs`에 module 선언 + `ToolRegistry::with_builtins_cwd()` 등록
+3. `oxicode-agent/src/tools.rs`에 module 선언 + `ToolRegistry::with_builtins_cwd()` 등록
 4. intent tracing 추가
 5. 각 도구 단위 테스트
 
@@ -99,17 +99,17 @@ ls /tmp/omp 2>/dev/null || git clone https://github.com/can1357/oh-my-pi.git /tm
 
 ### P1.6a — debug 도구 재등록
 
-debug 도구는 `oxi-agent/src/tools/debug_tool.rs`에 파일이 있지만 `ToolRegistry::with_builtins_cwd()`에서 주석 처리되어 있음.
+debug 도구는 `oxicode-agent/src/tools/debug_tool.rs`에 파일이 있지만 `ToolRegistry::with_builtins_cwd()`에서 주석 처리되어 있음.
 재등록하려면 DAP (Debug Adapter Protocol) 프록시 구현이 선행되어야 함.
 
 ```rust
-// oxi-agent/src/tools.rs: 주석 해제 대상
+// oxicode-agent/src/tools.rs: 주석 해제 대상
 all_tools.push(Box::new(debug_tool::DebugTool));
 ```
 
 **작업**:
 1. DAP 프록시 구현 (DebugTool이 외부 DAP 서버와 통신)
-2. `oxi-agent/tests/tools.rs`의 도구 카운트 업데이트 (25 → 26)
+2. `oxicode-agent/tests/tools.rs`의 도구 카운트 업데이트 (25 → 26)
 3. 등록 해제된 `all_tools.push(...)` 주석 해제
 
 **예상 규모**: ~600 lines.
@@ -118,16 +118,16 @@ all_tools.push(Box::new(debug_tool::DebugTool));
 
 ## Phase 3 — 프롬프트 & CLI 재정렬
 
-**대상 크레이트**: `oxi-cli/`, `oxi-ai/`
+**대상 크레이트**: `oxicode-cli/`, `oxicode-ai/`
 
 ### P3.1 — `.md` 기반 시스템 프롬프트
 
-현재 inline Rust 문자열(`oxi-cli/src/prompt/system_prompt.rs` 736줄)을 `.md` 파일(`include_str!()`)로 전환.
+현재 inline Rust 문자열(`oxicode-cli/src/prompt/system_prompt.rs` 736줄)을 `.md` 파일(`include_str!()`)로 전환.
 
 **omp 참조**: `/tmp/omp/packages/coding-agent/src/prompts/`
 
 **작업**:
-1. `oxi-cli/src/prompts/` 디렉토리 생성
+1. `oxicode-cli/src/prompts/` 디렉토리 생성
 2. system prompt를 `.md` 파일로 분리
 3. `include_str!()`으로 로드
 4. 기존 inline 문자열 제거
@@ -152,16 +152,16 @@ all_tools.push(Box::new(debug_tool::DebugTool));
 
 ---
 
-## Phase 4 — oxi-original 처리
+## Phase 4 — oxicode-original 처리
 
-**대상 크레이트**: `oxi-cli/`
+**대상 크레이트**: `oxicode-cli/`
 
 ### P4.1 — Issue 시스템 격리
 
 Issue 시스템(CAS + flock)을 agent 루프/session 모델에서 분리. 명시적 API boundary 뒤로 이동.
 
 **작업**:
-1. Issue 관련 코드를 `oxi-cli/src/store/issues/`로 이동
+1. Issue 관련 코드를 `oxicode-cli/src/store/issues/`로 이동
 2. Agent loop에서 직접 참조하는 부분을 port로 추상화
 3. 기존 `IssueStore` 의존성 정리
 
@@ -169,7 +169,7 @@ Issue 시스템(CAS + flock)을 agent 루프/session 모델에서 분리. 명시
 
 ### P4.2 — Package manager → omp 플러그인 모델
 
-`oxi-cli/src/storage/packages.rs`(106KB)를 omp `extensibility/plugins/` 모델에 맞춤.
+`oxicode-cli/src/storage/packages.rs`(106KB)를 omp `extensibility/plugins/` 모델에 맞춤.
 
 **예상 규모**: ~500 lines.
 
@@ -199,9 +199,9 @@ Cursor / Devin / GitLab Duo transport. `Api` enum에 variant 존재, transport�
 ## Phase 2 — TUI 재정렬 (가장 큼, 마지막)
 
 **omp 참조**: `/tmp/omp/packages/tui/src/tui.ts`(173KB)
-**대상 크레이트**: `oxi-tui`, `oxi-tui-legacy → oxi-tui rename`
+**대상 크레이트**: `oxicode-tui`, `oxicode-tui-legacy → oxicode-tui rename`
 
-1. `oxi-tui-legacy` → `oxi-tui` rename
+1. `oxicode-tui-legacy` → `oxicode-tui` rename
 2. omp 3-전략 차등 렌더링 Rust 구현 (Component memoization, Native scrollback commit, ED3 replay)
 3. Append-only "tape" 렌더 계약
 4. 전체 입력 시스템 (Kitty keyboard, bracketed paste, keybinding, mouse SGR, kill ring, undo)
@@ -215,7 +215,7 @@ Cursor / Devin / GitLab Duo transport. `Api` enum에 variant 존재, transport�
 ## 변경 시 주의사항
 
 ### dialect `xml.rs` 코드 작성 금지 규칙
-`oxi-ai/src/dialect/xml.rs`에 literal XML 태그(`<invoke`, `<parameter`, `</invoke>`)를 **절대 포함하지 마십시오**. harness wire framing과 충돌:
+`oxicode-ai/src/dialect/xml.rs`에 literal XML 태그(`<invoke`, `<parameter`, `</invoke>`)를 **절대 포함하지 마십시오**. harness wire framing과 충돌:
 - 모든 태그는 `concat!("<", "invoke")` / `concat!("</", "parameter>")` 형태로 빌드
 - 문서 작성 시 prose로 설명
 - `edit` 도구로 기존 xml.rs 수정은 안전 (직접 파일을 읽고 쓰므로)
@@ -224,22 +224,22 @@ Cursor / Devin / GitLab Duo transport. `Api` enum에 variant 존재, transport�
 `AgentLoopConfig`에 새 필드 추가 시 `Default::default()`에도 반드시 `None`/`false`/기본값 추가.
 
 ### P1.6b/c 도구 제작 순서
-1. `oxi-agent/src/tools/<name>.rs` 생성
+1. `oxicode-agent/src/tools/<name>.rs` 생성
 2. `AgentTool` trait 구현
-3. `oxi-agent/src/tools.rs`에 `mod <name>;` 선언
-4. `oxi-agent/src/tools.rs`의 `with_builtins_cwd()`에 `Box::new(<name>::<Name>Tool::new(...))` 등록
-5. `oxi-agent/src/tools.rs`의 `names()` 배열에 추가
+3. `oxicode-agent/src/tools.rs`에 `mod <name>;` 선언
+4. `oxicode-agent/src/tools.rs`의 `with_builtins_cwd()`에 `Box::new(<name>::<Name>Tool::new(...))` 등록
+5. `oxicode-agent/src/tools.rs`의 `names()` 배열에 추가
 
 ### debug_tool 재등록
-`oxi-agent/src/tools.rs`에서 주석 처리된 `all_tools.push(Box::new(debug_tool::DebugTool));`의 주석 해제 필요.
-DAP 프록시 구현 후 `oxi-agent/tests/tools.rs`의 카운트도 `25` → `26`으로 업데이트.
+`oxicode-agent/src/tools.rs`에서 주석 처리된 `all_tools.push(Box::new(debug_tool::DebugTool));`의 주석 해제 필요.
+DAP 프록시 구현 후 `oxicode-agent/tests/tools.rs`의 카운트도 `25` → `26`으로 업데이트.
 
 ### 회귀 게이트
 변경 후 항상 실행:
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
 ```

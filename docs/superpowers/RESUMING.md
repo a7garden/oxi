@@ -1,11 +1,11 @@
-# oxi omp-정렬 — 남은 작업 명세
+# oxicode omp-정렬 — 남은 작업 명세
 > **다음 세션 인수인계**: [HANDOFF-session5.md](./HANDOFF-session5.md) — P0.5 (remote-AGENT) + P2 (TUI 재정렬) + P4.2 후속 작업의 자세한 가이드
 
 
 > **최종 갱신**: 2026-07-28 (session 5)
 > **브랜치**: `main`
 > **완료**: P0 + P1 + P2 + P3.1 + P3.2 + **P3.3** + P4.3 + P4.4 + **P4.1** + **P4.2** + **P1.6a**
-> **기준선**: 1907 tests passing (oxi-cli 763, oxi-agent 746, oxi-sdk 398), clippy clean, fmt clean
+> **기준선**: 1907 tests passing (oxicode-cli 763, oxicode-agent 746, oxicode-sdk 398), clippy clean, fmt clean
 
 > **현재 상태 (2026-07-30):** 이 문서의 잔여 작업 설명은 superseded 되었습니다.
 > 모든 dialect transport는 explicit dispatch arm이 있습니다. P2 rich-content는
@@ -29,13 +29,13 @@
 | P1.6a | eval, ast_grep, ast_edit 도구 | `main` |
 | P1.6b | checkpoint, rewind, hub, yield, goal, review (6 tools) | `dcdd0b27` |
 | P1.6c | learn, manage_skill, inspect_image, computer, tts, vibe (6 tools) | `8432dd35` |
-| **P3.1** | **`.md` 기반 시스템 프롬프트** — `include_str!("../prompts/identity.md")` + `oxi-hashline/src/prompt.md` 참조 | `138e5689` |
+| **P3.1** | **`.md` 기반 시스템 프롬프트** — `include_str!("../prompts/identity.md")` + `oxicode-hashline/src/prompt.md` 참조 | `138e5689` |
 | **P3.2** | **CLI 명령 포팅** — `completions`, `install`, `update`, `commit`, `config path` | `1a6fa373`, `fb129dc4` |
 | P4.3 | Language policy → no-op (`language_directive()` → `None`) | 이전 session |
 | **P3.3** | **main.rs 핸들러 분리** (F-5) — 10개 commands/*.rs 파일, main.rs 62줄로 축소 | session 4 |
-| **P4.1** | **Issue 시스템 격리** — `oxi-cli/src/store/issues/` 디렉토리 모듈 (7개 하위모듈) | session 4 |
-| **P1.6a** | **debug 도구 재등록** — `oxi-agent`에 DebugTool 다시 연결, 37→38 tool count | session 5 |
-| **P4.2** | **Package manager 모듈화** — `oxi-cli/src/storage/packages.rs` (3096줄) → `packages/` 디렉토리 모듈 (9개 파일) | session 5 |
+| **P4.1** | **Issue 시스템 격리** — `oxicode-cli/src/store/issues/` 디렉토리 모듈 (7개 하위모듈) | session 4 |
+| **P1.6a** | **debug 도구 재등록** — `oxicode-agent`에 DebugTool 다시 연결, 37→38 tool count | session 5 |
+| **P4.2** | **Package manager 모듈화** — `oxicode-cli/src/storage/packages.rs` (3096줄) → `packages/` 디렉토리 모듈 (9개 파일) | session 5 |
 
 **Tool count**: 38 built-in tools registered (debug tool re-enabled).
 
@@ -43,26 +43,26 @@
 
 ## 2. Phase 3 — 프롬프트 & CLI 재정렬 (완료)
 
-> **대상 크레이트**: `oxi-cli/`
+> **대상 크레이트**: `oxicode-cli/`
 
 ### P3.3 — main.rs 핸들러 분리 (F-5) ✅ (2026-07-28)
 
-**변경 내용**: `oxi-cli/src/main.rs`의 모든 handler 함수를 `oxi-cli/src/cli/commands/*.rs`로 분리.
+**변경 내용**: `oxicode-cli/src/main.rs`의 모든 handler 함수를 `oxicode-cli/src/cli/commands/*.rs`로 분리.
 - 10개 파일 생성: `sessions.rs`, `issue.rs`, `pkg.rs`, `ext.rs`, `config.rs`, `setup.rs`, `reset.rs`, `export.rs`, `misc.rs`, `mod.rs`
 - `main.rs` 1779줄 → **62줄** (main() + handle_subcommand match arm만)
 - `cli.rs`에 `pub mod commands;` 추가
-- 주의사항 해결: handler 함수들은 `oxi::` 대신 `crate::` 사용 (library crate 내부)
+- 주의사항 해결: handler 함수들은 `oxicode::` 대신 `crate::` 사용 (library crate 내부)
 - **회귀 위험 해소**: clap Subcommand generic-bound 이슈 없음 — `pub use`로 정상 re-export
 
 ---
 
-## 3. Phase 4 — oxi-original 정리 (P4.1 + P4.4 완료, P4.2 잔여)
+## 3. Phase 4 — oxicode-original 정리 (P4.1 + P4.4 완료, P4.2 잔여)
 
-> **대상 크레이트**: `oxi-cli/`
+> **대상 크레이트**: `oxicode-cli/`
 
 ### P4.1 — Issue 시스템 격리 ✅ (2026-07-28)
 
-**변경 내용**: `oxi-cli/src/store/issues.rs` (2020줄) → `oxi-cli/src/store/issues/` 디렉토리 모듈 (7개 파일)
+**변경 내용**: `oxicode-cli/src/store/issues.rs` (2020줄) → `oxicode-cli/src/store/issues/` 디렉토리 모듈 (7개 파일)
 
 | 파일 | 내용 |
 |------|------|
@@ -80,7 +80,7 @@
 
 ### P4.2 — Package manager → omp 플러그인 모델 (~500 lines)
 
-**현재**: `oxi-cli/src/storage/packages.rs` (3096 lines) — 자체 패키지 시스템.
+**현재**: `oxicode-cli/src/storage/packages.rs` (3096 lines) — 자체 패키지 시스템.
 
 **목표**: omp `extensibility/plugins/` 모델에 맞춤. 기존 packages.rs 기능을 omp 플러그인 시스템과 정렬.
 
@@ -98,15 +98,15 @@ _Phase 1 잔여 항목 모두 완료 (P1.6a debug 도구 재등록은 아래 참
 ### P1.6a — debug 도구 재등록 ✅ (2026-07-28)
 
 **변경 내용**:
-- `oxi-agent/src/tools.rs`: `all_tools.push(Box::new(debug_tool::DebugTool));` 주석 해제
-- `oxi-agent/tests/tools.rs`: 도구 카운트 `37` → `38` (두 곳)
+- `oxicode-agent/src/tools.rs`: `all_tools.push(Box::new(debug_tool::DebugTool));` 주석 해제
+- `oxicode-agent/tests/tools.rs`: 도구 카운트 `37` → `38` (두 곳)
 - DAP 액션의 15/16은 여전히 scaffold (`xd://debug` device로 위임) — 핵심 launch/attach/breakpoint 액션은 wire됨
 
 **Tool count**: 38 built-in tools registered.
 
 ### P4.2 — Package manager 모듈화 ✅ (2026-07-28)
 
-**변경 내용**: `oxi-cli/src/storage/packages.rs` (3096줄 단일 파일) → `oxi-cli/src/storage/packages/` 디렉토리 모듈
+**변경 내용**: `oxicode-cli/src/storage/packages.rs` (3096줄 단일 파일) → `oxicode-cli/src/storage/packages/` 디렉토리 모듈
 
 | 파일 | 줄 수 | 내용 |
 |------|-------|------|
@@ -146,11 +146,11 @@ _Phase 1 잔여 항목 모두 완료 (P1.6a debug 도구 재등록은 아래 참
 > **가장 큼, 마지막 순위**
 
 **omp 참조**: `/tmp/omp/packages/tui/src/tui.ts` (173KB)
-**대상 크레이트**: `oxi-tui`, `oxi-tui-legacy`
+**대상 크레이트**: `oxicode-tui`, `oxicode-tui-legacy`
 
 | 항목 | 설명 |
 |------|------|
-| `oxi-tui-legacy` → `oxi-tui` rename | v2 파이프라인 폐기, legacy를 주축으로 |
+| `oxicode-tui-legacy` → `oxicode-tui` rename | v2 파이프라인 폐기, legacy를 주축으로 |
 | 3-전략 차등 렌더링 | Component memoization, Native scrollback commit, ED3 replay |
 | Append-only "tape" 렌더 계약 | omp 렌더링 모델로 전환 |
 | 입력 시스템 | Kitty keyboard, bracketed paste, keybinding, mouse SGR, kill ring, undo |
@@ -179,7 +179,7 @@ _Phase 1 잔여 항목 모두 완료 (P1.6a debug 도구 재등록은 아래 참
 ```bash
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p oxi-sdk --features native-browser -- -D warnings
+cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
 ```
@@ -187,7 +187,7 @@ cargo nextest run --workspace
 ### 주의사항
 - **dialect `xml.rs`**: literal XML 태그 금지 — `concat!("<", "invoke")` 형태 사용
 - **Config 필드 추가**: `Default::default()`에도 기본값 반드시 추가
-- **P3.1 참고**: `HASHLINE_FORMAT_SPEC` const 제거 — `include_str!("../../../oxi-hashline/src/prompt.md")`가 canonical source
+- **P3.1 참고**: `HASHLINE_FORMAT_SPEC` const 제거 — `include_str!("../../../oxicode-hashline/src/prompt.md")`가 canonical source
 - **P4.4 참고**: settings v10. 구버전 settings.toml의 dead 필드는 serde가 silent ignore. Router 기능 자체는 유지
-- **P3.3 참고**: commands 모듈은 `oxi-cli/src/cli/commands/`에 위치. handler 함수는 `pub(crate)` + `pub use` re-export 조합으로 외부 노출
+- **P3.3 참고**: commands 모듈은 `oxicode-cli/src/cli/commands/`에 위치. handler 함수는 `pub(crate)` + `pub use` re-export 조합으로 외부 노출
 - **P4.2 참고**: packages 디렉토리 모듈에서 `MANIFEST_NAME`/`NPM_MANIFEST_NAME`/`LOCKFILE_NAME` 상수는 mod.rs에 `pub(super) const`로 정의, manager.rs에서 `use super::{...}`로 가져옴

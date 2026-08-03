@@ -61,7 +61,7 @@ Provider 목록만 `Paragraph`를 써서 화면보다 항목이 많으면:
 
 ### 1. Input Area Status Line Fix
 
-**File**: `oxi-cli/src/tui/render.rs` → `render_input_area()`
+**File**: `oxicode-cli/src/tui/render.rs` → `render_input_area()`
 
 현재 레이아웃 (queue 없음, queue_lines=0):
 ```
@@ -90,7 +90,7 @@ y+N+1: input_row      ← 입력창 (queue 마지막 줄과 입력창 사이에 
 
 ### 2. Provider List Rewrite
 
-**File**: `oxi-cli/src/tui/render.rs` → `render_provider_list()`
+**File**: `oxicode-cli/src/tui/render.rs` → `render_provider_list()`
 
 현재: `Paragraph::new(lines)` — 스크롤 불가
 
@@ -148,7 +148,7 @@ d) **위치 표시**: 하단 hint에 현재 위치와 남은 항목 수 표시
 
 ### 3. Scrollable List Position Indicator
 
-**File**: `oxi-cli/src/tui/render.rs` → `render_selectable_list()`
+**File**: `oxicode-cli/src/tui/render.rs` → `render_selectable_list()`
 
 하단에 위치 표시 추가:
 ```rust
@@ -169,10 +169,10 @@ let position_hint = if items.len() > max_show {
 
 | File | Change |
 |------|--------|
-| `oxi-cli/src/tui/render.rs` | Bug 1: `render_input_area`에서 separator 제거, input_row y좌표 수정 |
-| `oxi-cli/src/tui/render.rs` | Bug 2: `render_provider_list`를 List 기반 스크롤 가능하게 재작성 |
-| `oxi-cli/src/tui/render.rs` | Bug 3: `render_selectable_list`에 위치 표시 추가 |
-| `oxi-cli/src/tui/render.rs` | Provider 카테고리 헤더 스타일 개선 |
+| `oxicode-cli/src/tui/render.rs` | Bug 1: `render_input_area`에서 separator 제거, input_row y좌표 수정 |
+| `oxicode-cli/src/tui/render.rs` | Bug 2: `render_provider_list`를 List 기반 스크롤 가능하게 재작성 |
+| `oxicode-cli/src/tui/render.rs` | Bug 3: `render_selectable_list`에 위치 표시 추가 |
+| `oxicode-cli/src/tui/render.rs` | Provider 카테고리 헤더 스타일 개선 |
 
 ---
 
@@ -181,13 +181,13 @@ let position_hint = if items.len() > max_show {
 1. **Bug 1** (Input area status line) — 가장 간단, 5분
 2. **Bug 3** (Scrollable list position) — `render_selectable_list` 수정, 15분
 3. **Bug 2** (Provider list rewrite) — 가장 복잡, 30분
-4. 각 버그 수정 후 `cargo clippy` + `cargo test -p oxi-cli` 확인
+4. 각 버그 수정 후 `cargo clippy` + `cargo test -p oxicode-cli` 확인
 
 ---
 
 ## Testing Plan
 
-- Bug 1: oxi 실행 → Idle 상태에서 `── ○ Idle ──` 표시 확인, Working 상태에서 스피너 표시 확인
+- Bug 1: oxicode 실행 → Idle 상태에서 `── ○ Idle ──` 표시 확인, Working 상태에서 스피너 표시 확인
 - Bug 2: `/provider` 실행 → provider 목록에서 방향키로 끝까지 스크롤, 하단 위치 표시 확인
 - Bug 3: `/model` 실행 → 모델 목록 스크롤 + 위치 표시 확인
 - 작은 터미널 창(40행)에서도 스크롤 동작 확인

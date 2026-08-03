@@ -37,7 +37,7 @@ updates:
         # wasmtime advisories are managed in .cargo/audit.toml + deny.toml
         # Track extism 1.22+ to drop RUSTSEC-2026-* ignore list.
       # self_update 0.44+ has an internal compile break (http_client::get
-      # removed). The crate is declared but never called from oxi-cli src/.
+      # removed). The crate is declared but never called from oxicode-cli src/.
       # Re-evaluate when self_update ships a working release.
       - dependency-name: "self_update"
         versions: [">= 0.44"]
@@ -75,5 +75,5 @@ updates:
         patterns:
           - "*"
 
-  # Cargo.lock is tracked (oxi-cli is a binary distribution), so we want
+  # Cargo.lock is tracked (oxicode-cli is a binary distribution), so we want
   # cargo updates to flow through the lockfile directly.

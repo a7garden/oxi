@@ -1,33 +1,33 @@
 # Legacy Cleanup & Incomplete Features — Implementation Log
 
 **Date**: 2026-06-01
-**Status**: 완료 (oxi), 완료 (oxios)
+**Status**: 완료 (oxicode), 완료 (oxios)
 
 ---
 
 ## Completed Items
 
-### oxi Project
+### oxicode Project
 
-#### #10: oxi-cli → oxi-sdk 의존성 제거 ✅
-- **Commit**: `oxi-cli/Cargo.toml`에서 `oxi-sdk` 의존성 제거
+#### #10: oxicode-cli → oxicode-sdk 의존성 제거 ✅
+- **Commit**: `oxicode-cli/Cargo.toml`에서 `oxicode-sdk` 의존성 제거
 - **Files**: `Cargo.toml`, `lib.rs`
-- **Before**: `OxiBuilder::new().with_builtins().build()` → `engine.create_provider()` + `engine.resolve_model()`
-- **After**: `oxi_ai::get_provider_arc()` + `oxi_ai::lookup_model()`
-- **Impact**: 빌드 의존성 트리에서 oxi-sdk + 하위 모듈 제거, 컴파일 시간 감소
+- **Before**: `OxicodeBuilder::new().with_builtins().build()` → `engine.create_provider()` + `engine.resolve_model()`
+- **After**: `oxicode_ai::get_provider_arc()` + `oxicode_ai::lookup_model()`
+- **Impact**: 빌드 의존성 트리에서 oxicode-sdk + 하위 모듈 제거, 컴파일 시간 감소
 
 #### #1: TUI 세션 브랜치 전환 ✅
-- **Files**: `oxi-cli/src/tui/app.rs`, `oxi-cli/src/tui/handlers.rs`, `oxi-store/src/session.rs`
+- **Files**: `oxicode-cli/src/tui/app.rs`, `oxicode-cli/src/tui/handlers.rs`, `oxicode-store/src/session.rs`
 - **Before**: `NavigateToEntry` → notification만 표시 (아무 일 안 일어남)
 - **After**: `TuiNextAction::GotoEntry(entry_id)` → `SessionManager::set_leaf_from_entry()` → 채팅 메시지 리로드
 - **Key additions**:
   - `TuiNextAction::GotoEntry(String)` variant
-  - `SessionManager::set_leaf_from_entry(entry_id)` method (oxi-store)
+  - `SessionManager::set_leaf_from_entry(entry_id)` method (oxicode-store)
   - Handler가 overlay에서 entry 선택 시 `GotoEntry` action 트리거
   - Main loop에서 session 열고 leaf 변경 후 메시지 리로드
 
 #### #5: Setup OAuth 숨김 ✅
-- **Files**: `oxi-cli/src/tui/handlers.rs`, `oxi-cli/src/tui/render.rs`
+- **Files**: `oxicode-cli/src/tui/handlers.rs`, `oxicode-cli/src/tui/render.rs`
 - **Before**: OAuth 선택지가 표시되지만 선택하면 아무 일 없이 provider 선택으로 넘어감 (사용자 오해)
 - **After**: OAuth 선택지를 주석 처리. API Key만 표시. 구현 완료 시 주석 해제 가능
 
@@ -39,7 +39,7 @@
 - Block 2 (`sdk_exports` 모듈 33개): 제거
 - Block 3 (`coordination.rs` re-export 15개): 제거
 - Block 4 (`CircuitBreaker` alias): 제거
-- Comment 추가: "Consumers should depend on oxi-sdk directly"
+- Comment 추가: "Consumers should depend on oxicode-sdk directly"
 
 #### #7: WasmSandbox feature-gate ✅
 - **File**: `crates/oxios-kernel/src/wasm_sandbox.rs`

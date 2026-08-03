@@ -3,7 +3,7 @@
 > 상태: 개정 v1 (모든 하위 설계에 적용)
 > 작성: 2026-06-19
 > 선행: [`00-master-plan.md`](./00-master-plan.md) (v1) + 리뷰
-> 목적: v1 설계 문서들의 코드 검증 결과를 반영, 실제 oxi API에 맞게 패턴을 수정
+> 목적: v1 설계 문서들의 코드 검증 결과를 반영, 실제 oxicode API에 맞게 패턴을 수정
 
 이 문서는 모든 하위 설계 문서(⑤~⑫)에 적용되는 **교차적(cross-cutting) 수정사항**을 정의한다. 각 하위 문서의 코드 스니펫은 이 개정 문서의 패턴으로 대체된다.
 
@@ -15,14 +15,14 @@
 
 v1 설계들은 `ToolContext`에 새 필드를 직접 추가한다고 가정했다 (`todo_state`, `session_writer`, `event_tx`, `agent_pool`, `lsp_writethrough`). **실제 코드는 능력 특성 주입 패턴을 사용한다.**
 
-### 1.2 실제 ToolContext (`oxi-agent/src/tools.rs:77-94`, 검증 완료)
+### 1.2 실제 ToolContext (`oxicode-agent/src/tools.rs:77-94`, 검증 완료)
 
 ```rust
 pub struct ToolContext {
     pub workspace_dir: PathBuf,
     pub root_dir: Option<PathBuf>,
     pub session_id: Option<String>,
-    pub snapshot_store: Option<Arc<dyn oxi_hashline::SnapshotStore>>,
+    pub snapshot_store: Option<Arc<dyn oxicode_hashline::SnapshotStore>>,
     pub memory: Option<Arc<dyn MemoryBackend>>,
     pub url_resolver: Option<Arc<dyn UrlResolver>>,
 }
@@ -35,7 +35,7 @@ pub struct ToolContext {
 todo, LSP, agent pool은 각각 능력 특성을 정의하고 `ToolContext`에 추가한다:
 
 ```rust
-// oxi-agent/src/tools.rs — ToolContext 확장 (v2)
+// oxicode-agent/src/tools.rs — ToolContext 확장 (v2)
 
 /// Todo 상태 접근 능력. todo 도구와 sticky panel이 공유.
 pub trait TodoStateProvider: Send + Sync {
@@ -60,7 +60,7 @@ pub struct ToolContext {
     pub workspace_dir: PathBuf,
     pub root_dir: Option<PathBuf>,
     pub session_id: Option<String>,
-    pub snapshot_store: Option<Arc<dyn oxi_hashline::SnapshotStore>>,
+    pub snapshot_store: Option<Arc<dyn oxicode_hashline::SnapshotStore>>,
     pub memory: Option<Arc<dyn MemoryBackend>>,
     pub url_resolver: Option<Arc<dyn UrlResolver>>,
     // ── v2 추가 (능력 주입) ──
@@ -95,7 +95,7 @@ impl ToolContext {
 | 05-todo | `ctx.todo_state`, `ctx.session_writer`, `ctx.event_tx` | `ctx.todo: Option<Arc<dyn TodoStateProvider>>` |
 | 06-panel | `AgentEvent::TodoUpdate` 직접 발생 | `TodoStateProvider`가 콜백으로 TUI 갱신 |
 | 07-hub | `ctx.agent_pool`, `ctx.lifecycle_tx` | `ctx.agent_pool: Option<Arc<dyn AgentPoolProvider>>` |
-| 08-commit | `ctx.provider`, `ctx.model` | `oxi_ai::high_level::complete(model, ctx, opts)` |
+| 08-commit | `ctx.provider`, `ctx.model` | `oxicode_ai::high_level::complete(model, ctx, opts)` |
 | 09-compaction | `self.inline_transformer` | `ContextTransformer` 능력 특성 |
 | 10-lsp | `ctx.lsp_writethrough` | `ctx.lsp: Option<Arc<dyn LspProvider>>` |
 | 12-hindsight | `ctx.memory_store` | `ctx.memory: Option<Arc<dyn MemoryBackend>>` (기존) |
@@ -107,7 +107,7 @@ impl ToolContext {
 ### 2.1 실제 코드 (검증 완료)
 
 ```rust
-// oxi-agent/src/tools.rs:173
+// oxicode-agent/src/tools.rs:173
 pub type ToolError = String;
 ```
 
@@ -129,9 +129,9 @@ return Err(e.to_string());
 
 ---
 
-## 3. 🔴 P0: oxi_ai API — 검증된 시그니처
+## 3. 🔴 P0: oxicode_ai API — 검증된 시그니처
 
-### 3.1 high_level::complete (검증 완료, `oxi-ai/src/high_level.rs:22`)
+### 3.1 high_level::complete (검증 완료, `oxicode-ai/src/high_level.rs:22`)
 
 ```rust
 pub async fn complete(
@@ -145,7 +145,7 @@ pub async fn complete(
 
 ```rust
 // v2 올바른 사용법
-use oxi_ai::{high_level::complete, Context, Message, UserMessage, Tool};
+use oxicode_ai::{high_level::complete, Context, Message, UserMessage, Tool};
 
 let mut ctx = Context::new()
     .with_system_prompt(system_prompt);
@@ -158,7 +158,7 @@ let result = complete(model, &ctx, Some(StreamOptions {
 })).await?;
 ```
 
-### 3.2 Tool (검증 완료, `oxi-ai/src/tools.rs:20`)
+### 3.2 Tool (검증 완료, `oxicode-ai/src/tools.rs:20`)
 
 ```rust
 pub struct Tool {
@@ -183,7 +183,7 @@ let tool = Tool::new(
 );
 ```
 
-### 3.3 Context (검증 완료, `oxi-ai/src/context.rs:8`)
+### 3.3 Context (검증 완료, `oxicode-ai/src/context.rs:8`)
 
 ```rust
 pub struct Context {
@@ -195,7 +195,7 @@ pub struct Context {
 
 `system_prompt` 필드로 직접 접근 가능. Hindsight의 `<memories>` 블록 주입 지점.
 
-### 3.4 providers::stream (검증 완료, `oxi-ai/src/providers/mod.rs:281`)
+### 3.4 providers::stream (검증 완료, `oxicode-ai/src/providers/mod.rs:281`)
 
 ```rust
 pub async fn stream(
@@ -211,7 +211,7 @@ compaction inline imaging은 **이 stream 호출 직전**에 context를 변환�
 
 ## 4. 🔴 P0: MemoryBackend — 기존 특성 재활용
 
-### 4.1 실제 코드 (검증 완료, `oxi-agent/src/tools.rs:31-51`)
+### 4.1 실제 코드 (검증 완료, `oxicode-agent/src/tools.rs:31-51`)
 
 ```rust
 pub trait MemoryBackend: Send + Sync {
@@ -231,11 +231,11 @@ pub trait MemoryBackend: Send + Sync {
 ### 4.2 수정된 아키텍처
 
 ```
-oxi-sdk MemoryStore 포트 (1차 ④)
+oxicode-sdk MemoryStore 포트 (1차 ④)
         ↑ 구현
-oxi-mnemopi Mnemopi (⑩ 백엔드)
+oxicode-mnemopi Mnemopi (⑩ 백엔드)
         ↑ 브리지
-oxi-agent MemoryBackend (기존 특성)
+oxicode-agent MemoryBackend (기존 특성)
         ↑ 사용
 memory_retain/recall/reflect/edit 도구 (⑨)
 ```
@@ -245,7 +245,7 @@ memory_retain/recall/reflect/edit 도구 (⑨)
 ### 4.3 Mnemopi → MemoryBackend 브리지
 
 ```rust
-// oxi-cli/src/store/memory_bridge.rs
+// oxicode-cli/src/store/memory_bridge.rs
 pub struct MnemopiMemoryBackend {
     mnemopi: Arc<Mnemopi>,
 }
@@ -263,7 +263,7 @@ impl MemoryBackend for MnemopiMemoryBackend {
 }
 ```
 
-> **1차 ④ 관계**: `MemoryStore` 포트(oxi-sdk)는 SDK 소비자용. `MemoryBackend`(oxi-agent)는 도구용. Mnemopi는 **둘 다** 구현 — 포트는 SDK 직접 사용자에게, MemoryBackend는 oxi-cli 도구에.
+> **1차 ④ 관계**: `MemoryStore` 포트(oxicode-sdk)는 SDK 소비자용. `MemoryBackend`(oxicode-agent)는 도구용. Mnemopi는 **둘 다** 구현 — 포트는 SDK 직접 사용자에게, MemoryBackend는 oxicode-cli 도구에.
 
 ---
 
@@ -279,7 +279,7 @@ impl MemoryBackend for MnemopiMemoryBackend {
 
 | 기능 | 1차 판정 | 2차 정정 | 근거 |
 |---|---|---|---|
-| LSP | 영구 제외 | **도입** (feature gate) | 독립 `oxi-lsp` 크레이트, `--features lsp` 미활성화 시 바이너리 크기 영향 0. 코딩 에이전트 핵심 기능 (rename 안전성) |
+| LSP | 영구 제외 | **도입** (feature gate) | 독립 `oxicode-lsp` 크레이트, `--features lsp` 미활성화 시 바이너리 크기 영향 0. 코딩 에이전트 핵심 기능 (rename 안전성) |
 | Commit | 영구 제외 | **도입** (opt-in 도구) | `disabled_tools`로 비활성화 가능. LLM 비용이지만 `commit_tool_enabled: false` 기본 |
 | DAP | 영구 제외 | **유지** (후순위) | LSP 안정화 후 별도 검토 |
 | eval 커널 | 영구 제외 | **유지** | Python/Bun 런타임 의존. oxios 제품 |
@@ -307,7 +307,7 @@ omp `crates/pi-natives/src/snapcompact.rs` (1,194줄)는 **순수 Rust**로 확�
 `#[napi]` 속성과 `Latin1String` 반환을 제거하고, `Vec<u8>` (PNG 바이트)을 반환하도록 수정:
 
 ```rust
-// oxi-ai/src/snapcompact/renderer.rs (이식 후)
+// oxicode-ai/src/snapcompact/renderer.rs (이식 후)
 pub fn render_snapcompact_png(
     text: &str,
     options: &SnapcompactRenderOptions,
@@ -358,9 +358,9 @@ impl MnemopiDb {
 
 ## 8. 🟠 P1: bank 스코핑 — git 루트 사용
 
-### 8.1 oxi 기존 자산 (검증 완료)
+### 8.1 oxicode 기존 자산 (검증 완료)
 
-`oxi-cli/src/storage/resource_loader.rs:1342`에 `find_git_root(dir)`가 이미 존재한다:
+`oxicode-cli/src/storage/resource_loader.rs:1342`에 `find_git_root(dir)`가 이미 존재한다:
 
 ```rust
 pub fn find_git_root(dir: &Path) -> Option<PathBuf> {
@@ -385,7 +385,7 @@ pub fn find_git_root(dir: &Path) -> Option<PathBuf> {
 ```rust
 // v2 — git 루트 기반 project label (omp #2412 수정 반영)
 pub fn compute_bank_scope(config: &HindsightConfig, cwd: &Path) -> BankScope {
-    let project_label = oxi_cli::storage::find_git_root(cwd)
+    let project_label = oxicode_cli::storage::find_git_root(cwd)
         .and_then(|root| root.file_name()?.to_str().map(String::from))
         .unwrap_or_else(|| {
             cwd.file_name()
@@ -503,7 +503,7 @@ pub struct AgentHandle {
     // 기존 핵심 필드 (변경 없음)...
     agent_id: String,
     status: Arc<AtomicU8>,
-    agent: Arc<oxi_agent::Agent>,
+    agent: Arc<oxicode_agent::Agent>,
     config: Arc<RwLock<AgentConfig>>,
     metrics: Arc<AgentMetrics>,
     lifecycle_tx: broadcast::Sender<AgentLifecycleEvent>,
@@ -532,7 +532,7 @@ impl AgentHandle {
 provider stream 호출 직전에 `ContextTransformer` 실행:
 
 ```rust
-// oxi-ai/src/high_level.rs에 transform 옵션 추가 (또는 agent_loop에서)
+// oxicode-ai/src/high_level.rs에 transform 옵션 추가 (또는 agent_loop에서)
 
 // agent_loop/streaming.rs — stream 호출 전
 let context = if let Some(transformer) = &self.context_transformer {
@@ -541,7 +541,7 @@ let context = if let Some(transformer) = &self.context_transformer {
     context.clone()
 };
 
-let stream = oxi_ai::providers::stream(model, &context, options).await?;
+let stream = oxicode_ai::providers::stream(model, &context, options).await?;
 ```
 
 ```rust
@@ -584,7 +584,7 @@ pub trait ContextTransformer: Send + Sync {
 ### 14.1 수정 — 기능별 TOML 섹션
 
 ```toml
-# ~/.oxi/settings.toml (v2 제안)
+# ~/.oxicode/settings.toml (v2 제안)
 
 [todo]
 enabled = true
@@ -634,7 +634,7 @@ renderer = "auto"            # | "mmdc" | "builtin" | "disabled"
 | 05-todo | ToolContext 능력, ToolError String | — | ✅ |
 | 06-panel | TodoStateProvider 콜백 | unicode width 수정 | ✅ |
 | 07-hub | AgentPoolProvider 능력 (개정문서 §11) | AgentMetadata 분리 (개정문서 §11) | ✅ 헤더 |
-| 08-commit | oxi_ai::complete 시그니처, Tool::new | git_utils 재사용 (개정문서 §8) | ✅ |
+| 08-commit | oxicode_ai::complete 시그니처, Tool::new | git_utils 재사용 (개정문서 §8) | ✅ |
 | 09-compaction | ContextTransformer 능력 (개정문서 §12) | snapcompact 확인 (개정문서 §6), async transform (개정문서 §12) | ✅ 헤더 |
 | 10-lsp | LspProvider 능력 (개정문서 §1) | read_until (개정문서 §10), lsp-types | ✅ 헤더 |
 | 11-mnemopi | MemoryBackend 구현 (§3 교체) | FTS5 bundled, spawn_blocking (개정문서 §7), mental_models 테이블 (개정문서 §9) | ✅ |

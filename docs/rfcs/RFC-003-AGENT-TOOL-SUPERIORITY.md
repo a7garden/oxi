@@ -1,7 +1,7 @@
 # RFC-003: Agent/Tool 우위 확보 — 내장 툴, MCP, Subagent 고도화
 
 **상태**: 초안  
-**우선순도**: P1 — oxi의 핵심 경쟁 우위 영역  
+**우선순도**: P1 — oxicode의 핵심 경쟁 우위 영역  
 **현재 완성도**: ~115% (pi 대비 우위, 일부 정교화 필요)  
 **목표**: 격차 확대 + pi에 없는 기능 정교화  
 
@@ -9,9 +9,9 @@
 
 ## 1. 현재 상태 분석
 
-oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7개를 크게 능가한다. 하지만 일부 영역(pi급 툴 렌더링, 스트리밍 진행률)에서 정교함이 부족하다.
+oxicode는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7개를 크게 능가한다. 하지만 일부 영역(pi급 툴 렌더링, 스트리밍 진행률)에서 정교함이 부족하다.
 
-### 1.1 실제 툴 인벤토리 (oxi-agent/src/tools/ + mcp/)
+### 1.1 실제 툴 인벤토리 (oxicode-agent/src/tools/ + mcp/)
 
 **AgentTool 트레이트 구현체 (20개):**
 
@@ -39,7 +39,7 @@ oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7�
 | 20 | BrowseSessionTool | `browse/browse_session_tool.rs` | |
 | 21 | BrowseScriptTool | `browse/browse_script_tool.rs` | `#[cfg(native-browser)]` |
 
-> **Note**: 총 22개 `.rs` 파일이 `oxi-agent/src/tools/`에 있으나, 그 중 7개는 유틸리티 모듈로 `AgentTool`을 구현하지 않음: `path_security.rs`, `path_utils.rs`, `render_utils.rs`, `search_cache.rs`(캐시 유틸 + GetSearchResultsTool), `tool_definition_wrapper.rs`, `truncate.rs`, `file_mutation_queue.rs`, `http_client.rs`.
+> **Note**: 총 22개 `.rs` 파일이 `oxicode-agent/src/tools/`에 있으나, 그 중 7개는 유틸리티 모듈로 `AgentTool`을 구현하지 않음: `path_security.rs`, `path_utils.rs`, `render_utils.rs`, `search_cache.rs`(캐시 유틸 + GetSearchResultsTool), `tool_definition_wrapper.rs`, `truncate.rs`, `file_mutation_queue.rs`, `http_client.rs`.
 
 ### 1.2 기존 인프라 (이미 구현됨)
 
@@ -47,18 +47,18 @@ oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7�
 
 | 기능 | 기존 구현 | 위치 | 상태 |
 |------|----------|------|------|
-| AgentTool 트레이트 | `name()`, `label()`, `description()`, `parameters_schema()`, `essential()`, `execute()`, `on_progress()`, `to_definition()` | `oxi-agent/src/tools.rs` | ✅ 완료 |
-| 툴 렌더링 | `tool_renderer.rs` (705 LOC) | `oxi-tui/src/widgets/tool_renderer.rs` | ✅ 완료 (확장 필요) |
-| 렌더링 유틸 | `render_utils.rs` (경로 단축, 바이너리 정제, 출력 미리보기) | `oxi-agent/src/tools/render_utils.rs` | ✅ 완료 |
-| 동시 편집 직렬화 | `file_mutation_queue.rs` (파일별 Mutex, 자동 정리, 1024엔트리 캡) | `oxi-agent/src/tools/file_mutation_queue.rs` | ✅ 완료 |
-| MCP Client | `tools/list`, `tools/call`, `resources/list`, `resources/read` | `oxi-agent/src/mcp/client.rs` | 🔶 부분 |
-| Subagent | 단일, 병렬(max 4 동시), 체인 모드; 에이전트 발견(유저/프로젝트) | `oxi-agent/src/tools/subagent.rs` | ✅ 완료 |
-| SDK 조정 | `WorkQueue`, `SharedMemory`, `Consensus`, `CoordinatedGroup` (fan-out, vote, map-reduce) | `oxi-sdk/src/coordination/` | ✅ 완료 |
-| 진행 콜백 | `on_progress(ProgressCallback)` + `ProgressCallback = Arc<dyn Fn(String)>` | `oxi-agent/src/tools.rs` | 🔶 기본 |
+| AgentTool 트레이트 | `name()`, `label()`, `description()`, `parameters_schema()`, `essential()`, `execute()`, `on_progress()`, `to_definition()` | `oxicode-agent/src/tools.rs` | ✅ 완료 |
+| 툴 렌더링 | `tool_renderer.rs` (705 LOC) | `oxicode-tui/src/widgets/tool_renderer.rs` | ✅ 완료 (확장 필요) |
+| 렌더링 유틸 | `render_utils.rs` (경로 단축, 바이너리 정제, 출력 미리보기) | `oxicode-agent/src/tools/render_utils.rs` | ✅ 완료 |
+| 동시 편집 직렬화 | `file_mutation_queue.rs` (파일별 Mutex, 자동 정리, 1024엔트리 캡) | `oxicode-agent/src/tools/file_mutation_queue.rs` | ✅ 완료 |
+| MCP Client | `tools/list`, `tools/call`, `resources/list`, `resources/read` | `oxicode-agent/src/mcp/client.rs` | 🔶 부분 |
+| Subagent | 단일, 병렬(max 4 동시), 체인 모드; 에이전트 발견(유저/프로젝트) | `oxicode-agent/src/tools/subagent.rs` | ✅ 완료 |
+| SDK 조정 | `WorkQueue`, `SharedMemory`, `Consensus`, `CoordinatedGroup` (fan-out, vote, map-reduce) | `oxicode-sdk/src/coordination/` | ✅ 완료 |
+| 진행 콜백 | `on_progress(ProgressCallback)` + `ProgressCallback = Arc<dyn Fn(String)>` | `oxicode-agent/src/tools.rs` | 🔶 기본 |
 
-### 1.3 oxi 우위 영역 (유지/확대)
+### 1.3 oxicode 우위 영역 (유지/확대)
 
-| 기능 | pi | oxi | 전략 |
+| 기능 | pi | oxicode | 전략 |
 |------|----|-----|------|
 | 내장 툴 수 | 7 | 20+ | 우위 유지 |
 | MCP Client | ❌ | ✅ (tools + resources) | 정교화 |
@@ -71,7 +71,7 @@ oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7�
 
 ### 1.4 보완 필요 영역 (pi에서 배울 점)
 
-| 기능 | pi | oxi | 필요 작업 |
+| 기능 | pi | oxicode | 필요 작업 |
 |------|----|-----|---------|
 | 툴 커스텀 렌더링 | 툴별 render 함수 | `tool_renderer.rs` (범용) | 툴별 커스텀 렌더 지원 |
 | 에디트 diff 품질 | 통합 diff + 배치 | `edit.rs` (기본) | diff 품질 향상 |
@@ -86,7 +86,7 @@ oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7�
 
 1. **기존 구현 위에 구축**: `tool_renderer.rs`, `render_utils.rs`, `file_mutation_queue.rs`, `subagent.rs`를 대체하지 않고 확장.
 2. **MCP 프로토콜 고급 기능**: 이미 구현된 `resources/list`, `resources/read` 위에 `prompts/*`, `sampling/*`, `logging/*` 추가.
-3. **Subagent + SDK 통합**: 새 WorkflowEngine을 만들지 않고 기존 `SubagentTool`(chain/parallel)과 `oxi-sdk/coordination`(WorkQueue, CoordinatedGroup)을 활용.
+3. **Subagent + SDK 통합**: 새 WorkflowEngine을 만들지 않고 기존 `SubagentTool`(chain/parallel)과 `oxicode-sdk/coordination`(WorkQueue, CoordinatedGroup)을 활용.
 4. **툴 출력 스트리밍**: 기존 `on_progress(String)`을 구조화된 `ToolProgress` enum으로 업그레이드.
 
 ---
@@ -98,7 +98,7 @@ oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7�
 기존 트레이트(`tools.rs`)에 선택적 메서드를 추가한다. 기존 7개 메서드는 유지.
 
 ```rust
-/// oxi-agent/src/tools.rs — 기존 트레이트에 선택적 확장 추가
+/// oxicode-agent/src/tools.rs — 기존 트레이트에 선택적 확장 추가
 
 #[async_trait]
 pub trait AgentTool: Send + Sync {
@@ -170,15 +170,15 @@ pub struct RenderOutput {
 ```
 
 **기존 시스템과의 관계:**
-- `oxi-tui/src/widgets/tool_renderer.rs` (705 LOC): 모든 툴의 기본 렌더링을 처리. `render_call`/`render_result`가 `None`을 반환하면 이 모듈이 자동으로 사용됨.
-- `oxi-agent/src/tools/render_utils.rs`: `shorten_path()`, `sanitize_binary_output()`, `truncate_output_preview()` 등의 유틸리티. 새 `RenderOutput`은 이 유틸들을 호출하여 일관된 포맷팅 보장.
+- `oxicode-tui/src/widgets/tool_renderer.rs` (705 LOC): 모든 툴의 기본 렌더링을 처리. `render_call`/`render_result`가 `None`을 반환하면 이 모듈이 자동으로 사용됨.
+- `oxicode-agent/src/tools/render_utils.rs`: `shorten_path()`, `sanitize_binary_output()`, `truncate_output_preview()` 등의 유틸리티. 새 `RenderOutput`은 이 유틸들을 호출하여 일관된 포맷팅 보장.
 
 ### 3.2 MCP 고도화
 
-현재 oxi의 MCP는 `tools/list`, `tools/call`, `resources/list`, `resources/read`를 이미 지원한다 (`client.rs` 218-250라인). 누락된 고급 기능을 추가한다.
+현재 oxicode의 MCP는 `tools/list`, `tools/call`, `resources/list`, `resources/read`를 이미 지원한다 (`client.rs` 218-250라인). 누락된 고급 기능을 추가한다.
 
 ```rust
-/// oxi-agent/src/mcp/client.rs 확장
+/// oxicode-agent/src/mcp/client.rs 확장
 
 /// MCP 서버 능력 (초기화 시 협상)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -212,7 +212,7 @@ impl McpClient {
         &mut self,
         name: &str,
         args: HashMap<String, String>,
-    ) -> Result<Vec<oxi_ai::Message>> {
+    ) -> Result<Vec<oxicode_ai::Message>> {
         let params = serde_json::json!({ "name": name, "arguments": args });
         let result = self.send_request("prompts/get", Some(params)).await?;
         // ... 파싱
@@ -223,7 +223,7 @@ impl McpClient {
     pub async fn create_sample(
         &mut self,
         request: McpSamplingRequest,
-    ) -> Result<oxi_ai::Message> {
+    ) -> Result<oxicode_ai::Message> {
         let params = serde_json::to_value(&request)?;
         let result = self.send_request("sampling/createMessage", Some(params)).await?;
         // ... 파싱 → AssistantMessage
@@ -245,7 +245,7 @@ pub struct McpPrompt {
     pub arguments: Vec<McpPromptArgument>,
 }
 
-/// 샘플링 요청 (MCP 서버 → oxi LLM 호출 위임)
+/// 샘플링 요청 (MCP 서버 → oxicode LLM 호출 위임)
 #[derive(Debug, Serialize)]
 pub struct McpSamplingRequest {
     pub messages: Vec<serde_json::Value>,
@@ -260,12 +260,12 @@ pub struct McpSamplingRequest {
 **새로운 WorkflowEngine을 만들지 않는다.** 기존 시스템이 이미 역할을 수행한다:
 
 - **`subagent.rs`**: single, parallel (max 4 동시성), chain 모드 구현. 에이전트 발견(user/project 스코프). YAML 프론트매터가 포함된 마크다운 에이전트 정의 파일.
-- **`oxi-sdk/coordination/`**: `WorkQueue` (우선순위 작업 큐), `SharedMemory` (버전 관리 KV 스토어), `Consensus` (투표), `CoordinatedGroup` (fan-out, vote, map-reduce).
+- **`oxicode-sdk/coordination/`**: `WorkQueue` (우선순위 작업 큐), `SharedMemory` (버전 관리 KV 스토어), `Consensus` (투표), `CoordinatedGroup` (fan-out, vote, map-reduce).
 
 대신, 기존 subagent에 **조건부 분기**와 **SDK 조정 모듈 연동**을 추가한다.
 
 ```rust
-/// oxi-agent/src/tools/subagent.rs 확장
+/// oxicode-agent/src/tools/subagent.rs 확장
 
 /// 기존 3모드(single, parallel, chain)에 conditional 추가
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -317,7 +317,7 @@ impl SubagentTool {
 기존 `on_progress(ProgressCallback)` (여기서 `ProgressCallback = Arc<dyn Fn(String) + Send + Sync>`)을 구조화된 진행 타입으로 업그레이드한다.
 
 ```rust
-/// oxi-agent/src/tools.rs 확장
+/// oxicode-agent/src/tools.rs 확장
 
 /// 기존: ProgressCallback = Arc<dyn Fn(String) + Send + Sync>
 /// 새로: 구조화된 진행 타입 지원
@@ -372,7 +372,7 @@ pub trait AgentTool: Send + Sync {
 기존 `file_mutation_queue.rs`는 파일별 Mutex로 동시 쓰기를 직렬화한다. 여기에 **내용 기반 충돌 감지**를 추가한다.
 
 ```rust
-/// oxi-agent/src/tools/edit.rs 확장
+/// oxicode-agent/src/tools/edit.rs 확장
 /// file_mutation_queue.rs는 직렬화만 담당 —
 /// 내용 기반 충돌 감지는 edit.rs에서 구현
 
@@ -418,7 +418,7 @@ impl AgentTool for EditTool {
 | `render_call` / `render_result` 추가 | 트레이트 확장 + 기본 구현 (None) | `tools.rs` 수정 |
 | `execution_mode` 추가 | `ToolExecutionMode` enum | `tools.rs` 수정 |
 | `RenderOutput` 타입 정의 | `render_utils.rs` 확장 | 기존 유틸 유지 |
-| `tool_renderer.rs` 연동 | render이 None이면 기존 렌더러 사용 | `oxi-tui` 수정 없음 |
+| `tool_renderer.rs` 연동 | render이 None이면 기존 렌더러 사용 | `oxicode-tui` 수정 없음 |
 
 ### Phase 2: MCP 고도화 (2주)
 
@@ -436,10 +436,10 @@ impl AgentTool for EditTool {
 | 작업 | 산출물 | 기존 코드 영향 |
 |------|--------|---------------|
 | `Conditional` 모드 추가 | subagent.rs 확장 | 기존 3모드 유지 |
-| SDK WorkQueue 연동 | 대규모 fan-out 시 WorkQueue 사용 | `oxi-sdk` 의존 |
+| SDK WorkQueue 연동 | 대규모 fan-out 시 WorkQueue 사용 | `oxicode-sdk` 의존 |
 | 템플릿 변수 확장 | `{task}`, `{previous}`, `{result}` 지원 | 기존 chain 로직 확장 |
 
-**참고**: 새 WorkflowEngine을 만들지 않음. 기존 `subagent.rs`와 `oxi-sdk/coordination/`을 활용.
+**참고**: 새 WorkflowEngine을 만들지 않음. 기존 `subagent.rs`와 `oxicode-sdk/coordination/`을 활용.
 
 ### Phase 4: 툴 스트리밍 (1주)
 

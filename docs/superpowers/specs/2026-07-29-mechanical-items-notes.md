@@ -7,7 +7,7 @@
 
 ## P2.1: Settings Feature Flags
 
-**파일:** `oxi-cli/src/store/settings.rs`
+**파일:** `oxicode-cli/src/store/settings.rs`
 
 **패턴:** `memory_enabled` (line 241)을 그대로 복사:
 
@@ -53,7 +53,7 @@ pub commit_tool_enabled: bool,
 
 ## P3.2: /memory Subcommand Stubs
 
-**파일:** `oxi-cli/src/tui/slash/builtin/memory.rs`
+**파일:** `oxicode-cli/src/tui/slash/builtin/memory.rs`
 
 **현재 스텁 5개:**
 
@@ -72,7 +72,7 @@ pub commit_tool_enabled: bool,
 |---|---|
 | `view` | `memory_summary.md` 파일을 읽어 content 표시 (`read_path_block` 재사용) |
 | `stats` | `MemoryBackend`에 `list()` 호출 → entry count, type별 분류, last consolidated time |
-| `diagnose` | `oxi-mnemopi`의 `DiagnosticsReporter` 또는 `db.integrity_check()` 호출 |
+| `diagnose` | `oxicode-mnemopi`의 `DiagnosticsReporter` 또는 `db.integrity_check()` 호출 |
 | `clear` | 확인 메시지 후 `MemoryBackend.clear()` 호출 + consolidation trigger |
 | `enqueue` | `start_memory_pipeline`의 join handle에 signal → 즉시 consolidation 실행 |
 
@@ -84,5 +84,5 @@ pub commit_tool_enabled: bool,
 
 | 항목 | 상태 | 권장 |
 |---|---|---|
-| Mnemopi MCP 서버 노출 | `oxi-mnemopi/src/mcp.rs` (843 LOC) — 파일 존재, 기능 검증 안 됨 | 다음 PR에서 E2E 테스트 |
+| Mnemopi MCP 서버 노출 | `oxicode-mnemopi/src/mcp.rs` (843 LOC) — 파일 존재, 기능 검증 안 됨 | 다음 PR에서 E2E 테스트 |
 | Snapcompact inline imaging | `ContextTransformer` trait 존재. `/compact snapcompact` 완료 후 E2E 검증 | P1.1 완료 후 자동 해결 |

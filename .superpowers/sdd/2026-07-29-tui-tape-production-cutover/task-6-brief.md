@@ -15,12 +15,12 @@ Prerequisites: Tasks 1-5 complete and reviewed.
 - Replace old alt-screen PTY expectation with main-screen assertions and first observe RED against old behavior if the prior cutover is not yet active in the test harness.
 - Add deterministic local/mock provider or existing fixture use; no network.
 - Add streaming differential, overlay, resize/session replacement PTY cases.
-- Remove dead ChatView full-frame production callsites, transcript cursor bridge fields, standalone/not-wired comments, and OXI_TAPE_RENDER forward references. Keep reusable overlay and formatting code.
+- Remove dead ChatView full-frame production callsites, transcript cursor bridge fields, standalone/not-wired comments, and OXICODE_TAPE_RENDER forward references. Keep reusable overlay and formatting code.
 
 ## Verification
-- `cargo nextest run -p oxi-cli --test pty_e2e`
-- `cargo clippy -p oxi-cli --all-targets -- -D warnings`
-- `cargo clippy -p oxi-tui --all-targets -- -D warnings`
+- `cargo nextest run -p oxicode-cli --test pty_e2e`
+- `cargo clippy -p oxicode-cli --all-targets -- -D warnings`
+- `cargo clippy -p oxicode-tui --all-targets -- -D warnings`
 - `cargo fmt --all -- --check`
 
 ## Report

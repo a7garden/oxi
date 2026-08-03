@@ -2,7 +2,7 @@
 
 **날짜**: 2026-07-19
 **상태**: v0.57.0
-**스펙**: `docs/superpowers/specs/2026-07-19-oxi-tui-ux-stability-design.md` §W1
+**스펙**: `docs/superpowers/specs/2026-07-19-oxicode-tui-ux-stability-design.md` §W1
 **Phase 1 완료**: A4 layout cache 안정화 + color level + PTY harness
 **선행 조건 충족**: PTY e2e harness (Phase 1 Task 6-7)에서 회귀 기반 확보 완료
 
@@ -24,17 +24,17 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 
 | 위험 | 완화 |
 |---|---|
-| 모든 render 경로 변경 | 1) **TDD-first** — 가상 좌표 적용 전 후 byte-equivalent snapshot 테스트 작성 2) **단계적 commit** — 5개 독립 commit, 매 단계 `cargo nextest run -p oxi-tui` 통과 3) **PTY 회귀** — Phase 1 harness가 scroll/flicker 검증 |
+| 모든 render 경로 변경 | 1) **TDD-first** — 가상 좌표 적용 전 후 byte-equivalent snapshot 테스트 작성 2) **단계적 commit** — 5개 독립 commit, 매 단계 `cargo nextest run -p oxicode-tui` 통과 3) **PTY 회귀** — Phase 1 harness가 scroll/flicker 검증 |
 | `LayoutEntry.y/height` 타입 변경이 광범위하게 전파 | 4) **불변 타입은 u32 유지, 그려질 때만 u16 변환**. 모듈 간 인터페이스는 u32. |
 | FollowMode 전이 12+ 케이스 누락 | 5) 상태 머신 단위 테스트로 모든 전이 매트릭스 커버 |
 | sticky 헤더가 viewport 일부를 덮음 | 6) sticky 영역은 render 시 별도 레이어로 분리, layout entries 위에 overlay |
-| `pub scroll_offset: u16` 등 외부 API (`oxi-cli/src/tui/app.rs`)가 u16 가정 | 7) 외부 API는 `u16` 헬퍼 메서드 (`scroll_up_n(n: u16)`) 유지, 내부 상태는 u32 |
+| `pub scroll_offset: u16` 등 외부 API (`oxicode-cli/src/tui/app.rs`)가 u16 가정 | 7) 외부 API는 `u16` 헬퍼 메서드 (`scroll_up_n(n: u16)`) 유지, 내부 상태는 u32 |
 
 ---
 
 ## 작업 분할 — 5개 커밋
 
-### Commit 1: `feat(oxi-tui): virtual coordinate u32 layer for chat scroll`
+### Commit 1: `feat(oxicode-tui): virtual coordinate u32 layer for chat scroll`
 
 **변경**:
 - `layout.rs::LayoutEntry { y: u16 → u32, height: u16 → u32 }`
@@ -45,7 +45,7 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 - `clamp_scroll(visible_height: u16)` → `clamp_viewport(visible_height: u16)` 시그니처 동일, 내부 `u32` 산술
 
 **호환성**:
-- `oxi-cli/src/tui/app.rs::scroll_up(n: u16)` / `scroll_down(n: u16)` / `ensure_auto_scroll(visible_height: u16)` 시그니처 **불변**. 내부에서 `self.chat.scroll_up(n as u32)` 변환.
+- `oxicode-cli/src/tui/app.rs::scroll_up(n: u16)` / `scroll_down(n: u16)` / `ensure_auto_scroll(visible_height: u16)` 시그니처 **불변**. 내부에서 `self.chat.scroll_up(n as u32)` 변환.
 - `state.scroll_offset` 외부 노출은 `as u16` getter (legacy 호환) — 단, 새 코드에서는 u32 직접 사용 권장
 
 **테스트**:
@@ -57,7 +57,7 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 
 ---
 
-### Commit 2: `feat(oxi-tui): FollowMode state machine replaces auto_scroll bool`
+### Commit 2: `feat(oxicode-tui): FollowMode state machine replaces auto_scroll bool`
 
 **변경**:
 - 신규 `state.rs::FollowMode` enum:
@@ -99,7 +99,7 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 
 ---
 
-### Commit 3: `feat(oxi-tui): draw-time u16 conversion in chat render loop`
+### Commit 3: `feat(oxicode-tui): draw-time u16 conversion in chat render loop`
 
 **변경**:
 - mod.rs::render:
@@ -121,7 +121,7 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 
 ---
 
-### Commit 4: `feat(oxi-tui): clamp jump prevention — reflow-safe viewport`
+### Commit 4: `feat(oxicode-tui): clamp jump prevention — reflow-safe viewport`
 
 **변경**:
 - 기존 `clamp_scroll(vh)` 호출을 `try_clamp_to_existing_anchor(vh)`로 교체:
@@ -138,7 +138,7 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 
 ---
 
-### Commit 5: `feat(oxi-tui): sticky turn-prompt header overlay`
+### Commit 5: `feat(oxicode-tui): sticky turn-prompt header overlay`
 
 **변경**:
 - 신규 `state.rs::compute_sticky_candidates(messages, viewport_base, vh, n=3)` → 직전 N개 사용자 메시지 (`msg_idx`, `entry_y`)
@@ -164,13 +164,13 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 
 ### 단위 테스트
 - 5개 commit 합쳐서 신규 테스트 ≥ 25개
-- 기존 oxi-tui 테스트 (363개) 모두 통과
+- 기존 oxicode-tui 테스트 (363개) 모두 통과
 - `cargo clippy --workspace --all-targets -- -D warnings` 통과
 
 ### 통합
 - `cargo nextest run --workspace` 통과
-- `cargo clippy -p oxi-sdk --features native-browser -- -D warnings` 통과 (oxi-tui 변경이 SDK에 영향 X)
-- `cargo fmt -p oxi-tui -- --check` 통과
+- `cargo clippy -p oxicode-sdk --features native-browser -- -D warnings` 통과 (oxicode-tui 변경이 SDK에 영향 X)
+- `cargo fmt -p oxicode-tui -- --check` 통과
 
 ### UX 증상 (PTY harness로 검증)
 - 100K 줄 더미 세션 스크롤 정상 (u16 cap 증상 해결)
@@ -179,21 +179,21 @@ Phase 1 spec이 식별한 4개 "불안정" 증상이 단일 근본 원인을 공
 - 100개 메시지 후에도 직전 turn prompt 보임 (sticky)
 
 ### 외부 API 호환
-- `oxi-cli/src/tui/app.rs::App::scroll_up(n: u16)` 등 시그니처 불변
-- `oxi-cli/src/tui/handlers.rs` 변경 없음
+- `oxicode-cli/src/tui/app.rs::App::scroll_up(n: u16)` 등 시그니처 불변
+- `oxicode-cli/src/tui/handlers.rs` 변경 없음
 - `chat::ChatView` widget render 결과 시각적으로 동일 (단, sticky/overflow 추가 효과는 의도된 변화)
 
 ---
 
 ## 총 LOC 추정: ~1,130
 
-(스펙의 3,500 추정은 B3 sticky 헤더가 별도 workstream이었던 v0 설계 기준. v3 설계에서 W1 sticky를 흡수했지만, 전체 grok sticky.rs 1,430 LOC를 oxi-tui 축소판으로 가져오지 않음 — 250 LOC이면 "직전 N개 사용자 메시지를 viewport 상단에 그리기" 충분)
+(스펙의 3,500 추정은 B3 sticky 헤더가 별도 workstream이었던 v0 설계 기준. v3 설계에서 W1 sticky를 흡수했지만, 전체 grok sticky.rs 1,430 LOC를 oxicode-tui 축소판으로 가져오지 않음 — 250 LOC이면 "직전 N개 사용자 메시지를 viewport 상단에 그리기" 충분)
 
 ---
 
 ## 외부 의존성
 
-없음. 모든 변경은 oxi-tui 내부. 외부 API (`App::scroll_*`)는 시그니처 유지 + 내부 변환만.
+없음. 모든 변경은 oxicode-tui 내부. 외부 API (`App::scroll_*`)는 시그니처 유지 + 내부 변환만.
 
 ---
 

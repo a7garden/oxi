@@ -16,25 +16,25 @@ Current state (production code only, excluding tests/examples):
 
 | File | `.expect()` Count | Risk Assessment |
 |------|-------------------|-----------------|
-| `oxi-ai/src/providers/bedrock.rs` | 10 | Low — all parse/infallible crypto ops |
-| `oxi-agent/src/agent_loop/streaming.rs` | 7 | **Medium** — `messages.last().expect("non-empty")` — could fail if invariant breaks |
-| `oxi-cli/src/rpc_mode/handlers.rs` | 5 | Low — RPC handler setup |
-| `oxi-ai/src/providers/openai.rs` | 3 | Low |
-| `oxi-store/src/session.rs` | 2 | Low |
-| `oxi-store/src/session_navigation.rs` | 2 | Low |
-| `oxi-store/src/model_resolver.rs` | 2 | Low |
+| `oxicode-ai/src/providers/bedrock.rs` | 10 | Low — all parse/infallible crypto ops |
+| `oxicode-agent/src/agent_loop/streaming.rs` | 7 | **Medium** — `messages.last().expect("non-empty")` — could fail if invariant breaks |
+| `oxicode-cli/src/rpc_mode/handlers.rs` | 5 | Low — RPC handler setup |
+| `oxicode-ai/src/providers/openai.rs` | 3 | Low |
+| `oxicode-store/src/session.rs` | 2 | Low |
+| `oxicode-store/src/session_navigation.rs` | 2 | Low |
+| `oxicode-store/src/model_resolver.rs` | 2 | Low |
 | Other files (1-2 each) | ~50 | Low |
 
 **True production `unwrap()` in non-test, non-example code:**
 
 | File | Count | Risk |
 |------|-------|------|
-| `oxi-sdk/src/multi_provider.rs` | 2 | Low — SDK builder |
-| `oxi-ai/src/fallback_chain.rs` | 2 | Low — chain construction |
-| `oxi-sdk/src/lib.rs` | 1 | Low |
-| `oxi-sdk/src/middleware/builtins.rs` | 1 | Low |
-| `oxi-sdk/src/coordination/work_queue.rs` | 1 | Low |
-| `oxi-ai/src/model_db.rs` | 1 | Low |
+| `oxicode-sdk/src/multi_provider.rs` | 2 | Low — SDK builder |
+| `oxicode-ai/src/fallback_chain.rs` | 2 | Low — chain construction |
+| `oxicode-sdk/src/lib.rs` | 1 | Low |
+| `oxicode-sdk/src/middleware/builtins.rs` | 1 | Low |
+| `oxicode-sdk/src/coordination/work_queue.rs` | 1 | Low |
+| `oxicode-ai/src/model_db.rs` | 1 | Low |
 
 ---
 
@@ -59,7 +59,7 @@ It DOES mean:
 
 ### Phase 1: Audit (read-only)
 
-1. Read `oxi-agent/src/agent_loop/streaming.rs` and trace the 7 `expect("non-empty")` calls:
+1. Read `oxicode-agent/src/agent_loop/streaming.rs` and trace the 7 `expect("non-empty")` calls:
    - `line 92`: `messages.last().expect("non-empty")`
    - `line 165`: `messages.last().expect("non-empty")`
    - `line 187`: `messages.last().expect("non-empty after push")`
@@ -73,7 +73,7 @@ It DOES mean:
    - If yes, is the `expect` message sufficient to explain why?
    - If no, what error should be returned instead?
 
-3. Read `oxi-ai/src/providers/bedrock.rs` lines 198-436 and verify the 10 `expect()` calls are all infallible header/crypto operations.
+3. Read `oxicode-ai/src/providers/bedrock.rs` lines 198-436 and verify the 10 `expect()` calls are all infallible header/crypto operations.
 
 ### Phase 2: Fix if needed
 

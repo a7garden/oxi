@@ -5,7 +5,7 @@
 ## 6.1 lib.rs 확장
 
 ```rust
-// oxi-sdk/src/lib.rs
+// oxicode-sdk/src/lib.rs
 
 // ── 기존 모듈 ──
 pub mod agent_builder;
@@ -29,12 +29,12 @@ pub mod error;
 pub mod routing;
 
 // ── 브라우저 엔진 (항상 사용 가능) ──
-pub use oxi_agent::tools::browse::{
+pub use oxicode_agent::tools::browse::{
     BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine, BrowserError, BrowserTab,
     ElementInfo, LinkInfo, PageContent, TabGuard,
 };
 #[cfg(feature = "native-browser")]
-pub use oxi_agent::tools::browse::{BrowseScriptTool, OxiBrowserEngine};
+pub use oxicode_agent::tools::browse::{BrowseScriptTool, OxicodeBrowserEngine};
 
 // ── 새 re-export ──
 pub use error::SdkError;
@@ -46,8 +46,8 @@ pub use observability::{Tracer, Span, SpanContext, TraceId, SpanId, AuditLog, Au
 pub use middleware::{Middleware, MiddlewarePipeline, MiddlewareBridge, MiddlewarePhase, ...};
 
 // ── 기존 re-export 유지 ──
-pub use oxi_ai::{ ... };
-pub use oxi_agent::{ ... };
+pub use oxicode_ai::{ ... };
+pub use oxicode_agent::{ ... };
 ```
 
 ---
@@ -62,7 +62,7 @@ pub use oxi_agent::{ ... };
 
 use thiserror::Error;
 
-/// oxi-sdk의 구조화된 에러 타입.
+/// oxicode-sdk의 구조화된 에러 타입.
 ///
 /// SDK 소비자는 `match`로 에러를 분기 처리할 수 있음.
 /// 내부 구현에서는 `anyhow`를 유지하되, 공개 API 경계에서 `SdkError`로 변환.
@@ -241,10 +241,10 @@ handle.routing().set_enabled(true);
 
 ---
 
-## 6.4 OxiBuilder 확장
+## 6.4 OxicodeBuilder 확장
 
 ```rust
-impl OxiBuilder {
+impl OxicodeBuilder {
     // ── 기존 ──
     pub fn new() -> Self;
     pub fn with_builtins(self) -> Self;
@@ -252,7 +252,7 @@ impl OxiBuilder {
     pub fn provider_factory(self, name: &str, factory: ...) -> Self;
     pub fn model(self, model: Model) -> Self;
     pub fn enable_routing(self, config: RoutingConfig) -> Self;
-    pub fn build(self) -> Oxi;
+    pub fn build(self) -> Oxicode;
 
     // ── 새로운 진입점 ──
 
@@ -261,7 +261,7 @@ impl OxiBuilder {
 }
 
 pub struct SupervisorBuilder {
-    oxi_builder: OxiBuilder,
+    oxicode_builder: OxicodeBuilder,
     policy: SupervisorPolicy,
     snapshot_dir: Option<PathBuf>,
     audit: Option<Arc<AuditLog>>,
@@ -288,7 +288,7 @@ impl SupervisorBuilder {
 
 ```rust
 pub struct AgentBuilder<'a> {
-    oxi: &'a Oxi,
+    oxicode: &'a Oxicode,
     config: AgentConfig,
     tools: ToolRegistry,
     workspace_dir: Option<PathBuf>,
@@ -346,13 +346,13 @@ impl<'a> AgentBuilder<'a> {
 ```rust
 pub fn build(self) -> Result<Agent, SdkError> {
     // 1. 모델 + 프로바이더 해석
-    let model = self.oxi.resolve_model(&self.config.model_id)
+    let model = self.oxicode.resolve_model(&self.config.model_id)
         .map_err(|_| SdkError::ModelNotFound { model_id: self.config.model_id.clone() })?;
-    let provider = self.oxi.create_provider(&model.provider)
+    let provider = self.oxicode.create_provider(&model.provider)
         .map_err(|_| SdkError::ProviderNotFound { provider: model.provider.clone() })?;
 
     // 2. 기본 Agent 생성
-    let resolver = /* OxiResolver 생성 */;
+    let resolver = /* OxicodeResolver 생성 */;
     let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
 
     // 3. Authorizer에 capabilities 부여
@@ -387,11 +387,11 @@ pub fn build(self) -> Result<Agent, SdkError> {
 
 ```rust
 // 기존
-pub use crate::builder::{Oxi, OxiBuilder};
+pub use crate::builder::{Oxicode, OxicodeBuilder};
 pub use crate::tool_factory::{browsing_tools, coding_tools, full_tools, readonly_tools};
-pub use oxi_agent::{ Agent, AgentConfig, AgentEvent, ToolRegistry, ... };
-pub use oxi_agent::tools::browse::{ BrowseConfig, BrowseTool, BrowserEngine, ... };
-pub use oxi_ai::{ Model, Provider, CompactionStrategy, ... };
+pub use oxicode_agent::{ Agent, AgentConfig, AgentEvent, ToolRegistry, ... };
+pub use oxicode_agent::tools::browse::{ BrowseConfig, BrowseTool, BrowserEngine, ... };
+pub use oxicode_ai::{ Model, Provider, CompactionStrategy, ... };
 
 // 새로운
 pub use crate::error::SdkError;
@@ -410,15 +410,15 @@ pub use crate::middleware::{ Middleware, MiddlewarePipeline, MiddlewareBridge };
 ### 기존 코드 — 변경 없음
 
 ```rust
-let oxi = OxiBuilder::new().with_builtins().build();
-let agent = oxi.agent(config).workspace("/tmp").coding_tools().build()?;
+let oxicode = OxicodeBuilder::new().with_builtins().build();
+let agent = oxicode.agent(config).workspace("/tmp").coding_tools().build()?;
 let (response, _) = agent.run("hello".into()).await?;
 ```
 
 ### Lifecycle 추가 (Phase 1)
 
 ```rust
-let supervisor = oxi.supervisor().build()?;
+let supervisor = oxicode.supervisor().build()?;
 let handle = supervisor.spawn(config)?;
 handle.add_tool(read_tool);
 let (response, _) = handle.run("Review code".into()).await?;
@@ -429,7 +429,7 @@ let snapshot = supervisor.suspend(handle.agent_id()).await?;
 
 ```rust
 let authorizer = Arc::new(Authorizer::new(audit.clone()));
-let agent = oxi.agent(config)
+let agent = oxicode.agent(config)
     .coding_tools()
     .authorizer(authorizer)
     .coding_capabilities()
@@ -442,7 +442,7 @@ let agent = oxi.agent(config)
 // 관측
 let tracer = Arc::new(Tracer::new());
 let audit = Arc::new(AuditLog::new(2048));
-let cost_tracker = Arc::new(CostTracker::new(oxi.models(), CostTrackerConfig {
+let cost_tracker = Arc::new(CostTracker::new(oxicode.models(), CostTrackerConfig {
     per_agent_budget: Some(5.0),
     global_budget: Some(50.0),
 }));
@@ -452,7 +452,7 @@ let authorizer = Arc::new(Authorizer::new(audit.clone()));
 authorizer.define_role("coder", CapabilitySet::coding("/workspace"));
 
 // Supervisor
-let supervisor = oxi.supervisor()
+let supervisor = oxicode.supervisor()
     .with_audit(audit.clone())
     .with_authorizer(authorizer.clone())
     .with_tracer(tracer.clone())
@@ -482,7 +482,7 @@ handle.routing().set_fallback_models(vec!["anthropic/claude-sonnet-4-20250514".i
 
 ---
 
-## 6.8 oxi-agent 최소 변경 요약
+## 6.8 oxicode-agent 최소 변경 요약
 
 | 파일 | 변경 | 줄 수 |
 |------|------|------|
@@ -491,7 +491,7 @@ handle.routing().set_fallback_models(vec!["anthropic/claude-sonnet-4-20250514".i
 | `state.rs` | 변경 없음 (이미 `Serialize`/`Deserialize`) | 0 |
 | `tools.rs` | 변경 없음 | 0 |
 
-**총 oxi-agent 변경:** ~8줄
+**총 oxicode-agent 변경:** ~8줄
 
 ---
 

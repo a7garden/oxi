@@ -1,19 +1,19 @@
 # Catalog tooling
 
-Scripts for managing `oxi-ai/data/catalog/` — the 3-tier hybrid catalog.
+Scripts for managing `oxicode-ai/data/catalog/` — the 3-tier hybrid catalog.
 
 ## `port-openclaw.py`
 
 Idempotent. Port openclaw's static `modelCatalog` from
-`/tmp/openclaw-upstream/extensions/` into oxi's `data/catalog/openclaw/`.
+`/tmp/openclaw-upstream/extensions/` into oxicode's `data/catalog/openclaw/`.
 
 ```bash
-# Edit the OPENCLAW_EXT and OXI_* constants in the script for your paths.
+# Edit the OPENCLAW_EXT and OXICODE_* constants in the script for your paths.
 python3 scripts/catalog/port-openclaw.py
 ```
 
-Updates existing oxi files (anthropic.toml, mistral.toml, etc.) with
-new model IDs from openclaw, never overwriting oxi-curated values.
+Updates existing oxicode files (anthropic.toml, mistral.toml, etc.) with
+new model IDs from openclaw, never overwriting oxicode-curated values.
 
 ## `backfill-prices.py`
 
@@ -36,7 +36,7 @@ python3 scripts/catalog/add-license-headers.py
 
 ## `convert-models.py`
 
-Idempotent. Convert the legacy `oxi-ai/src/model_db.rs` static arrays
+Idempotent. Convert the legacy `oxicode-ai/src/model_db.rs` static arrays
 into per-provider TOML files. Used once during the Layer 1 migration.
 Kept for reference; the resulting TOML files are already committed.
 
@@ -62,5 +62,5 @@ python3 scripts/catalog/convert-models.py
         vendor APIs (venice, novita)
 ```
 
-Layer 2 (`~/.oxi/catalog/overrides.toml`) and Layer 3 (runtime
+Layer 2 (`~/.oxicode/catalog/overrides.toml`) and Layer 3 (runtime
 discovery) are runtime-only and don't need scripts.
