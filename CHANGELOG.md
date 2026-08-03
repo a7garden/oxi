@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(nothing yet)_
+
+## [0.65.0] - 2026-08-03
+
 ### Breaking
 
 - **Project renamed: oxi → oxicode.** All crate names (`oxi-*` → `oxicode-*`),
