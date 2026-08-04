@@ -9,10 +9,9 @@
 //! All keyboard hints advertised by the shortcuts bar are verified against the
 //! real key dispatch in `super::main_loop::spawn_input_thread` — a hint that
 //! does not match a real handler is a misleading-UI defect.
-
 use oxicode_vtui::design::layout::{
-    AgentViewLayout, HintItem, LayoutConfig, LayoutInput, ScrollbarConfig, ShortcutBarStyling,
-    ShortcutsBar, StatusBar, effective_compact,
+    AgentViewLayout, CompactConfig, HintItem, LayoutConfig, LayoutInput, PendingHint,
+    ScrollbarConfig, ShortcutBarStyling, ShortcutsBar, StatusBar, effective_compact,
 };
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use ratatui::{
@@ -160,7 +159,17 @@ pub(super) fn render_chrome(
     // ── Shortcuts bar ──
     let hints = shortcut_hints();
     let shortcut_styles = ThemeShortcutStyles { styles: &styles };
-    let bar = ShortcutsBar::new(&hints, &shortcut_styles);
+    let mut bar = ShortcutsBar::new(&hints, &shortcut_styles);
+    if state.pending_quit {
+        bar = bar.pending(PendingHint {
+            key: "Ctrl+C",
+            label: "quit",
+        });
+    }
+    let compact_cfg = CompactConfig::default();
+    if compact {
+        bar = bar.compact(&compact_cfg);
+    }
     frame.render_widget(bar, layout.shortcuts);
 
     layout
