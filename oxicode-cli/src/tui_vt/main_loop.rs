@@ -180,6 +180,12 @@ pub struct RenderState {
     pub overlay: Option<OverlayState>,
     /// Model IDs for the /model overlay picker (ordered same as overlay items).
     pub overlay_model_ids: Vec<String>,
+    /// Queued input prompts (waiting to be processed).
+    pub queued_inputs: Vec<String>,
+    /// Follow-up suggestion chips.
+    pub follow_ups: Vec<String>,
+    /// Todo checklist items (text, done).
+    pub todo_items: Vec<(String, bool)>,
 }
 
 /// One rendered transcript line.
@@ -536,6 +542,9 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         }
         InlineCommand::SetReasoningStage(stage) => {
             state.reasoning_stage = stage;
+        }
+        InlineCommand::SetQueuedInputs { entries } => {
+            state.queued_inputs = entries;
         }
         InlineCommand::ShowOverlay { request } => {
             state.overlay = Some(materialize_overlay(*request));
@@ -1454,6 +1463,15 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     // the transcript and composer are placed into the returned rects.
     let layout = super::frame_layout::render_chrome(frame, area, state);
     render_transcript(frame, layout.scrollback, state);
+    if !state.queued_inputs.is_empty() {
+        render_queue_pane(frame, layout.scrollback, &state.queued_inputs);
+    }
+    if !state.todo_items.is_empty() {
+        render_todo_pane(frame, layout.scrollback, &state.todo_items);
+    }
+    if !state.follow_ups.is_empty() {
+        render_follow_ups(frame, layout.prompt, &state.follow_ups);
+    }
     if let Some(stage) = &state.reasoning_stage {
         render_reasoning_indicator(frame, layout.prompt, stage);
     }
@@ -1913,6 +1931,89 @@ fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage:
         ),
     ]);
     frame.render_widget(Paragraph::new(line), indicator_area);
+}
+
+/// Render queued input prompts as a compact pane at the top of the scrollback.
+fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, entries: &[String]) {
+    let styles = active_styles();
+    let height = entries.len() as u16 + 1;
+    let area = Rect {
+        x: scrollback.x,
+        y: scrollback.y,
+        width: scrollback.width,
+        height,
+    };
+    let items: Vec<Line<'_>> = entries
+        .iter()
+ .map(|e| {
+            Line::from(vec![
+                Span::styled("\u{2261} ", Style::default().fg(color_from_anstyle(styles.info.get_fg_color()))),
+                Span::styled(e.clone(), Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color()))),
+            ])
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(items).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color()))),
+        ),
+        area,
+    );
+}
+
+/// Render a compact todo checklist at the top of the scrollback area.
+fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, bool)]) {
+    let styles = active_styles();
+    let height = items.len() as u16 + 1;
+    let area = Rect {
+        x: scrollback.x,
+        y: scrollback.y,
+        width: scrollback.width,
+        height,
+    };
+    let lines: Vec<Line<'_>> = items
+        .iter()
+        .map(|(text, done)| {
+            let (marker, color) = if *done {
+                ("\u{2611}", styles.tool.get_fg_color()) // ☑
+            } else {
+                ("\u{2610}", styles.secondary.get_fg_color()) // ☐
+            };
+            Line::from(vec![
+                Span::styled(format!("{marker} "), Style::default().fg(color_from_anstyle(color))),
+                Span::styled(text.clone(), Style::default().fg(color_from_anstyle(Some(styles.foreground)))),
+            ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Render follow-up suggestion chips just above the composer.
+fn render_follow_ups(frame: &mut Frame<'_>, composer_area: Rect, chips: &[String]) {
+    let styles = active_styles();
+    let area = Rect {
+        x: composer_area.x,
+        y: composer_area.top().saturating_sub(1),
+        width: composer_area.width,
+        height: 1,
+    };
+    let mut spans = vec![Span::styled(
+        "Suggestions: ",
+        Style::default()
+            .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+            .add_modifier(Modifier::DIM),
+    )];
+    for (i, chip) in chips.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(
+            format!("\u{25b8} {chip}"),
+            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Render the slash-command autocomplete popup as a floating panel above the
