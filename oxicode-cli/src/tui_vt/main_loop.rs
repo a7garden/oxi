@@ -173,6 +173,8 @@ pub struct RenderState {
     pub pending_quit: bool,
     /// Slash-command autocomplete popup state.
     pub slash_popup: SlashPopup,
+    /// Current reasoning/tool stage (e.g. "tool: read"), shown above the composer.
+    pub reasoning_stage: Option<String>,
 }
 
 /// One rendered transcript line.
@@ -491,6 +493,9 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         }
         InlineCommand::SetCursorVisible(_) | InlineCommand::ForceRedraw => {
             // Redraw on the next loop iteration; nothing to persist.
+        }
+        InlineCommand::SetReasoningStage(stage) => {
+            state.reasoning_stage = stage;
         }
         InlineCommand::Shutdown => {
             state.shutdown_requested = true;
@@ -1147,6 +1152,9 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     // the transcript and composer are placed into the returned rects.
     let layout = super::frame_layout::render_chrome(frame, area, state);
     render_transcript(frame, layout.scrollback, state);
+    if let Some(stage) = &state.reasoning_stage {
+        render_reasoning_indicator(frame, layout.prompt, stage);
+    }
     render_composer(frame, layout.prompt, state);
     if state.slash_popup.open {
         render_slash_popup(frame, layout.prompt, state);
@@ -1387,6 +1395,31 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
     ];
     let para = Paragraph::new(text).alignment(Alignment::Center);
     frame.render_widget(para, area);
+}
+
+/// Render a 1-row reasoning/tool-stage indicator just above the composer.
+fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage: &str) {
+    let styles = active_styles();
+    let indicator_area = Rect {
+        x: composer_area.x,
+        y: composer_area.top().saturating_sub(1),
+        width: composer_area.width,
+        height: 1,
+    };
+    let spinner = "\u{25cc}"; // ◌
+    let line = Line::from(vec![
+        Span::styled(
+            format!("{spinner} "),
+            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
+        ),
+        Span::styled(
+            stage.to_string(),
+            Style::default()
+                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+                .add_modifier(Modifier::DIM),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), indicator_area);
 }
 
 /// Render the slash-command autocomplete popup as a floating panel above the
