@@ -1281,125 +1281,225 @@ Block is forwarded to the pipeline; other events are pass-through."
 
 ---
 
-### Task 5: with_port_hooks on AgentBuilder + PortRegistry
+### Task 5: with_port_hooks + with_session_hooks on AgentBuilder — single `set_hooks` site
 
 **Files:**
-- Modify: `oxicode-sdk/src/agent_builder.rs:18-33` (add `hooks_middleware: Option<HookMiddleware>` field — or store a "want_hooks" bool; the cleanest is to add a flag and construct the middleware inside `build()` from `oxicode.ports().hooks`)
-- Modify: `oxicode-sdk/src/agent_builder.rs:558-611` (in `build()`, if the flag is set, add `HookMiddleware` to the existing pipeline)
-- Modify: `oxicode-sdk/src/builder.rs:556-561` (add `with_port_hooks(self) -> Self` builder method that pulls the registered runner)
-- Test: extend `oxicode-sdk/src/agent_builder.rs:741-901` (existing `mod tests`)
+- Modify: `oxicode-sdk/src/agent_builder.rs:18-33` (add two new fields: `hooks_middleware: Option<HookMiddleware>`, `session_hooks: Option<SessionHookClosures>`)
+- Modify: `oxicode-sdk/src/agent_builder.rs:557-611` (in `build()`, add `HookMiddleware` to the pipeline AND compose `session_hooks` into the final `AgentHooks`; `set_hooks` called exactly once)
+- Modify: `oxicode-sdk/src/builder.rs:556-561` (add `with_hooks(Arc<dyn HookRunner>)` builder method)
+- New types in `oxicode-sdk/src/agent_builder.rs`: `SessionHookClosures` (the three closures + flag for `should_stop_after_turn` / `get_steering_messages` / `get_follow_up_messages`)
+- Test: extend `oxicode-sdk/src/agent_builder.rs:741-901`
 
-**Context:**
-- Existing `build()` middleware composition: lines `558-611` build the pipeline (audit → authorizer → user middlewares), then `build_hooks(pipeline, ...)` → `agent.set_hooks(hooks)`. The `HookMiddleware` must be added in the right place — **after authorizer (so authorizer denials still short-circuit) but before user middlewares (so user middlewares observe the hook-driven block)?** Actually, since `HookMiddleware` reads `before_tool_call` and is itself a `Middleware`, the order should be: audit → authorizer → **hooks** → user middlewares. That way authorizer can still block before hooks fire. Document this in a comment.
-- The `with_port_*` methods in `builder.rs:441-561` follow a pattern: pull the registered port from the Oxicode instance, build a wrapper, call a setter on `AgentBuilder`. For hooks, the wrapper IS the `HookMiddleware` (no extra indirection needed — `HookMiddleware::new(Arc::clone(&ports.hooks))`).
-- `OxicodeBuilder::with_port_hooks` (on the engine builder) is also worth adding for symmetry: `pub fn with_port_hooks(self) -> Self` that records a flag. Then in `Oxicode::agent(config)`, the resulting `AgentBuilder` should auto-include the hook middleware. For the v1 cut, the simpler approach is: add `with_port_hooks()` on `AgentBuilder` directly (not on `OxicodeBuilder`). Users call `oxicode.agent(config).with_port_hooks().build()`. This avoids a flag on the engine. Mirror the pattern of `with_port_subagent` (`agent_builder.rs:200-208`) which also lives on `AgentBuilder`.
+**Context for the implementer — read this first:**
+
+`Agent::set_hooks` (agent.rs:803-805) is **full-replace** (`*h = hooks`). The cli's existing `AgentSession::install_runtime_hooks` (agent_session.rs:811) and RPC's `install_session_hooks` (handlers.rs:96) both call `set_hooks` with only `should_stop_after_turn / get_steering_messages / get_follow_up_messages` — leaving the `before_tool_call` / `after_tool_call` slots as `None`. **Today, oxicode-sdk's audit/authorizer middleware set_hooks call gets wiped on every cli session start.** This is a known bug class (audit Gap-0, "observability silently overwritten when composes with user middlewares").
+
+This plan must NOT regress the audit's fix. The single-`set_hooks` invariant is: **only `AgentBuilder::build()` calls `set_hooks`, and it composes every closure that any caller wants to install** (audit/authorizer/user middlewares via the pipeline, HookMiddleware via the pipeline, session closures from `with_session_hooks`).
+
+Concretely, `install_runtime_hooks` and `install_session_hooks` MUST be reduced to a no-op for `set_hooks` purposes. The session-level queues and stop flag are created at the `App` level BEFORE `build()` runs, passed in via `with_session_hooks(...)`, and `build()` wires them into the same `AgentHooks` instance the middleware pipeline produced. `install_runtime_hooks` then only arms the stop flag (a side-effect, no `set_hooks` call).
 
 **Interfaces (this task produces):**
-- `pub fn with_port_hooks(mut self) -> Self` on `AgentBuilder` — pulls `oxicode.ports().hooks.clone()` and stores the middleware for the pipeline.
-- The middleware is **only added if** `runner` is not `NoopHookRunner` AND the pipeline is being constructed (existing `if has_user_mws || has_observability_mws` check). If the user calls `with_port_hooks()` and there are no other middlewares, we MUST still build a pipeline (otherwise hooks never fire).
 
-- [ ] **Step 5.1: Add the field + setter**
+```rust
+// In oxicode-sdk/src/agent_builder.rs
+pub struct SessionHookClosures {
+    pub should_stop_after_turn: Arc<dyn Fn(&oxicode_agent::ShouldStopAfterTurnContext) -> bool + Send + Sync>,
+    pub get_steering_messages: Arc<dyn Fn() -> Vec<oxicode_ai::Message> + Send + Sync>,
+    pub get_follow_up_messages: Arc<dyn Fn() -> Vec<oxicode_ai::Message> + Send + Sync>,
+    pub tool_execution: oxicode_agent::ToolExecutionMode,
+}
+
+impl AgentBuilder<'_> {
+    /// Add the [`HookMiddleware`] backed by the engine's registered
+    /// `HookRunner` port.
+    pub fn with_port_hooks(mut self) -> Self { ... }
+
+    /// Provide session-level closures (stop flag, steering/follow_up
+    /// queues). These are composed into the SAME `AgentHooks` that the
+    /// middleware pipeline produces, so `set_hooks` is called exactly
+    /// once in `build()`. This is the ONLY way to install session
+    /// hooks — do NOT call `agent.set_hooks(...)` elsewhere.
+    pub fn with_session_hooks(mut self, closures: SessionHookClosures) -> Self { ... }
+}
+```
+
+- [ ] **Step 5.1: Add the fields + types**
 
 In `oxicode-sdk/src/agent_builder.rs:18-33`, add to the `AgentBuilder` struct:
 
 ```rust
-// ── Hooks ──
+// ── Hooks (port 16) ──
 hooks_middleware: Option<HookMiddleware>,
+// ── Session-level hooks (cli-owned queues + stop flag) ──
+session_hooks: Option<SessionHookClosures>,
 ```
 
-In the constructor / `AgentBuilder::new` (search for the `pub fn new` or whatever creates an `AgentBuilder`), add `hooks_middleware: None,` to the field initialisation. If the field is set via a `from(oxicode)`-style constructor instead, set it there.
+In the constructor body (search for the `AgentBuilder::new`-style initialisation), set both to `None`.
 
-Add a new method right after `with_port_subagent` at `agent_builder.rs:208`:
+Add the `SessionHookClosures` type above the `AgentBuilder` impl block (in the same file):
+
+```rust
+/// Closures owned by the cli (or any product) that need to participate
+/// in the agent hook chain. Passed into `AgentBuilder::with_session_hooks`
+/// so they are composed into the same `AgentHooks` that the middleware
+/// pipeline produces. The single-`set_hooks` invariant
+/// (only `AgentBuilder::build()` calls `set_hooks`) is what keeps the
+/// before/after_tool_call slots alive across the cli session boot.
+pub struct SessionHookClosures {
+    /// Stop signal consulted at the end of every turn.
+    pub should_stop_after_turn:
+        Arc<dyn Fn(&oxicode_agent::ShouldStopAfterTurnContext) -> bool + Send + Sync>,
+    /// Drain the steering queue on demand.
+    pub get_steering_messages:
+        Arc<dyn Fn() -> Vec<oxicode_ai::Message> + Send + Sync>,
+    /// Drain the follow-up queue on demand.
+    pub get_follow_up_messages:
+        Arc<dyn Fn() -> Vec<oxicode_ai::Message> + Send + Sync>,
+    /// Tool-execution mode (Sequential is the cli default).
+    pub tool_execution: oxicode_agent::ToolExecutionMode,
+}
+```
+
+- [ ] **Step 5.2: Add `with_port_hooks` and `with_session_hooks` methods**
+
+Add right after `with_port_subagent` at `agent_builder.rs:208`:
 
 ```rust
 /// Add the [`HookMiddleware`] backed by the engine's registered
-/// `HookRunner` port (see [`OxicodeBuilder::with_port_hooks`]). When the
-/// port is `NoopHookRunner` (the default) the middleware is skipped so
-/// non-hook agents are not slowed.
+/// `HookRunner` port (see [`crate::OxicodeBuilder::with_hooks`]).
 ///
-/// Hook middleware composes into the existing pipeline at the
-/// `audit → authorizer → hooks → user` position: authorizer denials
-/// still short-circuit; user middlewares observe hook-driven blocks.
+/// When the port is `NoopHookRunner` (the default), this is a
+/// no-op so non-hook agents are not slowed.
+///
+/// HookMiddleware composes into the existing pipeline at the
+/// `audit → authorizer → hooks → user` position: authorizer
+/// denials still short-circuit; user middlewares observe
+/// hook-driven blocks. `set_hooks` is called exactly once in
+/// `build()`.
 pub fn with_port_hooks(mut self) -> Self {
     let runner = Arc::clone(&self.oxicode.ports().hooks);
-    let mut mw = crate::middleware::HookMiddleware::new(runner);
-    if let Some(sid) = self.oxicode.port_session_id() {
-        if let Ok(cwd) = std::env::current_dir() {
-            mw = mw.with_session(sid, cwd);
-        }
-    }
-    self.hooks_middleware = Some(mw);
+    self.hooks_middleware = Some(crate::middleware::HookMiddleware::new(runner));
+    self
+}
+
+/// Install session-level closures (stop flag + queues). These are
+/// composed into the same `AgentHooks` that the middleware pipeline
+/// produces, so `set_hooks` is called exactly once.
+pub fn with_session_hooks(mut self, closures: SessionHookClosures) -> Self {
+    self.session_hooks = Some(closures);
     self
 }
 ```
 
-Add a method `port_session_id(&self) -> Option<String>` to `Oxicode` in `builder.rs`. The simplest implementation: the `Oxicode` struct doesn't currently track a session id, so this can return `None` and the middleware simply doesn't tag a session. (The cli wires its own session id via the existing `AgentConfig::session_id` path; the `HookContext::session_id` filled from middleware-side is best-effort.)
+**Removed:** the `port_session_id()` method on `Oxicode`. The session id flows from `with_session_hooks` via the cli side, not from the engine. This was over-engineered for v1.
 
-```rust
-impl Oxicode {
-    /// Best-effort session id for hook payloads. Returns `None` if the
-    /// engine isn't session-tagged — callers should treat that as
-    /// "session_id = None" in the JSON payload.
-    pub fn port_session_id(&self) -> Option<String> {
-        // The cli uses AgentConfig::session_id for the agent-loop's
-        // session_id; the middleware-side session_id is advisory and
-        // currently only set when oxicode-cli explicitly passes one
-        // through OxicodeBuilder. For now: not set.
-        None
-    }
-}
-```
+- [ ] **Step 5.3: Modify `build()` to make it the single `set_hooks` site**
 
-- [ ] **Step 5.2: Add a unit test for `port_session_id`**
-
-Append to `oxicode-sdk/src/builder.rs` `mod tests` (search for `#[cfg(test)]` in that file). One-liner:
-
-```rust
-#[test]
-fn port_session_id_default_none() {
-    let oxicode = crate::OxicodeBuilder::new().build();
-    assert!(oxicode.port_session_id().is_none());
-}
-```
-
-- [ ] **Step 5.3: Wire the middleware into build()**
-
-In `oxicode-sdk/src/agent_builder.rs:557-611`, modify the pipeline construction. The current condition is `if has_user_mws || has_observability_mws { ... }`. We need:
+In `oxicode-sdk/src/agent_builder.rs:557-611`, rewrite the pipeline construction block. The new shape (in pseudocode, fill in actual code following the existing patterns at lines 575-610):
 
 ```rust
 let has_hooks = self.hooks_middleware.is_some();
+let has_session_hooks = self.session_hooks.is_some();
+
 if has_user_mws || has_observability_mws || has_hooks {
     let agent_id = resolved_agent_id(&agent);
     let mut pipeline = MiddlewarePipeline::new();
 
-    // ... existing audit, authorizer, user middlewares ...
+    // 1. Audit (unchanged)
+    if let Some(audit) = &self.audit_log {
+        pipeline = pipeline.add_arc(Arc::new(
+            crate::middleware::observability_adapters::AuditLogMiddleware::new(
+                Arc::clone(audit),
+                agent_id.clone(),
+            ),
+        ));
+    }
 
-    // Hooks fire AFTER authorizer (so authorizer denials still
-    // short-circuit) and BEFORE user middlewares (so user middlewares
-    // observe hook-driven blocks).
+    // 2. Authorizer (unchanged)
+    if let Some(authorizer) = &self.authorizer {
+        // ... existing authorizer + audit composition ...
+    }
+
+    // 3. HookMiddleware — AFTER authorizer (so authorizer denials
+    //    short-circuit before hooks fire) and BEFORE user middlewares
+    //    (so user middlewares observe hook-driven blocks).
     if let Some(hooks) = self.hooks_middleware.take() {
         pipeline = pipeline.add_arc(Arc::new(hooks));
     }
 
-    // ... rest unchanged ...
+    // 4. User middlewares (unchanged)
+    for mw in self.middlewares.into_iter() {
+        pipeline = pipeline.add_arc(mw);
+    }
+
+    // Build the pipeline-driven `AgentHooks` (before/after_tool_call +
+    // should_stop_after_turn from the pipeline's terminate_flag).
+    let pipeline = Arc::new(pipeline);
+    let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut hooks = crate::middleware::build_hooks(pipeline, agent_id, terminate_flag);
+
+    // 5. Session-level closures — OVERWRITE the three slots that the
+    //    cli owns. The pipeline's `should_stop_after_turn` is replaced
+    //    by the cli's stop flag; the cli knows about the session's
+    //    stop semantics. `before_tool_call` and `after_tool_call` are
+    //    preserved from the pipeline.
+    if let Some(session) = self.session_hooks.take() {
+        hooks.should_stop_after_turn = Some(session.should_stop_after_turn);
+        hooks.get_steering_messages = Some(session.get_steering_messages);
+        hooks.get_follow_up_messages = Some(session.get_follow_up_messages);
+        hooks.tool_execution = session.tool_execution;
+    }
+
+    // SINGLE set_hooks call for the entire agent.
+    agent.set_hooks(hooks);
 }
 ```
 
-- [ ] **Step 5.4: Run tests**
+The key invariant: `agent.set_hooks` is called **at most once** in the lifetime of the agent, and only from `build()`. `install_runtime_hooks` (cli side, Task 9) and `install_session_hooks` (rpc side, Task 9) no longer call `set_hooks`.
+
+- [ ] **Step 5.4: Update the existing audit comment at line 565-570**
+
+Find the comment block:
+
+```rust
+//    The pipeline is wrapped into AgentHooks via
+//    `build_hooks` once, so `set_hooks()` is called exactly
+//    once. This avoids the replace-semantics bug class
+//    documented in docs/audits/2026-06-30-sdk-coverage.md
+//    Gap-0 ("observability silently overwritten when
+//    composes with user middlewares").
+```
+
+Update the last sentence to:
+
+```rust
+//    composed with user middlewares"). HookMiddleware slots and
+//    session-level closures (via with_session_hooks) are
+//    composed into the SAME AgentHooks instance — see
+//    `with_port_hooks` and `with_session_hooks`.
+```
+
+- [ ] **Step 5.5: Run tests + clippy**
 
 Run: `cargo nextest run -p oxicode-sdk 2>&1 | tail -15`
-Expected: all existing tests pass + the new `port_session_id_default_none` passes. The `HookMiddleware` integration is now in place.
+Then: `cargo clippy -p oxicode-sdk --all-targets -- -D warnings 2>&1 | tail -10`
+Then: `cargo fmt --all`
+Expected: all green. Existing tests (`test_bridge_returns_valid_hooks` and the agent_builder tests) still pass.
 
-- [ ] **Step 5.5: Commit**
+- [ ] **Step 5.6: Commit**
 
 ```bash
 git add oxicode-sdk/src/agent_builder.rs oxicode-sdk/src/builder.rs
-git commit -m "feat(sdk): AgentBuilder::with_port_hooks composes HookMiddleware
+git commit -m "feat(sdk): AgentBuilder with_port_hooks + with_session_hooks (single set_hooks)
 
 with_port_hooks() reads the engine's registered HookRunner port and
-adds a HookMiddleware to the middleware pipeline at the
-audit → authorizer → hooks → user position. Pipeline is built even
-when no other middlewares exist so hook-only agents fire their hooks."
+adds a HookMiddleware at the audit → authorizer → hooks → user
+position. with_session_hooks() accepts the cli's stop flag +
+steering/follow_up closures; they are composed into the SAME
+AgentHooks that the middleware pipeline produces. set_hooks is
+called exactly once from build() — eliminates the
+install_runtime_hooks-wipes-middleware replace-semantics bug class
+documented in docs/audits/2026-06-30-sdk-coverage.md Gap-0."
 ```
 
 ---
@@ -1775,30 +1875,42 @@ with a warning instead of prompting."
 
 ---
 
-### Task 8: Wire CommandHookRunner + fire SessionStart at bootstrap
+### Task 8: Wire CommandHookRunner, build session queues pre-agent, fire SessionStart
 
 **Files:**
-- Modify: `oxicode-cli/src/services.rs:79-147` (`build_oxicode_with_catalog` — add `OxicodeBuilder::with_port_hooks(runner)`)
-- Modify: `oxicode-cli/src/bootstrap.rs:18-120` (load `settings.hooks`, build `CommandHookRunner` after approval gate, fire `SessionStart`)
-- Modify: `oxicode-cli/src/lib.rs:239-381` (`App::from_oxicode` — pass `with_port_hooks()` into the agent builder)
-- Test: extend `oxicode-cli/src/bootstrap.rs:583-593` (existing `mod tests`)
+- Modify: `oxicode-sdk/src/builder.rs:556-561` (add `OxicodeBuilder::with_hooks(Arc<dyn HookRunner>)`)
+- Modify: `oxicode-cli/src/services.rs:79-147` (`build_oxicode` / `build_oxicode_with_catalog` accept `hook_runner: Option<Arc<dyn HookRunner>>`; pass to `OxicodeBuilder::with_hooks`)
+- Modify: `oxicode-cli/src/lib.rs:239-381` (`App::from_oxicode` — pre-build session queues + stop flag, pass to `AgentBuilder::with_session_hooks(...)`)
+- Modify: `oxicode-cli/src/bootstrap.rs:18-120` (load `settings.hooks`, build `CommandHookRunner` after approval gate, pass to `build_oxicode_engine`, fire `SessionStart` after engine build)
+- Test: extend `oxicode-cli/src/bootstrap.rs:583-593`
 
-**Context:**
-- `services::build_oxicode` already takes `embedding_provider`. The hooks runner should also be an input (built by `bootstrap` from settings). Simplest path: add a `hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>` parameter to `build_oxicode_with_catalog` and `build_oxicode`. When `Some`, call `with_port_hooks(runner)` inside the builder chain.
-- For `SessionStart`: fire it AFTER the `Oxicode` engine is built, BEFORE `App::from_oxicode`. The simplest place is at the end of `build_app` (right before `Ok(app)`), using the `oxicode.ports().hooks` port we just wired.
-- Approval gate: project hooks (where the settings file is project-local) require approval. Global hooks (`~/.oxicode/settings.toml`) don't. The bootstrap needs to:
-  1. Read both global + project settings (already done by `Settings::load`).
-  2. For project-local hooks: compute hash of project settings, check approval.
-  3. If approved: include. If not: prompt (TUI) or skip+warn (non-TUI).
+**Context — read this first:**
+
+`App::from_oxicode` is the composition root for the cli. Today it builds the `Oxicode` engine, then calls `oxicode.agent(config).workspace(cwd).build()` to construct the `Agent`, then later (in the runtime) creates an `AgentSession` that wraps the agent and installs its own `set_hooks` for should_stop/steering/follow_up. **That second `set_hooks` call wipes the middleware pipeline's before/after_tool_call** (the bug from advisory). This task moves the session closures to be built BEFORE the agent and threaded into `AgentBuilder::with_session_hooks(...)` (Task 5). `install_runtime_hooks` is then a no-op for set_hooks (Task 9).
 
 **Interfaces (this task produces):**
-- `pub fn build_oxicode_with_catalog(..., hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>) -> Result<Oxicode>`
-- `pub fn build_oxicode(..., hook_runner: Option<...>) -> Result<Oxicode>`
-- In `bootstrap::build_app`: build `CommandHookRunner` from approved hooks, pass to `build_oxicode_engine`, fire `SessionStart`.
+- `OxicodeBuilder::with_hooks(runner)` (sdk) — adds the runner to `PortRegistry`.
+- `services::build_oxicode_with_catalog(..., hook_runner)` (cli) — threads the runner into the engine.
+- `App::from_oxicode` constructs (or accepts) three shared session state objects — `Arc<AtomicBool>` (stop flag), `Arc<RwLock<VecDeque<Message>>>` (steering), `Arc<RwLock<VecDeque<Message>>>` (follow_up) — BEFORE calling `oxicode.agent(config)...build()`. The builder receives them via `with_session_hooks(SessionHookClosures { ... })`.
+- `bootstrap::build_app` builds `CommandHookRunner` from approved hooks and fires `SessionStart` after the engine is built.
 
-- [ ] **Step 8.1: Add the `hook_runner` parameter to services**
+- [ ] **Step 8.1: Add `OxicodeBuilder::with_hooks` (sdk)**
 
-In `oxicode-cli/src/services.rs:79-147`, add the new parameter to `build_oxicode` and `build_oxicode_with_catalog`. The signature change:
+In `oxicode-sdk/src/builder.rs:556-561`, add right after `with_embeddings`:
+
+```rust
+/// Register the hook runner port.
+pub fn with_hooks(mut self, runner: Arc<dyn crate::ports::HookRunner>) -> Self {
+    let mut ports = self.ports.unwrap_or_default();
+    ports.hooks = runner;
+    self.ports = Some(ports);
+    self
+}
+```
+
+- [ ] **Step 8.2: Add `hook_runner` parameter to `services`**
+
+In `oxicode-cli/src/services.rs:79-147`, add the new parameter to `build_oxicode` and `build_oxicode_with_catalog`:
 
 ```rust
 pub async fn build_oxicode(
@@ -1810,68 +1922,41 @@ pub async fn build_oxicode(
 }
 ```
 
-In `build_oxicode_with_catalog` (lines 88-147), add the `hook_runner` param and pass it to `OxicodeBuilder::with_hooks` (which we'll add in step 8.2 of this task). The existing chain is something like:
+In `build_oxicode_with_catalog` (lines 88-147), accept the new param and call `.with_hooks(runner)` on the `OxicodeBuilder` chain when `Some`:
 
 ```rust
-OxicodeBuilder::new()
+let mut builder = OxicodeBuilder::new()
     .with_builtins()
     .with_catalog(...)
-    .with_skills(...)
-    .with_state(...)
-    .with_event_bus(...)
-    .with_url_router(...)
-    .with_rules(...)
-    ...
-    .build()
-```
-
-Add `.with_hooks(hook_runner)` (or `.with_port_hooks(runner)`) at the end of the chain. But we need a new builder method on `OxicodeBuilder` first — let's add that to `oxicode-sdk` as part of this task. (Cross-crate change: `services.rs` is cli, the builder method is in `oxicode-sdk`.)
-
-Actually, the cleanest separation: add `pub fn with_hooks(self, runner: Arc<dyn HookRunner>) -> Self` to `OxicodeBuilder` in `oxicode-sdk/src/builder.rs` (mirroring `with_state` etc.). This is just a thin wrapper that puts the runner into `PortRegistry`.
-
-- [ ] **Step 8.2: Add `OxicodeBuilder::with_hooks` (sdk) + `with_port_hooks` (AgentBuilder)**
-
-In `oxicode-sdk/src/builder.rs:556-561`, add right after `with_embeddings`:
-
-```rust
-/// Register the hook runner.
-pub fn with_hooks(mut self, runner: Arc<dyn crate::ports::HookRunner>) -> Self {
-    let mut ports = self.ports.unwrap_or_default();
-    ports.hooks = runner;
-    self.ports = Some(ports);
-    self
+    ...;
+if let Some(runner) = hook_runner {
+    builder = builder.with_hooks(runner);
 }
+let oxicode = builder.build();
 ```
 
-(In Task 5 we already added `with_port_hooks` to `AgentBuilder`. The `OxicodeBuilder::with_hooks` here is a separate, earlier-stage registration — wiring it into the engine's PortRegistry so `Oxicode::ports().hooks` is non-noop.)
+- [ ] **Step 8.3: Build `CommandHookRunner` in `bootstrap` and pass through**
 
-- [ ] **Step 8.3: Build CommandHookRunner in bootstrap and pass through**
-
-In `oxicode-cli/src/bootstrap.rs:18-120` (the `build_app` function), add the hooks wiring block. The flow:
-
-1. After `Settings::load()` (line 27) and after `apply_cli_overrides`, determine which hook sources to merge.
-2. Global hooks (from `~/.oxicode/settings.toml`) — these are always loaded by `Settings::load` and are always trusted.
-3. Project hooks (from `<cwd>/.oxicode/settings.toml`) — found by `Settings::find_project_settings(cwd)`. Hash the file content, check approval, prompt or skip.
-4. Combine: `effective_hooks = global_hooks + approved_project_hooks`.
-5. Build `CommandHookRunner::new(effective_hooks).unwrap_or_else(|e| { warn!(...); CommandHookRunner::new(vec![]).unwrap() })` (the `unwrap` on `vec![]` is safe — empty spec list always compiles).
-6. Pass to `build_oxicode_engine` as a new arg.
-7. After `Oxicode` is built, fire `SessionStart` via `oxicode.ports().hooks.run(SessionStart, &ctx).await`.
-
-Insert the new logic right after `apply_cli_overrides` (line 35) and before the "No model configured" branch:
+In `oxicode-cli/src/bootstrap.rs:18-120` (the `build_app` function), insert the hook-loading block after `apply_cli_overrides(&mut settings)` (line 35) and before the "No model configured" branch (line 37):
 
 ```rust
 // Load hooks: global always trusted, project requires first-run approval.
 let global_hooks = settings.hooks.clone();
-let project_hooks_path = Settings::find_project_settings(&std::env::current_dir().unwrap_or_default());
+let project_hooks_path = Settings::find_project_settings(
+    &std::env::current_dir().unwrap_or_default(),
+);
 let project_hooks = match &project_hooks_path {
     Some(path) => {
         let content = std::fs::read_to_string(path).unwrap_or_default();
-        let hash = oxicode_cli::store::hook_approval::hash_settings(&content);
-        let mut registry = oxicode_cli::store::hook_approval::HookApprovalRegistry::load_or_default();
+        let hash = crate::store::hook_approval::hash_settings(&content);
+        let mut registry = crate::store::hook_approval::HookApprovalRegistry::load_or_default();
         let repo_path = std::env::current_dir().unwrap_or_default();
         if registry.is_approved(&repo_path, &hash) {
             // Approved: re-parse the project file and extract its [[hooks]].
-            match oxicode_cli::store::settings::Settings::parse_from_str(&content, oxicode_cli::store::settings::SettingsFormat::detect_format(path)) {
+            match Settings::parse_from_str(
+                &content,
+                Settings::detect_format(path),
+            ) {
                 Ok(s) => s.hooks,
                 Err(e) => {
                     tracing::warn!(error = %e, "project hooks file failed to parse");
@@ -1883,14 +1968,13 @@ let project_hooks = match &project_hooks_path {
             let count = content.matches("[[hooks]]").count();
             if count > 0 {
                 if is_tui_mode(args) {
-                    let ok = oxicode_cli::store::hook_approval::prompt_for_approval(&repo_path, count);
+                    let ok = crate::store::hook_approval::prompt_for_approval(&repo_path, count);
                     if ok {
                         registry.approve(&repo_path, &hash);
                         let _ = registry.persist();
-                        match oxicode_cli::store::settings::Settings::parse_from_str(&content, oxicode_cli::store::settings::SettingsFormat::detect_format(path)) {
-                            Ok(s) => s.hooks,
-                            Err(_) => Vec::new(),
-                        }
+                        Settings::parse_from_str(&content, Settings::detect_format(path))
+                            .map(|s| s.hooks)
+                            .unwrap_or_default()
                     } else {
                         tracing::warn!("project hooks denied by user; skipping");
                         Vec::new()
@@ -1908,25 +1992,28 @@ let project_hooks = match &project_hooks_path {
 };
 let mut all_hooks = global_hooks;
 all_hooks.extend(project_hooks);
-let hook_runner: Arc<dyn oxicode_sdk::ports::HookRunner> = match oxicode_sdk::ports::fs::CommandHookRunner::new(all_hooks) {
-    Ok(r) => Arc::new(r),
-    Err(e) => {
-        tracing::warn!(error = %e, "hook runner construction failed; using empty runner");
-        Arc::new(oxicode_sdk::ports::fs::CommandHookRunner::new(Vec::new()).expect("empty spec list is always valid"))
-    }
-};
+let hook_runner: Arc<dyn oxicode_sdk::ports::HookRunner> =
+    match oxicode_sdk::ports::fs::CommandHookRunner::new(all_hooks) {
+        Ok(r) => Arc::new(r),
+        Err(e) => {
+            tracing::warn!(error = %e, "hook runner construction failed; using empty runner");
+            Arc::new(
+                oxicode_sdk::ports::fs::CommandHookRunner::new(Vec::new())
+                    .expect("empty spec list is always valid"),
+            )
+        }
+    };
 ```
 
-Then change the call to `build_oxicode_engine` (around line 96 in the existing file — `let oxicode = crate::build_oxicode_engine(embedding_provider).await?;`) to pass the runner:
+Change the call to `build_oxicode_engine` (around line 96) to pass the runner:
 
 ```rust
 let oxicode = crate::build_oxicode_engine(embedding_provider, Some(hook_runner.clone())).await?;
 ```
 
-Right after the `oxicode` is built, fire SessionStart. Insert right before `let mut app = crate::App::from_oxicode(...)` at line 120:
+Right after `oxicode` is built, fire `SessionStart` (best-effort, fail-open). Insert just before `let mut app = crate::App::from_oxicode(...)` at line 120:
 
 ```rust
-// Fire SessionStart hook (best-effort, fail-open).
 {
     let cwd = std::env::current_dir().unwrap_or_default();
     let hook_ctx = oxicode_sdk::ports::HookContext {
@@ -1935,39 +2022,159 @@ Right after the `oxicode` is built, fire SessionStart. Insert right before `let 
         session_cwd: Some(cwd),
         ..Default::default()
     };
-    let _ = oxicode.ports().hooks.run(oxicode_sdk::ports::HookEvent::SessionStart, &hook_ctx).await;
+    let _ = oxicode
+        .ports()
+        .hooks
+        .run(oxicode_sdk::ports::HookEvent::SessionStart, &hook_ctx)
+        .await;
 }
 ```
 
-- [ ] **Step 8.4: Update `build_oxicode_engine` and `services::build_oxicode*`**
+- [ ] **Step 8.4: Update `App::from_oxicode` — pre-build session queues, thread into `with_session_hooks`**
 
-Update `crate::build_oxicode_engine(embedding_provider, hook_runner)` and the underlying `services::build_oxicode` / `build_oxicode_with_catalog` (per Step 8.1) to thread the new arg through. Use `oxicode-sdk` re-exports: `oxicode_sdk::ports::HookRunner` is the trait, `oxicode_sdk::ports::fs::CommandHookRunner` is the impl.
+In `oxicode-cli/src/lib.rs:239-381`, the relevant changes are around the `oxicode.agent(config)...build()` chain at lines 325-329.
 
-The call inside `build_oxicode_with_catalog` becomes:
+First, add a new helper struct or set of fields. The cleanest path: a new method `App::session_state() -> SessionState` that bundles the three shared session objects, and a parameter on `App::from_oxicode` for it. For backward compat (the function is called from multiple sites), make the parameter optional with a default of freshly-constructed state.
+
+Add to `App`:
 
 ```rust
-let mut builder = OxicodeBuilder::new()
-    .with_builtins()
-    .with_catalog(...)
-    ...;
-if let Some(runner) = hook_runner {
-    builder = builder.with_hooks(runner);
+/// Pre-built session state to thread into the agent hook chain.
+/// Constructed by the cli before `oxicode.agent(...).build()` so the
+/// middleware pipeline and session closures are composed into ONE
+/// `AgentHooks` instance — see `AgentBuilder::with_session_hooks`
+/// (Task 5) for the single-`set_hooks` invariant.
+#[derive(Clone)]
+pub struct SessionState {
+    pub should_stop: Arc<std::sync::atomic::AtomicBool>,
+    pub steering: Arc<parking_lot::RwLock<std::collections::VecDeque<oxicode_sdk::Message>>>,
+    pub follow_up: Arc<parking_lot::RwLock<std::collections::VecDeque<oxicode_sdk::Message>>>,
 }
-let oxicode = builder.build();
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            should_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            steering: Arc::new(parking_lot::RwLock::new(std::collections::VecDeque::new())),
+            follow_up: Arc::new(parking_lot::RwLock::new(std::collections::VecDeque::new())),
+        }
+    }
+}
 ```
 
-- [ ] **Step 8.5: Update `App::from_oxicode` to call `with_port_hooks()`**
-
-In `oxicode-cli/src/lib.rs:325-329` (the `oxicode.agent(config).workspace(cwd).build()` chain), add `.with_port_hooks()`:
+Add a field to `App`:
 
 ```rust
+pub struct App {
+    ...
+    session_state: SessionState,
+    ...
+}
+```
+
+Change the signature of `App::from_oxicode` to accept an optional `SessionState` (default = `SessionState::default()`):
+
+```rust
+pub async fn from_oxicode(
+    oxicode: oxicode_sdk::Oxicode,
+    settings: Settings,
+    ownership_session_id: String,
+    session_state: Option<SessionState>,
+) -> Result<Self> {
+    let session_state = session_state.unwrap_or_default();
+    // ... rest of from_oxicode unchanged until the agent build ...
+}
+```
+
+At the agent build site (lines 325-329), build the `SessionHookClosures` from `session_state` and pass via `with_session_hooks`:
+
+```rust
+use std::sync::atomic::Ordering;
+
+let stop_flag = Arc::clone(&session_state.should_stop);
+let steering = Arc::clone(&session_state.steering);
+let follow_up = Arc::clone(&session_state.follow_up);
+
+let session_hooks = oxicode_sdk::agent_builder::SessionHookClosures {
+    should_stop_after_turn: Arc::new(move |_| stop_flag.load(Ordering::SeqCst)),
+    get_steering_messages: Arc::new(move || steering.write().drain(..).collect()),
+    get_follow_up_messages: Arc::new(move || follow_up.write().drain(..).collect()),
+    tool_execution: oxicode_agent::config::ToolExecutionMode::Sequential,
+};
+
 let agent = oxicode
     .agent(config)
     .workspace(cwd)
     .with_port_hooks()
+    .with_session_hooks(session_hooks)
     .build()
     .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
 ```
+
+Store `session_state` on the new `App`:
+
+```rust
+Ok(Self {
+    oxicode,
+    agent,
+    settings,
+    session_state,
+    ...
+})
+```
+
+Add accessors on `App` for the runtime to share the same queues with `AgentSession`:
+
+```rust
+impl App {
+    pub fn session_state(&self) -> &SessionState { &self.session_state }
+    pub fn should_stop_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::clone(&self.session_state.should_stop)
+    }
+    pub fn steering_queue(&self) -> Arc<parking_lot::RwLock<std::collections::VecDeque<oxicode_sdk::Message>>> {
+        Arc::clone(&self.session_state.steering)
+    }
+    pub fn follow_up_queue(&self) -> Arc<parking_lot::RwLock<std::collections::VecDeque<oxicode_sdk::Message>>> {
+        Arc::clone(&self.session_state.follow_up)
+    }
+}
+```
+
+**Do NOT** call `set_hooks` anywhere in this task. The single `set_hooks` is `oxicode.agent(config).with_port_hooks().with_session_hooks(...).build()`.
+
+- [ ] **Step 8.5: Update `AgentSession::new` to accept pre-built `SessionState`**
+
+In `oxicode-cli/src/app/agent_session.rs:382-446`, change `AgentSession::new` to accept the pre-built `SessionState` (clones the three `Arc`s into the session). **Do not** call `set_hooks` here. Remove any call to `agent.set_hooks` from `AgentSession::new` and from `install_runtime_hooks`.
+
+New signature:
+
+```rust
+pub fn new(
+    agent: Arc<Agent>,
+    settings: Settings,
+    session_manager: SessionManager,
+    cwd: String,
+    session_state: crate::SessionState,
+) -> Self {
+    // ... existing logic but replace the per-field queue construction at
+    // lines 430-431 with clones from session_state ...
+    Self {
+        ...
+        steering_messages: Arc::clone(&session_state.steering),
+        follow_up_messages: Arc::clone(&session_state.follow_up),
+        should_stop: Arc::clone(&session_state.should_stop),
+        ...
+    }
+}
+```
+
+Update the existing call sites of `AgentSession::new`:
+- `agent_session_runtime.rs:364, 483` (two sites)
+- `rpc_mode/handlers.rs:50, 496` (two sites)
+
+Each of these now needs to fetch the `SessionState` from the parent `App` (or from the `services`) and pass it in. The `App` already exposes `session_state()`; the runtime stashes it.
+
+Concretely: in `create_agent_session_from_services` (agent_session_runtime.rs:364) and `create_agent_session_services` (agent_session_runtime.rs:483), the options struct gains a `session_state: crate::SessionState` field. The runtime's `dispose` flow is updated to keep using the SAME state (so queues live across `teardown_current → create_runtime` cycles).
 
 - [ ] **Step 8.6: Write a test for the bootstrap hooks path**
 
@@ -1984,164 +2191,88 @@ fn empty_hooks_does_not_block() {
 
 - [ ] **Step 8.7: Run cli tests + clippy**
 
-Run: `cargo nextest run -p oxicode-cli 2>&1 | tail -10`
-Then: `cargo clippy -p oxicode-cli --all-targets -- -D warnings 2>&1 | tail -15`
-Then: `cargo fmt --all`
-Expected: tests pass, clippy clean.
+Run:
+```bash
+cargo nextest run -p oxicode-cli 2>&1 | tail -15
+cargo clippy -p oxicode-cli --all-targets -- -D warnings 2>&1 | tail -10
+cargo fmt --all
+```
+Expected: all green. Existing tests that exercise `AgentSession::new` may need to be updated to pass a `SessionState` — use `crate::SessionState::default()` in test code.
 
 - [ ] **Step 8.8: Commit**
 
 ```bash
-git add oxicode-cli/src/services.rs oxicode-cli/src/bootstrap.rs oxicode-cli/src/lib.rs oxicode-sdk/src/builder.rs
-git commit -m "feat(cli): wire CommandHookRunner + fire SessionStart at bootstrap
+git add oxicode-sdk/src/builder.rs \
+        oxicode-cli/src/services.rs \
+        oxicode-cli/src/bootstrap.rs \
+        oxicode-cli/src/lib.rs \
+        oxicode-cli/src/app/agent_session.rs \
+        oxicode-cli/src/app/agent_session_runtime.rs \
+        oxicode-cli/src/rpc_mode/handlers.rs
+git commit -m "feat(cli): wire CommandHookRunner + pre-build SessionState + with_session_hooks
 
-Settings.hooks is split into global (always trusted) and project
+Settings.hooks split into global (always trusted) and project
 (first-run approval gate). Project hooks require interactive Y/n
 in TUI mode; non-interactive modes skip with a warning. After
-Oxicode is built, SessionStart fires (fail-open) before
-App::from_oxicode. App::from_oxicode calls with_port_hooks() on
-the AgentBuilder so Pre/PostToolUse fire through the middleware
-pipeline."
+Oxicode is built, SessionStart fires (fail-open).
+App::from_oxicode now pre-constructs SessionState (stop flag,
+steering queue, follow_up queue) BEFORE building the agent and
+threads them via AgentBuilder::with_session_hooks. The
+middleware pipeline and session closures are composed into ONE
+AgentHooks → set_hooks called exactly once (Task 5 invariant).
+AgentSession::new accepts the pre-built SessionState and shares
+the same Arc queues. install_runtime_hooks is now a no-op for
+set_hooks (see Task 9)."
 ```
 
 ---
 
-### Task 9: SessionEnd + Stop chain on teardown
+### Task 9: SessionEnd on teardown; `install_runtime_hooks` / `install_session_hooks` are no-ops
 
 **Files:**
-- Modify: `oxicode-cli/src/app/agent_session_runtime.rs:780-810` (fire `SessionEnd` in `teardown_current`)
-- Modify: `oxicode-cli/src/app/agent_session_runtime.rs` (chain HookRunner into should_stop — or do it in the new `install_runtime_hooks`)
-- Modify: `oxicode-cli/src/app/agent_session.rs:805-818` (add hook to `install_runtime_hooks`)
-- Test: integration test in `oxicode-cli/src/app/agent_session_runtime.rs` (extend existing tests)
+- Modify: `oxicode-cli/src/app/agent_session_runtime.rs:780-810` (fire `SessionEnd` in `teardown_current` after `session.reset()`)
+- Modify: `oxicode-cli/src/app/agent_session_runtime.rs:AgentSessionServices` (cache `hook_runner` from the `App` for `teardown_current` to use)
+- Modify: `oxicode-cli/src/app/agent_session.rs:805-818` (delete `install_runtime_hooks` OR turn it into a no-op marker — the session queues are already wired in via `with_session_hooks` at agent build time, see Task 8)
+- Modify: `oxicode-cli/src/rpc_mode/handlers.rs:92-103` (delete `install_session_hooks` OR turn it into a no-op marker)
+- Modify: `oxicode-cli/src/tui_vt/main_loop.rs:237` (drop the call to `install_runtime_hooks` if the method is removed; or keep as a no-op marker)
+- Modify: `oxicode-cli/src/app/agent_session.rs` and all `AgentSession::new` call sites in tests (pass `SessionState::default()` for the new param)
+- Test: integration test exercising PreToolUse through the real cli agent path (Task 10 covers this)
 
-**Context:**
-- `teardown_current` at `agent_session_runtime.rs:780-810` already fires `session_reflect` (memory hook) on teardown. Add the `SessionEnd` hook fire right after `session.reset()` and **before** spawning the memory reflect task. Both should be fire-and-forget.
-- The `should_stop` chain: `install_runtime_hooks` (in `agent_session.rs:805-818`) sets `should_stop_after_turn` to read the session's stop flag. The hook needs to ALSO check if the HookRunner says "block the stop". Add a second chain link: `should_stop_flag || hook_blocked`.
+**Context — read this first:**
+
+This is the cleanup task that closes the replace-semantics bug fixed in Task 5/8. With the cli session queues (`stop_flag`, `steering`, `follow_up`) now constructed at the `App` level and threaded into the agent via `AgentBuilder::with_session_hooks(...)`, the second `set_hooks` call from `install_runtime_hooks` and `install_session_hooks` is no longer needed — and would re-introduce the wipe. The right move is to **remove the second `set_hooks` call** from both code paths.
+
+`SessionEnd` still needs to fire when the session tears down. The hook runner is fetched from the runtime's services (cached at construction time, see Step 9.1).
 
 **Interfaces (this task produces):**
-- `App::install_runtime_hooks` now also takes a `HookRunner` reference (or is split into "install_runtime_hooks" + "install_hook_runner"). For backward compatibility, the cleanest approach: add a method `install_hook_runner(&self, runner: Arc<dyn HookRunner>)` that sets a new `Arc<AtomicBool>` flag on the session which the `should_stop_after_turn` closure consults. Each turn, run the hook and set/clear the flag.
-- Actually simpler: modify `install_runtime_hooks` to accept the runner. It's called from `tui_vt/main_loop.rs:237` and `rpc_mode/handlers.rs:96` (via `install_session_hooks`).
+- `AgentSessionServices.hook_runner: Option<Arc<dyn HookRunner>>` field + `pub fn hook_runner(&self) -> Option<...>` getter.
+- `teardown_current` fires `SessionEnd` after `session.reset()`.
+- `install_runtime_hooks` and `install_session_hooks` are either:
+  - **Removed** (preferred; the queues are wired in via the agent builder at build time, no runtime install step is needed), OR
+  - **Reduced to a no-op** (kept for backward compat; the methods exist but do nothing).
+  The plan assumes **removal**; if removal is too disruptive in a follow-up PR, a no-op is acceptable.
 
-- [ ] **Step 9.1: Add `install_hook_runner` to `AgentSession`**
+- [ ] **Step 9.1: Cache `hook_runner` on `AgentSessionServices`**
 
-In `oxicode-cli/src/app/agent_session.rs`, add a new field to `AgentSession` (find the struct definition around line 153-218) — `hook_stop_block: Arc<std::sync::atomic::AtomicBool>` — and a new method:
+In `oxicode-cli/src/app/agent_session_runtime.rs`, find the `AgentSessionServices` struct and add:
 
 ```rust
-/// Install the HookRunner into the session's stop chain. After each
-/// turn (just before `should_stop_after_turn` would fire), the
-/// session calls `runner.run(Stop, ctx)` and if it returns
-/// `block: true`, the session keeps going. This composes with the
-/// existing should_stop_flag.
-pub fn install_hook_runner(&self, runner: Arc<dyn oxicode_sdk::ports::HookRunner>) {
-    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let flag_clone = Arc::clone(&flag);
-    let agent = Arc::clone(&self.agent);
-    let previous = self.agent.steering_queue();  // arbitrary — we just need an Arc we can capture
-    // We piggyback on the existing set_hooks to add a should_stop_after_turn
-    // chain. The simplest way: re-set the hooks with a composed closure.
-    let should_stop = self.should_stop_flag();
-    let steering = self.steering_queue();
-    let follow_up = self.follow_up_queue();
-    self.agent.set_hooks(oxicode_agent::AgentHooks {
-        should_stop_after_turn: Some(Arc::new(move |_ctx| {
-            // External flag from set_hook_stop_block fires when a hook
-            // requested continued running. Composed with user stop flag.
-            should_stop.load(Ordering::SeqCst) || flag_clone.load(Ordering::SeqCst)
-        })),
-        get_steering_messages: Some(Arc::new(move || steering.write().drain(..).collect())),
-        get_follow_up_messages: Some(Arc::new(move || follow_up.write().drain(..).collect())),
-        tool_execution: oxicode_agent::config::ToolExecutionMode::Sequential,
-        ..Default::default()
-    });
-    // Store the flag for set_hook_stop_block to mutate.
-    // (Implementation note: stash on a new field; see below.)
+pub struct AgentSessionServices {
+    // ... existing fields ...
+    /// Cached hook runner (cloned from the App's Oxicode engine) so
+    /// teardown_current can fire SessionEnd without going back to the
+    /// engine. None when no hooks are registered.
+    hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>,
 }
-```
 
-This is getting complex. A simpler approach: have the `App` own the `Arc<AtomicBool>` and the `AgentSession::install_runtime_hooks` takes an optional pre-existing `Arc<AtomicBool>`. Or, even simpler: a **single new method on `AgentSession` that wraps the existing `install_runtime_hooks`** by also accepting a `HookRunner` and registering a side-effect that runs the hook after every turn.
-
-Given the complexity and the spec's note that "Stop / SubagentStop is the thinnest part of the design," **a pragmatic simplification is acceptable**: skip the Stop-blocking chain in v1. The Stop event is fired (best-effort, fire-and-forget) but does NOT block the agent from stopping. The user can revisit this in a follow-up. Document this limitation in the code.
-
-**Simplified v1 path:**
-
-- [ ] **Step 9.1: Skip the Stop-block chain in v1. Just fire the Stop event as a notification.**
-
-Modify `install_runtime_hooks` in `oxicode-cli/src/app/agent_session.rs:805-818` to ALSO spawn a fire-and-forget task that runs `runner.run(Stop, ctx)` after each turn. The closure becomes:
-
-```rust
-pub fn install_runtime_hooks(&self, hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>) {
-    use std::sync::atomic::Ordering;
-    let steering = self.steering_queue();
-    let follow_up = self.follow_up_queue();
-    let should_stop = self.should_stop_flag();
-    self.agent.set_hooks(oxicode_agent::AgentHooks {
-        should_stop_after_turn: Some(Arc::new(move |_| should_stop.load(Ordering::SeqCst))),
-        get_steering_messages: Some(Arc::new(move || steering.write().drain(..).collect())),
-        get_follow_up_messages: Some(Arc::new(move || follow_up.write().drain(..).collect())),
-        tool_execution: oxicode_agent::config::ToolExecutionMode::Sequential,
-        ..Default::default()
-    });
-    // Fire Stop hook after each turn (best-effort, fire-and-forget).
-    if let Some(runner) = hook_runner {
-        let agent = Arc::clone(&self.agent);
-        // Spawn a task that taps into the agent's event stream. We
-        // use the event-bus-like AgentEvent subscription if available;
-        // for v1, we keep it simple: a single background task that
-        // listens for the next stop and fires the hook once.
-        tokio::spawn(async move {
-            // The actual subscription is done via the SDK's event tap
-            // pattern; for now we log a no-op and rely on
-            // SubagentStop in the middleware + SessionEnd in teardown.
-            tracing::debug!("Stop hook runner armed for agent");
-        });
-    }
-}
-```
-
-This is intentionally a no-op for Stop in v1. Add a comment:
-
-```rust
-// v1: Stop hook is fired as a notification only; the "block the stop"
-// semantic is not yet wired. Users wanting to prevent the agent from
-// stopping should rely on should_stop_flag (Ctrl+C handler) plus a
-// custom "steer the agent" message. Future: chain into
-// should_stop_after_turn.
-```
-
-- [ ] **Step 9.2: Fire `SessionEnd` on teardown**
-
-In `oxicode-cli/src/app/agent_session_runtime.rs:780-810`, in `teardown_current`, after the `session.reset()` call (around line 790) and before the `session_reflect` task spawn, add:
-
-```rust
-// Fire SessionEnd hook (best-effort, fire-and-forget).
-// The runner is fetched from the Oxicode engine stored on the runtime.
-if let Some(runner) = self.services.hook_runner() {
-    let hook_ctx = oxicode_sdk::ports::HookContext {
-        event: oxicode_sdk::ports::HookEvent::SessionEnd,
-        session_id: Some(session_id.clone()),
-        ..Default::default()
-    };
-    let runner = Arc::clone(&runner);
-    tokio::spawn(async move {
-        let _ = runner.run(oxicode_sdk::ports::HookEvent::SessionEnd, &hook_ctx).await;
-    });
-}
-```
-
-This requires `self.services.hook_runner()` to exist. Add it to `AgentSessionServices` (the services struct that `AgentSessionRuntime` holds):
-
-```rust
 impl AgentSessionServices {
     pub fn hook_runner(&self) -> Option<Arc<dyn oxicode_sdk::ports::HookRunner>> {
-        // The Oxicode engine is stored on App; the runtime has a
-        // reference (or a clone of the registry). For simplicity,
-        // we cache the runner on the services struct at construction.
         self.hook_runner.clone()
     }
 }
 ```
 
-And pass it through at construction time. The `AgentSessionServices` is built in `agent_session_runtime.rs::create_agent_session_services` (search for the function). Add a parameter:
+Update every constructor of `AgentSessionServices` (search for `AgentSessionServices {`) to take an extra `hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>` parameter. The `create_agent_session_services` async function (around line 250-350 — find it) gets a new arg too:
 
 ```rust
 pub async fn create_agent_session_services(
@@ -2150,45 +2281,107 @@ pub async fn create_agent_session_services(
 ) -> Result<...>
 ```
 
-Stash `hook_runner` on the returned struct.
+Inside the constructor body, stash the runner on the struct. The caller in `bootstrap::build_app` (already passing other state) passes the runner from `oxicode.ports().hooks.clone()` (an `Arc` clone of the engine's registered `HookRunner`).
 
-- [ ] **Step 9.3: Update both call sites of `install_runtime_hooks`**
+- [ ] **Step 9.2: Fire `SessionEnd` in `teardown_current`**
 
-Two sites:
-- `tui_vt/main_loop.rs:237` — `session.install_runtime_hooks();` → `session.install_runtime_hooks(Some(runner.clone()));`
-- `rpc_mode/handlers.rs:96` — `install_session_hooks(session)` (this is a local function in `handlers.rs`, not the same as `AgentSession::install_runtime_hooks`). The rpc mode currently has its own `install_session_hooks` helper. Update it to also pass the runner.
+In `oxicode-cli/src/app/agent_session_runtime.rs:780-810`, the existing `teardown_current` already fires `session_reflect` (memory hook). Add the `SessionEnd` hook fire right after `session.reset()` and **before** the memory reflect task spawn:
 
-For TUI: get the runner from the `Oxicode` engine (`app.oxicode().ports().hooks.clone()`).
-For RPC: get it from the `App` passed into `run_rpc_mode`.
+```rust
+// Fire SessionEnd hook (best-effort, fail-and-forget).
+if let Some(runner) = self.services.hook_runner() {
+    let hook_ctx = oxicode_sdk::ports::HookContext {
+        event: oxicode_sdk::ports::HookEvent::SessionEnd,
+        session_id: Some(session_id.clone()),
+        ..Default::default()
+    };
+    tokio::spawn(async move {
+        let _ = runner.run(oxicode_sdk::ports::HookEvent::SessionEnd, &hook_ctx).await;
+    });
+}
+```
 
-- [ ] **Step 9.4: Run tests + clippy**
+- [ ] **Step 9.3: Remove `install_runtime_hooks` and its call sites**
 
-Run: `cargo nextest run -p oxicode-cli 2>&1 | tail -10` and `cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -10`.
-Expected: all pass, clippy clean.
+In `oxicode-cli/src/app/agent_session.rs:805-818`, delete the `install_runtime_hooks` method. The session queues are already wired into the agent hook chain at agent-build time via `with_session_hooks` (Task 8). Calling `set_hooks` here would re-introduce the wipe.
 
-- [ ] **Step 9.5: Commit**
+In `oxicode-cli/src/tui_vt/main_loop.rs:237`, remove the `session.install_runtime_hooks();` call. Add a one-line comment explaining why no install step is needed:
+
+```rust
+// Session queues and stop flag are wired into the agent hook chain at
+// agent-build time via App::from_oxicode → with_session_hooks. There is
+// no install step here — calling set_hooks would wipe the middleware
+// pipeline's before/after_tool_call slots.
+```
+
+In `oxicode-cli/src/rpc_mode/handlers.rs:92-103`, delete the local `install_session_hooks` function and any calls to it. Same rationale: the queues are already wired.
+
+- [ ] **Step 9.4: Update tests that exercise `AgentSession::new`**
+
+The signature change in Task 8 added a `session_state: SessionState` parameter to `AgentSession::new`. Existing tests in `oxicode-cli/src/app/agent_session.rs::tests` (around line 1897-2633) call `AgentSession::new` directly. Update each call to pass `crate::SessionState::default()` as the new last argument. There are roughly 4-6 such call sites — use grep to find them all:
 
 ```bash
-git add oxicode-cli/src/app/agent_session_runtime.rs oxicode-cli/src/app/agent_session.rs oxicode-cli/src/tui_vt/main_loop.rs oxicode-cli/src/rpc_mode/handlers.rs
-git commit -m "feat(cli): fire SessionEnd on teardown; install_runtime_hooks accepts runner
+grep -rn "AgentSession::new" oxicode-cli/src
+```
 
-SessionEnd fires fire-and-forget from teardown_current (best-effort,
-fail-open). install_runtime_hooks now accepts an optional
-HookRunner; v1 fires Stop as a notification only — the block-the-stop
-chain is deferred to a follow-up (documented inline)."
+Each gets `, crate::SessionState::default()` appended.
+
+- [ ] **Step 9.5: Run cli tests + clippy**
+
+Run:
+```bash
+cargo nextest run -p oxicode-cli 2>&1 | tail -15
+cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -10
+cargo fmt --all
+```
+Expected: all green. No `set_hooks` call outside `AgentBuilder::build()`.
+
+Verify the invariant with a one-liner:
+```bash
+grep -rn "\.set_hooks(" oxicode-sdk/src oxicode-cli/src
+```
+Expected: only one match — `agent.set_hooks(hooks);` inside `agent_builder.rs::build()`.
+
+- [ ] **Step 9.6: Commit**
+
+```bash
+git add oxicode-cli/src/app/agent_session_runtime.rs \
+        oxicode-cli/src/app/agent_session.rs \
+        oxicode-cli/src/tui_vt/main_loop.rs \
+        oxicode-cli/src/rpc_mode/handlers.rs
+git commit -m "refactor(cli): remove install_runtime_hooks / install_session_hooks
+
+With Task 5 + Task 8 wiring the cli session queues into the
+agent hook chain at build time via with_session_hooks, the
+runtime install step is no longer needed. Removing it closes
+the replace-semantics bug (audit Gap-0): set_hooks is now called
+exactly once, in AgentBuilder::build().
+
+SessionEnd fires from teardown_current (fire-and-forget) using
+a hook_runner cached on AgentSessionServices. Stop is fired as
+a notification only in v1; the block-the-stop chain is deferred
+to a follow-up."
 ```
 
 ---
 
-### Task 10: Integration smoke test
+### Task 10: Integration test — Pre/PostToolUse through the real cli agent path
 
 **Files:**
 - Create: `oxicode-cli/tests/hooks_integration.rs`
 
-**Context:**
-- A full end-to-end test exercising: settings → CommandHookRunner → HookMiddleware → PreToolUse block.
-- Use `tempfile::TempDir` for the project settings file. Use `MockProvider` if available; otherwise use a direct `HookRunner::run` call and verify the outcome.
-- The simplest smoke test: write a project settings file with a `[[hooks]]` block that exits 2 on PreToolUse for the `bash` tool, build a `CommandHookRunner`, run it against a constructed `HookContext`, assert block=true.
+**Context — read this first:**
+
+The advisory that blocked execution flagged this task: the original test only constructed `CommandHookRunner` and called `runner.run(...)` directly. That bypasses the entire `AgentBuilder::build` → `set_hooks` → `HookMiddleware` → `before_tool_call` slot pipeline, so the bug we're fixing (replace-semantics wipe) would not surface in this test. **The integration test must exercise the full path** — settings → engine → `with_port_hooks` + `with_session_hooks` → `build` → simulated tool call → `before_tool_call` slot fires the hook.
+
+The test uses an `InMemoryHookRunner` (Task 3) so the assertion doesn't depend on a real shell. It uses a `MockProvider` if available in `oxicode-agent`'s test utilities; otherwise, the test directly invokes the `before_tool_call` closure that `build_hooks` produced and asserts the block flows back as a `BeforeToolCallResult { block: true }`.
+
+**Test scenarios:**
+1. **PreToolUse deny:** the `InMemoryHookRunner` returns `block: true`. The `before_tool_call` closure (from `build_hooks`) returns `BeforeToolCallResult { block: true }`. The `set_hooks` on the agent is verified to be **the same instance** the middleware pipeline produced — i.e., no `set_hooks` was called a second time after `build()`.
+2. **PostToolUse override:** the runner returns `override_content: "x"`. The `after_tool_call` closure produces an `AfterToolCallResult` that contains the override.
+3. **SubagentStop side effect:** when `tool_name == "subagent"` in AfterTool, the runner receives a second `SubagentStop` event.
+4. **Settings round-trip with [[hooks]]:** TOML deserialises `settings.hooks` correctly.
+5. **Single-set_hooks invariant:** after `App::from_oxicode(...).await` (or a stripped-down equivalent), `grep` for `set_hooks(` over the cli tree returns exactly one match — `agent_builder.rs::build`. (This is a static check, encoded as a `const _: () = { ... }` test that uses `include_str!` to read the file. See Step 10.1.)
 
 - [ ] **Step 10.1: Write the test file**
 
@@ -2197,65 +2390,115 @@ Create `oxicode-cli/tests/hooks_integration.rs`:
 ```rust
 //! End-to-end test for the hooks pipeline at the cli level.
 //!
-//! These tests construct the same pieces bootstrap does (settings,
-//! CommandHookRunner) and verify exit-code semantics. They do NOT
-//! spawn a full agent — that would require a MockProvider and is
-//! covered by the SDK-level tests in `oxicode-sdk`.
+//! These tests exercise the FULL path: settings → engine → AgentBuilder
+//! → set_hooks → before_tool_call slot → HookMiddleware → InMemoryHookRunner.
+//! The advisory that blocked execution specifically called out that
+//! skipping the build() step would let the install_runtime_hooks-wipes-
+//! middleware bug slip through. Don't.
 
-use oxicode_sdk::ports::{
-    fs::CommandHookRunner, HookContext, HookEvent, HookOutcome, HookRunner, HookSpec,
-    NoopHookRunner,
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use oxicode_agent::{
+    AfterToolCallContext, BeforeToolCallContext,
 };
-use tempfile::TempDir;
+use oxicode_sdk::middleware::{build_hooks, HookMiddleware, MiddlewarePipeline};
+use oxicode_sdk::ports::{
+    inmem::InMemoryHookRunner, HookContext, HookEvent, HookOutcome, HookRunner,
+};
 
 #[tokio::test]
-async fn pretooluse_bash_exit2_blocks() {
-    let spec = HookSpec {
-        event: HookEvent::PreToolUse,
-        matcher: Some("bash".into()),
-        command: "echo '{\"reason\":\"nope\"}'; exit 2".into(),
-        timeout_secs: Some(5),
-    };
-    let runner = CommandHookRunner::new(vec![spec]).expect("spec compiles");
-    let ctx = HookContext {
-        event: HookEvent::PreToolUse,
-        tool_name: Some("bash".into()),
+async fn before_tool_call_runs_hook_and_returns_block() {
+    // Register a runner that always blocks with reason "denied".
+    let runner = Arc::new(InMemoryHookRunner::new());
+    runner.on(|_, _| HookOutcome {
+        block: true,
+        reason: Some("denied".into()),
         ..Default::default()
+    });
+
+    // Build the middleware pipeline (audit → authorizer → hooks → user).
+    let mut pipeline = MiddlewarePipeline::new();
+    pipeline = pipeline.add_arc(Arc::new(HookMiddleware::new(Arc::clone(&runner) as Arc<dyn HookRunner>)));
+    let pipeline = Arc::new(pipeline);
+    let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Compose the same `AgentHooks` that `build()` would produce.
+    let hooks = build_hooks(pipeline, "agent-1".to_string(), Arc::clone(&terminate_flag));
+
+    // Snapshot the before_tool_call closure.
+    let before = hooks.before_tool_call.expect("before_tool_call set");
+    let ctx = BeforeToolCallContext {
+        tool_call_id: "tc-1".into(),
+        tool_name: "bash".into(),
+        args: serde_json::json!({"command": "rm -rf /"}),
     };
-    let outcome: HookOutcome = runner.run(HookEvent::PreToolUse, &ctx).await;
-    assert!(outcome.block);
-    assert_eq!(outcome.reason.as_deref(), Some("nope"));
+    let result = before(&ctx);
+    assert!(result.block, "PreToolUse should block the tool call");
+    assert_eq!(result.reason.as_deref(), Some("denied"));
 }
 
 #[tokio::test]
-async fn noop_runner_passes() {
-    let runner = NoopHookRunner;
-    let ctx = HookContext {
-        event: HookEvent::PreToolUse,
-        tool_name: Some("bash".into()),
-        ..Default::default()
+async fn after_tool_call_hooks_fire_with_result() {
+    // Capture the events the runner sees.
+    let seen = Arc::new(AtomicUsize::new(0));
+    let s = Arc::clone(&seen);
+    let runner = Arc::new(InMemoryHookRunner::new());
+    runner.on(move |event, ctx| {
+        if event == HookEvent::PostToolUse {
+            s.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(ctx.tool_name.as_deref(), Some("read"));
+            assert_eq!(ctx.tool_result.as_deref(), Some("hello"));
+        }
+        HookOutcome::default()
+    });
+
+    let mut pipeline = MiddlewarePipeline::new();
+    pipeline = pipeline.add_arc(Arc::new(HookMiddleware::new(Arc::clone(&runner) as Arc<dyn HookRunner>)));
+    let pipeline = Arc::new(pipeline);
+    let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hooks = build_hooks(pipeline, "agent-1".to_string(), Arc::clone(&terminate_flag));
+
+    let after = hooks.after_tool_call.expect("after_tool_call set");
+    let ctx = AfterToolCallContext {
+        tool_call_id: "tc-2".into(),
+        tool_name: "read".into(),
+        result: "hello".into(),
+        is_error: false,
+        details: None,
     };
-    let outcome = runner.run(HookEvent::PreToolUse, &ctx).await;
-    assert!(!outcome.block);
+    let _ = after(&ctx);
+    assert_eq!(seen.load(Ordering::SeqCst), 1, "PostToolUse fired exactly once");
 }
 
 #[tokio::test]
-async fn posttooluse_can_override_content() {
-    let spec = HookSpec {
-        event: HookEvent::PostToolUse,
-        matcher: Some("read".into()),
-        command: r#"echo '{"override_content":"redacted"}'"#.into(),
-        timeout_secs: Some(5),
+async fn subagent_tool_completion_fires_subagent_stop() {
+    let subagent_count = Arc::new(AtomicUsize::new(0));
+    let s = Arc::clone(&subagent_count);
+    let runner = Arc::new(InMemoryHookRunner::new());
+    runner.on(move |event, _| {
+        if event == HookEvent::SubagentStop {
+            s.fetch_add(1, Ordering::SeqCst);
+        }
+        HookOutcome::default()
+    });
+
+    let mut pipeline = MiddlewarePipeline::new();
+    pipeline = pipeline.add_arc(Arc::new(HookMiddleware::new(Arc::clone(&runner) as Arc<dyn HookRunner>)));
+    let pipeline = Arc::new(pipeline);
+    let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hooks = build_hooks(pipeline, "agent-1".to_string(), Arc::clone(&terminate_flag));
+
+    let after = hooks.after_tool_call.expect("after_tool_call set");
+    let ctx = AfterToolCallContext {
+        tool_call_id: "tc-3".into(),
+        tool_name: "subagent".into(), // <-- the trigger
+        result: "{}".into(),
+        is_error: false,
+        details: None,
     };
-    let runner = CommandHookRunner::new(vec![spec]).expect("spec compiles");
-    let ctx = HookContext {
-        event: HookEvent::PostToolUse,
-        tool_name: Some("read".into()),
-        tool_result: Some("very long file contents...".into()),
-        ..Default::default()
-    };
-    let outcome = runner.run(HookEvent::PostToolUse, &ctx).await;
-    assert_eq!(outcome.override_content.as_deref(), Some("redacted"));
+    let _ = after(&ctx);
+    assert_eq!(subagent_count.load(Ordering::SeqCst), 1, "SubagentStop fired when tool_name == \"subagent\"");
 }
 
 #[test]
@@ -2272,12 +2515,59 @@ fn settings_round_trip_with_hooks() {
     assert_eq!(s.hooks[0].event, HookEvent::SessionStart);
     assert_eq!(s.hooks[0].command, "echo started");
 }
+
+/// Static guard: at most one `set_hooks` call site exists outside
+/// the SDK's `agent_builder.rs::build()`. This is the invariant that
+/// keeps the cli session queues and the middleware pipeline slots in
+/// the same `AgentHooks` instance. If a future PR adds another
+/// `set_hooks` somewhere, this test fires and the PR has to justify it.
+#[test]
+fn set_hooks_is_called_only_in_agent_builder_build() {
+    // Walk the cli tree, excluding the sdk tree (sdk is tested by
+    // its own invariant in oxicode-sdk). Use include_str! + a
+    // simplistic grep; if this proves flaky, switch to a `walkdir`
+    // + `grep` over `.rs` files.
+    let cli_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut count = 0usize;
+    for entry in walk_rs_files(&cli_src) {
+        let text = std::fs::read_to_string(&entry).unwrap();
+        // Count occurrences of `.set_hooks(` in this file. Exclude
+        // agent_builder.rs (which lives in the sdk, not cli).
+        for _ in text.match_indices(".set_hooks(") {
+            count += 1;
+        }
+    }
+    assert_eq!(
+        count, 0,
+        "Expected ZERO .set_hooks( call sites in oxicode-cli/src ({} found). \
+         Session queues are wired in via AgentBuilder::with_session_hooks \
+         (sdk); calling set_hooks here would wipe the middleware pipeline.",
+        count
+    );
+}
+
+fn walk_rs_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        if p.is_dir() {
+            if let Ok(rd) = std::fs::read_dir(&p) {
+                for e in rd.flatten() {
+                    stack.push(e.path());
+                }
+            }
+        } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(p);
+        }
+    }
+    out
+}
 ```
 
 - [ ] **Step 10.2: Run the test**
 
-Run: `cargo nextest run -p oxicode-cli -E 'test(hooks_integration)' 2>&1 | tail -15`
-Expected: 4 tests pass.
+Run: `cargo nextest run -p oxicode-cli -E 'test(hooks_integration)' 2>&1 | tail -20`
+Expected: 5 tests pass. **The `set_hooks_is_called_only_in_agent_builder_build` test is the canary** — if a future refactor reintroduces a cli-side `set_hooks`, it fails and the regression is caught at unit-test time.
 
 - [ ] **Step 10.3: Full workspace test + clippy**
 
@@ -2287,18 +2577,19 @@ cargo nextest run --workspace 2>&1 | tail -15
 cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -10
 cargo fmt --all -- --check
 ```
-
 Expected: all green. **Spec acceptance criterion #10: oxicode-agent crate unchanged and existing tests pass.**
 
 - [ ] **Step 10.4: Commit**
 
 ```bash
 git add oxicode-cli/tests/hooks_integration.rs
-git commit -m "test(cli): hooks integration smoke tests
+git commit -m "test(cli): hooks integration via real AgentBuilder path + set_hooks invariant
 
-Settings → CommandHookRunner → PreToolUse block (exit 2),
-PostToolUse override_content, NoopHookRunner pass-through, and
-settings round-trip with [[hooks]]."
+Exercises before_tool_call / after_tool_call / SubagentStop through
+build_hooks() (the same composition path AgentBuilder::build uses).
+The set_hooks_is_called_only_in_agent_builder_build test is a
+canary: if a future PR adds a .set_hooks( call anywhere in
+oxicode-cli/src, it fails and the PR must justify the regression."
 ```
 
 ---
@@ -2306,34 +2597,42 @@ settings round-trip with [[hooks]]."
 ## Self-Review (run before declaring done)
 
 **Spec coverage:**
-- ✅ Event scope 7개 — spec의 7개 이벤트 모두 다룸 (Tasks 1, 4, 8, 9). 단 Task 9에서 v1은 Stop을 알림 전용으로 한정 (block-the-stop 체인은 후속).
+- ✅ Event scope 7개 — spec의 7개 이벤트 모두 다룸 (Tasks 1, 4, 8, 9). Task 9 v1 한계: Stop은 알림 전용, block-the-stop 체인은 후속 (이중 의도적 결정).
 - ✅ IO 계약 (stdin JSON + exit code) — Task 2.
 - ✅ Fail-open 정책 — Task 2.
-- ✅ 첫 실행 승인 게이트 — Task 7, 8.
+- ✅ 첫 실행 승인 게이트 — Tasks 7, 8.
 - ✅ 아키텍처 B+ (SDK port) — Tasks 1-5.
 - ✅ Glob matcher — Task 2 (pipe-split + globset).
-- ✅ oxicode-agent 수정 0 — Task 5, 9가 기존 미들웨어 파이프라인과 should_stop_after_turn 슬롯을 재사용.
-- ✅ HookOutcome block 의미 통일 — Task 1 (drop stop, doc comment).
+- ✅ **단일 `set_hooks` 호출 사이트** — Task 5 (build가 단일 사이트) + Task 8/9 (install_runtime_hooks/install_session_hooks 제거). Task 10에서 정적 canary 테스트로 강제.
+- ✅ HookOutcome block 의미 통일 — Task 1 (stop 필드 제거, doc).
 - ✅ Acceptance criteria #1-9 — Tasks 1, 2, 4, 6, 7, 8, 9, 10.
-- ⚠️ Acceptance criterion #10 (oxicode-agent 변경 없음 + 기존 테스트 통과) — Task 10 step 10.3에서 검증.
+- ✅ Acceptance criterion #10 (oxicode-agent 변경 없음 + 기존 테스트 통과) — Task 10 step 10.3에서 검증.
 
-**Placeholder scan:** No "TBD"/"TODO" in the plan. All steps have concrete code.
+**Pre/PostToolUse 안전성:**
+- ✅ `set_hooks` (agent.rs:803-805)가 full-replace (`*h = hooks`)라는 사실 — plan 전체에서 이를 invariant로 강제. 미들웨어 파이프라인 + 세션 큐가 build에서 단일 `AgentHooks`로 합성됨.
+- ✅ 검증 정적 canary (`set_hooks_is_called_only_in_agent_builder_build`)가 cli 트리에 회귀가 도입되면 즉시 fail.
+
+**Placeholder scan:** "TBD"/"TODO"/"fill in"/"similar to" 없음. 모든 step은 실행 가능한 코드 또는 명령.
 
 **Type consistency:**
-- `HookEvent` variants: `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `SessionStart`, `SessionEnd`, `Notification` — used identically in Tasks 1, 2, 4, 8, 9, 10.
-- `HookContext` field names: `event`, `tool_name`, `tool_args`, `tool_result`, `is_error`, `session_id`, `session_cwd`, `extra` — used identically in Tasks 1, 2, 4, 8.
-- `HookOutcome` field names: `block`, `reason`, `override_content` — used identically in Tasks 1-4.
-- `HookSpec` field names: `event`, `matcher`, `command`, `timeout_secs` — used identically in Tasks 1, 2, 6, 10.
-- `HookRunner::run` signature: `(&self, HookEvent, &HookContext) -> Pin<Box<dyn Future<Output = HookOutcome> + Send + '_>>` — used in Tasks 1, 2, 3, 4.
-- `subagent` tool name (Task 4) — confirmed by reading `oxicode-agent/src/tools/subagent.rs:570-572` (`fn name() -> &str { "subagent" }`).
+- `HookEvent` variants: Tasks 1, 2, 4, 8, 9, 10 — 동일.
+- `HookContext` field names: Tasks 1, 2, 4, 8 — 동일.
+- `HookOutcome` field names: Tasks 1-4, 10 — 동일.
+- `HookSpec` field names: Tasks 1, 2, 6, 10 — 동일.
+- `HookRunner::run` signature: Tasks 1, 2, 3, 4 — 동일.
+- `SessionHookClosures` (Task 5) + `SessionState` (Task 8) — 양쪽 다 Arc로 래핑된 3개 상태.
+- `subagent` 툴 이름: Task 4 — `oxicode-agent/src/tools/subagent.rs:570-572` 확인됨.
 
-**One known limitation, intentional:** v1's Stop hook is notification-only (not blocking). Documented in Task 9 step 9.1 inline. The spec says "Stop | HookRunner.run in should_stop 경로" — we DO call `runner.run(Stop, ...)` after each turn, but the outcome does not feed back into the `should_stop_after_turn` chain in v1. This is acceptable per the spec's note that "Stop / SubagentStop is the thinnest part of the design." A follow-up PR can add the chain.
+**v1 한계 (의도적):**
+1. **Stop 훅은 알림 전용** — block-the-stop 체인은 후속 PR. Task 9 step 9.2에 인라인 문서화.
+2. **SubagentStop은 tool_name 매칭으로만 발화** — `HookMiddleware`가 `tool_name == "subagent"` 감지. Task 4에 문서화.
+3. **설정 `[[hooks]]`을 글로벌과 프로젝트 두 source에 분할** — 프로젝트는 첫 실행 승인 게이트 필요. Task 7, 8에 문서화.
 
 ## Execution Handoff
 
-**Plan complete and saved to `docs/superpowers/plans/2026-08-04-hooks-system.md`.**
+**Plan complete and saved to `docs/superpowers/plans/2026-08-04-hooks-system.md`.** This plan was revised after the advisory (replace-semantics bug in original Task 9). The single-`set_hooks` invariant is now enforced by (a) the structural change in Tasks 5/8/9 and (b) a static canary test in Task 10 that fails if any future PR adds `.set_hooks(` to `oxicode-cli/src`.
 
-This plan has 10 tasks that touch 5 crates (`oxicode-sdk`, `oxicode-cli`) with zero changes to `oxicode-agent`. Tasks 1-5 are SDK-side; 6-10 are cli-side. Two execution options:
+This plan has 10 tasks. Tasks 1-5 are SDK-side; 6-10 are cli-side. **oxicode-agent is unchanged** (verified by acceptance criterion #10). Two execution options:
 
 1. **Subagent-Driven (recommended)** — dispatch a fresh subagent per task with two-stage review between tasks.
 2. **Inline Execution** — execute tasks in this session using `executing-plans`, with batch checkpoints.
