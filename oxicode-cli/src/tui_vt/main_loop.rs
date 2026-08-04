@@ -186,6 +186,10 @@ pub struct RenderState {
     pub follow_ups: Vec<String>,
     /// Todo checklist items (text, done).
     pub todo_items: Vec<(String, bool)>,
+    /// Vim editing state (enabled by /vim command).
+    pub vim_state: oxicode_vtui::vim::VimState,
+    /// Vim clipboard buffer.
+    pub vim_clipboard: String,
 }
 
 /// One rendered transcript line.
@@ -538,10 +542,12 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
             state.input_enabled = enabled;
         }
         InlineCommand::SetCursorVisible(_) | InlineCommand::ForceRedraw => {
-            // Redraw on the next loop iteration; nothing to persist.
         }
         InlineCommand::SetReasoningStage(stage) => {
             state.reasoning_stage = stage;
+        }
+        InlineCommand::SetVimModeEnabled(enabled) => {
+            state.vim_state.set_enabled(enabled);
         }
         InlineCommand::SetQueuedInputs { entries } => {
             state.queued_inputs = entries;
@@ -1141,6 +1147,30 @@ fn spawn_input_thread(
                     let mut s = state.lock();
                     if s.agent_hub_open && ch == 'q' {
                         s.agent_hub_open = false;
+                    } else if s.vim_state.enabled() && !s.slash_popup.open {
+                        // Route through the vim engine. Deref the guard so
+                        // we can borrow multiple fields simultaneously.
+                        let s = &mut *s;
+                        let vkey =
+                            crossterm::event::KeyEvent::new(KeyCode::Char(ch), key.modifiers);
+                        let mut editor = InputEditor {
+                            buffer: &mut s.input_buffer,
+                            cursor: &mut s.input_cursor,
+                        };
+                        let outcome = oxicode_vtui::vim::handle_key(
+                            &mut s.vim_state,
+                            &mut editor,
+                            &mut s.vim_clipboard,
+                            &vkey,
+                        );
+                        if outcome.handled {
+                            refresh_slash_popup(s);
+                        } else {
+                            let cursor = s.input_cursor;
+                            s.input_buffer.insert(cursor, ch);
+                            s.input_cursor = cursor + ch.len_utf8();
+                            refresh_slash_popup(s);
+                        }
                     } else {
                         let cursor = s.input_cursor;
                         s.input_buffer.insert(cursor, ch);
@@ -1846,7 +1876,16 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let body = state.input_buffer.clone();
     let placeholder = state.placeholder.clone();
 
-    let mut line_spans = vec![Span::styled(prefix, prefix_style)];
+    let mut line_spans = Vec::new();
+    if let Some(label) = state.vim_state.status_label() {
+        line_spans.push(Span::styled(
+            format!("[{label}] "),
+            Style::default()
+                .fg(color_from_anstyle(styles.tool.get_fg_color()))
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    line_spans.push(Span::styled(prefix, prefix_style));
     if body.is_empty()
         && let Some(ph) = placeholder
     {
@@ -1871,8 +1910,14 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     // Place the cursor inside the composer at the current edit position.
     // +1 on both axes to clear the rounded border.
     if state.input_enabled {
+        let vim_off = state
+            .vim_state
+            .status_label()
+            .map(|l| format!("[{l}] ").chars().count() as u16)
+            .unwrap_or(0);
         let cursor_x = area.left()
             + 1
+            + vim_off
             + state.prompt_prefix.chars().count() as u16
             + state.input_cursor as u16;
         let cursor_y = area.top() + 1;
@@ -2088,6 +2133,55 @@ fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &Render
             Span::styled(&item.description, Style::default().fg(secondary)),
         ]);
         frame.render_widget(Paragraph::new(line), row_area);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Vim mode — Editor adapter for the input buffer
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Adapter that lets the vim engine operate on `RenderState`'s input buffer.
+struct InputEditor<'a> {
+    buffer: &'a mut String,
+    cursor: &'a mut usize,
+}
+
+impl<'a> oxicode_vtui::vim::Editor for InputEditor<'a> {
+    fn content(&self) -> &str {
+        self.buffer
+    }
+    fn cursor(&self) -> usize {
+        *self.cursor
+    }
+    fn set_cursor(&mut self, pos: usize) {
+        *self.cursor = pos.min(self.buffer.len());
+    }
+    fn move_left(&mut self) {
+        *self.cursor = self.cursor.saturating_sub(1);
+    }
+    fn move_right(&mut self) {
+        let len = self.buffer.len();
+        *self.cursor = (*self.cursor + 1).min(len);
+    }
+    fn delete_char_forward(&mut self) {
+        let cursor = *self.cursor;
+        if cursor < self.buffer.len() {
+            let next = self.buffer[cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| cursor + i)
+                .unwrap_or(self.buffer.len());
+            self.buffer.replace_range(cursor..next, "");
+        }
+    }
+    fn insert_text(&mut self, text: &str) {
+        let cursor = *self.cursor;
+        self.buffer.insert_str(cursor, text);
+        *self.cursor = cursor + text.len();
+    }
+    fn replace(&mut self, content: String, cursor: usize) {
+        *self.buffer = content;
+        *self.cursor = cursor.min(self.buffer.len());
     }
 }
 

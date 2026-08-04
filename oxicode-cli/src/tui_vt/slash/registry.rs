@@ -166,7 +166,33 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(ModelCommand));
     registry.register(Box::new(CancelCommand));
     registry.register(Box::new(StatusCommand));
+    registry.register(Box::new(VimCommand));
     registry.register(Box::new(AgentsCommand));
+}
+
+/// `/vim` — toggle vim mode for prompt editing.
+struct VimCommand;
+
+impl SlashCommand for VimCommand {
+    fn name(&self) -> &'static str {
+        "vim"
+    }
+    fn description(&self) -> &'static str {
+        "Toggle vim mode for prompt editing"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let enabled = !ctx.state.vim_state.enabled();
+        ctx.state.vim_state.set_enabled(enabled);
+        ctx.reply(
+            InlineMessageKind::Info,
+            if enabled {
+                "Vim mode: ON — press Esc for Normal, i for Insert".to_string()
+            } else {
+                "Vim mode: OFF".to_string()
+            },
+        );
+        SlashOutcome::Handled
+    }
 }
 
 /// `/agents` — open the Agent Hub overlay. Alias: `/hub`.

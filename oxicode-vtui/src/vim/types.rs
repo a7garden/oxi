@@ -175,3 +175,9 @@ impl VimState {
         self.mode = mode;
     }
 }
+
+impl Default for VimState {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
