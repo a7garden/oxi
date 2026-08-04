@@ -345,6 +345,13 @@ pub struct Settings {
     /// `oxicode_agent::advisor` engine wired into `AgentSession`.
     #[serde(default)]
     pub advisor: AdvisorSettings,
+
+    // ── Hooks (port 16) ───────────────────────────────────────────
+    /// User-configured event→shell-command hooks. Loaded from the
+    /// `[[hooks]]` array in settings.toml. Project hooks are gated by
+    /// the first-run approval (see `store/hook_approval.rs`).
+    #[serde(default)]
+    pub hooks: Vec<oxicode_sdk::ports::HookSpec>,
 }
 
 /// Advisor subsystem settings — a read-only reviewer that shadows the primary
@@ -471,12 +478,13 @@ impl Default for Settings {
             todo_panel_enabled: true,
             agent_hub_enabled: true,
             snapcompact_enabled: false,
+            advisor: AdvisorSettings::default(),
             mermaid_render_enabled: true,
             commit_tool_enabled: false,
             ttsr_enabled: false,
             ttsr_interrupt_mode: default_ttsr_mode(),
             model_roles: HashMap::new(),
-            advisor: AdvisorSettings::default(),
+            hooks: Vec::new(),
         }
     }
 }
@@ -2167,5 +2175,28 @@ api_key_env = "MY_PROVIDER_API_KEY"
         assert_eq!(merged.custom_providers[0].name, "my-provider");
         // Default api value
         assert_eq!(merged.custom_providers[0].api, "openai-completions");
+    }
+
+    #[test]
+    fn settings_deserialise_hooks_array() {
+        let toml = r#"
+            [[hooks]]
+            event = "PreToolUse"
+            matcher = "bash|write"
+            command = "echo pre"
+            timeout_secs = 10
+        "#;
+        let s: Settings = toml::from_str(toml).unwrap();
+        assert_eq!(s.hooks.len(), 1);
+        assert_eq!(s.hooks[0].event, oxicode_sdk::ports::HookEvent::PreToolUse);
+        assert_eq!(s.hooks[0].matcher.as_deref(), Some("bash|write"));
+        assert_eq!(s.hooks[0].command, "echo pre");
+        assert_eq!(s.hooks[0].timeout_secs, Some(10));
+    }
+
+    #[test]
+    fn settings_default_has_no_hooks() {
+        let s = Settings::default();
+        assert!(s.hooks.is_empty());
     }
 }

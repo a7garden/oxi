@@ -26,6 +26,7 @@ pub mod skill;
 pub use access::SimpleAccessGate;
 pub use auth::FileAuthProvider;
 pub use capability::TomlCapabilityResolver;
+pub use catalog::{CatalogConfig, FileModelCatalog};
 pub use config::FileConfigStore;
 pub use hook_runner::CommandHookRunner;
 pub use persona::FilePersonaProvider;
