@@ -234,7 +234,9 @@ pub async fn run_tui(app: App) -> Result<()> {
     // `create_agent_session_from_services` so we can construct the session
     // without duplicating the runtime plumbing here.
     let session = build_agent_session(&app).await?;
-    session.install_runtime_hooks();
+    // No install_runtime_hooks call: session queues and stop flag are
+    // wired into the agent hook chain at agent-build time via
+    // App::from_oxicode → with_session_hooks.
     let session_handle = session.clone_handle();
 
     // Forward session events to a tokio mpsc so the main loop can
@@ -1008,8 +1010,11 @@ async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::Age
     use crate::store::session::SessionManager;
 
     let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
-    let services =
-        create_agent_session_services(CreateAgentSessionServicesOptions::new(cwd.clone()))?;
+    let hook_runner = Arc::clone(&app.oxicode().ports().hooks);
+    let services = create_agent_session_services(
+        CreateAgentSessionServicesOptions::new(cwd.clone()),
+        Some(hook_runner),
+    )?;
     let services = Arc::new(services);
 
     let model_id = app.model_id();

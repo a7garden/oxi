@@ -115,8 +115,19 @@ pub struct AgentSessionServices {
     /// allow-list hook on `ToolRegistry`).
     pub persona_provider: Arc<dyn oxicode_sdk::PersonaProvider>,
     /// Diagnostics collected during service creation.
-    #[allow(dead_code)]
     pub diagnostics: Vec<AgentSessionRuntimeDiagnostic>,
+    /// Cached hook runner (cloned from the engine) so `teardown_current`
+    /// can fire `SessionEnd` without going back to the engine. None when
+    /// no hooks are registered.
+    #[allow(dead_code)]
+    pub hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>,
+}
+
+impl AgentSessionServices {
+    /// Get a clone of the cached hook runner (or `None`).
+    pub fn hook_runner(&self) -> Option<Arc<dyn oxicode_sdk::ports::HookRunner>> {
+        self.hook_runner.clone()
+    }
 }
 
 /// Options for creating cwd-bound runtime services.
@@ -165,6 +176,7 @@ pub fn get_default_agent_dir() -> PathBuf {
 /// Returns services plus diagnostics. It does **not** create an `AgentSession`.
 pub fn create_agent_session_services(
     options: CreateAgentSessionServicesOptions,
+    hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>,
 ) -> Result<AgentSessionServices> {
     let cwd = options.cwd;
     let agent_dir = options.agent_dir.unwrap_or_else(get_default_agent_dir);
@@ -213,6 +225,7 @@ pub fn create_agent_session_services(
         resource_loader,
         persona_provider,
         diagnostics: Vec::new(),
+        hook_runner,
     })
 }
 
@@ -791,13 +804,6 @@ impl AgentSessionRuntime {
         Ok(())
     }
 
-    /// Shut down the runtime gracefully.
-    pub fn dispose(&mut self) {
-        self.teardown_current(SessionSwitchReason::Quit);
-    }
-
-    // ── Internal ─────────────────────────────────────────────────────
-
     /// Teardown the current session.
     fn teardown_current(&mut self, _reason: SessionSwitchReason) {
         // Capture session data before reset for memory reflection
@@ -806,6 +812,20 @@ impl AgentSessionRuntime {
         let memory = self.session.agent_ref().get_config().memory.clone();
 
         self.session.reset();
+
+        // Fire SessionEnd hook (best-effort, fire-and-forget).
+        if let Some(runner) = self.services.hook_runner() {
+            let hook_ctx = oxicode_sdk::ports::HookContext {
+                event: oxicode_sdk::ports::HookEvent::SessionEnd,
+                session_id: Some(session_id.clone()),
+                ..Default::default()
+            };
+            tokio::spawn(async move {
+                let _ = runner
+                    .run(oxicode_sdk::ports::HookEvent::SessionEnd, &hook_ctx)
+                    .await;
+            });
+        }
 
         // Fire-and-forget: store a session summary into the memory backend.
         // Non-blocking — teardown does not wait for the write to complete.
@@ -1020,16 +1040,21 @@ fn get_default_session_dir() -> String {
 #[allow(dead_code)]
 pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
     Arc::new(|options: CreateRuntimeOptions| {
-        // Create services for the target cwd
-        let services = create_agent_session_services(CreateAgentSessionServicesOptions {
-            cwd: options.cwd.clone(),
-            agent_dir: Some(options.agent_dir.clone()),
-            auth_storage: None,
-            settings: None,
-            model_registry: None,
-            resource_loader: None,
-            persona_provider: None,
-        })?;
+        // No hooks available in the default factory path — None disables
+        // SessionEnd firing here. (Production callers go through the App
+        // which wires the runner from the engine.)
+        let services = create_agent_session_services(
+            CreateAgentSessionServicesOptions {
+                cwd: options.cwd.clone(),
+                agent_dir: Some(options.agent_dir.clone()),
+                auth_storage: None,
+                settings: None,
+                model_registry: None,
+                resource_loader: None,
+                persona_provider: None,
+            },
+            None,
+        )?;
         let services = Arc::new(services);
 
         let handle = tokio::runtime::Handle::current();

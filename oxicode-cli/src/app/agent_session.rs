@@ -808,27 +808,13 @@ impl AgentSession {
         self.should_stop.store(false, Ordering::SeqCst);
     }
 
-    /// Install the runtime hooks that connect this session's stop flag and
-    /// steering / follow-up queues to the underlying [`Agent`].
-    ///
-    /// Without this call, [`abort`](AgentSession::abort) (and thus Ctrl+C),
-    /// `steer_sync`, and follow-up injection are inert during a run — the
-    /// agent loop never observes them. Every run-mode entry point (TUI, RPC)
-    /// must call this once after constructing the session.
-    pub fn install_runtime_hooks(&self) {
-        use std::sync::atomic::Ordering;
-        let steering = self.steering_queue();
-        let follow_up = self.follow_up_queue();
-        let should_stop = self.should_stop_flag();
-        self.agent.set_hooks(oxicode_agent::AgentHooks {
-            should_stop_after_turn: Some(Arc::new(move |_| should_stop.load(Ordering::SeqCst))),
-            get_steering_messages: Some(Arc::new(move || steering.write().drain(..).collect())),
-            get_follow_up_messages: Some(Arc::new(move || follow_up.write().drain(..).collect())),
-            tool_execution: oxicode_agent::config::ToolExecutionMode::Sequential,
-            ..Default::default()
-        });
-    }
-
+    /// (Removed in the hooks refactor.) Session queues and stop flag
+    /// are now wired into the agent hook chain at agent-build time via
+    /// `App::from_oxicode` → `with_session_hooks`. Previously this
+    /// function called `agent.set_hooks(...)` a second time, which
+    /// wiped the middleware pipeline's before/after_tool_call slots
+    /// (replace-semantics bug class — audit Gap-0). See
+    /// `docs/superpowers/specs/2026-08-04-hooks-system-design.md`.
     /// Clear all queued messages and return them.
     pub fn clear_queue(&self) -> (Vec<oxicode_sdk::Message>, Vec<oxicode_sdk::Message>) {
         let steering = self.steering_messages.write().drain(..).collect();

@@ -58,7 +58,6 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
         cwd.clone(),
         session_state.clone(),
     );
-    install_session_hooks(&session);
     let session = session.clone_handle();
 
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<RpcCommand>();
@@ -93,27 +92,6 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
     reader.abort();
     writer.await.context("RPC stdout writer task failed")??;
     Ok(())
-}
-
-/// Install the cli-owned session hooks on a freshly-constructed session.
-///
-/// The session has ALREADY had the shared state wired into it via the
-/// `SessionState` we passed to `AgentSession::new`. This call now just
-/// re-installs the SAME closures so even sessions constructed outside
-/// the `App` flow (legacy paths, tests) observe Ctrl+C and queues.
-/// Once Task 9 drops the `install_runtime_hooks` call site entirely,
-/// this helper becomes dead and should be removed.
-fn install_session_hooks(session: &AgentSession) {
-    let steering = session.steering_queue();
-    let follow_up = session.follow_up_queue();
-    let should_stop = session.should_stop_flag();
-    session.agent_ref().set_hooks(AgentHooks {
-        should_stop_after_turn: Some(Arc::new(move |_| should_stop.load(Ordering::SeqCst))),
-        get_steering_messages: Some(Arc::new(move || steering.write().drain(..).collect())),
-        get_follow_up_messages: Some(Arc::new(move || follow_up.write().drain(..).collect())),
-        tool_execution: ToolExecutionMode::Sequential,
-        ..Default::default()
-    });
 }
 
 async fn read_commands(command_tx: mpsc::UnboundedSender<RpcCommand>, output: OutputSender) {
@@ -514,7 +492,6 @@ impl RpcActor {
             self.cwd.clone(),
             self.session_state.clone(),
         );
-        install_session_hooks(&new_session);
         let handle = new_session.clone_handle();
         // Replace the active handle. The previous session is dropped here;
         // any in-flight prompts continue running on their cloned handles.
