@@ -13,6 +13,24 @@ use crate::middleware::{Middleware, MiddlewarePipeline};
 use crate::observability::{AuditLog, CostTracker, Tracer};
 use crate::security::{Authorizer, CapabilitySet};
 
+/// Closures owned by the cli (or any product) that participate in the
+/// agent hook chain. Passed into [`AgentBuilder::with_session_hooks`] so
+/// they are composed into the same `AgentHooks` that the middleware
+/// pipeline produces. The single-`set_hooks` invariant (only
+/// [`AgentBuilder::build`] calls `set_hooks`) is what keeps the
+/// before/after_tool_call slots alive across the cli session boot.
+pub struct SessionHookClosures {
+    /// Stop signal consulted at the end of every turn.
+    pub should_stop_after_turn:
+        std::sync::Arc<dyn Fn(&oxicode_agent::ShouldStopAfterTurnContext) -> bool + Send + Sync>,
+    /// Drain the steering queue on demand.
+    pub get_steering_messages: std::sync::Arc<dyn Fn() -> Vec<oxicode_ai::Message> + Send + Sync>,
+    /// Drain the follow-up queue on demand.
+    pub get_follow_up_messages: std::sync::Arc<dyn Fn() -> Vec<oxicode_ai::Message> + Send + Sync>,
+    /// Tool-execution mode (Sequential is the cli default).
+    pub tool_execution: oxicode_agent::ToolExecutionMode,
+}
+
 /// Builder for creating an agent with custom configuration.
 #[allow(dead_code)]
 pub struct AgentBuilder<'a> {
@@ -30,6 +48,10 @@ pub struct AgentBuilder<'a> {
     cost_tracker: Option<Arc<CostTracker>>,
     // ── Middleware ──
     middlewares: Vec<Arc<dyn Middleware>>,
+    // ── Hooks (port 16) ──
+    hooks_middleware: Option<crate::middleware::HookMiddleware>,
+    // ── Session-level closures (cli-owned stop flag + queues) ──
+    session_hooks: Option<SessionHookClosures>,
 }
 
 impl<'a> AgentBuilder<'a> {
@@ -47,6 +69,8 @@ impl<'a> AgentBuilder<'a> {
             audit_log: None,
             cost_tracker: None,
             middlewares: Vec::new(),
+            hooks_middleware: None,
+            session_hooks: None,
         }
     }
 
@@ -204,6 +228,30 @@ impl<'a> AgentBuilder<'a> {
         self.config.subagent_runner = Some(runner);
         self.tools
             .register(oxicode_agent::tools::SubagentTool::new());
+        self
+    }
+
+    /// Add the [`HookMiddleware`] backed by the engine's registered
+    /// `HookRunner` port (see [`crate::OxicodeBuilder::with_hooks`]).
+    ///
+    /// When the port is `NoopHookRunner` (the default), this is a no-op.
+    /// The middleware composes into the existing pipeline at the
+    /// `audit → authorizer → hooks → user` position. `set_hooks` is called
+    /// exactly once in `build()` — see the single-`set_hooks` invariant.
+    pub fn with_port_hooks(mut self) -> Self {
+        let runner = std::sync::Arc::clone(&self.oxicode.ports().hooks);
+        self.hooks_middleware = Some(crate::middleware::HookMiddleware::new(runner));
+        self
+    }
+
+    /// Install session-level closures (stop flag + steering/follow_up
+    /// queues). These are composed into the same `AgentHooks` that the
+    /// middleware pipeline produces, so `set_hooks` is called exactly once.
+    /// This is the **only** way to install session hooks — never call
+    /// `agent.set_hooks(...)` elsewhere (it would wipe the middleware
+    /// pipeline's before/after_tool_call slots).
+    pub fn with_session_hooks(mut self, closures: SessionHookClosures) -> Self {
+        self.session_hooks = Some(closures);
         self
     }
 
@@ -476,7 +524,7 @@ impl<'a> AgentBuilder<'a> {
     /// Uses the Oxicode engine's `ProviderResolver` for isolated provider/model
     /// lookups, so `switch_model()` and compaction stay within the engine's
     /// registry — no global state pollution.
-    pub fn build(self) -> anyhow::Result<Agent> {
+    pub fn build(mut self) -> anyhow::Result<Agent> {
         // 1. Resolve model from Oxicode's instance registry
         let model = self.oxicode.resolve_model(&self.config.model_id)?;
 
@@ -566,11 +614,16 @@ impl<'a> AgentBuilder<'a> {
         //    `build_hooks` once, so `set_hooks()` is called exactly
         //    once. This avoids the replace-semantics bug class
         //    documented in docs/audits/2026-06-30-sdk-coverage.md
-        //    Gap-0 ("observability silently overwritten when
-        //    composes with user middlewares").
+        //    Gap-0 ("observability silently overwritten when composes
+        //    with user middlewares"). HookMiddleware slots and
+        //    session-level closures (via with_session_hooks) are composed
+        //    into the SAME AgentHooks instance — set_hooks remains the
+        //    single call site.
         let has_observability_mws = self.audit_log.is_some() || self.authorizer.is_some();
         let has_user_mws = !self.middlewares.is_empty();
-        if has_user_mws || has_observability_mws {
+        let has_hooks = self.hooks_middleware.is_some();
+        let has_session_hooks = self.session_hooks.is_some();
+        if has_user_mws || has_observability_mws || has_hooks || has_session_hooks {
             let agent_id = resolved_agent_id(&agent);
             let mut pipeline = MiddlewarePipeline::new();
 
@@ -598,6 +651,13 @@ impl<'a> AgentBuilder<'a> {
                 pipeline = pipeline.add_arc(Arc::new(mw));
             }
 
+            // HookMiddleware fires AFTER authorizer (so authorizer denials
+            // still short-circuit) and BEFORE user middlewares (so user
+            // middlewares observe hook-driven blocks).
+            if let Some(hooks_mw) = self.hooks_middleware.take() {
+                pipeline = pipeline.add_arc(Arc::new(hooks_mw));
+            }
+
             // User middlewares fire last so audit/auth observe their
             // calls and Authorizer denials short-circuit before them.
             for mw in self.middlewares.into_iter() {
@@ -606,7 +666,22 @@ impl<'a> AgentBuilder<'a> {
 
             let pipeline = Arc::new(pipeline);
             let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let hooks = crate::middleware::build_hooks(pipeline, agent_id, terminate_flag);
+            let mut hooks = crate::middleware::build_hooks(pipeline, agent_id, terminate_flag);
+
+            // Session-level closures — overwrite the three slots the cli
+            // owns (should_stop_after_turn, steering, follow_up) on the
+            // SAME AgentHooks the pipeline just produced. before_tool_call
+            // and after_tool_call are preserved. This keeps set_hooks as a
+            // single call site and avoids the replace-semantics bug class
+            // (audit Gap-0).
+            if let Some(session) = self.session_hooks.take() {
+                hooks.should_stop_after_turn = Some(session.should_stop_after_turn);
+                hooks.get_steering_messages = Some(session.get_steering_messages);
+                hooks.get_follow_up_messages = Some(session.get_follow_up_messages);
+                hooks.tool_execution = session.tool_execution;
+            }
+
+            // SINGLE set_hooks call for the entire agent.
             agent.set_hooks(hooks);
         }
 
