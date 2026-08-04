@@ -27,7 +27,8 @@ use oxicode_agent::AgentEvent;
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
     InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
-    InlineHeaderStatusTone, InlineMessageKind, InlineSegment, InlineTextStyle,
+    InlineHeaderStatusTone, InlineListItem, InlineMessageKind, InlineSegment, InlineTextStyle,
+    OverlayRequest,
 };
 use ratatui::{
     Frame, Terminal,
@@ -175,6 +176,8 @@ pub struct RenderState {
     pub slash_popup: SlashPopup,
     /// Current reasoning/tool stage (e.g. "tool: read"), shown above the composer.
     pub reasoning_stage: Option<String>,
+    /// Overlay modal/list state — `Some` when an overlay is open.
+    pub overlay: Option<OverlayState>,
 }
 
 /// One rendered transcript line.
@@ -204,6 +207,41 @@ pub struct SlashPopup {
     pub open: bool,
     pub items: Vec<SlashPopupItem>,
     pub selected: usize,
+}
+
+/// One item rendered inside a list overlay. Mirrors [`InlineListItem`] but
+/// is a value type owned by the TUI (the input thread reads/writes these
+/// fields directly via the `parking_lot::Mutex<RenderState>`).
+#[derive(Clone, Debug)]
+pub struct OverlayListItem {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub badge: Option<String>,
+    pub indent: u8,
+    pub search_value: Option<String>,
+    /// Original `InlineListSelection` echoed back to the harness on submit.
+    pub selection: Option<oxicode_vtui::tui::core::InlineListSelection>,
+}
+
+/// Overlay modal/list state — materialised by `apply_command` when an
+/// `InlineCommand::ShowOverlay` arrives. The input thread mutates
+/// `selected` / `search` while the overlay is open and reads the same
+/// fields when forwarding `OverlayEvent`s.
+#[derive(Clone, Debug)]
+pub struct OverlayState {
+    pub title: String,
+    pub lines: Vec<String>,
+    pub items: Vec<OverlayListItem>,
+    pub selected: usize,
+    pub search: Option<OverlaySearchState>,
+}
+
+/// Search-bar state for an overlay. `None` value means search is disabled.
+#[derive(Clone, Debug)]
+pub struct OverlaySearchState {
+    pub label: String,
+    pub placeholder: Option<String>,
+    pub value: String,
 }
 
 impl RenderState {
@@ -497,6 +535,12 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         InlineCommand::SetReasoningStage(stage) => {
             state.reasoning_stage = stage;
         }
+        InlineCommand::ShowOverlay { request } => {
+            state.overlay = Some(materialize_overlay(*request));
+        }
+        InlineCommand::CloseOverlay => {
+            state.overlay = None;
+        }
         InlineCommand::Shutdown => {
             state.shutdown_requested = true;
             return true;
@@ -508,6 +552,73 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         }
     }
     false
+}
+
+/// Convert an `OverlayRequest` into the render-state representation used by
+/// the TUI. The input thread mutates `selected` / `search` while the overlay
+/// is open, and `handle_inline_event` projects the user's selection back to
+/// the harness as `InlineEvent::Overlay`.
+fn materialize_overlay(request: OverlayRequest) -> OverlayState {
+    match request {
+        OverlayRequest::Modal(req) => OverlayState {
+            title: req.title,
+            lines: req.lines,
+            items: Vec::new(),
+            selected: 0,
+            search: None,
+        },
+        OverlayRequest::List(req) => {
+            let search = req.search.map(|cfg| OverlaySearchState {
+                label: cfg.label,
+                placeholder: cfg.placeholder,
+                value: String::new(),
+            });
+            OverlayState {
+                title: req.title,
+                lines: req.lines,
+                items: req.items.into_iter().map(overlay_item_from).collect(),
+                selected: 0,
+                search,
+            }
+        }
+        OverlayRequest::Wizard(req) => {
+            // Wizard overlays are multi-step flows that this TUI does not yet
+            // render natively; surface the first step's title/items so the
+            // user still sees something instead of a blank panel.
+            let step_items = req
+                .steps
+                .first()
+                .map(|s| {
+                    s.items
+                        .iter()
+                        .map(|it| overlay_item_from(it.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let search = req.search.map(|cfg| OverlaySearchState {
+                label: cfg.label,
+                placeholder: cfg.placeholder,
+                value: String::new(),
+            });
+            OverlayState {
+                title: req.title,
+                lines: Vec::new(),
+                items: step_items,
+                selected: 0,
+                search,
+            }
+        }
+    }
+}
+fn overlay_item_from(item: InlineListItem) -> OverlayListItem {
+    OverlayListItem {
+        title: item.title,
+        subtitle: item.subtitle,
+        badge: item.badge,
+        indent: item.indent,
+        search_value: item.search_value,
+        selection: item.selection,
+    }
 }
 
 /// Map a `SessionEvent` to the matching `InlineHandle` calls. This is the
@@ -732,6 +843,29 @@ fn handle_inline_event(
             // forward-cycle is the closest match.
             let _ = session.cycle_model();
         }
+        InlineEvent::Overlay(overlay_evt) => {
+            // The overlay state is already cleared by the input thread
+            // before this event arrives (handle_overlay_key drops it).
+            // What remains is to surface the user's choice — for now we
+            // log it and let the harness react to subsequent commands.
+            // When the slash dispatcher opens a list overlay (e.g. /model),
+            // the selection is consumed by the command that opened it via
+            // its own subscriber on the cmd channel.
+            use oxicode_vtui::tui::core::OverlayEvent;
+            match overlay_evt {
+                OverlayEvent::Submitted(sub) => {
+                    tracing::debug!(?sub, "overlay submitted");
+                    handle.close_overlay();
+                }
+                OverlayEvent::Cancelled => {
+                    tracing::debug!("overlay cancelled by user");
+                    handle.close_overlay();
+                }
+                OverlayEvent::SelectionChanged(change) => {
+                    tracing::trace!(?change, "overlay selection changed");
+                }
+            }
+        }
         _ => {
             // Other events (overlay, list-selection, etc.) are no-ops in
             // this harness — they are handled by the harness overlay
@@ -846,6 +980,21 @@ fn spawn_input_thread(
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 let _ = evt_tx.send(InlineEvent::Interrupt);
                 continue;
+            }
+
+            // Overlay key handling takes priority — when an overlay is
+            // open, Up/Down navigate, Enter submits, Esc cancels, and any
+            // printable char is captured for the search bar (if any).
+            // All other keys are swallowed so the composer buffer stays
+            // frozen while the user is interacting with the overlay.
+            {
+                let s = state.lock();
+                if s.overlay.is_some() {
+                    drop(s);
+                    if handle_overlay_key(&state, &evt_tx, key.code) {
+                        continue;
+                    }
+                }
             }
 
             match key.code {
@@ -978,6 +1127,132 @@ fn spawn_input_thread(
             }
         }
     })
+}
+
+/// Handle a single keystroke while an overlay is open. Returns `true` if the
+/// key was consumed (whether it changed state or not). Always returns `false`
+/// when no overlay is open so the caller can fall through to the regular
+/// input-thread key dispatch.
+fn handle_overlay_key(
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+    code: KeyCode,
+) -> bool {
+    use oxicode_vtui::tui::core::{InlineListSelection, OverlayEvent, OverlaySubmission};
+
+    let mut s = state.lock();
+    let Some(overlay) = s.overlay.as_mut() else {
+        return false;
+    };
+
+    match code {
+        KeyCode::Esc => {
+            // Cancel the overlay and notify the harness.
+            drop(s);
+            state.lock().overlay = None;
+            let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Cancelled));
+        }
+        KeyCode::Enter => {
+            // Submit the currently selected item. If no item is selected
+            // (empty list), we still close the overlay with a cancel.
+            let submission = if let Some(item) = overlay.items.get(overlay.selected) {
+                item.selection.clone().unwrap_or_else(|| {
+                    // Fallback: echo back the index as a generic selection.
+                    // The harness can map the index back to a semantic
+                    // choice; this avoids dropping the event when an item
+                    // carries no InlineListSelection (e.g. Wizard).
+                    InlineListSelection::SlashCommand(format!("overlay:{}", overlay.selected))
+                })
+            } else {
+                drop(s);
+                state.lock().overlay = None;
+                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Cancelled));
+                return true;
+            };
+            let title = overlay.title.clone();
+            let selected = overlay.selected;
+            drop(s);
+            state.lock().overlay = None;
+            tracing::debug!(
+                overlay = %title,
+                selected,
+                "overlay submitted"
+            );
+            let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Submitted(
+                OverlaySubmission::Selection(submission),
+            )));
+        }
+        KeyCode::Up => {
+            let len = overlay_filtered_indices(overlay).len();
+            if len == 0 {
+                return true;
+            }
+            let pos = overlay_filtered_indices(overlay)
+                .iter()
+                .position(|&i| i == overlay.selected)
+                .unwrap_or(0);
+            let new_pos = if pos == 0 { len - 1 } else { pos - 1 };
+            overlay.selected = overlay_filtered_indices(overlay)[new_pos];
+        }
+        KeyCode::Down => {
+            let filtered = overlay_filtered_indices(overlay);
+            let len = filtered.len();
+            if len == 0 {
+                return true;
+            }
+            let pos = filtered
+                .iter()
+                .position(|&i| i == overlay.selected)
+                .unwrap_or(0);
+            let new_pos = if pos + 1 >= len { 0 } else { pos + 1 };
+            overlay.selected = filtered[new_pos];
+        }
+        KeyCode::Backspace => {
+            if let Some(search) = overlay.search.as_mut() {
+                search.value.pop();
+                overlay.selected = 0;
+            }
+        }
+        KeyCode::Char(ch) => {
+            if let Some(search) = overlay.search.as_mut() {
+                search.value.push(ch);
+                overlay.selected = 0;
+            }
+        }
+        _ => {
+            // Swallow all other keys while an overlay is open.
+        }
+    }
+    true
+}
+
+/// Return the indices of `overlay.items` that match the current search filter.
+/// When no search is configured (or the search field is empty), returns every
+/// index. Used by both the renderer and the input thread so they agree on
+/// which item is "selected" after navigation or filter changes.
+fn overlay_filtered_indices(overlay: &OverlayState) -> Vec<usize> {
+    let needle = overlay
+        .search
+        .as_ref()
+        .map(|s| s.value.to_lowercase())
+        .unwrap_or_default();
+    if needle.is_empty() {
+        return (0..overlay.items.len()).collect();
+    }
+    overlay
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, item)| {
+            let title_hit = item.title.to_lowercase().contains(&needle);
+            let sv_hit = item
+                .search_value
+                .as_deref()
+                .map(|v| v.to_lowercase().contains(&needle))
+                .unwrap_or(false);
+            if title_hit || sv_hit { Some(idx) } else { None }
+        })
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1173,6 +1448,9 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     if state.agent_hub_open {
         render_agent_hub(frame, area, state);
     }
+    if let Some(overlay) = &state.overlay {
+        render_overlay(frame, area, overlay);
+    }
 }
 
 /// Render the Agent Hub overlay — a centered panel listing every registered
@@ -1214,6 +1492,194 @@ fn render_agent_hub(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
             .collect()
     };
     frame.render_widget(List::new(items).block(block), rect);
+}
+
+/// Render an overlay (Modal / List) as a centered, bordered panel. Modals
+/// show only their title + descriptive lines; lists also render a search bar
+/// (when configured) and a scrollable item list with the selected item
+/// marked by ▸.
+fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
+    let styles = active_styles();
+    let visible_max = (area.height as usize).saturating_sub(6).max(3);
+
+    // Filter items by the search value when search is enabled.
+    let filtered: Vec<usize> = match &overlay.search {
+        Some(search) if !search.value.is_empty() => {
+            let needle = search.value.to_lowercase();
+            overlay
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, item)| {
+                    let title_match = item.title.to_lowercase().contains(&needle);
+                    let sv_match = item
+                        .search_value
+                        .as_deref()
+                        .map(|v| v.to_lowercase().contains(&needle))
+                        .unwrap_or(false);
+                    if title_match || sv_match {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+        _ => (0..overlay.items.len()).collect(),
+    };
+
+    let has_search = overlay.search.is_some();
+    let lines_count = overlay.lines.len();
+    let items_count = filtered.len().min(visible_max);
+    let height_inner = (lines_count + items_count + if has_search { 1 } else { 0 }) as u16;
+    let desired_h = height_inner.saturating_add(2); // borders
+    let height = desired_h.min(area.height.saturating_sub(2));
+    let width = area.width.clamp(30, 80);
+    let rect = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, rect);
+
+    let title = Line::from(Span::styled(
+        format!(" {} ", overlay.title),
+        Style::default()
+            .fg(color_from_anstyle(styles.primary.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    ));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
+        .title(title);
+    let inner = block.inner(rect);
+    frame.render_widget(&block, rect);
+
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
+    let fg = color_from_anstyle(Some(styles.foreground));
+    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+
+    // Compute where the selected item is in the filtered list.
+    let selected_filtered_pos = filtered
+        .iter()
+        .position(|&idx| idx == overlay.selected)
+        .unwrap_or(0);
+
+    let mut row = inner.top();
+    // Search bar (if present).
+    if let Some(search) = &overlay.search {
+        let prompt = format!("{}: {}", search.label, search.value);
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{}: ", search.label),
+                Style::default().fg(secondary),
+            ),
+            Span::styled(
+                if search.value.is_empty() {
+                    search
+                        .placeholder
+                        .clone()
+                        .unwrap_or_else(|| "type to filter\u{2026}".to_string())
+                } else {
+                    search.value.clone()
+                },
+                if search.value.is_empty() {
+                    Style::default().fg(secondary).add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(fg)
+                },
+            ),
+        ]);
+        let _ = prompt; // suppress unused warning
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(line), row_area);
+        row = row.saturating_add(1);
+    }
+
+    // Descriptive lines.
+    for line_text in &overlay.lines {
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
+        };
+        let line = Line::from(Span::styled(
+            line_text.clone(),
+            Style::default().fg(secondary),
+        ));
+        frame.render_widget(Paragraph::new(line), row_area);
+        row = row.saturating_add(1);
+    }
+
+    // Items.
+    if filtered.is_empty() {
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
+        };
+        let empty_text = if overlay.search.is_some() {
+            "  (no matches)"
+        } else {
+            "  (no items)"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                empty_text,
+                Style::default().fg(secondary).add_modifier(Modifier::DIM),
+            ))),
+            row_area,
+        );
+    } else {
+        for (display_idx, &item_idx) in filtered.iter().take(visible_max).enumerate() {
+            let item = &overlay.items[item_idx];
+            let is_selected = display_idx == selected_filtered_pos;
+            let marker = if is_selected { "\u{25b8} " } else { "  " };
+            let indent = "  ".repeat(item.indent as usize);
+            let item_style = if is_selected {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(fg)
+            };
+            let mut spans = vec![
+                Span::styled(marker, item_style),
+                Span::styled(indent, item_style),
+                Span::styled(item.title.clone(), item_style),
+            ];
+            if let Some(badge) = &item.badge {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    badge.clone(),
+                    Style::default().fg(secondary).add_modifier(Modifier::DIM),
+                ));
+            }
+            if let Some(subtitle) = &item.subtitle {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    subtitle.clone(),
+                    Style::default().fg(secondary),
+                ));
+            }
+            let line = Line::from(spans);
+            let row_area = Rect {
+                x: inner.left(),
+                y: row,
+                width: inner.width,
+                height: 1,
+            };
+            frame.render_widget(Paragraph::new(line), row_area);
+            row = row.saturating_add(1);
+        }
+    }
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
@@ -1714,7 +2180,7 @@ mod slash_popup_tests {
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use oxicode_vtui::tui::core::InlineHandle;
+    use oxicode_vtui::tui::core::{InlineHandle, OverlayEvent};
     use ratatui::{Terminal, backend::TestBackend};
     use tokio::sync::mpsc;
 
@@ -1825,5 +2291,258 @@ mod render_tests {
             full.contains("wrap"),
             "long line must wrap, not clip — text should be visible past col 40"
         );
+    }
+
+    // ─── overlay tests ────────────────────────────────────────────────────
+
+    fn sample_overlay_items() -> Vec<OverlayListItem> {
+        vec![
+            OverlayListItem {
+                title: "model-a".to_string(),
+                subtitle: Some("first".to_string()),
+                badge: Some("ready".to_string()),
+                indent: 0,
+                search_value: None,
+                selection: Some(oxicode_vtui::tui::core::InlineListSelection::Model(0)),
+            },
+            OverlayListItem {
+                title: "model-b".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                search_value: None,
+                selection: Some(oxicode_vtui::tui::core::InlineListSelection::Model(1)),
+            },
+            OverlayListItem {
+                title: "model-c".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                search_value: None,
+                selection: Some(oxicode_vtui::tui::core::InlineListSelection::Model(2)),
+            },
+        ]
+    }
+
+    #[test]
+    fn overlay_renders_title_and_items() {
+        let mut state = RenderState::default();
+        state.overlay = Some(OverlayState {
+            title: "Select model".to_string(),
+            lines: vec!["Pick one".to_string()],
+            items: sample_overlay_items(),
+            selected: 0,
+            search: None,
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("Select model"),
+            "overlay title must render"
+        );
+        assert!(rendered.contains("model-a"), "first item must render");
+        assert!(rendered.contains("model-b"), "second item must render");
+        assert!(rendered.contains("model-c"), "third item must render");
+        assert!(
+            rendered.contains("Pick one"),
+            "descriptive line must render"
+        );
+    }
+
+    #[test]
+    fn overlay_search_filters_items() {
+        let mut state = RenderState::default();
+        state.overlay = Some(OverlayState {
+            title: "Select".to_string(),
+            lines: Vec::new(),
+            items: sample_overlay_items(),
+            selected: 0,
+            search: Some(OverlaySearchState {
+                label: "filter".to_string(),
+                placeholder: Some("type".to_string()),
+                value: "model-b".to_string(),
+            }),
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(rendered.contains("model-b"), "matching item must render");
+        assert!(
+            !rendered.contains("model-a"),
+            "non-matching item must not render (got: {})",
+            rendered
+        );
+        assert!(
+            !rendered.contains("model-c"),
+            "non-matching item must not render"
+        );
+    }
+
+    #[test]
+    fn overlay_keyboard_nav_moves_selection() {
+        let mut state = RenderState::default();
+        state.overlay = Some(OverlayState {
+            title: "Select".to_string(),
+            lines: Vec::new(),
+            items: sample_overlay_items(),
+            selected: 0,
+            search: None,
+        });
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+        let (tx, mut _rx) = mpsc::unbounded_channel();
+
+        // Initial: index 0 selected.
+        assert_eq!(state_arc.lock().overlay.as_ref().unwrap().selected, 0);
+
+        // Down: index 1 selected.
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Down);
+        assert!(consumed, "Down must be consumed while overlay is open");
+        assert_eq!(state_arc.lock().overlay.as_ref().unwrap().selected, 1);
+
+        // Down: index 2 selected.
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Down);
+        assert!(consumed);
+        assert_eq!(state_arc.lock().overlay.as_ref().unwrap().selected, 2);
+
+        // Down: wraps to index 0.
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Down);
+        assert!(consumed);
+        assert_eq!(state_arc.lock().overlay.as_ref().unwrap().selected, 0);
+
+        // Up: wraps to last (index 2).
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Up);
+        assert!(consumed);
+        assert_eq!(state_arc.lock().overlay.as_ref().unwrap().selected, 2);
+
+        // Enter: closes overlay and emits a Submission event.
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Enter);
+        assert!(consumed);
+        assert!(
+            state_arc.lock().overlay.is_none(),
+            "overlay must be cleared after Enter"
+        );
+        let evt = _rx.try_recv().expect("submit event must arrive");
+        match evt {
+            InlineEvent::Overlay(OverlayEvent::Submitted(_)) => {}
+            other => panic!("expected Submitted overlay event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn overlay_esc_closes_and_emits_cancelled() {
+        let mut state = RenderState::default();
+        state.overlay = Some(OverlayState {
+            title: "Select".to_string(),
+            lines: Vec::new(),
+            items: sample_overlay_items(),
+            selected: 0,
+            search: None,
+        });
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Esc);
+        assert!(consumed);
+        assert!(
+            state_arc.lock().overlay.is_none(),
+            "overlay must be cleared after Esc"
+        );
+        let evt = rx.try_recv().expect("cancel event must arrive");
+        assert!(
+            matches!(evt, InlineEvent::Overlay(OverlayEvent::Cancelled)),
+            "expected Cancelled overlay event"
+        );
+    }
+
+    #[test]
+    fn overlay_chars_route_to_search_field() {
+        let mut state = RenderState::default();
+        state.overlay = Some(OverlayState {
+            title: "Select".to_string(),
+            lines: Vec::new(),
+            items: sample_overlay_items(),
+            selected: 0,
+            search: Some(OverlaySearchState {
+                label: "filter".to_string(),
+                placeholder: None,
+                value: String::new(),
+            }),
+        });
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_overlay_key(&state_arc, &tx, KeyCode::Char('m'));
+        handle_overlay_key(&state_arc, &tx, KeyCode::Char('o'));
+        handle_overlay_key(&state_arc, &tx, KeyCode::Backspace);
+        let value = state_arc
+            .lock()
+            .overlay
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap()
+            .value
+            .clone();
+        assert_eq!(value, "m", "Backspace should drop last char");
+    }
+
+    #[test]
+    fn overlay_key_no_op_when_no_overlay_open() {
+        let state = RenderState::default();
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let consumed = handle_overlay_key(&state_arc, &tx, KeyCode::Enter);
+        assert!(
+            !consumed,
+            "handle_overlay_key must return false when no overlay is open"
+        );
+    }
+
+    #[test]
+    fn apply_command_show_overlay_populates_state() {
+        use oxicode_vtui::tui::core::{InlineListItem, ListOverlayRequest};
+        let mut state = RenderState::default();
+        let items = vec![
+            InlineListItem {
+                title: "alpha".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                selection: None,
+                search_value: None,
+            },
+            InlineListItem {
+                title: "beta".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                selection: None,
+                search_value: None,
+            },
+        ];
+        let request = OverlayRequest::List(ListOverlayRequest {
+            title: "Pick".to_string(),
+            lines: vec!["desc".to_string()],
+            footer_hint: None,
+            items,
+            selected: None,
+            search: None,
+            hotkeys: Vec::new(),
+        });
+        let shutdown = apply_command(
+            &mut state,
+            InlineCommand::ShowOverlay {
+                request: Box::new(request),
+            },
+        );
+        assert!(!shutdown, "ShowOverlay must not request shutdown");
+        let overlay = state.overlay.as_ref().expect("overlay must be Some");
+        assert_eq!(overlay.title, "Pick");
+        assert_eq!(overlay.items.len(), 2);
+        assert_eq!(overlay.items[0].title, "alpha");
+        assert_eq!(overlay.items[1].title, "beta");
+        assert_eq!(overlay.lines.len(), 1);
+
+        // CloseOverlay clears it.
+        apply_command(&mut state, InlineCommand::CloseOverlay);
+        assert!(state.overlay.is_none(), "CloseOverlay must clear state");
     }
 }

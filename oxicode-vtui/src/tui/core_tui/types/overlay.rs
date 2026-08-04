@@ -5,29 +5,29 @@ use super::selection::{
 
 #[derive(Clone, Debug)]
 pub struct ModalOverlayRequest {
-    pub(crate) title: String,
-    pub(crate) lines: Vec<String>,
-    pub(crate) secure_prompt: Option<SecurePromptConfig>,
+    pub title: String,
+    pub lines: Vec<String>,
+    pub secure_prompt: Option<SecurePromptConfig>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ListOverlayRequest {
-    pub(crate) title: String,
-    pub(crate) lines: Vec<String>,
-    pub(crate) footer_hint: Option<String>,
-    pub(crate) items: Vec<InlineListItem>,
-    pub(crate) selected: Option<InlineListSelection>,
-    pub(crate) search: Option<InlineListSearchConfig>,
-    pub(crate) hotkeys: Vec<OverlayHotkey>,
+    pub title: String,
+    pub lines: Vec<String>,
+    pub footer_hint: Option<String>,
+    pub items: Vec<InlineListItem>,
+    pub selected: Option<InlineListSelection>,
+    pub search: Option<InlineListSearchConfig>,
+    pub hotkeys: Vec<OverlayHotkey>,
 }
 
 #[derive(Clone, Debug)]
 pub struct WizardOverlayRequest {
-    pub(crate) title: String,
-    pub(crate) steps: Vec<WizardStep>,
-    pub(crate) current_step: usize,
-    pub(crate) search: Option<InlineListSearchConfig>,
-    pub(crate) mode: WizardModalMode,
+    pub title: String,
+    pub steps: Vec<WizardStep>,
+    pub current_step: usize,
+    pub search: Option<InlineListSearchConfig>,
+    pub mode: WizardModalMode,
 }
 
 #[derive(Clone, Debug)]
@@ -39,8 +39,8 @@ pub enum OverlayRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OverlayHotkey {
-    pub(crate) key: OverlayHotkeyKey,
-    pub(crate) action: OverlayHotkeyAction,
+    pub key: OverlayHotkeyKey,
+    pub action: OverlayHotkeyAction,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
