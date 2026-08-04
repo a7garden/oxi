@@ -231,7 +231,7 @@ impl<'a> AgentBuilder<'a> {
         self
     }
 
-    /// Add the [`HookMiddleware`] backed by the engine's registered
+    /// Add the [`HookMiddleware`](crate::middleware::HookMiddleware) backed by the engine's registered
     /// `HookRunner` port (see [`crate::OxicodeBuilder::with_hooks`]).
     ///
     /// When the port is `NoopHookRunner` (the default), this is a no-op.

@@ -9,7 +9,7 @@
 //! Two matching modes are supported:
 //! - **Regex**: the original `condition` field, matched against streaming deltas.
 //! - **AST**: the optional `ast_condition` field, matched against file content
-//!   after tool writes via the [`TtsrAstMatcher`]. AST matching shells out to
+//!   after tool writes via the `TtsrAstMatcher`. AST matching shells out to
 //!   the `sg` (ast-grep) CLI in the default build — same dependency surface
 //!   as [`crate::tools::ast_grep`].
 
@@ -86,7 +86,7 @@ pub struct Rule {
     /// Where the rule originated (builtin, project, or user).
     pub source: RuleSource,
     /// Optional ast-grep Smart pattern matched against file content after
-    /// tool writes. See [`TtsrAstMatcher`] for the runtime that consumes
+    /// tool writes. See `TtsrAstMatcher` for the runtime that consumes
     /// this field. `None` (the common case) means the rule is purely
     /// regex-driven.
     pub ast_condition: Option<String>,
@@ -152,7 +152,7 @@ pub struct TtsrMatchContext {
 
 // ── AST matcher ─────────────────────────────────────────────────────────────
 
-/// One AST rule: the subset of a [`Rule`] that the [`TtsrAstMatcher`]
+/// One AST rule: the subset of a [`Rule`] that the `TtsrAstMatcher`
 /// cares about. Decoupled from `Rule` so AST evaluation is independent
 /// of regex compilation and so the matcher can be reused without a
 /// full rule registry.

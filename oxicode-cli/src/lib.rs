@@ -53,6 +53,7 @@ pub(crate) mod util;
 /// `App::new` path is still used by the interactive TUI during the
 /// migration period.
 ///
+/// ```
 /// use oxicode::build_oxicode_engine;
 /// # async fn _example() -> anyhow::Result<()> {
 /// let oxicode = build_oxicode_engine(None, None).await?;

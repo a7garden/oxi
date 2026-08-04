@@ -1,4 +1,4 @@
-//! [`HookMiddleware`] — bridge [`HookRunner`] into the existing
+//! [`HookMiddleware`](crate::middleware::HookMiddleware) — bridge [`HookRunner`](crate::ports::HookRunner) into the existing
 //! [`MiddlewarePipeline`] so Pre/PostToolUse hooks fire through the
 //! same path as audit/authorizer middlewares.
 //!

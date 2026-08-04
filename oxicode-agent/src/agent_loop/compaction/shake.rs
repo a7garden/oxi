@@ -1,20 +1,20 @@
 //! Shake compaction — mechanical (LLM-free) context compression.
 //!
 //! Walks the message log backwards to identify a recent
-//! [`protect_window_tokens`](ShakeConfig::protect_window_tokens) "tail" that
+//! `protect_window_tokens` "tail" that
 //! must be preserved verbatim, then elides large token-heavy regions from
 //! everything older:
 //!
 //! 1. Tool result messages whose text payload is at least
-//!    [`min_elidable_tokens`](ShakeConfig::min_elidable_tokens).
+//!    `min_elidable_tokens`.
 //! 2. Fenced code blocks (`` ```...``` ``) of at least the same size,
 //!    inside any message text.
 //!
 //! Each region is replaced with a compact placeholder. If the total
-//! recovered tokens meet [`min_savings_tokens`](ShakeConfig::min_savings_tokens),
+//! recovered tokens meet `min_savings_tokens`,
 //! every region is elided in a single pass and the function reports
-//! [`ShakeOutcome::Shaken`]. Otherwise **no message is mutated** and the
-//! function reports [`ShakeOutcome::NoChange`] — callers can poll the same
+//! `ShakeOutcome::Shaken`. Otherwise **no message is mutated** and the
+//! function reports `ShakeOutcome::NoChange` — callers can poll the same
 //! vector repeatedly without side effects.
 //!
 //! Ported from omp `packages/agent/src/compaction/shake.ts` (mechanical,
@@ -466,11 +466,11 @@ fn rewrite_message_content(
 
 /// Shake the message log: elide large tool results and code blocks from
 /// the older portion of `messages`, leaving the recent
-/// [`protect_window_tokens`](ShakeConfig::protect_window_tokens) intact.
+/// `protect_window_tokens` intact.
 ///
 /// If aggregate savings are below
-/// [`min_savings_tokens`](ShakeConfig::min_savings_tokens) the call is a
-/// no-op: `messages` is unchanged and the outcome is [`ShakeOutcome::NoChange`].
+/// `min_savings_tokens` the call is a
+/// no-op: `messages` is unchanged and the outcome is `ShakeOutcome::NoChange`.
 /// Otherwise every eligible region is replaced in a single pass.
 // The signature takes `&mut Vec<Message>` to match the spec; callers pass
 // a `Vec<Message>` from the agent log, and slice deref coercion is
