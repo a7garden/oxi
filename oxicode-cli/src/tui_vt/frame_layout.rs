@@ -111,6 +111,7 @@ impl ShortcutBarStyling for ThemeShortcutStyles<'_> {
 /// `spawn_input_thread`. Do not add a hint without a matching handler.
 fn shortcut_hints() -> Vec<HintItem> {
     vec![
+        HintItem::new("Tab", "complete"),
         HintItem::new("Enter", "send").pinned(),
         HintItem::new("Esc", "cancel").pinned(),
         HintItem::new("Ctrl+C", "interrupt"),

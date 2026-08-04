@@ -32,10 +32,10 @@ use oxicode_vtui::tui::core::{
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
 use crate::App;
@@ -171,6 +171,8 @@ pub struct RenderState {
     pub hub_entries: Vec<(String, HubEntry)>,
     /// First Ctrl+C armed a quit; a second press exits (two-press quit).
     pub pending_quit: bool,
+    /// Slash-command autocomplete popup state.
+    pub slash_popup: SlashPopup,
 }
 
 /// One rendered transcript line.
@@ -178,6 +180,28 @@ pub struct RenderState {
 pub struct TranscriptLine {
     pub kind: InlineMessageKind,
     pub segments: Vec<InlineSegment>,
+}
+
+/// One filtered entry in the `/`-command autocomplete popup.
+#[derive(Clone)]
+pub struct SlashPopupItem {
+    /// Display label, e.g. `"/quit, /exit, /q"`.
+    pub label: String,
+    /// Short human description.
+    pub description: String,
+    /// Canonical command name (no leading `/`), used for completion.
+    pub name: String,
+}
+
+/// Slash-command autocomplete popup state, managed by the input thread and
+/// read by the render loop. The popup is open when the input buffer starts
+/// with `/` and contains no space (i.e. the user is still typing the command
+/// token, not its arguments).
+#[derive(Default, Clone)]
+pub struct SlashPopup {
+    pub open: bool,
+    pub items: Vec<SlashPopupItem>,
+    pub selected: usize,
 }
 
 impl RenderState {
@@ -810,16 +834,44 @@ fn spawn_input_thread(
 
             match key.code {
                 KeyCode::Enter => {
+                    // If the slash popup is open, complete the selected
+                    // command so Enter runs it directly — the user arrowed
+                    // to a match and pressed Enter to execute.
                     let submitted = {
                         let mut s = state.lock();
-                        let buf = std::mem::take(&mut s.input_buffer);
+                        let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                            let item = &s.slash_popup.items[s.slash_popup.selected];
+                            format!("/{}", item.name)
+                        } else {
+                            std::mem::take(&mut s.input_buffer)
+                        };
                         s.input_cursor = 0;
+                        s.slash_popup = SlashPopup::default();
                         buf
                     };
                     let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
                 }
                 KeyCode::Esc => {
-                    let _ = evt_tx.send(InlineEvent::Cancel);
+                    // If the slash popup is open, Esc just closes it rather
+                    // than cancelling the whole session.
+                    let mut s = state.lock();
+                    if s.slash_popup.open {
+                        s.slash_popup = SlashPopup::default();
+                    } else {
+                        drop(s);
+                        let _ = evt_tx.send(InlineEvent::Cancel);
+                    }
+                }
+                KeyCode::Tab => {
+                    // Complete the selected slash command into the buffer
+                    // (without submitting) so the user can type arguments.
+                    let mut s = state.lock();
+                    if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                        let name = s.slash_popup.items[s.slash_popup.selected].name.clone();
+                        s.input_buffer = format!("/{} ", name);
+                        s.input_cursor = s.input_buffer.len();
+                        refresh_slash_popup(&mut s);
+                    }
                 }
                 KeyCode::Backspace => {
                     let mut s = state.lock();
@@ -837,6 +889,7 @@ fn spawn_input_thread(
                         s.input_buffer.replace_range(prev..cursor, "");
                         s.input_cursor = prev;
                     }
+                    refresh_slash_popup(&mut s);
                 }
                 KeyCode::Delete => {
                     let mut s = state.lock();
@@ -849,6 +902,7 @@ fn spawn_input_thread(
                             .unwrap_or(s.input_buffer.len());
                         s.input_buffer.replace_range(cursor..next, "");
                     }
+                    refresh_slash_popup(&mut s);
                 }
                 KeyCode::Left => {
                     let mut s = state.lock();
@@ -860,10 +914,32 @@ fn spawn_input_thread(
                     s.input_cursor = (s.input_cursor + 1).min(len);
                 }
                 KeyCode::Up => {
-                    let _ = evt_tx.send(InlineEvent::ScrollLineUp);
+                    let mut s = state.lock();
+                    if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                        let len = s.slash_popup.items.len();
+                        s.slash_popup.selected = if s.slash_popup.selected == 0 {
+                            len - 1
+                        } else {
+                            s.slash_popup.selected - 1
+                        };
+                    } else {
+                        drop(s);
+                        let _ = evt_tx.send(InlineEvent::ScrollLineUp);
+                    }
                 }
                 KeyCode::Down => {
-                    let _ = evt_tx.send(InlineEvent::ScrollLineDown);
+                    let mut s = state.lock();
+                    if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                        let len = s.slash_popup.items.len();
+                        s.slash_popup.selected = if s.slash_popup.selected + 1 >= len {
+                            0
+                        } else {
+                            s.slash_popup.selected + 1
+                        };
+                    } else {
+                        drop(s);
+                        let _ = evt_tx.send(InlineEvent::ScrollLineDown);
+                    }
                 }
                 KeyCode::PageUp => {
                     let _ = evt_tx.send(InlineEvent::ScrollPageUp);
@@ -879,6 +955,7 @@ fn spawn_input_thread(
                         let cursor = s.input_cursor;
                         s.input_buffer.insert(cursor, ch);
                         s.input_cursor = cursor + ch.len_utf8();
+                        refresh_slash_popup(&mut s);
                     }
                 }
                 _ => {}
@@ -1071,6 +1148,9 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     let layout = super::frame_layout::render_chrome(frame, area, state);
     render_transcript(frame, layout.scrollback, state);
     render_composer(frame, layout.prompt, state);
+    if state.slash_popup.open {
+        render_slash_popup(frame, layout.prompt, state);
+    }
     if state.agent_hub_open {
         render_agent_hub(frame, area, state);
     }
@@ -1118,6 +1198,10 @@ fn render_agent_hub(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+    if state.transcript.is_empty() {
+        render_welcome(frame, area);
+        return;
+    }
     let styles = active_styles();
     let items: Vec<ListItem<'_>> = state
         .transcript
@@ -1142,45 +1226,44 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let list = List::new(visible).block(Block::default());
     frame.render_widget(list, area);
 }
-
 fn transcript_item<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> ListItem<'a> {
-    let (kind_style, kind_label) = match line.kind {
+    let (kind_style, marker) = match line.kind {
         InlineMessageKind::Agent => (
             Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
-            "assistant",
+            "\u{25cf}", // ●
         ),
         InlineMessageKind::User => (
-            Style::default().fg(color_from_anstyle(styles.user.get_fg_color())),
-            "you",
+            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
+            "\u{276f}", // ❯
         ),
         InlineMessageKind::Tool => (
             Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
-            "tool",
+            "\u{2699}", // ⚙
         ),
         InlineMessageKind::Error => (
             Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
-            "error",
+            "\u{2717}", // ✗
         ),
         InlineMessageKind::Warning => (
             Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
-            "warn",
+            "\u{26a0}", // ⚠
         ),
         InlineMessageKind::Info => (
             Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-            "info",
+            "\u{2139}", // ℹ
         ),
         InlineMessageKind::Policy => (
             Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
-            "policy",
+            "\u{25c6}", // ◆
         ),
         InlineMessageKind::Pty => (
             Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
-            "pty",
+            "\u{258c}", // ▌
         ),
     };
 
     let mut spans = Vec::with_capacity(line.segments.len() + 1);
-    spans.push(Span::styled(format!("{kind_label} \u{2502} "), kind_style));
+    spans.push(Span::styled(format!("{marker} "), kind_style));
     for segment in &line.segments {
         let style = segment_style(segment, kind_style, styles);
         spans.push(Span::styled(segment.text.clone(), style));
@@ -1239,7 +1322,8 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         line_spans.push(Span::styled(body, text_style));
     }
     let block = Block::default()
-        .borders(Borders::TOP)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
     let paragraph = Paragraph::new(Line::from(line_spans))
         .block(block)
@@ -1247,11 +1331,117 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     frame.render_widget(paragraph, area);
 
     // Place the cursor inside the composer at the current edit position.
+    // +1 on both axes to clear the rounded border.
     if state.input_enabled {
-        let cursor_x =
-            area.left() + state.prompt_prefix.chars().count() as u16 + state.input_cursor as u16;
-        let cursor_y = area.top() + 1; // account for the top border
+        let cursor_x = area.left()
+            + 1
+            + state.prompt_prefix.chars().count() as u16
+            + state.input_cursor as u16;
+        let cursor_y = area.top() + 1;
         frame.set_cursor_position(ratatui::layout::Position::new(cursor_x, cursor_y));
+    }
+}
+
+/// Render a centred welcome banner when the transcript is empty.
+fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
+    let styles = active_styles();
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
+    let fg = color_from_anstyle(Some(styles.foreground));
+    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+
+    let text = vec![
+        Line::from(""),
+        Line::from(""),
+        Line::from(Span::styled(
+            "\u{25cf} oxicode",
+            Style::default().fg(primary).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Type a message to begin, or press / for commands.",
+            Style::default().fg(fg),
+        )),
+        Line::from(Span::styled(
+            "Use /help to see all available commands.",
+            Style::default().fg(secondary),
+        )),
+    ];
+    let para = Paragraph::new(text).alignment(Alignment::Center);
+    frame.render_widget(para, area);
+}
+
+/// Render the slash-command autocomplete popup as a floating panel above the
+/// composer. Anchored to the composer's left edge, grows upward.
+fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &RenderState) {
+    let styles = active_styles();
+    let items = &state.slash_popup.items;
+    if items.is_empty() {
+        return;
+    }
+
+    let max_visible = 8usize;
+    let visible = items.len().min(max_visible);
+    let popup_h = visible as u16 + 2; // +2 for top/bottom border
+    let width = composer_area.width.min(64);
+    let popup_area = Rect {
+        x: composer_area.left(),
+        y: composer_area.top().saturating_sub(popup_h),
+        width,
+        height: popup_h,
+    };
+    frame.render_widget(Clear, popup_area);
+
+    let border_color = color_from_anstyle(styles.secondary.get_fg_color());
+    let title = Line::from(Span::styled(
+        " Commands ",
+        Style::default()
+            .fg(color_from_anstyle(styles.primary.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    ));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(title);
+    let inner = block.inner(popup_area);
+    frame.render_widget(&block, popup_area);
+
+    // Column-align labels by padding to the widest visible label.
+    let max_label = items
+        .iter()
+        .take(visible)
+        .map(|i| i.label.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
+    let fg = color_from_anstyle(Some(styles.foreground));
+    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+
+    for (i, item) in items.iter().take(visible).enumerate() {
+        let is_selected = i == state.slash_popup.selected;
+        let y = inner.top() + i as u16;
+        let row_area = Rect {
+            x: inner.left(),
+            y,
+            width: inner.width,
+            height: 1,
+        };
+
+        let marker = if is_selected { "\u{25b8} " } else { "  " }; // ▸ or space
+        let label_style = if is_selected {
+            Style::default().fg(primary).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(fg)
+        };
+        let label_padded = format!("{:<width$}", item.label, width = max_label);
+        let line = Line::from(vec![
+            Span::styled(marker, label_style),
+            Span::styled(label_padded, label_style),
+            Span::raw("  "),
+            Span::styled(&item.description, Style::default().fg(secondary)),
+        ]);
+        frame.render_widget(Paragraph::new(line), row_area);
     }
 }
 
@@ -1273,6 +1463,59 @@ pub(super) fn effective_scroll_offset(offset: usize, total: usize, viewport: usi
     // Clamp into [0, total.saturating_sub(viewport)].
     let max_start = total.saturating_sub(viewport);
     offset.min(max_start)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Slash-command autocomplete popup
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Filter the built-in slash commands by `token` (the text after `/`).
+/// An empty token returns every command. Matching is prefix-based against
+/// the canonical name and all aliases.
+fn slash_filter(token: &str) -> Vec<SlashPopupItem> {
+    SlashRegistry::builtin_commands()
+        .into_iter()
+        .filter(|(name, _, aliases)| {
+            token.is_empty()
+                || name.starts_with(token)
+                || aliases.iter().any(|a| a.starts_with(token))
+        })
+        .map(|(name, desc, aliases)| {
+            let mut label = format!("/{name}");
+            for a in &aliases {
+                label.push_str(&format!(", /{a}"));
+            }
+            SlashPopupItem {
+                label,
+                description: desc.to_string(),
+                name: name.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// Recompute the slash popup from the current input buffer. The popup is
+/// active when the buffer starts with `/` and has no space yet (the user is
+/// still composing the command token, not its arguments). Called after every
+/// buffer mutation in the input thread.
+fn refresh_slash_popup(state: &mut RenderState) {
+    let buf = state.input_buffer.clone();
+    let active = buf.starts_with('/') && !buf[1..].contains(' ');
+    if !active {
+        state.slash_popup.open = false;
+        state.slash_popup.items.clear();
+        state.slash_popup.selected = 0;
+        return;
+    }
+    let token = &buf[1..];
+    let items = slash_filter(token);
+    state.slash_popup.open = !items.is_empty();
+    if items.is_empty() {
+        state.slash_popup.selected = 0;
+    } else {
+        state.slash_popup.selected = state.slash_popup.selected.min(items.len() - 1);
+    }
+    state.slash_popup.items = items;
 }
 
 fn preview_tool_result(content: &str) -> String {
@@ -1318,3 +1561,171 @@ fn ansi_to_ratatui(color: anstyle::AnsiColor) -> Color {
 // available for future control flags (e.g. SIGINT safety net).
 #[allow(dead_code, clippy::declare_interior_mutable_const)]
 const _ATOMIC_REFS: (AtomicBool, Ordering) = (AtomicBool::new(false), Ordering::SeqCst);
+
+#[cfg(test)]
+mod slash_popup_tests {
+    use super::*;
+
+    #[test]
+    fn empty_token_lists_all_commands() {
+        let items = slash_filter("");
+        // 7 built-in commands.
+        assert!(items.len() >= 7);
+        assert!(items.iter().any(|i| i.name == "quit"));
+        assert!(items.iter().any(|i| i.name == "clear"));
+        assert!(items.iter().any(|i| i.name == "model"));
+    }
+
+    #[test]
+    fn prefix_filter_matches_name() {
+        let items = slash_filter("qu");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "quit");
+        assert!(items[0].label.contains("/quit"));
+    }
+
+    #[test]
+    fn prefix_filter_matches_alias() {
+        // "cl" should match "clear" (alias "cls") and "compact".
+        let items = slash_filter("cl");
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"clear"));
+    }
+
+    #[test]
+    fn popup_opens_on_slash() {
+        let mut state = RenderState::default();
+        state.input_buffer = "/".to_string();
+        refresh_slash_popup(&mut state);
+        assert!(state.slash_popup.open);
+        assert!(!state.slash_popup.items.is_empty());
+    }
+
+    #[test]
+    fn popup_closes_on_space() {
+        let mut state = RenderState::default();
+        state.input_buffer = "/quit ".to_string();
+        refresh_slash_popup(&mut state);
+        assert!(!state.slash_popup.open);
+    }
+
+    #[test]
+    fn popup_closes_on_non_slash() {
+        let mut state = RenderState::default();
+        state.input_buffer = "hello".to_string();
+        refresh_slash_popup(&mut state);
+        assert!(!state.slash_popup.open);
+    }
+
+    #[test]
+    fn popup_filters_as_user_types() {
+        let mut state = RenderState::default();
+        state.input_buffer = "/m".to_string();
+        refresh_slash_popup(&mut state);
+        assert!(state.slash_popup.open);
+        // Every item's canonical name must start with 'm' (model is the
+        // only command matching the "m" prefix).
+        assert!(state.slash_popup.items.iter().all(|i| i.name.starts_with('m')));
+    }
+
+    #[test]
+    fn popup_selection_clamps_on_shrink() {
+        let mut state = RenderState::default();
+        state.input_buffer = "/".to_string();
+        refresh_slash_popup(&mut state);
+        let full_count = state.slash_popup.items.len();
+        state.slash_popup.selected = full_count - 1;
+        // Narrow the filter so fewer items remain.
+        state.input_buffer = "/qu".to_string();
+        refresh_slash_popup(&mut state);
+        assert!(state.slash_popup.selected < state.slash_popup.items.len());
+    }
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use oxicode_vtui::tui::core::InlineHandle;
+    use ratatui::{Terminal, backend::TestBackend};
+    use tokio::sync::mpsc;
+
+    /// Render `render_frame` into a TestBackend and return the concatenated
+    /// cell text. This catches regressions like a missing render_composer
+    /// call — `#![allow(dead_code)]` in lib.rs suppresses the unused-fn lint,
+    /// so only a render assertion can prove the composer is painted.
+    fn render_frame_to_string(state: &RenderState) -> String {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        terminal
+            .draw(|f| render_frame(f, state, &handle))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    out.push_str(cell.symbol());
+                }
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn welcome_screen_shown_when_transcript_empty() {
+        let state = RenderState::default();
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("oxicode"),
+            "welcome banner must appear when transcript is empty"
+        );
+    }
+
+    #[test]
+    fn composer_is_painted() {
+        // Regression guard: the composer prompt prefix must appear in the
+        // rendered output. This would have caught the missing
+        // render_composer call (advisory 2026-08-04).
+        let mut state = RenderState::default();
+        state.input_enabled = true;
+        state.prompt_prefix = "> ".to_string();
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains('>'),
+            "composer prompt prefix must be painted"
+        );
+    }
+
+    #[test]
+    fn slash_popup_renders_command_list() {
+        let mut state = RenderState::default();
+        state.slash_popup.open = true;
+        state.slash_popup.items = slash_filter("");
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("Commands"),
+            "popup title must render"
+        );
+        assert!(
+            rendered.contains("/quit"),
+            "popup must list /quit"
+        );
+    }
+
+    #[test]
+    fn composer_and_popup_render_together() {
+        let mut state = RenderState::default();
+        state.prompt_prefix = "> ".to_string();
+        state.input_buffer = "/qu".to_string();
+        state.slash_popup.open = true;
+        state.slash_popup.items = slash_filter("qu");
+        let rendered = render_frame_to_string(&state);
+        assert!(rendered.contains("Commands"), "popup must render");
+        assert!(rendered.contains("/quit"), "popup must list /quit");
+        assert!(rendered.contains('>'), "composer must still render");
+    }
+}
