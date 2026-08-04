@@ -837,9 +837,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
                     error = %hook_err,
                     "after_tool_call hook failed, creating error result"
                 );
-                result = AgentToolResult::error(format!(
-                    "after_tool_call hook failed: {hook_err}"
-                ));
+                result = AgentToolResult::error(format!("after_tool_call hook failed: {hook_err}"));
                 is_error = true;
             }
         }

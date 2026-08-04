@@ -16,6 +16,8 @@ const TTSR_INTERRUPT_TEMPLATE: &str = include_str!("../prompts/ttsr-interrupt.md
 
 /// Append-only context for stable prefix caching.
 pub mod append_only;
+/// Mechanical (LLM-free) context compaction strategies.
+pub mod compaction;
 /// Agent-loop configuration.
 pub mod config;
 /// Miscellaneous helper functions.
@@ -30,8 +32,6 @@ pub mod stream_outcome;
 pub mod streaming;
 /// Tool execution strategies.
 pub mod tool_exec;
-/// Mechanical (LLM-free) context compaction strategies.
-pub mod compaction;
 /// Time-Traveling Stream Rules engine.
 pub mod ttsr;
 
@@ -1338,8 +1338,6 @@ impl AgentLoop {
                 source: source_label.to_string(),
             },
         });
-
-
 
         let messages_to_compact: Vec<Message> = messages.to_vec();
         let instruction = self.build_compaction_instruction();

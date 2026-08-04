@@ -146,8 +146,7 @@ fn find_protect_boundary(messages: &[Message], protect_window_tokens: usize) -> 
             // large tail behind it — start the eligible range here.
             return idx + 1;
         }
-        accumulated_after =
-            accumulated_after.saturating_add(estimate_message_tokens(message));
+        accumulated_after = accumulated_after.saturating_add(estimate_message_tokens(message));
     }
     // Walked the whole log without crossing the window: every index is
     // protected.
@@ -215,12 +214,7 @@ fn collect_candidates(
                 }
             }
             Message::User(m) => {
-                collect_text_candidates(
-                    &m.content,
-                    index,
-                    min_elidable_tokens,
-                    &mut candidates,
-                );
+                collect_text_candidates(&m.content, index, min_elidable_tokens, &mut candidates);
             }
             Message::Assistant(m) => {
                 // Assistant messages hold many block types; we only
@@ -255,22 +249,26 @@ fn collect_text_candidates(
     let Some(text) = content.as_str() else {
         return;
     };
-    for_each_elidable_code_block(text, min_elidable_tokens, |block_start, block_end, body, lines| {
-        let body_tokens = estimate_tokens(body);
-        let placeholder = format!("\n```\n...code block elided ({lines} lines)...\n```\n");
-        let placeholder_tokens = estimate_tokens(&placeholder);
-        let tokens_saved = body_tokens.saturating_sub(placeholder_tokens);
-        if tokens_saved == 0 {
-            return;
-        }
-        out.push(Candidate::CodeBlock {
-            index,
-            block_start,
-            block_end,
-            placeholder,
-            tokens_saved,
-        });
-    });
+    for_each_elidable_code_block(
+        text,
+        min_elidable_tokens,
+        |block_start, block_end, body, lines| {
+            let body_tokens = estimate_tokens(body);
+            let placeholder = format!("\n```\n...code block elided ({lines} lines)...\n```\n");
+            let placeholder_tokens = estimate_tokens(&placeholder);
+            let tokens_saved = body_tokens.saturating_sub(placeholder_tokens);
+            if tokens_saved == 0 {
+                return;
+            }
+            out.push(Candidate::CodeBlock {
+                index,
+                block_start,
+                block_end,
+                placeholder,
+                tokens_saved,
+            });
+        },
+    );
 }
 
 /// Invoke `f` once per fenced code block whose body (excluding the
@@ -340,7 +338,12 @@ fn find_fence_close(bytes: &[u8], search_from: usize) -> Option<usize> {
 
 /// Replace `text[block_start..block_end]` with `placeholder`, returning
 /// the resulting `String`.
-fn replace_code_block(text: &str, block_start: usize, block_end: usize, placeholder: &str) -> String {
+fn replace_code_block(
+    text: &str,
+    block_start: usize,
+    block_end: usize,
+    placeholder: &str,
+) -> String {
     let mut out = String::with_capacity(text.len());
     out.push_str(&text[..block_start]);
     out.push_str(placeholder);
@@ -399,7 +402,9 @@ fn apply_one(messages: &mut [Message], candidate: Candidate) {
                 return;
             };
             match message {
-                Message::User(m) => rewrite_message_content(&mut m.content, block_start, block_end, &placeholder),
+                Message::User(m) => {
+                    rewrite_message_content(&mut m.content, block_start, block_end, &placeholder)
+                }
                 Message::Assistant(m) => {
                     // Replace the first text block whose `text` field
                     // is at least `block_end` chars long. This handles
@@ -447,8 +452,7 @@ fn rewrite_message_content(
                 if let ContentBlock::Text(t) = block
                     && t.text.len() >= block_end
                 {
-                    t.text =
-                        replace_code_block(&t.text, block_start, block_end, placeholder);
+                    t.text = replace_code_block(&t.text, block_start, block_end, placeholder);
                     return;
                 }
             }

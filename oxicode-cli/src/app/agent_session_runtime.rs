@@ -352,9 +352,9 @@ pub async fn create_agent_session_from_services(
                 let engine =
                     oxicode_agent::agent_loop::ttsr::TtsrEngine::new(registry, Default::default());
                 if !ast_rules.is_empty() {
-                    engine.set_ast_matcher(
-                        oxicode_agent::agent_loop::ttsr::TtsrAstMatcher::new(ast_rules),
-                    );
+                    engine.set_ast_matcher(oxicode_agent::agent_loop::ttsr::TtsrAstMatcher::new(
+                        ast_rules,
+                    ));
                 }
                 Some(Arc::new(engine))
             } else {
@@ -454,9 +454,9 @@ pub async fn create_agent_session_from_services(
                 },
             );
             if !ast_rules.is_empty() {
-                engine.set_ast_matcher(
-                    oxicode_agent::agent_loop::ttsr::TtsrAstMatcher::new(ast_rules),
-                );
+                engine.set_ast_matcher(oxicode_agent::agent_loop::ttsr::TtsrAstMatcher::new(
+                    ast_rules,
+                ));
             }
             Some(Arc::new(engine))
         } else {

@@ -389,9 +389,10 @@ impl CliLspProvider {
         for (name, client) in &clients {
             // Send workspace/didChangeConfiguration with empty settings to
             // trigger a config reload.
-            let _ = client.notify::<DidChangeConfiguration>(
-                lsp_types::DidChangeConfigurationParams { settings: serde_json::Value::Null },
-            );
+            let _ =
+                client.notify::<DidChangeConfiguration>(lsp_types::DidChangeConfigurationParams {
+                    settings: serde_json::Value::Null,
+                });
             results.push(format!("{name}: configuration reloaded"));
         }
         Ok(results.join("\n"))
@@ -441,7 +442,10 @@ impl CliLspProvider {
                     .to_string();
                 let result = client
                     .request::<WorkspaceSymbolRequest>(
-                        lsp_types::WorkspaceSymbolParams { query, ..Default::default() },
+                        lsp_types::WorkspaceSymbolParams {
+                            query,
+                            ..Default::default()
+                        },
                         REQUEST_TIMEOUT,
                     )
                     .await

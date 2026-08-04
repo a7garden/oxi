@@ -303,11 +303,7 @@ impl TtsrAstMatcher {
     ///
     /// The function is infallible by design: any matcher error collapses
     /// to "no match" rather than aborting the stream.
-    pub fn check_tool_snapshot(
-        &mut self,
-        file_path: &str,
-        content: &str,
-    ) -> Option<String> {
+    pub fn check_tool_snapshot(&mut self, file_path: &str, content: &str) -> Option<String> {
         if self.rules.is_empty() {
             return None;
         }
@@ -335,8 +331,7 @@ impl TtsrAstMatcher {
                 // Record digest only after a successful match so a
                 // non-matching snapshot doesn't poison subsequent
                 // edits to the same file.
-                self.seen_digests
-                    .insert(file_path.to_string(), digest);
+                self.seen_digests.insert(file_path.to_string(), digest);
                 return Some(rule.name.clone());
             }
         }
@@ -921,8 +916,7 @@ mod tests {
             vec!["*.rs".to_string()],
         )];
 
-        let mut matcher =
-            TtsrAstMatcher::with_matcher(ast_rules, Box::new(substring_matcher));
+        let mut matcher = TtsrAstMatcher::with_matcher(ast_rules, Box::new(substring_matcher));
 
         let content = "fn main() {\n    let _ = Box::leak(Box::new(0));\n}\n";
         let result = matcher.check_tool_snapshot("src/main.rs", content);
@@ -938,8 +932,7 @@ mod tests {
             vec!["*.rs".to_string()],
         )];
 
-        let mut matcher =
-            TtsrAstMatcher::with_matcher(ast_rules, Box::new(substring_matcher));
+        let mut matcher = TtsrAstMatcher::with_matcher(ast_rules, Box::new(substring_matcher));
 
         let content = "fn main() {\n    println!(\"clean code\");\n}\n";
         let result = matcher.check_tool_snapshot("src/main.rs", content);
@@ -965,8 +958,7 @@ mod tests {
             make_ast_rule("no-ts-leak", "Box::leak", vec!["*.ts".to_string()]),
         ];
 
-        let mut matcher =
-            TtsrAstMatcher::with_matcher(ast_rules, Box::new(substring_matcher));
+        let mut matcher = TtsrAstMatcher::with_matcher(ast_rules, Box::new(substring_matcher));
 
         // `.ts` file containing the pattern — `no-ts-leak` must fire,
         // `no-rs-leak` must not (because the `.rs` scope excludes it).
@@ -984,11 +976,10 @@ mod tests {
 
         // Empty-scope rule = match-all. Confirms the "empty scope = all"
         // semantic that `Rule::globs` already provides for regex.
-        let mut permissive =
-            TtsrAstMatcher::with_matcher(
-                vec![make_ast_rule("global", "forbidden-token", vec![])],
-                Box::new(substring_matcher),
-            );
+        let mut permissive = TtsrAstMatcher::with_matcher(
+            vec![make_ast_rule("global", "forbidden-token", vec![])],
+            Box::new(substring_matcher),
+        );
         let result = permissive.check_tool_snapshot("any/path.xyz", "has forbidden-token here");
         assert_eq!(result.as_deref(), Some("global"));
     }
