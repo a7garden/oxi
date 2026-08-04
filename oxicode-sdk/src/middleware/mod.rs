@@ -8,6 +8,9 @@ use std::sync::Arc;
 /// Bridge connecting the legacy hooks API to the middleware pipeline.
 pub mod bridge;
 pub mod builtins;
+/// [`HookMiddleware`] — bridges the [`HookRunner`](crate::ports::HookRunner) port
+/// into the pipeline so Pre/PostToolUse fire alongside audit/authorizer.
+pub mod hook;
 /// Adapters that bridge SDK observability/security types
 /// (AuditLog, Authorizer) into the Middleware pipeline so they
 /// compose with user middlewares instead of overwriting the
@@ -18,6 +21,7 @@ pub use bridge::build_hooks;
 pub use builtins::{
     ContentFilterMiddleware, LoggingMiddleware, RateLimitMiddleware, TokenBudgetMiddleware,
 };
+pub use hook::HookMiddleware;
 pub use plugin::{PluginLoader, PluginManifest};
 
 /// Middleware execution phase.
