@@ -34,6 +34,7 @@
 //! so adding a port or extending an existing one never breaks existing products.
 
 pub mod catalog;
+pub use hooks::{HookRunner, NoopHookRunner};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1096,6 +1097,10 @@ impl EmbeddingProvider for NoopEmbeddingProvider {
     }
 }
 
+// Port 16 — HookRunner: user-configurable event→shell-command hooks.
+// See `docs/superpowers/specs/2026-08-04-hooks-system-design.md`.
+pub mod hooks;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Registry — a single Arc<dyn ...> set registered on Oxicode
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1141,6 +1146,9 @@ pub struct PortRegistry {
     /// Embedding provider — text→vector for semantic search.
     /// Default: [`NoopEmbeddingProvider`].
     pub embeddings: Arc<dyn EmbeddingProvider>,
+    /// Hook runner — user-configurable event→shell-command hooks.
+    /// Default: [`NoopHookRunner`].
+    pub hooks: Arc<dyn HookRunner>,
 }
 
 impl std::fmt::Debug for PortRegistry {
@@ -1161,6 +1169,7 @@ impl std::fmt::Debug for PortRegistry {
             .field("url_router", &"<dyn InternalUrlRouter>")
             .field("rules", &"<dyn RuleRegistry>")
             .field("embeddings", &"<dyn EmbeddingProvider>")
+            .field("hooks", &"<dyn HookRunner>")
             .finish()
     }
 }
@@ -1191,6 +1200,7 @@ impl PortRegistry {
             url_router: Arc::new(NoopInternalUrlRouter),
             rules: Arc::new(NoopRuleRegistry),
             embeddings: Arc::new(NoopEmbeddingProvider),
+            hooks: Arc::new(NoopHookRunner),
         }
     }
 

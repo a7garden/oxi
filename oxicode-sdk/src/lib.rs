@@ -113,6 +113,10 @@ pub use ports::{
     StateStore, SubscriptionHandle, ToolCallRequest,
 };
 
+// Port 16 — HookRunner.
+#[oxicode_stable(since = "0.66.0")]
+pub use ports::hooks::{HookContext, HookEvent, HookOutcome, HookRunner, HookSpec, NoopHookRunner};
+
 // Catalog port (Port 12).
 #[oxicode_stable(since = "0.63.0")]
 pub use ports::catalog::{
