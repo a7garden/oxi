@@ -1925,13 +1925,59 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     }
 }
 
-/// Render a centred welcome banner when the transcript is empty.
+/// Render a welcome banner when the transcript is empty, using the vtui
+/// `WelcomeLayout` for proper geometry on wide terminals.
 fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
     let styles = active_styles();
     let primary = color_from_anstyle(styles.primary.get_fg_color());
     let fg = color_from_anstyle(Some(styles.foreground));
     let secondary = color_from_anstyle(styles.secondary.get_fg_color());
 
+    // For wide terminals, use the hero-box layout; otherwise a simple
+    // centered paragraph is more reliable for narrow viewports.
+    if area.width >= 90 {
+        use oxicode_vtui::design::layout::WelcomeLayout;
+        let layout = WelcomeLayout::compute(area, 3, 0, 0, 1, 0, false);
+        let logo_area = if layout.has_hero_box() {
+            layout.hero_logo
+        } else {
+            layout.logo
+        };
+        if logo_area.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "\u{25cf} oxicode",
+                    Style::default().fg(primary).add_modifier(Modifier::BOLD),
+                )))
+                .alignment(Alignment::Center),
+                logo_area,
+            );
+        }
+        if layout.tip.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "Type a message to begin, or press / for commands.",
+                    Style::default().fg(fg),
+                )))
+                .alignment(Alignment::Center),
+                layout.tip,
+            );
+        }
+        if layout.version.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!("v{}", env!("CARGO_PKG_VERSION")),
+                    Style::default().fg(secondary).add_modifier(Modifier::DIM),
+                )))
+                .alignment(Alignment::Center),
+                layout.version,
+            );
+        }
+        return;
+    }
+
+    // Narrow terminal fallback — simple centered paragraph.
+    let version = env!("CARGO_PKG_VERSION");
     let text = vec![
         Line::from(""),
         Line::from(""),
@@ -1945,12 +1991,11 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
             Style::default().fg(fg),
         )),
         Line::from(Span::styled(
-            "Use /help to see all available commands.",
+            format!("v{version} \u{2014} /help for commands"),
             Style::default().fg(secondary),
         )),
     ];
-    let para = Paragraph::new(text).alignment(Alignment::Center);
-    frame.render_widget(para, area);
+    frame.render_widget(Paragraph::new(text).alignment(Alignment::Center), area);
 }
 
 /// Render a 1-row reasoning/tool-stage indicator just above the composer.
