@@ -91,6 +91,7 @@ pub(crate) fn parse_rule_file(content: &str, name: &str, source: RuleSource) -> 
         globs: fm.globs.unwrap_or_default(),
         always_apply: fm.always_apply.unwrap_or(false),
         source,
+        ast_condition: None,
     })
 }
 

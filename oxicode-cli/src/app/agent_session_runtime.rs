@@ -333,10 +333,29 @@ pub async fn create_agent_session_from_services(
         let ttsr_engine: Option<Arc<oxicode_agent::agent_loop::ttsr::TtsrEngine>> =
             if settings.ttsr_enabled {
                 let rules = crate::discovery::rules::discover_rules(&services.cwd);
+                // Extract AST rules before moving rules into the registry.
+                let ast_rules: Vec<oxicode_agent::agent_loop::ttsr::AstRule> = rules
+                    .iter()
+                    .filter_map(|r| {
+                        r.ast_condition.as_ref().map(|pattern| {
+                            oxicode_agent::agent_loop::ttsr::AstRule {
+                                name: r.name.clone(),
+                                pattern: pattern.clone(),
+                                file_scope: r.globs.clone(),
+                                interrupt_mode: r.interrupt_mode,
+                            }
+                        })
+                    })
+                    .collect();
                 let registry: Arc<dyn oxicode_agent::agent_loop::ttsr::RuleRegistry> =
                     Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
                 let engine =
                     oxicode_agent::agent_loop::ttsr::TtsrEngine::new(registry, Default::default());
+                if !ast_rules.is_empty() {
+                    engine.set_ast_matcher(
+                        oxicode_agent::agent_loop::ttsr::TtsrAstMatcher::new(ast_rules),
+                    );
+                }
                 Some(Arc::new(engine))
             } else {
                 None
@@ -410,6 +429,20 @@ pub async fn create_agent_session_from_services(
     let ttsr_engine: Option<Arc<oxicode_agent::agent_loop::ttsr::TtsrEngine>> =
         if settings.ttsr_enabled {
             let rules = crate::discovery::rules::discover_rules(&services.cwd);
+            // Extract AST rules before moving rules into the registry.
+            let ast_rules: Vec<oxicode_agent::agent_loop::ttsr::AstRule> = rules
+                .iter()
+                .filter_map(|r| {
+                    r.ast_condition.as_ref().map(|pattern| {
+                        oxicode_agent::agent_loop::ttsr::AstRule {
+                            name: r.name.clone(),
+                            pattern: pattern.clone(),
+                            file_scope: r.globs.clone(),
+                            interrupt_mode: r.interrupt_mode,
+                        }
+                    })
+                })
+                .collect();
             let registry: Arc<dyn oxicode_agent::agent_loop::ttsr::RuleRegistry> =
                 Arc::new(crate::discovery::rules::StaticRuleRegistry::new(rules));
             let engine = oxicode_agent::agent_loop::ttsr::TtsrEngine::new(
@@ -420,6 +453,11 @@ pub async fn create_agent_session_from_services(
                     ..Default::default()
                 },
             );
+            if !ast_rules.is_empty() {
+                engine.set_ast_matcher(
+                    oxicode_agent::agent_loop::ttsr::TtsrAstMatcher::new(ast_rules),
+                );
+            }
             Some(Arc::new(engine))
         } else {
             None
