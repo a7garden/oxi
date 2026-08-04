@@ -37,6 +37,7 @@ dirs = "6"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
+globset = "0.4"
 regex = "1"
 oxicode-snapcompact = { version = "0.65.0", path = "../oxicode-snapcompact" }
 

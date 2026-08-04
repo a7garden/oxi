@@ -18,16 +18,16 @@ pub mod auth;
 pub mod capability;
 pub mod catalog;
 pub mod config;
+pub mod hook_runner;
 pub mod path;
 pub mod persona;
 pub mod session;
 pub mod skill;
-
 pub use access::SimpleAccessGate;
 pub use auth::FileAuthProvider;
 pub use capability::TomlCapabilityResolver;
-pub use catalog::{CatalogConfig, FileModelCatalog};
 pub use config::FileConfigStore;
+pub use hook_runner::CommandHookRunner;
 pub use persona::FilePersonaProvider;
 pub use session::FileStateStore;
 pub use skill::FileSkillLoader;

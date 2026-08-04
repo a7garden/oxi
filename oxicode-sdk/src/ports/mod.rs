@@ -34,7 +34,8 @@
 //! so adding a port or extending an existing one never breaks existing products.
 
 pub mod catalog;
-pub use hooks::{HookRunner, NoopHookRunner};
+pub mod hooks;
+pub use hooks::{HookContext, HookEvent, HookOutcome, HookRunner, HookSpec, NoopHookRunner};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1099,7 +1100,6 @@ impl EmbeddingProvider for NoopEmbeddingProvider {
 
 // Port 16 — HookRunner: user-configurable event→shell-command hooks.
 // See `docs/superpowers/specs/2026-08-04-hooks-system-design.md`.
-pub mod hooks;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Registry — a single Arc<dyn ...> set registered on Oxicode
