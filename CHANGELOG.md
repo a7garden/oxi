@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.66.0] - 2026-08-04
+
+### Added
+
+- **Hooks system (Claude Code-compatible).** A new `HookRunner` port (#16)
+  lets products run shell commands on agent-lifecycle and tool events
+  (PreToolUse, PostToolUse, SessionStart, SessionEnd, SubagentStop,
+  Notification). Ships with three implementations: `CommandHookRunner`
+  (shell-command reference impl), `InMemoryHookRunner` (tests/headless),
+  and `NoopHookRunner` (default). `HookMiddleware` bridges the port into
+  the existing `MiddlewarePipeline` so hooks fire alongside audit/authorizer.
+  `AgentBuilder::with_port_hooks` / `with_session_hooks` compose hooks into
+  a single `set_hooks` call. oxicode-cli adds a `[[hooks]]` schema in
+  `settings.toml`, a first-run approval gate for project hooks, and a
+  pre-build `SessionState` threaded through teardown/recreate cycles.
+- **Agent: shake compaction** — mechanical (LLM-free) context compression.
+  Elides large tool-result payloads and fenced code blocks from older
+  messages while preserving a recent token tail verbatim, falling through
+  to LLM compaction only when savings are below threshold.
+- **Agent: TTSR AST condition matching** — rules can now carry an
+  `ast_condition` (ast-grep Smart pattern) matched against file content
+  after tool writes, in addition to the existing regex `condition`.
+- **Agent: typed `StreamDelta`** — `MessageUpdate` streaming events now
+  surface a typed delta instead of a raw string.
+- **LSP: reload/capabilities/request actions** — the LSP bridge gains
+  `reload`, `capabilities`, and `request` actions with capabilities
+  caching.
+
+### Fixed
+
+- **Agent: `afterToolCall` error handling** — errors from the after-tool
+  hook are now propagated instead of swallowed, and spawned tool tasks
+  are guarded against panics.
+- **CLI: hooks middleware replace-semantics bug** — installing runtime
+  hooks no longer wipes the existing middleware pipeline; the
+  replace-vs-append semantics are now correct.
+
 ## [0.65.0] - 2026-08-03
 
 ### Breaking

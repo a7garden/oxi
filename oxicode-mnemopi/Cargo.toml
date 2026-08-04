@@ -1,6 +1,6 @@
 [package]
 name = "oxicode-mnemopi"
-version = "0.65.0"
+version = "0.66.0"
 description = "Local SQLite vector memory engine — Rust port of omp Mnemopi"
 edition = { workspace = true }
 rust-version = { workspace = true }
