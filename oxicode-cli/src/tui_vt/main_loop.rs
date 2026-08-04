@@ -1203,30 +1203,49 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         return;
     }
     let styles = active_styles();
-    let items: Vec<ListItem<'_>> = state
+
+    let lines: Vec<Line<'_>> = state
         .transcript
         .iter()
-        .map(|line| transcript_item(line, &styles))
+        .map(|tl| transcript_line(tl, &styles))
         .collect();
 
-    let total = items.len();
-    let viewport = area.height as usize;
-    let start = effective_scroll_offset(state.scroll_offset, total, viewport);
-
-    let visible = if start >= total {
-        Vec::new()
+    let total = lines.len();
+    let start = if state.scroll_offset == usize::MAX {
+        // Follow tail: compute how many lines fit so the last ones are visible.
+        let avail = area.height as usize;
+        total.saturating_sub(avail)
     } else {
-        items
-            .into_iter()
-            .skip(start)
-            .take(viewport.max(1))
-            .collect()
+        effective_scroll_offset(state.scroll_offset, total, area.height as usize)
     };
 
-    let list = List::new(visible).block(Block::default());
-    frame.render_widget(list, area);
+    // Render top-down, wrapping each line into multiple visual rows.
+    let mut y = area.top();
+    let width = area.width.max(1) as usize;
+    for line in lines.into_iter().skip(start) {
+        if y >= area.bottom() {
+            break;
+        }
+        let text_w = line.width();
+        let wrapped_h = if text_w == 0 {
+            1
+        } else {
+            text_w.div_ceil(width).max(1) as u16
+        };
+        let row = Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: wrapped_h.min(area.bottom().saturating_sub(y)),
+        };
+        frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), row);
+        y += wrapped_h;
+    }
 }
-fn transcript_item<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> ListItem<'a> {
+
+/// Build a ratatui `Line` from a transcript line (extracted from the old
+/// `transcript_item` which returned a `ListItem`).
+fn transcript_line<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> Line<'a> {
     let (kind_style, marker) = match line.kind {
         InlineMessageKind::Agent => (
             Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
@@ -1268,7 +1287,7 @@ fn transcript_item<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> Lis
         let style = segment_style(segment, kind_style, styles);
         spans.push(Span::styled(segment.text.clone(), style));
     }
-    ListItem::new(Line::from(spans))
+    Line::from(spans)
 }
 
 fn segment_style(segment: &InlineSegment, fallback: Style, styles: &ThemeStyles) -> Style {
@@ -1625,7 +1644,13 @@ mod slash_popup_tests {
         assert!(state.slash_popup.open);
         // Every item's canonical name must start with 'm' (model is the
         // only command matching the "m" prefix).
-        assert!(state.slash_popup.items.iter().all(|i| i.name.starts_with('m')));
+        assert!(
+            state
+                .slash_popup
+                .items
+                .iter()
+                .all(|i| i.name.starts_with('m'))
+        );
     }
 
     #[test]
@@ -1706,14 +1731,8 @@ mod render_tests {
         state.slash_popup.open = true;
         state.slash_popup.items = slash_filter("");
         let rendered = render_frame_to_string(&state);
-        assert!(
-            rendered.contains("Commands"),
-            "popup title must render"
-        );
-        assert!(
-            rendered.contains("/quit"),
-            "popup must list /quit"
-        );
+        assert!(rendered.contains("Commands"), "popup title must render");
+        assert!(rendered.contains("/quit"), "popup must list /quit");
     }
 
     #[test]
@@ -1727,5 +1746,40 @@ mod render_tests {
         assert!(rendered.contains("Commands"), "popup must render");
         assert!(rendered.contains("/quit"), "popup must list /quit");
         assert!(rendered.contains('>'), "composer must still render");
+    }
+
+    #[test]
+    fn transcript_wraps_long_lines() {
+        // A line wider than the terminal must wrap, not clip.
+        let mut state = RenderState::default();
+        state.transcript.push(TranscriptLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![plain_segment(
+                "This is a very long agent response line that should wrap across multiple terminal rows when rendered at a narrow width.".to_string()
+            )],
+        });
+        let backend = TestBackend::new(40, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        terminal
+            .draw(|f| render_frame(f, &state, &handle))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        // The word "wrap" must appear somewhere — it would be clipped if
+        // the List widget was still used at 40 cols.
+        let mut full = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    full.push_str(cell.symbol());
+                }
+            }
+            full.push('\n');
+        }
+        assert!(
+            full.contains("wrap"),
+            "long line must wrap, not clip — text should be visible past col 40"
+        );
     }
 }

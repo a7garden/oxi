@@ -138,7 +138,10 @@ pub(super) fn render_chrome(
     let layout = AgentViewLayout::compute(
         area,
         &LayoutConfig::default(),
-        &ScrollbarConfig::default(),
+        &ScrollbarConfig {
+            enabled: false,
+            ..Default::default()
+        },
         LayoutInput {
             prompt_height: COMPOSER_HEIGHT,
             shortcuts_height: SHORTCUTS_HEIGHT,
