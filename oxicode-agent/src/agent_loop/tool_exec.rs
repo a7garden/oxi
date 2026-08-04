@@ -447,18 +447,32 @@ async fn execute_tool_calls_sequential(
             let mut result = executed.result;
             let mut is_error = executed.is_error;
 
-            if let Some(ref hook) = loop_ref.after_tool_call
-                && let Some(modified) = hook(&tc_name, &result).await.ok().flatten()
-            {
-                if let Some(ref details) = modified.metadata {
-                    tracing::debug!(
-                        tool = %tc_name,
-                        details = %details,
-                        "after_tool_call hook returned details"
-                    );
+            if let Some(hook) = &loop_ref.after_tool_call {
+                match hook(&tc_name, &result).await {
+                    Ok(Some(modified)) => {
+                        if let Some(ref details) = modified.metadata {
+                            tracing::debug!(
+                                tool = %tc_name,
+                                details = %details,
+                                "after_tool_call hook returned details"
+                            );
+                        }
+                        result = modified;
+                        is_error = !result.success;
+                    }
+                    Ok(None) => {}
+                    Err(hook_err) => {
+                        tracing::warn!(
+                            tool = %tc_name,
+                            error = %hook_err,
+                            "after_tool_call hook failed, creating error result"
+                        );
+                        result = AgentToolResult::error(format!(
+                            "after_tool_call hook failed: {hook_err}"
+                        ));
+                        is_error = true;
+                    }
                 }
-                result = modified;
-                is_error = !result.success;
             }
 
             FinalizedToolCall {
@@ -803,18 +817,32 @@ pub(crate) async fn execute_prepared_tool_call_static(
         enrich_context_from_metadata(&context_cell, &result);
     }
 
-    if let Some(ref hook) = after_hook
-        && let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten()
-    {
-        if let Some(ref details) = modified.metadata {
-            tracing::debug!(
-                tool = %tool_call.name,
-                details = %details,
-                "after_tool_call hook returned details"
-            );
+    if let Some(hook) = &after_hook {
+        match hook(&tool_call.name, &result).await {
+            Ok(Some(modified)) => {
+                if let Some(details) = &modified.metadata {
+                    tracing::debug!(
+                        tool = %tool_call.name,
+                        details = %details,
+                        "after_tool_call hook returned details"
+                    );
+                }
+                result = modified;
+                is_error = !result.success;
+            }
+            Ok(None) => {}
+            Err(hook_err) => {
+                tracing::warn!(
+                    tool = %tool_call.name,
+                    error = %hook_err,
+                    "after_tool_call hook failed, creating error result"
+                );
+                result = AgentToolResult::error(format!(
+                    "after_tool_call hook failed: {hook_err}"
+                ));
+                is_error = true;
+            }
         }
-        result = modified;
-        is_error = !result.success;
     }
 
     let end_intent = result.intent.clone().or(static_intent);

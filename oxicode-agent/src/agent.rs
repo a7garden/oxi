@@ -1085,6 +1085,17 @@ impl Agent {
         };
 
         let handle = tokio::task::spawn(async move {
+            // Guard ensures is_running is cleared even if the task panics.
+            // Without this, a panic mid-stream leaves is_running=true and
+            // blocks all future runs (the compare_exchange at entry fails).
+            struct RunningGuard(Arc<AtomicBool>);
+            impl Drop for RunningGuard {
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::SeqCst);
+                }
+            }
+            let _guard = RunningGuard(is_running_flag);
+
             let result = agent_loop
                 .run(prompt, move |event: AgentEvent| {
                     // Forward to tokio channel (non-blocking)
@@ -1097,7 +1108,7 @@ impl Agent {
                     }
                     // Propagate should_stop → external_stop on every event,
                     // not just TurnEnd. See run_with_channel_inner for rationale.
-                    if let Some(ref hook) = maybe_hook {
+                    if let Some(hook) = &maybe_hook {
                         let ctx = ShouldStopAfterTurnContext {
                             message: match &event {
                                 AgentEvent::TurnEnd {
@@ -1123,8 +1134,7 @@ impl Agent {
                 })
                 .await;
 
-            // Clear the Agent's running flag
-            is_running_flag.store(false, Ordering::SeqCst);
+            // _guard dropped here: clears is_running on normal exit or panic.
 
             match result {
                 Ok(_events) => {
