@@ -30,6 +30,8 @@ pub mod stream_outcome;
 pub mod streaming;
 /// Tool execution strategies.
 pub mod tool_exec;
+/// Mechanical (LLM-free) context compaction strategies.
+pub mod compaction;
 /// Time-Traveling Stream Rules engine.
 pub mod ttsr;
 
@@ -1294,6 +1296,41 @@ impl AgentLoop {
             return;
         }
 
+        // ── Mechanical shake (LLM-free) ────────────────────────────
+        // Try eliding large tool results / code blocks BEFORE invoking
+        // the LLM compactor. If enough tokens are recovered, skip the
+        // expensive LLM round-trip entirely.
+        let shake_config = compaction::shake::ShakeConfig::default();
+        match compaction::shake::shake(messages, &shake_config) {
+            compaction::shake::ShakeOutcome::Shaken {
+                regions_elided,
+                tokens_saved,
+            } => {
+                tracing::info!(
+                    session_id = ?self.session_id,
+                    regions_elided,
+                    tokens_saved,
+                    "Shake compaction recovered {} tokens ({} regions), skipping LLM compaction",
+                    tokens_saved,
+                    regions_elided
+                );
+                emit(AgentEvent::Compaction {
+                    event: CompactionEvent::Triggered {
+                        context_tokens,
+                        iteration,
+                        source: format!(
+                            "shake ({} tokens, {} regions)",
+                            tokens_saved, regions_elided
+                        ),
+                    },
+                });
+                return; // shake recovered enough — no LLM compaction needed
+            }
+            compaction::shake::ShakeOutcome::NoChange => {
+                // Not enough elidable content — fall through to LLM compaction.
+            }
+        }
+
         emit(AgentEvent::Compaction {
             event: CompactionEvent::Triggered {
                 context_tokens,
@@ -1301,6 +1338,8 @@ impl AgentLoop {
                 source: source_label.to_string(),
             },
         });
+
+
 
         let messages_to_compact: Vec<Message> = messages.to_vec();
         let instruction = self.build_compaction_instruction();
