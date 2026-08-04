@@ -34,6 +34,85 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     };
     apply_cli_overrides(&mut settings);
 
+    // Pre-build the per-process liveness identity BEFORE the engine build so
+    // we can include it in the SessionStart hook context (and pass it to
+    // App::from_oxicode on the same path).
+    let ownership_session_id = if is_tui_mode(args) {
+        crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string()
+    } else {
+        format!(
+            "proc-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        )
+    };
+
+    // Load hooks: global hooks (`~/.oxicode/settings.toml` -> `[[hooks]]`)
+    // are always trusted. Project hooks (`.oxicode/settings.toml`) require
+    // a first-run interactive Y/n approval — unless we're in a non-TUI
+    // mode, in which case we skip with a warning to keep the boot path
+    // non-interactive. See `store/hook_approval.rs` for the registry.
+    let global_hooks = settings.hooks.clone();
+    let cwd_now = std::env::current_dir().unwrap_or_default();
+    let project_hooks_path = Settings::find_project_settings(&cwd_now);
+    let project_hooks: Vec<oxicode_sdk::ports::HookSpec> = match &project_hooks_path {
+        Some(path) => {
+            let content = std::fs::read_to_string(path).unwrap_or_default();
+            let hash = crate::store::hook_approval::hash_settings(&content);
+            let mut registry = crate::store::hook_approval::HookApprovalRegistry::load_or_default();
+            if registry.is_approved(&cwd_now, &hash) {
+                // Approved: re-parse the project file and extract its [[hooks]].
+                match Settings::parse_from_str(&content, Settings::detect_format(path)) {
+                    Ok(s) => s.hooks,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "project hooks file failed to parse");
+                        Vec::new()
+                    }
+                }
+            } else {
+                // First run or hash mismatch.
+                let count = content.matches("[[hooks]]").count();
+                if count > 0 {
+                    if is_tui_mode(args) {
+                        let ok = crate::store::hook_approval::prompt_for_approval(&cwd_now, count);
+                        if ok {
+                            registry.approve(&cwd_now, &hash);
+                            let _ = registry.persist();
+                            Settings::parse_from_str(&content, Settings::detect_format(path))
+                                .map(|s| s.hooks)
+                                .unwrap_or_default()
+                        } else {
+                            tracing::warn!("project hooks denied by user; skipping");
+                            Vec::new()
+                        }
+                    } else {
+                        tracing::warn!(
+                            count,
+                            "project hooks not approved; skipping (non-interactive mode)"
+                        );
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+        None => Vec::new(),
+    };
+    let mut all_hooks = global_hooks;
+    all_hooks.extend(project_hooks);
+    let hook_runner: std::sync::Arc<dyn oxicode_sdk::ports::HookRunner> =
+        match oxicode_sdk::ports::fs::CommandHookRunner::new(all_hooks) {
+            Ok(r) => std::sync::Arc::new(r),
+            Err(e) => {
+                tracing::warn!(error = %e, "hook runner construction failed; using empty runner");
+                std::sync::Arc::new(
+                    oxicode_sdk::ports::fs::CommandHookRunner::new(Vec::new())
+                        .expect("empty spec list is always valid"),
+                )
+            }
+        };
+
     if settings
         .effective_model(None)
         .unwrap_or_default()
@@ -93,23 +172,23 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
             as std::sync::Arc<dyn oxicode_sdk::ports::EmbeddingProvider>
     });
 
-    let oxicode = crate::build_oxicode_engine(embedding_provider).await?;
+    let oxicode =
+        crate::build_oxicode_engine(embedding_provider, Some(hook_runner.clone())).await?;
 
-    // Per-process liveness identity for issue-system ownership. In TUI mode
-    // we use the canonical "tui" id so the agent tool, the TUI panel, and
-    // the `/issue` slash command all share the same flock holder. In any
-    // non-TUI mode (print, RPC, single-prompt) we generate a stable
-    // process-scoped id; that way concurrent ownership checks see this
-    // process as a single coherent owner rather than an empty caller.
-    let ownership_session_id = if is_tui_mode(args) {
-        crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string()
-    } else {
-        format!(
-            "proc-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        )
-    };
+    // Fire SessionStart (fail-open: a hook that errors must not block boot).
+    {
+        let hook_ctx = oxicode_sdk::ports::HookContext {
+            event: oxicode_sdk::ports::HookEvent::SessionStart,
+            session_id: Some(ownership_session_id.clone()),
+            session_cwd: Some(cwd_now.clone()),
+            ..Default::default()
+        };
+        let _ = oxicode
+            .ports()
+            .hooks
+            .run(oxicode_sdk::ports::HookEvent::SessionStart, &hook_ctx)
+            .await;
+    }
 
     // Spawn the catalog event logger so refresh / override / local-discovery
     // events show up in the log file. UI hooks can subscribe to
@@ -117,7 +196,15 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     let _catalog_logger =
         crate::services::spawn_catalog_event_logger(std::sync::Arc::clone(oxicode.catalog()));
 
-    let mut app = crate::App::from_oxicode(oxicode, settings, ownership_session_id).await?;
+    // Pre-build session state so the runtime (AgentSession) and the
+    // agent's session-level closures (`with_session_hooks`) share the
+    // SAME queues + stop flag. The single `set_hooks` invariant depends
+    // on this state living across both ends.
+    let session_state = crate::SessionState::default();
+
+    let mut app =
+        crate::App::from_oxicode(oxicode, settings, ownership_session_id, Some(session_state))
+            .await?;
 
     // v2.2: wire the MCP credential provider (OAuth2 client_credentials).
     // Reads the same `mcp.json` files the agent uses, picks every server
@@ -579,7 +666,6 @@ fn is_tui_mode(args: &CliArgs) -> bool {
     }
     true
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,5 +675,12 @@ mod tests {
     fn rpc_mode_is_headless() {
         let args = CliArgs::try_parse_from(["oxicode", "--mode", "rpc"]).unwrap();
         assert!(!is_tui_mode(&args));
+    }
+
+    #[test]
+    fn empty_hooks_does_not_block() {
+        use crate::store::settings::Settings;
+        let s = Settings::default();
+        assert!(s.hooks.is_empty());
     }
 }

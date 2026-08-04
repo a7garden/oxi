@@ -76,19 +76,35 @@ impl OxicodePaths {
 /// This is the **composition root** for oxicode-cli. The catalog port
 /// performs network I/O during `init()`. Errors there fall back to
 /// a noop catalog so the user can re-run `oxicode refresh` later.
+///
+/// `hook_runner` registers the user's configured [`HookRunner`](oxicode_sdk::ports::HookRunner)
+/// (global + approved-project `[[hooks]]`) on the SDK's port registry. Pass
+/// `None` to keep the noop runner (default).
 pub async fn build_oxicode(
     paths: &OxicodePaths,
     embedding_provider: Option<Arc<dyn oxicode_sdk::ports::EmbeddingProvider>>,
+    hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>,
 ) -> Result<Oxicode> {
-    build_oxicode_with_catalog(paths, build_catalog_config(paths), embedding_provider).await
+    build_oxicode_with_catalog(
+        paths,
+        build_catalog_config(paths),
+        embedding_provider,
+        hook_runner,
+    )
+    .await
 }
 
 /// Build an `Oxicode` engine with a custom catalog config. Useful for
 /// tests (e.g. pointing the catalog at a tempdir).
+///
+/// `hook_runner` follows the same semantics as [`build_oxicode`]: `Some`
+/// installs the runner on the SDK's port registry, `None` keeps the noop
+/// default.
 pub async fn build_oxicode_with_catalog(
     paths: &OxicodePaths,
     catalog_config: CatalogConfig,
     embedding_provider: Option<Arc<dyn oxicode_sdk::ports::EmbeddingProvider>>,
+    hook_runner: Option<Arc<dyn oxicode_sdk::ports::HookRunner>>,
 ) -> Result<Oxicode> {
     ensure_parent(&paths.auth)?;
     ensure_parent(&paths.config)?;
@@ -139,6 +155,10 @@ pub async fn build_oxicode_with_catalog(
 
     if let Some(ep) = embedding_provider {
         builder = builder.with_embeddings(ep);
+    }
+
+    if let Some(runner) = hook_runner {
+        builder = builder.with_hooks(runner);
     }
 
     let oxicode = builder.build();
@@ -584,7 +604,7 @@ mod tests {
     async fn build_oxicode_succeeds() {
         let tmp = tempfile::TempDir::new().unwrap();
         let paths = OxicodePaths::from_home(tmp.path());
-        let oxicode = build_oxicode(&paths, None).await.unwrap();
+        let oxicode = build_oxicode(&paths, None, None).await.unwrap();
         let _ = oxicode.ports().state;
     }
 }

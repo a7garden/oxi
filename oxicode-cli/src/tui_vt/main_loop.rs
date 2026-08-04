@@ -1028,6 +1028,9 @@ async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::Age
         thinking_level: None,
         scoped_models: Vec::new(),
         tool_registry: Some(tools),
+        // TUI runtime: share the App's session state so /steer, /follow_up,
+        // and Ctrl+C continue to take effect across the session.
+        session_state: Some(app.session_state().clone()),
     })
     .await?;
 

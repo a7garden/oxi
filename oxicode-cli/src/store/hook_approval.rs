@@ -105,8 +105,7 @@ impl HookApprovalRegistry {
         let file = ApprovalFile {
             entries: self.entries.clone(),
         };
-        let body =
-            toml::to_string_pretty(&file).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let body = toml::to_string_pretty(&file).map_err(io::Error::other)?;
         let tmp = self.path.with_extension("toml.tmp");
         std::fs::write(&tmp, body)?;
         std::fs::rename(&tmp, &self.path)?;

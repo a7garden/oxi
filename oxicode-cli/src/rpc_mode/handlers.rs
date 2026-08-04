@@ -37,6 +37,9 @@ struct RpcActor {
     settings: Settings,
     cwd: String,
     active_bash: Arc<parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    /// Shared with every swapped-in session so /steer, /follow_up, and
+    /// Ctrl+C continue to work after `/new`, `/resume`, `/fork`, etc.
+    session_state: crate::SessionState,
 }
 
 /// Run the RPC server over JSON Lines on stdin/stdout.
@@ -47,11 +50,13 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
         .into_owned();
     let agent = app.agent();
     let settings = app.settings().clone();
+    let session_state = app.session_state().clone();
     let session = AgentSession::new(
         Arc::clone(&agent),
         settings.clone(),
         SessionManager::create(&cwd, None),
         cwd.clone(),
+        session_state.clone(),
     );
     install_session_hooks(&session);
     let session = session.clone_handle();
@@ -76,6 +81,7 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
         settings,
         cwd,
         active_bash: Arc::new(parking_lot::Mutex::new(None)),
+        session_state,
     };
 
     while let Some(command) = command_rx.recv().await {
@@ -89,6 +95,14 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
     Ok(())
 }
 
+/// Install the cli-owned session hooks on a freshly-constructed session.
+///
+/// The session has ALREADY had the shared state wired into it via the
+/// `SessionState` we passed to `AgentSession::new`. This call now just
+/// re-installs the SAME closures so even sessions constructed outside
+/// the `App` flow (legacy paths, tests) observe Ctrl+C and queues.
+/// Once Task 9 drops the `install_runtime_hooks` call site entirely,
+/// this helper becomes dead and should be removed.
 fn install_session_hooks(session: &AgentSession) {
     let steering = session.steering_queue();
     let follow_up = session.follow_up_queue();
@@ -498,6 +512,7 @@ impl RpcActor {
             self.settings.clone(),
             session_manager,
             self.cwd.clone(),
+            self.session_state.clone(),
         );
         install_session_hooks(&new_session);
         let handle = new_session.clone_handle();

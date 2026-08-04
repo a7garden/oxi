@@ -560,6 +560,20 @@ impl OxicodeBuilder {
         self
     }
 
+    /// Register the hook runner port.
+    ///
+    /// When set, [`crate::AgentBuilder::with_port_hooks`] composes a
+    /// [`HookMiddleware`](crate::middleware::HookMiddleware) backed by
+    /// this runner into the agent's hook pipeline. When unset, the port
+    /// stays at [`NoopHookRunner`](crate::ports::NoopHookRunner) and the
+    /// middleware short-circuits to a no-op.
+    pub fn with_hooks(mut self, runner: Arc<dyn crate::ports::HookRunner>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.hooks = runner;
+        self.ports = Some(ports);
+        self
+    }
+
     /// Create a supervisor builder for managing agent lifecycles.
     ///
     /// # Example

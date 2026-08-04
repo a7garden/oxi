@@ -235,6 +235,12 @@ pub struct CreateAgentSessionFromServicesOptions {
     /// Pre-configured tool registry to copy into the new agent.
     /// If None, builtin tools are registered automatically.
     pub tool_registry: Option<Arc<oxicode_agent::ToolRegistry>>,
+    /// Pre-built session queues + stop flag. When `None`, fresh state is
+    /// constructed (sufficient for the headless paths that don't share
+    /// state with an `App`). The TUI/RPC entry points pass the shared
+    /// `App::session_state()` so Ctrl+C and `/steer` survive the
+    /// teardown/recreate cycle.
+    pub session_state: Option<crate::SessionState>,
 }
 
 /// Result of creating an agent session.
@@ -361,7 +367,13 @@ pub async fn create_agent_session_from_services(
             config,
             Arc::new(oxicode_agent::ToolRegistry::new()),
         ));
-        let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
+        let session = AgentSession::new(
+            agent,
+            settings.clone(),
+            options.session_manager,
+            cwd,
+            options.session_state.clone().unwrap_or_default(),
+        );
         return Ok(CreateAgentSessionResult {
             session,
             model_fallback_message: None,
@@ -480,7 +492,13 @@ pub async fn create_agent_session_from_services(
     }
 
     // Create the session
-    let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
+    let session = AgentSession::new(
+        agent,
+        settings.clone(),
+        options.session_manager,
+        cwd,
+        options.session_state.clone().unwrap_or_default(),
+    );
 
     // Set scoped models if provided
     if !options.scoped_models.is_empty() {
@@ -1023,6 +1041,10 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
                 thinking_level: None,
                 scoped_models: Vec::new(),
                 tool_registry: None,
+                // The default factory runs without an App, so fresh
+                // state is constructed — fine for tests / RPC paths
+                // that don't need to share queues with another surface.
+                session_state: None,
             },
         ))?;
 

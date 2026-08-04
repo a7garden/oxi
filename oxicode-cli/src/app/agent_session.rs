@@ -379,11 +379,18 @@ fn resume_messages_from_branch(
 #[allow(dead_code)]
 impl AgentSession {
     /// Create a new session wrapping the given [`Agent`].
+    ///
+    /// `session_state` carries the cli-owned stop flag + steering / follow-up
+    /// queues. The session clones the three `Arc`s out of it so the runtime
+    /// and the agent's `with_session_hooks` closures observe the SAME state
+    /// (see [`crate::SessionState`] doc). When the caller doesn't care about
+    /// sharing state (tests, ad-hoc runs), pass [`crate::SessionState::default`].
     pub fn new(
         agent: Arc<Agent>,
         settings: Settings,
         session_manager: SessionManager,
         cwd: String,
+        session_state: crate::SessionState,
     ) -> Self {
         let session_id = session_manager.get_session_id();
         let hub = Arc::new(super::agent_hub_registry::HubRegistry::new());
@@ -427,8 +434,14 @@ impl AgentSession {
             hub,
             listeners: Arc::new(RwLock::new(Vec::new())),
             scoped_models: Arc::new(RwLock::new(Vec::new())),
-            steering_messages: Arc::new(RwLock::new(VecDeque::new())),
-            follow_up_messages: Arc::new(RwLock::new(VecDeque::new())),
+            // Steer / follow-up queues + stop flag are SHARED with the
+            // agent's session-level closures (see `with_session_hooks` in
+            // `App::from_oxicode`). Cloning the `Arc`s preserves identity
+            // — enqueues from the runtime are seen by the agent, and the
+            // agent's stop check is observed by Ctrl+C handlers.
+            steering_messages: Arc::clone(&session_state.steering),
+            follow_up_messages: Arc::clone(&session_state.follow_up),
+            should_stop: Arc::clone(&session_state.should_stop),
             steering_mode: Arc::new(RwLock::new("all".to_string())),
             follow_up_mode: Arc::new(RwLock::new("all".to_string())),
             compaction_config: Arc::new(RwLock::new(compaction_config)),
@@ -437,7 +450,6 @@ impl AgentSession {
             session_id: Arc::new(RwLock::new(session_id)),
             cwd,
             streaming: Arc::new(AtomicBool::new(false)),
-            should_stop: Arc::new(AtomicBool::new(false)),
             extension_runner: Arc::new(RwLock::new(None)),
             advisor: Arc::new(RwLock::new(None)),
             advisor_guard: Arc::new(AdvisorEmissionGuard::new()),
@@ -1883,8 +1895,6 @@ mod tests {
         }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────
-
     fn make_session() -> AgentSession {
         let provider = Arc::new(MockProvider);
         let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
@@ -1895,7 +1905,13 @@ mod tests {
         ));
         let settings = Settings::default();
         let session_manager = SessionManager::in_memory("/tmp/test");
-        AgentSession::new(agent, settings, session_manager, "/tmp/test".to_string())
+        AgentSession::new(
+            agent,
+            settings,
+            session_manager,
+            "/tmp/test".to_string(),
+            crate::SessionState::default(),
+        )
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -2630,7 +2646,13 @@ mod tests {
             config,
             Arc::new(oxicode_agent::ToolRegistry::new()),
         ));
-        let session = AgentSession::new(agent, Settings::default(), sm, "/tmp/test".to_string());
+        let session = AgentSession::new(
+            agent,
+            Settings::default(),
+            sm,
+            "/tmp/test".to_string(),
+            crate::SessionState::default(),
+        );
 
         let messages = session.agent_ref().state().messages;
         assert_eq!(messages.len(), 2, "agent state seeded with prior history");

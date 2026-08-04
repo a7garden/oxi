@@ -53,20 +53,18 @@ pub(crate) mod util;
 /// `App::new` path is still used by the interactive TUI during the
 /// migration period.
 ///
-/// # Example
-///
-/// ```no_run
 /// use oxicode::build_oxicode_engine;
 /// # async fn _example() -> anyhow::Result<()> {
-/// let oxicode = build_oxicode_engine(None).await?;
+/// let oxicode = build_oxicode_engine(None, None).await?;
 /// println!("providers: {}", oxicode.providers().names().len());
 /// # Ok(()) }
 /// ```
 pub async fn build_oxicode_engine(
     embedding_provider: Option<std::sync::Arc<dyn oxicode_sdk::ports::EmbeddingProvider>>,
+    hook_runner: Option<std::sync::Arc<dyn oxicode_sdk::ports::HookRunner>>,
 ) -> anyhow::Result<oxicode_sdk::Oxicode> {
     let paths = services::OxicodePaths::default_paths()?;
-    services::build_oxicode(&paths, embedding_provider).await
+    services::build_oxicode(&paths, embedding_provider, hook_runner).await
 }
 
 /// Self-check the wired port implementations. Prints a one-line summary
@@ -76,10 +74,9 @@ pub async fn build_oxicode_engine(
 /// `oxicode-cli/src/main.rs`. Useful for verifying the new composition root
 /// without disturbing the legacy `App::new` path.
 pub async fn run_port_check() -> anyhow::Result<()> {
-    let oxicode = build_oxicode_engine(None).await?;
+    let oxicode = build_oxicode_engine(None, None).await?;
     let ports = oxicode.ports();
 
-    // State
     let entries = ports.state.list("").await?;
     println!("[state]    entries: {}", entries.len());
 
@@ -153,12 +150,43 @@ use anyhow::{Error, Result};
 use oxicode_agent::{Agent, AgentConfig, AgentEvent};
 use parking_lot::RwLock;
 use skills::SkillManager;
+use std::collections::VecDeque;
 use std::sync::Arc;
+
+/// Pre-built session state threaded into the agent hook chain.
+///
+/// Constructed by the cli BEFORE `oxicode.agent(...).build()` so the
+/// middleware pipeline (`with_port_hooks`) and session closures
+/// (`with_session_hooks`) are composed into a single `AgentHooks`
+/// instance — see the single-`set_hooks` invariant (only
+/// [`AgentBuilder::build`](oxicode_sdk::AgentBuilder::build) calls
+/// `set_hooks`). The same `Arc`s are cloned into `AgentSession` so the
+/// runtime queues, stop flag, and agent hooks all observe the same
+/// state across teardown/recreate cycles.
+#[derive(Clone)]
+pub struct SessionState {
+    /// Set when the user (or `Ctrl+C` handler) requests the agent to
+    /// stop after the current turn. Consulted by
+    /// [`oxicode_sdk::agent_builder::SessionHookClosures::should_stop_after_turn`].
+    pub should_stop: Arc<std::sync::atomic::AtomicBool>,
+    /// Steering messages — drained at the start of each turn (until empty).
+    pub steering: Arc<RwLock<VecDeque<oxicode_sdk::Message>>>,
+    /// Follow-up messages — drained after the agent has stopped.
+    pub follow_up: Arc<RwLock<VecDeque<oxicode_sdk::Message>>>,
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            should_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            steering: Arc::new(RwLock::new(VecDeque::new())),
+            follow_up: Arc::new(RwLock::new(VecDeque::new())),
+        }
+    }
+}
 
 // ─── Application state ───────────────────────────────────────────────────────
 
-/// Application state and entry point.
-///
 /// Holds an `Oxicode` engine (composition root) and a single `Agent` built
 /// from it. The legacy `App::new(settings)` constructor is **gone**;
 /// use [`App::from_oxicode`] with a wired `Oxicode` from
@@ -189,9 +217,11 @@ pub struct App {
     /// Cached `default` persona body, resolved once in `from_oxicode` so
     /// synchronous prompt rebuilds can reuse it without awaiting the port.
     persona_body: RwLock<Option<String>>,
+    /// Pre-built session queues + stop flag. Cloned into `AgentSession` so
+    /// the runtime and the agent's session-level closures share the SAME
+    /// state (see [`SessionState`] doc).
+    session_state: SessionState,
 }
-
-/// Context for compaction operations, passed to extension hooks
 // ─── System prompt builder ───────────────────────────────────────────────────
 fn build_system_prompt(
     thinking_level: crate::store::settings::ThinkingLevel,
@@ -236,11 +266,19 @@ impl App {
     /// [`crate::store::issues::liveness::TUI_OWNERSHIP_ID`] so the panel and
     /// agent see the same flock holder. In print / RPC mode, a stable
     /// process-scoped id (e.g. `proc-<pid>-<uuid>`) is appropriate.
+    ///
+    /// `session_state` is the pre-built [`SessionState`] passed into the
+    /// agent's `with_session_hooks` call. When `None`, fresh state is
+    /// constructed (the default for tests and most call sites — bootstrap
+    /// constructs it explicitly so the runtime and AgentSession share the
+    /// SAME queues + stop flag).
     pub async fn from_oxicode(
         oxicode: oxicode_sdk::Oxicode,
         settings: Settings,
         ownership_session_id: String,
+        session_state: Option<SessionState>,
     ) -> Result<Self> {
+        let session_state = session_state.unwrap_or_default();
         // Resolve the default persona once from the wired
         // PersonaProvider port. The body flows into the system prompt;
         // `preferred_model` overrides the settings default when no
@@ -321,10 +359,36 @@ impl App {
         };
 
         // Build the agent via the SDK's AgentBuilder — no manual wiring.
+        //
+        // Single `set_hooks` invariant: the agent's hook chain is built
+        // EXACTLY ONCE here, composing the port-backed middleware pipeline
+        // (`with_port_hooks`) and the cli-owned session closures
+        // (`with_session_hooks`) into one `AgentHooks` value. NEVER call
+        // `agent.set_hooks(...)` elsewhere (it would wipe the
+        // before/after_tool_call slots the middleware populated).
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+        // Clone the shared session state into the closures. Each closure
+        // owns a fresh `Arc` clone — cheap, but essential so the agent
+        // and the runtime (which owns the `SessionState`) see mutations
+        // from either side.
+        let stop_flag = Arc::clone(&session_state.should_stop);
+        let steering = Arc::clone(&session_state.steering);
+        let follow_up = Arc::clone(&session_state.follow_up);
+        let session_hooks = oxicode_sdk::agent_builder::SessionHookClosures {
+            should_stop_after_turn: Arc::new(move |_| {
+                stop_flag.load(std::sync::atomic::Ordering::SeqCst)
+            }),
+            get_steering_messages: Arc::new(move || steering.write().drain(..).collect()),
+            get_follow_up_messages: Arc::new(move || follow_up.write().drain(..).collect()),
+            tool_execution: oxicode_agent::config::ToolExecutionMode::Sequential,
+        };
+
         let agent = oxicode
             .agent(config)
             .workspace(cwd)
+            .with_port_hooks()
+            .with_session_hooks(session_hooks)
             .build()
             .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
         let agent = Arc::new(agent);
@@ -369,6 +433,7 @@ impl App {
             ownership_session_id,
             liveness_guard: None, // set below once issue_store is known
             persona_body: RwLock::new(persona.as_ref().map(|p| p.system_prompt.clone())),
+            session_state,
         })
         .map(|mut app| {
             // Acquire the process-wide liveness flock now that issue_store exists.
@@ -538,6 +603,29 @@ impl App {
     /// Get the current model ID
     pub fn model_id(&self) -> String {
         self.agent.model_id()
+    }
+
+    /// Borrow the pre-built [`SessionState`] (stop flag + steering + follow-up
+    /// queues). The runtime clones the `Arc`s it needs into `AgentSession`
+    /// so the runtime and the agent's session-level closures share the SAME
+    /// state — required for Ctrl+C and `/steer` to take effect mid-run.
+    pub fn session_state(&self) -> &SessionState {
+        &self.session_state
+    }
+
+    /// Clone the shared stop flag. Cheap (single Arc bump).
+    pub fn should_stop_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::clone(&self.session_state.should_stop)
+    }
+
+    /// Clone the shared steering queue.
+    pub fn steering_queue(&self) -> Arc<RwLock<VecDeque<oxicode_sdk::Message>>> {
+        Arc::clone(&self.session_state.steering)
+    }
+
+    /// Clone the shared follow-up queue.
+    pub fn follow_up_queue(&self) -> Arc<RwLock<VecDeque<oxicode_sdk::Message>>> {
+        Arc::clone(&self.session_state.follow_up)
     }
 }
 
