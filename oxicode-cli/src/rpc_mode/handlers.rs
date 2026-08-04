@@ -744,9 +744,13 @@ pub(crate) fn agent_event_to_rpc(event: &AgentEvent) -> Option<RpcEvent> {
         AgentEvent::Thinking | AgentEvent::ThinkingDelta { .. } => Some(RpcEvent::Thinking),
         AgentEvent::ThinkingEnd => Some(RpcEvent::ThinkingEnd),
         AgentEvent::TextChunk { text } => Some(RpcEvent::TextChunk { text: text.clone() }),
-        AgentEvent::MessageUpdate {
-            delta: Some(text), ..
-        } if !text.is_empty() => Some(RpcEvent::TextChunk { text: text.clone() }),
+        AgentEvent::MessageUpdate { delta, .. }
+            if delta.as_text().is_some_and(|t| !t.is_empty()) =>
+        {
+            Some(RpcEvent::TextChunk {
+                text: delta.as_text().unwrap_or("").to_string(),
+            })
+        }
         AgentEvent::ToolCallDelta {
             tool_call_id,
             args_delta,

@@ -430,7 +430,7 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             serde_json::json!({
                 "type": "message_update",
                 "text": text,
-                "delta": delta,
+                "delta": delta.as_text(),
             })
         }
         AgentEvent::MessageEnd { message } => {

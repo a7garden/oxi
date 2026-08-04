@@ -266,8 +266,8 @@ pub use oxicode_agent::{
     AgentTool, AgentToolResult, BrowseProgress, BrowseProgressCallback, CompactedContext,
     CompactionEvent, CompactionHook, EditTool, FindTool, GetSearchResultsTool, GrepTool, LsTool,
     OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState, StructuredOutput,
-    StructuredOutputError, ToolCallContext, ToolContext, ToolError, ToolExecutionMode,
-    ToolRegistry, VisitReason, WebSearchTool, WriteTool,
+    StructuredOutputError, StreamDelta, ToolCallContext, ToolContext, ToolError,
+    ToolExecutionMode, ToolRegistry, VisitReason, WebSearchTool, WriteTool,
 };
 // ── Advisor subsystem (read-only reviewer that shadows the primary agent) ─
 //

@@ -94,6 +94,38 @@ pub enum ToolCallContext {
     },
 }
 
+// ── Stream delta types ────────────────────────────────────────────────────
+
+/// Typed incremental delta for [`AgentEvent::MessageUpdate`].
+///
+/// Replaces the former `Option<String>` which conflated text and thinking
+/// deltas. Consumers can now distinguish what kind of content changed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StreamDelta {
+    /// Regular text output from the assistant.
+    Text(String),
+    /// Thinking/reasoning content from a reasoning model.
+    Thinking(String),
+    /// Non-text structural change (e.g. a tool call was finalized).
+    /// Consumers should re-render from `message` rather than appending.
+    Sync,
+}
+
+impl StreamDelta {
+    /// Returns the text content if this is a `Text` or `Thinking` delta.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            StreamDelta::Text(s) | StreamDelta::Thinking(s) => Some(s),
+            StreamDelta::Sync => None,
+        }
+    }
+
+    /// Returns `true` if this delta carries text content (Text or Thinking).
+    pub fn has_text(&self) -> bool {
+        !matches!(self, StreamDelta::Sync)
+    }
+}
+
 /// Screenshot metadata attached to PageVisit context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotMeta {
@@ -177,8 +209,8 @@ pub enum AgentEvent {
     MessageUpdate {
         /// The message in its current state.
         message: oxicode_ai::Message,
-        /// Incremental text delta since the last update, if available.
-        delta: Option<String>,
+        /// Incremental delta describing what changed.
+        delta: StreamDelta,
     },
 
     /// A message has been finalized.

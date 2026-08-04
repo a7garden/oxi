@@ -276,7 +276,7 @@ pub(crate) async fn stream_assistant_response(
                 let delta_clone = delta.clone();
                 emit(super::AgentEvent::MessageUpdate {
                     message: last_msg,
-                    delta: Some(delta),
+                    delta: super::super::StreamDelta::Text(delta),
                 });
 
                 // ── TTSR check ──
@@ -285,6 +285,7 @@ pub(crate) async fn stream_assistant_response(
                         source: MatchSource::Text,
                         file_paths: vec![],
                         tool_name: None,
+                        file_contents: vec![],
                     };
                     let violations = engine.check_delta(&delta_clone, &ctx);
                     if !violations.is_empty() {
@@ -391,7 +392,7 @@ pub(crate) async fn stream_assistant_response(
                 });
                 emit(super::AgentEvent::MessageUpdate {
                     message: last_msg,
-                    delta: Some(delta),
+                    delta: super::super::StreamDelta::Thinking(delta),
                 });
             }
             ProviderEvent::ThinkingEnd { partial, .. } if added_partial => {
@@ -469,7 +470,7 @@ pub(crate) async fn stream_assistant_response(
                 let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageUpdate {
                     message: last_msg,
-                    delta: None,
+                    delta: super::super::StreamDelta::Sync,
                 });
             }
 

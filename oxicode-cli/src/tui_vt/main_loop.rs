@@ -539,23 +539,24 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::MessageStart { .. } => {
             state.message_buffer.clear();
         }
-        AgentEvent::MessageUpdate {
-            delta: Some(delta), ..
-        } => {
-            state.message_buffer.push_str(&delta);
-            handle.inline(InlineMessageKind::Agent, plain_segment(delta));
-        }
-        AgentEvent::MessageUpdate { delta: None, .. } => {
-            // Re-render the complete message as markdown
-            if !state.message_buffer.is_empty() {
-                let lines = oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
-                let count = lines.len();
-                if count > 0 {
-                    handle.replace_last(count, InlineMessageKind::Agent, lines);
-                }
-                state.message_buffer.clear();
+        AgentEvent::MessageUpdate { delta, .. } => match &delta {
+            oxicode_sdk::StreamDelta::Text(text) | oxicode_sdk::StreamDelta::Thinking(text) => {
+                state.message_buffer.push_str(text);
+                handle.inline(InlineMessageKind::Agent, plain_segment(text.clone()));
             }
-        }
+            oxicode_sdk::StreamDelta::Sync => {
+                // Re-render the complete message as markdown
+                if !state.message_buffer.is_empty() {
+                    let lines =
+                        oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
+                    let count = lines.len();
+                    if count > 0 {
+                        handle.replace_last(count, InlineMessageKind::Agent, lines);
+                    }
+                    state.message_buffer.clear();
+                }
+            }
+        },
         AgentEvent::MessageEnd { .. } => {
             // Final rendering (same as delta:None for completeness)
             if !state.message_buffer.is_empty() {
