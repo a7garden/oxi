@@ -21,6 +21,7 @@ pub mod access_compat;
 pub mod auth_storage;
 pub mod extracting_backend;
 pub mod fs_util;
+pub mod hook_approval;
 #[allow(missing_docs, dead_code)] // surface is large; do a doc pass before stabilizing
 pub mod issues;
 pub mod memory_mnemopi;
