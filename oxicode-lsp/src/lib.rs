@@ -132,6 +132,7 @@ pub struct LspClient {
     diagnostics: Arc<DashMap<String, PublishedDiagnostics>>,
     diagnostics_ready: Arc<Notify>,
     server: Option<ServerSocket>,
+    capabilities: parking_lot::RwLock<Option<types::ServerCapabilities>>,
     main_loop: Option<JoinHandle<async_lsp::Result<()>>>,
     child: Option<async_process::Child>,
     #[allow(dead_code)]
@@ -240,6 +241,7 @@ impl LspClient {
             diagnostics,
             diagnostics_ready: Arc::new(Notify::new()),
             server: Some(server),
+            capabilities: parking_lot::RwLock::new(None),
             main_loop: Some(main_loop_handle),
             child: Some(child),
             request_timeout: config.request_timeout,
@@ -322,8 +324,14 @@ impl LspClient {
                 method: "initialized".into(),
                 source: e,
             })?;
+        *self.capabilities.write() = Some(resp.capabilities.clone());
 
         Ok(resp.capabilities)
+    }
+
+    /// Returns the server capabilities captured during `initialize`, if available.
+    pub fn cached_capabilities(&self) -> Option<ServerCapabilities> {
+        self.capabilities.read().clone()
     }
 
     pub async fn request<R>(

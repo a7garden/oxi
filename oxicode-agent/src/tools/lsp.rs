@@ -160,6 +160,17 @@ fn parse_lsp_action(params: &Value) -> Result<LspAction, ToolError> {
                 apply,
             })
         }
+        "reload" => Ok(LspAction::Reload),
+        "capabilities" => Ok(LspAction::Capabilities),
+        "request" => {
+            let query = params
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("request requires 'query' (LSP method name)")?
+                .to_string();
+            let payload = params.get("payload").cloned();
+            Ok(LspAction::Request { query, payload })
+        }
         other => Err(format!("Unknown LSP action: '{}'", other)),
     }
 }

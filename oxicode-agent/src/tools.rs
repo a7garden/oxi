@@ -322,6 +322,17 @@ pub enum LspAction {
         /// If true, apply the rename; otherwise just preview.
         apply: bool,
     },
+    /// Reload the LSP server (e.g. rust-analyzer/reloadWorkspace).
+    Reload,
+    /// Dump the server's capabilities (from the initialize handshake).
+    Capabilities,
+    /// Send a raw LSP request (method name + optional JSON params).
+    Request {
+        /// LSP method name (e.g. "workspace/symbol").
+        query: String,
+        /// Optional JSON payload. If absent, empty params are sent.
+        payload: Option<serde_json::Value>,
+    },
 }
 
 /// LSP access capability. Implemented by an `oxicode-lsp` crate (feature-gated)

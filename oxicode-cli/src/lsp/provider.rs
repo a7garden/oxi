@@ -378,6 +378,106 @@ impl CliLspProvider {
             }
         })
     }
+
+    async fn action_reload(&self) -> Result<String, ToolError> {
+        use lsp_types::notification::DidChangeConfiguration;
+        let clients = self.manager.live_clients();
+        if clients.is_empty() {
+            return Err("No active LSP servers to reload".into());
+        }
+        let mut results = Vec::new();
+        for (name, client) in &clients {
+            // Send workspace/didChangeConfiguration with empty settings to
+            // trigger a config reload.
+            let _ = client.notify::<DidChangeConfiguration>(
+                lsp_types::DidChangeConfigurationParams { settings: serde_json::Value::Null },
+            );
+            results.push(format!("{name}: configuration reloaded"));
+        }
+        Ok(results.join("\n"))
+    }
+
+    async fn action_capabilities(&self) -> Result<String, ToolError> {
+        let clients = self.manager.live_clients();
+        if clients.is_empty() {
+            return Err("No active LSP servers".into());
+        }
+        let mut parts = Vec::new();
+        for (name, client) in &clients {
+            match client.cached_capabilities() {
+                Some(caps) => {
+                    let json = serde_json::to_string_pretty(&caps)
+                        .unwrap_or_else(|_| "(serialization failed)".into());
+                    parts.push(format!("=== {name} ===\n{json}"));
+                }
+                None => {
+                    parts.push(format!("=== {name} ===\n(capabilities not yet captured)"));
+                }
+            }
+        }
+        Ok(parts.join("\n\n"))
+    }
+
+    async fn action_raw_request(
+        &self,
+        method: &str,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, ToolError> {
+        // Route to typed lsp_types requests for known methods. The
+        // async-lsp client requires compile-time method routing, so we
+        // map common methods here. Unknown methods return an error.
+        let clients = self.manager.live_clients();
+        let (_name, client) = clients
+            .first()
+            .ok_or::<ToolError>("No active LSP servers".into())?;
+        let params = payload.unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+        match method {
+            "workspace/symbol" => {
+                let query = params
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let result = client
+                    .request::<WorkspaceSymbolRequest>(
+                        lsp_types::WorkspaceSymbolParams { query, ..Default::default() },
+                        REQUEST_TIMEOUT,
+                    )
+                    .await
+                    .map_err(lsp_err)?;
+                Ok(serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|_| "(serialization failed)".into()))
+            }
+            "textDocument/documentSymbol" => {
+                let uri = params
+                    .get("textDocument")
+                    .and_then(|v| v.get("uri"))
+                    .and_then(|v| v.as_str())
+                    .ok_or::<ToolError>("Missing textDocument.uri in params".into())?;
+                let result = client
+                    .request::<DocumentSymbolRequest>(
+                        lsp_types::DocumentSymbolParams {
+                            text_document: lsp_types::TextDocumentIdentifier {
+                                uri: uri.parse().map_err(|_| "Invalid URI".to_string())?,
+                            },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                            partial_result_params: lsp_types::PartialResultParams::default(),
+                        },
+                        REQUEST_TIMEOUT,
+                    )
+                    .await
+                    .map_err(lsp_err)?;
+                Ok(serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|_| "(serialization failed)".into()))
+            }
+            other => Err(format!(
+                "Raw request '{other}' is not supported via the typed LSP client. \
+                 Supported methods: workspace/symbol, textDocument/documentSymbol. \
+                 Use the dedicated LSP action (diagnostics, hover, etc.) instead."
+            )),
+        }
+    }
 }
 
 #[async_trait]
@@ -548,6 +648,11 @@ impl LspProvider for CliLspProvider {
                     new_path,
                     apply,
                 } => self.action_file_rename(old_path, new_path, *apply).await,
+                LspAction::Reload => self.action_reload().await,
+                LspAction::Capabilities => self.action_capabilities().await,
+                LspAction::Request { query, payload } => {
+                    self.action_raw_request(query, payload.clone()).await
+                }
             }
         })
     }
