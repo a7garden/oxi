@@ -724,20 +724,28 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::ToolStart { tool_name, .. } => {
             handle.append_line(
                 InlineMessageKind::Tool,
-                vec![plain_segment(format!("\u{2192} {tool_name}"))],
+                vec![plain_segment(format!("\u{2699} {tool_name}"))],
             );
             handle.set_reasoning_stage(Some(format!("tool: {tool_name}")));
         }
         AgentEvent::ToolComplete { result } => {
             let preview = preview_tool_result(&result.content);
-            handle.append_line(InlineMessageKind::Tool, vec![plain_segment(preview)]);
+            let mut style = InlineTextStyle::default();
+            style.effects |= anstyle::Effects::DIMMED;
+            handle.append_line(
+                InlineMessageKind::Tool,
+                vec![InlineSegment {
+                    text: format!("\u{2713} {preview}"),
+                    style: Arc::new(style),
+                }],
+            );
             handle.set_reasoning_stage(None);
             handle.set_input_enabled(true);
         }
         AgentEvent::ToolError { error, .. } => {
             handle.append_line(
                 InlineMessageKind::Error,
-                vec![plain_segment(format!("tool error: {error}"))],
+                vec![plain_segment(format!("\u{2717} {error}"))],
             );
             handle.set_reasoning_stage(None);
             handle.set_input_enabled(true);
@@ -2056,7 +2064,7 @@ fn refresh_slash_popup(state: &mut RenderState) {
 }
 
 fn preview_tool_result(content: &str) -> String {
-    const MAX: usize = 200;
+    const MAX: usize = 500;
     if content.chars().count() <= MAX {
         return content.to_string();
     }
