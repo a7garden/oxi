@@ -12,7 +12,7 @@
 //! `/settings`, …) are deferred until those overlays are rebuilt against
 //! `InlineCommand::ShowOverlay`.
 
-use oxicode_vtui::tui::core::{InlineHandle, InlineMessageKind};
+use oxicode_vtui::tui::core::{InlineHandle, InlineListItem, InlineMessageKind, InlineListSelection};
 
 use crate::app::agent_session::AgentSessionHandle;
 use crate::tui_vt::main_loop::{RenderState, plain_segment};
@@ -130,24 +130,32 @@ impl SlashRegistry {
     }
 
     fn render_help(&self, ctx: &mut SlashCtx<'_>) {
-        let mut entries: Vec<(String, String)> = self
+        let mut items: Vec<InlineListItem> = self
             .builtins
             .iter()
             .map(|c| {
-                let mut names = format!("/{}", c.name());
+                let mut title = format!("/{}", c.name());
                 for alias in c.aliases() {
-                    names.push_str(&format!(", /{alias}"));
+                    title.push_str(&format!(", /{alias}"));
                 }
-                (names, c.description().to_string())
+                InlineListItem {
+                    title,
+                    subtitle: Some(c.description().to_string()),
+                    badge: None,
+                    indent: 0,
+                    selection: Some(InlineListSelection::SlashCommand(c.name().to_string())),
+                    search_value: None,
+                }
             })
             .collect();
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let mut lines = vec!["Available commands:".to_string()];
-        for (names, desc) in &entries {
-            lines.push(format!("  {names:<18} {desc}"));
-        }
-        ctx.reply(InlineMessageKind::Info, lines.join("\n"));
+        items.sort_by(|a, b| a.title.cmp(&b.title));
+        ctx.handle.show_list_modal(
+            "Commands".to_string(),
+            vec!["Select a command (Esc to close)".to_string()],
+            items,
+            None,
+            None,
+        );
     }
 }
 
@@ -270,10 +278,48 @@ impl SlashCommand for ModelCommand {
     }
     fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
         match args.trim() {
-            "" => ctx.reply(
-                InlineMessageKind::Info,
-                format!("Current model: {}", ctx.session.model_id()),
-            ),
+            "" => {
+                let models = ctx.session.scoped_models();
+                if models.is_empty() {
+                    ctx.reply(
+                        InlineMessageKind::Info,
+                        format!("Current model: {}", ctx.session.model_id()),
+                    );
+                } else {
+                    // Open a model picker overlay.
+                    ctx.state.overlay_model_ids = models
+                        .iter()
+                        .map(|m| format!("{}/{}", m.provider, m.model_id))
+                        .collect();
+                    let current = ctx.session.model_id();
+                    let items: Vec<InlineListItem> = models
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| {
+                            let id = format!("{}/{}", m.provider, m.model_id);
+                            InlineListItem {
+                                title: id.clone(),
+                                subtitle: Some(m.provider.clone()),
+                                badge: if id == current {
+                                    Some("active".to_string())
+                                } else {
+                                    None
+                                },
+                                indent: 0,
+                                selection: Some(InlineListSelection::Model(i)),
+                                search_value: None,
+                            }
+                        })
+                        .collect();
+                    ctx.handle.show_list_modal(
+                        "Models".to_string(),
+                        vec!["Select a model (Esc to close)".to_string()],
+                        items,
+                        None,
+                        None,
+                    );
+                }
+            }
             "next" | "cycle" => match ctx.session.cycle_model() {
                 Some(new_id) => ctx.reply(InlineMessageKind::Info, format!("Switched to {new_id}")),
                 None => ctx.reply(

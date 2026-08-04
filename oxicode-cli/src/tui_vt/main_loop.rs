@@ -27,8 +27,8 @@ use oxicode_agent::AgentEvent;
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
     InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
-    InlineHeaderStatusTone, InlineListItem, InlineMessageKind, InlineSegment, InlineTextStyle,
-    OverlayRequest,
+    InlineHeaderStatusTone, InlineListItem, InlineListSelection, InlineMessageKind, InlineSegment,
+    InlineTextStyle, OverlayRequest, OverlaySubmission,
 };
 use ratatui::{
     Frame, Terminal,
@@ -178,6 +178,8 @@ pub struct RenderState {
     pub reasoning_stage: Option<String>,
     /// Overlay modal/list state — `Some` when an overlay is open.
     pub overlay: Option<OverlayState>,
+    /// Model IDs for the /model overlay picker (ordered same as overlay items).
+    pub overlay_model_ids: Vec<String>,
 }
 
 /// One rendered transcript line.
@@ -844,26 +846,32 @@ fn handle_inline_event(
             let _ = session.cycle_model();
         }
         InlineEvent::Overlay(overlay_evt) => {
-            // The overlay state is already cleared by the input thread
-            // before this event arrives (handle_overlay_key drops it).
-            // What remains is to surface the user's choice — for now we
-            // log it and let the harness react to subsequent commands.
-            // When the slash dispatcher opens a list overlay (e.g. /model),
-            // the selection is consumed by the command that opened it via
-            // its own subscriber on the cmd channel.
             use oxicode_vtui::tui::core::OverlayEvent;
             match overlay_evt {
                 OverlayEvent::Submitted(sub) => {
-                    tracing::debug!(?sub, "overlay submitted");
+                    // If this was a /model picker, set the selected model.
+                    if let OverlaySubmission::Selection(InlineListSelection::Model(idx)) = &sub
+                        && idx < &state.overlay_model_ids.len()
+                    {
+                        let model_id = state.overlay_model_ids[*idx].clone();
+                        match session.set_model(&model_id) {
+                            Ok(()) => handle.append_line(
+                                InlineMessageKind::Info,
+                                vec![plain_segment(format!("Switched to {model_id}"))],
+                            ),
+                            Err(e) => handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Failed to set model: {e}"))],
+                            ),
+                        }
+                    }
+                    state.overlay_model_ids.clear();
                     handle.close_overlay();
                 }
                 OverlayEvent::Cancelled => {
-                    tracing::debug!("overlay cancelled by user");
                     handle.close_overlay();
                 }
-                OverlayEvent::SelectionChanged(change) => {
-                    tracing::trace!(?change, "overlay selection changed");
-                }
+                OverlayEvent::SelectionChanged(_) => {}
             }
         }
         _ => {
