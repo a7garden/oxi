@@ -569,9 +569,20 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             state.message_buffer.clear();
         }
         AgentEvent::MessageUpdate { delta, .. } => match &delta {
-            oxicode_sdk::StreamDelta::Text(text) | oxicode_sdk::StreamDelta::Thinking(text) => {
+            oxicode_sdk::StreamDelta::Text(text) => {
                 state.message_buffer.push_str(text);
                 handle.inline(InlineMessageKind::Agent, plain_segment(text.clone()));
+            }
+            oxicode_sdk::StreamDelta::Thinking(text) => {
+                // Show thinking blocks as dimmed Info lines with a ✻ marker,
+                // visually distinct from the actual response text.
+                let mut style = InlineTextStyle::default();
+                style.effects |= anstyle::Effects::DIMMED;
+                let seg = InlineSegment {
+                    text: format!("\u{2733} {text}"),
+                    style: Arc::new(style),
+                };
+                handle.inline(InlineMessageKind::Info, seg);
             }
             oxicode_sdk::StreamDelta::Sync => {
                 // Re-render the complete message as markdown
