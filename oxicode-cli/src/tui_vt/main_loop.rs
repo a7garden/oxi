@@ -299,6 +299,16 @@ pub async fn run_tui(app: App) -> Result<()> {
     let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
     let git_branch = crate::util::git_utils::get_current_branch(&cwd);
     super::host::activate_theme(app.settings());
+    // Validate active theme contrast and log any warnings.
+    let theme_id = app.settings().theme.as_str();
+    let validation = oxicode_vtui::theme::validate_theme_contrast(theme_id);
+    if validation.warnings.is_empty() {
+        tracing::debug!("theme '{theme_id}' passed contrast validation");
+    } else {
+        for w in &validation.warnings {
+            tracing::warn!("theme contrast: {w}");
+        }
+    }
 
     // Wire the inline-protocol channels. `cmd_tx` becomes the
     // `InlineHandle`; `evt_tx` is the input-thread → main-loop channel.
