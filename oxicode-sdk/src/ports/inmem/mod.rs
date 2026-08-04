@@ -9,13 +9,14 @@
 
 pub mod cron;
 pub mod event;
+pub mod hook;
 pub mod memory;
 pub mod resources;
 pub mod todo_state;
 pub mod url_router;
-
 pub use cron::InMemoryCronScheduler;
 pub use event::InProcessEventBus;
+pub use hook::InMemoryHookRunner;
 pub use memory::InMemoryMemoryStore;
 pub use resources::CountingResourceMonitor;
 pub use todo_state::InMemoryTodoState;
