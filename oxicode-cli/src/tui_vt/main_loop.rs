@@ -579,7 +579,7 @@ impl RenderState {
     }
 
     /// Show an ephemeral tip if the per-session seen-cap hasn't been reached.
-    /// Each unique `key` can show at most [`SEEN_CAP`] times per session.
+    /// Each unique `key` can show at most `SEEN_CAP` times per session.
     pub fn show_tip(&mut self, key: &'static str, text: &str, ttl: u64, ambient: bool) {
         let count = self.seen_tips.entry(key).or_insert(0);
         if *count >= SEEN_CAP {

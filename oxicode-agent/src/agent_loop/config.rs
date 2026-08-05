@@ -29,7 +29,7 @@ pub struct AgentLoopConfig {
     ///
     /// SDK consumers set this via
     /// `AgentBuilder::with_compactor` (e.g. with the
-    /// [`crate::snapcompact_compactor::SnapcompactCompactor`]
+    /// `oxicode_sdk::snapcompact_compactor::SnapcompactCompactor`
     /// in `oxicode-sdk`).
     pub compactor: Option<Arc<dyn oxicode_ai::Compactor>>,
     /// Optional session identifier for logging and tracing.

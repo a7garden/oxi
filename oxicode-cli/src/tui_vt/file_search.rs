@@ -160,7 +160,7 @@ fn parse_line_range(s: &str) -> Option<(usize, usize)> {
 /// `.git/info/exclude`, and the global gitignore. Hidden files (dotfiles)
 /// are excluded by default and toggled on via the `@!` gesture.
 ///
-/// Caps at [`MAX_FILES`] entries to bound latency on large repos.
+/// Caps at `MAX_FILES` entries to bound latency on large repos.
 pub fn build_index(cwd: &Path, hidden: bool) -> Vec<String> {
     let mut files = Vec::new();
     let mut builder = ignore::WalkBuilder::new(cwd);

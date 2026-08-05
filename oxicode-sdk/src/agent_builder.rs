@@ -268,7 +268,7 @@ impl<'a> AgentBuilder<'a> {
     /// slot. `None` (default) preserves the existing LLM-compactor
     /// behavior.
     ///
-    /// The SDK ships [`crate::SnapcompactCompactor`] — a PNG-frame
+    /// The SDK ships [`crate::snapcompact_compactor::SnapcompactCompactor`] — a PNG-frame
     /// compactor that makes no LLM call:
     ///
     /// ```
