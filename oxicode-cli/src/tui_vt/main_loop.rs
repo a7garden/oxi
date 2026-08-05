@@ -2370,53 +2370,6 @@ fn transcript_line_marked<'a>(
     Line::from(spans)
 }
 
-/// Build a ratatui `Line` from a transcript line (extracted from the old
-/// `transcript_item` which returned a `ListItem`).
-fn transcript_line<'a>(line: &'a TranscriptLine, styles: &'a ThemeStyles) -> Line<'a> {
-    let (kind_style, marker) = match line.kind {
-        InlineMessageKind::Agent => (
-            Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
-            "\u{25cf}", // ●
-        ),
-        InlineMessageKind::User => (
-            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
-            "\u{276f}", // ❯
-        ),
-        InlineMessageKind::Tool => (
-            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
-            "\u{2699}", // ⚙
-        ),
-        InlineMessageKind::Error => (
-            Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
-            "\u{2717}", // ✗
-        ),
-        InlineMessageKind::Warning => (
-            Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
-            "\u{26a0}", // ⚠
-        ),
-        InlineMessageKind::Info => (
-            Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-            "\u{2139}", // ℹ
-        ),
-        InlineMessageKind::Policy => (
-            Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
-            "\u{25c6}", // ◆
-        ),
-        InlineMessageKind::Pty => (
-            Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
-            "\u{258c}", // ▌
-        ),
-    };
-
-    let mut spans = Vec::with_capacity(line.segments.len() + 1);
-    spans.push(Span::styled(format!("{marker} "), kind_style));
-    for segment in &line.segments {
-        let style = segment_style(segment, kind_style, styles);
-        spans.push(Span::styled(segment.text.clone(), style));
-    }
-    Line::from(spans)
-}
-
 fn segment_style(segment: &InlineSegment, fallback: Style, styles: &ThemeStyles) -> Style {
     let mut style = fallback;
     let inline = segment.style.as_ref();
@@ -2905,7 +2858,12 @@ fn preview_tool_result(content: &str) -> String {
 /// plain preview.
 fn try_render_diff(content: &str, handle: &InlineHandle) -> bool {
     let lines: Vec<&str> = content.lines().collect();
-    // Detect diff-like content: at least 2 added/removed lines.
+    // Require a unified-diff hunk header (`@@ … @@`) as a strong signal that
+    // the content is actually a diff — prevents grep context lines, bullet
+    // lists, and shell output from being mis-rendered as deletions.
+    if !lines.iter().any(|l| l.starts_with("@@")) {
+        return false;
+    }
     let additions = lines
         .iter()
         .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
