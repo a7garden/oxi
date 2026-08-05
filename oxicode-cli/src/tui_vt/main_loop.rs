@@ -190,6 +190,20 @@ pub struct RenderState {
     pub vim_state: oxicode_vtui::vim::VimState,
     /// Vim clipboard buffer.
     pub vim_clipboard: String,
+    /// In-transcript search state — `None` when no search is active.
+    pub search: Option<SearchState>,
+    /// Folded block IDs (toggled by the `e` key).
+    pub folded_blocks: std::collections::HashSet<usize>,
+    /// Last Esc press timestamp (for double-Esc detection).
+    pub last_esc_at: Option<std::time::Instant>,
+    /// Multiline input mode — Enter inserts newline, Shift+Enter sends.
+    pub multiline_mode: bool,
+    /// Submitted prompt history (most-recent-first).
+    pub prompt_history: Vec<String>,
+    /// Current position in history navigation (None = not navigating).
+    pub history_pos: Option<usize>,
+    /// Next block ID to assign when appending transcript lines.
+    pub next_block_id: usize,
 }
 
 /// One rendered transcript line.
@@ -197,6 +211,19 @@ pub struct RenderState {
 pub struct TranscriptLine {
     pub kind: InlineMessageKind,
     pub segments: Vec<InlineSegment>,
+    /// Block group ID — consecutive lines of the same kind share a block.
+    /// Assigned incrementally when lines are appended.
+    pub block_id: usize,
+}
+
+/// In-transcript search state.
+#[derive(Clone, Debug)]
+pub struct SearchState {
+    pub query: String,
+    /// Transcript line indices that contain a match.
+    pub matches: Vec<usize>,
+    /// Current match cursor (index into `matches`).
+    pub current: usize,
 }
 
 /// One filtered entry in the `/`-command autocomplete popup.
@@ -267,7 +294,12 @@ impl RenderState {
 
     /// Append a brand-new line to the transcript.
     fn append_line(&mut self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
-        self.transcript.push(TranscriptLine { kind, segments });
+        let block_id = self.block_id_for_kind(kind);
+        self.transcript.push(TranscriptLine {
+            kind,
+            segments,
+            block_id,
+        });
     }
 
     /// Append a segment to the most recent transcript line, or create a new
@@ -280,10 +312,143 @@ impl RenderState {
             last.segments.push(segment);
             return;
         }
+        let block_id = self.block_id_for_kind(kind);
         self.transcript.push(TranscriptLine {
             kind,
             segments: vec![segment],
+            block_id,
         });
+    }
+
+    /// Determine the block_id for a new line: reuse the last line's block
+    /// if the kind matches, otherwise allocate a new block.
+    fn block_id_for_kind(&mut self, kind: InlineMessageKind) -> usize {
+        if let Some(last) = self.transcript.last()
+            && last.kind == kind
+        {
+            return last.block_id;
+        }
+        let id = self.next_block_id;
+        self.next_block_id += 1;
+        id
+    }
+
+    // ── Search ──
+
+    /// Start a new transcript search, collecting all matching line indices.
+    pub fn start_search(&mut self, query: &str) {
+        let needle = query.to_lowercase();
+        let matches: Vec<usize> = self
+            .transcript
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| {
+                line.segments
+                    .iter()
+                    .any(|s| s.text.to_lowercase().contains(&needle))
+            })
+            .map(|(i, _)| i)
+            .collect();
+        self.search = Some(SearchState {
+            query: query.to_string(),
+            matches,
+            current: 0,
+        });
+        // Jump to the first match if any.
+        if let Some(s) = &self.search
+            && let Some(&first) = s.matches.first()
+        {
+            self.scroll_offset = first;
+        }
+    }
+
+    /// Advance to the next search match (wraps around).
+    pub fn search_next(&mut self) {
+        if let Some(s) = &mut self.search
+            && !s.matches.is_empty()
+        {
+            s.current = (s.current + 1) % s.matches.len();
+            let line = s.matches[s.current];
+            self.scroll_offset = line;
+        }
+    }
+
+    /// Go to the previous search match (wraps around).
+    pub fn search_prev(&mut self) {
+        if let Some(s) = &mut self.search
+            && !s.matches.is_empty()
+        {
+            if s.current == 0 {
+                s.current = s.matches.len() - 1;
+            } else {
+                s.current -= 1;
+            }
+            let line = s.matches[s.current];
+            self.scroll_offset = line;
+        }
+    }
+
+    // ── Block folding ──
+
+    /// Toggle the fold state of the block containing the line at (or nearest
+    /// above) the current scroll offset.
+    pub fn toggle_fold_at_view(&mut self) {
+        let offset = if self.scroll_offset == usize::MAX {
+            self.transcript.len().saturating_sub(1)
+        } else {
+            self.scroll_offset
+        };
+        if let Some(line) = self.transcript.get(offset) {
+            let bid = line.block_id;
+            if !self.folded_blocks.insert(bid) {
+                self.folded_blocks.remove(&bid);
+            }
+        }
+    }
+
+    /// Unfold all blocks.
+    pub fn unfold_all(&mut self) {
+        self.folded_blocks.clear();
+    }
+
+    // ── Turn navigation ──
+
+    /// Jump the scroll to the start of the next assistant (Agent) block.
+    pub fn jump_next_turn(&mut self) {
+        let offset = self.effective_offset();
+        let search_after = self
+            .transcript
+            .iter()
+            .enumerate()
+            .skip(offset + 1)
+            .find(|(_, l)| l.kind == InlineMessageKind::Agent || l.kind == InlineMessageKind::User);
+        if let Some((idx, _)) = search_after {
+            self.scroll_offset = idx;
+        }
+    }
+
+    /// Jump the scroll to the start of the previous user block.
+    pub fn jump_prev_turn(&mut self) {
+        let offset = self.effective_offset();
+        let search_before = self
+            .transcript
+            .iter()
+            .enumerate()
+            .take(offset)
+            .rev()
+            .find(|(_, l)| l.kind == InlineMessageKind::User);
+        if let Some((idx, _)) = search_before {
+            self.scroll_offset = idx;
+        }
+    }
+
+    /// Effective scroll offset (resolves `usize::MAX` follow-tail to a real index).
+    fn effective_offset(&self) -> usize {
+        if self.scroll_offset == usize::MAX {
+            self.transcript.len().saturating_sub(1)
+        } else {
+            self.scroll_offset
+        }
     }
 }
 
@@ -300,8 +465,8 @@ pub async fn run_tui(app: App) -> Result<()> {
     let git_branch = crate::util::git_utils::get_current_branch(&cwd);
     super::host::activate_theme(app.settings());
     // Validate active theme contrast and log any warnings.
-    let theme_id = app.settings().theme.as_str();
-    let validation = oxicode_vtui::theme::validate_theme_contrast(theme_id);
+    let theme_id = oxicode_vtui::theme::active_theme_id();
+    let validation = oxicode_vtui::theme::validate_theme_contrast(&theme_id);
     if validation.warnings.is_empty() {
         tracing::debug!("theme '{theme_id}' passed contrast validation");
     } else {
@@ -551,8 +716,7 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         InlineCommand::SetInputEnabled(enabled) => {
             state.input_enabled = enabled;
         }
-        InlineCommand::SetCursorVisible(_) | InlineCommand::ForceRedraw => {
-        }
+        InlineCommand::SetCursorVisible(_) | InlineCommand::ForceRedraw => {}
         InlineCommand::SetReasoningStage(stage) => {
             state.reasoning_stage = stage;
         }
@@ -754,16 +918,19 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             handle.set_reasoning_stage(Some(format!("tool: {tool_name}")));
         }
         AgentEvent::ToolComplete { result } => {
-            let preview = preview_tool_result(&result.content);
-            let mut style = InlineTextStyle::default();
-            style.effects |= anstyle::Effects::DIMMED;
-            handle.append_line(
-                InlineMessageKind::Tool,
-                vec![InlineSegment {
-                    text: format!("\u{2713} {preview}"),
-                    style: Arc::new(style),
-                }],
-            );
+            // If the result looks like a diff, render with green/red coloring.
+            if !try_render_diff(&result.content, handle) {
+                let preview = preview_tool_result(&result.content);
+                let mut style = InlineTextStyle::default();
+                style.effects |= anstyle::Effects::DIMMED;
+                handle.append_line(
+                    InlineMessageKind::Tool,
+                    vec![InlineSegment {
+                        text: format!("\u{2713} {preview}"),
+                        style: Arc::new(style),
+                    }],
+                );
+            }
             handle.set_reasoning_stage(None);
             handle.set_input_enabled(true);
         }
@@ -794,6 +961,13 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             ..
         } => {
             handle.set_input_status(None, Some(format!("retry {attempt}/{max_attempts}")));
+        }
+        AgentEvent::TurnEnd { .. } => {
+            // Ring the terminal bell when the agent finishes a turn.
+            use std::io::Write;
+            let _ = write!(std::io::stderr(), "\x07");
+            let _ = std::io::stderr().flush();
+            handle.set_reasoning_stage(None);
         }
         _ => {
             // Other variants (TurnStart/End, AgentStart/End, Usage, …) are
@@ -897,6 +1071,32 @@ fn handle_inline_event(
                                 vec![plain_segment(format!("Failed to set model: {e}"))],
                             ),
                         }
+                    }
+                    // If this was a /theme picker, apply the selected theme.
+                    if let OverlaySubmission::Selection(InlineListSelection::Theme(theme_id)) = &sub
+                    {
+                        match oxicode_vtui::theme::set_active_theme(theme_id) {
+                            Ok(()) => {
+                                let label = oxicode_vtui::theme::theme_label(theme_id)
+                                    .unwrap_or(theme_id.as_ref())
+                                    .to_string();
+                                handle.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!("Theme: {label}"))],
+                                );
+                            }
+                            Err(e) => handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown theme: {e}"))],
+                            ),
+                        }
+                    }
+                    // If this was a command palette selection, fill the prompt.
+                    if let OverlaySubmission::Selection(InlineListSelection::SlashCommand(name)) =
+                        &sub
+                    {
+                        state.input_buffer = format!("/{name} ");
+                        state.input_cursor = state.input_buffer.len();
                     }
                     state.overlay_model_ids.clear();
                     handle.close_overlay();
@@ -1023,6 +1223,20 @@ fn spawn_input_thread(
                 continue;
             }
 
+            // Ctrl+M: toggle multiline input mode.
+            if key.code == KeyCode::Char('m') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let mut s = state.lock();
+                s.multiline_mode = !s.multiline_mode;
+                continue;
+            }
+
+            // Ctrl+P: open the command palette.
+            if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let mut s = state.lock();
+                s.overlay = Some(build_command_palette());
+                continue;
+            }
+
             // Overlay key handling takes priority — when an overlay is
             // open, Up/Down navigate, Enter submits, Esc cancels, and any
             // printable char is captured for the search bar (if any).
@@ -1040,9 +1254,21 @@ fn spawn_input_thread(
 
             match key.code {
                 KeyCode::Enter => {
-                    // If the slash popup is open, complete the selected
-                    // command so Enter runs it directly — the user arrowed
-                    // to a match and pressed Enter to execute.
+                    // Multiline mode: plain Enter inserts a newline.
+                    // Shift+Enter (or Enter in non-multiline mode) sends.
+                    let send = !state.lock().multiline_mode
+                        || key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::SHIFT);
+
+                    if !send {
+                        let mut s = state.lock();
+                        let cursor = s.input_cursor;
+                        s.input_buffer.insert(cursor, '\n');
+                        s.input_cursor = cursor + 1;
+                        continue;
+                    }
+
                     let submitted = {
                         let mut s = state.lock();
                         let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
@@ -1053,17 +1279,40 @@ fn spawn_input_thread(
                         };
                         s.input_cursor = 0;
                         s.slash_popup = SlashPopup::default();
+                        s.history_pos = None;
+                        // Record non-empty, non-command prompts in history.
+                        if !buf.is_empty() && !buf.starts_with('/') {
+                            s.prompt_history.insert(0, buf.clone());
+                            s.prompt_history.truncate(100);
+                        }
                         buf
                     };
                     let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
                 }
                 KeyCode::Esc => {
-                    // If the slash popup is open, Esc just closes it rather
-                    // than cancelling the whole session.
+                    // Esc ladder (grok-build-style):
+                    // 1. Slash popup open → close popup
+                    // 2. Input non-empty + 2nd Esc within 800ms → clear buffer
+                    // 3. Input non-empty + 1st Esc → arm "press again to clear"
+                    // 4. Empty input → cancel the run
                     let mut s = state.lock();
                     if s.slash_popup.open {
                         s.slash_popup = SlashPopup::default();
+                    } else if !s.input_buffer.is_empty() {
+                        let now = std::time::Instant::now();
+                        let is_double = s
+                            .last_esc_at
+                            .map(|t| now.duration_since(t).as_millis() < 800)
+                            .unwrap_or(false);
+                        if is_double {
+                            s.input_buffer.clear();
+                            s.input_cursor = 0;
+                            s.last_esc_at = None;
+                        } else {
+                            s.last_esc_at = Some(now);
+                        }
                     } else {
+                        s.last_esc_at = None;
                         drop(s);
                         let _ = evt_tx.send(InlineEvent::Cancel);
                     }
@@ -1128,6 +1377,13 @@ fn spawn_input_thread(
                         } else {
                             s.slash_popup.selected - 1
                         };
+                    } else if s.input_buffer.is_empty() && !s.prompt_history.is_empty() {
+                        // History recall: fill the prompt with the previous entry.
+                        let pos = s.history_pos.unwrap_or(0);
+                        let next = (pos + 1).min(s.prompt_history.len() - 1);
+                        s.history_pos = Some(next);
+                        s.input_buffer = s.prompt_history[next].clone();
+                        s.input_cursor = s.input_buffer.len();
                     } else {
                         drop(s);
                         let _ = evt_tx.send(InlineEvent::ScrollLineUp);
@@ -1180,6 +1436,34 @@ fn spawn_input_thread(
                             s.input_buffer.insert(cursor, ch);
                             s.input_cursor = cursor + ch.len_utf8();
                             refresh_slash_popup(s);
+                        }
+                    } else if s.input_buffer.is_empty() && !s.slash_popup.open {
+                        // When the prompt is empty, intercept scrollback
+                        // navigation keys (matching grok-build's scrollback-
+                        // focus semantics). Any other char falls through to
+                        // normal insertion so the user can start typing.
+                        match ch {
+                            '?' => {
+                                s.overlay = Some(OverlayState {
+                                    title: "Keyboard Shortcuts".into(),
+                                    lines: cheatsheet_lines(),
+                                    items: vec![],
+                                    selected: 0,
+                                    search: None,
+                                });
+                            }
+                            'e' => s.toggle_fold_at_view(),
+                            'E' => s.unfold_all(),
+                            'J' => s.jump_next_turn(),
+                            'K' => s.jump_prev_turn(),
+                            'n' if s.search.is_some() => s.search_next(),
+                            'N' if s.search.is_some() => s.search_prev(),
+                            _ => {
+                                let cursor = s.input_cursor;
+                                s.input_buffer.insert(cursor, ch);
+                                s.input_cursor = cursor + ch.len_utf8();
+                                refresh_slash_popup(&mut s);
+                            }
                         }
                     } else {
                         let cursor = s.input_cursor;
@@ -1483,6 +1767,137 @@ async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::Age
 // Rendering
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Lines for the keyboard shortcuts cheatsheet overlay.
+fn cheatsheet_lines() -> Vec<String> {
+    vec![
+        "".into(),
+        "  Navigation".into(),
+        "  j / ↓        Scroll down".into(),
+        "  k / ↑        Scroll up".into(),
+        "  J (Shift+j)  Next turn".into(),
+        "  K (Shift+k)  Previous turn".into(),
+        "  PgDn / PgUp  Page scroll".into(),
+        "  g / G        Top / bottom".into(),
+        "".into(),
+        "  Blocks".into(),
+        "  e            Fold / unfold block".into(),
+        "  E            Unfold all".into(),
+        "".into(),
+        "  Search".into(),
+        "  /find <q>    Search transcript".into(),
+        "  n / N        Next / previous match".into(),
+        "".into(),
+        "  Commands".into(),
+        "  /theme       Cycle color theme".into(),
+        "  /model       Pick a model".into(),
+        "  /vim         Toggle vim mode".into(),
+        "  /compact     Compact context".into(),
+        "  /clear       Clear conversation".into(),
+        "  Ctrl+C       Cancel run (2× to quit)".into(),
+    ]
+}
+
+/// Build the command palette overlay — a searchable list of all slash
+/// commands plus quick actions. Triggered by Ctrl+P.
+fn build_command_palette() -> OverlayState {
+    use oxicode_vtui::tui::core::{InlineListItem, InlineListSelection};
+
+    let catalog = SlashRegistry::builtin_commands();
+    let mut items: Vec<InlineListItem> = catalog
+        .iter()
+        .map(|(name, desc, aliases)| {
+            let title = if aliases.is_empty() {
+                format!("/{name}")
+            } else {
+                format!(
+                    "/{name} ({})",
+                    aliases
+                        .iter()
+                        .map(|a| format!("/{a}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            InlineListItem {
+                title,
+                subtitle: Some(desc.to_string()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::SlashCommand(name.to_string())),
+                search_value: Some(format!("{name} {desc}")),
+            }
+        })
+        .collect();
+    items.sort_by(|a, b| a.title.cmp(&b.title));
+
+    OverlayState {
+        title: "Command Palette".into(),
+        lines: vec!["Type to filter, Enter to select".into()],
+        items: items
+            .into_iter()
+            .map(|item| OverlayListItem {
+                title: item.title,
+                subtitle: item.subtitle,
+                badge: item.badge,
+                indent: item.indent,
+                search_value: item.search_value,
+                selection: item.selection,
+            })
+            .collect(),
+        selected: 0,
+        search: Some(OverlaySearchState {
+            label: "search".into(),
+            placeholder: Some("filter commands\u{2026}".into()),
+            value: String::new(),
+        }),
+    }
+}
+
+/// Global frame tick counter for animations (incremented per render).
+static FRAME_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Tracks whether the terminal title currently shows a running state.
+static TITLE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Braille spinner frames for the tab title.
+const TITLE_SPINNER: &[&str] = &[
+    "\u{2807}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+];
+
+/// Wave brightness for accent rail animation: sin²(tick·speed + row/rows·2π).
+/// Returns [0.0, 1.0] — 1.0 = full color, 0.0 = dimmed toward background.
+fn wave_brightness(tick: u64, row: u16, wave_rows: u16, speed: f64) -> f64 {
+    let phase =
+        (tick as f64 * speed) + (row as f64 / wave_rows.max(1) as f64) * std::f64::consts::TAU;
+    let s = phase.sin();
+    s * s
+}
+
+/// Linear-interpolate between two RGB colors. `ratio` 0 = base, 1 = target.
+fn blend_rgb(base: Color, target: Color, ratio: f64) -> Color {
+    match (base, target) {
+        (Color::Rgb(br, bg, bb), Color::Rgb(tr, tg, tb)) => {
+            let r = (br as f64 + (tr as f64 - br as f64) * ratio).round() as u8;
+            let g = (bg as f64 + (tg as f64 - bg as f64) * ratio).round() as u8;
+            let b = (bb as f64 + (tb as f64 - bb as f64) * ratio).round() as u8;
+            Color::Rgb(r, g, b)
+        }
+        _ => base,
+    }
+}
+
+/// Accent rail color for a transcript line kind.
+fn accent_color_for_kind(kind: InlineMessageKind, styles: &ThemeStyles) -> Color {
+    match kind {
+        InlineMessageKind::User => color_from_anstyle(styles.primary.get_fg_color()),
+        InlineMessageKind::Agent => color_from_anstyle(styles.response.get_fg_color()),
+        InlineMessageKind::Tool => color_from_anstyle(styles.tool.get_fg_color()),
+        InlineMessageKind::Error => color_from_anstyle(styles.error.get_fg_color()),
+        InlineMessageKind::Warning => color_from_anstyle(styles.status.get_fg_color()),
+        InlineMessageKind::Info => color_from_anstyle(styles.info.get_fg_color()),
+        InlineMessageKind::Policy => color_from_anstyle(styles.mcp.get_fg_color()),
+        InlineMessageKind::Pty => color_from_anstyle(styles.pty_output.get_fg_color()),
+    }
+}
+
 /// Compose one frame using the agent view layout (grok-build-style):
 /// StatusBar (top) → Scrollback (dominant) → Prompt → ShortcutsBar (bottom).
 /// Chrome geometry and the status/shortcuts bars are rendered by
@@ -1498,11 +1913,30 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     frame
         .buffer_mut()
         .set_style(area, Style::default().bg(color_from_anstyle(Some(bg))));
-    // Agent view layout (grok-build-style pure geometry). `render_chrome`
-    // computes the layout and paints the top StatusBar + bottom ShortcutsBar;
-    // the transcript and composer are placed into the returned rects.
     let layout = super::frame_layout::render_chrome(frame, area, state);
-    render_transcript(frame, layout.scrollback, state);
+    let tick = FRAME_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // Update terminal tab title: spinner while running, plain when idle.
+    {
+        let running = state.reasoning_stage.is_some();
+        let was_running = TITLE_RUNNING.swap(running, std::sync::atomic::Ordering::Relaxed);
+        if running || was_running {
+            let title = if running {
+                let spin = TITLE_SPINNER[(tick as usize) % TITLE_SPINNER.len()];
+                let model = state
+                    .header_context
+                    .editor_context
+                    .as_deref()
+                    .unwrap_or("oxicode");
+                format!("{spin} oxicode \u{2014} {model}")
+            } else {
+                "oxicode".to_string()
+            };
+            use std::io::Write;
+            let _ = write!(std::io::stderr(), "\x1b]2;{}\x07", title);
+            let _ = std::io::stderr().flush();
+        }
+    }
+    render_transcript(frame, layout.scrollback, state, tick);
     if !state.queued_inputs.is_empty() {
         render_queue_pane(frame, layout.scrollback, &state.queued_inputs);
     }
@@ -1756,33 +2190,74 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     }
 }
 
-fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
+fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tick: u64) {
     if state.transcript.is_empty() {
         render_welcome(frame, area);
         return;
     }
     let styles = active_styles();
+    let bg_color = color_from_anstyle(Some(styles.background));
 
-    let lines: Vec<Line<'_>> = state
-        .transcript
-        .iter()
-        .map(|tl| transcript_line(tl, &styles))
-        .collect();
-
-    let total = lines.len();
-    let start = if state.scroll_offset == usize::MAX {
-        // Follow tail: compute how many lines fit so the last ones are visible.
-        let avail = area.height as usize;
-        total.saturating_sub(avail)
-    } else {
-        effective_scroll_offset(state.scroll_offset, total, area.height as usize)
+    // Split area: [1-col accent rail | content].
+    let accent_w: u16 = 1;
+    let content_area = Rect {
+        x: area.x + accent_w,
+        y: area.y,
+        width: area.width.saturating_sub(accent_w),
+        height: area.height,
     };
 
+    // Build the visible-line list, respecting block folding. Track the kind
+    // alongside each line so we can paint the accent rail in the role color.
+    let search_set: std::collections::HashSet<usize> = state
+        .search
+        .as_ref()
+        .map(|s| s.matches.iter().copied().collect())
+        .unwrap_or_default();
+    let current_match = state
+        .search
+        .as_ref()
+        .and_then(|s| (!s.matches.is_empty()).then(|| s.matches[s.current]));
+
+    let mut display: Vec<(usize, InlineMessageKind, Line<'_>)> =
+        Vec::with_capacity(state.transcript.len());
+    let mut prev_block: Option<usize> = None;
+    for (idx, tl) in state.transcript.iter().enumerate() {
+        let is_first_in_block = prev_block != Some(tl.block_id);
+        let folded = state.folded_blocks.contains(&tl.block_id);
+        if folded && !is_first_in_block {
+            continue;
+        }
+        let is_match = search_set.contains(&idx);
+        let is_current = current_match == Some(idx);
+        let line = transcript_line_marked(tl, &styles, folded, is_match, is_current);
+        display.push((idx, tl.kind, line));
+        prev_block = Some(tl.block_id);
+    }
+
+    // Resolve scroll offset into the display list.
+    let total = display.len();
+    let raw_start = if state.scroll_offset == usize::MAX {
+        total.saturating_sub(content_area.height as usize)
+    } else {
+        display
+            .iter()
+            .position(|(orig_idx, _, _)| *orig_idx >= state.scroll_offset)
+            .unwrap_or(total.saturating_sub(1))
+    };
+    let start = effective_scroll_offset(raw_start, total, content_area.height as usize);
+
+    // Determine animation state.
+    let running = state.reasoning_stage.is_some();
+    const WAVE_ROWS: u16 = 32;
+    const WAVE_SPEED: f64 = 0.15;
+
     // Render top-down, wrapping each line into multiple visual rows.
-    let mut y = area.top();
-    let width = area.width.max(1) as usize;
-    for line in lines.into_iter().skip(start) {
-        if y >= area.bottom() {
+    let mut y = content_area.top();
+    let width = content_area.width.max(1) as usize;
+    let mut visual_row: u16 = 0;
+    for (_, kind, line) in display.into_iter().skip(start) {
+        if y >= content_area.bottom() {
             break;
         }
         let text_w = line.width();
@@ -1791,15 +2266,108 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         } else {
             text_w.div_ceil(width).max(1) as u16
         };
+
+        // Paint accent rail for each visual row of this line.
+        let accent_base = accent_color_for_kind(kind, &styles);
+        for row_offset in 0..wrapped_h {
+            let paint_y = y + row_offset;
+            if paint_y >= content_area.bottom() {
+                break;
+            }
+            let brightness = if running {
+                0.4 + 0.6 * wave_brightness(tick, visual_row + row_offset, WAVE_ROWS, WAVE_SPEED)
+            } else {
+                0.7
+            };
+            let rail_color = blend_rgb(bg_color, accent_base, brightness);
+            if let Some(cell) = frame.buffer_mut().cell_mut((area.x, paint_y)) {
+                cell.set_char('\u{2503}'); // ┃ heavy vertical
+                cell.set_style(Style::default().fg(rail_color));
+            }
+        }
+
         let row = Rect {
-            x: area.x,
+            x: content_area.x,
             y,
-            width: area.width,
-            height: wrapped_h.min(area.bottom().saturating_sub(y)),
+            width: content_area.width,
+            height: wrapped_h.min(content_area.bottom().saturating_sub(y)),
         };
         frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), row);
         y += wrapped_h;
+        visual_row += wrapped_h;
     }
+}
+
+/// Build a ratatui `Line` from a transcript line, with optional fold marker
+/// and search-match highlighting.
+fn transcript_line_marked<'a>(
+    line: &'a TranscriptLine,
+    styles: &'a ThemeStyles,
+    folded: bool,
+    is_match: bool,
+    is_current: bool,
+) -> Line<'a> {
+    let (kind_style, marker) = match line.kind {
+        InlineMessageKind::Agent => (
+            Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
+            "\u{25cf}", // ●
+        ),
+        InlineMessageKind::User => (
+            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
+            "\u{276f}", // ❯
+        ),
+        InlineMessageKind::Tool => (
+            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
+            "\u{2699}", // ⚙
+        ),
+        InlineMessageKind::Error => (
+            Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
+            "\u{2717}", // ✗
+        ),
+        InlineMessageKind::Warning => (
+            Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
+            "\u{26a0}", // ⚠
+        ),
+        InlineMessageKind::Info => (
+            Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
+            "\u{2139}", // ℹ
+        ),
+        InlineMessageKind::Policy => (
+            Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
+            "\u{25c6}", // ◆
+        ),
+        InlineMessageKind::Pty => (
+            Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
+            "\u{258c}", // ▌
+        ),
+    };
+
+    // Fold marker: ▸ for folded, ▾ for unfolded (shown on first line of block).
+    let prefix = if folded {
+        format!("\u{25b8} {} ", marker) // ▸
+    } else {
+        format!("{} ", marker)
+    };
+
+    // Highlight background for search matches.
+    let highlight = if is_current {
+        Some(Style::default().reversed())
+    } else if is_match {
+        Some(Style::default().add_modifier(Modifier::UNDERLINED))
+    } else {
+        None
+    };
+
+    let mut spans = Vec::with_capacity(line.segments.len() + 1);
+    spans.push(Span::styled(prefix, kind_style));
+    for segment in &line.segments {
+        let mut style = segment_style(segment, kind_style, styles);
+        if let Some(h) = highlight {
+            style = style.patch(h);
+        }
+        spans.push(Span::styled(segment.text.clone(), style));
+    }
+    Line::from(spans)
 }
 
 /// Build a ratatui `Line` from a transcript line (extracted from the old
@@ -2045,19 +2613,23 @@ fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, entries: &[String]
     };
     let items: Vec<Line<'_>> = entries
         .iter()
- .map(|e| {
+        .map(|e| {
             Line::from(vec![
-                Span::styled("\u{2261} ", Style::default().fg(color_from_anstyle(styles.info.get_fg_color()))),
-                Span::styled(e.clone(), Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color()))),
+                Span::styled(
+                    "\u{2261} ",
+                    Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
+                ),
+                Span::styled(
+                    e.clone(),
+                    Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+                ),
             ])
         })
         .collect();
     frame.render_widget(
-        Paragraph::new(items).block(
-            Block::default()
-                .borders(Borders::TOP)
-                .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color()))),
-        ),
+        Paragraph::new(items).block(Block::default().borders(Borders::TOP).border_style(
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+        )),
         area,
     );
 }
@@ -2081,8 +2653,14 @@ fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, b
                 ("\u{2610}", styles.secondary.get_fg_color()) // ☐
             };
             Line::from(vec![
-                Span::styled(format!("{marker} "), Style::default().fg(color_from_anstyle(color))),
-                Span::styled(text.clone(), Style::default().fg(color_from_anstyle(Some(styles.foreground)))),
+                Span::styled(
+                    format!("{marker} "),
+                    Style::default().fg(color_from_anstyle(color)),
+                ),
+                Span::styled(
+                    text.clone(),
+                    Style::default().fg(color_from_anstyle(Some(styles.foreground))),
+                ),
             ])
         })
         .collect();
@@ -2322,6 +2900,74 @@ fn preview_tool_result(content: &str) -> String {
     format!("{truncated}\u{2026}")
 }
 
+/// Try to render tool result content as a colored diff. Returns `true` if the
+/// content was recognized as a diff and rendered, `false` to fall back to the
+/// plain preview.
+fn try_render_diff(content: &str, handle: &InlineHandle) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    // Detect diff-like content: at least 2 added/removed lines.
+    let additions = lines
+        .iter()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .count();
+    let deletions = lines
+        .iter()
+        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+        .count();
+    if additions + deletions < 2 {
+        return false;
+    }
+
+    let styles = active_styles();
+    let green = styles.secondary.get_fg_color();
+    let red = styles.error.get_fg_color();
+    const MAX_DIFF_LINES: usize = 30;
+
+    // Header line with diffstat.
+    let mut hdr_style = InlineTextStyle::default();
+    hdr_style.effects |= anstyle::Effects::DIMMED;
+    handle.append_line(
+        InlineMessageKind::Tool,
+        vec![InlineSegment {
+            text: format!("\u{2713} diff (+{additions} \u{2212}{deletions})"),
+            style: Arc::new(hdr_style),
+        }],
+    );
+
+    // Render diff lines with green/red coloring.
+    for line in lines.iter().take(MAX_DIFF_LINES) {
+        let mut style = InlineTextStyle::default();
+        if line.starts_with('+') && !line.starts_with("+++") {
+            style.color = green;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            style.color = red;
+        } else {
+            style.effects |= anstyle::Effects::DIMMED;
+        }
+        handle.append_line(
+            InlineMessageKind::Tool,
+            vec![InlineSegment {
+                text: format!("  {line}"),
+                style: Arc::new(style),
+            }],
+        );
+    }
+
+    if lines.len() > MAX_DIFF_LINES {
+        let mut more_style = InlineTextStyle::default();
+        more_style.effects |= anstyle::Effects::DIMMED;
+        handle.append_line(
+            InlineMessageKind::Tool,
+            vec![InlineSegment {
+                text: format!("  \u{2026} {} more lines", lines.len() - MAX_DIFF_LINES),
+                style: Arc::new(more_style),
+            }],
+        );
+    }
+
+    true
+}
+
 fn color_from_anstyle(color: Option<anstyle::Color>) -> Color {
     match color {
         Some(anstyle::Color::Ansi(a)) => ansi_to_ratatui(a),
@@ -2533,6 +3179,7 @@ mod render_tests {
             segments: vec![plain_segment(
                 "This is a very long agent response line that should wrap across multiple terminal rows when rendered at a narrow width.".to_string()
             )],
+            block_id: 0,
         });
         let backend = TestBackend::new(40, 24);
         let mut terminal = Terminal::new(backend).expect("backend");

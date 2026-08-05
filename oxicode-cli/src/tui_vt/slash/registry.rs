@@ -12,7 +12,9 @@
 //! `/settings`, …) are deferred until those overlays are rebuilt against
 //! `InlineCommand::ShowOverlay`.
 
-use oxicode_vtui::tui::core::{InlineHandle, InlineListItem, InlineMessageKind, InlineListSelection};
+use oxicode_vtui::tui::core::{
+    InlineHandle, InlineListItem, InlineListSelection, InlineMessageKind,
+};
 
 use crate::app::agent_session::AgentSessionHandle;
 use crate::tui_vt::main_loop::{RenderState, plain_segment};
@@ -168,6 +170,9 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(StatusCommand));
     registry.register(Box::new(VimCommand));
     registry.register(Box::new(AgentsCommand));
+    registry.register(Box::new(ThemeCommand));
+    registry.register(Box::new(FindCommand));
+    registry.register(Box::new(ShortcutsCommand));
 }
 
 /// `/vim` — toggle vim mode for prompt editing.
@@ -418,6 +423,188 @@ impl SlashCommand for StatusCommand {
     }
 }
 
+/// `/theme` — cycle, set, or pick a color theme.
+///   `/theme`            cycle to the next theme
+///   `/theme list`       open the theme picker overlay
+///   `/theme <name>`     switch to a named theme
+struct ThemeCommand;
+
+impl SlashCommand for ThemeCommand {
+    fn name(&self) -> &'static str {
+        "theme"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["t"]
+    }
+    fn description(&self) -> &'static str {
+        "Cycle or pick a color theme (/theme [name|list])"
+    }
+    fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        use oxicode_vtui::theme::{
+            active_theme_id, available_themes, set_active_theme, theme_label,
+        };
+        match args.trim() {
+            "" | "next" | "cycle" => {
+                let themes = available_themes();
+                if themes.len() <= 1 {
+                    ctx.reply(InlineMessageKind::Info, "Only one theme available.");
+                } else {
+                    let current = active_theme_id();
+                    let pos = themes.iter().position(|t| *t == current).unwrap_or(0);
+                    let next_id = &themes[(pos + 1) % themes.len()];
+                    match set_active_theme(next_id) {
+                        Ok(()) => {
+                            let label = theme_label(next_id).unwrap_or(next_id.as_ref());
+                            ctx.reply(InlineMessageKind::Info, format!("Theme: {label}"));
+                        }
+                        Err(e) => ctx.reply(
+                            InlineMessageKind::Error,
+                            format!("Failed to set theme: {e}"),
+                        ),
+                    }
+                }
+            }
+            "list" | "picker" => {
+                let themes = available_themes();
+                let current = active_theme_id();
+                let items: Vec<InlineListItem> = themes
+                    .iter()
+                    .map(|id| InlineListItem {
+                        title: theme_label(id).unwrap_or(id.as_ref()).to_string(),
+                        subtitle: Some(id.to_string()),
+                        badge: if *id == current {
+                            Some("active".to_string())
+                        } else {
+                            None
+                        },
+                        indent: 0,
+                        selection: Some(InlineListSelection::Theme(id.to_string())),
+                        search_value: Some(id.to_string()),
+                    })
+                    .collect();
+                ctx.handle.show_list_modal(
+                    "Themes".to_string(),
+                    vec!["Select a theme (Esc to close, Enter to apply)".to_string()],
+                    items,
+                    None,
+                    None,
+                );
+            }
+            name => match set_active_theme(name) {
+                Ok(()) => {
+                    let label = theme_label(name).unwrap_or(name);
+                    ctx.reply(InlineMessageKind::Info, format!("Theme: {label}"));
+                }
+                Err(e) => ctx.reply(
+                    InlineMessageKind::Error,
+                    format!("Unknown theme '{name}': {e}"),
+                ),
+            },
+        }
+        SlashOutcome::Handled
+    }
+}
+
+/// `/find` — search within the transcript. Opens an inline search bar.
+///   `/find <query>`   search for matches (n/N to navigate)
+///   `/find`           clear search
+struct FindCommand;
+
+impl SlashCommand for FindCommand {
+    fn name(&self) -> &'static str {
+        "find"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["search", "/"]
+    }
+    fn description(&self) -> &'static str {
+        "Search transcript (/find <query>, n/N to navigate)"
+    }
+    fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let query = args.trim();
+        if query.is_empty() {
+            ctx.state.search = None;
+            ctx.reply(InlineMessageKind::Info, "Search cleared.");
+        } else {
+            ctx.state.start_search(query);
+            let count = ctx
+                .state
+                .search
+                .as_ref()
+                .map(|s| s.matches.len())
+                .unwrap_or(0);
+            if count == 0 {
+                ctx.reply(
+                    InlineMessageKind::Warning,
+                    format!("No matches for '{query}'."),
+                );
+            } else {
+                ctx.reply(
+                    InlineMessageKind::Info,
+                    format!(
+                        "{count} match{} for '{query}'",
+                        if count == 1 { "" } else { "es" }
+                    ),
+                );
+            }
+        }
+        SlashOutcome::Handled
+    }
+}
+
+/// `/shortcuts` — show the keyboard shortcuts cheatsheet overlay.
+struct ShortcutsCommand;
+
+impl SlashCommand for ShortcutsCommand {
+    fn name(&self) -> &'static str {
+        "shortcuts"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["keys", "cheatsheet"]
+    }
+    fn description(&self) -> &'static str {
+        "Show keyboard shortcuts (alias: ?)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        ctx.handle
+            .show_modal("Keyboard Shortcuts".to_string(), shortcuts_lines(), None);
+        SlashOutcome::Handled
+    }
+}
+
+/// Lines for the shortcuts cheatsheet overlay.
+fn shortcuts_lines() -> Vec<String> {
+    vec![
+        "".into(),
+        "  Navigation".into(),
+        "  j / ↓      Scroll down (line)".into(),
+        "  k / ↑      Scroll up (line)".into(),
+        "  Shift+J    Next assistant turn".into(),
+        "  Shift+K    Previous user turn".into(),
+        "  PgDn       Scroll down (page)".into(),
+        "  PgUp       Scroll up (page)".into(),
+        "  G          Jump to bottom (follow)".into(),
+        "  g          Jump to top".into(),
+        "".into(),
+        "  Blocks".into(),
+        "  e          Fold / unfold block at cursor".into(),
+        "  Shift+E    Unfold all blocks".into(),
+        "".into(),
+        "  Search".into(),
+        "  /find <q>  Search transcript".into(),
+        "  n          Next match".into(),
+        "  N          Previous match".into(),
+        "  Esc        Clear search".into(),
+        "".into(),
+        "  Other".into(),
+        "  ?          Show this cheatsheet".into(),
+        "  /theme     Cycle color theme".into(),
+        "  /model     Pick a model".into(),
+        "  /vim       Toggle vim mode".into(),
+        "  Ctrl+C     Cancel run (press 2× to quit)".into(),
+        "".into(),
+    ]
+}
 // ─────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────

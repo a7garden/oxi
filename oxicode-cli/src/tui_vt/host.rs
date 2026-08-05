@@ -75,7 +75,7 @@ impl HostAdapter for OxicodeHostAdapter {
 pub fn activate_theme(settings: &crate::store::settings::Settings) {
     let theme_id = settings.get_theme_name();
     let theme_id = if theme_id.is_empty() {
-        "ciapre-dark"
+        oxicode_vtui::theme::DEFAULT_THEME_ID
     } else {
         theme_id.as_str()
     };
