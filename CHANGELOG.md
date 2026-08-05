@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.67.0] - 2026-08-05
+
+### Added
+
+- **TUI: grok-build parity (Phase 1 + Phase 2, 20 features).** Slash-command
+  autocomplete popup on `/` and a full main-screen restyle; file search with
+  fuzzy matching; `/settings` overlay; OSC 8 hyperlinks; line wrapping with
+  reclaimed scrollbar space; structured tool-call rendering with status
+  glyphs; distinct visual treatment for thinking blocks; reasoning/tool-stage
+  indicator above the composer; queue pane, todo checklist, and follow-up
+  suggestion chips; pending-quit hint and compact shortcuts on short
+  terminals; overlay picker system with `/model` and `/help`; vim mode for
+  prompt editing; theme fold/palette/diff improvements.
+- **TUI: `oxide-dark` default theme (GrokNight-inspired)** — calm monochrome
+  palette, with startup contrast validation so defined-but-unreadable color
+  slots fail loudly instead of shipping.
+- **TUI: vtui `WelcomeLayout`** for the wide-terminal empty state.
+- **SDK: `AgentBuilder::with_compactor`** — custom context compaction,
+  alongside the shipped `SnapcompactCompactor` (PNG-frame, LLM-free).
+
+### Fixed
+
+- **TUI: diff rendering** — `try_render_diff` now gated on `@@` markers, and
+  dead `transcript_line` code removed.
+- **Docs: broken intra-doc links** — compactor references and private-const
+  links that failed the `cargo doc -D warnings` CI gate.
+
 ## [0.66.0] - 2026-08-04
 
 ### Added
