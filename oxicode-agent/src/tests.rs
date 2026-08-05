@@ -403,6 +403,230 @@ async fn test_provider_reported_usage_drives_compaction_threshold() {
         "expected a Triggered event with source=\"provider-reported\", got: {triggered:?}"
     );
 }
+// ── Custom compactor wiring test ─────────────────────────────────────
+//
+// Verifies `AgentLoopConfig.compactor` REPLACES the default LLM
+// compactor end to end: when a custom compactor is provided, the
+// `maybe_compact` fall-through path (shake found nothing to elide —
+// this conversation is tiny) calls the custom compactor and surfaces
+// ITS `CompactedContext` in the `Completed` event. If someone reverts
+// the loop back to a hardcoded `LlmCompactor`, the summary assertion
+// fails (an LLM compactor would never produce "MOCK-COMPACTED").
+
+#[tokio::test]
+async fn custom_compactor_replaces_llm_compactor_in_loop() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::compaction::CompactionEvent;
+    use crate::events::AgentEvent;
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxicode_ai::compaction::CompactionError;
+    use oxicode_ai::{CompactionStrategy, Compactor};
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Compactor that records each invocation and returns a distinctive
+    /// summary — proves the loop used THIS compactor, not the default
+    /// `LlmCompactor`.
+    struct RecordingCompactor {
+        calls: AtomicUsize,
+    }
+
+    impl Compactor for RecordingCompactor {
+        fn compact<'a>(
+            &'a self,
+            _messages: &'a [oxicode_ai::Message],
+            _instruction: Option<&'a str>,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = std::result::Result<oxicode_ai::CompactedContext, CompactionError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                Ok(oxicode_ai::CompactedContext {
+                    summary: "MOCK-COMPACTED".to_string(),
+                    kept_messages: Vec::new(),
+                    compacted_count: 1,
+                    metadata: Default::default(),
+                    frames: None,
+                })
+            })
+        }
+    }
+
+    let compactor = Arc::new(RecordingCompactor {
+        calls: AtomicUsize::new(0),
+    });
+
+    // Mock reports `usage.input = 900` on the first turn — above the
+    // 800-token threshold — so the second turn's `maybe_compact` fires.
+    let provider = Arc::new(MockProvider::new(vec![
+        MockResponse::new("first turn ok").with_usage(900),
+        MockResponse::new("second turn ok"),
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: Some("You are helpful.".to_string()),
+        temperature: 0.7,
+        max_tokens: 4096,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Threshold(0.8),
+        context_window: 1_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+        workspace_dir: None,
+        provider_options: None,
+        on_compaction: None,
+        compactor: Some(compactor.clone()),
+        ..Default::default()
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    // Queue a follow-up so the loop runs a second turn (the same trick
+    // as the provider-reported usage regression test above).
+    agent_loop.follow_up(oxicode_ai::Message::User(oxicode_ai::UserMessage::new(
+        "follow-up",
+    )));
+
+    let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run("hello".to_string(), move |e| events_clone.lock().push(e))
+        .await;
+    assert!(result.is_ok(), "agent loop run failed: {result:?}");
+
+    assert!(
+        compactor.calls.load(Ordering::SeqCst) > 0,
+        "custom compactor was never called during the run"
+    );
+
+    let events = events.lock();
+    let completed: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Compaction {
+                event: CompactionEvent::Completed { result, .. },
+            } => Some(result.summary.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        completed.iter().any(|s| s == "MOCK-COMPACTED"),
+        "expected a Completed event carrying the custom compactor's summary; got: {completed:?}"
+    );
+}
+
+// ── Agent-level custom compactor semantics ───────────────────────────
+//
+// Verifies `Agent::new_with_compactor` (a) wires the custom compactor
+// into the Agent's own `compaction_manager`, and (b) does so even
+// under `CompactionStrategy::Disabled` — the custom compactor makes
+// manual compaction (`compact_now`) available regardless of strategy.
+// The control case proves existing behavior is preserved: without a
+// custom compactor, Disabled strategy leaves NO compactor installed
+// and `compact_now` fails with `CompactionDisabled`.
+
+#[tokio::test]
+async fn agent_new_with_compactor_wires_manager_and_ignores_disabled_strategy() {
+    use crate::agent::GlobalProviderResolver;
+    use oxicode_ai::compaction::CompactionError;
+    use oxicode_ai::{CompactionStrategy, Compactor};
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RecordingCompactor {
+        calls: AtomicUsize,
+    }
+
+    impl Compactor for RecordingCompactor {
+        fn compact<'a>(
+            &'a self,
+            _messages: &'a [oxicode_ai::Message],
+            _instruction: Option<&'a str>,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = std::result::Result<oxicode_ai::CompactedContext, CompactionError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                Ok(oxicode_ai::CompactedContext {
+                    summary: "MOCK-COMPACTED".to_string(),
+                    kept_messages: Vec::new(),
+                    compacted_count: 1,
+                    metadata: Default::default(),
+                    frames: None,
+                })
+            })
+        }
+    }
+
+    let compactor = Arc::new(RecordingCompactor {
+        calls: AtomicUsize::new(0),
+    });
+
+    // Custom compactor + Disabled strategy: the compactor is installed
+    // and manual compaction works.
+    let agent = Agent::new_with_compactor(
+        Arc::new(MockProvider::new(vec![MockResponse::new("hi")])),
+        AgentConfig {
+            model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+            compaction_strategy: CompactionStrategy::Disabled,
+            ..Default::default()
+        },
+        Arc::new(ToolRegistry::new()),
+        Arc::new(GlobalProviderResolver),
+        Some(compactor.clone()),
+    );
+
+    let ctx = agent
+        .compaction_manager()
+        .compact_now(&[], None)
+        .await
+        .expect("custom compactor should work under Disabled strategy");
+    assert_eq!(ctx.summary, "MOCK-COMPACTED");
+    assert_eq!(compactor.calls.load(Ordering::SeqCst), 1);
+
+    // Control: no custom compactor + Disabled strategy → no compactor
+    // installed, `compact_now` errors (existing behavior preserved).
+    let plain = Agent::new_with_resolver(
+        Arc::new(MockProvider::new(vec![MockResponse::new("hi")])),
+        AgentConfig {
+            model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+            compaction_strategy: CompactionStrategy::Disabled,
+            ..Default::default()
+        },
+        Arc::new(ToolRegistry::new()),
+        Arc::new(GlobalProviderResolver),
+    );
+
+    let err = plain
+        .compaction_manager()
+        .compact_now(&[], None)
+        .await
+        .expect_err("Disabled strategy without a compactor must fail");
+    assert!(
+        matches!(err, CompactionError::CompactionDisabled),
+        "expected CompactionDisabled, got: {err:?}"
+    );
+}
 // ── Tool-call loop guard wiring test ─────────────────────────────────
 //
 // Verifies that the tool_call_loop_guard wired into AgentLoop::run_loop

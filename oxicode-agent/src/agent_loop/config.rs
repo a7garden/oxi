@@ -19,6 +19,19 @@ pub struct AgentLoopConfig {
     pub context_window: usize,
     /// Optional instruction injected into the compaction prompt.
     pub compaction_instruction: Option<String>,
+    /// Custom compactor injected at loop construction.
+    ///
+    /// When `Some`, this **replaces** the default LLM compactor (the
+    /// `CompactionManager` has a single compactor slot — `set_compactor`
+    /// overwrites). `None` (default) preserves the existing behavior:
+    /// an `LlmCompactor` is built from the resolved model when the
+    /// strategy is not `Disabled`.
+    ///
+    /// SDK consumers set this via
+    /// `AgentBuilder::with_compactor` (e.g. with the
+    /// [`crate::snapcompact_compactor::SnapcompactCompactor`]
+    /// in `oxicode-sdk`).
+    pub compactor: Option<Arc<dyn oxicode_ai::Compactor>>,
     /// Optional session identifier for logging and tracing.
     pub session_id: Option<String>,
     /// Optional transport override (e.g. "sse", "stdio").
@@ -165,6 +178,7 @@ impl Default for AgentLoopConfig {
             compaction_strategy: oxicode_ai::CompactionStrategy::default(),
             context_window: 128_000,
             compaction_instruction: None,
+            compactor: None,
             session_id: None,
             transport: None,
             compact_on_start: false,

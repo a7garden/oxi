@@ -7,7 +7,8 @@ use crate::tools::{AgentTool, ToolRegistry};
 use crate::types::{Response, StopReason};
 use anyhow::{Error, Result};
 use oxicode_ai::{
-    CompactionManager, CompactionStrategy, LlmCompactor, Model, Provider, transform_for_provider,
+    CompactionManager, CompactionStrategy, Compactor, LlmCompactor, Model, Provider,
+    transform_for_provider,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -117,6 +118,12 @@ pub struct Agent {
     tools: Arc<ToolRegistry>,
     state: SharedState,
     compaction_manager: CompactionManager,
+    /// Custom compactor injected at construction (via `new_with_compactor`).
+    ///
+    /// Replaces the default `LlmCompactor` in the per-run `AgentLoop`
+    /// (threaded into `AgentLoopConfig.compactor`). `None` preserves the
+    /// existing default-LLM-compactor behavior.
+    custom_compactor: Option<Arc<dyn Compactor>>,
     hooks: parking_lot::RwLock<crate::config::AgentHooks>,
     /// Guard: true while a run is in progress. Prevents concurrent runs.
     is_running: Arc<AtomicBool>,
@@ -147,7 +154,7 @@ impl Agent {
     /// [`new_with_resolver`]: Agent::new_with_resolver
     pub fn new(provider: Arc<dyn Provider>, config: AgentConfig, tools: Arc<ToolRegistry>) -> Self {
         let resolver = Arc::new(GlobalProviderResolver);
-        Self::build_inner(provider, config, tools, resolver)
+        Self::build_inner(provider, config, tools, resolver, None)
     }
 
     /// Create an agent with a custom provider/model resolver.
@@ -160,7 +167,25 @@ impl Agent {
         tools: Arc<ToolRegistry>,
         resolver: Arc<dyn ProviderResolver>,
     ) -> Self {
-        Self::build_inner(provider, config, tools, resolver)
+        Self::build_inner(provider, config, tools, resolver, None)
+    }
+
+    /// Create an agent with a custom provider/model resolver and a custom
+    /// compactor that replaces the default LLM compactor.
+    ///
+    /// The compactor is threaded into every per-run `AgentLoop` (via
+    /// `AgentLoopConfig.compactor`) — see
+    /// [`crate::agent_loop::config::AgentLoopConfig::compactor`] for the
+    /// replace semantics. `oxicode-sdk`'s `AgentBuilder::with_compactor`
+    /// uses this constructor.
+    pub fn new_with_compactor(
+        provider: Arc<dyn Provider>,
+        config: AgentConfig,
+        tools: Arc<ToolRegistry>,
+        resolver: Arc<dyn ProviderResolver>,
+        custom_compactor: Option<Arc<dyn Compactor>>,
+    ) -> Self {
+        Self::build_inner(provider, config, tools, resolver, custom_compactor)
     }
 
     /// Create an agent with an empty tool registry.
@@ -188,18 +213,24 @@ impl Agent {
         self.config().config.clone()
     }
 
-    /// Internal constructor shared by `new()` and `new_with_resolver()`.
+    /// Internal constructor shared by `new()`, `new_with_resolver()` and
+    /// `new_with_compactor()`.
     fn build_inner(
         provider: Arc<dyn Provider>,
         config: AgentConfig,
         tools: Arc<ToolRegistry>,
         resolver: Arc<dyn ProviderResolver>,
+        custom_compactor: Option<Arc<dyn Compactor>>,
     ) -> Self {
         let mut compaction_manager =
             CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
         // Pre-initialize the LLM compactor if compaction is enabled
-        if config.compaction_strategy != CompactionStrategy::Disabled {
+        // (unless a custom compactor replaces it — the Agent's own
+        // manager follows the same replace semantics as the loop).
+        if let Some(compactor) = &custom_compactor {
+            compaction_manager.set_compactor(Arc::clone(compactor));
+        } else if config.compaction_strategy != CompactionStrategy::Disabled {
             let model = resolver.resolve_model(&config.model_id);
 
             if let Some(model) = model {
@@ -218,6 +249,7 @@ impl Agent {
             tools,
             state: SharedState::new(),
             compaction_manager,
+            custom_compactor,
             hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
             is_running: Arc::new(AtomicBool::new(false)),
             resolver,
@@ -584,6 +616,7 @@ impl Agent {
             tool_execution: crate::config::ToolExecutionMode::Sequential,
             compaction_strategy,
             compaction_instruction: None,
+            compactor: self.custom_compactor.clone(),
             context_window,
             session_id: self.config().config.session_id.clone(),
             transport: None,
@@ -1020,6 +1053,7 @@ impl Agent {
             tool_execution: crate::config::ToolExecutionMode::Sequential,
             compaction_strategy: inner.config.compaction_strategy.clone(),
             compaction_instruction: None,
+            compactor: self.custom_compactor.clone(),
             context_window: inner.config.context_window,
             session_id: inner.config.session_id.clone(),
             transport: None,

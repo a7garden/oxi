@@ -52,6 +52,10 @@ pub struct AgentBuilder<'a> {
     hooks_middleware: Option<crate::middleware::HookMiddleware>,
     // ── Session-level closures (cli-owned stop flag + queues) ──
     session_hooks: Option<SessionHookClosures>,
+    // ── Compaction ──
+    /// Custom compactor that replaces the default LLM compactor in every
+    /// agent run (see `AgentLoopConfig::compactor` for replace semantics).
+    compactor: Option<Arc<dyn oxicode_ai::Compactor>>,
 }
 
 impl<'a> AgentBuilder<'a> {
@@ -71,6 +75,7 @@ impl<'a> AgentBuilder<'a> {
             middlewares: Vec::new(),
             hooks_middleware: None,
             session_hooks: None,
+            compactor: None,
         }
     }
 
@@ -252,6 +257,31 @@ impl<'a> AgentBuilder<'a> {
     /// pipeline's before/after_tool_call slots).
     pub fn with_session_hooks(mut self, closures: SessionHookClosures) -> Self {
         self.session_hooks = Some(closures);
+        self
+    }
+
+    /// Replace the default LLM compactor with a custom one.
+    ///
+    /// The compactor is threaded into every agent run (via
+    /// `AgentLoopConfig::compactor`) and replaces the default
+    /// `LlmCompactor` — the `CompactionManager` has a single compactor
+    /// slot. `None` (default) preserves the existing LLM-compactor
+    /// behavior.
+    ///
+    /// The SDK ships [`crate::SnapcompactCompactor`] — a PNG-frame
+    /// compactor that makes no LLM call:
+    ///
+    /// ```
+    /// # use oxicode_sdk::{AgentBuilder, snapcompact_compactor::SnapcompactCompactor};
+    /// # fn build(oxicode: &oxicode_sdk::Oxicode, config: oxicode_agent::AgentConfig)
+    /// #     -> anyhow::Result<oxicode_agent::Agent> {
+    /// AgentBuilder::new(oxicode, config)
+    ///     .with_compactor(std::sync::Arc::new(SnapcompactCompactor::new()))
+    ///     .build()
+    /// # }
+    /// ```
+    pub fn with_compactor(mut self, compactor: std::sync::Arc<dyn oxicode_ai::Compactor>) -> Self {
+        self.compactor = Some(compactor);
         self
     }
 
@@ -561,8 +591,15 @@ impl<'a> AgentBuilder<'a> {
             self.tools.unregister("lsp");
         }
 
-        // 5. Create agent with the isolated resolver
-        let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
+        // 5. Create agent with the isolated resolver and optional custom
+        //    compactor (replaces the default LLM compactor when set).
+        let agent = Agent::new_with_compactor(
+            provider,
+            config,
+            Arc::new(self.tools),
+            resolver,
+            self.compactor,
+        );
 
         // 6. Authorizer: grant capabilities.
         //
@@ -972,5 +1009,58 @@ mod tests {
             "AgentBuilder's resolver must consult the catalog port, \
              not just the static registry"
         );
+    }
+
+    #[test]
+    fn with_compactor_wires_custom_compactor_into_agent() {
+        /// Compactor that returns a distinctive summary so the test can
+        /// prove the builder's compactor — not a default `LlmCompactor`
+        /// — reached the agent's `CompactionManager`.
+        struct BuilderCompactor;
+
+        impl oxicode_ai::Compactor for BuilderCompactor {
+            fn compact<'a>(
+                &'a self,
+                _messages: &'a [oxicode_ai::Message],
+                _instruction: Option<&'a str>,
+            ) -> Pin<
+                Box<
+                    dyn Future<
+                            Output = std::result::Result<
+                                oxicode_ai::CompactedContext,
+                                oxicode_ai::compaction::CompactionError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move {
+                    Ok(oxicode_ai::CompactedContext {
+                        summary: "BUILDER-COMPACTOR".to_string(),
+                        kept_messages: Vec::new(),
+                        compacted_count: 1,
+                        metadata: Default::default(),
+                        frames: None,
+                    })
+                })
+            }
+        }
+
+        let oxicode = OxicodeBuilder::new().with_builtins().build();
+
+        let agent = oxicode
+            .agent(AgentConfig {
+                model_id: "anthropic/claude-sonnet-4-20250514".into(),
+                ..Default::default()
+            })
+            .with_compactor(std::sync::Arc::new(BuilderCompactor))
+            .build()
+            .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ctx = rt
+            .block_on(agent.compaction_manager().compact_now(&[], None))
+            .expect("builder's compactor should be wired through to the agent");
+        assert_eq!(ctx.summary, "BUILDER-COMPACTOR");
     }
 }

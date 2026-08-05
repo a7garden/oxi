@@ -135,7 +135,15 @@ impl AgentLoop {
         let mut compaction_manager =
             OxCompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
-        if config.compaction_strategy != CompactionStrategy::Disabled {
+        // A custom compactor (e.g. `SnapcompactCompactor` from the SDK)
+        // replaces the default LLM compactor entirely. Note this happens
+        // regardless of strategy: the strategy still gates *when* the
+        // automatic path fires (`should_compact`), but a provided
+        // compactor makes manual compaction (`compact_now`) available
+        // even under `CompactionStrategy::Disabled`.
+        if let Some(compactor) = &config.compactor {
+            compaction_manager.set_compactor(Arc::clone(compactor));
+        } else if config.compaction_strategy != CompactionStrategy::Disabled {
             let model = resolver.resolve_model(&config.model_id);
             if let Some(model) = model {
                 let llm_compactor =
