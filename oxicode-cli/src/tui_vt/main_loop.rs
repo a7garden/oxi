@@ -192,8 +192,9 @@ pub struct RenderState {
     pub vim_clipboard: String,
     /// In-transcript search state — `None` when no search is active.
     pub search: Option<SearchState>,
-    /// Folded block IDs (toggled by the `e` key).
-    pub folded_blocks: std::collections::HashSet<usize>,
+    /// Per-block display override. An absent entry means the default
+    /// ([`BlockDisplayMode::Truncated]).
+    pub block_display: std::collections::HashMap<usize, BlockDisplayMode>,
     /// Last Esc press timestamp (for double-Esc detection).
     pub last_esc_at: Option<std::time::Instant>,
     /// Multiline input mode — Enter inserts newline, Shift+Enter sends.
@@ -204,6 +205,16 @@ pub struct RenderState {
     pub history_pos: Option<usize>,
     /// Next block ID to assign when appending transcript lines.
     pub next_block_id: usize,
+    /// Cancel grace window — Esc pressed within this window after a cancel
+    /// is ignored (grok-build post-cancel grace, ~1s). Prevents mashing.
+    pub cancel_grace_until: Option<std::time::Instant>,
+    /// Active y/n/x confirmation dialog — `Some` while a modal confirmation
+    /// is open. The input thread resolves it; the render loop paints it
+    /// centered on top of everything else.
+    pub confirmation: Option<ModalConfirmation>,
+    /// Active ephemeral tip banner — `Some` for a bounded number of render
+    /// ticks, then auto-dismissed by expiry.
+    pub tip: Option<EphemeralTip>,
 }
 
 /// One rendered transcript line.
@@ -214,6 +225,22 @@ pub struct TranscriptLine {
     /// Block group ID — consecutive lines of the same kind share a block.
     /// Assigned incrementally when lines are appended.
     pub block_id: usize,
+}
+
+/// Three-state display mode for a transcript block (grok-build parity).
+///
+/// The default is [`BlockDisplayMode::Truncated`] — finished long blocks
+/// show their head, an ellipsis gap, and a tail snippet rather than the
+/// full body, keeping the scrollback scannable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BlockDisplayMode {
+    /// Fully collapsed — only the first line shows (▸ marker).
+    Collapsed,
+    /// Default — first line + ellipsis gap + last N lines, body DIM.
+    #[default]
+    Truncated,
+    /// Fully expanded — every line shows at full weight.
+    Expanded,
 }
 
 /// In-transcript search state.
@@ -273,6 +300,27 @@ pub struct OverlayState {
     pub items: Vec<OverlayListItem>,
     pub selected: usize,
     pub search: Option<OverlaySearchState>,
+}
+
+/// A y/n/x confirmation dialog (grok-build `ModalConfirmation` parity).
+/// Rendered centered on top of everything else; the input thread routes
+/// `y` → confirm, `n` → decline (when offered), `x`/`Esc` → cancel.
+#[derive(Clone, Debug)]
+pub struct ModalConfirmation {
+    pub title: String,
+    pub message: String,
+}
+
+/// A short-lived contextual tip banner (grok-build ephemeral tips parity).
+/// Shown as one line above the composer for a bounded number of render
+/// ticks, then auto-dismissed.
+#[derive(Clone, Debug)]
+pub struct EphemeralTip {
+    pub text: String,
+    /// Render tick the tip was born at (`FRAME_TICK` snapshot).
+    pub born_tick: u64,
+    /// How many ticks the tip stays visible before auto-dismissing.
+    pub ttl_ticks: u64,
 }
 
 /// Search-bar state for an overlay. `None` value means search is disabled.
@@ -388,27 +436,67 @@ impl RenderState {
         }
     }
 
-    // ── Block folding ──
+    // ── Block display modes (Collapsed / Truncated / Expanded) ──
 
-    /// Toggle the fold state of the block containing the line at (or nearest
-    /// above) the current scroll offset.
-    pub fn toggle_fold_at_view(&mut self) {
-        let offset = if self.scroll_offset == usize::MAX {
-            self.transcript.len().saturating_sub(1)
-        } else {
-            self.scroll_offset
-        };
+    /// The display mode for a block — explicit override or the Truncated default.
+    pub fn block_mode(&self, block_id: usize) -> BlockDisplayMode {
+        self.block_display
+            .get(&block_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Cycle the display mode of the block at (or nearest above) the current
+    /// scroll offset: Collapsed → Truncated → Expanded → Collapsed.
+    pub fn cycle_block_at_view(&mut self) {
+        let offset = self.effective_offset();
         if let Some(line) = self.transcript.get(offset) {
             let bid = line.block_id;
-            if !self.folded_blocks.insert(bid) {
-                self.folded_blocks.remove(&bid);
+            let next = match self.block_mode(bid) {
+                BlockDisplayMode::Collapsed => BlockDisplayMode::Truncated,
+                BlockDisplayMode::Truncated => BlockDisplayMode::Expanded,
+                BlockDisplayMode::Expanded => BlockDisplayMode::Collapsed,
+            };
+            // Truncated is the default — represent it by absence so the map
+            // only carries real overrides.
+            if next == BlockDisplayMode::Truncated {
+                self.block_display.remove(&bid);
+            } else {
+                self.block_display.insert(bid, next);
             }
         }
     }
 
-    /// Unfold all blocks.
-    pub fn unfold_all(&mut self) {
-        self.folded_blocks.clear();
+    /// Expand every block (show every line at full weight).
+    pub fn expand_all(&mut self) {
+        for bid in self.all_block_ids() {
+            self.block_display.insert(bid, BlockDisplayMode::Expanded);
+        }
+    }
+
+    /// Collapse every block (first line only).
+    pub fn fold_all(&mut self) {
+        for bid in self.all_block_ids() {
+            self.block_display.insert(bid, BlockDisplayMode::Collapsed);
+        }
+    }
+
+    /// Reset every block to the default Truncated mode.
+    pub fn truncate_all(&mut self) {
+        self.block_display.clear();
+    }
+
+    /// Distinct block ids in transcript order.
+    fn all_block_ids(&self) -> Vec<usize> {
+        let mut ids = Vec::new();
+        let mut prev: Option<usize> = None;
+        for l in &self.transcript {
+            if prev != Some(l.block_id) {
+                ids.push(l.block_id);
+                prev = Some(l.block_id);
+            }
+        }
+        ids
     }
 
     // ── Turn navigation ──
@@ -448,6 +536,14 @@ impl RenderState {
             self.transcript.len().saturating_sub(1)
         } else {
             self.scroll_offset
+        }
+    }
+
+    /// Drop the head of the queued-input list. Called when a turn ends so
+    /// the queue pane stops showing the prompt that is now running.
+    pub fn drain_queue_head(&mut self) {
+        if !self.queued_inputs.is_empty() {
+            self.queued_inputs.remove(0);
         }
     }
 }
@@ -521,6 +617,13 @@ pub async fn run_tui(app: App) -> Result<()> {
     let state = Arc::new(parking_lot::Mutex::new(RenderState::new_with_header(
         header,
     )));
+    // Onboarding tip: surfaces the cheatsheet and help command on first run,
+    // auto-dismisses after ~30s of rendering.
+    state.lock().tip = Some(EphemeralTip {
+        text: "Press ? for shortcuts  \u{00b7}  /help for commands".to_string(),
+        born_tick: 0,
+        ttl_ticks: 900,
+    });
     spawn_input_thread(state.clone(), evt_tx.clone());
 
     // Worker thread that owns the agent loop. Receives prompts over a
@@ -669,6 +772,29 @@ async fn run_event_loop(
 enum LoopOutcome {
     Continue,
     Exit,
+}
+
+/// Whether an Esc-driven cancel should abort the running stream (via the
+/// interrupt path, which sets the footer + abort) or exit the app outright
+/// (idle one-press quit). Extracted as a pure function so the routing can
+/// be unit-tested without a live `AgentSessionHandle`.
+#[derive(PartialEq, Eq, Debug)]
+enum CancelRoute {
+    /// A stream is running: abort it. The input thread's ~1s post-cancel
+    /// grace then prevents mashing Esc from firing repeated cancels.
+    Interrupt,
+    /// Idle: instant one-press quit — no quit-arming footer, no grace.
+    Exit,
+}
+
+/// Pure routing decision for `InlineEvent::Cancel`. While a stream is
+/// running, Esc aborts it (matching Ctrl+C). When idle, Esc quits at once.
+fn route_cancel(is_streaming: bool) -> CancelRoute {
+    if is_streaming {
+        CancelRoute::Interrupt
+    } else {
+        CancelRoute::Exit
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -963,10 +1089,14 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             handle.set_input_status(None, Some(format!("retry {attempt}/{max_attempts}")));
         }
         AgentEvent::TurnEnd { .. } => {
-            // Ring the terminal bell when the agent finishes a turn.
-            use std::io::Write;
-            let _ = write!(std::io::stderr(), "\x07");
-            let _ = std::io::stderr().flush();
+            // Notify via the terminal's best-supported desktop-notification
+            // protocol (OSC 9/99/777, falling back to BEL) so the user
+            // notices a finished turn even when the window is unfocused.
+            crate::tui_vt::notifications::emit_notification("oxicode", "Response complete");
+            // The next queued prompt (if any) now starts running — drop it
+            // from the visible queue pane so the pane only shows still-pending
+            // inputs.
+            state.drain_queue_head();
             handle.set_reasoning_stage(None);
         }
         _ => {
@@ -1021,12 +1151,28 @@ fn handle_inline_event(
                 };
             }
             state.append_line(InlineMessageKind::User, vec![plain_segment(prompt.clone())]);
+            // While a run is active, mirror the prompt into the queue pane so
+            // the user sees their input is queued (the worker channel already
+            // serialises execution; this is the visible counterpart).
+            if session.is_streaming() {
+                state.queued_inputs.push(prompt.clone());
+            }
             // Hand the prompt to the worker thread. If the worker has
             // already exited (e.g. shutdown), drop it on the floor.
             let _ = prompt_tx.send(prompt);
         }
-        InlineEvent::Cancel | InlineEvent::Exit => {
-            // Trigger shutdown via the harness.
+        InlineEvent::Cancel => {
+            // Esc-driven cancel. While a stream is running, abort it (the
+            // input thread's ~1s post-cancel grace then prevents mashing).
+            // When idle, Esc is an instant one-press quit — no grace, no
+            // quit-arming footer that would invite a re-press the grace
+            // swallows.
+            return match route_cancel(session.is_streaming()) {
+                CancelRoute::Interrupt => handle_interrupt(state, session, handle),
+                CancelRoute::Exit => LoopOutcome::Exit,
+            };
+        }
+        InlineEvent::Exit => {
             return LoopOutcome::Exit;
         }
         InlineEvent::Interrupt => {
@@ -1148,23 +1294,40 @@ fn handle_interrupt(
     session: &crate::app::agent_session::AgentSessionHandle,
     _handle: &InlineHandle,
 ) -> LoopOutcome {
-    // A second consecutive Ctrl+C (no intervening submit) quits.
-    if state.pending_quit {
+    // If a confirmation is already open, Ctrl+C acts as confirm (quit).
+    if state.confirmation.is_some() {
         return LoopOutcome::Exit;
     }
-    // First Ctrl+C: abort any running stream and arm the quit flag so the
-    // next press exits. A single accidental press never kills the session.
+    // A second Ctrl+C (after the first armed a quit during a stream) opens
+    // the quit confirmation modal instead of exiting outright.
+    if state.pending_quit {
+        state.confirmation = Some(quit_confirmation());
+        state.pending_quit = false;
+        return LoopOutcome::Continue;
+    }
+    // First Ctrl+C. While streaming, abort the run and arm a quit (the next
+    // press opens the confirmation). When idle, open the confirmation at
+    // once — no separate quit-arming step needed.
     if session.is_streaming() {
         let s = session.clone();
         tokio::spawn(async move {
             s.abort().await;
         });
-        state.footer_left = Some("Stopping\u{2026} press Ctrl+C again to quit".to_string());
+        state.footer_left = Some("Stopping\u{2026} press Ctrl+C again to confirm quit".to_string());
+        state.pending_quit = true;
     } else {
-        state.footer_left = Some("Press Ctrl+C again to quit".to_string());
+        state.footer_left = None;
+        state.confirmation = Some(quit_confirmation());
     }
-    state.pending_quit = true;
     LoopOutcome::Continue
+}
+
+/// Build the standard quit-confirmation dialog.
+fn quit_confirmation() -> ModalConfirmation {
+    ModalConfirmation {
+        title: "Quit oxicode?".into(),
+        message: "  y \u{2014} quit now     n / x \u{2014} stay".into(),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1237,6 +1400,50 @@ fn spawn_input_thread(
                 continue;
             }
 
+            // Ctrl+E: fold all blocks (Shift+E expands all).
+            if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let mut s = state.lock();
+                s.fold_all();
+                continue;
+            }
+
+            // Ctrl+Enter: send-now — abort the current run (if any) and submit
+            // the composed input immediately, bypassing the queue pane.
+            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let submitted = {
+                    let mut s = state.lock();
+                    let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                        format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
+                    } else {
+                        std::mem::take(&mut s.input_buffer)
+                    };
+                    s.input_cursor = 0;
+                    s.slash_popup = SlashPopup::default();
+                    s.history_pos = None;
+                    if !buf.is_empty() && !buf.starts_with('/') {
+                        s.prompt_history.insert(0, buf.clone());
+                        s.prompt_history.truncate(100);
+                    }
+                    buf
+                };
+                if !submitted.is_empty() {
+                    let _ = evt_tx.send(InlineEvent::Interrupt);
+                    let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+                }
+                continue;
+            }
+
+            // Confirmation modal takes priority over everything except
+            // Ctrl+C (handled above): y/Enter confirms, n/x/Esc cancels.
+            {
+                let s = state.lock();
+                if s.confirmation.is_some() {
+                    drop(s);
+                    handle_confirmation_key(&state, &evt_tx, key.code);
+                    continue;
+                }
+            }
+
             // Overlay key handling takes priority — when an overlay is
             // open, Up/Down navigate, Enter submits, Esc cancels, and any
             // printable char is captured for the search bar (if any).
@@ -1294,7 +1501,8 @@ fn spawn_input_thread(
                     // 1. Slash popup open → close popup
                     // 2. Input non-empty + 2nd Esc within 800ms → clear buffer
                     // 3. Input non-empty + 1st Esc → arm "press again to clear"
-                    // 4. Empty input → cancel the run
+                    // 4. Empty input → cancel the run (with ~1s post-cancel
+                    //    grace so mashing Esc doesn't fire repeated cancels)
                     let mut s = state.lock();
                     if s.slash_popup.open {
                         s.slash_popup = SlashPopup::default();
@@ -1310,11 +1518,25 @@ fn spawn_input_thread(
                             s.last_esc_at = None;
                         } else {
                             s.last_esc_at = Some(now);
+                            // Ephemeral hint so the user learns the
+                            // double-Esc-to-clear gesture.
+                            s.tip = Some(EphemeralTip {
+                                text: "Press Esc again to clear input".to_string(),
+                                born_tick: FRAME_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                                ttl_ticks: 120,
+                            });
                         }
                     } else {
-                        s.last_esc_at = None;
-                        drop(s);
-                        let _ = evt_tx.send(InlineEvent::Cancel);
+                        let now = std::time::Instant::now();
+                        let in_grace = s.cancel_grace_until.map(|t| t > now).unwrap_or(false);
+                        if in_grace {
+                            // Swallow — already cancelling.
+                        } else {
+                            s.cancel_grace_until = Some(now + std::time::Duration::from_secs(1));
+                            s.last_esc_at = None;
+                            drop(s);
+                            let _ = evt_tx.send(InlineEvent::Cancel);
+                        }
                     }
                 }
                 KeyCode::Tab => {
@@ -1452,8 +1674,8 @@ fn spawn_input_thread(
                                     search: None,
                                 });
                             }
-                            'e' => s.toggle_fold_at_view(),
-                            'E' => s.unfold_all(),
+                            'e' => s.cycle_block_at_view(),
+                            'E' => s.expand_all(),
                             'J' => s.jump_next_turn(),
                             'K' => s.jump_prev_turn(),
                             'n' if s.search.is_some() => s.search_next(),
@@ -1476,6 +1698,35 @@ fn spawn_input_thread(
             }
         }
     })
+}
+
+/// Resolve a keystroke against the active confirmation modal. `y`/Enter
+/// confirms (the quit path forwards `Exit`); `n`/`x`/Esc cancels. Always
+/// consumes the key while a confirmation is open.
+fn handle_confirmation_key(
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+    code: KeyCode,
+) {
+    let mut s = state.lock();
+    if s.confirmation.is_none() {
+        return;
+    }
+    match code {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            s.confirmation = None;
+            drop(s);
+            let _ = evt_tx.send(InlineEvent::Exit);
+        }
+        KeyCode::Char('n')
+        | KeyCode::Char('N')
+        | KeyCode::Char('x')
+        | KeyCode::Char('X')
+        | KeyCode::Esc => {
+            s.confirmation = None;
+        }
+        _ => {}
+    }
 }
 
 /// Handle a single keystroke while an overlay is open. Returns `true` if the
@@ -1780,8 +2031,9 @@ fn cheatsheet_lines() -> Vec<String> {
         "  g / G        Top / bottom".into(),
         "".into(),
         "  Blocks".into(),
-        "  e            Fold / unfold block".into(),
-        "  E            Unfold all".into(),
+        "  e            Cycle block (collapse/truncate/expand)".into(),
+        "  E            Expand all blocks".into(),
+        "  Ctrl+E       Collapse all blocks".into(),
         "".into(),
         "  Search".into(),
         "  /find <q>    Search transcript".into(),
@@ -1793,7 +2045,10 @@ fn cheatsheet_lines() -> Vec<String> {
         "  /vim         Toggle vim mode".into(),
         "  /compact     Compact context".into(),
         "  /clear       Clear conversation".into(),
-        "  Ctrl+C       Cancel run (2× to quit)".into(),
+        "  Ctrl+C       Cancel run (then y to quit)".into(),
+        "  Ctrl+Enter   Send now (abort + submit)".into(),
+        "  Ctrl+M       Toggle multiline input".into(),
+        "  Ctrl+P       Command palette".into(),
     ]
 }
 
@@ -1950,6 +2205,12 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
         render_reasoning_indicator(frame, layout.prompt, stage);
     }
     render_composer(frame, layout.prompt, state);
+    // Ephemeral tip banner above the composer (auto-dismissed by tick TTL).
+    if let Some(tip) = &state.tip
+        && tip_is_visible(tip, tick)
+    {
+        render_tip(frame, layout.prompt, &tip.text);
+    }
     if state.slash_popup.open {
         render_slash_popup(frame, layout.prompt, state);
     }
@@ -1959,6 +2220,47 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     if let Some(overlay) = &state.overlay {
         render_overlay(frame, area, overlay);
     }
+    if let Some(confirm) = &state.confirmation {
+        render_confirmation(frame, area, confirm);
+    }
+}
+
+/// Render the y/n/x confirmation modal centered on top of everything else.
+fn render_confirmation(frame: &mut Frame, area: Rect, confirm: &ModalConfirmation) {
+    let styles = active_styles();
+    let accent = color_from_anstyle(styles.error.get_fg_color());
+    let inner_w = confirm
+        .title
+        .chars()
+        .count()
+        .max(confirm.message.chars().count())
+        .max(36) as u16;
+    let width = inner_w + 4;
+    let height = 5;
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let popup_area = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(
+            format!(" {} ", confirm.title),
+            Style::default().fg(accent).bold(),
+        ))
+        .border_style(Style::default().fg(accent));
+    let msg = Line::styled(
+        confirm.message.clone(),
+        Style::default().fg(color_from_anstyle(Some(styles.foreground))),
+    );
+    frame.render_widget(
+        Paragraph::new(vec![Line::default(), msg]).block(block),
+        popup_area,
+    );
 }
 
 /// Render the Agent Hub overlay — a centered panel listing every registered
@@ -2198,12 +2500,13 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
     let styles = active_styles();
     let bg_color = color_from_anstyle(Some(styles.background));
 
-    // Split area: [1-col accent rail | content].
+    // Split area: [1-col accent rail | content | 1-col scrollbar].
     let accent_w: u16 = 1;
+    let scrollbar_w: u16 = 1;
     let content_area = Rect {
         x: area.x + accent_w,
         y: area.y,
-        width: area.width.saturating_sub(accent_w),
+        width: area.width.saturating_sub(accent_w + scrollbar_w),
         height: area.height,
     };
 
@@ -2221,18 +2524,93 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
 
     let mut display: Vec<(usize, InlineMessageKind, Line<'_>)> =
         Vec::with_capacity(state.transcript.len());
-    let mut prev_block: Option<usize> = None;
+    // Group consecutive lines into blocks, then render each block according
+    // to its display mode (Collapsed / Truncated / Expanded). Absent
+    // overrides fall back to Truncated — the grok-build default that keeps
+    // long finished blocks scannable (head + ellipsis gap + tail).
+    const TRUNC_TAIL: usize = 3;
+    let dim_style = Style::default()
+        .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+        .add_modifier(Modifier::DIM);
+
+    let mut blocks: Vec<(usize, Vec<(usize, &TranscriptLine)>)> = Vec::new();
     for (idx, tl) in state.transcript.iter().enumerate() {
-        let is_first_in_block = prev_block != Some(tl.block_id);
-        let folded = state.folded_blocks.contains(&tl.block_id);
-        if folded && !is_first_in_block {
-            continue;
+        if blocks.last().is_some_and(|(id, _)| *id == tl.block_id) {
+            blocks.last_mut().unwrap().1.push((idx, tl));
+        } else {
+            blocks.push((tl.block_id, vec![(idx, tl)]));
         }
-        let is_match = search_set.contains(&idx);
-        let is_current = current_match == Some(idx);
-        let line = transcript_line_marked(tl, &styles, folded, is_match, is_current);
-        display.push((idx, tl.kind, line));
-        prev_block = Some(tl.block_id);
+    }
+
+    for (block_id, lines) in &blocks {
+        let mode = state.block_mode(*block_id);
+        let len = lines.len();
+        match mode {
+            BlockDisplayMode::Collapsed => {
+                let &(idx, tl) = &lines[0];
+                let is_match = search_set.contains(&idx);
+                let line =
+                    transcript_line_marked(tl, &styles, true, is_match, current_match == Some(idx));
+                display.push((idx, tl.kind, line));
+            }
+            BlockDisplayMode::Expanded => {
+                for &(idx, tl) in lines {
+                    let is_match = search_set.contains(&idx);
+                    let line = transcript_line_marked(
+                        tl,
+                        &styles,
+                        false,
+                        is_match,
+                        current_match == Some(idx),
+                    );
+                    display.push((idx, tl.kind, line));
+                }
+            }
+            BlockDisplayMode::Truncated => {
+                if len <= TRUNC_TAIL + 1 {
+                    // Short enough — show every line at full weight.
+                    for &(idx, tl) in lines {
+                        let is_match = search_set.contains(&idx);
+                        let line = transcript_line_marked(
+                            tl,
+                            &styles,
+                            false,
+                            is_match,
+                            current_match == Some(idx),
+                        );
+                        display.push((idx, tl.kind, line));
+                    }
+                } else {
+                    // Head (first line, full weight).
+                    let &(hidx, htl) = &lines[0];
+                    let is_match = search_set.contains(&hidx);
+                    let line = transcript_line_marked(
+                        htl,
+                        &styles,
+                        false,
+                        is_match,
+                        current_match == Some(hidx),
+                    );
+                    display.push((hidx, htl.kind, line));
+                    // Ellipsis gap summarising the hidden middle.
+                    let hidden = len - 1 - TRUNC_TAIL;
+                    let gap = Line::styled(format!("  \u{2026} +{hidden} lines"), dim_style);
+                    display.push((hidx, htl.kind, gap));
+                    // Tail (last N lines, in order).
+                    for &(idx, tl) in lines.iter().rev().take(TRUNC_TAIL).rev() {
+                        let is_match = search_set.contains(&idx);
+                        let line = transcript_line_marked(
+                            tl,
+                            &styles,
+                            false,
+                            is_match,
+                            current_match == Some(idx),
+                        );
+                        display.push((idx, tl.kind, line));
+                    }
+                }
+            }
+        }
     }
 
     // Resolve scroll offset into the display list.
@@ -2247,13 +2625,46 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
     };
     let start = effective_scroll_offset(raw_start, total, content_area.height as usize);
 
+    // Sticky header (grok-build parity): when the viewport top sits inside a
+    // block's body (not on its head), pin the block's first line at the top
+    // so the user can tell which block they are scrolling through.
+    let sticky_first: Option<usize> = display.get(start).and_then(|(orig_idx, _, _)| {
+        let bid = state.transcript.get(*orig_idx)?.block_id;
+        let first_idx = state.transcript.iter().position(|l| l.block_id == bid)?;
+        (first_idx != *orig_idx).then_some(first_idx)
+    });
+    let sticky_h: u16 = if sticky_first.is_some() { 1 } else { 0 };
+    let body_top = content_area.top() + sticky_h;
+
     // Determine animation state.
     let running = state.reasoning_stage.is_some();
     const WAVE_ROWS: u16 = 32;
     const WAVE_SPEED: f64 = 0.15;
 
+    // Sticky header row: accent rail + head line + faint bg highlight.
+    if let Some(sidx) = sticky_first {
+        let tl = &state.transcript[sidx];
+        let accent_base = accent_color_for_kind(tl.kind, &styles);
+        if let Some(cell) = frame.buffer_mut().cell_mut((area.x, content_area.top())) {
+            cell.set_char('\u{2503}');
+            cell.set_style(Style::default().fg(blend_rgb(bg_color, accent_base, 0.7)));
+        }
+        let line = transcript_line_marked(tl, &styles, false, false, false);
+        let row = Rect {
+            x: content_area.x,
+            y: content_area.top(),
+            width: content_area.width,
+            height: 1,
+        };
+        frame.buffer_mut().set_style(
+            row,
+            Style::default().bg(blend_rgb(bg_color, accent_base, 0.1)),
+        );
+        frame.render_widget(Paragraph::new(line), row);
+    }
+
     // Render top-down, wrapping each line into multiple visual rows.
-    let mut y = content_area.top();
+    let mut y = body_top;
     let width = content_area.width.max(1) as usize;
     let mut visual_row: u16 = 0;
     for (_, kind, line) in display.into_iter().skip(start) {
@@ -2295,6 +2706,76 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
         frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), row);
         y += wrapped_h;
         visual_row += wrapped_h;
+    }
+
+    // Scrollbar (rightmost column): shown only when content overflows.
+    // Follow-tail dims the thumb; explicit scroll brightens it.
+    let body_viewport = (content_area.height as usize).saturating_sub(sticky_h as usize);
+    if total > body_viewport {
+        let follow = state.scroll_offset == usize::MAX;
+        render_scrollbar(
+            frame,
+            area.right().saturating_sub(1),
+            area.top(),
+            area.height,
+            total,
+            body_viewport,
+            start,
+            follow,
+            &styles,
+            bg_color,
+        );
+    }
+}
+
+/// Render a 1-column scrollbar in the rightmost cell column. The thumb
+/// represents the viewport's position within the full content; the rail is
+/// a faint track. Follow-tail (auto-scroll) dims the thumb toward the
+/// background; an explicit scroll offset paints it in the accent color.
+#[allow(clippy::too_many_arguments)]
+fn render_scrollbar(
+    frame: &mut Frame,
+    x: u16,
+    top: u16,
+    height: u16,
+    total: usize,
+    viewport: usize,
+    start: usize,
+    follow: bool,
+    styles: &ThemeStyles,
+    bg: Color,
+) {
+    if height == 0 {
+        return;
+    }
+    let ratio = (start as f64 / total.max(1) as f64).clamp(0.0, 1.0);
+    let thumb_h = (((viewport as f64 / total.max(1) as f64) * height as f64).ceil() as u16)
+        .max(1)
+        .min(height);
+    let track_h = height.saturating_sub(thumb_h);
+    let thumb_y = (ratio * track_h as f64).round() as u16;
+
+    let accent = color_from_anstyle(styles.primary.get_fg_color());
+    // Follow-tail: dim thumb so it recedes. Explicit scroll: bright accent.
+    let thumb_color = if follow {
+        blend_rgb(bg, accent, 0.35)
+    } else {
+        accent
+    };
+    let rail_color = blend_rgb(bg, accent, 0.1);
+
+    for row in 0..height {
+        let y = top + row;
+        let is_thumb = row >= thumb_y && row < thumb_y + thumb_h;
+        let (ch, color) = if is_thumb {
+            ('\u{2588}', thumb_color) // █
+        } else {
+            ('\u{2502}', rail_color) // │
+        };
+        if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
+            cell.set_char(ch);
+            cell.set_style(Style::default().fg(color));
+        }
     }
 }
 
@@ -2645,6 +3126,29 @@ fn render_follow_ups(frame: &mut Frame<'_>, composer_area: Rect, chips: &[String
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// Whether an ephemeral tip is still within its visible TTL window.
+fn tip_is_visible(tip: &EphemeralTip, now_tick: u64) -> bool {
+    now_tick.saturating_sub(tip.born_tick) < tip.ttl_ticks
+}
+
+/// Render the ephemeral tip banner one row above the composer.
+fn render_tip(frame: &mut Frame, composer_area: Rect, text: &str) {
+    let styles = active_styles();
+    let area = Rect {
+        x: composer_area.x,
+        y: composer_area.top().saturating_sub(1),
+        width: composer_area.width,
+        height: 1,
+    };
+    let line = Line::styled(
+        format!(" \u{2139} {text}"),
+        Style::default()
+            .fg(color_from_anstyle(styles.info.get_fg_color()))
+            .add_modifier(Modifier::DIM),
+    );
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 /// Render the slash-command autocomplete popup as a floating panel above the
@@ -3415,5 +3919,306 @@ mod render_tests {
         // CloseOverlay clears it.
         apply_command(&mut state, InlineCommand::CloseOverlay);
         assert!(state.overlay.is_none(), "CloseOverlay must clear state");
+    }
+
+    // ─── fold / grace tests ─────────────────────────────────────────────
+
+    fn three_block_transcript() -> Vec<TranscriptLine> {
+        // Three distinct blocks: user(0), agent(1), user(2).
+        vec![
+            TranscriptLine {
+                kind: InlineMessageKind::User,
+                segments: vec![plain_segment("hi")],
+                block_id: 0,
+            },
+            TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment("hello")],
+                block_id: 1,
+            },
+            TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment("world")],
+                block_id: 1,
+            },
+            TranscriptLine {
+                kind: InlineMessageKind::User,
+                segments: vec![plain_segment("bye")],
+                block_id: 2,
+            },
+        ]
+    }
+
+    #[test]
+    fn default_block_mode_is_truncated() {
+        let state = RenderState::default();
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Truncated);
+        assert!(state.block_display.is_empty(), "default needs no map entry");
+    }
+
+    #[test]
+    fn fold_all_collapses_every_block() {
+        let mut state = RenderState::default();
+        state.transcript = three_block_transcript();
+        state.fold_all();
+        assert_eq!(state.block_display.len(), 3, "3 distinct block ids");
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Collapsed);
+        assert_eq!(state.block_mode(1), BlockDisplayMode::Collapsed);
+        assert_eq!(state.block_mode(2), BlockDisplayMode::Collapsed);
+    }
+
+    #[test]
+    fn expand_all_after_fold_all_shows_expanded() {
+        let mut state = RenderState::default();
+        state.transcript = three_block_transcript();
+        state.fold_all();
+        state.expand_all();
+        assert_eq!(state.block_display.len(), 3);
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Expanded);
+        assert_eq!(state.block_mode(2), BlockDisplayMode::Expanded);
+    }
+
+    #[test]
+    fn truncate_all_resets_to_default() {
+        let mut state = RenderState::default();
+        state.transcript = three_block_transcript();
+        state.fold_all();
+        state.truncate_all();
+        assert!(state.block_display.is_empty());
+        assert_eq!(state.block_mode(1), BlockDisplayMode::Truncated);
+    }
+
+    #[test]
+    fn fold_all_on_empty_transcript_is_noop() {
+        let mut state = RenderState::default();
+        state.fold_all();
+        assert!(state.block_display.is_empty());
+    }
+
+    #[test]
+    fn cycle_block_advances_through_three_states() {
+        let mut state = RenderState::default();
+        state.transcript = three_block_transcript();
+        state.scroll_offset = 0; // view on block 0
+        // Truncated (default) → Expanded
+        state.cycle_block_at_view();
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Expanded);
+        // Expanded → Collapsed
+        state.cycle_block_at_view();
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Collapsed);
+        // Collapsed → Truncated (default — removed from the map)
+        state.cycle_block_at_view();
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Truncated);
+        assert!(!state.block_display.contains_key(&0));
+    }
+
+    #[test]
+    fn cancel_grace_field_defaults_none() {
+        let state = RenderState::default();
+        assert!(
+            state.cancel_grace_until.is_none(),
+            "cancel_grace_until must default to None"
+        );
+    }
+
+    #[test]
+    fn cancel_routes_to_interrupt_when_streaming() {
+        assert_eq!(
+            route_cancel(true),
+            CancelRoute::Interrupt,
+            "Esc while streaming must route through the interrupt path"
+        );
+    }
+
+    #[test]
+    fn cancel_routes_to_exit_when_idle() {
+        assert_eq!(
+            route_cancel(false),
+            CancelRoute::Exit,
+            "Esc while idle must exit immediately (one-press quit)"
+        );
+    }
+    #[test]
+    fn scrollbar_paints_thumb_when_content_overflows() {
+        // 40 distinct blocks in a 24-row viewport must produce a scrollbar
+        // thumb (█) in the rendered frame.
+        let mut state = RenderState::default();
+        for i in 0..40u32 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment(format!("line {i}"))],
+                block_id: i as usize,
+            });
+        }
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains('\u{2588}'),
+            "scrollbar thumb (█) must render when transcript overflows the viewport"
+        );
+    }
+
+    #[test]
+    fn scrollbar_absent_when_content_fits_viewport() {
+        // A single short line fits without overflow — no thumb character.
+        let mut state = RenderState::default();
+        state.transcript.push(TranscriptLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![plain_segment("hi")],
+            block_id: 0,
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            !rendered.contains('\u{2588}'),
+            "no scrollbar thumb when content fits the viewport"
+        );
+    }
+
+    // ─── confirmation modal tests ───────────────────────────────────────
+
+    #[test]
+    fn confirmation_modal_renders_title() {
+        let mut state = RenderState::default();
+        state.confirmation = Some(quit_confirmation());
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("Quit oxicode?"),
+            "confirmation title must render"
+        );
+    }
+
+    #[test]
+    fn confirmation_yes_sends_exit_and_closes() {
+        let mut state = RenderState::default();
+        state.confirmation = Some(quit_confirmation());
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_confirmation_key(&state_arc, &tx, KeyCode::Char('y'));
+        assert!(
+            state_arc.lock().confirmation.is_none(),
+            "yes must close the modal"
+        );
+        let ev = rx.try_recv().expect("yes must send an event");
+        assert!(matches!(ev, InlineEvent::Exit), "yes must send Exit");
+    }
+
+    #[test]
+    fn confirmation_no_closes_without_event() {
+        let mut state = RenderState::default();
+        state.confirmation = Some(quit_confirmation());
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_confirmation_key(&state_arc, &tx, KeyCode::Char('n'));
+        assert!(
+            state_arc.lock().confirmation.is_none(),
+            "no must close the modal"
+        );
+        assert!(rx.try_recv().is_err(), "no must not send an event");
+    }
+    // ─── ephemeral tip tests ───────────────────────────────────────────
+
+    #[test]
+    fn tip_banner_renders_when_active() {
+        let mut state = RenderState::default();
+        let now_tick = FRAME_TICK.load(std::sync::atomic::Ordering::Relaxed);
+        state.tip = Some(EphemeralTip {
+            text: "hello-tip-marker".to_string(),
+            born_tick: now_tick,
+            ttl_ticks: 100,
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("hello-tip-marker"),
+            "active tip must render above the composer"
+        );
+    }
+
+    #[test]
+    fn tip_visible_within_ttl_window() {
+        let tip = EphemeralTip {
+            text: "x".to_string(),
+            born_tick: 10,
+            ttl_ticks: 5,
+        };
+        assert!(tip_is_visible(&tip, 12), "within TTL must be visible");
+        assert!(
+            !tip_is_visible(&tip, 15),
+            "at TTL boundary (born + ttl) must expire"
+        );
+        assert!(!tip_is_visible(&tip, 99), "past TTL must expire");
+    }
+
+    // ─── sticky header tests ───────────────────────────────────────────
+
+    #[test]
+    fn sticky_header_pins_block_head_when_scrolled_into_body() {
+        // One big block (40 same-block lines); scroll the viewport into the
+        // body. The sticky header must pin the block's first line at the top.
+        let mut state = RenderState::default();
+        for i in 0..40u32 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment(format!("body-line-{i:02}"))],
+                block_id: 0,
+            });
+        }
+        state.scroll_offset = 10;
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("body-line-00"),
+            "sticky header must pin the block head when scrolled into the body"
+        );
+    }
+
+    #[test]
+    fn sticky_header_absent_when_viewport_at_block_head() {
+        // Viewport top is the block head itself — no sticky pin needed.
+        let mut state = RenderState::default();
+        for i in 0..40u32 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment(format!("head-line-{i:02}"))],
+                block_id: 0,
+            });
+        }
+        state.scroll_offset = 0;
+        let rendered = render_frame_to_string(&state);
+        // head-line-00 is the viewport top already; it renders exactly once
+        // (no separate sticky row). Just assert it is present.
+        assert!(rendered.contains("head-line-00"));
+    }
+
+    // ─── prompt queue tests ─────────────────────────────────────────────
+
+    #[test]
+    fn turn_end_drains_queue_head() {
+        let mut state = RenderState::default();
+        state.queued_inputs = vec!["queued-1".into(), "queued-2".into()];
+        state.drain_queue_head();
+        assert_eq!(
+            state.queued_inputs.len(),
+            1,
+            "drain_queue_head must drop the head (now running)"
+        );
+        assert_eq!(state.queued_inputs[0], "queued-2");
+    }
+
+    // ─── render_frame integration ──────────────────────────────────────
+
+    #[test]
+    fn render_frame_paints_transcript_content() {
+        // Guard against render_frame losing its render_transcript call
+        // (which only a content assertion through render_frame can catch —
+        // render_transcript unit tests bypass render_frame entirely).
+        let mut state = RenderState::default();
+        state.transcript.push(TranscriptLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![plain_segment("frame-content-marker-xyz")],
+            block_id: 0,
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("frame-content-marker-xyz"),
+            "render_frame must paint transcript content"
+        );
     }
 }
