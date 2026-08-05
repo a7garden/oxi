@@ -92,6 +92,40 @@ pub fn emit_notification(title: &str, message: &str) {
     let _ = std::io::stderr().flush();
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// OSC 8 — Terminal hyperlinks
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Wrap `text` in an OSC 8 hyperlink escape pointing to `url`.
+///
+/// Format: `ESC ] 8 ; ; <url> ESC \ <text> ESC ] 8 ; ; ESC \`
+///
+/// Supported by: iTerm2, Kitty, Ghostty, WezTerm, gnome-terminal, Windows
+/// Terminal, and others. Terminals that don't understand OSC 8 render the
+/// inner `text` as-is (the escape sequences are invisible/no-op).
+///
+/// ```
+/// use oxicode::tui_vt::notifications::osc8_hyperlink;
+/// let link = osc8_hyperlink("https://example.com", "click here");
+/// assert!(link.contains("https://example.com"));
+/// assert!(link.contains("click here"));
+/// ```
+pub fn osc8_hyperlink(url: &str, text: &str) -> String {
+    // ST (String Terminator) is `ESC \`. Some terminals accept BEL as an
+    // alternative ST; we use `ESC \` which is the spec-compliant form.
+    format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
+}
+
+/// Wrap a local file path as a `file://` OSC 8 hyperlink.
+pub fn osc8_file_link(path: &str, text: &str) -> String {
+    let url = if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file://{}/{path}", "")
+    };
+    osc8_hyperlink(&url, text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +214,21 @@ mod tests {
         assert!(wrapped.starts_with("\x1bPtmux;"));
         assert!(wrapped.ends_with("\x1b\\"));
         assert!(wrapped.contains("\x1b\x1b]9;hi\x07"));
+    }
+
+    #[test]
+    fn osc8_hyperlink_wraps_url_and_text() {
+        let link = osc8_hyperlink("https://example.com", "click here");
+        // Must start with OSC 8 opener and end with closer.
+        assert!(link.starts_with("\x1b]8;;https://example.com\x1b\\"));
+        assert!(link.ends_with("\x1b]8;;\x1b\\"));
+        assert!(link.contains("click here"));
+    }
+
+    #[test]
+    fn osc8_file_link_uses_file_scheme() {
+        let link = osc8_file_link("/abs/path", "file.rs");
+        assert!(link.starts_with("\x1b]8;;file:///abs/path\x1b\\"));
+        assert!(link.contains("file.rs"));
     }
 }

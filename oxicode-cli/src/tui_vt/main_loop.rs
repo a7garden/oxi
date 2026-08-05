@@ -182,6 +182,12 @@ pub struct RenderState {
     pub overlay_model_ids: Vec<String>,
     /// Queued input prompts (waiting to be processed).
     pub queued_inputs: Vec<String>,
+    /// Queued input prompts — interactive panel open (Ctrl+; toggles).
+    pub queue_panel_open: bool,
+    /// Selected index within the queue panel (when interactive).
+    pub queue_selected: usize,
+    /// Shell mode — `!` prefix for direct bash commands (grok-build parity).
+    pub shell_mode: bool,
     /// Follow-up suggestion chips.
     pub follow_ups: Vec<String>,
     /// Todo checklist items (text, done).
@@ -215,6 +221,12 @@ pub struct RenderState {
     /// Active ephemeral tip banner — `Some` for a bounded number of render
     /// ticks, then auto-dismissed by expiry.
     pub tip: Option<EphemeralTip>,
+    /// Workspace root — used by the @ file picker to walk + fuzzy-match.
+    pub cwd: PathBuf,
+    /// Active @-file-search dropdown — `Some` while the picker is open.
+    pub file_search: Option<crate::tui_vt::file_search::FileSearchState>,
+    /// Per-tip-key show counter — suppresses ambient tips after SEEN_CAP views.
+    pub seen_tips: std::collections::HashMap<&'static str, u32>,
 }
 
 /// One rendered transcript line.
@@ -309,6 +321,18 @@ pub struct OverlayState {
 pub struct ModalConfirmation {
     pub title: String,
     pub message: String,
+    /// What happens when the user confirms (`y`). Cancel (`n`/`x`/`Esc`)
+    /// always just closes the dialog.
+    pub action: ConfirmationAction,
+}
+
+/// The action bound to a [`ModalConfirmation`] — dispatched on `y`/Enter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfirmationAction {
+    /// Exit the application.
+    Quit,
+    /// Clear the conversation transcript + reset the agent session.
+    ClearConversation,
 }
 
 /// A short-lived contextual tip banner (grok-build ephemeral tips parity).
@@ -321,6 +345,13 @@ pub struct EphemeralTip {
     pub born_tick: u64,
     /// How many ticks the tip stays visible before auto-dismissing.
     pub ttl_ticks: u64,
+    /// Stable identifier for per-session seen-cap tracking. Tips with the
+    /// same key are suppressed after `SEEN_CAP` showings.
+    pub key: &'static str,
+    /// Ambient tips (background suggestions) are occluded — their TTL pauses
+    /// while an overlay/confirmation/dropdown is open. Non-ambient tips
+    /// (direct user-action feedback) always count down.
+    pub ambient: bool,
 }
 
 /// Search-bar state for an overlay. `None` value means search is disabled.
@@ -546,7 +577,27 @@ impl RenderState {
             self.queued_inputs.remove(0);
         }
     }
+
+    /// Show an ephemeral tip if the per-session seen-cap hasn't been reached.
+    /// Each unique `key` can show at most [`SEEN_CAP`] times per session.
+    pub fn show_tip(&mut self, key: &'static str, text: &str, ttl: u64, ambient: bool) {
+        let count = self.seen_tips.entry(key).or_insert(0);
+        if *count >= SEEN_CAP {
+            return;
+        }
+        *count += 1;
+        self.tip = Some(EphemeralTip {
+            text: text.to_string(),
+            born_tick: FRAME_TICK.load(std::sync::atomic::Ordering::Relaxed),
+            ttl_ticks: ttl,
+            key,
+            ambient,
+        });
+    }
 }
+
+/// Max times an ambient tip key is shown per session before suppression.
+const SEEN_CAP: u32 = 3;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Main entry: `pub async fn run_tui(app: App) -> Result<()>`
@@ -617,13 +668,25 @@ pub async fn run_tui(app: App) -> Result<()> {
     let state = Arc::new(parking_lot::Mutex::new(RenderState::new_with_header(
         header,
     )));
+    state.lock().cwd = cwd.clone();
     // Onboarding tip: surfaces the cheatsheet and help command on first run,
     // auto-dismisses after ~30s of rendering.
     state.lock().tip = Some(EphemeralTip {
         text: "Press ? for shortcuts  \u{00b7}  /help for commands".to_string(),
         born_tick: 0,
         ttl_ticks: 900,
+        key: "onboarding",
+        ambient: true,
     });
+    // SSH tip: suggest tmux when running over SSH (1-time).
+    if std::env::var("SSH_CONNECTION").is_ok() {
+        state.lock().show_tip(
+            "ssh_wrap",
+            "Over SSH? Consider tmux to keep sessions alive",
+            600,
+            true,
+        );
+    }
     spawn_input_thread(state.clone(), evt_tx.clone());
 
     // Worker thread that owns the agent loop. Receives prompts over a
@@ -751,6 +814,20 @@ async fn run_event_loop(
             _ = render_tick.tick() => {}
         }
 
+        // small_screen tip: warn when terminal is too narrow for full UI.
+        if let Ok(size) = terminal.size()
+            && size.width < 40
+        {
+            let mut s = state.lock();
+            if s.tip.is_none() {
+                s.show_tip(
+                    "small_screen",
+                    "Terminal too narrow \u{2014} resize for full UI",
+                    300,
+                    true,
+                );
+            }
+        }
         // Redraw every iteration. The harness's redraw is idempotent —
         // the ratatui backend coalesces unchanged frames.
         let snapshot = state.lock();
@@ -1156,6 +1233,12 @@ fn handle_inline_event(
             // serialises execution; this is the visible counterpart).
             if session.is_streaming() {
                 state.queued_inputs.push(prompt.clone());
+                state.show_tip(
+                    "send_now",
+                    "Ctrl+Enter sends now  \u{00b7}  Ctrl+; manages queue",
+                    240,
+                    true,
+                );
             }
             // Hand the prompt to the worker thread. If the worker has
             // already exited (e.g. shutdown), drop it on the floor.
@@ -1244,6 +1327,63 @@ fn handle_inline_event(
                         state.input_buffer = format!("/{name} ");
                         state.input_cursor = state.input_buffer.len();
                     }
+                    // Settings overlay: toggle/cycle the selected setting.
+                    if let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
+                        &sub
+                    {
+                        match key.as_str() {
+                            "thinking_level" => {
+                                if let Some(level) = session.cycle_thinking_level() {
+                                    handle.append_line(
+                                        InlineMessageKind::Info,
+                                        vec![plain_segment(format!("Thinking: {level:?}"))],
+                                    );
+                                }
+                            }
+                            "auto_compaction" => {
+                                let enabled = !session.auto_compaction_enabled();
+                                session.set_auto_compaction(enabled);
+                                handle.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!(
+                                        "Auto-compaction: {}",
+                                        if enabled { "on" } else { "off" }
+                                    ))],
+                                );
+                            }
+                            "auto_retry" => {
+                                let enabled = !session.auto_retry_enabled();
+                                session.set_auto_retry(enabled);
+                                handle.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!(
+                                        "Auto-retry: {}",
+                                        if enabled { "on" } else { "off" }
+                                    ))],
+                                );
+                            }
+                            "advisor" => match session.toggle_advisor() {
+                                Ok(enabled) => handle.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!(
+                                        "Advisor: {}",
+                                        if enabled { "on" } else { "off" }
+                                    ))],
+                                ),
+                                Err(e) => handle.append_line(
+                                    InlineMessageKind::Error,
+                                    vec![plain_segment(format!("Failed to toggle advisor: {e}"))],
+                                ),
+                            },
+                            _ => {}
+                        }
+                    }
+                    // Session picker: resume the selected session by filling
+                    // `/resume <id>` into the prompt (the user confirms).
+                    if let OverlaySubmission::Selection(InlineListSelection::Session(id)) = &sub {
+                        state.input_buffer = format!("/resume {id}");
+                        state.input_cursor = state.input_buffer.len();
+                    }
                     state.overlay_model_ids.clear();
                     handle.close_overlay();
                 }
@@ -1327,6 +1467,16 @@ fn quit_confirmation() -> ModalConfirmation {
     ModalConfirmation {
         title: "Quit oxicode?".into(),
         message: "  y \u{2014} quit now     n / x \u{2014} stay".into(),
+        action: ConfirmationAction::Quit,
+    }
+}
+
+/// Build a clear-conversation confirmation dialog.
+pub(super) fn clear_confirmation() -> ModalConfirmation {
+    ModalConfirmation {
+        title: "Clear conversation?".into(),
+        message: "  y \u{2014} clear all     n / x \u{2014} cancel".into(),
+        action: ConfirmationAction::ClearConversation,
     }
 }
 
@@ -1400,6 +1550,16 @@ fn spawn_input_thread(
                 continue;
             }
 
+            // Ctrl+;: toggle the interactive queue panel.
+            if key.code == KeyCode::Char(';') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let mut s = state.lock();
+                s.queue_panel_open = !s.queue_panel_open;
+                if s.queue_panel_open {
+                    s.queue_selected = 0;
+                }
+                continue;
+            }
+
             // Ctrl+E: fold all blocks (Shift+E expands all).
             if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 let mut s = state.lock();
@@ -1459,6 +1619,19 @@ fn spawn_input_thread(
                 }
             }
 
+            // @-file-search dropdown — when the picker is open, intercept
+            // navigation and accept keys. Regular chars fall through to
+            // normal buffer insertion so the user can keep typing.
+            {
+                let s = state.lock();
+                if s.file_search.is_some() {
+                    drop(s);
+                    if handle_file_search_key(&state, &evt_tx, key.code) {
+                        continue;
+                    }
+                }
+            }
+
             match key.code {
                 KeyCode::Enter => {
                     // Multiline mode: plain Enter inserts a newline.
@@ -1473,6 +1646,28 @@ fn spawn_input_thread(
                         let cursor = s.input_cursor;
                         s.input_buffer.insert(cursor, '\n');
                         s.input_cursor = cursor + 1;
+                        continue;
+                    }
+
+                    // Shell mode: submit the buffer as a bash command request.
+                    let shell_cmd = state.lock().shell_mode;
+                    if shell_cmd {
+                        let submitted = {
+                            let mut s = state.lock();
+                            let buf = std::mem::take(&mut s.input_buffer);
+                            s.input_cursor = 0;
+                            s.shell_mode = false;
+                            s.history_pos = None;
+                            if !buf.is_empty() {
+                                s.prompt_history.insert(0, buf.clone());
+                                s.prompt_history.truncate(100);
+                            }
+                            buf
+                        };
+                        if !submitted.is_empty() {
+                            let prompt = format!("Run this shell command: `{submitted}`");
+                            let _ = evt_tx.send(InlineEvent::Submit(prompt.into()));
+                        }
                         continue;
                     }
 
@@ -1504,7 +1699,11 @@ fn spawn_input_thread(
                     // 4. Empty input → cancel the run (with ~1s post-cancel
                     //    grace so mashing Esc doesn't fire repeated cancels)
                     let mut s = state.lock();
-                    if s.slash_popup.open {
+                    if s.shell_mode {
+                        s.shell_mode = false;
+                        s.input_buffer.clear();
+                        s.input_cursor = 0;
+                    } else if s.slash_popup.open {
                         s.slash_popup = SlashPopup::default();
                     } else if !s.input_buffer.is_empty() {
                         let now = std::time::Instant::now();
@@ -1524,6 +1723,8 @@ fn spawn_input_thread(
                                 text: "Press Esc again to clear input".to_string(),
                                 born_tick: FRAME_TICK.load(std::sync::atomic::Ordering::Relaxed),
                                 ttl_ticks: 120,
+                                key: "esc_clear",
+                                ambient: false,
                             });
                         }
                     } else {
@@ -1547,7 +1748,7 @@ fn spawn_input_thread(
                         let name = s.slash_popup.items[s.slash_popup.selected].name.clone();
                         s.input_buffer = format!("/{} ", name);
                         s.input_cursor = s.input_buffer.len();
-                        refresh_slash_popup(&mut s);
+                        refresh_input_popups(&mut s);
                     }
                 }
                 KeyCode::Backspace => {
@@ -1566,7 +1767,7 @@ fn spawn_input_thread(
                         s.input_buffer.replace_range(prev..cursor, "");
                         s.input_cursor = prev;
                     }
-                    refresh_slash_popup(&mut s);
+                    refresh_input_popups(&mut s);
                 }
                 KeyCode::Delete => {
                     let mut s = state.lock();
@@ -1579,7 +1780,7 @@ fn spawn_input_thread(
                             .unwrap_or(s.input_buffer.len());
                         s.input_buffer.replace_range(cursor..next, "");
                     }
-                    refresh_slash_popup(&mut s);
+                    refresh_input_popups(&mut s);
                 }
                 KeyCode::Left => {
                     let mut s = state.lock();
@@ -1598,6 +1799,15 @@ fn spawn_input_thread(
                             len - 1
                         } else {
                             s.slash_popup.selected - 1
+                        };
+                    } else if s.queue_panel_open
+                        && !s.queued_inputs.is_empty()
+                        && s.input_buffer.is_empty()
+                    {
+                        s.queue_selected = if s.queue_selected == 0 {
+                            s.queued_inputs.len() - 1
+                        } else {
+                            s.queue_selected - 1
                         };
                     } else if s.input_buffer.is_empty() && !s.prompt_history.is_empty() {
                         // History recall: fill the prompt with the previous entry.
@@ -1620,6 +1830,15 @@ fn spawn_input_thread(
                         } else {
                             s.slash_popup.selected + 1
                         };
+                    } else if s.queue_panel_open
+                        && !s.queued_inputs.is_empty()
+                        && s.input_buffer.is_empty()
+                    {
+                        s.queue_selected = if s.queue_selected + 1 >= s.queued_inputs.len() {
+                            0
+                        } else {
+                            s.queue_selected + 1
+                        };
                     } else {
                         drop(s);
                         let _ = evt_tx.send(InlineEvent::ScrollLineDown);
@@ -1633,6 +1852,19 @@ fn spawn_input_thread(
                 }
                 KeyCode::Char(ch) => {
                     let mut s = state.lock();
+                    // @! hidden-file toggle: when the picker is open and '!'
+                    // is typed immediately after '@', toggle hidden mode
+                    // instead of inserting '!'.
+                    if s.file_search.is_some()
+                        && ch == '!'
+                        && s.input_buffer[..s.input_cursor].ends_with('@')
+                    {
+                        let cwd = s.cwd.clone();
+                        if let Some(fs) = s.file_search.as_mut() {
+                            fs.toggle_hidden(&cwd);
+                        }
+                        continue;
+                    }
                     if s.agent_hub_open && ch == 'q' {
                         s.agent_hub_open = false;
                     } else if s.vim_state.enabled() && !s.slash_popup.open {
@@ -1652,14 +1884,58 @@ fn spawn_input_thread(
                             &vkey,
                         );
                         if outcome.handled {
-                            refresh_slash_popup(s);
+                            refresh_input_popups(s);
                         } else {
                             let cursor = s.input_cursor;
                             s.input_buffer.insert(cursor, ch);
                             s.input_cursor = cursor + ch.len_utf8();
-                            refresh_slash_popup(s);
+                            refresh_input_popups(s);
                         }
                     } else if s.input_buffer.is_empty() && !s.slash_popup.open {
+                        // Shell mode: `!` on empty buffer enters bash mode.
+                        if ch == '!' && !s.shell_mode {
+                            s.shell_mode = true;
+                            continue;
+                        }
+                        // Queue panel interactive mode takes priority when
+                        // open and the buffer is empty. Keys that don't
+                        // match fall through to scrollback nav below.
+                        if s.queue_panel_open && !s.queued_inputs.is_empty() {
+                            let idx = s.queue_selected.min(s.queued_inputs.len() - 1);
+                            match ch {
+                                'x' | 'X' => {
+                                    s.queued_inputs.remove(idx);
+                                    if s.queue_selected >= s.queued_inputs.len()
+                                        && !s.queued_inputs.is_empty()
+                                    {
+                                        s.queue_selected = s.queued_inputs.len() - 1;
+                                    }
+                                    continue;
+                                }
+                                'e' => {
+                                    let entry = s.queued_inputs.remove(idx);
+                                    s.input_buffer = entry;
+                                    s.input_cursor = s.input_buffer.len();
+                                    s.queue_panel_open = false;
+                                    continue;
+                                }
+                                'J' => {
+                                    if idx + 1 < s.queued_inputs.len() {
+                                        s.queued_inputs.swap(idx, idx + 1);
+                                        s.queue_selected = idx + 1;
+                                    }
+                                    continue;
+                                }
+                                'K' => {
+                                    if idx > 0 {
+                                        s.queued_inputs.swap(idx, idx - 1);
+                                        s.queue_selected = idx - 1;
+                                    }
+                                    continue;
+                                }
+                                _ => {} // fall through to scrollback nav
+                            }
+                        }
                         // When the prompt is empty, intercept scrollback
                         // navigation keys (matching grok-build's scrollback-
                         // focus semantics). Any other char falls through to
@@ -1684,14 +1960,23 @@ fn spawn_input_thread(
                                 let cursor = s.input_cursor;
                                 s.input_buffer.insert(cursor, ch);
                                 s.input_cursor = cursor + ch.len_utf8();
-                                refresh_slash_popup(&mut s);
+                                refresh_input_popups(&mut s);
                             }
                         }
                     } else {
                         let cursor = s.input_cursor;
                         s.input_buffer.insert(cursor, ch);
                         s.input_cursor = cursor + ch.len_utf8();
-                        refresh_slash_popup(&mut s);
+                        refresh_input_popups(&mut s);
+                    }
+                    // plan_nudge: surface /compact when user mentions "plan".
+                    if s.tip.is_none() && s.input_buffer.to_lowercase().contains("plan") {
+                        s.show_tip(
+                            "plan_nudge",
+                            "Try /compact to summarize and plan ahead",
+                            180,
+                            true,
+                        );
                     }
                 }
                 _ => {}
@@ -1701,22 +1986,32 @@ fn spawn_input_thread(
 }
 
 /// Resolve a keystroke against the active confirmation modal. `y`/Enter
-/// confirms (the quit path forwards `Exit`); `n`/`x`/Esc cancels. Always
-/// consumes the key while a confirmation is open.
+/// confirms — dispatches the bound [`ConfirmationAction`]; `n`/`x`/Esc
+/// cancels. Always consumes the key while a confirmation is open.
 fn handle_confirmation_key(
     state: &Arc<parking_lot::Mutex<RenderState>>,
     evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
     code: KeyCode,
 ) {
     let mut s = state.lock();
-    if s.confirmation.is_none() {
+    let Some(confirm) = s.confirmation.clone() else {
         return;
-    }
+    };
     match code {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
             s.confirmation = None;
             drop(s);
-            let _ = evt_tx.send(InlineEvent::Exit);
+            match confirm.action {
+                ConfirmationAction::Quit => {
+                    let _ = evt_tx.send(InlineEvent::Exit);
+                }
+                ConfirmationAction::ClearConversation => {
+                    // Re-dispatch /clear with --yes so it flows through the
+                    // normal command pipeline (where `session.reset()` is
+                    // accessible). The sentinel arg bypasses the dialog.
+                    let _ = evt_tx.send(InlineEvent::Submit("/clear --yes".into()));
+                }
+            }
         }
         KeyCode::Char('n')
         | KeyCode::Char('N')
@@ -1853,6 +2148,59 @@ fn overlay_filtered_indices(overlay: &OverlayState) -> Vec<usize> {
             if title_hit || sv_hit { Some(idx) } else { None }
         })
         .collect()
+}
+
+/// Handle a single keystroke while the @-file-search dropdown is open.
+/// Returns `true` if the key was consumed. Up/Down navigate, Tab/Enter
+/// accept the selection (inserting `@path ` without submitting), Esc
+/// cancels. Regular chars fall through (`false`) so they enter the buffer
+/// and trigger `refresh_file_search` to re-filter.
+fn handle_file_search_key(
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    _evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+    code: KeyCode,
+) -> bool {
+    match code {
+        KeyCode::Up => {
+            let mut s = state.lock();
+            if let Some(fs) = s.file_search.as_mut() {
+                fs.up();
+                true
+            } else {
+                false
+            }
+        }
+        KeyCode::Down => {
+            let mut s = state.lock();
+            if let Some(fs) = s.file_search.as_mut() {
+                fs.down();
+                true
+            } else {
+                false
+            }
+        }
+        KeyCode::Tab | KeyCode::Enter => {
+            let mut s = state.lock();
+            if s.file_search
+                .as_ref()
+                .and_then(|fs| fs.selected_result())
+                .is_some()
+            {
+                accept_file_search(&mut s, false);
+                true
+            } else {
+                // No results: close the picker, let Enter fall through.
+                s.file_search = None;
+                false
+            }
+        }
+        KeyCode::Esc => {
+            let mut s = state.lock();
+            s.file_search = None;
+            true
+        }
+        _ => false,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2048,7 +2396,12 @@ fn cheatsheet_lines() -> Vec<String> {
         "  Ctrl+C       Cancel run (then y to quit)".into(),
         "  Ctrl+Enter   Send now (abort + submit)".into(),
         "  Ctrl+M       Toggle multiline input".into(),
-        "  Ctrl+P       Command palette".into(),
+        "  Ctrl+;       Toggle queue panel".into(),
+        "".into(),
+        "  Special Input".into(),
+        "  @           File picker (fuzzy search)".into(),
+        "  @!          Toggle hidden files in picker".into(),
+        "  !           Shell mode (bash command)".into(),
     ]
 }
 
@@ -2193,7 +2546,7 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     }
     render_transcript(frame, layout.scrollback, state, tick);
     if !state.queued_inputs.is_empty() {
-        render_queue_pane(frame, layout.scrollback, &state.queued_inputs);
+        render_queue_pane(frame, layout.scrollback, state);
     }
     if !state.todo_items.is_empty() {
         render_todo_pane(frame, layout.scrollback, &state.todo_items);
@@ -2206,13 +2559,18 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     }
     render_composer(frame, layout.prompt, state);
     // Ephemeral tip banner above the composer (auto-dismissed by tick TTL).
+    let occluded = state.overlay.is_some() || state.confirmation.is_some();
     if let Some(tip) = &state.tip
         && tip_is_visible(tip, tick)
+        && !(tip.ambient && occluded)
     {
         render_tip(frame, layout.prompt, &tip.text);
     }
     if state.slash_popup.open {
         render_slash_popup(frame, layout.prompt, state);
+    }
+    if state.file_search.is_some() {
+        render_file_search_dropdown(frame, layout.prompt, state);
     }
     if state.agent_hub_open {
         render_agent_hub(frame, area, state);
@@ -2641,13 +2999,42 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
     const WAVE_ROWS: u16 = 32;
     const WAVE_SPEED: f64 = 0.15;
 
+    // Push/fade (grok-build iOS-style 1D): detect the next block boundary
+    // within the viewport. As it approaches the sticky row, fade the current
+    // sticky header toward the background — a smooth handoff to the next
+    // block's header. FADE_ROWS controls the transition width.
+    const FADE_ROWS: usize = 5;
+    let sticky_opacity: f64 = if let Some(sidx) = sticky_first {
+        let sticky_bid = state.transcript[sidx].block_id;
+        // Walk display from `start` to find the first visual row belonging to
+        // a different block.
+        let next_offset = display.iter().skip(start).position(|(orig_idx, _, _)| {
+            state
+                .transcript
+                .get(*orig_idx)
+                .map(|l| l.block_id != sticky_bid)
+                .unwrap_or(false)
+        });
+        match next_offset {
+            Some(off) if off <= FADE_ROWS => off as f64 / FADE_ROWS as f64,
+            _ => 1.0,
+        }
+    } else {
+        1.0
+    };
+
     // Sticky header row: accent rail + head line + faint bg highlight.
+    // Opacity fades as the next block pushes in.
     if let Some(sidx) = sticky_first {
         let tl = &state.transcript[sidx];
         let accent_base = accent_color_for_kind(tl.kind, &styles);
-        if let Some(cell) = frame.buffer_mut().cell_mut((area.x, content_area.top())) {
+        let rail_blend = 0.7 * sticky_opacity;
+        let bg_blend = 0.1 * sticky_opacity;
+        if sticky_opacity > 0.05
+            && let Some(cell) = frame.buffer_mut().cell_mut((area.x, content_area.top()))
+        {
             cell.set_char('\u{2503}');
-            cell.set_style(Style::default().fg(blend_rgb(bg_color, accent_base, 0.7)));
+            cell.set_style(Style::default().fg(blend_rgb(bg_color, accent_base, rail_blend)));
         }
         let line = transcript_line_marked(tl, &styles, false, false, false);
         let row = Rect {
@@ -2656,10 +3043,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
             width: content_area.width,
             height: 1,
         };
-        frame.buffer_mut().set_style(
-            row,
-            Style::default().bg(blend_rgb(bg_color, accent_base, 0.1)),
-        );
+        if bg_blend > 0.01 {
+            frame.buffer_mut().set_style(
+                row,
+                Style::default().bg(blend_rgb(bg_color, accent_base, bg_blend)),
+            );
+        }
         frame.render_widget(Paragraph::new(line), row);
     }
 
@@ -2898,6 +3287,14 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         ));
     }
     line_spans.push(Span::styled(prefix, prefix_style));
+    if state.shell_mode {
+        line_spans.push(Span::styled(
+            "! ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     if body.is_empty()
         && let Some(ph) = placeholder
     {
@@ -2927,9 +3324,11 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
             .status_label()
             .map(|l| format!("[{l}] ").chars().count() as u16)
             .unwrap_or(0);
+        let shell_off = if state.shell_mode { 2 } else { 0 };
         let cursor_x = area.left()
             + 1
             + vim_off
+            + shell_off
             + state.prompt_prefix.chars().count() as u16
             + state.input_cursor as u16;
         let cursor_y = area.top() + 1;
@@ -3036,8 +3435,11 @@ fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage:
 }
 
 /// Render queued input prompts as a compact pane at the top of the scrollback.
-fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, entries: &[String]) {
+fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderState) {
     let styles = active_styles();
+    let entries = &state.queued_inputs;
+    let interactive = state.queue_panel_open;
+    let selected = state.queue_selected.min(entries.len().saturating_sub(1));
     let height = entries.len() as u16 + 1;
     let area = Rect {
         x: scrollback.x,
@@ -3045,18 +3447,37 @@ fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, entries: &[String]
         width: scrollback.width,
         height,
     };
+    let info = color_from_anstyle(styles.info.get_fg_color());
+    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
     let items: Vec<Line<'_>> = entries
         .iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
+            let prefix = if interactive {
+                format!("#{} ", i + 1)
+            } else {
+                "\u{2261} ".to_string()
+            };
+            let prefix_style = if interactive && i == selected {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(info)
+            };
+            let text_style = if interactive && i == selected {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(secondary)
+            };
+            let marker = if interactive && i == selected {
+                "\u{25b8} " // ▸
+            } else {
+                "  "
+            };
             Line::from(vec![
-                Span::styled(
-                    "\u{2261} ",
-                    Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-                ),
-                Span::styled(
-                    e.clone(),
-                    Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-                ),
+                Span::styled(prefix, prefix_style),
+                Span::styled(marker, prefix_style),
+                Span::styled(e.clone(), text_style),
             ])
         })
         .collect();
@@ -3226,6 +3647,101 @@ fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &Render
     }
 }
 
+/// Render the @-file-search dropdown as a floating panel above the
+/// composer, mirroring `render_slash_popup`'s geometry. Shows up to 10
+/// fuzzy-matched file paths with the selected one highlighted.
+fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state: &RenderState) {
+    let styles = active_styles();
+    let Some(fs) = &state.file_search else {
+        return;
+    };
+    let items = &fs.results;
+    if items.is_empty() {
+        return;
+    }
+
+    let max_visible = 10usize;
+    let visible = items.len().min(max_visible);
+    let popup_h = visible as u16 + 2; // +2 for top/bottom border
+    let width = composer_area.width.min(72);
+    let popup_area = Rect {
+        x: composer_area.left(),
+        y: composer_area.top().saturating_sub(popup_h),
+        width,
+        height: popup_h,
+    };
+    frame.render_widget(Clear, popup_area);
+
+    let border_color = color_from_anstyle(styles.secondary.get_fg_color());
+    let title_str = if fs.hidden_mode {
+        " Files (hidden) "
+    } else {
+        " Files "
+    };
+    let title = Line::from(Span::styled(
+        title_str,
+        Style::default()
+            .fg(color_from_anstyle(styles.primary.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    ));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(title);
+    let inner = block.inner(popup_area);
+    frame.render_widget(&block, popup_area);
+
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
+    let fg = color_from_anstyle(Some(styles.foreground));
+    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+
+    for (i, result) in items.iter().take(visible).enumerate() {
+        let is_selected = i == fs.selected;
+        let y = inner.top() + i as u16;
+        let row_area = Rect {
+            x: inner.left(),
+            y,
+            width: inner.width,
+            height: 1,
+        };
+
+        let marker = if is_selected { "\u{25b8} " } else { "  " }; // ▸ or space
+        let path_style = if is_selected {
+            Style::default().fg(primary).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(fg)
+        };
+        let line = Line::from(vec![
+            Span::styled(marker, path_style),
+            Span::styled(&result.path, path_style),
+        ]);
+        frame.render_widget(Paragraph::new(line), row_area);
+    }
+
+    // Footer hint: show result count + key bindings.
+    if popup_h >= 4 {
+        let hint_y = inner.bottom();
+        let hint_area = Rect {
+            x: inner.left(),
+            y: hint_y,
+            width: inner.width,
+            height: 1,
+        };
+        let count = items.len();
+        let hint = format!("{count} files  \u{00b7}  Tab accept  Esc cancel");
+        let _ = secondary; // suppress unused warning
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                hint,
+                Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+            )))
+            .style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color()))),
+            hint_area,
+        );
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Vim mode — Editor adapter for the input buffer
 // ─────────────────────────────────────────────────────────────────────────
@@ -3346,6 +3862,65 @@ fn refresh_slash_popup(state: &mut RenderState) {
         state.slash_popup.selected = state.slash_popup.selected.min(items.len() - 1);
     }
     state.slash_popup.items = items;
+}
+/// Combined popup refresher — calls both the slash-command popup and the
+/// @-file-search picker. Called after every input buffer mutation in the
+/// input thread so both popups stay in sync with the cursor position.
+fn refresh_input_popups(state: &mut RenderState) {
+    refresh_slash_popup(state);
+    refresh_file_search(state);
+}
+
+/// Recompute the @-file-search dropdown from the current input buffer.
+/// Called after every buffer mutation in the input thread. The filesystem
+/// walk (building the index) happens only on the `None → Some` transition
+/// (when `@` is first typed); subsequent keystrokes just re-filter the
+/// cached index via [`file_search::FileSearchState::refresh`].
+fn refresh_file_search(state: &mut RenderState) {
+    use crate::tui_vt::file_search;
+    // Never open the file picker while a slash command is being composed.
+    if state.slash_popup.open {
+        state.file_search = None;
+        return;
+    }
+    match file_search::parse_at_cursor(&state.input_buffer, state.input_cursor) {
+        Some(token) => match &mut state.file_search {
+            None => {
+                let cwd = state.cwd.clone();
+                state.file_search = Some(file_search::open(&cwd, token.at_offset, false));
+            }
+            Some(fs) => {
+                if fs.query != token.path_query {
+                    fs.refresh(&token.path_query);
+                }
+            }
+        },
+        None => state.file_search = None,
+    }
+}
+
+/// Accept the currently-selected file-search result: replace the `@query`
+/// token in the buffer with the canonical `@path ` (or `@path:N-M ` in
+/// line mode), advance the cursor past it, and close the picker.
+/// Returns `true` if a result was accepted.
+fn accept_file_search(state: &mut RenderState, line_mode: bool) -> bool {
+    use crate::tui_vt::file_search;
+    let Some(fs) = &state.file_search else {
+        return false;
+    };
+    let Some(result) = fs.selected_result().cloned() else {
+        return false;
+    };
+    let at_offset = fs.at_offset;
+    let text = file_search::insertion_text(&result.path, None, line_mode);
+    let cursor_end = state.input_cursor;
+    // Replace everything from `@` to the current cursor with the insertion.
+    state
+        .input_buffer
+        .replace_range(at_offset..cursor_end.min(state.input_buffer.len()), &text);
+    state.input_cursor = at_offset + text.len();
+    state.file_search = None;
+    true
 }
 
 fn preview_tool_result(content: &str) -> String {
@@ -3499,7 +4074,7 @@ mod slash_popup_tests {
     fn popup_opens_on_slash() {
         let mut state = RenderState::default();
         state.input_buffer = "/".to_string();
-        refresh_slash_popup(&mut state);
+        refresh_input_popups(&mut state);
         assert!(state.slash_popup.open);
         assert!(!state.slash_popup.items.is_empty());
     }
@@ -3508,7 +4083,7 @@ mod slash_popup_tests {
     fn popup_closes_on_space() {
         let mut state = RenderState::default();
         state.input_buffer = "/quit ".to_string();
-        refresh_slash_popup(&mut state);
+        refresh_input_popups(&mut state);
         assert!(!state.slash_popup.open);
     }
 
@@ -3516,7 +4091,7 @@ mod slash_popup_tests {
     fn popup_closes_on_non_slash() {
         let mut state = RenderState::default();
         state.input_buffer = "hello".to_string();
-        refresh_slash_popup(&mut state);
+        refresh_input_popups(&mut state);
         assert!(!state.slash_popup.open);
     }
 
@@ -3524,7 +4099,7 @@ mod slash_popup_tests {
     fn popup_filters_as_user_types() {
         let mut state = RenderState::default();
         state.input_buffer = "/m".to_string();
-        refresh_slash_popup(&mut state);
+        refresh_input_popups(&mut state);
         assert!(state.slash_popup.open);
         // Every item's canonical name must start with 'm' (model is the
         // only command matching the "m" prefix).
@@ -3541,12 +4116,12 @@ mod slash_popup_tests {
     fn popup_selection_clamps_on_shrink() {
         let mut state = RenderState::default();
         state.input_buffer = "/".to_string();
-        refresh_slash_popup(&mut state);
+        refresh_input_popups(&mut state);
         let full_count = state.slash_popup.items.len();
         state.slash_popup.selected = full_count - 1;
         // Narrow the filter so fewer items remain.
         state.input_buffer = "/qu".to_string();
-        refresh_slash_popup(&mut state);
+        refresh_input_popups(&mut state);
         assert!(state.slash_popup.selected < state.slash_popup.items.len());
     }
 }
@@ -4124,6 +4699,8 @@ mod render_tests {
             text: "hello-tip-marker".to_string(),
             born_tick: now_tick,
             ttl_ticks: 100,
+            key: "test",
+            ambient: false,
         });
         let rendered = render_frame_to_string(&state);
         assert!(
@@ -4138,6 +4715,8 @@ mod render_tests {
             text: "x".to_string(),
             born_tick: 10,
             ttl_ticks: 5,
+            key: "test",
+            ambient: false,
         };
         assert!(tip_is_visible(&tip, 12), "within TTL must be visible");
         assert!(
@@ -4219,6 +4798,90 @@ mod render_tests {
         assert!(
             rendered.contains("frame-content-marker-xyz"),
             "render_frame must paint transcript content"
+        );
+    }
+
+    #[test]
+    fn file_search_dropdown_renders_results() {
+        use crate::tui_vt::file_search::{FileSearchResult, FileSearchState};
+        let mut state = RenderState::default();
+        state.input_enabled = true;
+        state.file_search = Some(FileSearchState {
+            query: "main".into(),
+            at_offset: 0,
+            hidden_mode: false,
+            results: vec![
+                FileSearchResult {
+                    path: "src/main.rs".into(),
+                    score: 100,
+                },
+                FileSearchResult {
+                    path: "tests/main.rs".into(),
+                    score: 50,
+                },
+            ],
+            selected: 0,
+            index: vec![],
+            line_mode: false,
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(rendered.contains("Files"), "dropdown title must render");
+        assert!(
+            rendered.contains("src/main.rs"),
+            "dropdown must show file paths"
+        );
+    }
+
+    #[test]
+    fn file_search_dropdown_hidden_mode_title() {
+        use crate::tui_vt::file_search::{FileSearchResult, FileSearchState};
+        let mut state = RenderState::default();
+        state.input_enabled = true;
+        state.file_search = Some(FileSearchState {
+            query: "".into(),
+            at_offset: 0,
+            hidden_mode: true,
+            results: vec![FileSearchResult {
+                path: ".env".into(),
+                score: 0,
+            }],
+            selected: 0,
+            index: vec![],
+            line_mode: false,
+        });
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("hidden"),
+            "hidden mode must be indicated in title"
+        );
+    }
+
+    #[test]
+    fn file_search_and_composer_render_together() {
+        use crate::tui_vt::file_search::{FileSearchResult, FileSearchState};
+        let mut state = RenderState::default();
+        state.input_enabled = true;
+        state.prompt_prefix = "> ".into();
+        state.input_buffer = "@main".into();
+        state.input_cursor = 5;
+        state.file_search = Some(FileSearchState {
+            query: "main".into(),
+            at_offset: 0,
+            hidden_mode: false,
+            results: vec![FileSearchResult {
+                path: "src/main.rs".into(),
+                score: 100,
+            }],
+            selected: 0,
+            index: vec![],
+            line_mode: false,
+        });
+        let rendered = render_frame_to_string(&state);
+        // Both the composer text and the dropdown must appear.
+        assert!(rendered.contains('>'), "composer must still render");
+        assert!(
+            rendered.contains("src/main.rs"),
+            "dropdown must render alongside composer"
         );
     }
 }

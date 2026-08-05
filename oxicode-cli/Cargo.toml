@@ -63,6 +63,8 @@ ratatui = { version = "0.30", features = ["crossterm"] }
 unicode-width = "0.2"
 anstyle = "1"
 base64 = "0.22"
+nucleo = { workspace = true }
+ignore = "0.4"
 rand = "0.9"
 sha2 = "0.10"
 url = "2"

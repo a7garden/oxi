@@ -161,6 +161,196 @@ impl SlashRegistry {
     }
 }
 
+/// `/settings` — open a settings overlay showing current configuration.
+/// Selecting a toggleable item cycles/toggles its value through the session.
+struct SettingsCommand;
+
+impl SlashCommand for SettingsCommand {
+    fn name(&self) -> &'static str {
+        "settings"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["config"]
+    }
+    fn description(&self) -> &'static str {
+        "Show settings overlay (toggle thinking, compaction, advisor)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        use oxicode_vtui::tui::core::{
+            InlineListItem, InlineListSearchConfig, InlineListSelection,
+        };
+
+        let session = ctx.session;
+        let model = session.model_id();
+        let thinking = session.thinking_level();
+        let auto_compaction = session.auto_compaction_enabled();
+        let auto_retry = session.auto_retry_enabled();
+        let advisor = session.is_advisor_enabled();
+
+        // Build setting items. Items with a `selection` are interactive;
+        // items without are read-only display.
+        let items = vec![
+            InlineListItem {
+                title: format!("Model: {model}"),
+                subtitle: Some("Use /model to switch".into()),
+                badge: None,
+                indent: 0,
+                selection: None,
+                search_value: Some("model".into()),
+            },
+            InlineListItem {
+                title: format!("Thinking: {thinking:?}"),
+                subtitle: Some("Enter to cycle".into()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction("thinking_level".into())),
+                search_value: Some("thinking".into()),
+            },
+            InlineListItem {
+                title: format!(
+                    "Auto-compaction: {}",
+                    if auto_compaction { "on" } else { "off" }
+                ),
+                subtitle: Some("Enter to toggle".into()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction("auto_compaction".into())),
+                search_value: Some("compaction".into()),
+            },
+            InlineListItem {
+                title: format!("Auto-retry: {}", if auto_retry { "on" } else { "off" }),
+                subtitle: Some("Enter to toggle".into()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction("auto_retry".into())),
+                search_value: Some("retry".into()),
+            },
+            InlineListItem {
+                title: format!("Advisor: {}", if advisor { "on" } else { "off" }),
+                subtitle: Some("Enter to toggle".into()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction("advisor".into())),
+                search_value: Some("advisor".into()),
+            },
+        ];
+
+        let search = InlineListSearchConfig {
+            label: "Filter settings".into(),
+            placeholder: Some("Type to filter\u{2026}".into()),
+        };
+        ctx.handle.show_list_modal(
+            "Settings".into(),
+            vec!["Select a setting to toggle/cycle (Esc to close)".into()],
+            items,
+            None,
+            Some(search),
+        );
+        SlashOutcome::Handled
+    }
+}
+
+/// `/sessions` — open a session picker overlay listing recent sessions.
+/// Selecting a session fills `/resume <id>` into the prompt.
+struct SessionsCommand;
+
+impl SlashCommand for SessionsCommand {
+    fn name(&self) -> &'static str {
+        "sessions"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["resume"]
+    }
+    fn description(&self) -> &'static str {
+        "Browse and resume past sessions"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        use oxicode_vtui::tui::core::{InlineListItem, InlineListSearchConfig};
+
+        // Find the sessions directory.
+        let session_dir = dirs::home_dir()
+            .map(|h| h.join(".oxicode").join("sessions"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".oxicode/sessions"));
+
+        // Scan session files synchronously, sorted by mtime desc.
+        let mut entries: Vec<(String, std::time::SystemTime)> = Vec::new();
+        if let Ok(dir) = std::fs::read_dir(&session_dir) {
+            for entry in dir.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                    let id = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let mtime = entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    entries.push((id, mtime));
+                }
+            }
+        }
+        entries.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
+        entries.truncate(30); // cap at 30 most recent
+
+        if entries.is_empty() {
+            ctx.reply(InlineMessageKind::Info, "No saved sessions found.");
+            return SlashOutcome::Handled;
+        }
+
+        let items: Vec<InlineListItem> = entries
+            .iter()
+            .map(|(id, mtime)| {
+                let time_str = format_relative_time(*mtime);
+                InlineListItem {
+                    title: format!("{id}  \u{00b7}  {time_str}"),
+                    subtitle: Some("Enter to resume".into()),
+                    badge: None,
+                    indent: 0,
+                    selection: Some(InlineListSelection::Session(id.clone())),
+                    search_value: Some(id.clone()),
+                }
+            })
+            .collect();
+
+        let search = InlineListSearchConfig {
+            label: "Filter sessions".into(),
+            placeholder: Some("Type to filter\u{2026}".into()),
+        };
+        ctx.handle.show_list_modal(
+            "Sessions".into(),
+            vec!["Select a session to resume (Esc to close)".into()],
+            items,
+            None,
+            Some(search),
+        );
+        SlashOutcome::Handled
+    }
+}
+
+/// Format a `SystemTime` as a human-readable relative time (e.g. "2h ago").
+fn format_relative_time(t: std::time::SystemTime) -> String {
+    let now = std::time::SystemTime::now();
+    match now.duration_since(t) {
+        Ok(d) => {
+            let mins = d.as_secs() / 60;
+            if mins < 1 {
+                "just now".into()
+            } else if mins < 60 {
+                format!("{mins}m ago")
+            } else if mins < 60 * 24 {
+                format!("{}h ago", mins / 60)
+            } else if mins < 60 * 24 * 7 {
+                format!("{}d ago", mins / (60 * 24))
+            } else {
+                format!("{}w ago", mins / (60 * 24 * 7))
+            }
+        }
+        Err(_) => "unknown".into(),
+    }
+}
+
 fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(QuitCommand));
     registry.register(Box::new(ClearCommand));
@@ -172,7 +362,7 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(AgentsCommand));
     registry.register(Box::new(ThemeCommand));
     registry.register(Box::new(FindCommand));
-    registry.register(Box::new(ShortcutsCommand));
+    registry.register(Box::new(SessionsCommand));
 }
 
 /// `/vim` — toggle vim mode for prompt editing.
@@ -255,7 +445,13 @@ impl SlashCommand for ClearCommand {
     fn description(&self) -> &'static str {
         "Clear the conversation and transcript (alias: /cls)"
     }
-    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+    fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        // `--yes` skips the confirmation dialog (used when re-dispatching
+        // from the confirmation modal). Without it, open the dialog.
+        if !args.split_whitespace().any(|a| a == "--yes") {
+            ctx.state.confirmation = Some(super::super::main_loop::clear_confirmation());
+            return SlashOutcome::Handled;
+        }
         ctx.session.reset();
         ctx.state.transcript.clear();
         ctx.state.message_buffer.clear();
