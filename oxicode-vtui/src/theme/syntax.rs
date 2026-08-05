@@ -58,7 +58,7 @@ pub fn get_syntax_theme_for_ui_theme(ui_theme: &str) -> &'static str {
         "vitesse-light" | "vitesse-light-soft" => "base16-ocean.light",
         "ciapre" | "ciapre-dark" | "ciapre-blue" => "base16-ocean.dark",
         "vitesse-black" | "vitesse-dark" | "vitesse-dark-soft" => "base16-ocean.dark",
-        "mono" | "ansi-classic" => "base16-ocean.dark",
+        "oxide-dark" | "mono" | "ansi-classic" => "base16-ocean.dark",
         _ => "base16-ocean.dark",
     }
 }

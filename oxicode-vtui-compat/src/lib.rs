@@ -109,7 +109,7 @@ pub mod constants {
         pub fn default_model() -> String {
             "gpt-4o".into()
         }
-        pub const DEFAULT_THEME: &str = "ciapre-dark";
+        pub const DEFAULT_THEME: &str = "oxide-dark";
     }
 
     pub mod tools {

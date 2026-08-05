@@ -22,6 +22,61 @@ fn test_mono_theme_contrast() {
 }
 
 #[test]
+fn test_oxide_dark_theme_exists() {
+    let result = ensure_theme("oxide-dark");
+    assert!(result.is_ok(), "Oxide Dark theme should be registered");
+    assert_eq!(result.unwrap(), "Oxide Dark");
+}
+
+#[test]
+fn test_oxide_dark_is_default() {
+    // The calm neutral-gray theme is the default — no warm/brown tones.
+    assert_eq!(DEFAULT_THEME_ID, "oxide-dark");
+}
+
+#[test]
+fn test_oxide_dark_contrast() {
+    let result = validate_theme_contrast("oxide-dark");
+    assert!(
+        result.errors.is_empty(),
+        "Oxide Dark theme should have no contrast errors"
+    );
+    assert!(result.is_valid);
+}
+
+#[test]
+fn test_oxide_dark_suite() {
+    assert_eq!(theme_suite_id("oxide-dark"), Some("oxide"));
+    assert_eq!(theme_suite_label("oxide-dark"), Some("Oxide"));
+}
+
+#[test]
+fn test_oxide_dark_palette_is_neutral_gray() {
+    // Regression: the old default (ciapre) used warm tan #aea47f as
+    // foreground, making the whole TUI brown. oxide-dark must use a neutral
+    // (near-achromatic) foreground and background.
+    let theme = all_theme_definitions()
+        .get("oxide-dark")
+        .expect("oxide-dark exists");
+    let RgbColor(fr, fg, fb) = theme.palette.foreground;
+    let spread = (fr as i16 - fg as i16).unsigned_abs()
+        + (fg as i16 - fb as i16).unsigned_abs()
+        + (fr as i16 - fb as i16).unsigned_abs();
+    assert!(
+        spread <= 6,
+        "foreground should be near-achromatic (neutral gray), got spread {spread} from ({fr},{fg},{fb})"
+    );
+    let RgbColor(br, bg, bb) = theme.palette.background;
+    let bspread = (br as i16 - bg as i16).unsigned_abs()
+        + (bg as i16 - bb as i16).unsigned_abs()
+        + (br as i16 - bb as i16).unsigned_abs();
+    assert!(
+        bspread <= 6,
+        "background should be near-achromatic (neutral gray), got spread {bspread} from ({br},{bg},{bb})"
+    );
+}
+
+#[test]
 fn test_ansi_classic_theme_exists() {
     let result = ensure_theme("ansi-classic");
     assert!(result.is_ok(), "ANSI Classic theme should be registered");

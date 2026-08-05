@@ -877,6 +877,25 @@ static REGISTRY: Lazy<HashMap<&'static str, ThemeDefinition>> = Lazy::new(|| {
             },
         },
     );
+    map.insert(
+        "oxide-dark",
+        ThemeDefinition {
+            id: "oxide-dark",
+            label: "Oxide Dark",
+            palette: ThemePalette {
+                // GrokNight-inspired: neutral gray base + restrained TokyoNight
+                // accents. Structural elements read as calm gray; color is
+                // reserved for semantic meaning (blue info, red error, magenta
+                // branding). No warm/brown tones.
+                primary_accent: RgbColor(0xC8, 0xC8, 0xC8), // #c8c8c8 calm gray chrome
+                background: RgbColor(0x14, 0x14, 0x14),     // #141414 neutral dark gray
+                foreground: RgbColor(0xE1, 0xE1, 0xE1),     // #e1e1e1 neutral white
+                secondary_accent: RgbColor(0x7A, 0xA2, 0xF7), // #7aa2f7 blue (info/structure)
+                alert: RgbColor(0xF7, 0x76, 0x8E),          // #f7768e red (errors)
+                logo_accent: RgbColor(0xBB, 0x9A, 0xF7),    // #bb9af7 magenta (branding)
+            },
+        },
+    );
     register_catppuccin_themes(&mut map);
     map
 });
@@ -941,8 +960,8 @@ pub(crate) fn all_theme_definitions() -> &'static HashMap<&'static str, ThemeDef
 
 /// Return the list of built-in theme identifiers in sorted order.
 pub fn available_themes() -> Vec<&'static str> {
-    let mut keys: Vec<_> = REGISTRY.keys().copied().collect();
-    keys.sort();
+    let mut keys: Vec<&'static str> = REGISTRY.keys().copied().collect();
+    keys.sort_unstable();
     keys
 }
 
@@ -960,6 +979,8 @@ fn suite_id_for_theme(theme_id: &str) -> Option<&'static str> {
         Some("vitesse")
     } else if theme_id.starts_with("ciapre-") {
         Some("ciapre")
+    } else if theme_id.starts_with("oxide-") {
+        Some("oxide")
     } else if theme_id == "mono" {
         Some("mono")
     } else {
@@ -972,6 +993,7 @@ fn suite_label(suite_id: &str) -> Option<&'static str> {
         "nord" => Some("Nord"),
         "catppuccin" => Some("Catppuccin"),
         "vitesse" => Some("Vitesse"),
+        "oxide" => Some("Oxide"),
         "ciapre" => Some("Ciapre"),
         "mono" => Some("Mono"),
         _ => None,
@@ -990,7 +1012,7 @@ pub fn theme_suite_label(theme_id: &str) -> Option<&'static str> {
 
 /// Return the built-in theme suites and their member theme identifiers.
 pub fn available_theme_suites() -> Vec<ThemeSuite> {
-    const ORDER: &[&str] = &["ciapre", "vitesse", "catppuccin", "mono", "nord"];
+    const ORDER: &[&str] = &["oxide", "ciapre", "vitesse", "catppuccin", "mono", "nord"];
 
     ORDER
         .iter()

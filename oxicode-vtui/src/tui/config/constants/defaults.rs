@@ -1,1 +1,1 @@
-pub const DEFAULT_THEME: &str = "ciapre";
+pub const DEFAULT_THEME: &str = "oxide-dark";
