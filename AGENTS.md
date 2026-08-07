@@ -30,19 +30,21 @@ oxicode/
 ├── oxicode-lsp/           LSP bridge
 ├── oxicode-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
 ├── oxicode-snapcompact/   Context compaction via PNG rasterization (fontdue)
-├── oxicode-tui/           Terminal UI — widgets, theme, glyph, render (ratatui + DiffBackend)
+├── oxicode-vtui/          Terminal UI framework — theme registry, design/layout, markdown, vim engine
+├── oxicode-vtui-compat/   Compat stubs for vendored vtcode-ui (protocol types + substrate)
 ```
 
-> The grok-inspired `oxicode-tui` v2 crate was retired (P2.1, 2026-07-29).
-> The legacy crate was renamed to `oxicode-tui` as the sole TUI crate.
-> Production chat rendering now uses the main-screen `TapeEngine`
-> (`oxicode-tui/src/tape/`); ratatui remains only for transient overlays and
-> off-screen line formatting.
+> The standalone `oxicode-tui` widget library (tape engine, DiffBackend, glyph
+> system, 28-slot ColorScheme) was DELETED as dead code — it was never in the
+> workspace build and had zero dependents. The production TUI is `oxicode-vtui`
+> (an adapted re-vendoring of vtcode-ui) consumed by `oxicode-cli/src/tui_vt/`.
+> Rendering is ratatui on the main screen (no tape engine, no alt screen); the
+> single render driver is `tui_vt/main_loop.rs::render_frame`.
 
 ### Dependency Flow
 
 Leaf crates (zero internal `oxicode-*` deps): `oxicode-ai`, `oxicode-hashline`, `oxicode-lsp`,
-`oxicode-mnemopi`, `oxicode-snapcompact`, `oxicode-tui`.
+`oxicode-mnemopi`, `oxicode-snapcompact`, `oxicode-vtui` (+ `oxicode-vtui-compat`).
 
 ```
 oxicode-ai  (foundation)              oxicode-hashline (independent)
@@ -51,7 +53,7 @@ oxicode-agent  ←  oxicode-ai, oxicode-hashline
   ↓
 oxicode-sdk  ←  oxicode-ai, oxicode-agent, oxicode-snapcompact
   ↓
-oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-mnemopi, oxicode-tui
+oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-mnemopi, oxicode-vtui
 ```
 
 `oxicode-ai` is the foundation layer with zero internal dependencies.
@@ -164,32 +166,49 @@ pub trait AgentTool: Send + Sync {
 
 Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 
-### oxicode-tui — Terminal UI
+### oxicode-vtui — Terminal UI Framework
 
-`oxicode-tui` provides ratatui-based TUI widgets, theme system, glyph system,
-and the OMP-aligned tape engine. **No oxicode-* dependencies** — pure widget
-library. Production oxicode-cli renders chat transcripts on the terminal main
-screen through `tape::TapeEngine`; ratatui is retained for transient
-overlay sessions and off-screen line formatting. See
-`docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md`.
+`oxicode-vtui` is an adapted re-vendoring of the third-party vtcode-ui
+framework (itself ported from grok-build). It provides the theme registry,
+design/layout primitives, the markdown renderer, and the vim engine consumed
+by the CLI host. `oxicode-vtui-compat` is a thin stub substrate (protocol data
+types + no-op shims) that lets the vendored framework compile without its
+original vtcode-config/vtcode-commons deps.
 
-- Theme system with hot-reload from TOML/JSON files.
-- **Glyph set system** (`symbols.rs`): every UI symbol (status markers, list
-  cursors, box drawing, spinners, icons) comes from a pluggable `GlyphSet`
-  preset — `Unicode` (default), `Ascii`, or `Nerd`. The active `Symbols`
-  table rides on `Theme`/`ThemeStyles`, so `styles.symbols.<field>` is the
-  single source for any glyph. **Never hardcode a symbol in a widget** — read
-  it from the symbol table so the `glyph_set` setting re-skins the whole UI.
-  Adding a glyph: add a field to `Symbols`, populate all three preset
-  constructors (`unicode`/`ascii`/`nerd`), migrate the one call site.
-- Markdown rendering via `pulldown-cmark`. Fuzzy search for file/command completion.
-- `widgets/chat/` is the main conversation widget.
-- The widget layer defines its own domain types (`ChatMessage`,
-  `MessageRole`, `ContentBlock`) so it can be reused by any product
-  that wants the chat UX. Products implement the conversion
-  (one `From` impl per direction) in their own composition root.
+**No `oxicode-*` dependencies** — pure UI framework. The CLI host
+(`oxicode-cli/src/tui_vt/`) owns the event loop and the render driver
+(`main_loop.rs::render_frame`); it renders chat on the terminal **main screen**
+via ratatui (NOT an alternate screen, NOT a tape engine). `oxicode-vtui`
+supplies the parts: `theme::` (62-theme registry + contrast pipeline),
+`design::layout` (chrome/agent-view/welcome geometry), `tui::ui::markdown`
+(the production `render_markdown`), `tui::core_tui` (the `InlineCommand`/
+`InlineEvent`/`InlineHandle` protocol), and `vim::` (Insert+Normal engine).
 
-Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`, `GlyphSet`, `Symbols`.
+- **Theme system** (`theme/registry.rs`): 62 themes (58 static + 4 Catppuccin),
+  a `ThemePalette`→`ThemeStyles` derivation with WCAG contrast guarantees, and
+  a runtime with active/preview state. Programmatic activation
+  (`set_active_theme`); no file hot-reload.
+- **Markdown renderer** (`tui/ui/markdown/mod.rs`): pulldown-cmark →
+  `Vec<Vec<InlineSegment>>`. Renders headings/emphasis/strong/strike/links/
+  blockquote/rule/inline-code, fenced code blocks with syntect highlighting
+  (theme-aware via `theme::syntax::get_active_syntax_theme`), ordered/unordered
+  lists with nesting, and GFM tables (box-bordered). `InlineSegment`/
+  `InlineTextStyle` live in `oxicode-vtui-compat::ui_protocol`.
+  **Syntect theme caveat:** `ThemeSet::load_defaults()` ships only 7 themes
+  (base16-*, Solarized, InspiredGitHub). UI themes whose mapped name isn't in
+  that set (Dracula, GitHub, Gruvbox, Catppuccin, OneDark, Material, Night Owl,
+  Monokai, Zenburn, Tomorrow, ayu, …) fall back to `base16-ocean.dark` (colored,
+  not plain). The default `"oxi"` theme maps to `base16-ocean.dark` and works.
+  To get true per-theme colors, vendor extra `.tmTheme` files into the ThemeSet.
+- **Vim engine** (`vim/`): motions, operators, text objects, find, `.` repeat.
+  Insert + Normal modes only (no Visual/counts/search/registers). The host
+  routes printable keys to it.
+- **Glyphs are currently hardcoded** in the host render code (`main_loop.rs`
+  emits `⚙ ✓ ☑ ☐ ▸ █` directly). There is no production glyph-set system; the
+  `glyph_set` setting has no effect on the live TUI.
+
+Key types: `ThemeStyles`, `ThemeDefinition`, `InlineSegment`, `InlineTextStyle`,
+`InlineCommand`, `HostAdapter`, `VimState`.
 
 ### oxicode-sdk — Multi-Agent SDK + Port Contract
 
@@ -254,9 +273,10 @@ Self-contained submodules in `oxicode-cli/src/`:
   config), `auth_storage.rs` (API keys + OAuth), `router_config.rs`
   (auto-routing rules), `session_cwd.rs` (cwd binding).
 - `bootstrap.rs` — composition root.
-- `tui/` — interactive mode entry points and app glue
-  (`tui/app.rs`, `tui/handlers.rs`, `tui/slash.rs`,
-  `tui/overlay/*`).
+- `tui_vt/` — interactive TUI host (the production render driver + event loop):
+  `main_loop.rs` (`render_frame`, `run_event_loop`, `spawn_input_thread`,
+  ~4.9K LOC), `frame_layout.rs` (chrome), `file_search.rs` (@-file picker),
+  `notifications.rs`, `slash/registry.rs` (slash commands).
 - `app/agent_session*.rs` — single-shot session wrapper around
   `Agent`.
 - `setup_wizard.rs` — interactive `oxicode setup`.
@@ -303,7 +323,7 @@ Extension system (`src/extensions/types.rs`):
 - Prefer `anyhow::Result` for application code, custom error enums (`thiserror`) for library crates.
   - **Library crates** (oxicode-ai, oxicode-agent, oxicode-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
   - **Application crate** (oxicode-cli): use `anyhow::Result` everywhere.
-  - **Leaf crate** (oxicode-tui): `anyhow` is acceptable — no public error types needed.
+  - **Leaf crate** (oxicode-vtui): `anyhow` is acceptable — no public error types needed.
   - Never create a shared workspace error crate. Each library owns its own error type.
 - Use `parking_lot::RwLock` instead of `std::sync::RwLock`. (But
   `parking_lot::MutexGuard` is `!Send` — drop the guard before any
@@ -493,21 +513,29 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   directives for them without a new product decision. `/settings` exposes only
   live settings that still exist; print, RPC, and TUI share no hidden language
   policy behavior.
-- **Theme system: background slots must be consumed by render code, not just defined.** `ColorScheme` (oxicode-tui/src/theme.rs) has 28 color slots — 21 original + 7 Phase-1 background slots (`response_bg`, `thinking_bg`, `surface_bg`, `panel_bg`, `diff_add_bg`, `diff_remove_bg`, `diff_hunk_bg`). The 7 new slots AND the 3 previously-dead slots (`user_bg`, `code_bg`, `selection_bg`) are now **wired into render code** as of the theme redesign (2026-06-24). If you add a new `ColorScheme` field, you MUST also:
-  - Add it to `ThemeStyles` + `to_styles()` (pack as `Style::default().bg(color)` or `.fg(color)`).
-  - Add it to `ThemeFileColors` + `into_theme()` resolve.
-  - Populate it in all 6 `ColorScheme::*()` constructors (`dark`, `light`, `nord`, `catppuccin`, `github_dark`, `monokai`).
-  - **Consume it in the render code** — a defined-but-unconsumed slot is a dead field that makes the theme feel unchangeable. Use `buf.set_style(rect, self.styles.<field>)` for area fills or `Style::patch()` for per-Span composition.
-  - The brightness hierarchy is `background ≤ response_bg < thinking_bg < surface_bg < user_bg < panel_bg` — new slots must respect this ordering. See `docs/THEME_GUIDE.md` for the derivation rules.
-  - **`DashboardWidget` takes `&Theme`** (not `Theme::dark()`). The MCP dashboard overlay constructs it fresh in `render()` with the live theme. Do not re-introduce a hardcoded `Theme::dark()` in any widget — pass the theme through.
-  - **`OxicodeStyleSheet` is theme-aware** — constructed via `OxicodeStyleSheet::from_styles(&ThemeStyles)`. Do not revert to the old zero-sized unit struct with hardcoded RGB values.
+- **Theme system lives in `oxicode-vtui`.** The standalone `oxicode-tui`
+  `ColorScheme` (28 slots, TOML hot-reload, glyph `Symbols`) documented in
+  older revisions described a now-DELETED dead crate — ignore it. The
+  production TUI (`tui_vt/`) renders via `oxicode_vtui::theme`:
+  - To change colors, edit the `"oxi"` `ThemeDefinition` seed fields in
+    `oxicode-vtui/src/theme/registry.rs`. The `color_math` WCAG pipeline
+    derives the rest — never hand-patch derived colors.
+  - `ThemeStyles` (23 ratatui `Style` fields) comes from
+    `ThemePalette::build_styles_with_accessibility`; read it via
+    `theme::active_styles()`. Contrast is enforced by `validate_theme_contrast`.
+  - Default theme `"oxi"` (DEFAULT_THEME in `oxicode-vtui-compat`): pure-black
+    canvas `#000000`, warm ink `#fbfaf7`, calm-gray chrome `#c8c8c8`, blue info
+    `#53a3f2`, red alert `#ff6467`, purple logo `#cc97f3` (oxi-design-system
+    `DESIGN.md` v1.0). See `docs/oxi-design-system-tui.md` for the
+    OKLCH→palette mapping.
 
-## oxicode-tui v2 — RETIRED; tape cutover — LIVE (2026-07-29)
+## TUI architecture (current)
 
-The grok-inspired `oxicode-tui` v2 crate (terminal-first pipeline with
-`RetainedTree`, `draw_frame_closure`, cell-level `DiffBackend`) has been
-retired and deleted. The production TUI now renders chat transcripts on the
-main screen through `tape::TapeEngine` with memoized transcript components.
-Alternate screen is entered only for transient overlays. See
-`docs/superpowers/specs/2026-07-29-p2-tui-tape-model-design.md` and
-`docs/superpowers/plans/2026-07-29-tui-tape-production-cutover.md`.
+The production TUI stack is **`oxicode-vtui` + `oxicode-cli/src/tui_vt/`**.
+The host (`tui_vt/main_loop.rs`, ~4.9K lines) owns the event loop and renders
+chat via ratatui on the **main screen** (no alternate screen, no tape engine).
+The single render driver is `render_frame`; `oxicode-vtui` supplies theme,
+layout, markdown, vim, and the `InlineCommand`/`InlineEvent` protocol. The
+older grok-inspired `oxicode-tui` v2 (RetainedTree/DiffBackend) and the legacy
+widget library (`oxicode-tui`, tape engine, glyph system) are both DELETED as
+dead code — neither was in the production path.
