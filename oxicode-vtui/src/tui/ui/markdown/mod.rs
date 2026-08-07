@@ -2,9 +2,15 @@
 use anstyle::{Color as AnsiColorEnum, Effects, RgbColor};
 use oxicode_vtui_compat::ui_protocol::{InlineSegment, InlineTextStyle};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use syntect::easy::HighlightLines;
+use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
+use unicode_width::UnicodeWidthStr;
+
+// Cached once at module scope — never rebuild per call.
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Parse markdown text into styled InlineSegment lines.
 pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
@@ -15,20 +21,49 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
 
     let mut lines: Vec<Vec<InlineSegment>> = Vec::new();
     let mut cur: Vec<InlineSegment> = Vec::new();
-    let effects: Effects = Effects::default();
+    let mut effects: Effects = Effects::default();
 
     let mut code_buf: Option<CodeBlockState> = None;
-    let ss = SyntaxSet::load_defaults_newlines();
+    let mut table_buf: Option<TableState> = None;
+    let mut list_stack: Vec<ListLevel> = Vec::new();
+    let ss = &*SYNTAX_SET;
 
     for event in Parser::new_ext(text, opts) {
+        if let Some(tb) = &mut table_buf {
+            match event {
+                Event::Text(t) | Event::Html(t) => tb.current_cell.push_str(&t),
+                Event::End(TagEnd::TableCell) => {
+                    tb.current_row.push(std::mem::take(&mut tb.current_cell));
+                }
+                Event::End(TagEnd::TableRow) => {
+                    tb.rows.push(std::mem::take(&mut tb.current_row));
+                }
+                Event::End(TagEnd::TableHead) => {
+                    // Header row was already pushed into `rows` on End(TableRow);
+                    // move it out into `header` and clear rows for the body.
+                    if !tb.rows.is_empty() && tb.header.is_empty() {
+                        tb.header = tb.rows.remove(0);
+                    }
+                }
+                Event::End(TagEnd::Table) => {
+                    let tb = table_buf.take().unwrap();
+                    let table_lines = render_table(&tb.header, &tb.rows);
+                    lines.extend(table_lines);
+                    lines.push(Vec::new());
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         // Code block capture mode
-        if let Some(ref mut cb) = code_buf {
+        if let Some(cb) = &mut code_buf {
             match event {
                 Event::Text(t) => cb.code.push_str(&t),
                 Event::End(TagEnd::CodeBlock) => {
                     let cb = code_buf.take().unwrap();
                     flush_line(&mut cur, &mut lines);
-                    let block_lines = render_code_block(&cb.code, cb.lang.as_deref(), &ss);
+                    let block_lines = render_code_block(&cb.code, cb.lang.as_deref(), ss);
                     lines.extend(block_lines);
                     lines.push(Vec::new());
                 }
@@ -52,16 +87,52 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
                 });
             }
 
+            // ── Tables ─────────────────────────────────────────────────
+            Event::Start(Tag::Table(_)) => {
+                flush_line(&mut cur, &mut lines);
+                table_buf = Some(TableState::default());
+            }
+
+            // ── Lists ──────────────────────────────────────────────────
+            Event::Start(Tag::List(start)) => {
+                list_stack.push(ListLevel {
+                    is_ordered: start.is_some(),
+                    index: start.map(|n| n.saturating_sub(1)).unwrap_or(0),
+                });
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_stack.pop();
+            }
+            Event::Start(Tag::Item) => {
+                flush_line(&mut cur, &mut lines);
+                let depth = list_stack.len();
+                if let Some(top) = list_stack.last_mut() {
+                    let indent = " ".repeat((depth.saturating_sub(1)) * 2);
+                    let marker = if top.is_ordered {
+                        let n = top.index + 1;
+                        top.index += 1;
+                        format!("{}{}. ", indent, n)
+                    } else {
+                        format!("{}• ", indent)
+                    };
+                    let seg = InlineSegment {
+                        text: marker,
+                        style: Arc::new(InlineTextStyle::default()),
+                    };
+                    merge_or_push(&mut cur, seg);
+                }
+            }
+
             // ── Block-level ────────────────────────────────────────────
             Event::Start(Tag::Paragraph) => {}
 
             Event::Start(Tag::Heading { level, .. }) => {
                 flush_line(&mut cur, &mut lines);
                 {
-                    let _ = effects.insert(Effects::BOLD);
+                    effects = effects.insert(Effects::BOLD);
                 };
                 {
-                    let _ = effects.insert(if level == HeadingLevel::H1 {
+                    effects = effects.insert(if level == HeadingLevel::H1 {
                         Effects::UNDERLINE
                     } else {
                         Effects::default()
@@ -70,27 +141,24 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
             }
             Event::End(TagEnd::Heading(_)) => {
                 {
-                    let _ = effects.remove(Effects::BOLD | Effects::UNDERLINE);
+                    effects = effects.remove(Effects::BOLD | Effects::UNDERLINE);
                 };
                 flush_line(&mut cur, &mut lines);
             }
 
             Event::Start(Tag::BlockQuote(_)) => {
                 {
-                    let _ = effects.insert(Effects::DIMMED);
+                    effects = effects.insert(Effects::DIMMED);
                 };
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 {
-                    let _ = effects.remove(Effects::DIMMED);
+                    effects = effects.remove(Effects::DIMMED);
                 };
             }
 
             Event::End(TagEnd::Paragraph) | Event::End(TagEnd::Item) => {
                 flush_line(&mut cur, &mut lines);
-            }
-            Event::End(TagEnd::List(_)) => {
-                lines.push(Vec::new());
             }
 
             Event::Rule => {
@@ -104,45 +172,45 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
             // ── Inline formatting ──────────────────────────────────────
             Event::Start(Tag::Emphasis) => {
                 {
-                    let _ = effects.insert(Effects::ITALIC);
+                    effects = effects.insert(Effects::ITALIC);
                 };
             }
             Event::End(TagEnd::Emphasis) => {
                 {
-                    let _ = effects.remove(Effects::ITALIC);
+                    effects = effects.remove(Effects::ITALIC);
                 };
             }
 
             Event::Start(Tag::Strong) => {
                 {
-                    let _ = effects.insert(Effects::BOLD);
+                    effects = effects.insert(Effects::BOLD);
                 };
             }
             Event::End(TagEnd::Strong) => {
                 {
-                    let _ = effects.remove(Effects::BOLD);
+                    effects = effects.remove(Effects::BOLD);
                 };
             }
 
             Event::Start(Tag::Strikethrough) => {
                 {
-                    let _ = effects.insert(Effects::STRIKETHROUGH);
+                    effects = effects.insert(Effects::STRIKETHROUGH);
                 };
             }
             Event::End(TagEnd::Strikethrough) => {
                 {
-                    let _ = effects.remove(Effects::STRIKETHROUGH);
+                    effects = effects.remove(Effects::STRIKETHROUGH);
                 };
             }
 
             Event::Start(Tag::Link { .. }) => {
                 {
-                    let _ = effects.insert(Effects::UNDERLINE);
+                    effects = effects.insert(Effects::UNDERLINE);
                 };
             }
             Event::End(TagEnd::Link) => {
                 {
-                    let _ = effects.remove(Effects::UNDERLINE);
+                    effects = effects.remove(Effects::UNDERLINE);
                 };
             }
 
@@ -193,7 +261,16 @@ pub fn render_code_block(
     let syntax = lang
         .and_then(|l| ss.find_syntax_by_token(l))
         .unwrap_or_else(|| ss.find_syntax_plain_text());
-    let theme = syntect::highlighting::Theme::default();
+    // syntect's bundled `ThemeSet` ships only 7 themes (base16-*, Solarized,
+    // InspiredGitHub). Many UI themes map to names outside that set; fall back
+    // to a real bundled dark theme rather than the plain `Theme::default()` so
+    // code is always colored (see `theme::syntax::get_active_syntax_theme`).
+    let theme = THEME_SET
+        .themes
+        .get(crate::get_active_syntax_theme())
+        .or_else(|| THEME_SET.themes.get("base16-ocean.dark"))
+        .cloned()
+        .unwrap_or_default();
     #[allow(unused_mut)]
     let mut h = HighlightLines::new(syntax, &theme);
     let mut lines = Vec::new();
@@ -224,11 +301,110 @@ pub fn render_code_block(
     lines
 }
 
+/// Render a GFM table with box-drawing borders and natural column widths.
+fn render_table(header: &[String], rows: &[Vec<String>]) -> Vec<Vec<InlineSegment>> {
+    let num_cols = std::cmp::max(
+        header.len(),
+        rows.iter().map(|r| r.len()).max().unwrap_or(0),
+    );
+    if num_cols == 0 {
+        return Vec::new();
+    }
+
+    // Compute natural column widths from display width.
+    let mut col_width: Vec<usize> = vec![0; num_cols];
+    for (c, cell) in header.iter().enumerate() {
+        col_width[c] = std::cmp::max(col_width[c], cell.width());
+    }
+    for row in rows {
+        for (c, cell) in row.iter().enumerate() {
+            col_width[c] = std::cmp::max(col_width[c], cell.width());
+        }
+    }
+
+    let mut out: Vec<Vec<InlineSegment>> = Vec::new();
+
+    // Border builders
+    let top = format!(
+        "┌{}┐",
+        col_width
+            .iter()
+            .map(|w| "─".repeat(w + 2))
+            .collect::<Vec<_>>()
+            .join("┬")
+    );
+    let mid = format!(
+        "├{}┤",
+        col_width
+            .iter()
+            .map(|w| "─".repeat(w + 2))
+            .collect::<Vec<_>>()
+            .join("┼")
+    );
+    let bot = format!(
+        "└{}┘",
+        col_width
+            .iter()
+            .map(|w| "─".repeat(w + 2))
+            .collect::<Vec<_>>()
+            .join("┴")
+    );
+
+    let plain = |s: String| {
+        vec![InlineSegment {
+            text: s,
+            style: Arc::new(InlineTextStyle::default()),
+        }]
+    };
+    let bold = |s: String| {
+        vec![InlineSegment {
+            text: s,
+            style: Arc::new(InlineTextStyle::default().bold()),
+        }]
+    };
+
+    out.push(plain(top));
+
+    // Header row
+    let header_line = format_row(header, &col_width, num_cols);
+    out.push(bold(header_line));
+    out.push(plain(mid));
+
+    // Body rows
+    for row in rows {
+        out.push(plain(format_row(row, &col_width, num_cols)));
+    }
+
+    out.push(plain(bot));
+    out
+}
+
+fn format_row(cells: &[String], col_width: &[usize], num_cols: usize) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(num_cols);
+    for (c, &w) in col_width.iter().enumerate() {
+        let text = cells.get(c).map(String::as_str).unwrap_or("");
+        parts.push(format!(" {:<width$} ", text, width = w));
+    }
+    format!("│{}│", parts.join("│"))
+}
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 struct CodeBlockState {
     code: String,
     lang: Option<String>,
+}
+
+#[derive(Default)]
+struct TableState {
+    header: Vec<String>,
+    rows: Vec<Vec<String>>,
+    current_cell: String,
+    current_row: Vec<String>,
+}
+
+struct ListLevel {
+    is_ordered: bool,
+    index: u64,
 }
 
 fn flush_line(cur: &mut Vec<InlineSegment>, lines: &mut Vec<Vec<InlineSegment>>) {
@@ -264,4 +440,70 @@ fn apply_effects(mut style: InlineTextStyle, effects: Effects) -> InlineTextStyl
         style.effects |= Effects::STRIKETHROUGH;
     }
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_text(line: &[InlineSegment]) -> String {
+        line.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    #[test]
+    fn unordered_list_has_markers() {
+        let out = render_markdown("- a\n- b\n");
+        // Find the lines that contain "a" and "b".
+        let combined: Vec<String> = out.iter().map(|l| line_text(l)).collect();
+        let line_a = combined
+            .iter()
+            .find(|l| l.contains('a'))
+            .expect("line with 'a'");
+        let line_b = combined
+            .iter()
+            .find(|l| l.contains('b'))
+            .expect("line with 'b'");
+        assert!(line_a.contains('\u{2022}'), "missing bullet in: {line_a:?}");
+        assert!(line_b.contains('\u{2022}'), "missing bullet in: {line_b:?}");
+    }
+
+    #[test]
+    fn ordered_list_has_numbers() {
+        let out = render_markdown("1. first\n2. second\n");
+        let combined: Vec<String> = out.iter().map(|l| line_text(l)).collect();
+        let has_one = combined
+            .iter()
+            .any(|l| l.contains("1.") && l.contains("first"));
+        let has_two = combined
+            .iter()
+            .any(|l| l.contains("2.") && l.contains("second"));
+        assert!(has_one, "missing '1.' marker in {combined:?}");
+        assert!(has_two, "missing '2.' marker in {combined:?}");
+    }
+
+    #[test]
+    fn table_renders_borders() {
+        let md = "| h1 | h2 |\n|----|----|\n| a  | b  |\n| c  | d  |\n";
+        let out = render_markdown(md);
+        let combined: Vec<String> = out.iter().map(|l| line_text(l)).collect();
+        let bar_lines = combined.iter().filter(|l| l.contains('\u{2502}')).count();
+        assert!(bar_lines >= 3, "expected ≥3 lines with │, got {combined:?}");
+        let has_top_or_bottom = combined
+            .iter()
+            .any(|l| l.contains('\u{250C}') || l.contains('\u{2514}'));
+        assert!(
+            has_top_or_bottom,
+            "expected ┌ or └ in output, got {combined:?}"
+        );
+    }
+
+    #[test]
+    fn inline_still_works() {
+        let out = render_markdown("**bold**");
+        let bold_found = out.iter().any(|line| {
+            line.iter()
+                .any(|seg| seg.style.effects.contains(anstyle::Effects::BOLD))
+        });
+        assert!(bold_found, "expected BOLD effect in rendered segments");
+    }
 }
