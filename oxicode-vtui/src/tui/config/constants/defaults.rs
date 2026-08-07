@@ -1,1 +1,1 @@
-pub const DEFAULT_THEME: &str = "oxide-dark";
+pub const DEFAULT_THEME: &str = "oxi";

@@ -4,6 +4,20 @@ oxicode's terminal UI supports **28 customizable color slots**, 3 glyph sets
 (Unicode / ASCII / Nerd), and spacing configuration. Themes load from TOML
 or JSON files with hot-reload.
 
+## Color Authority
+
+> **Production renders via `oxicode-vtui`, not this guide's `oxicode-tui`
+> `ColorScheme`.** The interactive TUI (`tui_vt/`) uses `oxicode_vtui::theme`
+> — a registry of 6-field `ThemePalette`s with a contrast-guaranteeing
+> derivation pipeline. The authoritative brand mapping (OKLCH → palette) and
+> the implementation reference live in `docs/oxi-design-system-tui.md`; the
+> default theme is `"oxi"` (pure-black canvas, oxi-design-system palette).
+>
+> This guide below documents the **secondary** `oxicode-tui` widget-library
+> `ColorScheme` (28 slots, TOML/JSON themes, hot-reload) — a separate system
+> from the production renderer. Apply brand/color changes to `oxicode-vtui`
+> first.
+
 ## Quick Start
 
 ### Using a built-in theme

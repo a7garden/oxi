@@ -878,6 +878,29 @@ static REGISTRY: Lazy<HashMap<&'static str, ThemeDefinition>> = Lazy::new(|| {
         },
     );
     map.insert(
+        "oxi",
+        ThemeDefinition {
+            id: "oxi",
+            label: "Oxi",
+            palette: ThemePalette {
+                // oxi-design-system brand palette (DESIGN.md v1.0) on a
+                // pure-black canvas — the sole intentional deviation from the
+                // spec's cool near-black canvas (oklch 0.13 0.020 265).
+                // Identity comes from neutrals (warm near-white ink on true
+                // black); color is data — blue = info/structure, red = alert,
+                // purple = logo. The derivation pipeline (color_math) computes
+                // every derived style with contrast guarantees against the
+                // pure-black background. See docs/oxi-design-system-tui.md.
+                primary_accent: RgbColor(0xC8, 0xC8, 0xC8), // #c8c8c8 calm gray chrome
+                background: RgbColor(0x00, 0x00, 0x00),     // #000000 pure black
+                foreground: RgbColor(0xFB, 0xFA, 0xF7),     // #fbfaf7 warm ink
+                secondary_accent: RgbColor(0x53, 0xA3, 0xF2), // #53a3f2 blue (info)
+                alert: RgbColor(0xFF, 0x64, 0x67),          // #ff6467 red (errors)
+                logo_accent: RgbColor(0xCC, 0x97, 0xF3),    // #cc97f3 purple (logo)
+            },
+        },
+    );
+    map.insert(
         "oxide-dark",
         ThemeDefinition {
             id: "oxide-dark",
@@ -983,6 +1006,8 @@ fn suite_id_for_theme(theme_id: &str) -> Option<&'static str> {
         Some("oxide")
     } else if theme_id == "mono" {
         Some("mono")
+    } else if theme_id == "oxi" {
+        Some("oxi")
     } else {
         None
     }
@@ -994,6 +1019,7 @@ fn suite_label(suite_id: &str) -> Option<&'static str> {
         "catppuccin" => Some("Catppuccin"),
         "vitesse" => Some("Vitesse"),
         "oxide" => Some("Oxide"),
+        "oxi" => Some("Oxi"),
         "ciapre" => Some("Ciapre"),
         "mono" => Some("Mono"),
         _ => None,
@@ -1012,7 +1038,15 @@ pub fn theme_suite_label(theme_id: &str) -> Option<&'static str> {
 
 /// Return the built-in theme suites and their member theme identifiers.
 pub fn available_theme_suites() -> Vec<ThemeSuite> {
-    const ORDER: &[&str] = &["oxide", "ciapre", "vitesse", "catppuccin", "mono", "nord"];
+    const ORDER: &[&str] = &[
+        "oxi",
+        "oxide",
+        "ciapre",
+        "vitesse",
+        "catppuccin",
+        "mono",
+        "nord",
+    ];
 
     ORDER
         .iter()

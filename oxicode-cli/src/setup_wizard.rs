@@ -1395,7 +1395,7 @@ fn finish_setup(state: &mut WizardState) -> Result<()> {
         .themes
         .get(state.theme_selected)
         .cloned()
-        .unwrap_or_else(|| "oxicode_dark".to_string());
+        .unwrap_or_else(|| "oxi".to_string());
 
     // Collect custom provider base URLs
     let custom_base_urls: Vec<(String, String)> = state
@@ -1493,7 +1493,7 @@ pub async fn run() -> Result<()> {
     let current_theme = crate::store::settings::Settings::load()
         .ok()
         .map(|s| s.theme.clone())
-        .unwrap_or_else(|| "oxicode_dark".to_string());
+        .unwrap_or_else(|| "oxi".to_string());
 
     let theme_selected = themes.iter().position(|t| *t == current_theme).unwrap_or(0);
 
@@ -1748,7 +1748,7 @@ mod tests {
             model_selected: 0,
             model_filter: String::new(),
             model_list_state: ListState::default(),
-            themes: vec!["oxicode_dark".to_string()],
+            themes: vec!["oxi".to_string()],
             theme_selected: 0,
             theme_list_state: ListState::default(),
             auth_path: PathBuf::new(),
@@ -1886,7 +1886,7 @@ mod tests {
     fn esc_backs_out_of_theme_step() {
         let mut state = make_state(vec!["openai"], vec![]);
         state.step = 2;
-        state.themes = vec!["oxicode_dark".to_string()];
+        state.themes = vec!["oxi".to_string()];
         handle_theme_event(&mut state, esc_event()).unwrap();
         assert_eq!(state.step, 1);
     }

@@ -29,9 +29,42 @@ fn test_oxide_dark_theme_exists() {
 }
 
 #[test]
-fn test_oxide_dark_is_default() {
-    // The calm neutral-gray theme is the default — no warm/brown tones.
-    assert_eq!(DEFAULT_THEME_ID, "oxide-dark");
+fn test_oxi_is_default() {
+    // The oxi-design-system brand theme is the default — pure-black canvas,
+    // warm ink, color-as-data. See docs/oxi-design-system-tui.md.
+    assert_eq!(DEFAULT_THEME_ID, "oxi");
+}
+
+#[test]
+fn test_oxi_theme_exists() {
+    let result = ensure_theme("oxi");
+    assert!(result.is_ok(), "Oxi theme should be registered");
+    assert_eq!(result.unwrap(), "Oxi");
+}
+
+#[test]
+fn test_oxi_contrast() {
+    let result = validate_theme_contrast("oxi");
+    assert!(
+        result.errors.is_empty(),
+        "Oxi theme should have no contrast errors"
+    );
+    assert!(result.is_valid);
+}
+
+#[test]
+fn test_oxi_suite() {
+    assert_eq!(theme_suite_id("oxi"), Some("oxi"));
+    assert_eq!(theme_suite_label("oxi"), Some("Oxi"));
+}
+
+#[test]
+fn test_oxi_palette_is_pure_black() {
+    // The oxi theme mandates a pure-black canvas (#000000) — the sole
+    // intentional deviation from the design system's cool near-black canvas.
+    let theme = all_theme_definitions().get("oxi").expect("oxi exists");
+    let RgbColor(r, g, b) = theme.palette.background;
+    assert_eq!((r, g, b), (0, 0, 0), "oxi background must be pure black");
 }
 
 #[test]
