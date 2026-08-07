@@ -34,7 +34,7 @@ body:
       options:
         - oxicode-ai (LLM providers)
         - oxicode-agent (tools, agent loop)
-        - oxicode-tui (terminal UI)
+        - oxicode-vtui (terminal UI)
         - oxicode-hashline (patch format)
         - oxicode-sdk (multi-agent SDK)
         - oxicode-cli (binary, CLI interface)

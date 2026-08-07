@@ -232,7 +232,7 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 ```
 oxicode-ai      ← oxicode-agent ← oxicode-sdk ← oxicode-cli
 oxicode-hashline ← oxicode-agent
-oxicode-tui     (independent)         ← oxicode-cli
+oxicode-vtui    (independent)         ← oxicode-cli
 ```
 
 ### Adding a New Provider

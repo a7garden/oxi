@@ -55,7 +55,7 @@
 
 - name: "area: tui"
   color: "1d76db"
-  description: oxicode-tui — terminal UI widgets, themes, markdown rendering.
+  description: oxicode-vtui — terminal UI framework, theme registry, markdown, vim engine.
 
 - name: "area: sdk"
   color: "1d76db"

@@ -113,7 +113,7 @@ pub struct Settings {
     /// Thinking level for agent responses
     #[serde(default = "default_thinking_level")]
     pub thinking_level: ThinkingLevel,
-    /// Color theme — resolved by `Theme::by_name` (e.g. "oxicode_dark", "nord").
+    /// Color theme — resolved by `oxicode_vtui::theme` (e.g. "oxi", "oxide-dark", "nord").
     #[serde(default = "default_theme")]
     pub theme: String,
 
@@ -219,7 +219,7 @@ pub struct Settings {
     // ── Keybindings ────────────────────────────────────────────────────
     /// User-defined keybinding overrides.
     /// Format: `{ "ActionName": ["Ctrl+x", "Alt+y"] }`
-    /// Actions are matched case-insensitively to the Action enum in oxicode-tui.
+    /// Actions are matched case-insensitively. Declared here for config persistence; not currently consumed by the `tui_vt` host loop.
     #[serde(default)]
     pub keybindings: HashMap<String, Vec<String>>,
 
@@ -972,7 +972,7 @@ impl Settings {
     /// Get the theme name from settings, returning a default if not set.
     pub fn get_theme_name(&self) -> String {
         if self.theme.is_empty() || self.theme == "default" {
-            "oxicode_dark".to_string()
+            "oxi".to_string()
         } else {
             self.theme.clone()
         }

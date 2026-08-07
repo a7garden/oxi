@@ -110,7 +110,7 @@ oxicode is a multi-crate Rust workspace designed for modularity:
 ```mermaid
 graph LR
     A[oxicode-cli] --> B[oxicode-sdk]
-    A --> C[oxicode-tui]
+    A --> C[oxicode-vtui]
     B --> E[oxicode-agent]
     E --> F[oxicode-ai]
 ```
@@ -119,7 +119,7 @@ graph LR
 |-------|---------|
 | [**oxicode-ai**](oxicode-ai/) | Unified LLM API — 8 providers, streaming, tool calling, compaction |
 | [**oxicode-agent**](oxicode-agent/) | Agent runtime — tool-calling loop, event system, MCP client |
-| [**oxicode-tui**](oxicode-tui/) | Terminal UI — differential rendering, themes, markdown, chat widgets |
+| [**oxicode-vtui**](oxicode-vtui/) | Terminal UI framework — ratatui widgets, theme registry, markdown, vim engine |
 | [**oxicode-sdk**](oxicode-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |
 | [**oxicode-cli**](oxicode-cli/) | CLI binary — ties everything together (TUI + RPC + port composition root) |
 
@@ -216,7 +216,7 @@ OpenAI, Anthropic, Google, DeepSeek, Mistral, Groq, Cerebras, xAI, OpenRouter, a
 <details>
 <summary><strong>Can I use oxicode as a library?</strong></summary>
 
-Yes. Each crate is published independently: `oxicode-ai` (LLM API), `oxicode-agent` (agent runtime), `oxicode-tui` (terminal UI), `oxicode-sdk` (multi-agent SDK). See individual crate READMEs for details.
+Yes. Each crate is published independently: `oxicode-ai` (LLM API), `oxicode-agent` (agent runtime), `oxicode-vtui` (terminal UI), `oxicode-sdk` (multi-agent SDK). See individual crate READMEs for details.
 </details>
 
 <details>
