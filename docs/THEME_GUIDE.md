@@ -13,10 +13,10 @@ or JSON files with hot-reload.
 > the implementation reference live in `docs/oxi-design-system-tui.md`; the
 > default theme is `"oxi"` (pure-black canvas, oxi-design-system palette).
 >
-> This guide below documents the **secondary** `oxicode-tui` widget-library
-> `ColorScheme` (28 slots, TOML/JSON themes, hot-reload) — a separate system
-> from the production renderer. Apply brand/color changes to `oxicode-vtui`
-> first.
+> ⚠️ The guide body below documents the **deleted** `oxicode-tui` widget-library
+> `ColorScheme` (28 slots, TOML/JSON themes, hot-reload) — kept as a historical
+> reference only; that crate was removed as dead code and is not in any build.
+> For all live theming, use `oxicode-vtui` (see `docs/oxi-design-system-tui.md`).
 
 ## Quick Start
 

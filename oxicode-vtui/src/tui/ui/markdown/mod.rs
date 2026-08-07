@@ -31,7 +31,7 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
     for event in Parser::new_ext(text, opts) {
         if let Some(tb) = &mut table_buf {
             match event {
-                Event::Text(t) | Event::Html(t) => tb.current_cell.push_str(&t),
+                Event::Text(t) | Event::Html(t) | Event::Code(t) => tb.current_cell.push_str(&t),
                 Event::End(TagEnd::TableCell) => {
                     tb.current_row.push(std::mem::take(&mut tb.current_cell));
                 }
@@ -383,7 +383,10 @@ fn format_row(cells: &[String], col_width: &[usize], num_cols: usize) -> String 
     let mut parts: Vec<String> = Vec::with_capacity(num_cols);
     for (c, &w) in col_width.iter().enumerate() {
         let text = cells.get(c).map(String::as_str).unwrap_or("");
-        parts.push(format!(" {:<width$} ", text, width = w));
+        // Pad to display width `w` (not scalar count) so CJK / wide chars keep
+        // columns aligned — `{:<width$}` pads by char count and misaligns them.
+        let pad = w.saturating_sub(text.width());
+        parts.push(format!(" {}{} ", text, " ".repeat(pad)));
     }
     format!("│{}│", parts.join("│"))
 }
@@ -505,5 +508,43 @@ mod tests {
                 .any(|seg| seg.style.effects.contains(anstyle::Effects::BOLD))
         });
         assert!(bold_found, "expected BOLD effect in rendered segments");
+    }
+    #[test]
+    fn table_cell_keeps_inline_code() {
+        // Inline code (backticks) arrives as Event::Code, not Event::Text — the
+        // table router must capture it or the cell renders blank.
+        let md = "| type | example |\n|------|----------|\n| foo  | `bar`    |\n";
+        let out = render_markdown(md);
+        let joined: String = out
+            .iter()
+            .map(|l| line_text(l))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("bar"),
+            "inline code `bar` dropped from table cell: {joined:?}"
+        );
+    }
+
+    #[test]
+    fn table_cjk_columns_align() {
+        // Wide chars (CJK) have display width 2; padding must use display width
+        // so every data row has the same width and the │ borders line up.
+        let md = "| a | b  |\n|---|----|\n| 中 | x  |\n| 1 | yy |\n";
+        let out = render_markdown(md);
+        let rows: Vec<String> = out
+            .iter()
+            .map(|l| line_text(l))
+            .filter(|l| l.starts_with('\u{2502}'))
+            .collect();
+        let widths: Vec<usize> = rows
+            .iter()
+            .map(|l| unicode_width::UnicodeWidthStr::width(l.as_str()))
+            .collect();
+        let first = widths[0];
+        assert!(
+            widths.iter().all(|&w| w == first),
+            "CJK column misalignment — row display widths differ: {widths:?}\n{rows:?}"
+        );
     }
 }
