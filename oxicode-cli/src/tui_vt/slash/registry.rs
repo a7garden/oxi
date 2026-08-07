@@ -5,12 +5,12 @@
 //! execution. Adding a command = implement `SlashCommand` + register it in
 //! [`SlashRegistry::builtins`].
 //!
-//! This is the new-harness counterpart of the legacy ratatui-based slash
-//! system (deleted with the old `tui/` crate). Only commands that map onto
-//! `crate::app::agent_session::AgentSessionHandle` + the inline protocol
-//! are wired here; overlay-driving commands (`/model` picker, `/issue`,
-//! `/settings`, …) are deferred until those overlays are rebuilt against
-//! `InlineCommand::ShowOverlay`.
+//! Slash commands for the VT TUI harness. Each command owns its name, aliases,
+//! and execution; adding one = implement `SlashCommand` + register it in
+//! [`SlashRegistry::builtins`] (`register_all`). Overlay-driving commands
+//! (`/model`, `/settings`, `/sessions`, `/theme`) build an `InlineListSelection`
+//! modal whose submission is handled in `main_loop.rs`'s overlay-submission arm.
+//! `/issue` is not yet wired (no issue overlay in this harness).
 
 use oxicode_vtui::tui::core::{
     InlineHandle, InlineListItem, InlineListSelection, InlineMessageKind,
@@ -358,11 +358,13 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(ModelCommand));
     registry.register(Box::new(CancelCommand));
     registry.register(Box::new(StatusCommand));
+    registry.register(Box::new(SettingsCommand));
     registry.register(Box::new(VimCommand));
     registry.register(Box::new(AgentsCommand));
     registry.register(Box::new(ThemeCommand));
     registry.register(Box::new(FindCommand));
     registry.register(Box::new(SessionsCommand));
+    registry.register(Box::new(ShortcutsCommand));
 }
 
 /// `/vim` — toggle vim mode for prompt editing.
