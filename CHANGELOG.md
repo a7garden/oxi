@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.68.0] - 2026-08-07
+
+### Added
+
+- **TUI: markdown rendering — lists, tables, theme-aware code blocks.** The
+  production renderer (`oxicode-vtui::tui::ui::markdown`) now emits ordered/
+  unordered list markers with nesting indentation, renders GFM tables as
+  box-bordered grids (natural column widths, CJK-aligned), and highlights fenced
+  code blocks with the active syntect theme (`LazyLock`-cached sets,
+  `base16-ocean.dark` fallback for unmapped names). Fixes a pre-existing bug
+  where `Effects::insert` (takes `self` by value) silently dropped bold/italic/
+  strike/underline/dim.
+- **TUI: `/settings` and `/shortcuts` slash commands** are now registered (they
+  were fully implemented but never wired into the command registry). `/settings`
+  toggles thinking/auto-compaction/auto-retry/advisor; `/shortcuts` shows the
+  cheatsheet.
+- **Theme: `"oxi"` is now the default** — the oxi-design-system brand theme
+  (pure-black canvas, warm ink, color-as-data), superseding `oxide-dark`.
+
+### Changed
+
+- **TUI documentation rewritten for the production stack.** AGENTS.md's TUI
+  section, the theme pitfall, and the dependency flow now describe
+  `oxicode-vtui` + `tui_vt/main_loop.rs` (ratatui main-screen render), not the
+  retired tape engine.
+
+### Removed
+
+- **Deleted the dead `oxicode-tui` crate** (~27.6K LOC). It was never in the
+  workspace build, absent from `Cargo.lock`, and had zero dependents. All living
+  references (CODEOWNERS, README, CONTRIBUTING, labels, issue template) updated.
+
+### Fixed
+
+- **TUI: inline code in markdown table cells** is no longer dropped (the table
+  event router now captures `Event::Code`).
+- **TUI: CJK-aware column padding** in table rendering (display-width, not char
+  count, so wide characters keep borders aligned).
+
 ## [0.67.0] - 2026-08-05
 
 ### Added
