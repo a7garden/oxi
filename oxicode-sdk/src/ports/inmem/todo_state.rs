@@ -116,6 +116,7 @@ mod tests {
                 content: "do thing".into(),
                 status: TodoStatus::Pending,
                 notes: None,
+                block_reason: None,
             }],
         }];
         let state = InMemoryTodoState::with_phases(initial);

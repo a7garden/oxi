@@ -213,6 +213,13 @@ impl Agent {
         self.config().config.clone()
     }
 
+    /// Get a cheap clone of the configured todo state provider, if any.
+    /// Used by hosts (e.g. the TUI) to observe todo phase changes without
+    /// cloning the full [`AgentConfig`].
+    pub fn todo_provider(&self) -> Option<std::sync::Arc<dyn crate::tools::TodoStateProvider>> {
+        self.config().config.todo.clone()
+    }
+
     /// Internal constructor shared by `new()`, `new_with_resolver()` and
     /// `new_with_compactor()`.
     fn build_inner(

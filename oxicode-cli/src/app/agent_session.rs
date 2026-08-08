@@ -467,6 +467,15 @@ impl AgentSession {
         &self.hub
     }
 
+    /// Get the session's todo state provider, if configured. Lets the TUI
+    /// observe todo phase changes live (the same source of truth the `todo`
+    /// agent tool writes to).
+    pub fn todo_provider(
+        &self,
+    ) -> Option<std::sync::Arc<dyn oxicode_agent::tools::TodoStateProvider>> {
+        self.agent.todo_provider()
+    }
+
     /// Get the current model ID (`provider/model`).
     pub fn model_id(&self) -> String {
         self.agent.model_id()

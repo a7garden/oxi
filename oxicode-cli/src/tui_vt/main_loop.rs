@@ -24,6 +24,8 @@ use crossterm::{
     terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate, disable_raw_mode, enable_raw_mode},
 };
 use oxicode_agent::AgentEvent;
+use oxicode_agent::tools::TodoStateProvider;
+use oxicode_agent::tools::todo::TodoStatus;
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
     InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
@@ -199,8 +201,11 @@ pub struct RenderState {
     pub shell_mode: bool,
     /// Follow-up suggestion chips.
     pub follow_ups: Vec<String>,
-    /// Todo checklist items (text, done).
-    pub todo_items: Vec<(String, bool)>,
+    /// Todo checklist items (text, status) — refreshed from the live provider.
+    pub todo_items: Vec<(String, TodoStatus)>,
+    /// Live todo state provider — the same source the `todo` agent tool
+    /// writes to. `None` when todos are disabled; the pane stays hidden.
+    pub todo_provider: Option<Arc<dyn TodoStateProvider>>,
     /// Vim editing state (enabled by /vim command).
     pub vim_state: oxicode_vtui::vim::VimState,
     /// Vim clipboard buffer.
@@ -685,6 +690,7 @@ pub async fn run_tui(app: App) -> Result<()> {
     state.lock().cwd = cwd.clone();
     state.lock().catalog = Some(app.catalog());
     state.lock().file_commands = crate::tui_vt::slash::file_commands::load_file_commands(&cwd);
+    state.lock().todo_provider = session_handle.todo_provider();
     // Onboarding tip: surfaces the cheatsheet and help command on first run,
     // auto-dismisses after ~30s of rendering.
     state.lock().tip = Some(EphemeralTip {
@@ -846,7 +852,12 @@ async fn run_event_loop(
         }
         // Redraw every iteration. The harness's redraw is idempotent —
         // the ratatui backend coalesces unchanged frames.
-        let snapshot = state.lock();
+        let mut snapshot = state.lock();
+        // Refresh the todo checklist from the live provider so the sticky
+        // pane reflects phase changes written by the `todo` agent tool.
+        if let Some(provider) = snapshot.todo_provider.as_ref() {
+            snapshot.todo_items = flatten_todo_items(&provider.get_phases());
+        }
         let _ = execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
         let draw_err = terminal
             .draw(|frame| render_frame(frame, &snapshot, handle))
@@ -3579,8 +3590,18 @@ fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderStat
     );
 }
 
+/// Flatten todo phases into `(content, status)` pairs for the sticky pane.
+fn flatten_todo_items(
+    phases: &[oxicode_agent::tools::todo::TodoPhase],
+) -> Vec<(String, TodoStatus)> {
+    phases
+        .iter()
+        .flat_map(|p| p.tasks.iter().map(|t| (t.content.clone(), t.status)))
+        .collect()
+}
+
 /// Render a compact todo checklist at the top of the scrollback area.
-fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, bool)]) {
+fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, TodoStatus)]) {
     let styles = active_styles();
     let height = items.len() as u16 + 1;
     let area = Rect {
@@ -3591,21 +3612,30 @@ fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, b
     };
     let lines: Vec<Line<'_>> = items
         .iter()
-        .map(|(text, done)| {
-            let (marker, color) = if *done {
-                ("\u{2611}", styles.tool.get_fg_color()) // ☑
+        .map(|(text, status)| {
+            // Per-status glyph + color so the current task (▶), blocked
+            // tasks (⏸), and abandoned tasks (✗) are distinguishable at a
+            // glance, not just done (☑) vs. open (☐).
+            let (marker, color) = match status {
+                TodoStatus::Completed => ("\u{2611}", Some(styles.foreground)), // ☑
+                TodoStatus::InProgress => ("\u{25B6}", styles.primary.get_fg_color()), // ▶
+                TodoStatus::Blocked => ("\u{23F8}", styles.info.get_fg_color()), // ⏸
+                TodoStatus::Abandoned => ("\u{2717}", styles.error.get_fg_color()), // ✗
+                TodoStatus::Pending => ("\u{2610}", styles.secondary.get_fg_color()), // ☐
+            };
+            let text_style = if *status == TodoStatus::Completed {
+                Style::default()
+                    .fg(color_from_anstyle(Some(styles.foreground)))
+                    .add_modifier(Modifier::CROSSED_OUT)
             } else {
-                ("\u{2610}", styles.secondary.get_fg_color()) // ☐
+                Style::default().fg(color_from_anstyle(Some(styles.foreground)))
             };
             Line::from(vec![
                 Span::styled(
                     format!("{marker} "),
                     Style::default().fg(color_from_anstyle(color)),
                 ),
-                Span::styled(
-                    text.clone(),
-                    Style::default().fg(color_from_anstyle(Some(styles.foreground))),
-                ),
+                Span::styled(text.clone(), text_style),
             ])
         })
         .collect();
@@ -5097,5 +5127,76 @@ mod render_tests {
             rendered.contains("src/main.rs"),
             "dropdown must render alongside composer"
         );
+    }
+
+    #[test]
+    fn flatten_todo_items_preserves_order_and_status() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let phases = vec![
+            TodoPhase {
+                name: "A".into(),
+                tasks: vec![
+                    TodoItem {
+                        content: "write code".into(),
+                        status: TodoStatus::InProgress,
+                        notes: None,
+                        block_reason: None,
+                    },
+                    TodoItem {
+                        content: "write tests".into(),
+                        status: TodoStatus::Pending,
+                        notes: None,
+                        block_reason: None,
+                    },
+                ],
+            },
+            TodoPhase {
+                name: "B".into(),
+                tasks: vec![TodoItem {
+                    content: "waiting on review".into(),
+                    status: TodoStatus::Blocked,
+                    notes: None,
+                    block_reason: None,
+                }],
+            },
+        ];
+        let flat = flatten_todo_items(&phases);
+        assert_eq!(flat.len(), 3);
+        assert_eq!(flat[0], ("write code".to_string(), TodoStatus::InProgress));
+        assert_eq!(flat[1], ("write tests".to_string(), TodoStatus::Pending));
+        assert_eq!(
+            flat[2],
+            ("waiting on review".to_string(), TodoStatus::Blocked)
+        );
+    }
+
+    #[test]
+    fn todo_pane_renders_when_items_present() {
+        // The sticky pane is populated from the live provider in the event
+        // loop; here we seed it directly to assert the pane paints task text.
+        let mut state = RenderState::default();
+        state.todo_items = vec![
+            ("active task".to_string(), TodoStatus::InProgress),
+            ("open task".to_string(), TodoStatus::Pending),
+        ];
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("active task"),
+            "in-progress task must render"
+        );
+        assert!(rendered.contains("open task"), "pending task must render");
+        // The in-progress glyph (▶) must distinguish the active task.
+        assert!(
+            rendered.contains('\u{25B6}'),
+            "in-progress glyph must render"
+        );
+    }
+
+    #[test]
+    fn todo_pane_hidden_when_empty() {
+        let state = RenderState::default();
+        let rendered = render_frame_to_string(&state);
+        // No todo content should leak when the list is empty.
+        assert!(!rendered.contains('\u{2611}'), "no checkmark when empty");
     }
 }

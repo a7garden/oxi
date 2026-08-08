@@ -27,6 +27,9 @@ pub enum TodoStatus {
     Completed,
     /// Task was cancelled or deemed unnecessary.
     Abandoned,
+    /// Task is waiting on external input (a user decision, another agent, an
+    /// external service). Excluded from the stop-time incomplete-todo reminder.
+    Blocked,
 }
 
 impl TodoStatus {
@@ -37,6 +40,7 @@ impl TodoStatus {
             Self::InProgress => "\u{25B6}", // ▶
             Self::Completed => "\u{2611}",  // ☑
             Self::Abandoned => "\u{2717}",  // ✗
+            Self::Blocked => "\u{23F8}",    // ⏸
         }
     }
 
@@ -47,6 +51,7 @@ impl TodoStatus {
             Self::InProgress => "in_progress",
             Self::Completed => "completed",
             Self::Abandoned => "abandoned",
+            Self::Blocked => "blocked",
         }
     }
 }
@@ -67,6 +72,9 @@ pub struct TodoItem {
     /// Optional free-form notes attached to the task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<String>>,
+    /// Optional reason a task is blocked (set by the `block` op).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
 }
 
 /// A named group of related tasks within a todo list.
@@ -133,6 +141,28 @@ pub enum TodoOp {
         phase: String,
         /// Task contents to append.
         items: Vec<String>,
+    },
+    /// Mark matching tasks as blocked (waiting on external input).
+    /// Terminal states (Completed/Abandoned) are left untouched.
+    Block {
+        /// Task content filter.
+        #[serde(default)]
+        task: Option<String>,
+        /// Phase name filter.
+        #[serde(default)]
+        phase: Option<String>,
+        /// Optional human-readable reason the task is blocked.
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Return matching blocked tasks to `pending`.
+    Unblock {
+        /// Task content filter.
+        #[serde(default)]
+        task: Option<String>,
+        /// Phase name filter.
+        #[serde(default)]
+        phase: Option<String>,
     },
     /// Return the current state without modifying it.
     View,
@@ -205,6 +235,22 @@ fn apply_entry(phases: &mut Vec<TodoPhase>, op: &TodoOp, errors: &mut Vec<String
         TodoOp::Append { phase, items } => {
             append_items(phases, phase, items);
         }
+        TodoOp::Block {
+            task,
+            phase,
+            reason,
+        } => {
+            block_tasks(
+                phases,
+                task.as_deref(),
+                phase.as_deref(),
+                reason.as_deref(),
+                errors,
+            );
+        }
+        TodoOp::Unblock { task, phase } => {
+            unblock_tasks(phases, task.as_deref(), phase.as_deref(), errors);
+        }
         TodoOp::View => {} // read-only
     }
 }
@@ -227,6 +273,7 @@ fn init_phases(
                         content: c.clone(),
                         status: TodoStatus::Pending,
                         notes: None,
+                        block_reason: None,
                     })
                     .collect(),
             })
@@ -240,6 +287,7 @@ fn init_phases(
                     content: c.clone(),
                     status: TodoStatus::Pending,
                     notes: None,
+                    block_reason: None,
                 })
                 .collect(),
         }]
@@ -292,6 +340,45 @@ fn transition_status(
     }
 }
 
+/// Mark matching tasks as `Blocked`, recording an optional reason. Tasks in a
+/// terminal state (`Completed`/`Abandoned`) are left untouched — blocking a
+/// finished task is a no-op rather than a silent reopening.
+fn block_tasks(
+    phases: &mut [TodoPhase],
+    task: Option<&str>,
+    phase: Option<&str>,
+    reason: Option<&str>,
+    errors: &mut Vec<String>,
+) {
+    let targets = resolve_targets(phases, task, phase, errors);
+    for (pi, ti) in targets {
+        let t = &mut phases[pi].tasks[ti];
+        if matches!(t.status, TodoStatus::Completed | TodoStatus::Abandoned) {
+            continue;
+        }
+        t.status = TodoStatus::Blocked;
+        t.block_reason = reason.map(String::from);
+    }
+}
+
+/// Return matching `Blocked` tasks to `Pending` and clear their reason. Tasks
+/// not currently blocked are left as-is, making `unblock` idempotent.
+fn unblock_tasks(
+    phases: &mut [TodoPhase],
+    task: Option<&str>,
+    phase: Option<&str>,
+    errors: &mut Vec<String>,
+) {
+    let targets = resolve_targets(phases, task, phase, errors);
+    for (pi, ti) in targets {
+        let t = &mut phases[pi].tasks[ti];
+        if t.status == TodoStatus::Blocked {
+            t.status = TodoStatus::Pending;
+            t.block_reason = None;
+        }
+    }
+}
+
 fn append_items(phases: &mut Vec<TodoPhase>, phase_name: &str, items: &[String]) {
     let phase = if let Some(p) = phases.iter_mut().find(|p| p.name == phase_name) {
         p
@@ -310,6 +397,7 @@ fn append_items(phases: &mut Vec<TodoPhase>, phase_name: &str, items: &[String])
             content: content.clone(),
             status: TodoStatus::Pending,
             notes: None,
+            block_reason: None,
         });
     }
 }
@@ -354,6 +442,27 @@ fn normalize_in_progress(phases: &mut [TodoPhase]) {
                 } else {
                     found = true;
                 }
+            }
+        }
+    }
+}
+
+/// After a completion, if no task is `InProgress`, promote the earliest
+/// `Pending` task (in phase order, then task order) to `InProgress`. Blocked
+/// tasks are skipped — they wait on external input and cannot be worked on.
+/// omp "earliest still-open task auto-promotes" contract.
+fn auto_promote_next(phases: &mut [TodoPhase]) {
+    let has_in_progress = phases
+        .iter()
+        .any(|p| p.tasks.iter().any(|t| t.status == TodoStatus::InProgress));
+    if has_in_progress {
+        return;
+    }
+    for phase in phases {
+        for task in &mut phase.tasks {
+            if task.status == TodoStatus::Pending {
+                task.status = TodoStatus::InProgress;
+                return;
             }
         }
     }
@@ -430,6 +539,7 @@ pub fn phases_to_markdown(phases: &[TodoPhase]) -> String {
             let marker = match task.status {
                 TodoStatus::Completed => "- [x]",
                 TodoStatus::Abandoned => "- [-]",
+                TodoStatus::Blocked => "- [!]",
                 _ => "- [ ]",
             };
             out.push_str(&format!("  {} {}\n", marker, task.content));
@@ -490,6 +600,7 @@ pub fn markdown_to_phases(md: &str) -> Result<Vec<TodoPhase>, String> {
                 content,
                 status,
                 notes: None,
+                block_reason: None,
             });
         }
     }
@@ -536,6 +647,9 @@ fn parse_task_line(line: &str) -> Option<(TodoStatus, String)> {
     if let Some(rest) = t.strip_prefix("- [-] ") {
         return Some((TodoStatus::Abandoned, rest.to_string()));
     }
+    if let Some(rest) = t.strip_prefix("- [!] ") {
+        return Some((TodoStatus::Blocked, rest.to_string()));
+    }
     if let Some(rest) = t.strip_prefix("- [ ] ") {
         return Some((TodoStatus::Pending, rest.to_string()));
     }
@@ -556,17 +670,34 @@ pub fn format_summary(phases: &[TodoPhase], errors: &[String], read_only: bool) 
                 .count()
         })
         .sum();
+    let blocked: usize = phases
+        .iter()
+        .map(|p| {
+            p.tasks
+                .iter()
+                .filter(|t| t.status == TodoStatus::Blocked)
+                .count()
+        })
+        .sum();
+    let blocked_suffix = if blocked > 0 {
+        format!(", {} blocked", blocked)
+    } else {
+        String::new()
+    };
 
     let mut out = if read_only {
         format!(
-            "\u{1F4CB} Todo list (read-only) — {}/{} done\n\n",
+            "\u{1F4CB} Todo list (read-only) — {}/{} done{blocked_suffix}\n\n",
             done, total
         )
     } else if errors.is_empty() {
-        format!("\u{2713} Todo updated — {}/{} done\n\n", done, total)
+        format!(
+            "\u{2713} Todo updated — {}/{} done{blocked_suffix}\n\n",
+            done, total
+        )
     } else {
         format!(
-            "\u{26A0} Todo updated with {} error(s) — {}/{} done\n\n",
+            "\u{26A0} Todo updated with {} error(s) — {}/{} done{blocked_suffix}\n\n",
             errors.len(),
             done,
             total
@@ -579,6 +710,11 @@ pub fn format_summary(phases: &[TodoPhase], errors: &[String], read_only: bool) 
         }
         for task in &phase.tasks {
             out.push_str(&format!("  {} {}\n", task.status.icon(), task.content));
+            if task.status == TodoStatus::Blocked
+                && let Some(reason) = &task.block_reason
+            {
+                out.push_str(&format!("      \u{23F8} {reason}\n"));
+            }
         }
     }
 
@@ -595,10 +731,16 @@ pub fn format_summary(phases: &[TodoPhase], errors: &[String], read_only: bool) 
 pub fn apply_ops(phases: &mut Vec<TodoPhase>, ops: &[TodoOp]) -> TodoUpdateResult {
     let old_phases = phases.clone();
     let mut errors = Vec::new();
+    let had_done = ops.iter().any(|op| matches!(op, TodoOp::Done { .. }));
     for op in ops {
         apply_entry(phases, op, &mut errors);
     }
     normalize_in_progress(phases);
+    // omp: on each completion the earliest still-open task auto-promotes to
+    // in_progress, so the list always points at what to work on next.
+    if had_done {
+        auto_promote_next(phases);
+    }
     let completed_tasks = get_completion_transitions(&old_phases, phases);
     TodoUpdateResult {
         phases: phases.clone(),
@@ -644,8 +786,10 @@ impl AgentTool for TodoTool {
 
     fn description(&self) -> &str {
         "Phased todo list manager. Use init to create a plan, start/done/drop \
-         to transition tasks, append to add, rm to remove, view to read. \
-         Tasks should be 5-10 words describing WHAT not HOW."
+         to transition tasks, block/unblock to gate tasks on external input, \
+         append to add, rm to remove, view to read. On each completion the \
+         earliest still-open task auto-promotes to in_progress. Tasks should \
+         be 5-10 words describing WHAT not HOW."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -660,10 +804,11 @@ impl AgentTool for TodoTool {
                         "properties": {
                             "op": {
                                 "type": "string",
-                                "enum": ["init", "start", "done", "drop", "rm", "append", "view"]
+                                "enum": ["init", "start", "done", "drop", "block", "unblock", "rm", "append", "view"]
                             },
                             "task": {"type": "string", "description": "Task content (verbatim)"},
                             "phase": {"type": "string", "description": "Phase name"},
+                            "reason": {"type": "string", "description": "Why the task is blocked (block op only)"},
                             "items": {"type": "array", "items": {"type": "string"}},
                             "list": {
                                 "type": "array",
@@ -720,6 +865,7 @@ mod tests {
             content: content.into(),
             status,
             notes: None,
+            block_reason: None,
         }
     }
 
@@ -945,5 +1091,190 @@ mod tests {
         );
         assert!(result.errors.is_empty());
         assert_eq!(phases[0].tasks[0].status, TodoStatus::Abandoned);
+    }
+
+    #[test]
+    fn block_marks_blocked_with_reason() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![make_task("a1", TodoStatus::Pending)],
+        }];
+        let result = apply_ops(
+            &mut phases,
+            &[TodoOp::Block {
+                task: Some("a1".into()),
+                phase: None,
+                reason: Some("waiting on user".into()),
+            }],
+        );
+        assert!(result.errors.is_empty());
+        assert_eq!(phases[0].tasks[0].status, TodoStatus::Blocked);
+        assert_eq!(
+            phases[0].tasks[0].block_reason.as_deref(),
+            Some("waiting on user")
+        );
+    }
+
+    #[test]
+    fn block_skips_terminal_states() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![make_task("done", TodoStatus::Completed)],
+        }];
+        apply_ops(
+            &mut phases,
+            &[TodoOp::Block {
+                task: Some("done".into()),
+                phase: None,
+                reason: None,
+            }],
+        );
+        // Completed must not be silently reopened as Blocked.
+        assert_eq!(phases[0].tasks[0].status, TodoStatus::Completed);
+    }
+
+    #[test]
+    fn unblock_returns_to_pending() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![TodoItem {
+                content: "a1".into(),
+                status: TodoStatus::Blocked,
+                notes: None,
+                block_reason: Some("blocked earlier".into()),
+            }],
+        }];
+        let result = apply_ops(
+            &mut phases,
+            &[TodoOp::Unblock {
+                task: Some("a1".into()),
+                phase: None,
+            }],
+        );
+        assert!(result.errors.is_empty());
+        assert_eq!(phases[0].tasks[0].status, TodoStatus::Pending);
+        assert!(phases[0].tasks[0].block_reason.is_none());
+    }
+
+    #[test]
+    fn unblock_is_idempotent_on_nonblocked() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![make_task("a1", TodoStatus::Pending)],
+        }];
+        apply_ops(
+            &mut phases,
+            &[TodoOp::Unblock {
+                task: Some("a1".into()),
+                phase: None,
+            }],
+        );
+        // Pending task stays pending; no error.
+        assert_eq!(phases[0].tasks[0].status, TodoStatus::Pending);
+    }
+
+    #[test]
+    fn done_auto_promotes_next_pending() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![
+                make_task("a1", TodoStatus::InProgress),
+                make_task("a2", TodoStatus::Pending),
+            ],
+        }];
+        let result = apply_ops(
+            &mut phases,
+            &[TodoOp::Done {
+                task: Some("a1".into()),
+                phase: None,
+            }],
+        );
+        assert!(result.errors.is_empty());
+        let a1 = phases[0].tasks.iter().find(|t| t.content == "a1").unwrap();
+        let a2 = phases[0].tasks.iter().find(|t| t.content == "a2").unwrap();
+        assert_eq!(a1.status, TodoStatus::Completed);
+        // omp: completing a1 auto-promotes the earliest still-open task (a2).
+        assert_eq!(a2.status, TodoStatus::InProgress);
+    }
+
+    #[test]
+    fn done_promotion_skips_blocked() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![
+                make_task("a1", TodoStatus::InProgress),
+                make_task("a2", TodoStatus::Blocked),
+                make_task("a3", TodoStatus::Pending),
+            ],
+        }];
+        apply_ops(
+            &mut phases,
+            &[TodoOp::Done {
+                task: Some("a1".into()),
+                phase: None,
+            }],
+        );
+        let a2 = phases[0].tasks.iter().find(|t| t.content == "a2").unwrap();
+        let a3 = phases[0].tasks.iter().find(|t| t.content == "a3").unwrap();
+        // Blocked a2 is skipped; a3 (the earliest Pending) is promoted.
+        assert_eq!(a2.status, TodoStatus::Blocked);
+        assert_eq!(a3.status, TodoStatus::InProgress);
+    }
+
+    #[test]
+    fn done_with_no_open_task_does_not_promote() {
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![make_task("only", TodoStatus::Pending)],
+        }];
+        apply_ops(
+            &mut phases,
+            &[TodoOp::Done {
+                task: Some("only".into()),
+                phase: None,
+            }],
+        );
+        assert_eq!(phases[0].tasks[0].status, TodoStatus::Completed);
+        // Nothing left to promote; no phantom in_progress.
+        assert!(
+            phases[0]
+                .tasks
+                .iter()
+                .all(|t| t.status != TodoStatus::InProgress)
+        );
+    }
+
+    #[test]
+    fn start_does_not_auto_promote() {
+        // init + start must NOT trigger promotion — only done does (omp).
+        let mut phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![
+                make_task("a1", TodoStatus::Pending),
+                make_task("a2", TodoStatus::Pending),
+            ],
+        }];
+        apply_ops(
+            &mut phases,
+            &[TodoOp::Start {
+                task: Some("a1".into()),
+                phase: None,
+            }],
+        );
+        let a1 = phases[0].tasks.iter().find(|t| t.content == "a1").unwrap();
+        let a2 = phases[0].tasks.iter().find(|t| t.content == "a2").unwrap();
+        assert_eq!(a1.status, TodoStatus::InProgress);
+        assert_eq!(a2.status, TodoStatus::Pending);
+    }
+
+    #[test]
+    fn markdown_roundtrip_blocked() {
+        let phases = vec![TodoPhase {
+            name: "Test".into(),
+            tasks: vec![make_task("blocked task", TodoStatus::Blocked)],
+        }];
+        let md = phases_to_markdown(&phases);
+        let parsed = markdown_to_phases(&md).unwrap();
+        assert_eq!(parsed[0].tasks[0].status, TodoStatus::Blocked);
     }
 }

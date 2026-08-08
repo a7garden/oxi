@@ -139,6 +139,7 @@ mod tests {
                 content: "t".into(),
                 status: oxicode_agent::tools::todo::TodoStatus::Pending,
                 notes: None,
+                block_reason: None,
             }],
         }];
         let state = TodoState::with_phases(initial);

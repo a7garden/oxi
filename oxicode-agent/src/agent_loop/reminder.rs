@@ -72,7 +72,7 @@ fn todo_summary(phases: &[TodoPhase]) -> String {
             match task.status {
                 TodoStatus::InProgress => in_progress += 1,
                 TodoStatus::Pending => pending += 1,
-                TodoStatus::Completed | TodoStatus::Abandoned => {}
+                TodoStatus::Completed | TodoStatus::Abandoned | TodoStatus::Blocked => {}
             }
         }
     }
@@ -160,6 +160,7 @@ mod tests {
                     content: content.into(),
                     status,
                     notes: None,
+                    block_reason: None,
                 })
                 .collect(),
         }
