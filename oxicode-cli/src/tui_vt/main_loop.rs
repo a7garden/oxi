@@ -42,6 +42,7 @@ use ratatui::{
 use crate::App;
 use crate::app::agent_hub_registry::HubEntry;
 use crate::app::agent_session::SessionEvent;
+use crate::tui_vt::slash::file_commands::FileCommand;
 use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -235,6 +236,9 @@ pub struct RenderState {
     pub file_search: Option<crate::tui_vt::file_search::FileSearchState>,
     /// Per-tip-key show counter — suppresses ambient tips after SEEN_CAP views.
     pub seen_tips: std::collections::HashMap<&'static str, u32>,
+    /// User-defined slash commands loaded once at startup from
+    /// `.oxicode/commands/` and `~/.oxicode/commands/`.
+    pub file_commands: Vec<FileCommand>,
 }
 
 /// One rendered transcript line.
@@ -680,6 +684,7 @@ pub async fn run_tui(app: App) -> Result<()> {
     )));
     state.lock().cwd = cwd.clone();
     state.lock().catalog = Some(app.catalog());
+    state.lock().file_commands = crate::tui_vt::slash::file_commands::load_file_commands(&cwd);
     // Onboarding tip: surfaces the cheatsheet and help command on first run,
     // auto-dismisses after ~30s of rendering.
     state.lock().tip = Some(EphemeralTip {
@@ -1230,11 +1235,22 @@ fn handle_inline_event(
                     SlashOutcome::Quit => LoopOutcome::Exit,
                     SlashOutcome::Handled => LoopOutcome::Continue,
                     SlashOutcome::NotHandled => {
-                        ctx.reply(
-                            InlineMessageKind::Error,
-                            format!("Unknown command: {}", prompt.trim()),
-                        );
-                        LoopOutcome::Continue
+                        // File-based commands: try before erroring.
+                        if let Some(expanded) = crate::tui_vt::slash::file_commands::try_expand(
+                            &ctx.state.file_commands,
+                            &prompt,
+                        ) {
+                            // Send expanded text directly to the agent worker.
+                            // The original `/cmd args` is already echoed above.
+                            let _ = prompt_tx.send(expanded);
+                            LoopOutcome::Continue
+                        } else {
+                            ctx.reply(
+                                InlineMessageKind::Error,
+                                format!("Unknown command: {}", prompt.trim()),
+                            );
+                            LoopOutcome::Continue
+                        }
                     }
                 };
             }
@@ -3889,11 +3905,20 @@ pub(super) fn effective_scroll_offset(offset: usize, total: usize, viewport: usi
 // Slash-command autocomplete popup
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Filter the built-in slash commands by `token` (the text after `/`).
-/// An empty token returns every command. Matching is prefix-based against
-/// the canonical name and all aliases.
-fn slash_filter(token: &str) -> Vec<SlashPopupItem> {
-    SlashRegistry::builtin_commands()
+/// Filter slash commands by `token` (the text after `/`). An empty token
+/// returns every command. Matching is prefix-based against the canonical
+/// name and all aliases.
+///
+/// Built-in commands are listed first; user-defined file commands are
+/// appended afterwards. Any file command whose name shadows a built-in is
+/// dropped — built-ins always win, so file commands cannot redefine
+/// `/quit`, `/clear`, etc.
+fn slash_filter(token: &str, file_commands: &[FileCommand]) -> Vec<SlashPopupItem> {
+    let builtins = SlashRegistry::builtin_commands();
+    let builtin_names: std::collections::HashSet<&str> =
+        builtins.iter().map(|(n, _, _)| *n).collect();
+
+    let mut items: Vec<SlashPopupItem> = builtins
         .into_iter()
         .filter(|(name, _, aliases)| {
             token.is_empty()
@@ -3911,7 +3936,35 @@ fn slash_filter(token: &str) -> Vec<SlashPopupItem> {
                 name: name.to_string(),
             }
         })
-        .collect()
+        .collect();
+
+    // Append file commands (skip names shadowed by builtins).
+    for fc in file_commands {
+        if builtin_names.contains(fc.name.as_str())
+            || fc
+                .aliases
+                .iter()
+                .any(|alias| builtin_names.contains(alias.as_str()))
+        {
+            continue;
+        }
+        if token.is_empty()
+            || fc.name.starts_with(token)
+            || fc.aliases.iter().any(|a| a.starts_with(token))
+        {
+            let mut label = format!("/{}", fc.name);
+            for a in &fc.aliases {
+                label.push_str(&format!(", /{a}"));
+            }
+            items.push(SlashPopupItem {
+                label,
+                description: fc.description.clone(),
+                name: fc.name.clone(),
+            });
+        }
+    }
+
+    items
 }
 
 /// Recompute the slash popup from the current input buffer. The popup is
@@ -3928,7 +3981,7 @@ fn refresh_slash_popup(state: &mut RenderState) {
         return;
     }
     let token = &buf[1..];
-    let items = slash_filter(token);
+    let items = slash_filter(token, &state.file_commands);
     state.slash_popup.open = !items.is_empty();
     if items.is_empty() {
         state.slash_popup.selected = 0;
@@ -4120,7 +4173,7 @@ mod slash_popup_tests {
 
     #[test]
     fn empty_token_lists_all_commands() {
-        let items = slash_filter("");
+        let items = slash_filter("", &[]);
         // 7 built-in commands.
         assert!(items.len() >= 7);
         assert!(items.iter().any(|i| i.name == "quit"));
@@ -4130,7 +4183,7 @@ mod slash_popup_tests {
 
     #[test]
     fn prefix_filter_matches_name() {
-        let items = slash_filter("qu");
+        let items = slash_filter("qu", &[]);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "quit");
         assert!(items[0].label.contains("/quit"));
@@ -4139,9 +4192,61 @@ mod slash_popup_tests {
     #[test]
     fn prefix_filter_matches_alias() {
         // "cl" should match "clear" (alias "cls") and "compact".
-        let items = slash_filter("cl");
+        let items = slash_filter("cl", &[]);
         let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
         assert!(names.contains(&"clear"));
+    }
+
+    #[test]
+    fn file_commands_appear_in_filter() {
+        let fc = crate::tui_vt::slash::file_commands::FileCommand::parse(
+            "review",
+            "---\ndescription: proj cmd\naliases: cr\n---\nbody",
+        );
+        let items = slash_filter("", &[fc]);
+        assert!(items.iter().any(|i| i.name == "review"));
+        assert!(items.iter().any(|i| i.name == "quit")); // builtins still present
+    }
+
+    #[test]
+    fn file_commands_filtered_by_prefix() {
+        let fc = crate::tui_vt::slash::file_commands::FileCommand::parse(
+            "review",
+            "---\ndescription: x\n---\nbody",
+        );
+        let items = slash_filter("rev", &[fc]);
+        assert!(items.iter().any(|i| i.name == "review"));
+    }
+
+    #[test]
+    fn file_commands_shadowed_by_builtins_are_dropped() {
+        // A file command whose name collides with a built-in must be dropped —
+        // built-ins always win. Without this guarantee the popup could surface
+        // two items for the same prefix and the dispatch layer would pick the
+        // wrong one.
+        let fc = crate::tui_vt::slash::file_commands::FileCommand::parse(
+            "quit",
+            "---\ndescription: hijack\n---\nbody",
+        );
+        let items = slash_filter("", &[fc]);
+        let quit_count = items.iter().filter(|i| i.name == "quit").count();
+        assert_eq!(quit_count, 1, "shadowed file command must not appear");
+        // And it must be the built-in description, not the file one.
+        assert!(
+            items
+                .iter()
+                .any(|i| i.name == "quit" && !i.description.contains("hijack"))
+        );
+    }
+
+    #[test]
+    fn file_commands_with_builtin_aliases_are_dropped() {
+        let fc = crate::tui_vt::slash::file_commands::FileCommand::parse(
+            "review",
+            "---\ndescription: hijack\naliases: quit\n---\nbody",
+        );
+        let items = slash_filter("", &[fc]);
+        assert!(!items.iter().any(|item| item.name == "review"));
     }
 
     #[test]
@@ -4262,7 +4367,7 @@ mod render_tests {
     fn slash_popup_renders_command_list() {
         let mut state = RenderState::default();
         state.slash_popup.open = true;
-        state.slash_popup.items = slash_filter("");
+        state.slash_popup.items = slash_filter("", &[]);
         let rendered = render_frame_to_string(&state);
         assert!(rendered.contains("Commands"), "popup title must render");
         assert!(rendered.contains("/quit"), "popup must list /quit");
@@ -4274,7 +4379,7 @@ mod render_tests {
         state.prompt_prefix = "> ".to_string();
         state.input_buffer = "/qu".to_string();
         state.slash_popup.open = true;
-        state.slash_popup.items = slash_filter("qu");
+        state.slash_popup.items = slash_filter("qu", &[]);
         let rendered = render_frame_to_string(&state);
         assert!(rendered.contains("Commands"), "popup must render");
         assert!(rendered.contains("/quit"), "popup must list /quit");
