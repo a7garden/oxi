@@ -823,22 +823,6 @@ pub fn build_stop_reminder(
     Some(msg)
 }
 
-/// Trait abstracting where todo state lives. Implemented by hosts
-/// (e.g. `oxicode-cli::store::TodoState`) so the stateless `TodoTool` and
-/// the TUI sticky panel share one source of truth.
-pub trait TodoStateProvider: Send + Sync {
-    /// Snapshot of the current phases (cheap clone expected).
-    fn get_phases(&self) -> Vec<TodoPhase>;
-
-    /// Apply a batch of ops asynchronously. The returned future is
-    /// `Send` so it can be driven from a worker task.
-    fn apply_ops<'a>(
-        &'a self,
-        ops: Vec<TodoOp>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<TodoUpdateResult, ToolError>> + Send + 'a>,
-    >;
-}
 // ── TodoTool (AgentTool 구현) ─────────────────────────────────────────
 
 /// `todo` agent tool. 상태 비저장 (상태는 `TodoStateProvider`가 보유).
