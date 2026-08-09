@@ -749,6 +749,80 @@ pub fn apply_ops(phases: &mut Vec<TodoPhase>, ops: &[TodoOp]) -> TodoUpdateResul
     }
 }
 
+// ── Stop-time incomplete-todo reminder ───────────────────────────────
+
+/// Maximum stop-reminder injections per agent run. A hard cap so a
+/// misbehaving agent (e.g. one that keeps adding todos and then stopping)
+/// cannot loop indefinitely.
+pub const MAX_TODO_STOP_REMINDERS: u32 = 3;
+
+/// State for the stop-time incomplete-todo reminder, scoped to a single
+/// agent run. [`build_stop_reminder`] mutates it to dedup unchanged
+/// open-task sets and cap total reminders.
+#[derive(Debug, Default)]
+pub struct StopReminderState {
+    last_signature: Option<String>,
+    count: u32,
+}
+
+impl StopReminderState {
+    /// Reminders emitted so far this run.
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+}
+
+/// Build a stop-time reminder when the todo list has open tasks.
+///
+/// "Open" = `Pending` or `InProgress`. `Blocked` tasks are excluded — they
+/// wait on external input and are not actionable — as are `Completed` and
+/// `Abandoned`.
+///
+/// Returns `None` (leaving `state` untouched) when there is nothing open,
+/// the open set is unchanged since the last reminder, or `max` reminders
+/// have already been emitted. This bounds the agent loop's extra turns:
+/// at most `max` per run, never two in a row without the open set changing.
+pub fn build_stop_reminder(
+    phases: &[TodoPhase],
+    state: &mut StopReminderState,
+    max: u32,
+) -> Option<String> {
+    let open: Vec<&str> = phases
+        .iter()
+        .flat_map(|p| {
+            p.tasks
+                .iter()
+                .filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
+                .map(|t| t.content.as_str())
+        })
+        .collect();
+    if open.is_empty() {
+        return None;
+    }
+    // Signature = open task contents in order. Any change (progress,
+    // reorder, or new open tasks) re-entitles a single fresh reminder.
+    let signature = open.join("\u{1}");
+    if state.last_signature.as_deref() == Some(signature.as_str()) {
+        return None;
+    }
+    if state.count >= max {
+        return None;
+    }
+    state.last_signature = Some(signature);
+    state.count += 1;
+
+    let mut msg = format!("You still have {} incomplete todo task(s):\n", open.len());
+    for content in &open {
+        msg.push_str(&format!("- {}\n", content));
+    }
+    msg.push_str(
+        "Continue working through them, or mark each done/dropped/blocked as \
+         appropriate. Do not treat the overall request as complete while \
+         these tasks remain open.",
+    );
+    Some(msg)
+}
+
 /// Trait abstracting where todo state lives. Implemented by hosts
 /// (e.g. `oxicode-cli::store::TodoState`) so the stateless `TodoTool` and
 /// the TUI sticky panel share one source of truth.
@@ -1276,5 +1350,105 @@ mod tests {
         let md = phases_to_markdown(&phases);
         let parsed = markdown_to_phases(&md).unwrap();
         assert_eq!(parsed[0].tasks[0].status, TodoStatus::Blocked);
+    }
+
+    fn open_task_phases() -> Vec<TodoPhase> {
+        vec![TodoPhase {
+            name: "Work".into(),
+            tasks: vec![
+                make_task("done task", TodoStatus::Completed),
+                make_task("active task", TodoStatus::InProgress),
+                make_task("open task", TodoStatus::Pending),
+                make_task("blocked task", TodoStatus::Blocked),
+                make_task("dropped task", TodoStatus::Abandoned),
+            ],
+        }]
+    }
+
+    #[test]
+    fn stop_reminder_lists_only_open_tasks() {
+        let mut state = StopReminderState::default();
+        let msg = build_stop_reminder(&open_task_phases(), &mut state, MAX_TODO_STOP_REMINDERS)
+            .expect("open tasks should yield a reminder");
+        // InProgress + Pending only; Blocked/Completed/Abandoned excluded.
+        assert!(msg.contains("active task"));
+        assert!(msg.contains("open task"));
+        assert!(!msg.contains("done task"));
+        assert!(!msg.contains("blocked task"));
+        assert!(!msg.contains("dropped task"));
+        assert_eq!(state.count(), 1);
+    }
+
+    #[test]
+    fn stop_reminder_none_when_all_closed() {
+        let mut state = StopReminderState::default();
+        let phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![
+                make_task("x", TodoStatus::Completed),
+                make_task("y", TodoStatus::Abandoned),
+                make_task("z", TodoStatus::Blocked),
+            ],
+        }];
+        assert!(build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS).is_none());
+        assert_eq!(state.count(), 0);
+    }
+
+    #[test]
+    fn stop_reminder_dedups_unchanged_open_set() {
+        let mut state = StopReminderState::default();
+        let phases = open_task_phases();
+        let first = build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS);
+        // Same open set → no second reminder.
+        let second = build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS);
+        assert!(first.is_some());
+        assert!(second.is_none());
+        assert_eq!(state.count(), 1);
+    }
+
+    #[test]
+    fn stop_reminder_re_entitles_after_progress() {
+        let mut state = StopReminderState::default();
+        let phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![make_task("a", TodoStatus::Pending)],
+        }];
+        assert!(build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS).is_some());
+        // Same set again → deduped.
+        assert!(build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS).is_none());
+        // Agent completes `a`, leaving a new open task `b` → fresh reminder.
+        let phases2 = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![
+                make_task("a", TodoStatus::Completed),
+                make_task("b", TodoStatus::Pending),
+            ],
+        }];
+        assert!(build_stop_reminder(&phases2, &mut state, MAX_TODO_STOP_REMINDERS).is_some());
+        assert_eq!(state.count(), 2);
+    }
+
+    #[test]
+    fn stop_reminder_caps_at_max() {
+        let mut state = StopReminderState::default();
+        // Each iteration changes the open set so dedup never triggers; the
+        // hard cap must still bound the count.
+        for i in 0..MAX_TODO_STOP_REMINDERS {
+            let phases = vec![TodoPhase {
+                name: "A".into(),
+                tasks: vec![make_task(&format!("task {i}"), TodoStatus::Pending)],
+            }];
+            assert!(
+                build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS).is_some(),
+                "reminder {i} should fire"
+            );
+        }
+        // Beyond the cap — even with a brand-new open set — no more reminders.
+        let phases = vec![TodoPhase {
+            name: "A".into(),
+            tasks: vec![make_task("task beyond cap", TodoStatus::Pending)],
+        }];
+        assert!(build_stop_reminder(&phases, &mut state, MAX_TODO_STOP_REMINDERS).is_none());
+        assert_eq!(state.count(), MAX_TODO_STOP_REMINDERS);
     }
 }

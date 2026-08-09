@@ -40,6 +40,7 @@ use crate::agent::ProviderResolver;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::state::TokenSource;
+use crate::tools::todo::{MAX_TODO_STOP_REMINDERS, StopReminderState, build_stop_reminder};
 use crate::{state::SharedState, tools::ToolContext, tools::ToolRegistry};
 use anyhow::{Error, Result};
 pub use config::{AfterToolCallHook, AgentLoopConfig, BeforeToolCallHook, ToolExecutionMode};
@@ -773,6 +774,11 @@ impl AgentLoop {
 
         let mut pending_messages: Vec<Message> = self.drain_steering_queue();
 
+        // Stop-time incomplete-todo reminder state (per-run). Bounded by
+        // signature dedup + MAX_TODO_STOP_REMINDERS so nudging the agent to
+        // finish open todos can never loop forever.
+        let mut todo_reminder_state = StopReminderState::default();
+
         // Append-only context for prefix-stable message management.
         let mut append_only =
             crate::agent_loop::append_only::AppendOnlyContext::new(messages.clone());
@@ -1227,6 +1233,24 @@ impl AgentLoop {
                 continue;
             }
 
+            // Stop-time incomplete-todo reminder: if the agent is about to
+            // stop with open todos, inject one user-turn reminder so it
+            // continues or explicitly closes them. Bounded (dedup + cap) so
+            // it can't loop. Blocked/Completed/Abandoned are excluded.
+            if let Some(provider) = self.config.todo.as_ref()
+                && let Some(text) = build_stop_reminder(
+                    &provider.get_phases(),
+                    &mut todo_reminder_state,
+                    MAX_TODO_STOP_REMINDERS,
+                )
+            {
+                tracing::info!(
+                    count = todo_reminder_state.count(),
+                    "[AGENT-LOOP] injecting incomplete-todo stop reminder"
+                );
+                pending_messages = vec![Message::User(UserMessage::new(text))];
+                continue;
+            }
             break;
         }
 
