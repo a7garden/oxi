@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
@@ -46,6 +46,11 @@ pub struct AskBridge {
     /// Ask overlay timeout. `None` = disabled (wait indefinitely).
     /// Set at construction from `Settings::ask_timeout_secs`.
     timeout: Option<Duration>,
+    /// Shared autonomy mode (0 = [`Default`](crate::config::Mode::Default),
+    /// 1 = [`Auto`](crate::config::Mode::Auto)). Toggled at runtime by the
+    /// TUI; read by the ask tool and the per-turn steering closure. Shared
+    /// (same `Arc`) so a toggle takes effect immediately across threads.
+    mode: Arc<AtomicU8>,
 }
 
 impl AskBridge {
@@ -56,6 +61,7 @@ impl AskBridge {
             ui_attached: Arc::new(AtomicBool::new(false)),
             session_id: Arc::new(parking_lot::Mutex::new(None)),
             timeout: None,
+            mode: Arc::new(AtomicU8::new(crate::config::Mode::Default.as_u8())),
         }
     }
 
@@ -103,6 +109,23 @@ impl AskBridge {
     /// Returns the configured timeout duration, if any.
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout
+    }
+
+    /// Current autonomy mode.
+    pub fn mode(&self) -> crate::config::Mode {
+        crate::config::Mode::load(&self.mode)
+    }
+
+    /// Set the autonomy mode (runtime toggle).
+    pub fn set_mode(&self, mode: crate::config::Mode) {
+        self.mode.store(mode.as_u8(), Ordering::SeqCst);
+    }
+
+    /// Clone the shared mode atomic so another owner (e.g. the per-turn
+    /// steering closure) can read/toggle the SAME mode in lock-step with
+    /// this bridge.
+    pub fn mode_handle(&self) -> Arc<AtomicU8> {
+        Arc::clone(&self.mode)
     }
 
     /// Store a pending ask. Called by `AskTool::execute`.
@@ -350,6 +373,18 @@ impl AgentTool for AskTool {
         signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        // Auto mode — the agent runs autonomously without user interaction.
+        // Short-circuit: instead of blocking on the overlay, return a
+        // steering response that tells the model to decide on its own. This
+        // is the guarantee behind `Mode::Auto` ("no questions, run to end").
+        if self.bridge.mode().is_auto() {
+            return Ok(AgentToolResult::success(
+                "Auto mode is active — the user is unavailable. Do not ask the \
+                 user; make a reasonable autonomous decision and proceed to \
+                 completion. Do not call the ask tool again.",
+            ));
+        }
+
         // 0. Headless guard — refuse in non-interactive mode
         if !self.bridge.is_ui_attached() {
             return Ok(AgentToolResult::error(
@@ -512,6 +547,61 @@ pub fn format_answers(answers: &[Answer], timed_out: bool) -> String {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn auto_mode_short_circuits_ask() {
+        // Bridge with UI attached and Auto mode set — the tool must return
+        // the steering response immediately instead of blocking on the overlay.
+        let bridge = std::sync::Arc::new(AskBridge::new());
+        bridge.attach_with_session("test-session");
+        bridge.set_mode(crate::config::Mode::Auto);
+        let tool = AskTool::new(bridge.clone());
+        let ctx = ToolContext::default();
+        let params = serde_json::json!({
+            "questions": [{
+                "id": "x",
+                "prompt": "pick",
+                "options": [
+                    { "value": "a", "label": "A" },
+                    { "value": "b", "label": "B" }
+                ]
+            }]
+        });
+        let result = tool.execute("call-1", params, None, &ctx).await.unwrap();
+        assert!(
+            result.success,
+            "Auto-mode ask should succeed with steering text"
+        );
+        assert!(
+            result.output.contains("Auto mode"),
+            "steering text should mention Auto mode (got: {})",
+            result.output,
+        );
+        assert!(
+            result.output.contains("autonomous"),
+            "should tell model to decide autonomously",
+        );
+        assert!(!bridge.has_pending());
+    }
+
+    #[tokio::test]
+    async fn default_mode_passes_headless_guard_only() {
+        // Default mode + UI not attached → still refused by the headless
+        // guard (Auto guard comes first; Default mode falls through to the
+        // existing headless refusal path).
+        let bridge = std::sync::Arc::new(AskBridge::new());
+        // No attach_with_session — ui_attached stays false.
+        let tool = AskTool::new(bridge);
+        let ctx = ToolContext::default();
+        let params = serde_json::json!({
+            "questions": [{
+                "id": "x",
+                "prompt": "pick",
+                "options": [{ "value": "a", "label": "A" }]
+            }]
+        });
+        let result = tool.execute("call-2", params, None, &ctx).await.unwrap();
+        assert!(!result.success, "headless default-mode ask should error");
+    }
     #[test]
     fn test_parse_questions_valid() {
         let json = serde_json::json!({

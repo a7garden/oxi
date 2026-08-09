@@ -7,6 +7,69 @@ fn default_context_window() -> usize {
     128_000
 }
 
+// Agent autonomy mode — controls whether the agent may pause to ask the
+// user questions or runs autonomously to completion. In [`Mode::Auto`] the
+// `ask` tool short-circuits and a per-turn directive reinforces autonomous
+// operation; [`Mode::Default`] is normal interactive behavior.
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// Agent autonomy mode.
+///
+/// - [`Mode::Default`]: normal interactive behavior — the agent may use the
+///   `ask` tool to request user input.
+/// - [`Mode::Auto`]: autonomous operation — the agent runs to completion
+///   without asking the user questions. The `ask` tool is short-circuited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    /// Normal interactive behavior (the default).
+    #[default]
+    Default,
+    /// Autonomous operation — no user questions, run to completion.
+    Auto,
+}
+
+impl Mode {
+    /// Returns `true` in autonomous ([`Mode::Auto`]) mode.
+    pub fn is_auto(self) -> bool {
+        matches!(self, Mode::Auto)
+    }
+
+    /// Toggle between the two modes.
+    pub fn toggle(self) -> Self {
+        match self {
+            Mode::Default => Mode::Auto,
+            Mode::Auto => Mode::Default,
+        }
+    }
+
+    /// Short display label (`"default"` / `"auto"`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Default => "default",
+            Mode::Auto => "auto",
+        }
+    }
+
+    /// Encode as a `u8` for storage in a shared atomic.
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// Decode from a `u8` (any value other than `1` maps to [`Mode::Default`]).
+    pub fn from_u8(v: u8) -> Self {
+        if v == Mode::Auto.as_u8() {
+            Mode::Auto
+        } else {
+            Mode::Default
+        }
+    }
+
+    /// Read the current mode from a shared atomic.
+    pub fn load(atomic: &AtomicU8) -> Self {
+        Mode::from_u8(atomic.load(Ordering::SeqCst))
+    }
+}
 /// Hook context for `shouldStopAfterTurn`.
 #[derive(Debug, Clone)]
 pub struct ShouldStopAfterTurnContext {
@@ -166,6 +229,12 @@ pub struct AgentConfig {
     #[serde(default)]
     pub session_id: Option<String>,
 
+    /// Autonomy mode — [`Mode::Default`] (interactive) or [`Mode::Auto`]
+    /// (autonomous; the `ask` tool is short-circuited and a directive
+    /// reinforces autonomous operation). Default: [`Mode::Default`].
+    #[serde(default)]
+    pub mode: Mode,
+
     /// Per-provider options for fine-grained control.
     ///
     /// When set, these are passed through to [`oxicode_ai::StreamOptions::provider_options`]
@@ -250,6 +319,7 @@ impl Default for AgentConfig {
             workspace_dir: None,
             output_mode: None,
             provider_options: None,
+            mode: Mode::Default,
             session_id: None,
             ttsr_engine: None,
             memory: None,

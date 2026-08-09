@@ -88,7 +88,7 @@ pub use advisor::{
 #[oxicode_stable(since = "0.63.0")]
 pub use config::{
     AfterToolCallContext, AfterToolCallResult, AgentConfig, AgentHooks, BeforeToolCallContext,
-    BeforeToolCallResult, ShouldStopAfterTurnContext, ToolExecutionMode,
+    BeforeToolCallResult, Mode, ShouldStopAfterTurnContext, ToolExecutionMode,
 };
 pub use error::AgentError;
 pub use events::{AgentEvent, StreamDelta, ToolCallContext, VisitReason};

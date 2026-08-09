@@ -265,7 +265,7 @@ pub use oxicode_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
     AgentTool, AgentToolResult, BrowseProgress, BrowseProgressCallback, CompactedContext,
     CompactionEvent, CompactionHook, EditTool, FindTool, GetSearchResultsTool, GrepTool, LsTool,
-    OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState, StreamDelta,
+    Mode, OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState, StreamDelta,
     StructuredOutput, StructuredOutputError, ToolCallContext, ToolContext, ToolError,
     ToolExecutionMode, ToolRegistry, VisitReason, WebSearchTool, WriteTool,
 };

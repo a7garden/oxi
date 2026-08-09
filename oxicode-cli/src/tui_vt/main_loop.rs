@@ -24,6 +24,7 @@ use crossterm::{
     terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate, disable_raw_mode, enable_raw_mode},
 };
 use oxicode_agent::AgentEvent;
+use oxicode_agent::config::Mode;
 use oxicode_agent::tools::TodoStateProvider;
 use oxicode_agent::tools::todo::TodoStatus;
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
@@ -219,6 +220,10 @@ pub struct RenderState {
     pub last_esc_at: Option<std::time::Instant>,
     /// Multiline input mode — Enter inserts newline, Shift+Enter sends.
     pub multiline_mode: bool,
+    /// Autonomy mode mirror for display. The authoritative value lives in
+    /// the shared `AskBridge` mode atomic (toggled by Shift+Tab); this field
+    /// is kept in lock-step so the render loop can draw a badge.
+    pub autonomy_mode: Mode,
     /// Submitted prompt history (most-recent-first).
     pub prompt_history: Vec<String>,
     /// Current position in history navigation (None = not navigating).
@@ -709,7 +714,15 @@ pub async fn run_tui(app: App) -> Result<()> {
             true,
         );
     }
-    spawn_input_thread(state.clone(), evt_tx.clone());
+    // Shared autonomy-mode handle — Shift+Tab toggles it at runtime. The
+    // AskBridge atomic is the authority; the render state mirrors it so the
+    // composer can draw a mode badge.
+    let mode_handle = app.ask_bridge().map(|b| {
+        let handle = b.mode_handle();
+        state.lock().autonomy_mode = Mode::load(&handle);
+        handle
+    });
+    spawn_input_thread(state.clone(), evt_tx.clone(), mode_handle);
 
     // Worker thread that owns the agent loop. Receives prompts over a
     // tokio mpsc and dispatches them through `run_with_channel`. The
@@ -1577,6 +1590,7 @@ pub(super) fn clear_confirmation() -> ModalConfirmation {
 fn spawn_input_thread(
     state: Arc<parking_lot::Mutex<RenderState>>,
     evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+    mode_handle: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         // Poll stdin in a tight loop. `event::poll` returns `Ok(false)` on
@@ -1722,6 +1736,29 @@ fn spawn_input_thread(
             }
 
             match key.code {
+                // Shift+Tab — cycle autonomy mode Default <-> Auto.
+                KeyCode::BackTab => {
+                    if let Some(h) = &mode_handle {
+                        let new_mode = Mode::load(h).toggle();
+                        h.store(new_mode.as_u8(), std::sync::atomic::Ordering::SeqCst);
+                        let label = new_mode.label();
+                        let detail = if new_mode.is_auto() {
+                            "autonomous — no questions, runs to completion"
+                        } else {
+                            "interactive — may ask questions"
+                        };
+                        let mut s = state.lock();
+                        s.autonomy_mode = new_mode;
+                        s.tip = Some(EphemeralTip {
+                            text: format!("Mode: {label} — {detail}"),
+                            born_tick: 0,
+                            ttl_ticks: 240,
+                            key: "mode_toggle",
+                            ambient: false,
+                        });
+                    }
+                    continue;
+                }
                 KeyCode::Enter => {
                     // Multiline mode: plain Enter inserts a newline.
                     // Shift+Enter (or Enter in non-multiline mode) sends.
@@ -2497,6 +2534,7 @@ fn cheatsheet_lines() -> Vec<String> {
         "  Ctrl+C       Cancel run (then y to quit)".into(),
         "  Ctrl+Enter   Send now (abort + submit)".into(),
         "  Ctrl+M       Toggle multiline input".into(),
+        "  Shift+Tab    Toggle Auto mode (no questions, runs to end)".into(),
         "  Ctrl+;       Toggle queue panel".into(),
         "".into(),
         "  Special Input".into(),
@@ -3387,6 +3425,14 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    if state.autonomy_mode.is_auto() {
+        line_spans.push(Span::styled(
+            "[auto] ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     line_spans.push(Span::styled(prefix, prefix_style));
     if state.shell_mode {
         line_spans.push(Span::styled(
@@ -3426,9 +3472,11 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
             .map(|l| format!("[{l}] ").chars().count() as u16)
             .unwrap_or(0);
         let shell_off = if state.shell_mode { 2 } else { 0 };
+        let mode_off = if state.autonomy_mode.is_auto() { 7 } else { 0 };
         let cursor_x = area.left()
             + 1
             + vim_off
+            + mode_off
             + shell_off
             + state.prompt_prefix.chars().count() as u16
             + state.input_cursor as u16;

@@ -90,6 +90,16 @@ impl<'a> AgentBuilder<'a> {
         self.system_prompt = Some(prompt.into());
         self
     }
+
+    /// Set the agent's autonomy [`Mode`](oxicode_agent::Mode).
+    ///
+    /// In [`Mode::Auto`](oxicode_agent::Mode::Auto) the agent runs to
+    /// completion without asking the user questions (the `ask` tool is
+    /// short-circuited). Default: [`Mode::Default`](oxicode_agent::Mode::Default).
+    pub fn with_mode(mut self, mode: oxicode_agent::Mode) -> Self {
+        self.config.mode = mode;
+        self
+    }
     /// Register a [`TodoStateProvider`](crate::TodoStateProvider) so the agent's `todo` tool works.
     ///
     /// The provider is shared between the agent (writer) and the host

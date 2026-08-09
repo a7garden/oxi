@@ -127,6 +127,12 @@ pub struct AgentLoopConfig {
     /// approval gating (all tools allowed without check).
     pub approval_config: ApprovalConfig,
 
+    /// Autonomy mode — threaded from [`crate::config::AgentConfig::mode`].
+    /// In [`crate::config::Mode::Auto`] the agent runs without user
+    /// interaction (the `ask` tool is short-circuited). Default:
+    /// [`crate::config::Mode::Default`].
+    pub mode: crate::config::Mode,
+
     /// Soft tool requirements: tools the agent should call.
     ///
     /// On the first turn where a soft-required tool is missing, the loop
@@ -201,6 +207,7 @@ impl Default for AgentLoopConfig {
             subagent_depth: 0,
             thinking_loop_detection: true,
             approval_config: ApprovalConfig::default(),
+            mode: crate::config::Mode::default(),
             soft_requirements: Vec::new(),
             harmony_leak_detection: false,
             dialect: None,

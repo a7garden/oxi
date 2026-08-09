@@ -373,6 +373,20 @@ impl App {
         // owns a fresh `Arc` clone — cheap, but essential so the agent
         // and the runtime (which owns the `SessionState`) see mutations
         // from either side.
+        // Build the shared AskBridge early. Its mode atomic is shared with
+        // the per-turn steering closure below so a runtime toggle
+        // (Shift+Tab in the TUI) takes effect immediately across the agent
+        // loop, the ask tool, and the render state.
+        let ask_timeout = if settings.ask_timeout_secs > 0 {
+            Some(std::time::Duration::from_secs(settings.ask_timeout_secs))
+        } else {
+            None
+        };
+        let bridge = std::sync::Arc::new(oxicode_agent::tools::ask::AskBridge::with_timeout(
+            ask_timeout,
+        ));
+        let mode_handle = bridge.mode_handle();
+
         let stop_flag = Arc::clone(&session_state.should_stop);
         let steering = Arc::clone(&session_state.steering);
         let follow_up = Arc::clone(&session_state.follow_up);
@@ -380,7 +394,19 @@ impl App {
             should_stop_after_turn: Arc::new(move |_| {
                 stop_flag.load(std::sync::atomic::Ordering::SeqCst)
             }),
-            get_steering_messages: Arc::new(move || steering.write().drain(..).collect()),
+            get_steering_messages: Arc::new(move || {
+                let mut msgs: Vec<oxicode_sdk::Message> = steering.write().drain(..).collect();
+                // Auto mode: reinforce autonomous operation every turn so a
+                // mid-session Shift+Tab toggle takes effect immediately.
+                if oxicode_agent::config::Mode::load(&mode_handle).is_auto() {
+                    msgs.push(oxicode_sdk::Message::User(oxicode_sdk::UserMessage::new(
+                        "Autonomy mode (auto) is active: proceed autonomously to \
+                         completion without asking the user questions. Make \
+                         reasonable decisions on your own and keep working.",
+                    )));
+                }
+                msgs
+            }),
             get_follow_up_messages: Arc::new(move || follow_up.write().drain(..).collect()),
             tool_execution: oxicode_agent::config::ToolExecutionMode::Sequential,
         };
@@ -394,14 +420,6 @@ impl App {
             .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
         let agent = Arc::new(agent);
 
-        let ask_timeout = if settings.ask_timeout_secs > 0 {
-            Some(std::time::Duration::from_secs(settings.ask_timeout_secs))
-        } else {
-            None
-        };
-        let bridge = std::sync::Arc::new(oxicode_agent::tools::ask::AskBridge::with_timeout(
-            ask_timeout,
-        ));
         let ask_tool = oxicode_agent::tools::ask::AskTool::new(bridge.clone());
         agent.tools().register_arc(std::sync::Arc::new(ask_tool));
         // Open the local issue store rooted at the project (`.oxicode/issues/`).
