@@ -63,7 +63,7 @@ impl BedrockProvider {
         "us-east-1".to_string()
     }
 
-    /// Read region from ~/.aws/config [default] region=...
+    /// Read region from `~/.aws/config` under the `[default]` section.
     fn region_from_aws_config() -> Option<String> {
         let home = dirs::home_dir()?;
         let config_path = home.join(".aws").join("config");
@@ -104,7 +104,7 @@ impl BedrockProvider {
         Err(ProviderError::MissingApiKey)
     }
 
-    /// Read credentials from ~/.aws/credentials [default]
+    /// Read credentials from `~/.aws/credentials` under the `[default]` section.
     fn creds_from_aws_file() -> Option<(String, String)> {
         let home = dirs::home_dir()?;
         let creds_path = home.join(".aws").join("credentials");

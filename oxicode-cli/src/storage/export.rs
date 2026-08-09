@@ -510,7 +510,7 @@ fn render_edit_call(arguments: &serde_json::Value) -> String {
 }
 
 /// Render a `grep` / `find` / `ls` tool call.
-/// `tag` is the bracket label ([G]/[F]/[D]), `key` is the argument key
+/// `tag` is the bracket label (\[G\]/\[F\]/\[D\]), `key` is the argument key
 /// holding the user's query (pattern for grep, name for find, path for ls).
 fn render_search_call(tag: &str, key: &str, arguments: &serde_json::Value) -> String {
     let query = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");

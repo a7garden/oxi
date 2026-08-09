@@ -1116,7 +1116,7 @@ fn scratchpad_clear(conn: &rusqlite::Connection, session_id: &str) -> Result<usi
 ///
 /// Mirrors omp's `exportToDict` — selects every row scoped to the
 /// session, excluding superseded entries. Uses `store::row_to_memory_row`
-/// to hydrate each row into a [`MemoryRow`].
+/// to hydrate each row into a [`MemoryRow`](crate::types::MemoryRow).
 fn export_working_memory(
     conn: &rusqlite::Connection,
     session_id: &str,

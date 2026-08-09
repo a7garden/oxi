@@ -3,10 +3,10 @@
 //! These live in a sibling module to [`super::registry`] to keep the catalog-
 //! dependent and introspection commands isolated from the core command
 //! plumbing. They are registered alongside the built-ins by
-//! [`register_extra`], which [`super::registry::register_all`] calls.
+//! `register_extra` (called from `register_all` in the sibling `registry`
 //!
 //! Every command here is self-contained: it owns its definition + execution
-//! and receives a [`SlashCtx`] (`session`, `handle`, `state`). The model
+//! and receives a `SlashCtx` (`session`, `handle`, `state`). The model
 //! catalog is reached via `ctx.state.catalog` (captured once at TUI startup);
 //! credentials via the process-global `shared_auth_storage()`.
 

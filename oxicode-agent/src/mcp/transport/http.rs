@@ -46,7 +46,7 @@ pub struct StreamableHttpTransport {
     /// every subsequent request header.
     session_id: Mutex<Option<String>>,
     /// Inbound handler for notifications and server→client requests.
-    /// Uses `parking_lot` (sync) so the sync [`set_inbound_handler`]
+    /// Uses `parking_lot` (sync) so the sync [`Self::set_inbound_handler`]
     /// setter can write without `async` plumbing; the guard is dropped
     /// before any `.await` so the `!Send` constraint is safe.
     inbound_handler: parking_lot::Mutex<Option<InboundHandler>>,

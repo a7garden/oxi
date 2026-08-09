@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 /// Maximum characters per line in grep output
 const GREP_MAX_LINE_LENGTH: usize = 500;
 
-/// Truncate a single line to max characters, adding "... [truncated]" suffix.
+/// Truncate a single line to max characters, adding "... <kbd>truncated</kbd>" suffix.
 fn truncate_line(line: &str) -> (String, bool) {
     if line.len() <= GREP_MAX_LINE_LENGTH {
         (line.to_string(), false)

@@ -1515,7 +1515,7 @@ impl AgentSession {
     /// Emit a before-tool-call event to extensions.
     ///
     /// Extensions may block the tool call by returning an error.
-    /// Returns the [`ToolCallEmitResult`] with blocking status.
+    /// Returns the [`ToolCallEmitResult`](crate::extensions::types::ToolCallEmitResult) with blocking status.
     pub fn emit_before_tool_call(
         &self,
         tool_name: &str,

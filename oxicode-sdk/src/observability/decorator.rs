@@ -3,7 +3,7 @@
 //!
 //! Built-in [`ObservabilityDecorator`] bundles the four observability
 //! pieces (audit, authorizer, tracer, cost tracker) that previously had
-//! silent no-op setters on [`crate::SupervisorBuilder`]. The decorator
+//! silent no-op setters on [`SupervisorBuilder`](crate::builder::SupervisorBuilder). The decorator
 //! is applied to the [`crate::AgentBuilder`] *before* `.build()` runs,
 //! so the agent's middleware pipeline + event-tap dispatch are wired
 //! exactly as if the caller had set each piece per-agent via

@@ -200,7 +200,7 @@ impl AdvisorTranscriptRecorder {
         self.cursor.store(messages.len(), Ordering::SeqCst);
     }
 
-    /// Build the post-prompt hook for [`AgentAdvisor::with_post_prompt_hook`].
+    /// Build the post-prompt hook for [`AgentAdvisor::with_post_prompt_hook`](oxicode_agent::AgentAdvisor::with_post_prompt_hook).
     #[must_use]
     pub fn hook(self: &Arc<Self>) -> Arc<dyn Fn(&oxicode_agent::Agent) + Send + Sync> {
         let this = Arc::clone(self);

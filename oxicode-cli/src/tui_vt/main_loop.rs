@@ -1522,15 +1522,15 @@ impl Drop for StreamingGuard<'_> {
 /// Central Ctrl+C policy.
 ///
 /// - **Agent streaming** → abort the current run and tell the user to press
-///   again to quit. The abort is effective because [`install_runtime_hooks`]
-///   wires the session's `should_stop` flag into the agent loop.
+///   again to quit. The abort is effective because the session hooks installed
+///   via `App::from_oxicode` → `with_session_hooks` wire the session's
+///   `should_stop` flag into the agent loop.
 /// - **Agent idle** → exit the application.
 ///
 /// Both the input-thread key event (`InlineEvent::Interrupt`) and the OS
 /// signal handler (`tokio::signal::ctrl_c()`) route through here so
 /// behavior is identical regardless of how the interrupt arrives.
 ///
-/// [`install_runtime_hooks`]: crate::app::agent_session::AgentSession::install_runtime_hooks
 fn handle_interrupt(
     state: &mut RenderState,
     session: &crate::app::agent_session::AgentSessionHandle,
@@ -2648,7 +2648,7 @@ fn accent_color_for_kind(kind: InlineMessageKind, styles: &ThemeStyles) -> Color
 /// Compose one frame using the agent view layout (grok-build-style):
 /// StatusBar (top) → Scrollback (dominant) → Prompt → ShortcutsBar (bottom).
 /// Chrome geometry and the status/shortcuts bars are rendered by
-/// [`frame_layout::render_chrome`]; the transcript and composer are placed
+/// [`render_chrome`](crate::tui_vt::frame_layout::render_chrome); the transcript and composer are placed
 /// into the returned layout rects.
 fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHandle) {
     let area = frame.area();
@@ -4080,7 +4080,7 @@ fn refresh_input_popups(state: &mut RenderState) {
 /// Called after every buffer mutation in the input thread. The filesystem
 /// walk (building the index) happens only on the `None → Some` transition
 /// (when `@` is first typed); subsequent keystrokes just re-filter the
-/// cached index via [`file_search::FileSearchState::refresh`].
+/// cached index via [`FileSearchState::refresh`](crate::tui_vt::file_search::FileSearchState::refresh).
 fn refresh_file_search(state: &mut RenderState) {
     use crate::tui_vt::file_search;
     // Never open the file picker while a slash command is being composed.

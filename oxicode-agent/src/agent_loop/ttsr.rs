@@ -212,7 +212,7 @@ fn default_sg_matcher() -> Box<AstMatcherFn> {
 ///
 /// Returns `Ok(true)` if at least one match is produced, `Ok(false)` on
 /// no matches or any failure that's not a hard parse error. This mirrors
-/// [`crate::tools::ast_grep::run_sg`] but is sync (we run it from the
+/// `crate::tools::ast_grep::run_sg` but is sync (we run it from the
 /// TTSR call site, not from a tokio task).
 fn run_sg_match(pattern: &str, target: &Path) -> std::io::Result<bool> {
     let output = std::process::Command::new("sg")
