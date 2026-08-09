@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.69.0] - 2026-08-10
+
+### Added
+
+- **Autonomy mode (Auto/Goal) with Shift+Tab toggle.** The TUI now exposes a
+  new mode dimension that runs the agent end-to-end without confirming
+  intermediate decisions. The default mode is interactive; Shift+Tab toggles
+  between interactive and Auto. The mode is first-class on the
+  `OxicodeBuilder` (SDK) so products can pin or programmatically switch it
+  independent of the host TUI.
+- **TUI user-defined slash commands.** Load any `*.md` file under
+  `.oxicode/commands/` at startup and the TUI registers its frontmatter
+  name as a slash command that prompts the agent with the body. Enables
+  teams to ship per-repo workflows without compiling.
+- **TUI slash-command expansion.** `/settings`, `/shortcuts`, `/help`,
+  `/model`, `/providers`, `/tools`, `/mcp`, `/info`, `/export`,
+  `/commands`, `/themes`, `/search`, `/vim`, `/sessions`, `/abort`,
+  `/quit` are registered; in-TUI provider/model edits are now wired
+  end-to-end.
+- **Todo agent tool: `block` / `unblock` ops + auto-promotion.** The
+  todo tool now lets the agent mark work blocked (waiting on external
+  input) and unblock it; the UI auto-promotes the earliest unblocked
+  pending item to `in_progress` when the active task closes. A live TUI
+  panel renders the current todo set.
+- **Todo agent tool: stop-time incomplete-todo reminder.** When the
+  agent loop returns to the user with an idle todo set still carrying
+  pending or in-progress items, the runtime injects a single-turn
+  reminder so the agent surfaces the unfinished work before actually
+  stopping. Bounded by signature dedup and a max-counter.
+
+### Changed
+
+- **Todo agent tool: removed the dead duplicate `TodoStateProvider`
+  trait.** The instrumentation-around-state path was never wired; the
+  single, shipped provider trait is the source of truth.
+
+### Documentation
+
+- **TUI: fixed 17 rustdoc `broken-intra-doc-links` errors** that the
+  `cargo doc` CI gate was rejecting. Affected: `oxicode-agent` (ttsr,
+  mcp transport, grep truncate), `oxicode-ai` (bedrock AWS literals),
+  `oxicode-mnemopi` (MemoryRow path), `oxicode-sdk` (SupervisorBuilder
+  path), `oxicode-cli` (AgentAdvisor, ToolCallEmitResult, TUI module
+  links, slash-command private-link). Brings the `cargo doc` job back
+  to green.
+
 ## [0.68.0] - 2026-08-07
 
 ### Added
