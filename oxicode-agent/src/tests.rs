@@ -1890,6 +1890,205 @@ async fn test_multiple_steering_messages() {
     assert_eq!(steering_count, 3);
 }
 
+// ── Stop-time incomplete-todo reminder (end-to-end) ──────────────────
+
+#[tokio::test]
+async fn todo_stop_reminder_fires_and_extends_loop_for_open_tasks() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, TodoUpdateResult};
+    use crate::tools::{TodoStateProvider, ToolRegistry};
+    use oxicode_ai::CompactionStrategy;
+    use parking_lot::Mutex;
+    use std::pin::Pin;
+
+    #[derive(Debug)]
+    struct StubTodos(Vec<TodoPhase>);
+    impl TodoStateProvider for StubTodos {
+        fn get_phases(&self) -> Vec<TodoPhase> {
+            self.0.clone()
+        }
+        fn apply_ops<'a>(
+            &'a self,
+            _ops: Vec<TodoOp>,
+        ) -> Pin<Box<dyn Future<Output = Result<TodoUpdateResult, String>> + Send + 'a>> {
+            Box::pin(async move { Err("stub does not accept ops".to_string()) })
+        }
+    }
+
+    fn open_todo() -> Arc<dyn TodoStateProvider> {
+        Arc::new(StubTodos(vec![TodoPhase {
+            name: "Work".into(),
+            tasks: vec![TodoItem {
+                content: "finish the report".into(),
+                status: TodoStatus::Pending,
+                notes: None,
+                block_reason: None,
+            }],
+        }]))
+    }
+
+    // Two final (no-tool-call) responses: turn 1 stops, the reminder drives
+    // turn 2, which stops again — dedup then ends the run.
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![
+        MultiTurnToolResponse {
+            text: Some("I'm done".to_string()),
+            tool_calls: vec![],
+        },
+        MultiTurnToolResponse {
+            text: Some("Really done".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+        workspace_dir: None,
+        provider_options: None,
+        on_compaction: None,
+        todo: Some(open_todo()),
+        ..Default::default()
+    };
+
+    let agent_loop = AgentLoop::new(
+        provider,
+        config,
+        Arc::new(ToolRegistry::new()),
+        SharedState::new(),
+    );
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    agent_loop
+        .run("do the work".to_string(), move |e| {
+            events_clone.lock().push(e)
+        })
+        .await
+        .unwrap();
+    let events = events.lock();
+
+    // The reminder surfaces as a steering message, exactly once — dedup
+    // suppresses a second even though the loop ran a second turn.
+    let reminder_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+        .count();
+    assert_eq!(
+        reminder_count, 1,
+        "exactly one stop-reminder should fire (dedup bounds it)"
+    );
+
+    // The reminder drove an extra turn: initial stop + reminder-driven turn.
+    let turn_ends = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TurnEnd { .. }))
+        .count();
+    assert_eq!(turn_ends, 2, "reminder should extend the run by one turn");
+}
+
+#[tokio::test]
+async fn todo_stop_reminder_silent_when_all_tasks_closed() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, TodoUpdateResult};
+    use crate::tools::{TodoStateProvider, ToolRegistry};
+    use oxicode_ai::CompactionStrategy;
+    use parking_lot::Mutex;
+    use std::pin::Pin;
+
+    #[derive(Debug)]
+    struct StubTodos(Vec<TodoPhase>);
+    impl TodoStateProvider for StubTodos {
+        fn get_phases(&self) -> Vec<TodoPhase> {
+            self.0.clone()
+        }
+        fn apply_ops<'a>(
+            &'a self,
+            _ops: Vec<TodoOp>,
+        ) -> Pin<Box<dyn Future<Output = Result<TodoUpdateResult, String>> + Send + 'a>> {
+            Box::pin(async move { Err("stub does not accept ops".to_string()) })
+        }
+    }
+
+    // All tasks completed → no open work → the run stops after one turn with
+    // no reminder.
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![MultiTurnToolResponse {
+        text: Some("Done".to_string()),
+        tool_calls: vec![],
+    }]));
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+        workspace_dir: None,
+        provider_options: None,
+        on_compaction: None,
+        todo: Some(Arc::new(StubTodos(vec![TodoPhase {
+            name: "Work".into(),
+            tasks: vec![TodoItem {
+                content: "finished".into(),
+                status: TodoStatus::Completed,
+                notes: None,
+                block_reason: None,
+            }],
+        }])) as Arc<dyn TodoStateProvider>),
+        ..Default::default()
+    };
+    let agent_loop = AgentLoop::new(
+        provider,
+        config,
+        Arc::new(ToolRegistry::new()),
+        SharedState::new(),
+    );
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    agent_loop
+        .run("do the work".to_string(), move |e| {
+            events_clone.lock().push(e)
+        })
+        .await
+        .unwrap();
+    let events = events.lock();
+
+    let reminder_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+        .count();
+    assert_eq!(reminder_count, 0, "no reminder when all tasks are closed");
+    let turn_ends = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TurnEnd { .. }))
+        .count();
+    assert_eq!(turn_ends, 1, "run should stop after a single turn");
+}
+
 // ── Test 6: Follow-up queue processing ───────────────────────────────
 
 #[test]
