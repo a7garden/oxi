@@ -498,6 +498,21 @@ impl Provider for RouterProvider {
                 }
             };
 
+            // 3b. Vision-aware model override. When recent messages carry image
+            // content (e.g. a `browse` screenshot), ensure the resolved model is
+            // vision-capable — swapping to a vision fallback or upgrading the tier
+            // via `ensure_vision_model`. No-op when no images are present. This
+            // activates the VisionSignal infrastructure (signals.rs) that was
+            // previously built but never wired into the routing hot path.
+            let vision = VisionSignal::extract(&context.messages, 10);
+            let is_vision_triggered = vision.requires_vision();
+            let vision_images = vision.recent_image_count;
+            let tier_config = if is_vision_triggered {
+                self.ensure_vision_model(tier_config, tier, profile_name)
+            } else {
+                tier_config
+            };
+
             // 4. Resolve tier config.
             let pm = parse_tier_model(&tier_config).unwrap_or_else(|| ProviderModel {
                 provider: model.provider.clone(),
@@ -522,8 +537,8 @@ impl Provider for RouterProvider {
                 is_fallback: false,
                 is_context_triggered: method == DecisionMethod::ContextUpgrade,
                 is_budget_forced: method == DecisionMethod::BudgetDowngrade,
-                is_vision_triggered: false,
-                vision_images: 0,
+                is_vision_triggered,
+                vision_images,
                 decision_method: method,
             };
             self.pipeline.write().record_decision(decision);
@@ -614,4 +629,116 @@ pub fn set_router_pin(tier: Option<RouterTier>) {
 /// Get the current global router pin tier.
 pub fn get_router_pin() -> Option<RouterTier> {
     *ROUTER_PIN_TIER.read()
+}
+
+#[cfg(test)]
+mod vision_routing_tests {
+    //! These tests cover the vision model-swap that `stream()` now activates.
+    //! `VisionSignal` extraction itself is covered in `signals::vision_tests`;
+    //! here we prove `route_with_vision` (the pub wrapper around the exact
+    //! `ensure_vision_model` logic the hot path calls) performs a real swap.
+    use super::types::RouterTier;
+    use super::{RoutedTierConfig, RouterConfig, RouterProfile, RouterProvider};
+    use crate::context::Context;
+    use crate::messages::{ContentBlock, ImageContent, Message, MessageContent, UserMessage};
+    use crate::providers::ProviderRegistry;
+    use crate::register_model;
+    use crate::types::{Api, InputModality, Model};
+    use std::sync::Arc;
+
+    /// Register a text-only model and a vision-capable model under a test
+    /// provider so `ensure_vision_model` can observe a real swap via the
+    /// global model registry (nextest isolates each test in its own process,
+    /// so the global mutation is safe).
+    fn register_test_models() {
+        let novision = Model::new(
+            "novision",
+            "NoVision",
+            Api::OpenAiCompletions,
+            "testvision",
+            "http://localhost",
+        ); // input defaults to [Text] — no vision
+        let mut sees = Model::new(
+            "sees",
+            "Sees",
+            Api::OpenAiCompletions,
+            "testvision",
+            "http://localhost",
+        );
+        sees.input.push(InputModality::Image);
+        register_model(novision);
+        register_model(sees);
+    }
+
+    /// Profile whose low tier is text-only with a vision-capable fallback.
+    fn swap_config() -> RouterConfig {
+        let mut config = RouterConfig::default();
+        config.profiles.insert(
+            "auto".to_string(),
+            RouterProfile {
+                high: RoutedTierConfig {
+                    model: "testvision/novision".to_string(),
+                    thinking: None,
+                    fallbacks: vec![],
+                },
+                medium: RoutedTierConfig {
+                    model: "testvision/novision".to_string(),
+                    thinking: None,
+                    fallbacks: vec![],
+                },
+                low: RoutedTierConfig {
+                    model: "testvision/novision".to_string(),
+                    thinking: None,
+                    fallbacks: vec!["testvision/sees".to_string()],
+                },
+            },
+        );
+        config
+    }
+
+    fn image_context() -> Context {
+        let mut ctx = Context::new();
+        ctx.messages
+            .push(Message::User(UserMessage::new(MessageContent::Blocks(
+                vec![ContentBlock::Image(ImageContent::new("fake", "image/png"))],
+            ))));
+        ctx
+    }
+
+    /// Image-bearing context routed to a text-only tier model must swap to its
+    /// vision-capable fallback — the core contract the hot-path wiring delivers.
+    #[test]
+    fn route_with_vision_swaps_to_vision_fallback() {
+        register_test_models();
+        let provider = RouterProvider::new(&swap_config(), Arc::new(ProviderRegistry::new()));
+
+        let (vision, tier_config) =
+            provider.route_with_vision(&image_context(), "auto", RouterTier::Low);
+
+        assert!(
+            vision.requires_vision(),
+            "image context must require vision"
+        );
+        assert_eq!(
+            tier_config.model, "testvision/sees",
+            "non-vision low-tier model must swap to the vision fallback"
+        );
+        assert_eq!(vision.recent_image_count, 1);
+    }
+
+    /// No images → no vision requirement → model unchanged.
+    #[test]
+    fn route_with_vision_keeps_model_without_images() {
+        register_test_models();
+        let provider = RouterProvider::new(&swap_config(), Arc::new(ProviderRegistry::new()));
+
+        let mut ctx = Context::new();
+        ctx.messages
+            .push(Message::User(UserMessage::new("just text")));
+
+        let (vision, tier_config) = provider.route_with_vision(&ctx, "auto", RouterTier::Low);
+
+        assert!(!vision.requires_vision());
+        assert_eq!(tier_config.model, "testvision/novision");
+    }
 }

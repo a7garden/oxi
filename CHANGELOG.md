@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(nothing yet)_
+### Added
+
+- **Vision routing is now live in the routing hot path.** The
+  `VisionSignal` → `ensure_vision_model` chain (fully built but previously
+  orphaned — `stream()` called only plain `route()` and hardcoded
+  `is_vision_triggered: false`) is now wired into `RouterProvider::stream()`:
+  when recent messages carry image content (e.g. a `browse` screenshot), the
+  resolved tier model is swapped to a vision-capable fallback or upgraded tier,
+  and the decision records the real `is_vision_triggered` / `vision_images`. New
+  `router::vision_routing_tests` cover the swap.
+
+### Changed
+
+- **`oxibrowser` / `oxibrowser-core` 0.16 / 0.17 → 0.20** (`oxicode-agent`,
+  `oxicode-sdk`). Resolves the lingering version skew. 0.20 adds a new
+  `oxibrowser-render` crate (Blitz / Stylo CSS + Taffy + vello_cpu), so
+  screenshots are now real CSS-laid-out PNGs (full-page by default) and pages
+  execute `<script>` on navigation (SPA fidelity). API-compatible — zero oxicode
+  source changes were needed for the bump. The default build is lighter
+  (`oxibrowser` 0.20 `default = []` = search-only, no `boa_engine`); the
+  `native-browser` feature now compiles the Blitz stack.
+
+### Fixed
+
+- **Supply-chain config cleaned up for the 0.20 dep tree.** `rav1e` / `ravif` /
+  `libfuzzer-sys` are gone — the dead `libfuzzer-sys` NCSA license exception was
+  removed from `deny.toml`. The `paste` (RUSTSEC-2024-0436) ignore comment was
+  corrected (path is now `boa_engine → boa_string`, not `rav1e`) and
+  `rustybuzz` (RUSTSEC-2026-0206, new via the Blitz text-shaping stack) was
+  documented in `audit.toml` / `deny.toml`.
 
 ## [0.70.0] - 2026-08-10
 

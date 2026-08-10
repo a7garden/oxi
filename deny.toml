@@ -34,10 +34,18 @@ ignore = [
     # number_prefix - unmaintained, transitive via indicatif → self_update → oxicode-cli.
     # No known exploit. self_update has no maintained alternative; re-evaluate periodically.
     "RUSTSEC-2025-0119",
-    # paste - unmaintained, transitive via oxibrowser-core → rav1e / boa_engine.
-    # oxibrowser-core is pinned; paste is only used for CSS selector engine internals.
-    # Re-evaluate when oxibrowser-core updates.
+    # paste - unmaintained, transitive via oxibrowser-core → boa_engine → boa_string.
+    # (The old rav1e path was removed in oxibrowser 0.20; paste now reaches us only
+    # through the boa JS engine. No fix while boa 0.20 depends on paste.) Only under
+    # the non-default `native-browser` feature, so cargo-deny's default-features scan
+    # reports "advisory-not-detected" — harmless; kept for `--features native-browser`.
     "RUSTSEC-2024-0436",
+    # rustybuzz 0.20.1 — unmaintained (RUSTSEC-2026-0206), transitive via the Blitz
+    # text-shaping stack (blitz-* → parley → rustybuzz) → oxibrowser-render →
+    # oxibrowser-core, only under the non-default `native-browser` feature. No known
+    # exploit; no fix (Blitz pins rustybuzz). Same not-detected-under-default note as
+    # paste above.
+    "RUSTSEC-2026-0206",
     # ttf-parser 0.21.1 - unmaintained, transitive via fontdue 0.9.3 (latest)
     # → oxicode-snapcompact (snapcompact_render.rs). fontdue pins ttf-parser ^0.21;
     # no upgrade path. Informational, no known exploit. Mirror of audit.toml.
@@ -85,20 +93,6 @@ allow = [
 ]
 private = { ignore = true }
 
-# Targeted exceptions. These do NOT broaden the global allow list above;
-# they apply only to the named crate at the named version.
-#
-# libfuzzer-sys is a fuzzing-only binding (links LLVM's libFuzzer). In our
-# graph it reaches us transitively as:
-#   oxicode-cli → oxibrowser-core → image (avif feature) → ravif → rav1e → libfuzzer-sys
-# rav1e gates it on `cfg(fuzzing)`, so the crate is never linked into the
-# runtime binary. The license is `(MIT OR Apache-2.0) AND NCSA` — NCSA is a
-# permissive, OSI-approved, FSF-Free license, so we whitelist it for this
-# single transitive crate instead of expanding the global allow list.
-[[licenses.exceptions]]
-name = "libfuzzer-sys"
-version = "*"
-allow = ["NCSA"]
 
 [bans]
 multiple-versions = "warn"
