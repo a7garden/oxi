@@ -53,8 +53,10 @@ Zero callers pass `Some(_)`. The protocol path is dead.
 - Input thread: when `overlay.secure_input.is_some()`, route printable keys
   to `value` accumulation (backspace pops, normal text appends at cursor),
   Enter submits as `SecureInput(value)`, Esc submits as `Cancelled`.
-  Ignore non-text keys (`←`/`→` move cursor; copy/paste is `Cmd-V` → text
-  insertion at cursor — best-effort).
+  `←`/`→` move cursor within `value`. Paste (`Cmd-V` / bracketed-paste)
+  inserts the pasted text at the cursor, stripping a trailing `\n`; ASCII
+  range only — non-printable bytes are dropped. The full input box is
+  single-line, so any other `\n` is rejected at insertion time.
 - `render_overlay` draws a single-line input box below the modal text:
   `<label>: [value or * for mask_input]` with `▌` cursor indicator.
   `mask_input=true` displays `*` per character, never the value itself.
