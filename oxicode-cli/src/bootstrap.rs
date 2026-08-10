@@ -206,6 +206,24 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         crate::App::from_oxicode(oxicode, settings, ownership_session_id, Some(session_state))
             .await?;
 
+    // Fire-and-forget OAuth refresh: if the active provider has a stored
+    // OAuth credential that is expired (or within 60 s of expiry), ask the
+    // refresh module to rotate it in the background. A failed refresh must
+    // never crash startup — the agent will surface a re-login prompt on
+    // the first 401 if the refresh actually failed.
+    if let Some(active_provider) = app
+        .settings()
+        .effective_provider(args.provider.as_deref())
+        && !active_provider.is_empty()
+    {
+        let p = active_provider.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::oauth_refresh::refresh_if_expired(&p).await {
+                tracing::debug!(provider = %p, error = %e, "oauth refresh skipped");
+            }
+        });
+    }
+
     // v2.2: wire the MCP credential provider (OAuth2 client_credentials).
     // Reads the same `mcp.json` files the agent uses, picks every server
     // with an `oauth` block, and gives the manager a provider that can
