@@ -114,7 +114,7 @@ async fn implement(
     let _ = header_end; // keep header_end alive for clarity; full body is discarded.
 
     let Some(received_state) = state else {
-        return Err(CallbackError::MissingCode);
+        return Err(CallbackError::BadRequest("missing `state` in callback".into()));
     };
     if received_state != expected_state {
         return Err(CallbackError::StateMismatch {
@@ -194,6 +194,21 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CallbackError::MissingCode));
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_state_returns_bad_request() {
+        let req = "GET /callback?code=abc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let err = drive_callback(req, "ST", "/callback", Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        match &err {
+            CallbackError::BadRequest(msg) => assert!(
+                msg.contains("state"),
+                "expected BadRequest mentioning `state`, got {msg:?}"
+            ),
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
     }
 
     #[tokio::test]
