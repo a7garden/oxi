@@ -518,37 +518,100 @@ fn render_overlay_secure_input_placeholder_when_empty() {
 Run: `cargo nextest run -p oxicode-cli render_overlay_secure_input`
 Expected: FAIL — the input box is not drawn today.
 
-- [ ] **Step 3: Implement the render block in `render_overlay`**
+- [ ] **Step 3: Implement the secure-input branch in `render_overlay`**
 
-In `render_overlay` (around line 2808), after the existing `lines` block and before the items loop, add:
+In `render_overlay` (around line 2908), the existing function renders list overlays (search bar + lines + items). For secure-input overlays, `overlay.items` is empty, so the function should branch early and render only the title + lines + the secure input box. The simplest path:
+
+At the top of `render_overlay`, after computing `filtered` and `selected_filtered_pos`, IF `overlay.secure_input.is_some()`, render a compact frame:
+- centered rect with borders + title (same width/height logic as the existing path, but height = `lines_count + 1 + 2` instead of `lines_count + items_count + 1 + 2`)
+- render lines (same code as the existing `for line_text in &overlay.lines` block)
+- render the secure input box on the next line: `<label>: <display>` where `display` is `mask_input` masks `value` (or placeholder when empty)
+- `return` after rendering — skip the items loop
+
+A precise sketch:
 
 ```rust
-// Secure prompt input box (single-line, masked).
+// At the top of render_overlay, after `let styles = active_styles();`:
 if let Some(secure) = &overlay.secure_input {
-    // Reserve one more row under the lines; clamp to the visible area.
-    if let Some(input_row_idx) = visible_line_count.min(overlay.lines.len()) {
-        let label = &secure.config.label;
-        let display = if secure.value.is_empty() {
-            secure
-                .config
-                .placeholder
-                .clone()
-                .unwrap_or_else(|| "(empty)".to_string())
-        } else if secure.config.mask_input {
-            "\u{2022}".repeat(secure.value.chars().count())
-        } else {
-            secure.value.clone()
+    // Reserve the line just below `overlay.lines` for the input box.
+    let lines_count = overlay.lines.len();
+    let desired_h = (lines_count as u16).saturating_add(1).saturating_add(2); // input row + borders
+    let height = desired_h.min(area.height.saturating_sub(2));
+    let width = area.width.clamp(30, 80);
+    let rect = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, rect);
+
+    let title = Line::from(Span::styled(
+        format!(" {} ", overlay.title),
+        Style::default()
+            .fg(color_from_anstyle(styles.primary.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    ));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
+        .title(title);
+    let inner = block.inner(rect);
+    frame.render_widget(&block, rect);
+
+    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+    let fg = color_from_anstyle(Some(styles.foreground));
+
+    let mut row = inner.top();
+    for line_text in &overlay.lines {
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
         };
-        let prompt = format!("{label}: {display}");
-        if let Some(row) = area_rows.nth(input_row_idx) {
-            let line = Line::from(Span::styled(prompt, styles.dialog_text));
-            // ... draw the line into the centered panel.
-        }
+        let line = Line::from(Span::styled(line_text.clone(), Style::default().fg(secondary)));
+        frame.render_widget(Paragraph::new(line), row_area);
+        row = row.saturating_add(1);
     }
+
+    // Secure input box.
+    let label = &secure.config.label;
+    let display: String = if secure.value.is_empty() {
+        secure.config.placeholder.clone().unwrap_or_else(|| "(empty)".to_string())
+    } else if secure.config.mask_input {
+        // Render one bullet per character so the cursor can sit at the right
+        // byte index without leaking the value.
+        "\u{2022}".repeat(secure.value.chars().count())
+    } else {
+        secure.value.clone()
+    };
+    let prompt = format!("{label}: {display}");
+    let input_row = row; // the row reserved for the input box
+    let row_area = Rect {
+        x: inner.left(),
+        y: input_row,
+        width: inner.width,
+        height: 1,
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            format!("{label}: "),
+            Style::default().fg(secondary),
+        ),
+        Span::styled(
+            display,
+            Style::default().fg(fg),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), row_area);
+    return;
 }
+
+The cursor (`▌`) is intentionally omitted in this task; the helpers in Task 2 already know the cursor position. The render focus is the mask/placeholder visibility asserted by the tests.
 ```
 
-The exact line-drawing call uses the existing modal-block construction pattern. Match the file's idioms for `Paragraph` / `Line` / `Span` with `active_styles()`. The `cursor` indicator (`▌`) is drawn at the column corresponding to `cursor` only when the cursor is at the end of the visible string (avoids needing precise pixel-accurate cursor math in the test).
 
 - [ ] **Step 4: Run the tests to confirm they pass**
 
