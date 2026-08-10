@@ -2907,6 +2907,84 @@ fn render_agent_hub(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 /// marked by ▸.
 fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     let styles = active_styles();
+    // Secure-input overlays draw a compact frame: title + lines + a single
+    // masked input box. List overlays take the longer path below.
+    if let Some(secure) = &overlay.secure_input {
+        // Reserve the line just below `overlay.lines` for the input box.
+        let lines_count = overlay.lines.len();
+        let desired_h = (lines_count as u16).saturating_add(1).saturating_add(2); // input row + borders
+        let height = desired_h.min(area.height.saturating_sub(2));
+        let width = area.width.clamp(30, 80);
+        let rect = Rect {
+            x: area.x + (area.width.saturating_sub(width)) / 2,
+            y: area.y + (area.height.saturating_sub(height)) / 2,
+            width,
+            height,
+        };
+        frame.render_widget(Clear, rect);
+
+        let title = Line::from(Span::styled(
+            format!(" {} ", overlay.title),
+            Style::default()
+                .fg(color_from_anstyle(styles.primary.get_fg_color()))
+                .add_modifier(Modifier::BOLD),
+        ));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
+            .title(title);
+        let inner = block.inner(rect);
+        frame.render_widget(&block, rect);
+
+        let secondary = color_from_anstyle(styles.secondary.get_fg_color());
+        let fg = color_from_anstyle(Some(styles.foreground));
+
+        let mut row = inner.top();
+        for line_text in &overlay.lines {
+            let row_area = Rect {
+                x: inner.left(),
+                y: row,
+                width: inner.width,
+                height: 1,
+            };
+            let line = Line::from(Span::styled(line_text.clone(), Style::default().fg(secondary)));
+            frame.render_widget(Paragraph::new(line), row_area);
+            row = row.saturating_add(1);
+        }
+
+        // Secure input box — mask the value when `mask_input` is on; fall back
+        // to the configured placeholder when the buffer is empty.
+        let label = &secure.config.label;
+        let display: String = if secure.value.is_empty() {
+            secure.config.placeholder.clone().unwrap_or_else(|| "(empty)".to_string())
+        } else if secure.config.mask_input {
+            // One asterisk per character so the length is visible without
+            // leaking the value. The render path must never reveal
+            // `secure.value` when `mask_input` is on.
+            "*".repeat(secure.value.chars().count())
+        } else {
+            secure.value.clone()
+        };
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
+        };
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{label}: "),
+                Style::default().fg(secondary),
+            ),
+            Span::styled(
+                display,
+                Style::default().fg(fg),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), row_area);
+        return;
+    }
     let visible_max = (area.height as usize).saturating_sub(6).max(3);
 
     // Filter items by the search value when search is enabled.
@@ -5442,6 +5520,77 @@ mod render_tests {
         let rendered = render_frame_to_string(&state);
         // No todo content should leak when the list is empty.
         assert!(!rendered.contains('\u{2611}'), "no checkmark when empty");
+    }
+
+    #[test]
+    fn render_overlay_secure_input_shows_label_mask_value_and_placeholder() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let overlay = OverlayState {
+            title: "OpenAI key".into(),
+            lines: vec!["Paste your API key".into()],
+            items: Vec::new(),
+            selected: 0,
+            search: None,
+            secure_input: Some(OverlaySecureInput {
+                config: SecurePromptConfig {
+                    label: "Key".into(),
+                    placeholder: Some("sk-...".into()),
+                    mask_input: true,
+                },
+                value: "sk-abc".into(),
+                cursor: 6,
+            }),
+        };
+        terminal
+            .draw(|f| render_overlay(f, f.area(), &overlay))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        // Mask must show 6 asterisks, never the value.
+        let text: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(text.contains("Key:"));
+        assert!(text.contains("******"));
+        assert!(!text.contains("sk-abc"));
+    }
+
+    #[test]
+    fn render_overlay_secure_input_placeholder_when_empty() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let overlay = OverlayState {
+            title: "OpenAI key".into(),
+            lines: vec!["Paste your API key".into()],
+            items: Vec::new(),
+            selected: 0,
+            search: None,
+            secure_input: Some(OverlaySecureInput {
+                config: SecurePromptConfig {
+                    label: "Key".into(),
+                    placeholder: Some("sk-...".into()),
+                    mask_input: true,
+                },
+                value: String::new(),
+                cursor: 0,
+            }),
+        };
+        terminal
+            .draw(|f| render_overlay(f, f.area(), &overlay))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(text.contains("sk-..."));
     }
 }
 
