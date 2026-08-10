@@ -51,10 +51,11 @@ jobs:
       # CI runs.  nightly-2026-05-02 (rustc 1.97.0-nightly) is the
       # first pinned nightly >= the workspace MSRV (1.96); the old
       # pin (nightly-2025-08-02, rustc 1.90.0) was below MSRV and
-      # could not compile the workspace.  The nightly install
-      # coexists with the 1.96 MSRV install above: cargo-public-api
-      # invokes `cargo +nightly` internally, so the workspace
-      # rust-toolchain.toml 1.96 override does not interfere.
+      # could not compile the workspace.  cargo-public-api 0.52.0
+      # dropped its `--toolchain` flag; the invocation must use
+      # `cargo +nightly-2026-05-02 public-api` explicitly so the
+      # nightly (not the rust-toolchain.toml 1.96 default) builds
+      # the rustdoc JSON.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-05-02
@@ -92,7 +93,7 @@ jobs:
           mkdir -p api-snapshots
           failed=0
           for crate in oxicode-ai oxicode-agent oxicode-sdk; do
-            if cargo public-api -p "$crate" \
+            if cargo +nightly-2026-05-02 public-api -p "$crate" \
                 > "api-snapshots/${crate}.txt" \
                 2> "api-snapshots/${crate}.stderr"; then
               lines=$(wc -l < "api-snapshots/${crate}.txt" | tr -d ' ')
@@ -139,7 +140,7 @@ jobs:
           mkdir -p api-snapshots-main
           removed_any=0
           for crate in oxicode-ai oxicode-agent oxicode-sdk; do
-            ( cd "$RUNNER_TEMP/main-baseline" && cargo public-api -p "$crate" ) \
+            ( cd "$RUNNER_TEMP/main-baseline" && cargo +nightly-2026-05-02 public-api -p "$crate" ) \
               > "api-snapshots-main/${crate}.txt" 2> "api-snapshots-main/${crate}.stderr" || true
             lines=$( wc -l < "api-snapshots-main/${crate}.txt" | tr -d ' ' )
             if [ "$lines" = "0" ]; then
