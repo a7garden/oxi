@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.70.0] - 2026-08-10
+
+### Added
+
+- **In-TUI OAuth provider setup.** Full OAuth 2.0 PKCE flow: provider
+  spec loader from `product-meta.toml`, auth-URL builder + code exchange
+  + browser launch, single-shot loopback callback listener, end-to-end
+  flow runner with refresh-token coalescing, and a headless manual-URL
+  fallback with a 5-minute wait window.
+- **TUI secure prompt input overlay.** The overlay now renders a masked
+  input box and routes submissions through a dedicated
+  `OverlaySubmission::SecureInput` path; `secure_prompt` is threaded
+  into `OverlayState`.
+- **TUI `/providers` action matrix.** Inline provider management — add
+  API key, start OAuth, and remove providers — directly from the
+  `/providers` slash command.
+
+### Fixed
+
+- **TUI: restored overlay cleanup in the `Submitted` arm** that was
+  dropped when the secure-input path was added.
+- **OAuth: missing-state branch returns `BadRequest`, not `MissingCode`.**
+  The loopback listener now rejects requests missing the OAuth state
+  parameter with the correct HTTP status.
+
 ## [0.69.0] - 2026-08-10
 
 ### Added
