@@ -1363,11 +1363,15 @@ pub(crate) fn handle_auth_action(
 ///    subsequent requests can use the access token (and `refresh_token`
 ///    if granted) without re-prompting the user.
 ///
-/// Every step that fails (browser launch, callback timeout, state
-/// mismatch, exchange error) posts an `InlineMessageKind::Error` line to
-/// the transcript and returns; the bound listener is dropped on every
-/// return path, satisfying the single-shot invariant.
+/// Steps that hard-fail (callback timeout, state mismatch, missing
+/// `code`, exchange error, persist error) post an `InlineMessageKind::Error`
+/// line to the transcript and return; the bound listener is dropped on
+/// every return path, satisfying the single-shot invariant.
 ///
+/// Headless fallback (plan §3 / design §3): if `open_browser` returns
+/// `Err`, we do NOT abort. We post an `Info` line printing the auth URL
+/// and lengthen the callback timeout to 5 minutes so the user can paste
+/// the URL into a browser on another machine and complete the flow.
 /// Masking: every user-facing line that mentions the access token
 /// surfaces only the token length (`access_token.chars().count()`), never
 /// the value. Tokens are never logged via `tracing`.
@@ -1378,7 +1382,11 @@ pub(crate) async fn run_oauth_flow(
     auth: Arc<crate::store::auth_storage::AuthStorage>,
 ) {
     use std::time::Duration;
-    let callback_timeout = Duration::from_secs(120);
+    // Timeout is selected AFTER the browser attempt: 2 minutes when the
+    // browser opened (the user is right in front of it), 5 minutes when
+    // it didn't (headless box — user has to copy the URL to another
+    // machine, sign in there, and the redirect has to traverse NAT).
+    // The variable is declared once as `mut` and then frozen below.
     // 1. Bind the loopback listener BEFORE opening the browser so the
     //    `redirect_uri` we hand to the provider already points at a live
     //    port. `TcpListener::bind("127.0.0.1:0")` picks an ephemeral port.
@@ -1424,15 +1432,25 @@ pub(crate) async fn run_oauth_flow(
             spec.redirect_path
         ))],
     );
-    if let Err(e) = crate::provider_oauth::open_browser(&auth_url) {
-        handle.append_line(
-            InlineMessageKind::Error,
-            vec![plain_segment(format!(
-                "OAuth: could not open browser for '{provider}': {e}\nVisit this URL manually: {auth_url}"
-            ))],
-        );
-        return;
-    }
+    // Pick the callback timeout based on whether the browser opened.
+    // Headless fallback (plan §3 / design §3): when the OS refuses to
+    // launch a browser, we surface the URL and KEEP listening so a user
+    // on a different machine can paste it, sign in, and let the
+    // redirect land back on our loopback port. A 5-minute window is
+    // long enough for that round-trip; a 2-minute window is plenty
+    // when the browser already opened in front of the user.
+    let callback_timeout = match crate::provider_oauth::open_browser(&auth_url) {
+        Ok(()) => Duration::from_secs(120),
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Info,
+                vec![plain_segment(format!(
+                    "OAuth: could not open a browser ({e}).\nOpen this URL manually within 5 minutes:\n  {auth_url}"
+                ))],
+            );
+            Duration::from_secs(300)
+        }
+    };
 
     // 4. Wait for the callback. The listener is single-shot by design:
     //    `await_callback` accepts exactly one connection.
