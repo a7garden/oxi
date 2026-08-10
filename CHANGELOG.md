@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(nothing yet)_
+
+## [0.71.0] - 2026-08-10
+
 ### Added
 
 - **Vision routing is now live in the routing hot path.** The
@@ -37,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected (path is now `boa_engine → boa_string`, not `rav1e`) and
   `rustybuzz` (RUSTSEC-2026-0206, new via the Blitz text-shaping stack) was
   documented in `audit.toml` / `deny.toml`.
+- **`oxicode-cli` publish failure fixed.** The OAuth provider-spec loader used
+  `include_str!` to reach into a sibling crate's (`oxicode-catalog`) `data/`
+  directory, which is absent from `oxicode-cli`'s standalone tarball and broke
+  `cargo publish` (cli was stuck at 0.69.0 while the rest shipped 0.70.0). The
+  raw `product-meta.toml` is now exposed via
+  `oxicode_catalog::product_meta_toml()` and consumed through a direct crate
+  dependency instead of the filesystem path.
 
 ## [0.70.0] - 2026-08-10
 
