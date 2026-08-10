@@ -19,7 +19,19 @@
 - **Refresh coalesce.** One in-flight refresh per provider at a time. Concurrent callers wait on `OnceCell`.
 - **Library crate lint rules apply** — no `unwrap()` in non-test code; `cargo clippy --workspace --all-targets -- -D warnings` must pass clean.
 - **Test runner:** `cargo nextest run -p oxicode-cli` for all verification steps.
-- **No new top-level dependencies** beyond `httparse` (header-only, no allocations on the error path) and `open` (already a transitive of many crates; add to `oxicode-cli/Cargo.toml` only). `urlencoding`, `base64` are already in the workspace tree.
+- **New top-level dependencies** (added to `oxicode-cli/Cargo.toml` only):
+  - `httparse` (header-only HTTP parse; no http server needed for single-shot callback)
+  - `open` (browser auto-open; gracefully fails on headless)
+  - `sha2` (PKCE S256 challenge)
+  - `base64` (URL-safe no-pad for PKCE verifier/challenge)
+  - `url` (`build_auth_url` parses + mutates query params)
+  - `rand` (Pkce verifier randomness)
+  - `once_cell` (`OnceCell` for refresh coalesce)
+  - `reqwest` (token exchange; already in workspace)
+  - `chrono` (token expiry timestamps)
+  - `urlencoding` (form body for token POST)
+  - `httpmock` (dev-only, integration tests)
+  - `oauth2` crate is **not** added — too much weight for two providers; hand-roll the wire format.
 
 ## File Structure
 
@@ -32,7 +44,7 @@
 | **Modify:** `oxicode-cli/src/tui_vt/slash/commands.rs` | `ProvidersCommand::execute` already loads names + key status; new variants `InlineListSelection::ProviderAction(AuthAction)` so the host can dispatch. |
 | **Modify:** `oxicode-cli/src/lib.rs` | Add `pub mod provider_oauth;`, `pub mod oauth_listener;`, `pub mod oauth_refresh;`. |
 | **Modify:** `oxicode-ai/data/catalog/product-meta.toml` | Add `[providers.openai.oauth]` and `[providers.anthropic.oauth]` blocks. |
-| **Modify:** `oxicode-cli/Cargo.toml` | Add `httparse`, `open`. |
+| **Modify:** `oxicode-cli/Cargo.toml` | Add `httparse`, `open`, `sha2`, `base64`, `url`, `rand`, `once_cell`, `chrono`, `urlencoding` (runtime); `httpmock` (dev). |
 
 ---
 
@@ -63,8 +75,7 @@ fn materialize_overlay_modal_with_secure_prompt_populates_secure_input() {
         }),
     });
     let state = materialize_overlay(request);
-    let overlay = state.overlay.expect("overlay must be Some");
-    let secure = overlay
+    let secure = state
         .secure_input
         .expect("secure_input must be Some when secure_prompt is Some");
     assert_eq!(secure.config.label, "Key");
@@ -81,10 +92,8 @@ fn materialize_overlay_modal_without_secure_prompt_has_none_secure_input() {
         secure_prompt: None,
     });
     let state = materialize_overlay(request);
-    let overlay = state.overlay.expect("overlay must be Some");
-    assert!(overlay.secure_input.is_none());
+    assert!(state.secure_input.is_none());
 }
-```
 
 - [ ] **Step 2: Run the tests to confirm they fail**
 
