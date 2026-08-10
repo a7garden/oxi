@@ -42,13 +42,6 @@ pub struct OAuthMeta {
     pub specs: HashMap<String, ProviderOAuthSpec>,
 }
 
-/// The catalog file embedded into the binary at compile time.
-///
-/// Path is resolved relative to this module because the layout of
-/// `oxicode-cli/src/` and `oxicode-catalog/data/` is a workspace invariant.
-const PRODUCT_META_TOML: &str =
-    include_str!("../../oxicode-catalog/data/catalog/product-meta.toml");
-
 /// Process-wide cache of the parsed `product-meta.toml` OAuth sections.
 ///
 /// Populated lazily on first call to [`oauth_meta`] (or [`spec_for`]).
@@ -104,7 +97,9 @@ pub fn load_meta(path: &Path) -> std::io::Result<OAuthMeta> {
 /// file does not panic the CLI; downstream code treats "no spec" as
 /// "key-only provider".
 pub fn oauth_meta() -> &'static OAuthMeta {
-    META.get_or_init(|| load_meta_from_str(PRODUCT_META_TOML).unwrap_or_default())
+    META.get_or_init(|| {
+        load_meta_from_str(oxicode_catalog::product_meta_toml()).unwrap_or_default()
+    })
 }
 
 /// Look up the OAuth spec for `provider` (e.g. `"openai"`, `"anthropic"`).

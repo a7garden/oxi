@@ -5667,6 +5667,7 @@ dependencies = [
  "open",
  "oxicode-agent",
  "oxicode-ai",
+ "oxicode-catalog",
  "oxicode-lsp",
  "oxicode-mnemopi",
  "oxicode-sdk",

@@ -159,6 +159,17 @@ pub fn materialize_providers() -> Vec<BuiltinProviderEntry> {
     providers
 }
 
+/// The raw `data/catalog/product-meta.toml` source embedded at compile time.
+///
+/// Exposed so sibling crates (e.g. `oxicode-cli`'s OAuth spec loader) can read
+/// this catalog's own data file **through the crate dependency** rather than
+/// reaching into `data/` via a relative filesystem path — which breaks
+/// standalone `cargo package` / crates.io publishing (the file is not included
+/// in a downstream consumer's tarball).
+pub fn product_meta_toml() -> &'static str {
+    include_str!("../../data/catalog/product-meta.toml")
+}
+
 /// Product-specific metadata: extra HTTP headers for a subset of providers.
 ///
 /// Models.dev does not know oxicode-specific HTTP headers (e.g. `HTTP-Referer`
