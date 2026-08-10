@@ -24,6 +24,7 @@ pub mod lsp;
 pub mod main_dispatch;
 pub mod mcp_credentials;
 pub mod print_mode;
+pub mod provider_oauth;
 pub mod services;
 pub mod setup_wizard;
 pub mod store;

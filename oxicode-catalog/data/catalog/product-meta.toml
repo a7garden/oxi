@@ -44,3 +44,24 @@ extra_headers = [["HTTP-Referer", "https://oxicode.dev/"], ["X-Title", "oxicode"
 [[provider]]
 id = "zenmux"
 extra_headers = [["HTTP-Referer", "https://oxicode.dev/"], ["X-Title", "oxicode"]]
+
+# OAuth metadata for `authorization_code` flow.
+#
+# Source of truth for `provider_oauth::spec_for`. Empty/missing block per
+# provider = key-only. PKCE is public-client only — no `client_secret` field
+# is permitted by the parser.
+[providers.openai.oauth]
+client_id     = "app-OxQ2ZoRxwMh6l3V7eNbC"
+auth_url      = "https://auth.openai.com/oauth/authorize"
+token_url     = "https://auth.openai.com/oauth/token"
+scopes        = ["openid", "profile", "email", "offline_access"]
+redirect_path = "/callback"
+use_pkce      = true
+
+[providers.anthropic.oauth]
+client_id     = "oxicode-cli"
+auth_url      = "https://console.anthropic.com/oauth/authorize"
+token_url     = "https://console.anthropic.com/oauth/token"
+scopes        = ["user:profile", "user:inference", "offline_access"]
+redirect_path = "/callback"
+use_pkce      = true
