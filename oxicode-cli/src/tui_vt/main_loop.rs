@@ -1305,17 +1305,38 @@ pub(crate) fn handle_auth_action(
             );
         }
         AuthAction::StartOAuth => {
-            // TODO(task-8): wire `run_oauth_flow` here. Task 8 owns the
-            // PKCE + loopback-callback plumbing; once it lands this branch
-            // becomes `tokio::spawn(async move { run_oauth_flow(...).await; })`.
-            handle.append_line(
-                InlineMessageKind::Info,
-                vec![plain_segment(format!(
-                    "OAuth login for '{provider}' is being wired up — coming in the next update."
-                ))],
-            );
-            // Touch `auth` so the parameter stays useful for Task 8 (no-op).
-            let _ = auth;
+            // PKCE + loopback-callback glue lives in `run_oauth_flow`
+            // (defined just below `handle_auth_action`). Spawn it on a
+            // dedicated tokio task so the main loop can continue
+            // rendering; the spawned task posts status updates back to
+            // the transcript via the cloned `InlineHandle`.
+            //
+            // First, gate on the provider actually having an OAuth
+            // spec in `product-meta.toml` — the action is only offered
+            // when `next_provider_actions` includes it, so this branch
+            // is purely defensive against a stale UI state.
+            let spec = match crate::provider_oauth::spec_for(provider) {
+                Some(s) => s,
+                None => {
+                    handle.append_line(
+                        InlineMessageKind::Error,
+                        vec![plain_segment(format!(
+                            "OAuth: no OAuth config for '{provider}'."
+                        ))],
+                    );
+                    return;
+                }
+            };
+            // `provider_owned` and `tx` are cloned Strings/`InlineHandle`s
+            // owned by the task; `auth_clone` is the shared storage
+            // singleton (cheap to clone — it is already `Arc`-backed).
+            // `spec` is moved into the task.
+            let provider_owned = provider.to_string();
+            let tx = handle.clone();
+            let auth_clone = Arc::clone(auth);
+            tokio::spawn(async move {
+                run_oauth_flow(provider_owned, spec, tx, auth_clone).await;
+            });
         }
         AuthAction::RemoveKey => {
             state.confirmation = Some(ModalConfirmation {
@@ -1325,6 +1346,175 @@ pub(crate) fn handle_auth_action(
             });
         }
     }
+}
+
+ /// Drive the OAuth `authorization_code` flow for `provider` end to end:
+///
+/// 1. Bind an ephemeral loopback TCP listener and capture its port.
+/// 2. Generate PKCE verifier + S256 challenge (`provider_oauth::pkce_pair`).
+/// 3. Build the authorization URL (`provider_oauth::build_auth_url`) and
+///    open it in the user's browser (`provider_oauth::open_browser`).
+/// 4. Wait on the listener for the redirect carrying the `code` + `state`
+///    (`oauth_listener::await_callback`); bind a timeout so a stuck
+///    listener cannot leak.
+/// 5. Exchange the code for tokens at the provider's token URL
+///    (`provider_oauth::exchange_code`).
+/// 6. Persist the OAuth credential via `AuthStorage::set_oauth_full` so
+///    subsequent requests can use the access token (and `refresh_token`
+///    if granted) without re-prompting the user.
+///
+/// Every step that fails (browser launch, callback timeout, state
+/// mismatch, exchange error) posts an `InlineMessageKind::Error` line to
+/// the transcript and returns; the bound listener is dropped on every
+/// return path, satisfying the single-shot invariant.
+///
+/// Masking: every user-facing line that mentions the access token
+/// surfaces only the token length (`access_token.chars().count()`), never
+/// the value. Tokens are never logged via `tracing`.
+pub(crate) async fn run_oauth_flow(
+    provider: String,
+    spec: crate::provider_oauth::ProviderOAuthSpec,
+    handle: InlineHandle,
+    auth: Arc<crate::store::auth_storage::AuthStorage>,
+) {
+    use std::time::Duration;
+    let callback_timeout = Duration::from_secs(120);
+    // 1. Bind the loopback listener BEFORE opening the browser so the
+    //    `redirect_uri` we hand to the provider already points at a live
+    //    port. `TcpListener::bind("127.0.0.1:0")` picks an ephemeral port.
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0u16)).await {
+        Ok(l) => l,
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!(
+                    "OAuth: could not bind loopback listener for '{provider}': {e}"
+                ))],
+            );
+            return;
+        }
+    };
+    let port = match listener.local_addr() {
+        Ok(addr) => addr.port(),
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!(
+                    "OAuth: could not read loopback port for '{provider}': {e}"
+                ))],
+            );
+            return;
+        }
+    };
+
+    // 2. PKCE pair + per-flow `state`. The state must match what we send
+    //    in the auth URL and what we accept on the callback — a single
+    //    random base64-url string is enough since the flow is single-shot.
+    let (verifier, challenge) = crate::provider_oauth::pkce_pair();
+    let state_token = crate::provider_oauth::pkce_pair().0; // 43-char url-safe random
+
+    // 3. Build auth URL and open the browser. `open_browser` already
+    //    validates the URL scheme so a malformed spec would have failed
+    //    at `build_auth_url` time (it calls `Url::parse` internally).
+    let auth_url = crate::provider_oauth::build_auth_url(&spec, port, &state_token, &challenge);
+    handle.append_line(
+        InlineMessageKind::Info,
+        vec![plain_segment(format!(
+            "OAuth: opening browser for '{provider}' on http://127.0.0.1:{port}{}",
+            spec.redirect_path
+        ))],
+    );
+    if let Err(e) = crate::provider_oauth::open_browser(&auth_url) {
+        handle.append_line(
+            InlineMessageKind::Error,
+            vec![plain_segment(format!(
+                "OAuth: could not open browser for '{provider}': {e}\nVisit this URL manually: {auth_url}"
+            ))],
+        );
+        return;
+    }
+
+    // 4. Wait for the callback. The listener is single-shot by design:
+    //    `await_callback` accepts exactly one connection.
+    let callback = match crate::oauth_listener::await_callback(
+        listener,
+        state_token.clone(),
+        spec.redirect_path.clone(),
+        callback_timeout,
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(crate::oauth_listener::CallbackError::Timeout) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!(
+                    "OAuth: timed out waiting for '{provider}' callback (after {}s)",
+                    callback_timeout.as_secs()
+                ))],
+            );
+            return;
+        }
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!(
+                    "OAuth: callback failed for '{provider}': {e}"
+                ))],
+            );
+            return;
+        }
+    };
+
+    // 5. Exchange code → tokens.
+    let tokens = match crate::provider_oauth::exchange_code(
+        &spec,
+        port,
+        &callback.code,
+        &verifier,
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!(
+                    "OAuth: token exchange failed for '{provider}': {e}"
+                ))],
+            );
+            return;
+        }
+    };
+
+    // 6. Persist. `set_oauth_full` takes u64 `expires_at`; `OAuthTokens`
+    //    exposes i64 (so callers can branch on `now < expires_at` in
+    //    signed arithmetic). Saturate defensively — the value is always
+    //    `now + expires_in` with `expires_in >= 0`, so negatives are
+    //    impossible here, but a guard costs nothing.
+    let new_expires_at: u64 = tokens.expires_at.max(0) as u64;
+    let access_token_len = tokens.access_token.chars().count();
+    // `set_oauth_full` returns `()` and logs persistence failures via
+    // `tracing::warn` — the in-memory credential is always updated.
+    auth.set_oauth_full(
+        &provider,
+        tokens.access_token,
+        tokens.refresh_token,
+        new_expires_at,
+        if tokens.scopes.is_empty() {
+            None
+        } else {
+            Some(tokens.scopes.join(" "))
+        },
+        None,
+    );
+    handle.append_line(
+        InlineMessageKind::Info,
+        vec![plain_segment(format!(
+            "OAuth: '{provider}' logged in. Token stored ({} chars).",
+            access_token_len
+        ))],
+    );
 }
 
  /// Map an input-thread `InlineEvent` to agent actions / state edits.

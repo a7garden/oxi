@@ -256,6 +256,81 @@ pub async fn exchange_code(
     }
 }
 
+ /// Tokens returned from a successful OAuth token-refresh grant.
+///
+/// `expires_at` is an absolute Unix epoch in seconds (`now + expires_in`).
+/// `refresh_token` is preserved when the provider returns one in the
+/// response and falls back to the input token when omitted (RFC 6749 §6:
+/// "the authorization server MAY issue a new refresh token, in which case
+/// the client MUST replace the old refresh token").
+#[derive(Debug, Clone)]
+pub struct RefreshedTokens {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: i64,
+}
+
+/// Exchange a stored `refresh_token` for fresh access tokens at
+/// `spec.token_url`.
+///
+/// Sends `grant_type=refresh_token` per RFC 6749 §6 with only the public
+/// `client_id` — this CLI is a public PKCE client by design and never
+/// carries a `client_secret`. Returns the parsed [`RefreshedTokens`].
+pub async fn refresh_grant(
+    spec: &ProviderOAuthSpec,
+    refresh_token: &str,
+) -> anyhow::Result<RefreshedTokens> {
+    use anyhow::Context;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .context("building reqwest client")?;
+    let body = [
+        ("grant_type", "refresh_token"),
+        ("client_id", spec.client_id.as_str()),
+        ("refresh_token", refresh_token),
+    ];
+    let resp = client
+        .post(&spec.token_url)
+        .form(&body)
+        .send()
+        .await
+        .context("refresh request failed")?;
+    let status = resp.status();
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .context("refresh response was not JSON")?;
+    if !status.is_success() {
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return Err(anyhow::anyhow!("refresh failed: {status} {err}"));
+    }
+    let access_token = json
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("access_token missing"))?
+        .to_string();
+    let refresh_token_out = json
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| Some(refresh_token.to_string()));
+    let expires_in = json
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(3600);
+    let now = chrono::Utc::now().timestamp();
+    Ok(RefreshedTokens {
+        access_token,
+        refresh_token: refresh_token_out,
+        expires_at: now + expires_in,
+    })
+}
+
 /// Hand a URL to the OS so the user's default browser opens it.
 ///
 /// Validates the URL is parseable before handing it off — we never want
@@ -452,6 +527,35 @@ mod tests {
         );
         mock.assert_hits(1);
     }
+    #[tokio::test]
+    async fn refresh_grant_parses_200() {
+        use httpmock::MockServer;
+        let server = MockServer::start_async().await;
+        let mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/oauth/token");
+            then.status(200).json_body(serde_json::json!({
+                "access_token": "AT2",
+                "refresh_token": "RT2",
+                "expires_in": 7200
+            }));
+        });
+        let spec = ProviderOAuthSpec {
+            client_id: "app-x".into(),
+            auth_url: "https://example.com/oauth/authorize".into(),
+            token_url: format!("{}/oauth/token", server.base_url()),
+            scopes: vec![],
+            redirect_path: "/callback".into(),
+            use_pkce: true,
+        };
+        let tokens = refresh_grant(&spec, "RT")
+            .await
+            .expect("refresh_grant should succeed");
+        assert_eq!(tokens.access_token, "AT2");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("RT2"));
+        assert!(tokens.expires_at > 0);
+        mock.assert_hits(1);
+    }
+
 
     /// Smoke test: the function must exist, accept a `&str`, and return a
     /// `Result` compatible with `anyhow::Error`. The brief notes that
