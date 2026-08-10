@@ -103,6 +103,7 @@ serde_yaml = "0.9"
 
 # OAuth support
 urlencoding = "2.1"
+open = "5"
 
 # Filesystem watching
 notify = "8"
@@ -126,3 +127,4 @@ tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
 portable-pty = { workspace = true }
+httpmock = "0.7"
