@@ -31,7 +31,7 @@ use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
     InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
     InlineHeaderStatusTone, InlineListItem, InlineListSelection, InlineMessageKind, InlineSegment,
-    InlineTextStyle, OverlayRequest, OverlaySubmission,
+    InlineTextStyle, OverlayRequest, OverlaySubmission, SecurePromptConfig,
 };
 use ratatui::{
     Frame, Terminal,
@@ -334,6 +334,18 @@ pub struct OverlayState {
     pub items: Vec<OverlayListItem>,
     pub selected: usize,
     pub search: Option<OverlaySearchState>,
+    pub secure_input: Option<OverlaySecureInput>,
+}
+
+/// Secure (masked) single-line input state carried by an overlay.
+/// Only present when the original `OverlayRequest::Modal` carried a
+/// `secure_prompt`. The input thread mutates `value` and `cursor` while
+/// the overlay is open; on `Enter` it submits `OverlaySubmission::SecureInput`.
+#[derive(Clone, Debug)]
+pub struct OverlaySecureInput {
+    pub config: SecurePromptConfig,
+    pub value: String,
+    pub cursor: usize,
 }
 
 /// A y/n/x confirmation dialog (grok-build `ModalConfirmation` parity).
@@ -994,13 +1006,21 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
 /// the harness as `InlineEvent::Overlay`.
 fn materialize_overlay(request: OverlayRequest) -> OverlayState {
     match request {
-        OverlayRequest::Modal(req) => OverlayState {
-            title: req.title,
-            lines: req.lines,
-            items: Vec::new(),
-            selected: 0,
-            search: None,
-        },
+        OverlayRequest::Modal(req) => {
+            let secure_input = req.secure_prompt.map(|cfg| OverlaySecureInput {
+                config: cfg,
+                value: String::new(),
+                cursor: 0,
+            });
+            OverlayState {
+                title: req.title,
+                lines: req.lines,
+                items: Vec::new(),
+                selected: 0,
+                search: None,
+                secure_input,
+            }
+        }
         OverlayRequest::List(req) => {
             let search = req.search.map(|cfg| OverlaySearchState {
                 label: cfg.label,
@@ -1013,6 +1033,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 items: req.items.into_iter().map(overlay_item_from).collect(),
                 selected: 0,
                 search,
+                secure_input: None,
             }
         }
         OverlayRequest::Wizard(req) => {
@@ -1040,6 +1061,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 items: step_items,
                 selected: 0,
                 search,
+                secure_input: None,
             }
         }
     }
@@ -2074,6 +2096,7 @@ fn spawn_input_thread(
                                     items: vec![],
                                     selected: 0,
                                     search: None,
+                                    secure_input: None,
                                 });
                             }
                             'e' => s.cycle_block_at_view(),
@@ -2597,6 +2620,7 @@ fn build_command_palette() -> OverlayState {
             placeholder: Some("filter commands\u{2026}".into()),
             value: String::new(),
         }),
+        secure_input: None,
     }
 }
 
@@ -4540,6 +4564,7 @@ mod render_tests {
             items: sample_overlay_items(),
             selected: 0,
             search: None,
+            secure_input: None,
         });
         let rendered = render_frame_to_string(&state);
         assert!(
@@ -4568,6 +4593,7 @@ mod render_tests {
                 placeholder: Some("type".to_string()),
                 value: "model-b".to_string(),
             }),
+            secure_input: None,
         });
         let rendered = render_frame_to_string(&state);
         assert!(rendered.contains("model-b"), "matching item must render");
@@ -4591,6 +4617,7 @@ mod render_tests {
             items: sample_overlay_items(),
             selected: 0,
             search: None,
+            secure_input: None,
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut _rx) = mpsc::unbounded_channel();
@@ -4641,6 +4668,7 @@ mod render_tests {
             items: sample_overlay_items(),
             selected: 0,
             search: None,
+            secure_input: None,
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -4677,6 +4705,7 @@ mod render_tests {
             }],
             selected: 0,
             search: None,
+            secure_input: None,
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -4706,6 +4735,7 @@ mod render_tests {
                 placeholder: None,
                 value: String::new(),
             }),
+            secure_input: None,
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -4786,6 +4816,43 @@ mod render_tests {
         // CloseOverlay clears it.
         apply_command(&mut state, InlineCommand::CloseOverlay);
         assert!(state.overlay.is_none(), "CloseOverlay must clear state");
+    }
+
+    #[test]
+    fn materialize_overlay_modal_with_secure_prompt_populates_secure_input() {
+        use oxicode_vtui::tui::core::{ModalOverlayRequest, SecurePromptConfig};
+        let request = OverlayRequest::Modal(ModalOverlayRequest {
+            title: "API key".into(),
+            lines: vec!["Paste your key".into()],
+            secure_prompt: Some(SecurePromptConfig {
+                label: "Key".into(),
+                placeholder: Some("sk-...".into()),
+                mask_input: true,
+            }),
+        });
+        let state = materialize_overlay(request);
+        let secure = state
+            .secure_input
+            .expect("secure_input must be Some when secure_prompt is Some");
+        assert_eq!(secure.config.label, "Key");
+        assert!(secure.config.mask_input);
+        assert_eq!(secure.value, "");
+        assert_eq!(secure.cursor, 0);
+    }
+
+    #[test]
+    fn materialize_overlay_modal_without_secure_prompt_has_none_secure_input() {
+        use oxicode_vtui::tui::core::ModalOverlayRequest;
+        let request = OverlayRequest::Modal(ModalOverlayRequest {
+            title: "Confirm".into(),
+            lines: vec!["y/n".into()],
+            secure_prompt: None,
+        });
+        let state = materialize_overlay(request);
+        assert!(
+            state.secure_input.is_none(),
+            "secure_input must be None when secure_prompt is None"
+        );
     }
 
     // ─── fold / grace tests ─────────────────────────────────────────────
