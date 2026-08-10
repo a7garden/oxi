@@ -17,8 +17,8 @@ pub use protocol::{
     InlineMessageKind, InlineSession, PreviewCallback, SubmittedInput,
 };
 pub use selection::{
-    AuthAction, InlineListItem, InlineListSearchConfig, InlineListSelection, OpenAIServiceTierChoice,
-    RewindAction, SecurePromptConfig, WizardModalMode, WizardStep,
+    AuthAction, InlineListItem, InlineListSearchConfig, InlineListSelection,
+    OpenAIServiceTierChoice, RewindAction, SecurePromptConfig, WizardModalMode, WizardStep,
 };
 pub use style::{
     InlineHeaderBadge, InlineHeaderContext, InlineHeaderHighlight, InlineHeaderStatusBadge,

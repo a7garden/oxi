@@ -211,9 +211,7 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // refresh module to rotate it in the background. A failed refresh must
     // never crash startup — the agent will surface a re-login prompt on
     // the first 401 if the refresh actually failed.
-    if let Some(active_provider) = app
-        .settings()
-        .effective_provider(args.provider.as_deref())
+    if let Some(active_provider) = app.settings().effective_provider(args.provider.as_deref())
         && !active_provider.is_empty()
     {
         let p = active_provider.clone();

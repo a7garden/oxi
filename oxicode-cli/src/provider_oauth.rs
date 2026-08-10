@@ -256,7 +256,7 @@ pub async fn exchange_code(
     }
 }
 
- /// Tokens returned from a successful OAuth token-refresh grant.
+/// Tokens returned from a successful OAuth token-refresh grant.
 ///
 /// `expires_at` is an absolute Unix epoch in seconds (`now + expires_in`).
 /// `refresh_token` is preserved when the provider returns one in the
@@ -298,15 +298,9 @@ pub async fn refresh_grant(
         .await
         .context("refresh request failed")?;
     let status = resp.status();
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .context("refresh response was not JSON")?;
+    let json: serde_json::Value = resp.json().await.context("refresh response was not JSON")?;
     if !status.is_success() {
-        let err = json
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("");
         return Err(anyhow::anyhow!("refresh failed: {status} {err}"));
     }
     let access_token = json
@@ -555,7 +549,6 @@ mod tests {
         assert!(tokens.expires_at > 0);
         mock.assert_hits(1);
     }
-
 
     /// Smoke test: the function must exist, accept a `&str`, and return a
     /// `Result` compatible with `anyhow::Error`. The brief notes that

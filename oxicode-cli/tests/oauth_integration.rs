@@ -22,11 +22,7 @@ use oxicode::provider_oauth::{self, ProviderOAuthSpec};
 /// TCP connection (not a mock request) verifies that the listener's
 /// HTTP/1.1 parsing, query-string handling, and state-mismatch rejection
 /// all behave on the wire as they would in production.
-async fn simulate_browser_callback(
-    port: u16,
-    code: &str,
-    state: &str,
-) {
+async fn simulate_browser_callback(port: u16, code: &str, state: &str) {
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .await
         .expect("connect to loopback listener");

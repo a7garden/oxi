@@ -18,7 +18,7 @@
 //! `auth.get_all()` and pattern-match the OAuth variant.
 
 use crate::provider_oauth;
-use crate::store::auth_storage::{shared_auth_storage, AuthCredential, AuthStorage};
+use crate::store::auth_storage::{AuthCredential, AuthStorage, shared_auth_storage};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex;
@@ -144,7 +144,6 @@ pub async fn refresh_if_expired_with_storage(
     Ok(())
 }
 
-
 /// Drop the coalesce cell for `provider` so the next call to
 /// [`refresh_if_expired`] is forced to do a fresh refresh. Intended for
 /// tests and for error-recovery paths that want to invalidate a failed
@@ -239,7 +238,10 @@ mod tests {
         );
 
         let result = refresh_if_expired_with_storage("never-exp", &auth).await;
-        assert!(result.is_ok(), "expires_at=0 must be a no-op, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expires_at=0 must be a no-op, got {result:?}"
+        );
     }
 
     /// No stored credential at all → `RefreshError::NotOAuth`.

@@ -29,9 +29,10 @@ use oxicode_agent::tools::TodoStateProvider;
 use oxicode_agent::tools::todo::TodoStatus;
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
-    AuthAction, InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
-    InlineHeaderStatusTone, InlineListItem, InlineListSelection, InlineMessageKind, InlineSegment,
-    InlineTextStyle, OverlayRequest, OverlaySubmission, SecurePromptConfig,
+    AuthAction, InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext,
+    InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineListItem, InlineListSelection,
+    InlineMessageKind, InlineSegment, InlineTextStyle, OverlayRequest, OverlaySubmission,
+    SecurePromptConfig,
 };
 use ratatui::{
     Frame, Terminal,
@@ -1252,8 +1253,6 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
     }
 }
 
-
-
 /// Decide which `/providers` actions apply for a provider, given whether
 /// the user already has a stored credential and whether the provider
 /// supports the OAuth `authorization_code` flow.
@@ -1348,7 +1347,7 @@ pub(crate) fn handle_auth_action(
     }
 }
 
- /// Drive the OAuth `authorization_code` flow for `provider` end to end:
+/// Drive the OAuth `authorization_code` flow for `provider` end to end:
 ///
 /// 1. Bind an ephemeral loopback TCP listener and capture its port.
 /// 2. Generate PKCE verifier + S256 challenge (`provider_oauth::pkce_pair`).
@@ -1485,25 +1484,19 @@ pub(crate) async fn run_oauth_flow(
     };
 
     // 5. Exchange code → tokens.
-    let tokens = match crate::provider_oauth::exchange_code(
-        &spec,
-        port,
-        &callback.code,
-        &verifier,
-    )
-    .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            handle.append_line(
-                InlineMessageKind::Error,
-                vec![plain_segment(format!(
-                    "OAuth: token exchange failed for '{provider}': {e}"
-                ))],
-            );
-            return;
-        }
-    };
+    let tokens =
+        match crate::provider_oauth::exchange_code(&spec, port, &callback.code, &verifier).await {
+            Ok(t) => t,
+            Err(e) => {
+                handle.append_line(
+                    InlineMessageKind::Error,
+                    vec![plain_segment(format!(
+                        "OAuth: token exchange failed for '{provider}': {e}"
+                    ))],
+                );
+                return;
+            }
+        };
 
     // 6. Persist. `set_oauth_full` takes u64 `expires_at`; `OAuthTokens`
     //    exposes i64 (so callers can branch on `now < expires_at` in
@@ -1535,7 +1528,7 @@ pub(crate) async fn run_oauth_flow(
     );
 }
 
- /// Map an input-thread `InlineEvent` to agent actions / state edits.
+/// Map an input-thread `InlineEvent` to agent actions / state edits.
 fn handle_inline_event(
     state: &mut RenderState,
     handle: &InlineHandle,
@@ -1839,7 +1832,7 @@ fn handle_inline_event(
                             vec![plain_segment(format!(
                                 "Saved API key for '{provider}' ({} chars).",
                                 text.chars().count()
-            ))],
+                            ))],
                         );
                     }
                     state.overlay_catalog_models.clear();

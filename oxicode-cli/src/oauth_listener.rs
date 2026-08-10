@@ -88,7 +88,9 @@ async fn implement(
         .method
         .ok_or_else(|| CallbackError::BadRequest("missing method".into()))?;
     if method != "GET" {
-        return Err(CallbackError::BadRequest(format!("expected GET, got {method}")));
+        return Err(CallbackError::BadRequest(format!(
+            "expected GET, got {method}"
+        )));
     }
     let path_full = req
         .path
@@ -99,7 +101,9 @@ async fn implement(
         None => (path_full, ""),
     };
     if path != expected_path {
-        return Err(CallbackError::PathMismatch { expected: expected_path });
+        return Err(CallbackError::PathMismatch {
+            expected: expected_path,
+        });
     }
 
     let mut code: Option<String> = None;
@@ -114,7 +118,9 @@ async fn implement(
     let _ = header_end; // keep header_end alive for clarity; full body is discarded.
 
     let Some(received_state) = state else {
-        return Err(CallbackError::BadRequest("missing `state` in callback".into()));
+        return Err(CallbackError::BadRequest(
+            "missing `state` in callback".into(),
+        ));
     };
     if received_state != expected_state {
         return Err(CallbackError::StateMismatch {
@@ -125,7 +131,8 @@ async fn implement(
         return Err(CallbackError::MissingCode);
     };
 
-    let body = "<!DOCTYPE html><html><body>Login complete. You may close this window.</body></html>";
+    let body =
+        "<!DOCTYPE html><html><body>Login complete. You may close this window.</body></html>";
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
@@ -134,7 +141,10 @@ async fn implement(
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
 
-    Ok(CallbackReceived { code, state: received_state })
+    Ok(CallbackReceived {
+        code,
+        state: received_state,
+    })
 }
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {
