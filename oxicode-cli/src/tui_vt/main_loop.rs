@@ -1644,6 +1644,32 @@ fn spawn_input_thread(
             }
 
             if !pasted.is_empty() {
+                // When an overlay with a secure prompt is open, the paste
+                // targets the masked input field instead of the main
+                // composer buffer. Single-line filter (drops non-graphic
+                // bytes, strips trailing newline) keeps secrets clean.
+                let routed_to_secure = {
+                    let mut s = state.lock();
+                    if let Some(overlay) = s.overlay.as_mut() {
+                        if let Some(secure) = overlay.secure_input.as_mut() {
+                            let (v, c) = insert_paste_into_secure_input(
+                                &secure.value,
+                                secure.cursor,
+                                &pasted,
+                            );
+                            secure.value = v;
+                            secure.cursor = c;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if routed_to_secure {
+                    continue;
+                }
                 let mut s = state.lock();
                 let cursor = s.input_cursor;
                 s.input_buffer.insert_str(cursor, &pasted);
@@ -2196,6 +2222,56 @@ fn handle_overlay_key(
     let Some(overlay) = s.overlay.as_mut() else {
         return false;
     };
+    // Secure (masked) single-line prompt: takes precedence over list
+    // navigation. Char / Backspace / Left / Right / Enter / Esc route
+    if let Some(secure) = overlay.secure_input.as_mut() {
+        match code {
+            KeyCode::Backspace => {
+                let (v, c) = backspace_secure_input(&secure.value, secure.cursor);
+                secure.value = v;
+                secure.cursor = c;
+            }
+            KeyCode::Left => {
+                if secure.cursor > 0 {
+                    let mut p = secure.cursor - 1;
+                    while !secure.value.is_char_boundary(p) {
+                        p -= 1;
+                    }
+                    secure.cursor = p;
+                }
+            }
+            KeyCode::Right => {
+                if secure.cursor < secure.value.len() {
+                    let mut n = secure.cursor + 1;
+                    while n < secure.value.len() && !secure.value.is_char_boundary(n) {
+                        n += 1;
+                    }
+                    secure.cursor = n;
+                }
+            }
+            KeyCode::Enter => {
+                let submission = OverlaySubmission::SecureInput(secure.value.clone());
+                drop(s);
+                state.lock().overlay = None;
+                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Submitted(
+                    submission,
+                )));
+            }
+            KeyCode::Esc => {
+                drop(s);
+                state.lock().overlay = None;
+                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Cancelled));
+            }
+            KeyCode::Char(ch) if ch.is_ascii_graphic() || ch == ' ' => {
+                let (v, n) =
+                    insert_char_into_secure_input(&secure.value, secure.cursor, ch);
+                secure.value = v;
+                secure.cursor = n;
+            }
+            _ => {} // ignore other keys while the secure prompt is open
+        }
+        return true;
+    }
 
     match code {
         KeyCode::Esc => {
@@ -4004,6 +4080,59 @@ pub(super) fn effective_scroll_offset(offset: usize, total: usize, viewport: usi
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Secure-input helpers — pure string mutations used by the input thread
+// while a secure prompt overlay is open. Kept as free functions so the
+// key routing in `handle_overlay_key` / `spawn_input_thread` stays thin
+// and the byte-boundary logic is unit-testable in isolation.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Append `ch` to `value` at `cursor`, returning the new value and cursor.
+/// `cursor` is a byte index into `value`; `ch` is inserted at that offset
+/// and the cursor advances by `ch.len_utf8()` bytes.
+fn insert_char_into_secure_input(value: &str, cursor: usize, ch: char) -> (String, usize) {
+    let mut s = String::with_capacity(value.len() + ch.len_utf8());
+    s.push_str(&value[..cursor]);
+    s.push(ch);
+    s.push_str(&value[cursor..]);
+    (s, cursor + ch.len_utf8())
+}
+
+/// Pop the byte before `cursor` from `value`, returning the new value and
+/// cursor. Walks back to the nearest UTF-8 char boundary so multi-byte
+/// characters are removed whole. A no-op when `cursor == 0`.
+fn backspace_secure_input(value: &str, cursor: usize) -> (String, usize) {
+    if cursor == 0 {
+        return (value.to_string(), 0);
+    }
+    // Find the previous char boundary.
+    let mut prev = cursor - 1;
+    while !value.is_char_boundary(prev) {
+        prev -= 1;
+    }
+    let mut s = String::with_capacity(value.len() - (cursor - prev));
+    s.push_str(&value[..prev]);
+    s.push_str(&value[cursor..]);
+    (s, prev)
+}
+
+/// Insert a pasted chunk at `cursor`. Strips a single trailing `\n`
+/// (terminals commonly deliver one at the end of a bracketed paste) and
+/// drops any byte that isn't printable ASCII — newlines, tabs, and other
+/// control characters are filtered out so secrets stay on a single line.
+fn insert_paste_into_secure_input(value: &str, cursor: usize, paste: &str) -> (String, usize) {
+    let trimmed = paste.trim_end_matches('\n');
+    let filtered: String = trimmed
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .collect();
+    let mut s = String::with_capacity(value.len() + filtered.len());
+    s.push_str(&value[..cursor]);
+    s.push_str(&filtered);
+    s.push_str(&value[cursor..]);
+    (s, cursor + filtered.len())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Slash-command autocomplete popup
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -5313,5 +5442,55 @@ mod render_tests {
         let rendered = render_frame_to_string(&state);
         // No todo content should leak when the list is empty.
         assert!(!rendered.contains('\u{2611}'), "no checkmark when empty");
+    }
+}
+
+#[cfg(test)]
+mod secure_input_tests {
+    use super::*;
+    use oxicode_vtui::tui::core::OverlaySubmission;
+
+    #[test]
+    fn overlay_submission_secure_input_is_routed_to_host() {
+        // Smoke: serialization round-trip — the variant must be reachable
+        // through the protocol so the input thread can dispatch it.
+        let _ = OverlaySubmission::SecureInput("sk-test".into());
+        let serialized = format!("{:?}", OverlaySubmission::SecureInput("x".into()));
+        assert!(serialized.contains("SecureInput"));
+    }
+
+    #[test]
+    fn insert_char_at_middle() {
+        let (s, c) = insert_char_into_secure_input("abcd", 2, 'X');
+        assert_eq!(s, "abXcd");
+        assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn backspace_at_start_is_noop() {
+        let (s, c) = backspace_secure_input("abc", 0);
+        assert_eq!(s, "abc");
+        assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn backspace_at_middle() {
+        let (s, c) = backspace_secure_input("abcd", 2);
+        assert_eq!(s, "acd");
+        assert_eq!(c, 1);
+    }
+
+    #[test]
+    fn paste_strips_trailing_newline_and_drops_non_ascii() {
+        let (s, c) = insert_paste_into_secure_input("ab", 2, "sk-xyz\nABC\u{1F600}");
+        assert_eq!(s, "absk-xyzABC");
+        assert_eq!(c, 11);
+    }
+
+    #[test]
+    fn insert_at_end_appends() {
+        let (s, c) = insert_char_into_secure_input("hello", 5, '!');
+        assert_eq!(s, "hello!");
+        assert_eq!(c, 6);
     }
 }

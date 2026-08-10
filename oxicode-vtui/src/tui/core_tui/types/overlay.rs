@@ -78,4 +78,6 @@ pub enum OverlaySubmission {
     Selection(InlineListSelection),
     Wizard(Vec<InlineListSelection>),
     Hotkey(OverlayHotkeyAction),
+    /// Submission of the secure prompt input box (single-line masked text).
+    SecureInput(String),
 }
