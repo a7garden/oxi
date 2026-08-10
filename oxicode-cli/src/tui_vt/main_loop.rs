@@ -1636,6 +1636,8 @@ fn handle_inline_event(
                     }
                     state.overlay_catalog_models.clear();
                     state.overlay_providers.clear();
+                    state.overlay_model_ids.clear();
+                    handle.close_overlay();
                 }
                 OverlayEvent::Cancelled => {
                     handle.close_overlay();
