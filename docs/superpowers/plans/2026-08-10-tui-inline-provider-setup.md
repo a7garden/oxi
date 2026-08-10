@@ -4,7 +4,7 @@
 
 **Goal:** Wire in-TUI API key entry and OAuth `authorization_code` login for providers surfaced by `/providers`, so the user no longer has to exit the TUI to run `oxicode setup`.
 
-**Architecture:** Revive the existing but unused `SecurePromptConfig` overlay channel in `oxicode-cli/src/tui_vt/main_loop.rs` so `InlineHandle::show_modal(title, lines, Some(secure_prompt))` actually renders a single-line masked input box. Extend `/providers` row selection (`main_loop.rs:1458`) to drive an action matrix that branches on `has_key × oauth_capable`. OAuth support is implemented as three new modules — `provider_oauth` (PKCE + auth/token URL builders), `oauth_listener` (single-shot `127.0.0.1:0` HTTP callback), and `oauth_refresh` (pre-request refresh + coalesce) — and OAuth metadata is loaded from `data/catalog/product-meta.toml` (`[providers.<name>.oauth]` blocks). Existing `AuthCredential::OAuth` is reused; refresh is wired into the bootstrap that constructs the `AuthProvider` impl.
+- Mask always shows the value length, never the value. `mask_input=true` renders one `*` (U+002A) per character; the underlying `value` field is never logged or echoed. The mask glyph is `*`, not `•` (U+2022) — the tests assert `*`. The asterisk is unambiguously ASCII and won't break terminal rendering across CJK/emoji fonts.
 
 **Tech Stack:** Rust 2024 edition, `tokio::net::TcpListener`, `httparse` (header parse only — no full HTTP), `open` crate (browser auto-open), `once_cell` (`OnceLock`/`OnceCell`), `urlencoding`, `base64` (URL-safe no-pad), `reqwest` (already in workspace for token exchange), `oauth2` is **not** added — too much weight for two providers; hand-roll the wire format.
 
@@ -581,9 +581,9 @@ if let Some(secure) = &overlay.secure_input {
     let display: String = if secure.value.is_empty() {
         secure.config.placeholder.clone().unwrap_or_else(|| "(empty)".to_string())
     } else if secure.config.mask_input {
-        // Render one bullet per character so the cursor can sit at the right
+        // Render one asterisk per character so the cursor can sit at the right
         // byte index without leaking the value.
-        "\u{2022}".repeat(secure.value.chars().count())
+        "*".repeat(secure.value.chars().count())
     } else {
         secure.value.clone()
     };
