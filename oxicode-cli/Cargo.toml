@@ -104,6 +104,7 @@ serde_yaml = "0.9"
 # OAuth support
 urlencoding = "2.1"
 open = "5"
+httparse = "1.10"
 
 # Filesystem watching
 notify = "8"

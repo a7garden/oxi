@@ -23,6 +23,7 @@ pub mod internal_urls;
 pub mod lsp;
 pub mod main_dispatch;
 pub mod mcp_credentials;
+pub mod oauth_listener;
 pub mod print_mode;
 pub mod provider_oauth;
 pub mod services;
