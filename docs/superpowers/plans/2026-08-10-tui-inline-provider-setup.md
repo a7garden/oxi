@@ -279,59 +279,95 @@ fn insert_paste_into_secure_input(value: &str, cursor: usize, paste: &str) -> (S
 }
 ```
 
-In the input-thread key handler, after detecting `state.overlay.secure_input.is_some()`, route keys:
+In `handle_overlay_key` (around line 2188, signature `fn handle_overlay_key(state: &Arc<parking_lot::Mutex<RenderState>>, evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>, code: KeyCode) -> bool`), the function currently only handles `Esc` and `Enter` for list overlays. Add a new branch ABOVE the existing `match code {` that detects `secure_input` and routes printable keys. The actual function takes `KeyCode`, not `Key`. Paste arrives through a separate `Event::Paste` path (see line 1642) — handle paste in `spawn_input_thread` instead of `handle_overlay_key`. Sketch:
 
 ```rust
-// Pseudo - integrate into the existing key-event handler:
-if let Some(secure) = state.overlay.as_mut().and_then(|o| o.secure_input.as_mut()) {
-    match key {
-        Key::Backspace => {
-            let (v, c) = backspace_secure_input(&secure.value, secure.cursor);
-            secure.value = v;
-            secure.cursor = c;
-        }
-        Key::Left => {
-            if secure.cursor > 0 {
-                let mut p = secure.cursor - 1;
-                while !secure.value.is_char_boundary(p) {
-                    p -= 1;
-                }
-                secure.cursor = p;
+// In handle_overlay_key, before the existing match:
+fn handle_overlay_key(
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+    code: KeyCode,
+) -> bool {
+    use oxicode_vtui::tui::core::{OverlayEvent, OverlaySubmission};
+
+    let mut s = state.lock();
+    let Some(overlay) = s.overlay.as_mut() else { return false; };
+
+    // Secure input branch — takes precedence over the list-overlay branch.
+    if let Some(secure) = overlay.secure_input.as_mut() {
+        match code {
+            KeyCode::Backspace => {
+                let (v, c) = backspace_secure_input(&secure.value, secure.cursor);
+                secure.value = v;
+                secure.cursor = c;
             }
-        }
-        Key::Right => {
-            if secure.cursor < secure.value.len() {
-                let mut n = secure.cursor + 1;
-                while n < secure.value.len() && !secure.value.is_char_boundary(n) {
-                    n += 1;
+            KeyCode::Left => {
+                if secure.cursor > 0 {
+                    let mut p = secure.cursor - 1;
+                    while !secure.value.is_char_boundary(p) { p -= 1; }
+                    secure.cursor = p;
                 }
+            }
+            KeyCode::Right => {
+                if secure.cursor < secure.value.len() {
+                    let mut n = secure.cursor + 1;
+                    while n < secure.value.len() && !secure.value.is_char_boundary(n) { n += 1; }
+                    secure.cursor = n;
+                }
+            }
+            KeyCode::Esc => {
+                drop(s);
+                state.lock().overlay = None;
+                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Cancelled));
+            }
+            KeyCode::Enter => {
+                let value = secure.value.clone();
+                drop(s);
+                state.lock().overlay = None;
+                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Submitted(
+                    OverlaySubmission::SecureInput(value),
+                )));
+            }
+            KeyCode::Char(c) if c.is_ascii_graphic() || c == ' ' => {
+                let (v, n) = insert_char_into_secure_input(&secure.value, secure.cursor, c);
+                secure.value = v;
                 secure.cursor = n;
             }
+            _ => {} // ignore other keys
         }
-        Key::Enter => {
-            let submission = OverlaySubmission::SecureInput(secure.value.clone());
-            let _ = overlay_tx.send(OverlayEvent::Submitted(submission));
-        }
-        Key::Esc => {
-            let _ = overlay_tx.send(OverlayEvent::Cancelled);
-        }
-        Key::Paste(text) => {
-            let (v, c) = insert_paste_into_secure_input(&secure.value, secure.cursor, &text);
-            secure.value = v;
-            secure.cursor = c;
-        }
-        Key::Char(c) if c.is_ascii_graphic() || c == ' ' => {
-            let (v, n) = insert_char_into_secure_input(&secure.value, secure.cursor, c);
-            secure.value = v;
-            secure.cursor = n;
-        }
-        _ => {} // ignore other keys
+        return true;
     }
-    return; // do not fall through to the normal input handling
+
+    // Existing list-overlay branch follows unchanged.
+    match code {
+        KeyCode::Esc => { /* ... */ }
+        // ...
+    }
 }
 ```
 
-The exact `Key` enum and `overlay_tx` field name come from the existing code. Match the project's conventions.
+The `OverlaySubmission::SecureInput(text)` reflects the new variant. To submit, drop the lock, clear the overlay, then send the event (matches the existing pattern at line 2203-2205).
+
+For **paste**, the existing `spawn_input_thread` has a separate `Event::Paste(p)` handler (around line 1642) that inserts into the input buffer. Add a parallel branch that, when the overlay is in secure-input mode, inserts into `state.overlay.secure_input` instead. Sketch:
+
+```rust
+// In spawn_input_thread, replace the existing paste block:
+if !pasted.is_empty() {
+    let mut s = state.lock();
+    if let Some(secure) = s.overlay.as_mut().and_then(|o| o.secure_input.as_mut()) {
+        let (v, c) = insert_paste_into_secure_input(&secure.value, secure.cursor, &pasted);
+        secure.value = v;
+        secure.cursor = c;
+    } else {
+        let cursor = s.input_cursor;
+        s.input_buffer.insert_str(cursor, &pasted);
+        s.input_cursor = cursor + pasted.len();
+    }
+    continue;
+}
+```
+
+This makes paste work correctly for both modes.
 
 - [ ] **Step 7: Write failing tests for the secure input helpers**
 
