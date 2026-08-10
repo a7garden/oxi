@@ -58,6 +58,10 @@ ignore = [
     # syntect 5.x → oxicode-vtui. yaml-rust2 is the maintained fork but
     # syntect has not switched. Mirror of audit.toml.
     "RUSTSEC-2024-0320",
+    # async-std 1.13.2 — unmaintained (RUSTSEC-2025-0052), transitive via
+    # httpmock → oxicode-cli (dev-dependency, test-only). httpmock pins
+    # async-std; no fix available. Test-only, not shipped. Mirror of audit.toml.
+    "RUSTSEC-2025-0052",
 ]
 
 [licenses]
