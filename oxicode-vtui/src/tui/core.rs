@@ -6,7 +6,7 @@ pub use crate::tui::core_tui::types::protocol::{
     InlineCommand, InlineEvent, InlineHandle, InlineSession,
 };
 pub use crate::tui::core_tui::types::{
-    ContentPart, FocusChangeCallback, InlineEventCallback, InlineHeaderContext,
+    AuthAction, ContentPart, FocusChangeCallback, InlineEventCallback, InlineHeaderContext,
     InlineHeaderHighlight, InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineLinkRange,
     InlineLinkTarget, InlineListItem, InlineListSearchConfig, InlineListSelection,
     InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, ListOverlayRequest,

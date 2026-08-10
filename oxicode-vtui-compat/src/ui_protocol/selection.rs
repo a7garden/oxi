@@ -17,6 +17,23 @@ pub enum OpenAIServiceTierChoice {
     Priority,
 }
 
+/// Host-side action bound to a `/providers` row (`ProviderRow` →
+/// `ProviderAction { provider, action }`).
+///
+/// Lives in `vtui-compat` (not `oxicode-cli`) because it is referenced
+/// inside `InlineListSelection::ProviderAction`. Putting it here avoids
+/// an import cycle: `oxicode-cli` already depends on `oxicode-vtui-compat`
+/// but cannot introduce the reverse edge just for an enum.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthAction {
+    /// Prompt for a fresh API key (set / replace).
+    SetApiKey,
+    /// Kick off the OAuth `authorization_code` flow.
+    StartOAuth,
+    /// Remove the currently stored credential.
+    RemoveKey,
+}
+
 /// Selection value returned from a list or wizard overlay.
 ///
 /// The `Reasoning` variant carries a `String` reasoning-effort level rather
@@ -37,6 +54,13 @@ pub enum InlineListSelection {
     CatalogModel(usize),
     /// `/providers` list — index into `RenderState::overlay_providers`.
     ProviderRow(usize),
+    /// `/providers` → action-menu selection. Emitted by the per-provider
+    /// action list overlay so the host can route the chosen `AuthAction`
+    /// (set key / start OAuth / remove key) back to the auth pipeline.
+    ProviderAction {
+        provider: String,
+        action: AuthAction,
+    },
     Theme(String),
     Session(String),
     SessionForkMode {

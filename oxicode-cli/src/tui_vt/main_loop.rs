@@ -29,7 +29,7 @@ use oxicode_agent::tools::TodoStateProvider;
 use oxicode_agent::tools::todo::TodoStatus;
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
-    InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
+    AuthAction, InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext, InlineHeaderStatusBadge,
     InlineHeaderStatusTone, InlineListItem, InlineListSelection, InlineMessageKind, InlineSegment,
     InlineTextStyle, OverlayRequest, OverlaySubmission, SecurePromptConfig,
 };
@@ -249,6 +249,11 @@ pub struct RenderState {
     /// User-defined slash commands loaded once at startup from
     /// `.oxicode/commands/` and `~/.oxicode/commands/`.
     pub file_commands: Vec<FileCommand>,
+    /// Provider name targeted by the currently open secure prompt. Set
+    /// before opening the prompt; cleared on `OverlaySubmission::SecureInput`
+    /// after the key is written. `None` outside the `/providers` key-entry
+    /// flow so a stray `SecureInput` cannot leak into a different provider.
+    pub secure_input_target: Option<String>,
 }
 
 /// One rendered transcript line.
@@ -1247,7 +1252,82 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
     }
 }
 
-/// Map an input-thread `InlineEvent` to agent actions / state edits.
+
+
+/// Decide which `/providers` actions apply for a provider, given whether
+/// the user already has a stored credential and whether the provider
+/// supports the OAuth `authorization_code` flow.
+///
+/// Single-action branches skip the menu entirely and drive directly
+/// (no user-visible "Pick an action" list for the obvious cases).
+pub(crate) fn next_provider_actions(has_key: bool, oauth_capable: bool) -> Vec<AuthAction> {
+    match (has_key, oauth_capable) {
+        (true, true) => vec![
+            AuthAction::SetApiKey,
+            AuthAction::StartOAuth,
+            AuthAction::RemoveKey,
+        ],
+        (true, false) => vec![AuthAction::RemoveKey],
+        (false, true) => vec![AuthAction::SetApiKey, AuthAction::StartOAuth],
+        (false, false) => vec![AuthAction::SetApiKey],
+    }
+}
+
+/// Dispatch a single `AuthAction` for `provider`.
+///
+/// `SetApiKey` opens the secure (masked) prompt and stashes
+/// `state.secure_input_target` so the `SecureInput(text)` consumer can
+/// route the key to the right provider. `StartOAuth` is a stub for
+/// Task 8 (TODO: wire `run_oauth_flow`). `RemoveKey` reuses the existing
+/// confirmation modal — its `ConfirmationAction::RemoveProviderKey`
+/// handler already runs through `/providers remove <name> --yes`.
+pub(crate) fn handle_auth_action(
+    provider: &str,
+    action: &AuthAction,
+    auth: &Arc<crate::store::auth_storage::AuthStorage>,
+    handle: &InlineHandle,
+    state: &mut RenderState,
+) {
+    match action {
+        AuthAction::SetApiKey => {
+            state.secure_input_target = Some(provider.to_string());
+            handle.show_modal(
+                format!("Set API key for {provider}"),
+                vec![
+                    "Paste the API key. Press Enter to save, Esc to cancel.".into(),
+                    "The key is masked on screen; nothing is logged.".into(),
+                ],
+                Some(SecurePromptConfig {
+                    label: format!("{provider} key"),
+                    placeholder: Some("sk-...".into()),
+                    mask_input: true,
+                }),
+            );
+        }
+        AuthAction::StartOAuth => {
+            // TODO(task-8): wire `run_oauth_flow` here. Task 8 owns the
+            // PKCE + loopback-callback plumbing; once it lands this branch
+            // becomes `tokio::spawn(async move { run_oauth_flow(...).await; })`.
+            handle.append_line(
+                InlineMessageKind::Info,
+                vec![plain_segment(format!(
+                    "OAuth login for '{provider}' is being wired up — coming in the next update."
+                ))],
+            );
+            // Touch `auth` so the parameter stays useful for Task 8 (no-op).
+            let _ = auth;
+        }
+        AuthAction::RemoveKey => {
+            state.confirmation = Some(ModalConfirmation {
+                title: format!("Remove key for {provider}?"),
+                message: "  y \u{2014} remove key     n / x \u{2014} cancel".into(),
+                action: ConfirmationAction::RemoveProviderKey(provider.to_string()),
+            });
+        }
+    }
+}
+
+ /// Map an input-thread `InlineEvent` to agent actions / state edits.
 fn handle_inline_event(
     state: &mut RenderState,
     handle: &InlineHandle,
@@ -1475,41 +1555,87 @@ fn handle_inline_event(
                             ),
                         }
                     }
-                    // `/providers` list: offer key removal (has key) or show
-                    // how to add one (no key).
+                    // `/providers` list: pick a provider, then drive the
+                    // `next_provider_actions(has_key, oauth_capable)` matrix.
+                    // Single-action cases fire straight into
+                    // `handle_auth_action`; multi-action cases open a
+                    // one-shot action list whose selections are
+                    // `ProviderAction { provider, action }`.
                     if let OverlaySubmission::Selection(InlineListSelection::ProviderRow(idx)) =
                         &sub
                         && idx < &state.overlay_providers.len()
                     {
                         let name = state.overlay_providers[*idx].clone();
                         let auth = crate::store::auth_storage::shared_auth_storage();
-                        if auth.has(&name) {
-                            state.confirmation = Some(ModalConfirmation {
-                                title: format!("Remove key for {name}?"),
-                                message: "  y \u{2014} remove key     n / x \u{2014} cancel".into(),
-                                action: ConfirmationAction::RemoveProviderKey(name),
-                            });
+                        let has_key = auth.has(&name);
+                        let oauth_capable = crate::provider_oauth::spec_for(&name).is_some();
+                        let actions = next_provider_actions(has_key, oauth_capable);
+                        if actions.len() == 1 {
+                            // Single action — drive directly with no menu.
+                            handle_auth_action(&name, &actions[0], &auth, handle, state);
                         } else {
-                            let env_hint = state
-                                .catalog
-                                .as_ref()
-                                .and_then(|c| c.get_provider_sync(&name))
-                                .and_then(|p| p.env_key);
-                            let msg = match env_hint {
-                                Some(env) => format!(
-                                    "No key for '{name}'. Set {env} or run `oxicode setup`."
-                                ),
-                                None => {
-                                    format!("No key for '{name}'. Run `oxicode setup` to add one.")
-                                }
-                            };
-                            handle.append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
+                            // Show action menu.
+                            let items: Vec<InlineListItem> = actions
+                                .iter()
+                                .map(|a| InlineListItem {
+                                    title: match a {
+                                        AuthAction::SetApiKey => "Set API key".into(),
+                                        AuthAction::StartOAuth => "Login with OAuth".into(),
+                                        AuthAction::RemoveKey => "Remove key".into(),
+                                    },
+                                    subtitle: None,
+                                    badge: None,
+                                    indent: 0,
+                                    selection: Some(InlineListSelection::ProviderAction {
+                                        provider: name.clone(),
+                                        action: a.clone(),
+                                    }),
+                                    search_value: None,
+                                })
+                                .collect();
+                            handle.show_list_modal(
+                                name.clone(),
+                                vec!["Pick an action".into()],
+                                items,
+                                None,
+                                None,
+                            );
                         }
+                    }
+                    // `/providers` action menu: forward the chosen
+                    // `AuthAction` to the host dispatcher. Selecting
+                    // "Remove key" reuses the existing y/n confirmation
+                    // modal; "Set API key" opens the secure prompt;
+                    // "Login with OAuth" prints the Task 8 stub.
+                    if let OverlaySubmission::Selection(InlineListSelection::ProviderAction {
+                        provider,
+                        action,
+                    }) = &sub
+                    {
+                        let auth = crate::store::auth_storage::shared_auth_storage();
+                        handle_auth_action(provider, action, &auth, handle, state);
+                    }
+                    // Secure (masked) prompt committed by the user. The
+                    // matching open prompt must have stashed
+                    // `state.secure_input_target`; we trust that field
+                    // here because every prompt path goes through
+                    // `handle_auth_action` (SetApiKey) which sets it
+                    // before opening the modal.
+                    if let OverlaySubmission::SecureInput(text) = &sub
+                        && let Some(provider) = state.secure_input_target.take()
+                    {
+                        let auth = crate::store::auth_storage::shared_auth_storage();
+                        auth.set_api_key(&provider, text.clone());
+                        handle.append_line(
+                            InlineMessageKind::Info,
+                            vec![plain_segment(format!(
+                                "Saved API key for '{provider}' ({} chars).",
+                                text.chars().count()
+            ))],
+                        );
                     }
                     state.overlay_catalog_models.clear();
                     state.overlay_providers.clear();
-                    state.overlay_model_ids.clear();
-                    handle.close_overlay();
                 }
                 OverlayEvent::Cancelled => {
                     handle.close_overlay();
@@ -2253,9 +2379,7 @@ fn handle_overlay_key(
                 let submission = OverlaySubmission::SecureInput(secure.value.clone());
                 drop(s);
                 state.lock().overlay = None;
-                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Submitted(
-                    submission,
-                )));
+                let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Submitted(submission)));
             }
             KeyCode::Esc => {
                 drop(s);
@@ -2263,8 +2387,7 @@ fn handle_overlay_key(
                 let _ = evt_tx.send(InlineEvent::Overlay(OverlayEvent::Cancelled));
             }
             KeyCode::Char(ch) if ch.is_ascii_graphic() || ch == ' ' => {
-                let (v, n) =
-                    insert_char_into_secure_input(&secure.value, secure.cursor, ch);
+                let (v, n) = insert_char_into_secure_input(&secure.value, secure.cursor, ch);
                 secure.value = v;
                 secure.cursor = n;
             }
@@ -2948,7 +3071,10 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
                 width: inner.width,
                 height: 1,
             };
-            let line = Line::from(Span::styled(line_text.clone(), Style::default().fg(secondary)));
+            let line = Line::from(Span::styled(
+                line_text.clone(),
+                Style::default().fg(secondary),
+            ));
             frame.render_widget(Paragraph::new(line), row_area);
             row = row.saturating_add(1);
         }
@@ -2957,7 +3083,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         // to the configured placeholder when the buffer is empty.
         let label = &secure.config.label;
         let display: String = if secure.value.is_empty() {
-            secure.config.placeholder.clone().unwrap_or_else(|| "(empty)".to_string())
+            secure
+                .config
+                .placeholder
+                .clone()
+                .unwrap_or_else(|| "(empty)".to_string())
         } else if secure.config.mask_input {
             // One asterisk per character so the length is visible without
             // leaking the value. The render path must never reveal
@@ -2973,14 +3103,8 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             height: 1,
         };
         let line = Line::from(vec![
-            Span::styled(
-                format!("{label}: "),
-                Style::default().fg(secondary),
-            ),
-            Span::styled(
-                display,
-                Style::default().fg(fg),
-            ),
+            Span::styled(format!("{label}: "), Style::default().fg(secondary)),
+            Span::styled(display, Style::default().fg(fg)),
         ]);
         frame.render_widget(Paragraph::new(line), row_area);
         return;
@@ -5524,7 +5648,7 @@ mod render_tests {
 
     #[test]
     fn render_overlay_secure_input_shows_label_mask_value_and_placeholder() {
-        use ratatui::{backend::TestBackend, Terminal};
+        use ratatui::{Terminal, backend::TestBackend};
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let overlay = OverlayState {
@@ -5561,7 +5685,7 @@ mod render_tests {
 
     #[test]
     fn render_overlay_secure_input_placeholder_when_empty() {
-        use ratatui::{backend::TestBackend, Terminal};
+        use ratatui::{Terminal, backend::TestBackend};
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let overlay = OverlayState {
@@ -5606,6 +5730,37 @@ mod secure_input_tests {
         let _ = OverlaySubmission::SecureInput("sk-test".into());
         let serialized = format!("{:?}", OverlaySubmission::SecureInput("x".into()));
         assert!(serialized.contains("SecureInput"));
+    }
+
+    #[test]
+    fn providers_action_matrix_branches_correctly() {
+        // Pin the (has_key, oauth_capable) → Vec<AuthAction> matrix
+        // exactly. Refactors MUST keep this contract: the order of
+        // returned actions drives the visible action menu order.
+        assert_eq!(
+            next_provider_actions(true, true),
+            vec![
+                AuthAction::SetApiKey,
+                AuthAction::StartOAuth,
+                AuthAction::RemoveKey,
+            ],
+            "has key + oauth-capable: replace, oauth, remove"
+        );
+        assert_eq!(
+            next_provider_actions(true, false),
+            vec![AuthAction::RemoveKey],
+            "has key, key-only provider: remove only"
+        );
+        assert_eq!(
+            next_provider_actions(false, true),
+            vec![AuthAction::SetApiKey, AuthAction::StartOAuth],
+            "no key + oauth-capable: set key, oauth"
+        );
+        assert_eq!(
+            next_provider_actions(false, false),
+            vec![AuthAction::SetApiKey],
+            "no key + key-only provider: set key only"
+        );
     }
 
     #[test]
