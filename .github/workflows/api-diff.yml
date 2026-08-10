@@ -1,6 +1,6 @@
 name: Public API Snapshot
 
-# Public-API surface job.  Runs `cargo public-api list` against each
+# Public-API surface job.  Runs `cargo public-api` against each
 # workspace crate that ships a stable API surface (oxicode-ai, oxicode-agent,
 # oxicode-sdk).  On every run it captures the surface and uploads it as a
 # workflow artifact.  On pull requests it additionally ENFORCES the
@@ -44,19 +44,20 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION_MSRV }}
       # cargo-public-api builds rustdoc JSON internally, which is
-      # still nightly-only.  The README pins nightly-2025-08-02 as
-      # the minimum compatible with the current cargo-public-api
-      # release; each release of cargo-public-api understands only
-      # a window of nightly rustdoc JSON outputs (see the
-      # compatibility matrix in cargo-public-api/README.md), so
-      # pinning a specific date keeps the job reproducible across
-      # CI runs.  The nightly install coexists with the 1.96 MSRV
-      # install above: cargo-public-api invokes `cargo +nightly`
-      # internally, so the workspace rust-toolchain.toml 1.96
-      # override does not interfere.
+      # still nightly-only.  Each release of cargo-public-api
+      # understands only a window of nightly rustdoc JSON outputs
+      # (see the compatibility matrix in cargo-public-api/README.md),
+      # so pinning a specific date keeps the job reproducible across
+      # CI runs.  nightly-2026-05-02 (rustc 1.97.0-nightly) is the
+      # first pinned nightly >= the workspace MSRV (1.96); the old
+      # pin (nightly-2025-08-02, rustc 1.90.0) was below MSRV and
+      # could not compile the workspace.  The nightly install
+      # coexists with the 1.96 MSRV install above: cargo-public-api
+      # invokes `cargo +nightly` internally, so the workspace
+      # rust-toolchain.toml 1.96 override does not interfere.
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-08-02
+          toolchain: nightly-2026-05-02
       - name: Install system dependencies
         # `oxicode-agent` pulls in `oxibrowser`, and Cargo.lock still
         # contains `openssl` / `openssl-sys` entries (3 hits as of
@@ -91,18 +92,18 @@ jobs:
           mkdir -p api-snapshots
           failed=0
           for crate in oxicode-ai oxicode-agent oxicode-sdk; do
-            if cargo public-api list -p "$crate" \
+            if cargo public-api -p "$crate" \
                 > "api-snapshots/${crate}.txt" \
                 2> "api-snapshots/${crate}.stderr"; then
               lines=$(wc -l < "api-snapshots/${crate}.txt" | tr -d ' ')
               if [ "$lines" = "0" ]; then
-                echo "::error::cargo public-api list for ${crate} succeeded but produced 0 lines — likely a rustdoc-JSON toolchain or system-dep mismatch; see api-snapshots/${crate}.stderr"
+                echo "::error::cargo public-api for ${crate} succeeded but produced 0 lines — likely a rustdoc-JSON toolchain or system-dep mismatch; see api-snapshots/${crate}.stderr"
                 failed=1
               else
                 echo "captured ${crate}: ${lines} lines"
               fi
             else
-              echo "::error::cargo public-api list failed for ${crate}; see api-snapshots/${crate}.stderr"
+              echo "::error::cargo public-api failed for ${crate}; see api-snapshots/${crate}.stderr"
               failed=1
             fi
           done
@@ -138,7 +139,7 @@ jobs:
           mkdir -p api-snapshots-main
           removed_any=0
           for crate in oxicode-ai oxicode-agent oxicode-sdk; do
-            ( cd "$RUNNER_TEMP/main-baseline" && cargo public-api list -p "$crate" ) \
+            ( cd "$RUNNER_TEMP/main-baseline" && cargo public-api -p "$crate" ) \
               > "api-snapshots-main/${crate}.txt" 2> "api-snapshots-main/${crate}.stderr" || true
             lines=$( wc -l < "api-snapshots-main/${crate}.txt" | tr -d ' ' )
             if [ "$lines" = "0" ]; then
