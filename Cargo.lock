@@ -5357,6 +5357,7 @@ dependencies = [
  "extism",
  "flate2",
  "futures",
+ "httparse",
  "httpmock",
  "ignore",
  "image",
