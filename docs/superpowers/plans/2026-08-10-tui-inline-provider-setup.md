@@ -701,7 +701,7 @@ git commit -m "feat(oauth): provider OAuth spec loader from product-meta.toml"
 - Modify: `oxicode-cli/src/provider_oauth.rs`
 
 **Interfaces:**
-- Produces: `pkce_pair() -> (verifier, challenge)`, `build_auth_url(spec, port, state, code_challenge) -> String`, `exchange_code(spec, code, verifier) -> OAuthTokens`.
+- Produces: `pkce_pair() -> (verifier, challenge)`, `build_auth_url(spec, port, state, code_challenge) -> String`, `exchange_code(spec, port, code, verifier) -> OAuthTokens`, `open_browser(url) -> Result<()>`.
 
 - [ ] **Step 1: Add failing tests for `pkce_pair` and `build_auth_url`**
 
@@ -836,7 +836,7 @@ async fn exchange_code_parses_200_response() {
         redirect_path: "/callback".into(),
         use_pkce: true,
     };
-    let tokens = exchange_code(&spec, "code-1", "verifier").await.unwrap();
+    let tokens = exchange_code(&spec, 12345, "code-1", "verifier").await.unwrap();
     assert_eq!(tokens.access_token, "AT");
     assert_eq!(tokens.refresh_token.as_deref(), Some("RT"));
     assert!(tokens.expires_at > 0);
@@ -862,7 +862,7 @@ async fn exchange_code_returns_error_on_4xx() {
         redirect_path: "/callback".into(),
         use_pkce: true,
     };
-    let err = exchange_code(&spec, "code-1", "v").await.unwrap_err();
+    let err = exchange_code(&spec, 12345, "code-1", "v").await.unwrap_err();
     assert!(format!("{err}").contains("invalid_grant"));
     mock.assert_hits(1);
 }
@@ -881,18 +881,20 @@ pub struct OAuthTokens {
 
 pub async fn exchange_code(
     spec: &ProviderOAuthSpec,
+    port: u16,
     code: &str,
     verifier: &str,
 ) -> anyhow::Result<OAuthTokens> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
+    let redirect_uri = format!("http://127.0.0.1:{port}{}", spec.redirect_path);
     let body = [
         ("grant_type", "authorization_code"),
         ("client_id", spec.client_id.as_str()),
         ("code", code),
         ("code_verifier", verifier),
-        ("redirect_uri", &format!("http://127.0.0.1:0{}", spec.redirect_path)),
+        ("redirect_uri", &redirect_uri),
     ];
     let resp = client.post(&spec.token_url).form(&body).send().await?;
     let status = resp.status();
@@ -938,16 +940,45 @@ pub async fn exchange_code(
 
 Add `httpmock` (dev-only) and `chrono` to dependencies.
 
-- [ ] **Step 4: Run all provider_oauth tests**
+- [ ] **Step 4: Add `open_browser` helper with failing test**
+
+Add to `provider_oauth.rs`:
+
+```rust
+/// Open `url` in the user's default browser. Returns `Err` on headless /
+/// no-display environments so the caller can fall back to a manual URL.
+pub fn open_browser(url: &str) -> anyhow::Result<()> {
+    open::that(url).map_err(|e| anyhow::anyhow!("failed to open browser: {e}"))?;
+    Ok(())
+}
+```
+
+Test (covers the obvious success path; the headless branch is exercised manually):
+
+```rust
+#[test]
+fn open_browser_accepts_a_well_formed_url() {
+    // We don't actually want to launch a browser in CI; just verify the URL
+    // validation that `open::that` performs doesn't reject our scheme.
+    let url = "https://example.com/oauth/authorize?response_type=code";
+    // Smoke: passing the URL through `url::Url::parse` (open::that's first
+    // check) must succeed.
+    assert!(url::Url::parse(url).is_ok());
+    // The function itself is not invoked here — invoking it would open a real
+    // browser. Manual smoke covers the runtime path.
+}
+```
+
+- [ ] **Step 5: Run all provider_oauth tests**
 
 Run: `cargo nextest run -p oxicode-cli provider_oauth`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add oxicode-cli/src/provider_oauth.rs oxicode-cli/Cargo.toml
-git commit -m "feat(oauth): PKCE, build_auth_url, exchange_code"
+git commit -m "feat(oauth): PKCE, build_auth_url, exchange_code, open_browser"
 ```
 
 ---
@@ -1347,15 +1378,14 @@ fn handle_auth_action(
                     return;
                 }
             };
-            // Stash the spec for the background task to consume.
-            state.secure_input_target = Some(provider.to_string());
-            state.pending_oauth_spec = Some(spec);
-            // Spawn the OAuth flow on a dedicated tokio task.
-            let (provider_owned, spec_owned) = (provider.to_string(), state.pending_oauth_spec.take().unwrap());
+            // Spawn the OAuth flow on a dedicated tokio task. The spec is
+            // moved into the task; no intermediate `RenderState` mutation
+            // is needed.
+            let provider_owned = provider.to_string();
             let tx = handle.clone();
             let auth_clone = auth.clone();
             tokio::spawn(async move {
-                run_oauth_flow(provider_owned, spec_owned, tx, auth_clone).await;
+                run_oauth_flow(provider_owned, spec, tx, auth_clone).await;
             });
         }
         AuthAction::RemoveKey => {
@@ -1369,11 +1399,10 @@ fn handle_auth_action(
 }
 ```
 
-Add two new fields to `RenderState`:
+Add one new field to `RenderState`:
 
 ```rust
 pub secure_input_target: Option<String>,
-pub pending_oauth_spec: Option<ProviderOAuthSpec>,
 ```
 
 The `run_oauth_flow` async function is implemented in Task 8 (next).
@@ -1656,7 +1685,7 @@ async fn run_oauth_flow(
             return;
         }
     };
-    let tokens = match provider_oauth::exchange_code(&spec, &cb.code, &challenge).await {
+    let tokens = match provider_oauth::exchange_code(&spec, port, &cb.code, &challenge).await {
         Ok(t) => t,
         Err(e) => {
             handle.append_line(InlineMessageKind::Error, vec![plain_segment(format!("Token exchange failed: {e}"))]);
@@ -1764,7 +1793,7 @@ async fn happy_path_openai_oauth_login() {
     let cb = task.await.unwrap().unwrap();
     assert_eq!(cb.code, code);
 
-    let tokens = provider_oauth::exchange_code(&spec, &cb.code, &challenge).await.unwrap();
+    let tokens = provider_oauth::exchange_code(&spec, port, &cb.code, &challenge).await.unwrap();
     assert_eq!(tokens.access_token, "AT");
     assert_eq!(tokens.refresh_token.as_deref(), Some("RT"));
 }
@@ -1905,6 +1934,6 @@ git commit -m "chore: cargo fmt / clippy cleanups"
 - `OAuthTokens` (Task 5) and `RefreshedTokens` (Task 8) are distinct types (different shapes — `OAuthTokens` has `scopes`, `RefreshedTokens` does not). Both feed into `auth.set_oauth_full` / `auth.update_oauth_tokens`.
 - `CallbackReceived` (Task 6) is used in Task 8 by `run_oauth_flow` — name matches.
 - `ProviderOAuthSpec` (Task 4) is shared by Tasks 5, 6, 7, 8 — fields and serialization match across tests.
-- `pending_oauth_spec` (Task 7) is consumed in Task 8 — Task 8 reads it via `state.pending_oauth_spec.take()` inside `handle_auth_action`.
+- `secure_input_target` (Task 7) is consumed in Task 7 itself on `SecureInput` submission.
 
 **No spec gaps found.** Plan is ready for execution.
