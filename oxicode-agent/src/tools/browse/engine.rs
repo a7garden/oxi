@@ -37,6 +37,17 @@ pub enum BrowserError {
     Backend(String),
     #[error("no active session — call 'open' first")]
     NoActiveSession,
+    #[error("no match: {0}")]
+    /// browse_act LLM could not pick a confident match. The carried string is
+    /// the LLM's free-text reason (or a deterministic-tier note when the
+    /// provider was unavailable).
+    NoMatch(String),
+    #[error("missing value for action: {action}")]
+    /// browse_act was given an action that requires a value but it was empty.
+    MissingValue { action: &'static str },
+    #[error("grounding parse failed: {0}")]
+    /// browse_act LLM response wasn't parseable as the expected JSON shape.
+    GroundingParse(String),
 }
 
 impl From<BrowserError> for crate::tools::ToolError {
@@ -880,5 +891,27 @@ mod tests {
             let json2 = serde_json::to_string(&restored).unwrap();
             assert_eq!(json, json2, "roundtrip failed for {:?}", bp);
         }
+    }
+
+    #[test]
+    fn browser_error_no_match_carries_reason() {
+        let err = BrowserError::NoMatch("no button on page".into());
+        let s = err.to_string();
+        assert!(s.contains("no match"), "got: {s}");
+        assert!(s.contains("no button on page"), "got: {s}");
+    }
+
+    #[test]
+    fn browser_error_missing_value_names_action() {
+        let err = BrowserError::MissingValue { action: "type" };
+        assert_eq!(err.to_string(), "missing value for action: type");
+    }
+
+    #[test]
+    fn browser_error_grounding_parse_includes_message() {
+        let err = BrowserError::GroundingParse("expected JSON".into());
+        let s = err.to_string();
+        assert!(s.contains("grounding parse failed"), "got: {s}");
+        assert!(s.contains("expected JSON"), "got: {s}");
     }
 }
