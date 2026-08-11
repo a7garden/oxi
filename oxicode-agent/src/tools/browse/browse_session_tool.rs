@@ -187,6 +187,7 @@ impl AgentTool for BrowseSessionTool {
                         "evaluate_await",
                         "get_value",
                         "screenshot",
+                        "pdf",
                         "close"
                     ],
                     "description": "Session action to perform"
@@ -652,6 +653,41 @@ impl AgentTool for BrowseSessionTool {
                 .with_content_blocks(vec![img]))
             }
 
+            // ── PDF export ────────────────────────────────────────────
+            "pdf" => {
+                self.check_idle_timeout().await?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let pdf = tab.print_to_pdf(width).await.map_err(browser_err)?;
+                let size_bytes = pdf.len();
+                // Persist to a deterministic temp path so the agent can read it
+                // back with the read tool. We don't attach the bytes as a
+                // content block (PDF has no model-facing variant) and we
+                // don't echo them in the text payload (MBs of base64 would
+                // blow the model's context window).
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let tab_id = tab.tab_id();
+                let path = std::env::temp_dir().join(format!("oxicode-{tab_id}-{stamp}.pdf"));
+                std::fs::write(&path, &pdf)
+                    .map_err(|e| BrowserError::Backend(format!("failed to persist PDF: {e}")))?;
+                let path_str = path.to_string_lossy().to_string();
+                tracing::info!(
+                    width,
+                    size_bytes,
+                    path = %path_str,
+                    "browse: pdf exported"
+                );
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "size_bytes": size_bytes,
+                    "width": width,
+                    "path": path_str,
+                    "note": "Read the PDF with the read tool (or open the file directly).",
+                }))))
+            }
             // ── Extended DOM actions ──────────────────────────────
             "scroll_into_view" => {
                 self.check_idle_timeout().await?;
@@ -733,9 +769,8 @@ impl AgentTool for BrowseSessionTool {
             _ => Err(format!(
                 "Unknown action: '{}'. Valid actions: open, goto, back, forward, reload, \
                      click, fill, type, clear, press, select, check, uncheck, scroll, \
-                     scroll_into_view, hover, double_click, right_click, drag, upload_file, \
                      wait_for, wait, content, observe, query_all, extract_links, evaluate, \
-                     evaluate_await, get_value, screenshot, close",
+                     evaluate_await, get_value, screenshot, pdf, close",
                 action
             )),
         }
@@ -845,6 +880,11 @@ mod tests {
         }
         async fn screenshot(&self, _width: u32) -> Result<Vec<u8>, BrowserError> {
             Ok(vec![0x89, 0x50, 0x4E, 0x47]) // PNG magic bytes
+        }
+        async fn print_to_pdf(&self, _width: u32) -> Result<Vec<u8>, BrowserError> {
+            // Minimal "%PDF-1.4\n%%EOF\n" header so downstream consumers can
+            // detect the format. Mock returns a constant ~14-byte payload.
+            Ok(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n%%EOF\n".to_vec())
         }
         async fn close(&self) -> Result<(), BrowserError> {
             self.closed.store(true, Ordering::SeqCst);
@@ -1101,6 +1141,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_pdf_action() {
+        let tool = make_tool();
+        let ctx = ToolContext::default();
+
+        tool.execute("c1", json!({"action": "open"}), None, &ctx)
+            .await
+            .unwrap();
+
+        let result = tool
+            .execute("c2", json!({"action": "pdf", "width": 1024}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert!(result.output.contains("size_bytes"));
+        assert!(result.output.contains("\"path\""));
+        // The mock writes a fake %PDF-1.4 file; verify the returned path
+        // actually contains a %PDF- magic.
+        let parsed: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        let path = parsed["path"].as_str().expect("path field");
+        let bytes = std::fs::read(path).expect("read pdf from returned path");
+        assert!(
+            bytes.starts_with(b"%PDF-"),
+            "PDF file should start with %PDF-"
+        );
+
+        tool.execute("c3", json!({"action": "close"}), None, &ctx)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn test_dom_actions() {
         let tool = make_tool();
         let ctx = ToolContext::default();
@@ -1300,6 +1371,6 @@ mod tests {
         let tool = make_tool();
         let schema = tool.parameters_schema();
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
-        assert_eq!(actions.len(), 31);
+        assert_eq!(actions.len(), 32);
     }
 }

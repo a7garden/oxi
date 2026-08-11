@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.73.0] - 2026-08-11
+
+### Added
+
+- **`browse_session` gains a `pdf` action.** Exports the current page as a
+  single-page PDF (viewport width configurable via `width`, default 800) and
+  persists the bytes to `/tmp/oxicode-<tab_id>-<ms>.pdf`. The handler returns
+  `{size_bytes, width, path, note}` — the agent can re-read the file via
+  `read <path>`. PDF bytes are not echoed inline (a single page can be many
+  MB; would blow the model context). Available only with `native-browser`.
+ **`Tab::print_to_pdf`** is now wired through `BrowserEngine` (default body
+  returns `BrowserError::Pdf` for non-`oxibrowser` engines; the real impl in
+  `OxicodeBrowserEngine` delegates to `oxibrowser_core::Tab::print_to_pdf`).
+ New `BrowseProgress::PdfExported` event carries the export metadata.
+
+### Changed
+
+- **oxibrowser upgraded 0.20 → 0.21.** Pulls in `Tab::print_to_pdf` (a
+  Rust-API, not just CDP) and WebAssembly support (wasmi ↔ boa_engine bridge,
+  pages with WASM modules now run). WASM is enabled automatically by the
+  `oxibrowser-core` dep; the only oxicode-visible change is the new
+  `print_to_pdf` surface. Pure additive — no breaking changes.
+ `oxibrowser` (search-only) + `oxibrowser-core` (optional, `native-browser`)
+  pins both bumped. Lockfile picked up `wasmi`, `wasmi_core`, `wasmi_collections`,
+  `wasmi_ir`, `wasmparser`, `weezl`, `xmlparser`, `yansi`, `printpdf`.
+
+
 ## [0.72.0] - 2026-08-11
 
 ### Changed — ⚠ Breaking

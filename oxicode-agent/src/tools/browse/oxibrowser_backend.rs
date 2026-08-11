@@ -22,9 +22,9 @@ fn extract_event_tab_id(event: &oxibrowser_core::BrowserEvent) -> uuid::Uuid {
         oxibrowser_core::BrowserEvent::NavigationStarted { tab_id, .. }
         | oxibrowser_core::BrowserEvent::WaitingForSelector { tab_id, .. }
         | oxibrowser_core::BrowserEvent::DocumentReady { tab_id, .. }
-        | oxibrowser_core::BrowserEvent::ScreenshotCaptured { tab_id, .. } => *tab_id,
-        // `NavigationFailed` is only present in oxibrowser-core ≥ 0.14.
-        // crates.io 0.13 lacks this variant; unknown variants fall through.
+        | oxibrowser_core::BrowserEvent::ScreenshotCaptured { tab_id, .. }
+        | oxibrowser_core::BrowserEvent::PdfExported { tab_id, .. } => *tab_id,
+        // `BrowserEvent` is `#[non_exhaustive]`; fall through for forward-compat.
         _ => uuid::Uuid::nil(),
     }
 }
@@ -71,8 +71,16 @@ fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<B
             width: *viewport_width,
             duration_ms: duration.as_millis() as u64,
         }),
-        // `NavigationFailed` is only present in oxibrowser-core ≥ 0.14.
-        // crates.io 0.13 lacks this variant; we degrade gracefully.
+        PdfExported {
+            bytes,
+            viewport_width,
+            duration,
+            ..
+        } => Some(BrowseProgress::PdfExported {
+            bytes: *bytes,
+            width: *viewport_width,
+            duration_ms: duration.as_millis() as u64,
+        }),
         _ => None,
     }
 }
@@ -374,6 +382,13 @@ impl BrowserTabTrait for OxicodeTab {
             .screenshot(width)
             .await
             .map_err(|e| BrowserError::Screenshot(e.to_string()))
+    }
+
+    async fn print_to_pdf(&self, width: u32) -> Result<Vec<u8>, BrowserError> {
+        self.inner
+            .print_to_pdf(width)
+            .await
+            .map_err(|e| BrowserError::Pdf(e.to_string()))
     }
 
     async fn close(&self) -> Result<(), BrowserError> {

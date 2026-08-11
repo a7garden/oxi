@@ -29,6 +29,8 @@ pub enum BrowserError {
     Evaluation(String),
     #[error("screenshot failed: {0}")]
     Screenshot(String),
+    #[error("pdf export failed: {0}")]
+    Pdf(String),
     #[error("tab closed: {0}")]
     TabClosed(String),
     #[error("browser error: {0}")]
@@ -243,6 +245,16 @@ pub trait BrowserTab: Send + Sync {
 
     /// Capture a screenshot and return PNG bytes.
     async fn screenshot(&self, width: u32) -> Result<Vec<u8>, BrowserError>;
+
+    /// Export the current page to PDF and return raw PDF bytes.
+    /// Returns a `BrowserError::Screenshot` (or a dedicated `Pdf` variant if added)
+    /// on render or encode failure.
+    async fn print_to_pdf(&self, width: u32) -> Result<Vec<u8>, BrowserError> {
+        let _ = width;
+        Err(BrowserError::Pdf(
+            "print_to_pdf not implemented by this engine".into(),
+        ))
+    }
 
     /// Close this tab.
     async fn close(&self) -> Result<(), BrowserError>;
@@ -465,6 +477,16 @@ pub enum BrowseProgress {
         /// Viewport width the screenshot was rendered at.
         width: u32,
         /// Render duration in milliseconds.
+        duration_ms: u64,
+    },
+
+    /// A PDF export has completed.
+    PdfExported {
+        /// Size of the PDF payload in bytes.
+        bytes: usize,
+        /// Viewport width the PDF was rendered at.
+        width: u32,
+        /// Render + encode duration in milliseconds.
         duration_ms: u64,
     },
 
@@ -840,6 +862,11 @@ mod tests {
                 bytes: 8192,
                 width: 1280,
                 duration_ms: 200,
+            },
+            BrowseProgress::PdfExported {
+                bytes: 16384,
+                width: 1280,
+                duration_ms: 350,
             },
             BrowseProgress::NavigationFailed {
                 url: "https://fail.example.com".into(),
