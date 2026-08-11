@@ -943,6 +943,7 @@ pub mod path_security;
 pub mod path_utils;
 /// File reading tool.
 pub mod read;
+pub(crate) mod read_http;
 /// Rendering utilities for tool output.
 pub mod render_utils;
 /// Review tool — request code review with focus areas and priorities.

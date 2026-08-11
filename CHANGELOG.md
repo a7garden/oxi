@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(nothing yet)_
 
+## [0.72.0] - 2026-08-11
+
+### Changed — ⚠ Breaking
+
+- **Browsing is now a product capability, not an SDK contract.** `oxicode-sdk`
+  no longer re-exports browser tooling: the `BrowseTool`/`BrowserEngine`/
+  `BrowseSessionTool`/`OxicodeBrowserEngine` re-exports, the
+  `browsing_tools()`/`native_browser_tools()`/`browsing_tools_with_session()`/
+  `full_tools()` factories, the `.browsing()`/`.browsing_with_config()`/
+  `.native_browser()`/`.browsing_with_session()` `AgentBuilder` methods, and the
+  `browser`/`native-browser` **features of `oxicode-sdk`** have all been removed.
+  `oxibrowser` is the standalone general-purpose headless browser; products that
+  want browsing depend on `oxibrowser` directly (or reuse the agent-layer browse
+  tools in `oxicode_agent::tools::browse`). The `Capability::WebBrowse` security
+  contract is retained. Blast radius is low (the removed surface lived behind
+  `unstable` + `default = []`), but consumers must update.
+
+### Added
+
+- **`native-browser` is now a default feature of `oxicode-cli`.** `cargo install
+  oxicode` now ships the built-in headless browser (browse tools) out of the box
+  — "browsing-equipped AI agent" identity in every build. Pass
+  `--no-default-features --features self-update` for the lightweight build.
+- **`read` now fetches `http(s)` URLs as reader-mode markdown.** A lightweight
+  static path (no JavaScript, no browser engine) that works in every build — use
+  `browse` for dynamic/JS pages, screenshots, or interaction. Role split:
+  `read <url>` = fast static body; `browse <url>` = full browser. The system
+  prompt now teaches the `web_search → read <url> → browse <url>` research route.
+- **Browse tool factories moved to the agent layer.**
+  `oxicode_agent::tools::browse::{browsing_tools, browsing_tools_with_session}`
+  are the new home for browser-tool assembly.
+
 ## [0.71.0] - 2026-08-10
 
 ### Added

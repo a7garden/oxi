@@ -9,19 +9,11 @@
 pub use crate::agent_builder::AgentBuilder;
 pub use crate::agent_definition::{AgentDefinition, AgentDiscovery, AgentScope, DefaultContext};
 pub use crate::builder::{Oxicode, OxicodeBuilder};
-pub use crate::tool_factory::{browsing_tools, coding_tools, full_tools, readonly_tools};
-
-#[cfg(feature = "native-browser")]
-pub use crate::tool_factory::browsing_tools_with_session;
+pub use crate::tool_factory::{coding_tools, readonly_tools};
 
 pub use oxicode_agent::{
     Agent, AgentConfig, AgentEvent, AgentLoop, AgentState, AgentTool, AgentToolResult,
     CompactionEvent, SearchCache, SharedState, ToolError, ToolExecutionMode, ToolRegistry,
-};
-
-pub use oxicode_agent::tools::browse::{
-    BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine, BrowserError, BrowserTab,
-    ElementInfo, LinkInfo, PageContent, TabGuard,
 };
 
 pub use oxicode_ai::{CompactionStrategy, Model, Provider, UserMessage};

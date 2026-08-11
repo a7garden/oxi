@@ -1,6 +1,6 @@
 [package]
 name = "oxicode-cli"
-version = "0.71.0"
+version = "0.72.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
@@ -21,14 +21,14 @@ name = "oxicode"
 path = "src/lib.rs"
 
 [dependencies]
-oxicode-ai = { version = "0.71.0", path = "../oxicode-ai" }
-oxicode-catalog = { version = "0.71.0", path = "../oxicode-catalog" }
-oxicode-agent = { version = "0.71.0", path = "../oxicode-agent" }
-oxicode-sdk = { version = "0.71.0", path = "../oxicode-sdk", features = ["router", "role-routing", "role-switching", "url-resolver"] }
-oxicode-vtui = { version = "0.71.0", path = "../oxicode-vtui" }
-oxicode-vtui-compat = { version = "0.71.0", path = "../oxicode-vtui-compat" }
-oxicode-mnemopi = { version = "0.71.0", path = "../oxicode-mnemopi", features = ["remote-embeddings"] }
-oxicode-lsp = { version = "0.71.0", path = "../oxicode-lsp" }
+oxicode-ai = { version = "0.72.0", path = "../oxicode-ai" }
+oxicode-catalog = { version = "0.72.0", path = "../oxicode-catalog" }
+oxicode-agent = { version = "0.72.0", path = "../oxicode-agent" }
+oxicode-sdk = { version = "0.72.0", path = "../oxicode-sdk", features = ["router", "role-routing", "role-switching", "url-resolver"] }
+oxicode-vtui = { version = "0.72.0", path = "../oxicode-vtui" }
+oxicode-vtui-compat = { version = "0.72.0", path = "../oxicode-vtui-compat" }
+oxicode-mnemopi = { version = "0.72.0", path = "../oxicode-mnemopi", features = ["remote-embeddings"] }
+oxicode-lsp = { version = "0.72.0", path = "../oxicode-lsp" }
 lsp-types = "0.95"
 
 # Async
@@ -120,9 +120,9 @@ zip = "8"
 libc = "0.2"
 
 [features]
-default = ["self-update"]
+default = ["self-update", "native-browser"]
 self-update = ["dep:self_update"]
-native-browser = ["oxicode-agent/native-browser", "oxicode-sdk/native-browser"]
+native-browser = ["oxicode-agent/native-browser"]
 
 [dev-dependencies]
 tempfile = "3"

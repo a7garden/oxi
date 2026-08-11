@@ -305,7 +305,7 @@ impl AgentTool for ReadTool {
         true
     }
     fn description(&self) -> &str {
-        "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When reading with offset, line numbering starts from 1."
+        "Read the contents of a file, or fetch an http(s) URL. Supports text files and images (jpg, png, gif, webp); images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB. Use offset/limit for large files. For http(s) URLs, the page is fetched and returned as reader-mode markdown (static content only, no JavaScript rendering) — use `browse` for dynamic/JS pages, screenshots, or interaction. When reading with offset, line numbering starts from 1."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -314,7 +314,7 @@ impl AgentTool for ReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to read (relative or absolute), or an internal URL (issue://N, pr://owner/repo/N, skill://name/SKILL.md, agent://id, etc.)"
+                    "description": "Path to the file to read (relative or absolute), an internal URL (issue://N, pr://owner/repo/N, skill://name/SKILL.md, agent://id, etc.), or a web URL (http://https://) which is fetched and converted to reader-mode markdown"
                 },
                 "offset": {
                     "type": "number",
@@ -359,6 +359,22 @@ impl AgentTool for ReadTool {
         {
             let resolved = resolver.resolve(path_str).await?;
             return Ok(AgentToolResult::success(resolved.content));
+        }
+        // ── Web URL fetch (reader-mode) ──
+        // http(s) URLs are fetched and converted to reader-mode markdown — a
+        // lightweight static path with no JS rendering, available in every
+        // build. For dynamic/JS-rendered pages, screenshots, or interaction,
+        // the agent should use `browse` (the `native-browser` feature). The
+        // internal URL resolver above rejects web schemes by design.
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            let fetch = super::read_http::fetch_url(path_str).await?;
+            let mut result = AgentToolResult::success(fetch.content);
+            result = result.with_metadata(json!({
+                "url": fetch.url,
+                "title": fetch.title,
+                "content_type": fetch.content_type,
+            }));
+            return Ok(result);
         }
 
         // Security: validate path with PathGuard (use root_dir if set, else ctx)

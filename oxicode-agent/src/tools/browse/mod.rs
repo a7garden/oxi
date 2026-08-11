@@ -10,6 +10,7 @@ pub mod browse_tool;
 pub mod callback_mixin;
 pub mod config;
 pub mod engine;
+pub mod factory;
 pub mod helpers;
 pub mod tab_guard;
 
@@ -28,9 +29,12 @@ pub use engine::{
     BrowseProgress, BrowseProgressCallback, BrowseWaitCondition, BrowserEngine, BrowserError,
     BrowserTab, ElementInfo, LinkInfo, Observation, ObservedElement, PageContent,
 };
+pub use factory::{browsing_tools, browsing_tools_with_config};
 pub use tab_guard::TabGuard;
 
 #[cfg(feature = "native-browser")]
 pub use browse_script_tool::BrowseScriptTool;
+#[cfg(feature = "native-browser")]
+pub use factory::browsing_tools_with_session;
 #[cfg(feature = "native-browser")]
 pub use oxibrowser_backend::OxicodeBrowserEngine;

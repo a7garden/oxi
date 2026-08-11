@@ -271,7 +271,7 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     {
         match oxicode_agent::tools::browse::OxicodeBrowserEngine::new().await {
             Ok(engine) => {
-                let browser_registry = oxicode_sdk::tool_factory::browsing_tools_with_session(
+                let browser_registry = oxicode_agent::tools::browse::browsing_tools_with_session(
                     std::sync::Arc::new(engine),
                 );
                 tools.extend_from(&browser_registry);

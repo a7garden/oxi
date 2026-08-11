@@ -349,34 +349,6 @@ pub use oxicode_ai::OpenAiProvider;
 #[oxicode_stable(since = "0.63.0")]
 pub use oxicode_ai::OpenAiResponsesProvider;
 
-// ── Browser engine re-exports ────────────────────────────────────────────────
-//
-// The browser trait layer (BrowserEngine, BrowserTab, config, error types)
-// is available behind the `browser` feature so SDK consumers can implement
-// custom backends. The native oxibrowser-core backend additionally requires
-// the `native-browser` feature.
-
-#[cfg(feature = "browser")]
-#[oxicode_unstable(feature = "browser")]
-pub use oxicode_agent::tools::browse::{
-    BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine, BrowserError, BrowserTab,
-    ElementInfo, LinkInfo, PageContent, TabGuard,
-};
-
-#[cfg(feature = "native-browser")]
-#[oxicode_unstable(feature = "native-browser")]
-pub use oxicode_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxicodeBrowserEngine};
-
-/// Re-export the browser event type from oxibrowser-core. Surfaced through
-/// `Browser::subscribe_events()` for agents/UIs that want to render fine-
-/// grained progress ("Opening X…", "Loaded Y…") to the user.
-///
-/// Gated by the `native-browser` feature because it depends on
-/// `oxibrowser-core` types.
-#[cfg(feature = "native-browser")]
-#[oxicode_unstable(feature = "native-browser")]
-pub use oxibrowser_core::BrowserEvent;
-
 // ── MCP (Model Context Protocol) re-exports ───────────────────────────
 //
 // SDK consumers can use MCP servers alongside built-in tools.

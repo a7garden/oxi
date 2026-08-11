@@ -74,6 +74,13 @@ cd oxicode && cargo build --release
 cp target/release/oxicode /usr/local/bin/
 ```
 
+> **Built-in browser.** `oxicode` ships with a pure-Rust headless browser
+> (`oxibrowser`) by default — the agent can browse, screenshot, and read web
+> pages with no Chrome/Playwright dependency. `read <url>` fetches static page
+> bodies as reader-mode markdown; `browse <url>` drives the full browser
+> (JavaScript, screenshots, vision). To build without it (smaller binary, no
+> browser tools): `cargo install oxicode-cli --no-default-features --features self-update`.
+
 ### Verify a downloaded binary
 
 ```bash

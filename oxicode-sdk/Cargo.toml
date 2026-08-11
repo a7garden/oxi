@@ -1,6 +1,6 @@
 [package]
 name = "oxicode-sdk"
-version = "0.71.0"
+version = "0.72.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "oxicode AI agent SDK — build isolated, multi-agent AI systems"
@@ -13,15 +13,11 @@ categories = ["api-bindings", "development-tools"]
 exclude = ["target/"]
 
 [dependencies]
-oxicode-ai = { version = "0.71.0", path = "../oxicode-ai" }
-oxicode-agent = { version = "0.71.0", path = "../oxicode-agent" }
-oxicode-hashline = { version = "0.71.0", path = "../oxicode-hashline" }
-oxicode-api-stability = { version = "0.71.0", path = "../oxicode-api-stability" }
+oxicode-ai = { version = "0.72.0", path = "../oxicode-ai" }
+oxicode-agent = { version = "0.72.0", path = "../oxicode-agent" }
+oxicode-hashline = { version = "0.72.0", path = "../oxicode-hashline" }
+oxicode-api-stability = { version = "0.72.0", path = "../oxicode-api-stability" }
 async-trait = "0.1"
-# Re-exported under the `native-browser` feature so downstream consumers
-# can match on `BrowserEvent` variants without depending on oxibrowser-core
-# directly.
-oxibrowser-core = { version = "0.20", optional = true }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
@@ -39,7 +35,7 @@ chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
 globset = "0.4"
 regex = "1"
-oxicode-snapcompact = { version = "0.71.0", path = "../oxicode-snapcompact" }
+oxicode-snapcompact = { version = "0.72.0", path = "../oxicode-snapcompact" }
 
 # File-based port impls (fs/ sub-module). Always available in default build.
 toml = "0.9"
@@ -57,7 +53,6 @@ wiremock = "0.6"
 
 [features]
 default = []
-native-browser = ["oxicode-agent/native-browser", "dep:oxibrowser-core"]
 # Opt-in gates for surface that the R3 tier annotations flag as `#[unstable]`.
 # These are REAL machine-enforced signals (the consumer cannot reach the
 # symbols without enabling the feature) — not just doc cosmetics.
@@ -77,7 +72,6 @@ unstable = [
     "subagent",
     "agent-hub",
     "lsp",
-    "browser",
 ]
 circuit-breaker = []
 mcp-spawn-validator = []
@@ -93,7 +87,6 @@ memory = []
 subagent = []
 agent-hub = []
 lsp = []
-browser = []
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

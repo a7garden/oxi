@@ -288,6 +288,22 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
             "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)",
         );
     }
+    let has_web_search = options.selected_tools.contains(&"web_search".to_string());
+    let has_browse = options.selected_tools.contains(&"browse".to_string())
+        || options
+            .selected_tools
+            .contains(&"browse_session".to_string());
+    if has_web_search && has_read {
+        if has_browse {
+            add_guideline(
+                "For web research: use web_search to discover sources, read <url> for static page bodies (fast, no JavaScript), and browse <url> for dynamic/JS pages, screenshots, or visual analysis (browse screenshots are routed to a vision-capable model automatically)",
+            );
+        } else {
+            add_guideline(
+                "For web research: use web_search to discover sources, then read <url> to fetch the page body as reader-mode markdown (static content only)",
+            );
+        }
+    }
 
     // User-provided guidelines
     for g in &options.prompt_guidelines {
