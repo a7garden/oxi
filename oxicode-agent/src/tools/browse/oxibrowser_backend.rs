@@ -311,7 +311,7 @@ impl BrowserTabTrait for OxicodeTab {
             .map_err(|e| BrowserError::Timeout(e.to_string()))
     }
     /// Native structured-wait override — maps our portable
-    /// [`BrowseWaitCondition`] to `oxibrowser_core::tab::WaitCondition` so
+    /// [`super::engine::BrowseWaitCondition`] to `oxibrowser_core::tab::WaitCondition` so
     /// `NetworkIdle` / `DomContentLoaded` / `Load` honour real in-flight
     /// traffic semantics (Playwright/Puppeteer "networkidle" parity).
     async fn wait_for_condition(
@@ -341,7 +341,7 @@ impl BrowserTabTrait for OxicodeTab {
         Ok(browse_result_to_page_content(page))
     }
     /// omp `observe()` parity — runs the JS accessibility-surface synthesis
-    /// via `evaluate()` and parses the result into an [`Observation`].
+    /// via `evaluate()` and parses the result into a [`super::engine::Observation`].
     /// Returns the page's visible, interactive elements with stable
     /// `data-oxicode-ref` selectors (no coordinates — boa only approximates
     /// layout geometry).
