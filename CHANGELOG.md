@@ -7,7 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(nothing yet)_
+### Added
+
+- **`browse_act`** — natural-language goal → grounded `BrowserTab` action.
+  Opens a tab, calls `observe()` to capture the page's interactive surface,
+  prunes to a top-20 candidate tier via a deterministic Jaccard scorer, then
+  asks a construction-injected LLM to pick the element matching the goal.
+  Dispatches `click` / `type` / `fill` / `select_option` / `check` /
+  `uncheck` / `press` / `hover`. No CSS selectors required from the caller.
+  Closes the layer-2 gap that browser-use / Stagehand / Playwright MCP /
+  Skyvern / AgentQL / Claude CU / OpenAI CUA already address. Provider +
+  Model are injected at factory construction (`browsing_tools(provider,
+  model, engine)`).
+- **`browse_act` deterministic-only mode.** When the factory is called with
+  `provider = None` (tests, offline builds, MCP servers without an LLM wire),
+  the tool still works using its deterministic candidate-tier scorer and
+  surfaces `mode: "deterministic_only"` in every result. The factory
+  signatures are now `(Option<Arc<dyn Provider>>, Option<Model>, engine)`.
+- **Factory signature change.** `browsing_tools` / `browsing_tools_with_config`
+  / `browsing_tools_with_session` now take `Option<Arc<dyn oxicode_ai::Provider>>`
+  + `Option<oxicode_ai::Model>` so `browse_act` can be wired. CLI bootstrap
+  updates the wire in lockstep (anthropic default for the LLM, deterministic
+  fallback when no model is configured).
+
+### Fixed
+
+- **CI: `libfontconfig1-dev` missing on smoke-test and msrv jobs.** v0.72.0
+  promoted `native-browser` to a default feature of `oxicode-cli`, which
+  transitively pulls `oxibrowser-render` (Blitz/Stylo/Taffy/vello) and the
+  `yeslogic-fontconfig-sys` build script. The two clippy jobs install
+  `libfontconfig1-dev` (added in v0.73.0) but smoke-test and msrv did not,
+  so `pkg-config` could not find fontconfig and `cargo test --no-run`
+  (smoke-test) or `cargo build --workspace` (msrv) failed at the
+  fontconfig-sys build script. Both jobs now install the system dep.
+  CI run 31467470837 was the evidence; red since v0.71.0 → v0.72.0.
+- **Doc: two broken intra-doc links in `oxibrowser_backend.rs`.** Qualified
+  `BrowseWaitCondition` and `Observation` references as
+  `super::engine::BrowseWaitCondition` / `super::engine::Observation` so
+  `cargo doc --workspace --no-deps` passes under `RUSTDOCFLAGS="-D warnings"`.
+
+### Deferred
+
+- **`browse_extract_struct`** (intent-based structured extraction) — needs
+  its own design pass: intent → selector synthesis, schema → field mapping,
+  list-row scoping. A non-LLM CSS-per-field path would not be an "AI
+  primitive" and a full-LLM intent path is a different design problem;
+  neither ships under that name in this PR. Tracked on the P4 roadmap
+  alongside vision-grounded clicking.
 
 ## [0.73.0] - 2026-08-11
 
