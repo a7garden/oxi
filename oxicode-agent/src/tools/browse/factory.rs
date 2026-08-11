@@ -55,10 +55,7 @@ pub fn browsing_tools_with_config(
     config: BrowseConfig,
 ) -> Arc<ToolRegistry> {
     let registry = ToolRegistry::new();
-    registry.register(BrowseTool::with_config(
-        Arc::clone(&engine),
-        config.clone(),
-    ));
+    registry.register(BrowseTool::with_config(Arc::clone(&engine), config.clone()));
     match (provider, model) {
         (Some(p), Some(m)) => {
             registry.register(BrowseActTool::with_config(

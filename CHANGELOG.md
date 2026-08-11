@@ -46,14 +46,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `super::engine::BrowseWaitCondition` / `super::engine::Observation` so
   `cargo doc --workspace --no-deps` passes under `RUSTDOCFLAGS="-D warnings"`.
 
-### Deferred
+### Added
 
-- **`browse_extract_struct`** (intent-based structured extraction) — needs
-  its own design pass: intent → selector synthesis, schema → field mapping,
-  list-row scoping. A non-LLM CSS-per-field path would not be an "AI
-  primitive" and a full-LLM intent path is a different design problem;
-  neither ships under that name in this PR. Tracked on the P4 roadmap
-  alongside vision-grounded clicking.
+- **P2 `browse_session` runtime-verify smoke tests.** Two new
+  integration tests in `browse_session_tool.rs`:
+  - `test_full_lifecycle_smoke` drives the full action lifecycle
+    (open → goto → click → fill → type → press → check → scroll →
+    wait_for → hover → content → query_all → evaluate → screenshot
+    → pdf → close → double-close) in one sequence, asserting every
+    step returns `success=true`. Catches regressions where one
+    action's handler accidentally invalidates session state for the
+    next.
+  - `test_open_after_close_yields_fresh_session` exercises the
+    multi-tab lifecycle (round 1: open → goto → content → close →
+    round 2: open → goto → content → close). Verifies that
+    `current_tab_id()` clears on close and re-arms on the next
+    open. The native backend's unique-UUID-per-tab contract is
+    covered by oxibrowser's own tests; the agent-layer test
+    asserts the lifecycle, not the UUID uniqueness (the MockTab
+    used here returns `Uuid::nil()` for every tab).
+### Deferred
 
 ## [0.73.0] - 2026-08-11
 

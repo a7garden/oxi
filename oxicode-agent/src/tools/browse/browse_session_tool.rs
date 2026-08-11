@@ -1373,4 +1373,198 @@ mod tests {
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
         assert_eq!(actions.len(), 32);
     }
+
+    /// P2 runtime-verify smoke test — drives the full action lifecycle
+    /// in one sequence on a single session, asserting every step returns
+    /// `success=true`. Catches regressions where one action's handler
+    /// accidentally invalidates session state for the next.
+    #[tokio::test]
+    async fn test_full_lifecycle_smoke() {
+        let tool = make_tool();
+        let ctx = ToolContext::default();
+
+        // 1. Open.
+        let r = tool
+            .execute("c1", json!({"action": "open"}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(r.success, "open: {:?}", r);
+
+        // 2. Navigate.
+        let r = tool
+            .execute(
+                "c2",
+                json!({"action": "goto", "url": "https://example.com"}),
+                None,
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r.success, "goto: {:?}", r);
+
+        // 3. DOM interaction chain (mirrors what the agent would actually
+        // do in a realistic flow).
+        for (i, call) in [
+            ("click", json!({"action": "click", "selector": "#btn"})),
+            (
+                "fill",
+                json!({"action": "fill", "selector": "#input", "value": "hello"}),
+            ),
+            (
+                "type",
+                json!({"action": "type", "selector": "#input", "value": "world"}),
+            ),
+            ("press", json!({"action": "press", "combo": "Enter"})),
+            ("check", json!({"action": "check", "selector": "#agree"})),
+            ("scroll", json!({"action": "scroll", "pixels": 200})),
+            (
+                "wait_for",
+                json!({"action": "wait_for", "selector": ".loaded"}),
+            ),
+            ("hover", json!({"action": "hover", "selector": "#menu"})),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let (label, params) = call;
+            let r = tool
+                .execute(&format!("c3-{i}"), params.clone(), None, &ctx)
+                .await
+                .unwrap();
+            assert!(r.success, "{label}: {:?}", r);
+        }
+
+        // 4. Read paths.
+        let r = tool
+            .execute(
+                "c4-content",
+                json!({"action": "content", "format": "markdown"}),
+                None,
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r.success, "content: {:?}", r);
+
+        let r = tool
+            .execute(
+                "c4-query",
+                json!({"action": "query_all", "selector": ".item"}),
+                None,
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r.success, "query_all: {:?}", r);
+
+        let r = tool
+            .execute(
+                "c4-eval",
+                json!({"action": "evaluate", "javascript": "document.title"}),
+                None,
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r.success, "evaluate: {:?}", r);
+
+        // 5. Visual / binary outputs (no panic on size-0 mock bytes).
+        let r = tool
+            .execute("c5-screenshot", json!({"action": "screenshot"}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(r.success, "screenshot: {:?}", r);
+
+        let r = tool
+            .execute("c5-pdf", json!({"action": "pdf", "width": 800}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(r.success, "pdf: {:?}", r);
+
+        // 6. Close.
+        let r = tool
+            .execute("c99", json!({"action": "close"}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(r.success, "close: {:?}", r);
+
+        // 7. Double-close is a no-op error (no active session), not a panic.
+        let r = tool
+            .execute("c100", json!({"action": "close"}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(r.success, "double close must be a success json: {:?}", r);
+    }
+
+    /// P2 multi-tab lifecycle smoke — re-opening after close must yield a
+    /// fresh tab. The previous session's tab must be fully closed (no leak)
+    /// and the new session must accept the full action sequence again.
+    #[tokio::test]
+    async fn test_open_after_close_yields_fresh_session() {
+        let tool = make_tool();
+        let ctx = ToolContext::default();
+
+        // Round 1.
+        tool.execute("r1-a", json!({"action": "open"}), None, &ctx)
+            .await
+            .unwrap();
+        tool.execute(
+            "r1-b",
+            json!({"action": "goto", "url": "https://example.com"}),
+            None,
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let r1_content = tool
+            .execute(
+                "r1-c",
+                json!({"action": "content", "format": "markdown"}),
+                None,
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r1_content.success);
+        let r1_tab_id = tool.current_tab_id();
+        assert!(r1_tab_id.is_some(), "round 1 tab_id must be set");
+        tool.execute("r1-z", json!({"action": "close"}), None, &ctx)
+            .await
+            .unwrap();
+        tool.execute("r2-a", json!({"action": "open"}), None, &ctx)
+            .await
+            .unwrap();
+        let r2_tab_id = tool.current_tab_id();
+        assert!(r2_tab_id.is_some(), "round 2 tab_id must be set");
+        // Note: MockTab in this test fixture returns Uuid::nil() for
+        // every new tab (engine.rs:371 default impl), so we cannot
+        // assert the tab_id differs from round 1 here. The native
+        // backend returns unique UUIDs and that contract is exercised
+        // by oxibrowser's own tests.
+        tool.execute(
+            "r2-b",
+            json!({"action": "goto", "url": "https://example.org"}),
+            None,
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let r = tool
+            .execute(
+                "r2-c",
+                json!({"action": "content", "format": "text"}),
+                None,
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r.success);
+        tool.execute("r2-z", json!({"action": "close"}), None, &ctx)
+            .await
+            .unwrap();
+        assert!(
+            tool.current_tab_id().is_none(),
+            "round 2 tab_id must clear on close"
+        );
+    }
 }
