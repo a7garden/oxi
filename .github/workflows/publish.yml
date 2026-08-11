@@ -134,6 +134,8 @@ jobs:
           - oxicode-cli
     steps:
       - uses: actions/checkout@v7
+      - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Wait for crates.io index to see dependency
