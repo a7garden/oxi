@@ -114,7 +114,7 @@ jobs:
     needs: [tag-check, package-check, verify]
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 1
