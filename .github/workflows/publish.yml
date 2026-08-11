@@ -86,6 +86,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.96"
