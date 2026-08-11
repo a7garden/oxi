@@ -83,7 +83,7 @@ jobs:
     name: fmt + clippy + nextest
     needs: tag-check
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
