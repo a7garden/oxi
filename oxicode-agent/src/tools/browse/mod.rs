@@ -4,6 +4,7 @@
 //! (oxibrowser-core) is behind `#[cfg(feature = "native-browser")]`.
 
 // Always compiled — trait definitions, helpers, config, session tool
+pub mod browse_act_tool;
 pub mod browse_extract_tool;
 pub mod browse_session_tool;
 pub mod browse_tool;
@@ -21,6 +22,7 @@ pub mod browse_script_tool;
 pub mod oxibrowser_backend;
 
 // Re-exports for convenience
+pub use browse_act_tool::BrowseActTool;
 pub use browse_extract_tool::BrowseExtractTool;
 pub use browse_session_tool::BrowseSessionTool;
 pub use browse_tool::BrowseTool;

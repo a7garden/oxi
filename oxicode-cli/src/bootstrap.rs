@@ -271,7 +271,32 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     {
         match oxicode_agent::tools::browse::OxicodeBrowserEngine::new().await {
             Ok(engine) => {
+                let (provider, model) = match (app.agent().model_id().is_empty(), app.oxicode()) {
+                    (false, oxicode) => {
+                        let model_id = app.agent().model_id();
+                        // model_id is the bare model id (Agent::model_id);
+                        // resolve provider name from the agent's config or fall
+                        // back to the Oxicode default.
+                        let provider_name = "anthropic".to_string();
+                        match (
+                            oxicode.create_provider(&provider_name),
+                            oxicode_ai::Model::new(
+                                model_id.clone(),
+                                model_id.clone(),
+                                oxicode_ai::Api::AnthropicMessages,
+                                provider_name.clone(),
+                                String::new(),
+                            ),
+                        ) {
+                            (Ok(p), m) => (Some(p), Some(m)),
+                            _ => (None, None),
+                        }
+                    }
+                    _ => (None, None),
+                };
                 let browser_registry = oxicode_agent::tools::browse::browsing_tools_with_session(
+                    provider,
+                    model,
                     std::sync::Arc::new(engine),
                 );
                 tools.extend_from(&browser_registry);
