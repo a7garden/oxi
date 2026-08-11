@@ -90,6 +90,7 @@ allow = [
     "MPL-2.0",
     "CDLA-Permissive-2.0",
     "bzip2-1.0.6",  # bzip2/libbz2 — permissive, GPL-compatible (libbz2-rs-sys via zip → oxicode-cli)
+    "NCSA",  # University of Illinois/NCSA Open Source License (libfuzzer-sys v0.4.13 via rav1e → ravif → image → anyrender_svg → blitz-paint → oxibrowser-render 0.21; reachable only under `native-browser`)
 ]
 private = { ignore = true }
 
