@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.74.0] - 2026-08-12
+
 ### Added
 
 - **`browse_act`** — natural-language goal → grounded `BrowserTab` action.
@@ -29,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   + `Option<oxicode_ai::Model>` so `browse_act` can be wired. CLI bootstrap
   updates the wire in lockstep (anthropic default for the LLM, deterministic
   fallback when no model is configured).
+- **`/handoff` slash command for session handoff.** New TUI slash command
+  (`oxicode-cli/src/tui_vt/slash/`) that captures the current session's
+  task state + remaining-work summary as a structured Markdown handoff
+  document (`docs/handoff/<timestamp>-<slug>.md`) and writes a
+  companion boot token for the next session. The handoff format is
+  designed to survive context compaction: state + invariants +
+  next-action checklist, not conversation transcripts.
+- **`/handoff` progress spinner + auto-continue guard.** While the
+  handoff write is in flight the TUI shows an inline spinner. The
+  guard prevents the next prompt from being submitted before the
+  write completes (avoids orphan-doc races if the user hits Enter
+  again mid-handoff).
+- **`/providers` TUI flow is complete.** Adds full provider setup
+  inside the TUI: list existing providers → row selection chains into
+  the secure-prompt API-key entry (replaceable key-only path) or the
+  `run-oauth` flow for OAuth-capable providers. Each row shows the
+  live OAuth badge (filled = active token, outline = none) so the
+  user can see auth state at a glance. Keeps the newly-opened overlay
+  alive after row selection (was being dismissed prematurely).
 
 ### Fixed
 
@@ -45,6 +66,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BrowseWaitCondition` and `Observation` references as
   `super::engine::BrowseWaitCondition` / `super::engine::Observation` so
   `cargo doc --workspace --no-deps` passes under `RUSTDOCFLAGS="-D warnings"`.
+- **CI: `libfontconfig1-dev` missing on `cargo doc` and `Doc Tests` jobs.**
+  Same native-browser fallout as the smoke-test/msrv fix above — the
+  fontconfig-sys build script also runs during `cargo doc --workspace
+  --no-deps` and `cargo test --workspace --doc`. v0.73.0 fixed the
+  other two jobs but missed these, so both failed at the fontconfig-sys
+  build step on every push to main since v0.72.0. Now installs
+  `libfontconfig1-dev` on both jobs (ci.yml + test.yml) and restores
+  the missing `actions/checkout` + toolchain + rust-cache steps in
+  `test-doc`. CI runs 31588320161 / 31588320102 were the evidence.
 
 ### Added
 
