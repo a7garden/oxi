@@ -250,11 +250,33 @@ pub struct RenderState {
     /// User-defined slash commands loaded once at startup from
     /// `.oxicode/commands/` and `~/.oxicode/commands/`.
     pub file_commands: Vec<FileCommand>,
-    /// Provider name targeted by the currently open secure prompt. Set
-    /// before opening the prompt; cleared on `OverlaySubmission::SecureInput`
-    /// after the key is written. `None` outside the `/providers` key-entry
-    /// flow so a stray `SecureInput` cannot leak into a different provider.
-    pub secure_input_target: Option<String>,
+    /// Provider name and origin for the currently open secure prompt.
+    /// Set before opening the prompt; cleared on `OverlaySubmission::SecureInput`
+    /// after the key is written. `None` outside the secure-prompt flows
+    /// (`/providers` row action, `/providers add`, programmatic rekey) so a
+    /// stray `SecureInput` cannot leak into a different provider.
+    ///
+    /// The `SecureInputOrigin` variant lets the consumer of the submitted
+    /// key know whether to greet the user ("just added a provider") or
+    /// simply acknowledge ("key replaced") — both write to the same auth
+    /// storage slot, but the surrounding UX differs.
+    pub secure_input_origin: Option<SecureInputOrigin>,
+}
+
+/// Where a secure prompt came from. The `SecureInput` overlay has just one
+/// payload (the API key text); the origin discriminates the post-commit
+/// follow-up so the user gets a contextual message instead of a generic
+/// "saved" line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SecureInputOrigin {
+    /// User picked a provider row and chose "Set API key" (or hit Enter
+    /// on a key-only provider with no key) — this is a *replace* or
+    /// first-time key entry for an existing provider.
+    SetKey { provider: String },
+    /// User just added a provider via `/providers add …` and we are
+    /// chaining straight into the key prompt so they can finish the
+    /// setup without another navigation step.
+    NewlyAdded { provider: String },
 }
 
 /// One rendered transcript line.
@@ -1314,21 +1336,60 @@ pub(crate) fn next_provider_actions(has_key: bool, oauth_capable: bool) -> Vec<A
             AuthAction::StartOAuth,
             AuthAction::RemoveKey,
         ],
-        (true, false) => vec![AuthAction::RemoveKey],
+        (true, false) => vec![AuthAction::SetApiKey, AuthAction::RemoveKey],
         (false, true) => vec![AuthAction::SetApiKey, AuthAction::StartOAuth],
         (false, false) => vec![AuthAction::SetApiKey],
     }
 }
 
+/// Open a masked secure prompt and stash the `origin` so the
+/// `OverlaySubmission::SecureInput` consumer can route the key to the
+/// right provider slot and emit a contextual follow-up message.
+///
+/// Shared by:
+/// - `handle_auth_action::SetApiKey` (replace or first-time key entry)
+/// - `add_custom_provider` (chain immediately after persisting a new
+///   custom provider so the user does not have to navigate back)
+///
+/// The caller must consume the boolean return value the same way it does
+/// for `handle_auth_action`: `true` means a new overlay was opened, so
+/// the previously-open overlay must NOT be closed in the same submit
+/// pass (the cmd channel processes `ShowOverlay` and `CloseOverlay` in
+/// submit order).
+pub(crate) fn open_secure_prompt(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    origin: SecureInputOrigin,
+) {
+    let provider = match &origin {
+        SecureInputOrigin::SetKey { provider } | SecureInputOrigin::NewlyAdded { provider } => {
+            provider.clone()
+        }
+    };
+    state.secure_input_origin = Some(origin);
+    handle.show_modal(
+        format!("Set API key for {provider}"),
+        vec![
+            "Paste the API key. Press Enter to save, Esc to cancel.".into(),
+            "The key is masked on screen; nothing is logged.".into(),
+        ],
+        Some(SecurePromptConfig {
+            label: format!("{provider} key"),
+            placeholder: Some("sk-...".into()),
+            mask_input: true,
+        }),
+    );
+}
+
 /// Dispatch a single `AuthAction` for `provider`.
 ///
-/// `SetApiKey` opens the secure (masked) prompt and stashes
-/// `state.secure_input_target` so the `SecureInput(text)` consumer can
-/// route the key to the right provider. `StartOAuth` spawns
-/// `run_oauth_flow` on a dedicated tokio task (PKCE + loopback
-/// callback + token exchange + persistence). `RemoveKey` reuses the
-/// existing confirmation modal — its `ConfirmationAction::RemoveProviderKey`
-/// handler runs through `/providers remove <name> --yes`.
+/// `SetApiKey` opens the secure (masked) prompt via `open_secure_prompt`
+/// (stashing `SecureInputOrigin::SetKey` so the consumer can route the
+/// key to the right provider). `StartOAuth` spawns `run_oauth_flow` on a
+/// dedicated tokio task (PKCE + loopback callback + token exchange +
+/// persistence). `RemoveKey` reuses the existing confirmation modal —
+/// its `ConfirmationAction::RemoveProviderKey` handler runs through
+/// `/providers remove <name> --yes`.
 pub(crate) fn handle_auth_action(
     provider: &str,
     action: &AuthAction,
@@ -1350,18 +1411,12 @@ pub(crate) fn handle_auth_action(
     // the caller is free to close the old overlay.
     match action {
         AuthAction::SetApiKey => {
-            state.secure_input_target = Some(provider.to_string());
-            handle.show_modal(
-                format!("Set API key for {provider}"),
-                vec![
-                    "Paste the API key. Press Enter to save, Esc to cancel.".into(),
-                    "The key is masked on screen; nothing is logged.".into(),
-                ],
-                Some(SecurePromptConfig {
-                    label: format!("{provider} key"),
-                    placeholder: Some("sk-...".into()),
-                    mask_input: true,
-                }),
+            open_secure_prompt(
+                state,
+                handle,
+                SecureInputOrigin::SetKey {
+                    provider: provider.to_string(),
+                },
             );
             true
         }
@@ -1895,22 +1950,31 @@ fn handle_inline_event(
                     }
                     // Secure (masked) prompt committed by the user. The
                     // matching open prompt must have stashed
-                    // `state.secure_input_target`; we trust that field
+                    // `state.secure_input_origin`; we trust that field
                     // here because every prompt path goes through
-                    // `handle_auth_action` (SetApiKey) which sets it
-                    // before opening the modal.
+                    // `open_secure_prompt` (SetApiKey, add_custom_provider)
+                    // which sets it before opening the modal.
                     if let OverlaySubmission::SecureInput(text) = &sub
-                        && let Some(provider) = state.secure_input_target.take()
+                        && let Some(origin) = state.secure_input_origin.take()
                     {
+                        let provider = match &origin {
+                            SecureInputOrigin::SetKey { provider }
+                            | SecureInputOrigin::NewlyAdded { provider } => provider.clone(),
+                        };
                         let auth = crate::store::auth_storage::shared_auth_storage();
                         auth.set_api_key(&provider, text.clone());
-                        handle.append_line(
-                            InlineMessageKind::Info,
-                            vec![plain_segment(format!(
+                        let msg = match origin {
+                            SecureInputOrigin::SetKey { .. } => format!(
                                 "Saved API key for '{provider}' ({} chars).",
                                 text.chars().count()
-                            ))],
-                        );
+                            ),
+                            SecureInputOrigin::NewlyAdded { .. } => format!(
+                                "Added and configured '{provider}' ({} chars).\n\
+                                 Run /models to browse available models, or /providers to manage.",
+                                text.chars().count()
+                            ),
+                        };
+                        handle.append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
                     }
                     state.overlay_catalog_models.clear();
                     state.overlay_providers.clear();
@@ -6030,8 +6094,8 @@ mod secure_input_tests {
         );
         assert_eq!(
             next_provider_actions(true, false),
-            vec![AuthAction::RemoveKey],
-            "has key, key-only provider: remove only"
+            vec![AuthAction::SetApiKey, AuthAction::RemoveKey],
+            "has key, key-only provider: replace, remove"
         );
         assert_eq!(
             next_provider_actions(false, true),
@@ -6311,12 +6375,15 @@ mod provider_overlay_tests {
             summarise(&cmds)
         );
 
-        // The secure prompt target must be stashed so a subsequent
-        // `SecureInput` submission routes the key to the right provider.
+        // The secure prompt origin must be stashed so a subsequent
+        // `SecureInput` submission routes the key to the right provider
+        // and emits a contextual follow-up message.
         assert_eq!(
-            state.secure_input_target.as_deref(),
-            Some("cerebras"),
-            "secure_input_target must be stashed by SetApiKey"
+            state.secure_input_origin,
+            Some(SecureInputOrigin::SetKey {
+                provider: "cerebras".to_string(),
+            }),
+            "secure_input_origin must be stashed by SetApiKey"
         );
     }
 
@@ -6359,8 +6426,41 @@ mod provider_overlay_tests {
         assert!(
             cmds.iter()
                 .any(|c| matches!(c, InlineCommand::CloseOverlay)),
-            "CatalogModel selection must close the overlay (commands: {})",
+            "catalog model selection must close the overlay (commands: {})",
             summarise(&cmds)
         );
+    }
+
+    /// `add_custom_provider` chains into the secure prompt via
+    /// `open_secure_prompt` with `SecureInputOrigin::NewlyAdded`. The
+    /// provider must be reachable from either variant so the
+    /// `OverlaySubmission::SecureInput` consumer routes the key to the
+    /// right slot without a per-variant branch.
+    fn secure_input_origin_carries_provider_independently_of_variant() {
+        let set = SecureInputOrigin::SetKey {
+            provider: "openai".to_string(),
+        };
+        let added = SecureInputOrigin::NewlyAdded {
+            provider: "minimax".to_string(),
+        };
+        // `provider` must be reachable regardless of variant so the
+        // `OverlaySubmission::SecureInput` consumer can route the key
+        // without a per-variant branch.
+        assert_eq!(
+            match &set {
+                SecureInputOrigin::SetKey { provider }
+                | SecureInputOrigin::NewlyAdded { provider } => provider,
+            },
+            "openai"
+        );
+        assert_eq!(
+            match &added {
+                SecureInputOrigin::SetKey { provider }
+                | SecureInputOrigin::NewlyAdded { provider } => provider,
+            },
+            "minimax"
+        );
+        // Variants are distinct (so the follow-up message can branch).
+        assert_ne!(set, added);
     }
 }

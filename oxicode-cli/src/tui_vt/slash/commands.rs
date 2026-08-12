@@ -420,10 +420,6 @@ fn add_custom_provider(ctx: &mut SlashCtx<'_>, tokens: &[&str]) -> SlashOutcome 
         );
         return SlashOutcome::Handled;
     }
-    // Capture refs to the values that the user-facing message needs so
-    // we can move the originals into the `CustomProvider` struct.
-    let base_url_for_msg = base_url.clone();
-    let api_key_env_for_msg = api_key_env.clone();
     let cp = crate::store::settings::CustomProvider {
         name: name.clone(),
         base_url,
@@ -440,12 +436,17 @@ fn add_custom_provider(ctx: &mut SlashCtx<'_>, tokens: &[&str]) -> SlashOutcome 
         return SlashOutcome::Handled;
     }
 
-    ctx.reply(
-        InlineMessageKind::Info,
-        format!(
-            "Added custom provider '{name}' (base_url={base_url_for_msg}, env={api_key_env_for_msg}).\n\
-             Run `/providers` to set its API key or `/providers run-oauth {name}` if OAuth is supported."
-        ),
+    // Chain into the secure prompt so the user can finish the setup
+    // without a second navigation step. The SecureInput consumer in
+    // `main_loop.rs` will emit a contextual follow-up based on the
+    // `NewlyAdded` origin (vs. the generic `SetKey` message used when
+    // the user rekeys an existing provider).
+    crate::tui_vt::main_loop::open_secure_prompt(
+        ctx.state,
+        ctx.handle,
+        crate::tui_vt::main_loop::SecureInputOrigin::NewlyAdded {
+            provider: name.clone(),
+        },
     );
     SlashOutcome::Handled
 }
