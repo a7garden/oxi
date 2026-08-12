@@ -1334,7 +1334,19 @@ pub(crate) fn handle_auth_action(
     auth: &Arc<crate::store::auth_storage::AuthStorage>,
     handle: &InlineHandle,
     state: &mut RenderState,
-) {
+) -> bool {
+    // Returns true when the dispatched action opened a new overlay via
+    // `handle.show_*` (currently only `SetApiKey` opens the secure prompt
+    // modal). The caller — the `OverlayEvent::Submitted` arm in
+    // `handle_inline_event` — uses this signal to decide whether the
+    // previously-open overlay should be closed after dispatch. Closing
+    // unconditionally would also clear the freshly-opened overlay because
+    // the cmd channel processes `ShowOverlay` and `CloseOverlay` in submit
+    // order, so a stale `CloseOverlay` enqueued right after the
+    // `ShowOverlay` wins. Branches that do NOT open a new overlay
+    // (`StartOAuth` spawns an async task, `RemoveKey` sets
+    // `state.confirmation` rather than `state.overlay`) return false so
+    // the caller is free to close the old overlay.
     match action {
         AuthAction::SetApiKey => {
             state.secure_input_target = Some(provider.to_string());
@@ -1350,6 +1362,7 @@ pub(crate) fn handle_auth_action(
                     mask_input: true,
                 }),
             );
+            true
         }
         AuthAction::StartOAuth => {
             // PKCE + loopback-callback glue lives in `run_oauth_flow`
@@ -1371,7 +1384,7 @@ pub(crate) fn handle_auth_action(
                             "OAuth: no OAuth config for '{provider}'."
                         ))],
                     );
-                    return;
+                    return false;
                 }
             };
             // `provider_owned` and `tx` are cloned Strings/`InlineHandle`s
@@ -1384,6 +1397,7 @@ pub(crate) fn handle_auth_action(
             tokio::spawn(async move {
                 run_oauth_flow(provider_owned, spec, tx, auth_clone).await;
             });
+            false
         }
         AuthAction::RemoveKey => {
             state.confirmation = Some(ModalConfirmation {
@@ -1391,6 +1405,7 @@ pub(crate) fn handle_auth_action(
                 message: "  y \u{2014} remove key     n / x \u{2014} cancel".into(),
                 action: ConfirmationAction::RemoveProviderKey(provider.to_string()),
             });
+            false
         }
     }
 }
@@ -1687,6 +1702,16 @@ fn handle_inline_event(
             use oxicode_vtui::tui::core::OverlayEvent;
             match overlay_evt {
                 OverlayEvent::Submitted(sub) => {
+                    // Tracks whether this submission chained into a new overlay
+                    // (the action menu after `/providers` row selection, or the
+                    // secure prompt after `SetApiKey`). When set, the
+                    // unconditional `close_overlay()` at the end of the arm
+                    // would clear the freshly-opened overlay because the
+                    // `cmd` channel processes `ShowOverlay` and
+                    // `CloseOverlay` in submit order. Stale-state cleanup
+                    // (clearing `overlay_providers` etc.) still runs — only
+                    // the close is gated.
+                    let mut opened_new_overlay = false;
                     // If this was a /model picker, set the selected model.
                     if let OverlaySubmission::Selection(InlineListSelection::Model(idx)) = &sub
                         && idx < &state.overlay_model_ids.len()
@@ -1821,7 +1846,8 @@ fn handle_inline_event(
                         let actions = next_provider_actions(has_key, oauth_capable);
                         if actions.len() == 1 {
                             // Single action — drive directly with no menu.
-                            handle_auth_action(&name, &actions[0], &auth, handle, state);
+                            opened_new_overlay |=
+                                handle_auth_action(&name, &actions[0], &auth, handle, state);
                         } else {
                             // Show action menu.
                             let items: Vec<InlineListItem> = actions
@@ -1849,6 +1875,7 @@ fn handle_inline_event(
                                 None,
                                 None,
                             );
+                            opened_new_overlay = true;
                         }
                     }
                     // `/providers` action menu: forward the chosen
@@ -1862,7 +1889,8 @@ fn handle_inline_event(
                     }) = &sub
                     {
                         let auth = crate::store::auth_storage::shared_auth_storage();
-                        handle_auth_action(provider, action, &auth, handle, state);
+                        opened_new_overlay |=
+                            handle_auth_action(provider, action, &auth, handle, state);
                     }
                     // Secure (masked) prompt committed by the user. The
                     // matching open prompt must have stashed
@@ -1886,7 +1914,9 @@ fn handle_inline_event(
                     state.overlay_catalog_models.clear();
                     state.overlay_providers.clear();
                     state.overlay_model_ids.clear();
-                    handle.close_overlay();
+                    if !opened_new_overlay {
+                        handle.close_overlay();
+                    }
                 }
                 OverlayEvent::Cancelled => {
                     handle.close_overlay();
@@ -6047,5 +6077,289 @@ mod secure_input_tests {
         let (s, c) = insert_char_into_secure_input("hello", 5, '!');
         assert_eq!(s, "hello!");
         assert_eq!(c, 6);
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// `/providers` overlay chaining — regression for the bug where the
+// `OverlayEvent::Submitted` arm closed the current overlay
+// unconditionally, even when the handler opened a fresh overlay (action
+// menu, secure prompt). The cmd channel processes `ShowOverlay` and
+// `CloseOverlay` in submit order, so a `CloseOverlay` enqueued right
+// after the `ShowOverlay` from the action menu won — leaving the user
+// with nothing visible on Enter.
+// ═════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod provider_overlay_tests {
+    use super::*;
+    use crate::app::agent_session::{AgentSession, AgentSessionHandle};
+    use crate::store::session::SessionManager;
+    use crate::store::settings::Settings;
+    use oxicode_agent::{Agent, AgentConfig};
+    use oxicode_sdk::{Provider, ProviderError, ProviderEvent};
+    use oxicode_vtui::tui::core::OverlayEvent;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::task::{Context as TaskContext, Poll};
+
+    /// Minimal mock provider — produces an empty stream so `AgentSession`
+    /// can construct (the `ProviderRow` dispatch never streams).
+    struct EmptyStream;
+    impl futures::Stream for EmptyStream {
+        type Item = ProviderEvent;
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(None)
+        }
+    }
+
+    struct StubProvider;
+    impl Provider for StubProvider {
+        fn stream<'a>(
+            &'a self,
+            _model: &'a oxicode_sdk::Model,
+            _context: &'a oxicode_sdk::Context,
+            _options: Option<oxicode_sdk::StreamOptions>,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<
+                            Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
+                            ProviderError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                Ok::<_, ProviderError>(Box::pin(EmptyStream)
+                    as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+            })
+        }
+    }
+
+    fn make_session() -> AgentSessionHandle {
+        let provider = Arc::new(StubProvider);
+        let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+        let agent = Arc::new(Agent::new(
+            provider,
+            config,
+            Arc::new(oxicode_agent::ToolRegistry::new()),
+        ));
+        let settings = Settings::default();
+        let session_manager = SessionManager::in_memory("/tmp/test_providers");
+        let session = AgentSession::new(
+            agent,
+            settings,
+            session_manager,
+            "/tmp/test_providers".to_string(),
+            crate::SessionState::default(),
+        );
+        session.clone_handle()
+    }
+
+    /// `InlineCommand` does not implement `Debug`, so summarise the channel
+    /// contents by command variant for assertion failure messages.
+    fn summarise(cmds: &[InlineCommand]) -> String {
+        let mut show = 0;
+        let mut close = 0;
+        let mut other = 0;
+        for c in cmds {
+            match c {
+                InlineCommand::ShowOverlay { .. } => show += 1,
+                InlineCommand::CloseOverlay => close += 1,
+                _ => other += 1,
+            }
+        }
+        format!("[ShowOverlay={show}, CloseOverlay={close}, other={other}]")
+    }
+
+    /// Regression: `/providers` row selection for an OAuth-capable
+    /// provider with no stored key triggers the multi-action chain
+    /// `[SetApiKey, StartOAuth]` → `handle.show_list_modal` opens the
+    /// action menu. The bug closed that menu instantly. The fix tracks
+    /// whether the handler opened a new overlay and only emits the
+    /// trailing `close_overlay()` when nothing was opened.
+    #[test]
+    fn provider_row_opens_action_menu_without_close() {
+        // openai is OAuth-capable (per `product-meta.toml`), no key in
+        // the env / storage, so the action matrix returns the
+        // multi-action list.
+        let session = make_session();
+        let mut state = RenderState::default();
+        state.overlay_providers = vec!["openai".to_string()];
+        state.overlay = Some(OverlayState {
+            title: "Providers".to_string(),
+            lines: Vec::new(),
+            items: Vec::new(),
+            selected: 0,
+            search: None,
+            secure_input: None,
+        });
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+            InlineListSelection::ProviderRow(0),
+        )));
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+
+        let cmds: Vec<InlineCommand> = {
+            let mut out = Vec::new();
+            while let Ok(cmd) = cmd_rx.try_recv() {
+                out.push(cmd);
+            }
+            out
+        };
+        let show_count = cmds
+            .iter()
+            .filter(|c| matches!(c, InlineCommand::ShowOverlay { .. }))
+            .count();
+        assert_eq!(
+            show_count,
+            1,
+            "submitting a provider row must ShowOverlay exactly once (commands: {})",
+            summarise(&cmds)
+        );
+
+        // The bug: a `CloseOverlay` followed the `ShowOverlay` on the
+        // cmd channel and won the order-of-application race. After the
+        // fix, no `CloseOverlay` may follow the `ShowOverlay`.
+        let show_idx = cmds
+            .iter()
+            .position(|c| matches!(c, InlineCommand::ShowOverlay { .. }))
+            .expect("ShowOverlay must be present");
+        let trailing = &cmds[show_idx + 1..];
+        assert!(
+            !trailing
+                .iter()
+                .any(|c| matches!(c, InlineCommand::CloseOverlay)),
+            "no CloseOverlay may follow the action-menu ShowOverlay (commands: {})",
+            summarise(&cmds)
+        );
+
+        // Stale-state cleanup must still run so future `/providers`
+        // does not see stale indices.
+        assert!(
+            state.overlay_providers.is_empty(),
+            "overlay_providers must be cleared after dispatch (got {:?})",
+            state.overlay_providers
+        );
+    }
+
+    /// Regression: `/providers` row selection for a key-only provider
+    /// (no OAuth spec) with no stored key triggers the single-action
+    /// chain `[SetApiKey]` → `handle_auth_action` opens the secure
+    /// prompt modal. The bug closed that modal instantly. The fix
+    /// propagates the `opened_new_overlay` flag through `|=` so the
+    /// secure prompt survives.
+    #[test]
+    fn provider_row_set_api_key_opens_secure_prompt_without_close() {
+        // cerebras is key-only (no OAuth spec in `product-meta.toml`).
+        let session = make_session();
+        let mut state = RenderState::default();
+        state.overlay_providers = vec!["cerebras".to_string()];
+        state.overlay = Some(OverlayState {
+            title: "Providers".to_string(),
+            lines: Vec::new(),
+            items: Vec::new(),
+            selected: 0,
+            search: None,
+            secure_input: None,
+        });
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+            InlineListSelection::ProviderRow(0),
+        )));
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+
+        let cmds: Vec<InlineCommand> = {
+            let mut out = Vec::new();
+            while let Ok(cmd) = cmd_rx.try_recv() {
+                out.push(cmd);
+            }
+            out
+        };
+        let show_count = cmds
+            .iter()
+            .filter(|c| matches!(c, InlineCommand::ShowOverlay { .. }))
+            .count();
+        assert_eq!(
+            show_count,
+            1,
+            "submitting a provider row must ShowOverlay exactly once (commands: {})",
+            summarise(&cmds)
+        );
+
+        let show_idx = cmds
+            .iter()
+            .position(|c| matches!(c, InlineCommand::ShowOverlay { .. }))
+            .expect("ShowOverlay must be present");
+        let trailing = &cmds[show_idx + 1..];
+        assert!(
+            !trailing
+                .iter()
+                .any(|c| matches!(c, InlineCommand::CloseOverlay)),
+            "no CloseOverlay may follow the secure-prompt ShowOverlay (commands: {})",
+            summarise(&cmds)
+        );
+
+        // The secure prompt target must be stashed so a subsequent
+        // `SecureInput` submission routes the key to the right provider.
+        assert_eq!(
+            state.secure_input_target.as_deref(),
+            Some("cerebras"),
+            "secure_input_target must be stashed by SetApiKey"
+        );
+    }
+
+    /// Catalog model selection (the working baseline) must remain
+    /// closing — pinning the behavior so the conditional close does
+    /// not regress the other `Submitted` branches.
+    #[test]
+    fn catalog_model_selection_still_closes_overlay() {
+        let session = make_session();
+        let mut state = RenderState::default();
+        state.overlay_catalog_models = vec![(
+            "anthropic".to_string(),
+            "claude-sonnet-4-20250514".to_string(),
+        )];
+        state.overlay = Some(OverlayState {
+            title: "Models".to_string(),
+            lines: Vec::new(),
+            items: Vec::new(),
+            selected: 0,
+            search: None,
+            secure_input: None,
+        });
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+            InlineListSelection::CatalogModel(0),
+        )));
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+
+        let cmds: Vec<InlineCommand> = {
+            let mut out = Vec::new();
+            while let Ok(cmd) = cmd_rx.try_recv() {
+                out.push(cmd);
+            }
+            out
+        };
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, InlineCommand::CloseOverlay)),
+            "CatalogModel selection must close the overlay (commands: {})",
+            summarise(&cmds)
+        );
     }
 }
