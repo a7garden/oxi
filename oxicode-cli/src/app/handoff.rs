@@ -151,7 +151,7 @@ fn derive_slug(messages: &[Message]) -> String {
     if slug.is_empty() {
         "session".to_string()
     } else {
-        slug.chars().take(40).collect()
+        slug.trim_start_matches('-').chars().take(40).collect()
     }
 }
 
@@ -185,6 +185,14 @@ mod tests {
         let msgs = vec![Message::user("Hello, World!!! @#$%")];
         let slug = derive_slug(&msgs);
         assert_eq!(slug, "hello-world");
+    }
+
+    #[test]
+    fn derive_slug_leading_hyphen() {
+        let msgs = vec![Message::user("---fix-bug")];
+        let slug = derive_slug(&msgs);
+        assert_eq!(slug, "fix-bug");
+        assert!(!slug.starts_with('-'));
     }
 
     #[test]

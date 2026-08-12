@@ -35,7 +35,7 @@ pub fn gather_git_state(cwd: &str) -> GitState {
         })
         .unwrap_or_default();
 
-    let modified_files = git_output(cwd, &["diff", "--stat"])
+    let modified_files = git_output(cwd, &["status", "--porcelain"])
         .map(|s| {
             s.lines()
                 .map(|l| l.trim().to_string())
