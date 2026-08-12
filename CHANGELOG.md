@@ -1881,8 +1881,6 @@ the production `AskBridge::attach_with_session(session_id)` API with
 `app.ownership_session_id()` (which equals `TUI_OWNERSHIP_ID` in
 TUI mode per AGENTS.md). Upgrade to 0.41.1.
 
-
-## [Unreleased]
 ## [0.40.0] - 2026-06-21
 ### Fixed — production-readiness audit remediation
 

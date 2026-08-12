@@ -173,6 +173,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "doc"
+      - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - name: Build docs (treat warnings as errors)
         env:
           RUSTDOCFLAGS: "-D warnings"
