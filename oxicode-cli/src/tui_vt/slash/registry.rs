@@ -553,7 +553,6 @@ impl SlashCommand for HandoffCommand {
             auto_continue,
             dry_run,
         };
-        let session = ctx.session.clone();
 
         let msg = if dry_run {
             "Generating handoff document (dry run)\u{2026}"
@@ -564,8 +563,18 @@ impl SlashCommand for HandoffCommand {
         };
         ctx.reply(InlineMessageKind::Info, msg);
 
+        // Show a spinner while the LLM call runs (10-30s). The handle is
+        // Clone (cheap Arc) and fire-and-forget — no awaiting the worker.
+        let handle = ctx.handle.clone();
+        handle.set_reasoning_stage(Some("Generating handoff\u{2026}".to_string()));
+        let session = ctx.session.clone();
+
         tokio::spawn(async move {
-            match generate_and_apply_handoff(&session, &opts).await {
+            let result = generate_and_apply_handoff(&session, &opts).await;
+            // Always clear the spinner, even on failure, so the footer
+            // doesn't stay stuck on "Generating handoff".
+            handle.set_reasoning_stage(None);
+            match result {
                 Ok(path) => tracing::info!(%path, "handoff complete"),
                 Err(err) => {
                     tracing::warn!(%err, "handoff failed");
@@ -977,6 +986,32 @@ mod tests {
         assert!(quit.2.contains(&"exit"));
         assert!(quit.2.contains(&"q"));
         assert!(!quit.1.is_empty(), "quit has a description");
+    }
+
+    #[test]
+    fn handoff_command_metadata() {
+        // /handoff must be registered and exposed via /help + RPC. Aliases
+        // let power users type /hd instead.
+        let reg = SlashRegistry::builtins();
+        let names: Vec<&str> = reg.builtins.iter().map(|c| c.name()).collect();
+        assert!(names.contains(&"handoff"), "handoff command registered");
+
+        let catalog = SlashRegistry::builtin_commands();
+        let handoff = catalog
+            .iter()
+            .find(|(name, _, _)| *name == "handoff")
+            .expect("handoff present in catalog");
+        assert!(
+            handoff.2.contains(&"hd"),
+            "handoff exposes /hd alias: got {:?}",
+            handoff.2
+        );
+        assert!(!handoff.1.is_empty(), "handoff has a description");
+
+        let cmd = HandoffCommand;
+        assert!(cmd.matches("handoff"));
+        assert!(cmd.matches("HD"));
+        assert!(cmd.matches("Hd"));
     }
 
     #[test]

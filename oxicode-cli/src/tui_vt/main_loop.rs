@@ -845,15 +845,29 @@ async fn run_event_loop(
                             doc_path
                         ))],
                     );
-                    if *auto_continue {
+                    let user_typed = !s.input_buffer.trim().is_empty();
+                    s.input_buffer.clear();
+                    s.input_cursor = 0;
+                    if *auto_continue && !user_typed {
                         drop(s);
                         let _ = prompt_tx.send(format!(
-                            "Continue our work. Read the handoff document at {} \
-                             and start with the first item in \"Remaining Work\".",
+                            "Read the handoff document at {} and continue \
+                             from where the previous session left off.",
                             doc_path
                         ));
+                    } else if user_typed {
+                        drop(s);
+                        handle.append_line(
+                            InlineMessageKind::Info,
+                            vec![plain_segment(
+                                "Handoff complete. Auto-continue skipped \
+                                 because input was non-empty \u{2014} press \
+                                 Enter to submit your message in the new \
+                                 session."
+                                    .to_string(),
+                            )],
+                        );
                     }
-                } else {
                     handle_session_event(&mut state.lock(), handle, &event);
                 }
             }
