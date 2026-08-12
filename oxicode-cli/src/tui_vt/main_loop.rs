@@ -1324,10 +1324,11 @@ pub(crate) fn next_provider_actions(has_key: bool, oauth_capable: bool) -> Vec<A
 ///
 /// `SetApiKey` opens the secure (masked) prompt and stashes
 /// `state.secure_input_target` so the `SecureInput(text)` consumer can
-/// route the key to the right provider. `StartOAuth` is a stub for
-/// Task 8 (TODO: wire `run_oauth_flow`). `RemoveKey` reuses the existing
-/// confirmation modal — its `ConfirmationAction::RemoveProviderKey`
-/// handler already runs through `/providers remove <name> --yes`.
+/// route the key to the right provider. `StartOAuth` spawns
+/// `run_oauth_flow` on a dedicated tokio task (PKCE + loopback
+/// callback + token exchange + persistence). `RemoveKey` reuses the
+/// existing confirmation modal — its `ConfirmationAction::RemoveProviderKey`
+/// handler runs through `/providers remove <name> --yes`.
 pub(crate) fn handle_auth_action(
     provider: &str,
     action: &AuthAction,

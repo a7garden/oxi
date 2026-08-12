@@ -97,7 +97,7 @@ pub struct CustomProvider {
     pub api: String,
 }
 
-fn default_custom_provider_api() -> String {
+pub(crate) fn default_custom_provider_api() -> String {
     "openai-completions".to_string()
 }
 

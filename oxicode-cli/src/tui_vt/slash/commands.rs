@@ -191,8 +191,11 @@ impl SlashCommand for ModelsCommand {
 
 /// `/providers` — list every known provider with its credential status.
 /// `/providers remove <name>` — remove a stored API key (asks for
-/// confirmation; `--yes` skips it). Key *entry* still needs `oxicode setup`
-/// (the overlay has no free-text input for secrets).
+/// confirmation; `--yes` skips it).
+/// `/providers add <name> <base_url> [api_key_env] [api]` — register a
+/// custom OpenAI-compatible provider into `~/.oxicode/settings.toml`.
+/// `/providers run-oauth <name>` — kick off the OAuth flow non-interactively
+/// (mostly a power-user shortcut; the in-OAuth UI is the default path).
 struct ProvidersCommand;
 
 impl SlashCommand for ProvidersCommand {
@@ -203,7 +206,7 @@ impl SlashCommand for ProvidersCommand {
         &["keys"]
     }
     fn description(&self) -> &'static str {
-        "Show provider key status; remove a key (/providers remove <name>)"
+        "Manage providers: status, add custom, remove a key, run OAuth"
     }
     fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
         let tokens: Vec<&str> = args.split_whitespace().collect();
@@ -215,6 +218,20 @@ impl SlashCommand for ProvidersCommand {
             .unwrap_or(false)
         {
             return remove_provider_key(ctx, tokens.get(1).copied(), tokens.contains(&"--yes"));
+        }
+
+        // `/providers add <name> <base_url> [api_key_env] [api]`
+        if tokens.first().map(|t| *t == "add").unwrap_or(false) {
+            return add_custom_provider(ctx, &tokens[1..]);
+        }
+
+        // `/providers run-oauth <name>`
+        if tokens
+            .first()
+            .map(|t| *t == "run-oauth" || *t == "oauth")
+            .unwrap_or(false)
+        {
+            return run_provider_oauth(ctx, tokens.get(1).copied());
         }
 
         // `/providers` — status overlay.
@@ -253,10 +270,22 @@ impl SlashCommand for ProvidersCommand {
                 let entry = catalog.and_then(|c| c.get_provider_sync(name));
                 let base = entry.as_ref().and_then(|p| p.base_url.clone());
                 let env_key = entry.as_ref().and_then(|p| p.env_key.clone());
-                let subtitle = match (env_key.as_deref(), base.as_deref()) {
-                    (Some(env), Some(url)) if !url.is_empty() => format!("{env} · {url}"),
-                    (Some(env), _) => env.to_string(),
-                    (_, Some(url)) => url.to_string(),
+                // OAuth-capable? `product-meta.toml` ships exactly two
+                // OAuth blocks today (openai, anthropic); every other
+                // provider is key-only. Surface this so the user does
+                // not look for an OAuth menu where there is none.
+                let oauth_capable = crate::provider_oauth::spec_for(name).is_some();
+                let subtitle = match (env_key.as_deref(), base.as_deref(), oauth_capable) {
+                    (Some(env), Some(url), true) if !url.is_empty() => {
+                        format!("{env} · {url} · oauth")
+                    }
+                    (Some(env), Some(url), false) if !url.is_empty() => {
+                        format!("{env} · {url}")
+                    }
+                    (Some(env), _, true) => format!("{env} · oauth"),
+                    (Some(env), _, false) => env.to_string(),
+                    (_, Some(url), true) => format!("{url} · oauth"),
+                    (_, Some(url), false) => url.to_string(),
                     _ => "Enter to manage".to_string(),
                 };
                 InlineListItem {
@@ -321,6 +350,145 @@ fn remove_provider_key(ctx: &mut SlashCtx<'_>, name: Option<&str>, yes: bool) ->
     ctx.reply(
         InlineMessageKind::Info,
         format!("Removed key for '{name}'."),
+    );
+    SlashOutcome::Handled
+}
+
+/// Handler for `/providers add <name> <base_url> [api_key_env] [api]`.
+///
+/// Persists a new `CustomProvider` entry into `~/.oxicode/settings.toml`.
+/// `api_key_env` defaults to `<NAME>_API_KEY` (uppercased, hyphens → `_`)
+/// to match the convention in `setup_wizard.rs`. `api` defaults to
+/// `"openai-completions"` via `CustomProvider::default_api`.
+///
+/// Run from the TUI composer so the user never has to leave the session
+/// for the structured equivalent of `oxicode setup`. The new provider
+/// appears immediately in `/providers` because the status overlay reads
+/// `settings.custom_providers` on every open.
+fn add_custom_provider(ctx: &mut SlashCtx<'_>, tokens: &[&str]) -> SlashOutcome {
+    // Need at least name + base_url. api_key_env and api are optional.
+    let (name, base_url, api_key_env, api) = match tokens {
+        [name, base_url] => (
+            (*name).to_string(),
+            (*base_url).to_string(),
+            default_api_key_env(name),
+            None,
+        ),
+        [name, base_url, env] => (
+            (*name).to_string(),
+            (*base_url).to_string(),
+            (*env).to_string(),
+            None,
+        ),
+        [name, base_url, env, api] => (
+            (*name).to_string(),
+            (*base_url).to_string(),
+            (*env).to_string(),
+            Some((*api).to_string()),
+        ),
+        _ => {
+            ctx.reply(
+                InlineMessageKind::Error,
+                "Usage: /providers add <name> <base_url> [api_key_env] [api]".to_string(),
+            );
+            return SlashOutcome::Handled;
+        }
+    };
+
+    if name.is_empty() || base_url.is_empty() {
+        ctx.reply(
+            InlineMessageKind::Error,
+            "Provider name and base URL must be non-empty.".to_string(),
+        );
+        return SlashOutcome::Handled;
+    }
+
+    let mut settings = match crate::store::settings::Settings::load() {
+        Ok(s) => s,
+        Err(e) => {
+            ctx.reply(
+                InlineMessageKind::Error,
+                format!("Failed to load settings: {e}"),
+            );
+            return SlashOutcome::Handled;
+        }
+    };
+    if settings.custom_providers.iter().any(|cp| cp.name == name) {
+        ctx.reply(
+            InlineMessageKind::Warning,
+            format!("Custom provider '{name}' already exists."),
+        );
+        return SlashOutcome::Handled;
+    }
+    // Capture refs to the values that the user-facing message needs so
+    // we can move the originals into the `CustomProvider` struct.
+    let base_url_for_msg = base_url.clone();
+    let api_key_env_for_msg = api_key_env.clone();
+    let cp = crate::store::settings::CustomProvider {
+        name: name.clone(),
+        base_url,
+        api_key_env,
+        api: api.unwrap_or_else(crate::store::settings::default_custom_provider_api),
+    };
+    settings.custom_providers.push(cp);
+
+    if let Err(e) = settings.save() {
+        ctx.reply(
+            InlineMessageKind::Error,
+            format!("Failed to persist settings: {e}"),
+        );
+        return SlashOutcome::Handled;
+    }
+
+    ctx.reply(
+        InlineMessageKind::Info,
+        format!(
+            "Added custom provider '{name}' (base_url={base_url_for_msg}, env={api_key_env_for_msg}).\n\
+             Run `/providers` to set its API key or `/providers run-oauth {name}` if OAuth is supported."
+        ),
+    );
+    SlashOutcome::Handled
+}
+
+/// Default api_key_env for a custom provider name: uppercased, hyphens
+/// replaced with underscores, suffixed with `_API_KEY`. Matches the
+/// convention used in `setup_wizard.rs` (`api_key_env` formatter).
+fn default_api_key_env(name: &str) -> String {
+    format!("{}_API_KEY", name.to_uppercase().replace('-', "_"))
+}
+
+/// Handler for `/providers run-oauth <name>`.
+///
+/// Power-user shortcut that drives the OAuth flow without going through
+/// the per-row action menu. Same PKCE + loopback + token exchange path as
+/// the in-overlay OAuth action; the `InlineHandle` is used to emit
+/// progress lines (the task posts to it directly).
+fn run_provider_oauth(ctx: &mut SlashCtx<'_>, name: Option<&str>) -> SlashOutcome {
+    let Some(name) = name else {
+        ctx.reply(
+            InlineMessageKind::Error,
+            "Usage: /providers run-oauth <name>".to_string(),
+        );
+        return SlashOutcome::Handled;
+    };
+    let Some(spec) = crate::provider_oauth::spec_for(name) else {
+        ctx.reply(
+            InlineMessageKind::Error,
+            format!("No OAuth spec for '{name}'. Not an OAuth-capable provider."),
+        );
+        return SlashOutcome::Handled;
+    };
+    let provider = name.to_string();
+    let provider_for_log = provider.clone();
+    let tx = ctx.handle.clone();
+    let auth = crate::store::auth_storage::shared_auth_storage();
+    let auth_clone = std::sync::Arc::clone(&auth);
+    tokio::spawn(async move {
+        crate::tui_vt::main_loop::run_oauth_flow(provider, spec, tx, auth_clone).await;
+    });
+    ctx.reply(
+        InlineMessageKind::Info,
+        format!("Starting OAuth flow for '{provider_for_log}'…"),
     );
     SlashOutcome::Handled
 }
@@ -591,4 +759,49 @@ mod tests {
         // Only the first slash splits.
         assert_eq!(split_model_id("oai/gpt-4/vision"), ("oai", "gpt-4/vision"));
     }
+
+    /// OAuth-capable providers must surface in the catalog overlay so the
+    /// user can discover the OAuth action instead of going through the
+    /// `Remove key` only branch. `product-meta.toml` ships exactly two
+    /// OAuth blocks (openai, anthropic); every other built-in is key-only.
+    #[test]
+    fn provider_oauth_capability_matches_meta() {
+        // OAuth-capable: openai, anthropic.
+        assert!(
+            crate::provider_oauth::spec_for("openai").is_some(),
+            "openai must be oauth-capable per product-meta.toml"
+        );
+        assert!(
+            crate::provider_oauth::spec_for("anthropic").is_some(),
+            "anthropic must be oauth-capable per product-meta.toml"
+        );
+        // Key-only: ollama, google, vertex, etc.
+        assert!(
+            crate::provider_oauth::spec_for("ollama").is_none(),
+            "ollama has no OAuth spec"
+        );
+        assert!(
+            crate::provider_oauth::spec_for("google").is_none(),
+            "google has no OAuth spec"
+        );
+    }
+
+    /// Default api_key_env format used by `/providers add <name> <url>`:
+    /// uppercased + hyphens → underscores + `_API_KEY`. Mirrors the
+    /// convention in `setup_wizard.rs`.
+    #[test]
+    fn default_api_key_env_for_custom_provider() {
+        assert_eq!(default_api_key_env("minimax"), "MINIMAX_API_KEY");
+        assert_eq!(default_api_key_env("zai-org"), "ZAI_ORG_API_KEY");
+        assert_eq!(default_api_key_env("Foo-Bar"), "FOO_BAR_API_KEY");
+    }
+
+    // `add_custom_provider` is exercised end-to-end by the in-TUI flow. We
+    // can't call it without a real `SlashCtx` (which requires an
+    // `AgentSessionHandle` + `InlineHandle`), and the function writes to
+    // `~/.oxicode/settings.toml` so it can't run unmodified in a unit test.
+    // The handler-level contract is pinned by the regex above and the
+    // `custom_provider_default_api` integration test in
+    // `oxicode-cli/src/store/settings.rs`; the persistence path is a
+    // straight `Settings::save()` call.
 }
