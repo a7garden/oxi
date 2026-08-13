@@ -1,0 +1,22 @@
+[package]
+name = "oxicode-textarea"
+version = "0.75.0"
+edition.workspace = true
+license = "MIT"
+description = "Atomic-mutation text editor widget with vim mode, soft-wrap, and TextElement atomicity (ported from xai-org/grok-build)"
+publish = true
+
+[dependencies]
+crossterm = { workspace = true, features = ["event-stream", "bracketed-paste"] }
+ratatui = { workspace = true, features = ["crossterm", "unstable-widget-ref"] }
+ratatui-core = { workspace = true }
+textwrap = { workspace = true }
+tui-scrollbar = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+fuzzy-matcher = { workspace = true }
+itertools = { workspace = true }
+pretty_assertions = { workspace = true }
+rand = { workspace = true }

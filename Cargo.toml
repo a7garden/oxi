@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxicode-catalog", "oxicode-ai", "oxicode-agent", "oxicode-cli", "oxicode-sdk", "oxicode-hashline", "oxicode-lsp", "oxicode-mnemopi", "oxicode-snapcompact", "oxicode-vtui", "oxicode-vtui-compat", "oxicode-api-stability"]
+members = ["oxicode-catalog", "oxicode-ai", "oxicode-agent", "oxicode-cli", "oxicode-sdk", "oxicode-hashline", "oxicode-lsp", "oxicode-mnemopi", "oxicode-snapcompact", "oxicode-textarea", "oxicode-vtui", "oxicode-vtui-compat", "oxicode-api-stability"]
 exclude = ["scripts"]
 
 # Shared defaults inherited by every workspace member. Members can override
@@ -17,8 +17,8 @@ repository = "https://github.com/project-oxi/oxicode"
 
 # NOTE: [patch.crates-io] was removed. Workspace members are auto-resolved
 # by `members` above; explicit [patch] entries would block `cargo publish`.
-
 [workspace.dependencies]
+crossterm = "0.29"
 thiserror = "2"
 supports-color = "3.0"
 portable-pty = "0.9"
@@ -26,6 +26,16 @@ nucleo = "0.5"
 linkify = "0.10"
 regex = "1"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy", "regex-onig"] }
+fuzzy-matcher = "0.3"
+itertools = "0.14"
+pretty_assertions = "1"
+rand = "0.9"
+ratatui = { version = "0.30", features = ["crossterm"] }
+ratatui-core = "0.1"
+textwrap = "0.16"
+tui-scrollbar = "0.2"
+unicode-segmentation = "1.13"
+unicode-width = "0.2"
 
 [profile.release]
 opt-level = 3
