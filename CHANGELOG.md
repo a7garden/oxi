@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The `next`/`cycle` arm of `/model` still emits the
   "No scoped models configured to cycle" warning (`ScopedModel` is the
   config-curated cycling set and is out of scope here).
+- **TUI `/sessions` is now a real resume, not a no-op.** Was: the
+  picker reopened on every selection because the picked id was
+  dropped. Now: `/sessions <id>` (and the `/resume <id>` alias)
+  opens the file via `SessionManager::open`, validates the cwd,
+  and atomically swaps the live `AgentSessionHandle` so the
+  conversation continues with the prior history. Selection from
+  the `/sessions` picker enqueues the same resume path (was:
+  fills `/resume <id>` into the input buffer, which then
+  re-dispatched to the same picker). `Cannot resume while agent
+  is running. Use /cancel first.` gates the same way `/handoff`
+  does. The `next`/`cycle` and `set_model` arms of `/model` and
+  every other slash command are unchanged.
 ## [0.74.0] - 2026-08-12
 
 ### Added
