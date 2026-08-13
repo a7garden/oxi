@@ -3663,9 +3663,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         // at 0 or `value.len()` — the two atomic positions for the field.
         ta.set_cursor(secure.editor.cursor_byte());
         frame.render_widget_ref(&ta, textarea_area);
-        if let Some((lx, ly)) = ta.cursor_pos_with_state(textarea_area, TextAreaState::default()) {
-            let caret_x = inner_left.saturating_add(lx).min(inner_right);
-            frame.set_cursor_position(Position::new(caret_x, row + ly));
+        // `cursor_pos_with_state` returns ABSOLUTE coordinates (it already
+        // adds `textarea_area.x`/`.y`). Do NOT re-add the area origin.
+        if let Some((cx, cy)) = ta.cursor_pos_with_state(textarea_area, TextAreaState::default()) {
+            let caret_x = cx.min(inner_right);
+            frame.set_cursor_position(Position::new(caret_x, cy));
         }
         return;
     }
@@ -4377,16 +4379,17 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     frame.render_widget_ref(&state.composer, textarea_area);
 
     if state.input_enabled
-        && let Some((lx, ly)) = state
+        && let Some((cx, cy)) = state
             .composer
             .cursor_pos_with_state(textarea_area, TextAreaState::default())
     {
-        // The textarea's cursor is relative to `textarea_area`; add the
-        // prefix offset (and the area origin is already inside the box).
-        frame.set_cursor_position(Position::new(
-            textarea_area.left().saturating_add(lx),
-            textarea_area.top().saturating_add(ly),
-        ));
+        // `cursor_pos_with_state` returns the ABSOLUTE screen position:
+        // it already adds `area.x` and `area.y` to the cursor's column/row
+        // inside the area (see oxicode-textarea `cursor_pos_with_state`:
+        // `Some((area.x + col, area.y + screen_row))`). Do NOT add the
+        // area origin again — that double-offset pushed the caret off the
+        // frame (e.g. row 38 on a 24-row terminal).
+        frame.set_cursor_position(Position::new(cx, cy));
     }
 }
 
@@ -5328,6 +5331,77 @@ mod render_tests {
             out.push('\n');
         }
         out
+    }
+
+    /// Diagnostic helper: render the full frame and return the terminal
+    /// caret position (where render_composer set it).
+    fn terminal_caret(state: &RenderState) -> Option<(u16, u16)> {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        terminal
+            .draw(|f| render_frame(f, state, &handle))
+            .expect("draw");
+        terminal.get_cursor().ok()
+    }
+
+    #[test]
+    fn composer_caret_aligns_after_ascii() {
+        let mut state = RenderState::default();
+        state.prompt_prefix = "> ".to_string();
+        state.input_enabled = true;
+        let mut composer = oxicode_textarea::TextArea::new();
+        composer.set_text("hello");
+        composer.set_cursor(5);
+        state.composer = composer;
+        let caret = terminal_caret(&state);
+        // layout.prompt = Rect{x:2,y:18,w:76,h:3}; inner = Rect{x:3,y:19};
+        // textarea_area = Rect{x:3+prefix_w(2)=5, y:19}; cursor_pos_with_state
+        // returns (area.x + col, area.y + row) = (5 + 5, 19 + 0) = (10, 19).
+        assert_eq!(
+            caret,
+            Some((10, 19)),
+            "ASCII caret must sit right after '> hello'"
+        );
+    }
+
+    #[test]
+    fn composer_caret_aligns_after_cjk_display_columns() {
+        let mut state = RenderState::default();
+        state.prompt_prefix = "> ".to_string();
+        state.input_enabled = true;
+        let body = "안녕";
+        let mut composer = oxicode_textarea::TextArea::new();
+        composer.set_text(body);
+        composer.set_cursor(body.len()); // 6 bytes (end), 4 display cols
+        state.composer = composer;
+        let caret = terminal_caret(&state);
+        // textarea_area.x = 5, col = 4 -> (5 + 4, 19) = (9, 19).
+        assert_eq!(
+            caret,
+            Some((9, 19)),
+            "CJK caret must sit after 4 display columns (not 6 bytes)"
+        );
+    }
+
+    #[test]
+    fn composer_caret_aligns_after_mixed_ascii_cjk() {
+        let body = "hi안녕";
+        let mut state = RenderState::default();
+        state.prompt_prefix = "> ".to_string();
+        state.input_enabled = true;
+        let mut composer = oxicode_textarea::TextArea::new();
+        composer.set_text(body);
+        composer.set_cursor(body.len()); // 8 bytes, 6 display cols
+        state.composer = composer;
+        let caret = terminal_caret(&state);
+        // textarea_area.x = 5, col = 6 -> (5 + 6, 19) = (11, 19).
+        assert_eq!(
+            caret,
+            Some((11, 19)),
+            "Mixed caret must sit after 6 display columns"
+        );
     }
 
     #[test]
