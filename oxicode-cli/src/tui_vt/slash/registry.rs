@@ -251,7 +251,9 @@ impl SlashCommand for SettingsCommand {
 }
 
 /// `/sessions` — open a session picker overlay listing recent sessions.
-/// Selecting a session fills `/resume <id>` into the prompt.
+/// Selecting a session enqueues a resume that fires on the next Enter.
+struct SessionsCommand;
+
 /// Resolve the TUI's session storage directory (mirrors the CLI's
 /// `~/.oxicode/sessions`).
 pub(crate) fn sessions_dir() -> std::path::PathBuf {
@@ -259,8 +261,6 @@ pub(crate) fn sessions_dir() -> std::path::PathBuf {
         .map(|h| h.join(".oxicode").join("sessions"))
         .unwrap_or_else(|| std::path::PathBuf::from(".oxicode/sessions"))
 }
-
-struct SessionsCommand;
 
 impl SessionsCommand {
     fn open_picker(&self, ctx: &mut SlashCtx<'_>) -> SlashOutcome {

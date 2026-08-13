@@ -1952,18 +1952,32 @@ fn handle_inline_event(
                     // Session picker: enqueue the selected session. The next
                     // Submit event drains it before normal composer dispatch.
                     if let OverlaySubmission::Selection(InlineListSelection::Session(id)) = &sub {
-                        let path = crate::tui_vt::slash::registry::sessions_dir()
-                            .join(format!("{id}.jsonl"));
-                        if !path.is_file() {
+                        // Gate: refuse to queue a resume while the agent is
+                        // running — the pending_resume drain would clobber
+                        // the in-flight conversation's message history on
+                        // the shared Arc<Agent> (same wording as the direct
+                        // /sessions <id> path and /handoff).
+                        if session.is_streaming() {
                             handle.append_line(
                                 InlineMessageKind::Error,
-                                vec![plain_segment(format!(
-                                    "No session file: {}",
-                                    path.display()
-                                ))],
+                                vec![plain_segment(
+                                    "Cannot resume while agent is running. Use /cancel first.",
+                                )],
                             );
                         } else {
-                            state.pending_resume = Some(path);
+                            let path = crate::tui_vt::slash::registry::sessions_dir()
+                                .join(format!("{id}.jsonl"));
+                            if !path.is_file() {
+                                handle.append_line(
+                                    InlineMessageKind::Error,
+                                    vec![plain_segment(format!(
+                                        "No session file: {}",
+                                        path.display()
+                                    ))],
+                                );
+                            } else {
+                                state.pending_resume = Some(path);
+                            }
                         }
                     }
                     // `/models` catalog browser: switch to the selected model.
@@ -6561,5 +6575,82 @@ mod provider_overlay_tests {
         );
         // Variants are distinct (so the follow-up message can branch).
         assert_ne!(set, added);
+    }
+
+    /// Regression: the `/sessions` picker arm previously set
+    /// `state.pending_resume` without the `is_streaming()` gate that the
+    /// direct `/sessions <id>` path and `/handoff` both use. A mid-stream
+    /// pick + Enter fired the drain, which calls `resume_from_file` →
+    /// `AgentSession::new` → `agent.update_state` on the shared
+    /// `Arc<Agent>`, clobbering the in-flight conversation's message
+    /// history. The picker now refuses with the same error wording as
+    /// the direct path and never sets `pending_resume` while streaming.
+    #[test]
+    fn session_picker_resume_refused_while_streaming() {
+        let session = make_session();
+        // Flip the streaming flag BEFORE dispatch so the gate fires.
+        // `streaming_flag()` returns an `Arc<AtomicBool>` shared with the
+        // worker thread, so the production code observes the new value.
+        session
+            .streaming_flag()
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let mut state = RenderState::default();
+        // Sanity: no resume queued yet.
+        assert!(
+            state.pending_resume.is_none(),
+            "precondition: pending_resume must start None"
+        );
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+            InlineListSelection::Session("some-id".to_string()),
+        )));
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+
+        // The gate must have refused: pending_resume stays None.
+        assert!(
+            state.pending_resume.is_none(),
+            "streaming session must not enqueue pending_resume (got {:?})",
+            state.pending_resume
+        );
+
+        // Drain the handle's cmd channel and inspect appended lines.
+        let mut cmds: Vec<InlineCommand> = Vec::new();
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            cmds.push(cmd);
+        }
+        let mut found_error = false;
+        let mut error_text = String::new();
+        for cmd in &cmds {
+            if let InlineCommand::AppendLine { kind, segments } = cmd
+                && matches!(kind, InlineMessageKind::Error)
+            {
+                error_text = segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("");
+                found_error = true;
+            }
+        }
+        assert!(
+            found_error,
+            "expected an error AppendLine (commands: {})",
+            summarise(&cmds)
+        );
+        assert!(
+            error_text.contains("Cannot resume while agent is running"),
+            "error text must match the direct-path wording (got {error_text:?})"
+        );
+
+        // Cleanup: reset streaming so the flag doesn't leak across tests
+        // in the same process.
+        session
+            .streaming_flag()
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
