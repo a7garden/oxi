@@ -676,6 +676,57 @@ impl SlashCommand for ModelCommand {
     }
 }
 
+/// Build the rows for the `/model` picker.
+///
+/// Rules:
+/// 1. Models from every provider where `auth.has(p)` is true are
+///    included (the current provider's models too — the user wants to
+///    see every model they can call, including the other models from
+///    their current provider).
+/// 2. The active model is always present and pinned at index 0,
+///    even if its provider has no key (e.g. key removed mid-session).
+/// 3. If neither (1) nor (2) produces a row, fall back to the full
+///    catalog and set `used_fallback = true` so the caller can drop
+///    "no-key" badges (every row would be "no-key" in that state and
+///    the footer already explains the fallback).
+fn model_picker_rows(
+    catalog: &std::sync::Arc<dyn oxicode_sdk::ports::catalog::ModelCatalog>,
+    auth: &std::sync::Arc<crate::store::auth_storage::AuthStorage>,
+    cur_provider: &str,
+    cur_model_id: &str,
+) -> (Vec<oxicode_sdk::CatalogModelEntry>, bool) {
+    let all = catalog.search_sync("");
+
+    // Models from every provider the user has a key for. The current
+    // provider is NOT excluded — the user wants to see the other
+    // models from their current provider, not just cross-provider
+    // alternatives. The active model is deduplicated below.
+    let mut keyed: Vec<_> = all
+        .iter()
+        .filter(|e| auth.has(&e.provider))
+        .cloned()
+        .collect();
+
+    let current_entry = all
+        .iter()
+        .find(|e| e.provider == cur_provider && e.model_id == cur_model_id)
+        .cloned();
+
+    // Pin the active row at index 0. If the active model is already in
+    // the keyed set (the normal case), drop the duplicate.
+    let mut rows = Vec::with_capacity(keyed.len() + 1);
+    if let Some(ce) = current_entry {
+        keyed.retain(|e| !(e.provider == ce.provider && e.model_id == ce.model_id));
+        rows.push(ce); // active row pinned to top
+    }
+    rows.append(&mut keyed);
+
+    if rows.is_empty() {
+        (all, true)
+    } else {
+        (rows, false)
+    }
+}
 /// `/cancel` — abort any in-progress agent run. Alias: `/stop`.
 struct CancelCommand;
 
@@ -954,6 +1005,11 @@ fn shortcuts_lines() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxicode_sdk::ports::catalog::{
+        CatalogEvent, CatalogModelEntry, CatalogProtocol, CatalogSource, ModelCatalog,
+    };
+    use std::future::Future;
+    use std::pin::Pin;
 
     #[test]
     fn builtins_register_expected_commands() {
@@ -1014,14 +1070,251 @@ mod tests {
         assert!(cmd.matches("Hd"));
     }
 
+    /// `model_picker_rows` filters the catalog to providers with stored
+    /// API keys, pins the active model at index 0, and falls back to the
+    /// full catalog when nothing is keyed.
     #[test]
-    fn dispatch_help_is_intercepted() {
-        // `/help` must resolve even though no HelpCommand is registered —
-        // only the registry can enumerate its siblings.
-        let _reg = SlashRegistry::builtins();
-        // We can't build a real SlashCtx without a session, so verify the
-        // interception logic indirectly: a registered command name does not
-        // shadow help, and help token is recognized before iteration.
-        assert!(matches!("help".strip_prefix('/').unwrap_or("help"), "help"));
+    fn model_picker_filters_by_keyed_providers() {
+        use crate::store::auth_storage::AuthStorage;
+        use std::sync::Arc;
+
+        // Two providers, three models. The `anthropic` provider has a
+        // key below; `google` does not.
+        let entries = vec![
+            CatalogModelEntry {
+                provider: "anthropic".into(),
+                model_id: "claude-sonnet".into(),
+                name: "Claude Sonnet".into(),
+                protocol: CatalogProtocol::AnthropicMessages,
+                source: CatalogSource::Embedded,
+                base_url: None,
+                reasoning: false,
+                supports_vision: true,
+                cost_input: 3.0,
+                cost_output: 15.0,
+                cost_cache_read: 0.0,
+                cost_cache_write: 0.0,
+                context_window: 200_000,
+                max_tokens: 8_192,
+                input_modalities: vec!["text".into(), "image".into()],
+                release_date: None,
+                status: None,
+            },
+            CatalogModelEntry {
+                provider: "anthropic".into(),
+                model_id: "claude-opus".into(),
+                name: "Claude Opus".into(),
+                protocol: CatalogProtocol::AnthropicMessages,
+                source: CatalogSource::Embedded,
+                base_url: None,
+                reasoning: false,
+                supports_vision: true,
+                cost_input: 15.0,
+                cost_output: 75.0,
+                cost_cache_read: 0.0,
+                cost_cache_write: 0.0,
+                context_window: 200_000,
+                max_tokens: 8_192,
+                input_modalities: vec!["text".into(), "image".into()],
+                release_date: None,
+                status: None,
+            },
+            CatalogModelEntry {
+                provider: "google".into(),
+                model_id: "gemini-2.5-pro".into(),
+                name: "Gemini 2.5 Pro".into(),
+                protocol: CatalogProtocol::OpenAiCompatible,
+                source: CatalogSource::Embedded,
+                base_url: None,
+                reasoning: true,
+                supports_vision: true,
+                cost_input: 1.25,
+                cost_output: 5.0,
+                cost_cache_read: 0.0,
+                cost_cache_write: 0.0,
+                context_window: 1_000_000,
+                max_tokens: 65_536,
+                input_modalities: vec!["text".into(), "image".into()],
+                release_date: None,
+                status: None,
+            },
+        ];
+        let catalog: Arc<dyn ModelCatalog> = Arc::new(StaticCatalog::new(entries));
+
+        // Hermetic in-memory AuthStorage — no file I/O, no risk of
+        // touching the user's real ~/.oxicode/auth.json. The production
+        // `AuthStorage::default()` would point at that file and any
+        // `set_api_key` would persist there. Always use `in_memory()`
+        // in tests.
+        let auth: Arc<AuthStorage> = Arc::new(AuthStorage::in_memory());
+        auth.set_api_key("anthropic", "test-anthropic-key".to_string());
+
+        let (rows, used_fallback) =
+            model_picker_rows(&catalog, &auth, "anthropic", "claude-sonnet");
+
+        assert!(
+            !used_fallback,
+            "keyed providers exist — no fallback expected"
+        );
+        // Active row pinned to index 0, the other keyed provider row
+        // follows. google's models are excluded (no key).
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].provider, "anthropic");
+        assert_eq!(rows[0].model_id, "claude-sonnet");
+        assert_eq!(rows[1].model_id, "claude-opus");
+    }
+    /// When no providers are keyed AND there is no active model match
+    /// in the catalog, the helper returns the full catalog with
+    /// `used_fallback = true`.
+    #[test]
+    fn model_picker_falls_back_when_unkeyed_and_no_active_match() {
+        use crate::store::auth_storage::AuthStorage;
+        use std::sync::Arc;
+
+        let entries = vec![CatalogModelEntry {
+            provider: "openai".into(),
+            model_id: "gpt-4o".into(),
+            name: "GPT-4o".into(),
+            protocol: CatalogProtocol::OpenAiCompatible,
+            source: CatalogSource::Embedded,
+            base_url: None,
+            reasoning: false,
+            supports_vision: true,
+            cost_input: 2.5,
+            cost_output: 10.0,
+            cost_cache_read: 0.0,
+            cost_cache_write: 0.0,
+            context_window: 128_000,
+            max_tokens: 16_384,
+            input_modalities: vec!["text".into(), "image".into()],
+            release_date: None,
+            status: None,
+        }];
+        let catalog: Arc<dyn ModelCatalog> = Arc::new(StaticCatalog::new(entries));
+
+        // No keys at all.
+        let auth: Arc<AuthStorage> = Arc::new(AuthStorage::in_memory());
+        // Active model id is not in the catalog (impossible in practice
+        // but the helper must handle it).
+        let (rows, used_fallback) =
+            model_picker_rows(&catalog, &auth, "anthropic", "claude-not-in-catalog");
+
+        assert!(
+            used_fallback,
+            "no keys, no active match — fallback expected"
+        );
+        // The full catalog is returned.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].model_id, "gpt-4o");
+    }
+
+    /// In-memory `ModelCatalog` test double holding a fixed list of
+    /// entries. Only `search_sync` is exercised by `model_picker_rows`;
+    /// the async methods are stubbed to keep the trait satisfied and
+    /// are never invoked by the helper.
+    struct StaticCatalog {
+        entries: Vec<CatalogModelEntry>,
+        tx: tokio::sync::broadcast::Sender<CatalogEvent>,
+    }
+
+    impl StaticCatalog {
+        fn new(entries: Vec<CatalogModelEntry>) -> Self {
+            let (tx, _) = tokio::sync::broadcast::channel(16);
+            Self { entries, tx }
+        }
+    }
+
+    impl std::fmt::Debug for StaticCatalog {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("StaticCatalog")
+                .field("entries", &self.entries.len())
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl ModelCatalog for StaticCatalog {
+        fn list_providers(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = oxicode_sdk::SdkResult<Vec<String>>> + Send + '_>>
+        {
+            let mut providers: Vec<String> =
+                self.entries.iter().map(|e| e.provider.clone()).collect();
+            providers.sort();
+            providers.dedup();
+            Box::pin(async move { Ok(providers) })
+        }
+        fn get_provider(
+            &self,
+            _id: &str,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = oxicode_sdk::SdkResult<Option<oxicode_sdk::CatalogProviderEntry>>,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Ok(None) })
+        }
+        fn list_models(
+            &self,
+            provider_id: &str,
+        ) -> Pin<Box<dyn Future<Output = oxicode_sdk::SdkResult<Vec<CatalogModelEntry>>> + Send + '_>>
+        {
+            let v: Vec<_> = self
+                .entries
+                .iter()
+                .filter(|e| e.provider == provider_id)
+                .cloned()
+                .collect();
+            Box::pin(async move { Ok(v) })
+        }
+        fn get_model(
+            &self,
+            provider: &str,
+            model_id: &str,
+        ) -> Pin<
+            Box<dyn Future<Output = oxicode_sdk::SdkResult<Option<CatalogModelEntry>>> + Send + '_>,
+        > {
+            let hit = self.entries.iter().find_map(|e| {
+                if e.provider == provider && e.model_id == model_id {
+                    Some(e.clone())
+                } else {
+                    None
+                }
+            });
+            Box::pin(async move { Ok(hit) })
+        }
+        fn search(
+            &self,
+            _pattern: &str,
+        ) -> Pin<Box<dyn Future<Output = oxicode_sdk::SdkResult<Vec<CatalogModelEntry>>> + Send + '_>>
+        {
+            let v = self.entries.clone();
+            Box::pin(async move { Ok(v) })
+        }
+        fn model_count(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = oxicode_sdk::SdkResult<usize>> + Send + '_>> {
+            let n = self.entries.len();
+            Box::pin(async move { Ok(n) })
+        }
+        fn refresh(
+            &self,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = oxicode_sdk::SdkResult<oxicode_sdk::RefreshOutcome>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Ok(oxicode_sdk::RefreshOutcome::Unchanged) })
+        }
+        fn subscribe(&self) -> tokio::sync::broadcast::Receiver<CatalogEvent> {
+            self.tx.subscribe()
+        }
+        fn search_sync(&self, _pattern: &str) -> Vec<CatalogModelEntry> {
+            self.entries.clone()
+        }
     }
 }
