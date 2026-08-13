@@ -261,6 +261,22 @@ pub struct RenderState {
     /// simply acknowledge ("key replaced") — both write to the same auth
     /// storage slot, but the surrounding UX differs.
     pub secure_input_origin: Option<SecureInputOrigin>,
+    /// Live-session swapper. `None` until the TUI startup wires it.
+    /// The render loop and the agent worker both call `current()` per
+    /// dispatch; the resume `tokio::spawn` calls `swap(new_handle)`.
+    /// `Option` because `#[derive(Default)]` requires it.
+    pub session_swapper: Option<Arc<crate::app::agent_session_handle::SessionSwapper>>,
+    /// `Some(path)` when the slash command wants the event loop to
+    /// drain a resume job on the next `Submitted` arm. The
+    /// `Submitted` arm calls `state.pending_resume.take()` and
+    /// enqueues the resume.
+    pub pending_resume: Option<PathBuf>,
+    /// `Some(state)` once the TUI startup clones the `App`'s
+    /// `SessionState` into the render state. The resume spawn
+    /// closure captures it and passes it to
+    /// `AgentSession::resume_from_file`. `Option` because
+    /// `#[derive(Default)]` requires it.
+    pub session_state: Option<crate::SessionState>,
 }
 
 /// Where a secure prompt came from. The `SecureInput` overlay has just one
@@ -433,6 +449,16 @@ impl RenderState {
         s.prompt_prefix = "> ".to_string();
         s.input_enabled = true;
         s
+    }
+
+    /// Get a clone of the live `SessionSwapper`. Panics if the TUI
+    /// wasn't initialized properly (the `run_tui` startup wires it
+    /// before any user input is processed, so the panic is
+    /// unreachable in normal use).
+    pub fn swapper(&self) -> Arc<crate::app::agent_session_handle::SessionSwapper> {
+        self.session_swapper
+            .clone()
+            .expect("RenderState::session_swapper must be initialized at TUI startup")
     }
 
     /// Append a brand-new line to the transcript.
@@ -701,6 +727,13 @@ pub async fn run_tui(app: App) -> Result<()> {
     // App::from_oxicode → with_session_hooks.
     let session_handle = session.clone_handle();
 
+    // Wrap the initial handle in a SessionSwapper. The render loop
+    // and the agent worker both read through `current()`; the
+    // resume `tokio::spawn` (below) calls `swap(new_handle)`.
+    let session_swapper = Arc::new(crate::app::agent_session_handle::SessionSwapper::new(
+        session_handle.clone(),
+    ));
+
     // Forward session events to a tokio mpsc so the main loop can
     // `tokio::select!` on them. We do this in two stages:
     //  1. Subscribe to AgentSession — CompactionStart/End, Advisor,
@@ -736,6 +769,8 @@ pub async fn run_tui(app: App) -> Result<()> {
     state.lock().catalog = Some(app.catalog());
     state.lock().file_commands = crate::tui_vt::slash::file_commands::load_file_commands(&cwd);
     state.lock().todo_provider = session_handle.todo_provider();
+    state.lock().session_swapper = Some(session_swapper.clone());
+    state.lock().session_state = Some(app.session_state().clone());
     // Onboarding tip: surfaces the cheatsheet and help command on first run,
     // auto-dismisses after ~30s of rendering.
     state.lock().tip = Some(EphemeralTip {
@@ -769,7 +804,7 @@ pub async fn run_tui(app: App) -> Result<()> {
     // returned `AgentEvent`s flow through a `std::sync::mpsc`; a paired
     // forwarder thread funnels them into the session's listener bus so
     // our subscriber above picks them up.
-    let prompt_tx = spawn_agent_worker(session_handle.clone());
+    let prompt_tx = spawn_agent_worker(session_swapper.clone());
 
     let result = run_event_loop(
         &mut tui.terminal,
@@ -778,7 +813,7 @@ pub async fn run_tui(app: App) -> Result<()> {
         &mut session_rx,
         &handle,
         &state,
-        &session_handle,
+        &session_swapper,
         prompt_tx.clone(),
     )
     .await;
@@ -805,7 +840,7 @@ async fn run_event_loop(
     session_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
     handle: &InlineHandle,
     state: &Arc<parking_lot::Mutex<RenderState>>,
-    session: &crate::app::agent_session::AgentSessionHandle,
+    session_swapper: &Arc<crate::app::agent_session_handle::SessionSwapper>,
     prompt_tx: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<()> {
     // Drain any pending InlineCommands so the harness's initial set_header_context
@@ -899,7 +934,7 @@ async fn run_event_loop(
                 let outcome = handle_inline_event(
                     &mut state.lock(),
                     handle,
-                    session,
+                    &session_swapper.current(),
                     &prompt_tx,
                     evt,
                 );
@@ -914,7 +949,7 @@ async fn run_event_loop(
             _ = tokio::signal::ctrl_c() => {
                 let outcome = {
                     let mut s = state.lock();
-                    handle_interrupt(&mut s, session, handle)
+                    handle_interrupt(&mut s, &session_swapper.current(), handle)
                 };
                 if outcome == LoopOutcome::Exit {
                     break;
@@ -1657,6 +1692,59 @@ fn handle_inline_event(
 ) -> LoopOutcome {
     match evt {
         InlineEvent::Submit(text) => {
+            // ── Drain pending resume (set by /sessions <id> or the picker). ──
+            if let Some(path) = state.pending_resume.take() {
+                let swapper = state.swapper();
+                let agent_arc = Arc::clone(&session.agent_arc());
+                let settings = session.settings_clone();
+                let session_state = state
+                    .session_state
+                    .clone()
+                    .expect("RenderState::session_state must be initialized at TUI startup");
+                let path_for_log = path.clone();
+                let handle = handle.clone();
+                let swapper_for_swap = swapper.clone();
+                tokio::spawn(async move {
+                    match crate::app::agent_session::resume_from_file(
+                        agent_arc,
+                        settings,
+                        session_state,
+                        &path,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(new_session) => {
+                            swapper_for_swap.swap(new_session.clone_handle());
+                            let n = new_session.messages().len();
+                            let id = new_session.session_id();
+                            handle.append_line(
+                                InlineMessageKind::Info,
+                                vec![plain_segment(format!(
+                                    "Resumed session {id} ({n} messages)"
+                                ))],
+                            );
+                        }
+                        Err(crate::app::agent_session::ResumeError::FileNotFound(p)) => {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("No session file: {}", p.display()))],
+                            );
+                        }
+                        Err(crate::app::agent_session::ResumeError::CwdInvalid(cwd)) => {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!(
+                                    "Cannot resume {}: the session was recorded in `{cwd}`, which no longer exists. \
+                                     Use /export to save its content, then /clear.",
+                                    path_for_log.display()
+                                ))],
+                            );
+                        }
+                    }
+                });
+                return LoopOutcome::Continue;
+            }
             // Drain the composer — the input thread already cleared its
             // local copy once Submit fired, but we keep the canonical
             // buffer here in sync.
@@ -1861,11 +1949,22 @@ fn handle_inline_event(
                             _ => {}
                         }
                     }
-                    // Session picker: resume the selected session by filling
-                    // `/resume <id>` into the prompt (the user confirms).
+                    // Session picker: enqueue the selected session. The next
+                    // Submit event drains it before normal composer dispatch.
                     if let OverlaySubmission::Selection(InlineListSelection::Session(id)) = &sub {
-                        state.input_buffer = format!("/resume {id}");
-                        state.input_cursor = state.input_buffer.len();
+                        let path = crate::tui_vt::slash::registry::sessions_dir()
+                            .join(format!("{id}.jsonl"));
+                        if !path.is_file() {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!(
+                                    "No session file: {}",
+                                    path.display()
+                                ))],
+                            );
+                        } else {
+                            state.pending_resume = Some(path);
+                        }
                     }
                     // `/models` catalog browser: switch to the selected model.
                     if let OverlaySubmission::Selection(InlineListSelection::CatalogModel(idx)) =
@@ -2915,7 +3014,7 @@ fn handle_file_search_key(
 // ─────────────────────────────────────────────────────────────────────────
 
 fn spawn_agent_worker(
-    session: crate::app::agent_session::AgentSessionHandle,
+    session_swapper: Arc<crate::app::agent_session_handle::SessionSwapper>,
 ) -> tokio::sync::mpsc::UnboundedSender<String> {
     let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
@@ -2936,7 +3035,7 @@ fn spawn_agent_worker(
             local
                 .run_until(async move {
                     while let Some(prompt) = prompt_rx.recv().await {
-                        run_one_prompt(&session, prompt).await;
+                        run_one_prompt(&session_swapper.current(), prompt).await;
                     }
                 })
                 .await;

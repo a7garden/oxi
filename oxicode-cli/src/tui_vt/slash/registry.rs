@@ -252,29 +252,23 @@ impl SlashCommand for SettingsCommand {
 
 /// `/sessions` — open a session picker overlay listing recent sessions.
 /// Selecting a session fills `/resume <id>` into the prompt.
+/// Resolve the TUI's session storage directory (mirrors the CLI's
+/// `~/.oxicode/sessions`).
+pub(crate) fn sessions_dir() -> std::path::PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".oxicode").join("sessions"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".oxicode/sessions"))
+}
+
 struct SessionsCommand;
 
-impl SlashCommand for SessionsCommand {
-    fn name(&self) -> &'static str {
-        "sessions"
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["resume"]
-    }
-    fn description(&self) -> &'static str {
-        "Browse and resume past sessions"
-    }
-    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+impl SessionsCommand {
+    fn open_picker(&self, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
         use oxicode_vtui::tui::core::{InlineListItem, InlineListSearchConfig};
 
-        // Find the sessions directory.
-        let session_dir = dirs::home_dir()
-            .map(|h| h.join(".oxicode").join("sessions"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".oxicode/sessions"));
-
-        // Scan session files synchronously, sorted by mtime desc.
+        let session_dir = sessions_dir();
         let mut entries: Vec<(String, std::time::SystemTime)> = Vec::new();
-        if let Ok(dir) = std::fs::read_dir(&session_dir) {
+        if let Ok(dir) = std::fs::read_dir(session_dir) {
             for entry in dir.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
@@ -292,7 +286,7 @@ impl SlashCommand for SessionsCommand {
             }
         }
         entries.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
-        entries.truncate(30); // cap at 30 most recent
+        entries.truncate(30);
 
         if entries.is_empty() {
             ctx.reply(InlineMessageKind::Info, "No saved sessions found.");
@@ -329,6 +323,42 @@ impl SlashCommand for SessionsCommand {
     }
 }
 
+impl SlashCommand for SessionsCommand {
+    fn name(&self) -> &'static str {
+        "sessions"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["resume"]
+    }
+    fn description(&self) -> &'static str {
+        "Browse and resume past sessions"
+    }
+    fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let arg = args.trim();
+        if arg.is_empty() {
+            return self.open_picker(ctx);
+        }
+
+        if ctx.session.is_streaming() {
+            ctx.reply(
+                InlineMessageKind::Error,
+                "Cannot resume while agent is running. Use /cancel first.",
+            );
+            return SlashOutcome::Handled;
+        }
+        let path = sessions_dir().join(format!("{arg}.jsonl"));
+        if !path.is_file() {
+            ctx.reply(
+                InlineMessageKind::Error,
+                format!("No session file: {}", path.display()),
+            );
+            return SlashOutcome::Handled;
+        }
+        ctx.state.pending_resume = Some(path);
+        ctx.reply(InlineMessageKind::Info, format!("Resuming {arg}…"));
+        SlashOutcome::Handled
+    }
+}
 /// Format a `SystemTime` as a human-readable relative time (e.g. "2h ago").
 fn format_relative_time(t: std::time::SystemTime) -> String {
     let now = std::time::SystemTime::now();
