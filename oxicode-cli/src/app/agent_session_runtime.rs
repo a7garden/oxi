@@ -907,7 +907,7 @@ pub enum ForkPosition {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Adapter to use `SessionManager` with `assert_session_cwd_exists`.
-struct SessionManagerCwdAdapter<'a>(&'a SessionManager);
+pub(crate) struct SessionManagerCwdAdapter<'a>(pub(crate) &'a SessionManager);
 
 impl SessionCwdSource for SessionManagerCwdAdapter<'_> {
     fn get_cwd(&self) -> Option<String> {

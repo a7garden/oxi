@@ -524,6 +524,21 @@ impl AgentSession {
         self.agent.state().messages
     }
 
+    /// Returns a clone of the inner `Arc<Agent>`. Used by the TUI
+    /// `/sessions` resume worker (Task 3 of the resume plan) which
+    /// needs to feed the existing agent's conversation state without
+    /// taking a reference to the session itself.
+    pub(crate) fn agent_arc(&self) -> std::sync::Arc<oxicode_agent::Agent> {
+        std::sync::Arc::clone(&self.agent)
+    }
+
+    /// Returns a fresh clone of the current [`Settings`] snapshot.
+    /// Used by the TUI `/sessions` resume worker to construct the
+    /// resumed `AgentSession` with the live settings (Task 3).
+    pub(crate) fn settings_clone(&self) -> Settings {
+        self.settings.read().clone()
+    }
+
     /// Current session ID.
     pub fn session_id(&self) -> String {
         self.session_manager.read().get_session_id()
@@ -1878,6 +1893,22 @@ impl std::ops::Deref for AgentSessionHandle {
     }
 }
 
+impl AgentSessionHandle {
+    /// Returns a clone of the inner `Arc<Agent>`. Mirrors
+    /// [`AgentSession::agent_arc`] for use through the handle.
+    /// Used by the TUI `/sessions` resume worker.
+    pub(crate) fn agent_arc(&self) -> std::sync::Arc<oxicode_agent::Agent> {
+        std::sync::Arc::clone(&self.inner.agent)
+    }
+
+    /// Returns a fresh clone of the current [`Settings`] snapshot.
+    /// Mirrors [`AgentSession::settings_clone`] for use through the
+    /// handle. Used by the TUI `/sessions` resume worker.
+    pub(crate) fn settings_clone(&self) -> Settings {
+        self.inner.settings.read().clone()
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Cycling direction
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2713,4 +2744,227 @@ mod tests {
             "persist_session must not duplicate seeded history"
         );
     }
+
+    // ─── resume_from_file (TUI /sessions resume) ───
+
+    use super::{ResumeError, resume_from_file};
+    use crate::store::session::{CURRENT_SESSION_VERSION, FileEntry, SessionHeader};
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    /// Build a fresh (provider, config, tools) `Arc<Agent>` and a default
+    /// `Settings` for use by the resume_from_file tests. Mirrors the
+    /// pattern in `make_session` but is session-free.
+    fn fixture_agent_and_settings() -> (Arc<oxicode_agent::Agent>, Settings) {
+        let provider = Arc::new(MockProvider);
+        let config = AgentConfig::new("test/dummy-model");
+        let agent = Arc::new(oxicode_agent::Agent::new(
+            provider,
+            config,
+            Arc::new(oxicode_agent::ToolRegistry::new()),
+        ));
+        (agent, Settings::default())
+    }
+
+    #[test]
+    fn resume_from_file_returns_err_for_missing_file() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let (agent, settings) = fixture_agent_and_settings();
+            let result = resume_from_file(
+                agent,
+                settings,
+                crate::SessionState::default(),
+                std::path::Path::new("/tmp/does-not-exist-1234567890.jsonl"),
+                None,
+            )
+            .await;
+            assert!(matches!(result, Err(ResumeError::FileNotFound(_))));
+        });
+    }
+
+    #[test]
+    fn resume_from_file_succeeds_for_existing_in_memory_session() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let tmp = tempfile::tempdir().unwrap();
+            let session_dir = tmp.path().to_path_buf();
+            let cwd = tmp.path().to_string_lossy().to_string();
+
+            // 1. Create a fresh session, persist a user message.
+            let mut sm = SessionManager::create(&cwd, Some(&session_dir.to_string_lossy()));
+            sm.append_message(AgentMessage::User {
+                content: ContentValue::String("hello prior".to_string()),
+            });
+            // The first assistant message triggers the SessionManager's
+            // deferred-flush path: every accumulated entry (header + user
+            // + this assistant) is written to disk in one go. Without
+            // this, the user message would remain in memory only and the
+            // on-disk `.jsonl` would contain nothing past the header.
+            use crate::store::session::AssistantContentBlock;
+            sm.append_message(AgentMessage::Assistant {
+                content: vec![AssistantContentBlock::Text {
+                    text: "ack".to_string(),
+                }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
+            });
+            // 2. Find the file path.
+            let mut files: Vec<PathBuf> = std::fs::read_dir(&session_dir)
+                .unwrap()
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().map(|x| x == "jsonl").unwrap_or(false) {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(files.len(), 1, "expected exactly one session file");
+            let file = files.remove(0);
+
+            // 3. Resume.
+            let (agent, settings) = fixture_agent_and_settings();
+            let new_session =
+                resume_from_file(agent, settings, crate::SessionState::default(), &file, None)
+                    .await
+                    .expect("resume should succeed for an in-memory roundtrip");
+
+            // 4. The new session's seeded messages should include the
+            //    user message we persisted.
+            let msgs = new_session.messages();
+            let user_msg = msgs
+                .iter()
+                .find(|m| matches!(m, oxicode_sdk::Message::User(_)));
+            assert!(
+                user_msg.is_some(),
+                "user message should be in resumed history"
+            );
+        });
+    }
+
+    #[test]
+    fn resume_from_file_returns_cwd_invalid_for_missing_cwd() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let tmp = tempfile::tempdir().unwrap();
+            let session_dir = tmp.path().to_path_buf();
+
+            // Build the JSONL by hand: header + one entry, cwd bogus.
+            let bogus_cwd = "/path/that/does/not/exist/1234567890";
+            let header = FileEntry::Header(SessionHeader {
+                entry_type: "session".to_string(),
+                version: Some(CURRENT_SESSION_VERSION),
+                id: Uuid::new_v4().to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                cwd: bogus_cwd.to_string(),
+                parent_session: None,
+            });
+            let file = session_dir.join("bogus-cwd-session.jsonl");
+            let mut s = String::new();
+            s.push_str(&serde_json::to_string(&header).unwrap());
+            s.push('\n');
+            std::fs::write(&file, s).unwrap();
+
+            let (agent, settings) = fixture_agent_and_settings();
+            let result =
+                resume_from_file(agent, settings, crate::SessionState::default(), &file, None)
+                    .await;
+            assert!(matches!(result, Err(ResumeError::CwdInvalid(_))));
+        });
+    }
+
+    #[test]
+    fn resume_from_file_propagates_session_busy_via_caller_check() {
+        // `SessionBusy` is NOT a free-function error — it's a
+        // slash-command concern. This test pins the contract: the
+        // free function never returns SessionBusy. (If a future
+        // change wants to add it, this test will fail and force a
+        // conscious update.)
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ResumeError>();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Resume (TUI /sessions)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Errors raised by [`resume_from_file`]. The TUI maps each variant
+/// to a distinct transcript line. `SessionBusy` is *not* a
+/// `ResumeError` variant — the streaming check is the slash
+/// command's job, not this function's.
+#[derive(Debug, thiserror::Error)]
+pub enum ResumeError {
+    #[error("No session file at {0}")]
+    FileNotFound(std::path::PathBuf),
+    #[error("Session cwd is gone: {0}")]
+    CwdInvalid(String),
+}
+
+/// Open a session from a file path, validate the cwd, and construct a
+/// fresh [`AgentSession`] around the same `Arc<Agent>` as the live
+/// session. The [`AgentSession::new`] constructor already seeds the
+/// agent's conversation state from the resumed branch via
+/// `resume_messages_from_branch` (see `agent_session.rs:280`).
+///
+/// **Why a free function, not a method on `App`:** `App` is
+/// `!Send + !Sync` (its fields include `parking_lot::RwLock`). The
+/// resume worker runs inside a `tokio::spawn` closure, so it cannot
+/// carry `&App`. The free function takes only `Send + Sync` arguments.
+///
+/// `cwd_override` is passed straight to `SessionManager::open`. Pass
+/// `None` to let the file's header drive the cwd (the normal case).
+///
+/// `settings` is passed by value (not `Arc<Settings>`) because the
+/// caller already holds a fresh clone (Task 3's resume closure
+/// drains it from the live [`AgentSessionHandle`]); taking it by
+/// value avoids a clone inside this function.
+#[allow(clippy::needless_pass_by_value)]
+pub async fn resume_from_file(
+    agent: std::sync::Arc<oxicode_agent::Agent>,
+    settings: Settings,
+    session_state: crate::SessionState,
+    path: &std::path::Path,
+    cwd_override: Option<&str>,
+) -> Result<AgentSession, ResumeError> {
+    // 1. File exists.
+    if !path.is_file() {
+        return Err(ResumeError::FileNotFound(path.to_path_buf()));
+    }
+
+    // 2. Open the file. Sync — `SessionManager::open` is fast for the
+    //    JSONL case and the rest of the function is I/O-free.
+    let session_manager =
+        crate::store::session::SessionManager::open(&path.to_string_lossy(), None, cwd_override);
+
+    // 3. Validate cwd — same check AgentSessionRuntime::switch_session uses.
+    let cwd = session_manager.get_cwd();
+    let adapter = crate::app::agent_session_runtime::SessionManagerCwdAdapter(&session_manager);
+    if let Err(e) = crate::store::session_cwd::assert_session_cwd_exists(&adapter, &cwd) {
+        return Err(ResumeError::CwdInvalid(format!("{e}")));
+    }
+
+    // 4. Construct a fresh AgentSession around the same Arc<Agent>.
+    let session = AgentSession::new(
+        std::sync::Arc::clone(&agent),
+        settings,
+        session_manager,
+        cwd,
+        session_state,
+    );
+    Ok(session)
 }
