@@ -1,27 +1,10 @@
-//! `oxicode-textarea` — atomic-mutation text editor widget.
-//!
-//! Derived from `xai-org/grok-build`'s `xai-ratatui-textarea` crate.
-//!
-//! Public modules:
-//! - [`element`] — atomic text units (Plain, Masked, FileRef, Image)
-//! - [`command`] — `EditCommand`, `EditPlan`, `EditResult`
-//! - [`selection`] — selection state
-//! - [`wrap`] — soft-wrap + display width helpers
-//! - [`editor`] — `Editor` state with `EditPlan::apply`
-//! - [`editor_keys`] — key → `EditCommand` mapping (normal/insert/vim)
-//! - [`textarea`] — `TextArea` widget with cursor / position APIs
+#![allow(clippy::new_without_default)]
 
-pub mod command;
 pub mod editor;
-pub mod editor_keys;
-pub mod element;
-pub mod selection;
+pub mod render;
 pub mod textarea;
-pub mod wrap;
+pub mod wrapping;
 
-pub use command::{EditCommand, EditPlan, EditResult};
-pub use editor::Editor;
-pub use element::{ElementRange, TextElement};
-pub use selection::{Affinity, Anchor, Selection};
-pub use textarea::{TextArea, TextAreaState};
-pub use wrap::display_width_of_range;
+// Re-exports restored from grok lib.rs in the port task:
+//   editor:: {ApplyEditPlanError, EditBuffer, EditCommand, EditDelta, EditOutcome, EditPlan, PostEditCursorAffinity, SingleLineViewport, WordStyle, classify_key_event}
+//   textarea::{ClipboardProvider, ElementId, ElementKind, InternalClipboard, MouseAction, TextArea, TextAreaState, TextElement, TextElementEvent, TextElementEventKind, is_undo_input}
