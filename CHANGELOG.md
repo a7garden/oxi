@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.75.0] - 2026-08-13
+
 ### Fixed
 
 - **TUI `/model` is now a picker, not a transcript line.** Was: a single
@@ -30,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-dispatched to the same picker). `Cannot resume while agent
   is running. Use /cancel first.` gates the same way `/handoff`
   does. The `next`/`cycle` and `set_model` arms of `/model` and
-  every other slash command are unchanged.
+
 ## [0.74.0] - 2026-08-12
 
 ### Added
