@@ -13,8 +13,7 @@
 //! `/issue` is not yet wired (no issue overlay in this harness).
 
 use oxicode_vtui::tui::core::{
-    InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection,
-    InlineMessageKind,
+    InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection, InlineMessageKind,
 };
 
 use crate::app::agent_session::AgentSessionHandle;
@@ -616,15 +615,10 @@ impl SlashCommand for ModelCommand {
 
                 let auth = crate::store::auth_storage::shared_auth_storage();
                 let current = ctx.session.model_id();
-                let (cur_provider, cur_model_id) =
-                    super::commands::split_model_id(&current);
+                let (cur_provider, cur_model_id) = super::commands::split_model_id(&current);
 
-                let (rows, used_fallback) = model_picker_rows(
-                    catalog,
-                    &auth,
-                    cur_provider,
-                    cur_model_id,
-                );
+                let (rows, used_fallback) =
+                    model_picker_rows(catalog, &auth, cur_provider, cur_model_id);
 
                 let keyed_provider_count = rows
                     .iter()
@@ -633,8 +627,7 @@ impl SlashCommand for ModelCommand {
                     .collect::<std::collections::BTreeSet<_>>()
                     .len();
                 let filter_label = if used_fallback {
-                    "Showing full catalog — no providers with keys configured yet"
-                        .to_string()
+                    "Showing full catalog — no providers with keys configured yet".to_string()
                 } else {
                     format!(
                         "Showing models from {keyed_provider_count} keyed provider{}",
@@ -679,10 +672,9 @@ impl SlashCommand for ModelCommand {
                             badge,
                             indent: 0,
                             selection: Some(InlineListSelection::Model(i)),
-                            search_value: Some(format!(
-                                "{} {} {}",
-                                e.provider, e.model_id, e.name,
-                            )),
+                            search_value: Some(
+                                format!("{} {} {}", e.provider, e.model_id, e.name,),
+                            ),
                         }
                     })
                     .collect();
@@ -690,9 +682,7 @@ impl SlashCommand for ModelCommand {
                 let total = items.len();
                 let search = InlineListSearchConfig {
                     label: "Filter models".into(),
-                    placeholder: Some(
-                        "Type to filter (provider / model / name)\u{2026}".into(),
-                    ),
+                    placeholder: Some("Type to filter (provider / model / name)\u{2026}".into()),
                 };
                 ctx.handle.show_list_modal(
                     format!("Models ({total})"),

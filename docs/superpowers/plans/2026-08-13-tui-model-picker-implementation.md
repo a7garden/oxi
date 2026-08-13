@@ -104,8 +104,9 @@ Append the following two test cases to the existing `#[cfg(test)] mod tests` blo
         let catalog: Arc<dyn ModelCatalog> = Arc::new(TwoProviderCatalog);
 
         // Only anthropic has a key; the active model is an anthropic one.
-        let auth = AuthStorage::new_for_test();
-        auth.set_for_test("anthropic", "test-anthropic-key");
+        // Hermetic — see Step 2 for why AuthStorage::default() is unsafe.
+        let auth: Arc<AuthStorage> = Arc::new(AuthStorage::in_memory());
+        auth.set_api_key("anthropic", "test-anthropic-key".to_string());
 
         let (rows, used_fallback) =
             model_picker_rows(&catalog, &auth, "anthropic", "claude-sonnet");
@@ -149,8 +150,8 @@ Append the following two test cases to the existing `#[cfg(test)] mod tests` blo
         }
         let catalog: Arc<dyn ModelCatalog> = Arc::new(EmptyCatalog);
 
-        // No keys at all.
-        let auth = AuthStorage::new_for_test();
+        // No keys at all. Hermetic — see Step 2 for why default() is unsafe.
+        let auth: Arc<AuthStorage> = Arc::new(AuthStorage::in_memory());
 
         // Active model id is not in the catalog (impossible in practice
         // but the helper must handle it).
@@ -164,37 +165,45 @@ Append the following two test cases to the existing `#[cfg(test)] mod tests` blo
     }
 }
 
-- [ ] **Step 2: Add the `set_for_test` test seam on `AuthStorage`**
+- [ ] **Step 2: Use the existing public `AuthStorage::in_memory()` constructor (no production code change)**
 
-`AuthStorage` already has `Default::default()` (creates an empty in-memory
-store at `auth_storage.rs:1076`) and a public `set_api_key(provider, key)`
-method (`auth_storage.rs:743`). The test seam is one new method:
+The plan originally called for adding `new_for_test` + `set_for_test`
+test seams that wrapped `AuthStorage::default()`. An advisory during
+review caught that `AuthStorage::default()` builds a file-backed
+store pointing at `~/.oxicode/auth.json` (line 493 →
+`FileAuthStorage::default_path()` → `~/.oxicode/auth.json`); any
+`set_api_key` would overwrite the user's real stored API keys with
+test placeholders — irreversible credential loss.
 
-Open `oxicode-cli/src/store/auth_storage.rs` and add the following method
-inside the existing `impl AuthStorage` block, right after the existing
-`pub fn has(&self, provider: &str) -> bool` at line 916:
+`AuthStorage::in_memory()` at `auth_storage.rs:535` is the
+pre-existing public hermetic constructor. It sets `file_storage: None`
+so `persist()` is a no-op (see `auth_storage.rs:976-1003` — the entire
+`if let Some(ref storage) = self.file_storage` body is skipped). It
+is used by ~30 existing tests in this same file (lines 1332, 1338,
+1362, …). Test code becomes:
 
 ```rust
-    /// **Test-only:** create a fresh, hermetic `AuthStorage` with no
-    /// persisted file backing. Equivalent to `AuthStorage::default()`
-    /// but spelled for the test seam. Do not call from production code.
-    #[cfg(test)]
-    pub fn new_for_test() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self::default())
-    }
-
-    /// **Test-only:** insert a placeholder API key for `provider` so
-    /// `has(provider)` returns true. Bypasses the secure-prompt
-    /// validation flow. Do not call from production code.
-    #[cfg(test)]
-    pub fn set_for_test(&self, provider: &str, key: &str) {
-        self.set_api_key(provider, key.to_string());
-    }
+let auth: Arc<AuthStorage> = Arc::new(AuthStorage::in_memory());
+auth.set_api_key("anthropic", "test-anthropic-key".to_string());
 ```
 
-Test code then uses `AuthStorage::new_for_test()` to construct and
-`auth.set_for_test("anthropic", "test-key")` to insert. No new fields,
-no in-memory constructor needed.
+Also update the test bodies above to use this construction (replace
+`AuthStorage::new_for_test()` → `Arc::new(AuthStorage::in_memory())`
+and drop the `auth.set_for_test(...)` calls in favor of
+`auth.set_api_key(provider, key.to_string())`).
+
+No `#[cfg(test)]` test seam needed.
+
+**Note on the test catalog struct.** The test catalogs in Step 1
+(`TwoProviderCatalog`, `EmptyCatalog`) are illustrative. `ModelCatalog`
+has additional required async methods (no defaults for the async
+contract); the actual implementation uses a `StaticCatalog` test
+double that holds a `Vec<CatalogModelEntry>` and stubs every async
+method + `subscribe()`. `CatalogModelEntry` itself also has additional
+fields not shown here (`protocol`, `cost_cache_read`, `cost_cache_write`,
+`max_tokens`, `input_modalities`, etc.) — populate every field when
+end up around 200 lines of test code; that's expected.
+
 - [ ] **Step 3: Run the tests to verify they fail (compile error / assertion)**
 
 Run: `cargo nextest run -p oxicode-cli --no-fail-fast -- model_picker`

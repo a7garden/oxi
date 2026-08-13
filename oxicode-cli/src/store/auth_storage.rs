@@ -921,7 +921,6 @@ impl AuthStorage {
     pub fn get_all(&self) -> HashMap<String, AuthCredential> {
         self.credentials.read().clone()
     }
-
     /// Clear all stored credentials
     pub fn clear(&self) {
         self.credentials.write().clear();
