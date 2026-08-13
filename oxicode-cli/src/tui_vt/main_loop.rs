@@ -220,7 +220,7 @@ pub struct RenderState {
     /// writes to. `None` when todos are disabled; the pane stays hidden.
     pub todo_provider: Option<Arc<dyn TodoStateProvider>>,
     /// Vim editing state (enabled by /vim command).
-    pub vim_state: oxicode_vtui::vim::VimState,
+    pub vim_state: crate::tui_vt::vim::VimState,
     /// Vim clipboard buffer.
     pub vim_clipboard: String,
     /// In-transcript search state — `None` when no search is active.
@@ -324,7 +324,7 @@ impl Default for RenderState {
             follow_ups: Vec::new(),
             todo_items: Vec::new(),
             todo_provider: None,
-            vim_state: oxicode_vtui::vim::VimState::default(),
+            vim_state: crate::tui_vt::vim::VimState::default(),
             vim_clipboard: String::new(),
             search: None,
             block_display: std::collections::HashMap::new(),
@@ -2696,7 +2696,7 @@ fn spawn_input_thread(
                         let vkey =
                             crossterm::event::KeyEvent::new(KeyCode::Char(ch), key.modifiers);
                         let mut editor = InputEditor::new(&mut s.composer);
-                        let outcome = oxicode_vtui::vim::handle_key(
+                        let outcome = crate::tui_vt::vim::handle_key(
                             &mut s.vim_state,
                             &mut editor,
                             &mut s.vim_clipboard,
@@ -4836,7 +4836,7 @@ impl<'a> InputEditor<'a> {
     }
 }
 
-impl<'a> oxicode_vtui::vim::Editor for InputEditor<'a> {
+impl<'a> crate::tui_vt::vim::Editor for InputEditor<'a> {
     fn content(&self) -> &str {
         self.composer.text()
     }
