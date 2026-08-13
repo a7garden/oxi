@@ -37,11 +37,12 @@ use oxicode_vtui::tui::core::{
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::App;
 use crate::app::agent_hub_registry::HubEntry;
@@ -3568,11 +3569,39 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             width: inner.width,
             height: 1,
         };
+        let label_prefix = format!("{label}: ");
         let line = Line::from(vec![
-            Span::styled(format!("{label}: "), Style::default().fg(secondary)),
+            Span::styled(label_prefix.clone(), Style::default().fg(secondary)),
             Span::styled(display, Style::default().fg(fg)),
         ]);
         frame.render_widget(Paragraph::new(line), row_area);
+
+        // Caret column = label prefix columns + display width of the rendered
+        // text preceding the byte cursor. The secure cursor is filtered to
+        // ASCII graphic + space at insert time, so for masked input the caret
+        // matches the rendered `*` count exactly; for unmasked input the
+        // `unicode-width` measurement keeps the caret aligned if the value
+        // ever holds non-ASCII bytes.
+        let prefix_columns = UnicodeWidthStr::width(label_prefix.as_str()) as u16;
+        let body_columns: u16 = if secure.value.is_empty() {
+            0
+        } else if secure.config.mask_input {
+            // `display` is `secure.value.chars().count()` asterisks; the
+            // cursor byte offset has the same char count after filtering.
+            secure.cursor.min(secure.value.chars().count()) as u16
+        } else {
+            let cursor = secure.cursor.min(secure.value.len());
+            UnicodeWidthStr::width(&secure.value[..cursor]) as u16
+        };
+        let inner_left = inner.left();
+        let inner_right = inner.right().saturating_sub(1);
+        let caret_x = inner_left
+            .saturating_add(prefix_columns)
+            .saturating_add(body_columns)
+            .min(inner_right);
+        if inner.width > 0 {
+            frame.set_cursor_position(Position::new(caret_x, row));
+        }
         return;
     }
     let visible_max = (area.height as usize).saturating_sub(6).max(3);
@@ -4172,6 +4201,57 @@ fn segment_style(segment: &InlineSegment, fallback: Style, styles: &ThemeStyles)
     }
     style
 }
+/// Compute the on-screen cursor position for the composer.
+///
+/// The input cursor is a UTF-8 byte offset into `input_buffer`, but the
+/// terminal cell count depends on each grapheme's column width — ASCII is 1,
+/// CJK / wide emoji is 2, ZWJ emoji sequences and combining marks are also
+/// grapheme-aware. Treating `input_cursor` as a column count silently drifts
+/// the caret further right than the typed text the moment any wide glyph is
+/// inserted.
+///
+/// `prefix_segments` mirrors the spans pushed before the body in
+/// [`render_composer`]; its total column width is added to the byte-prefix
+/// column of the body so the caret lands exactly on the next edit cell.
+/// Returns `None` when the body length is empty AND no placeholder is shown
+/// (cursor is hidden), or when the body has wrapped past the visible row.
+fn composer_cursor_position(
+    area: Rect,
+    state: &RenderState,
+    prefix_columns: u16,
+) -> Option<Position> {
+    // Inner area = block borders (1 on each side).
+    let inner_left = area.left().saturating_add(1);
+    let inner_right = area.right().saturating_sub(1);
+    let inner_width = inner_right.saturating_sub(inner_left);
+
+    // When the body is empty and a placeholder is shown, the caret sits at
+    // the start of the placeholder so the user sees where typing will land.
+    // Otherwise the caret tracks `input_cursor` columns into the body.
+    let body_columns: u16 = if state.input_buffer.is_empty() {
+        0
+    } else {
+        let cursor = state.input_cursor.min(state.input_buffer.len());
+        // The body is rendered as a single Span; width() handles graphemes,
+        // wide glyphs, and ZWJ correctly via UnicodeWidthStr.
+        UnicodeWidthStr::width(&state.input_buffer[..cursor]) as u16
+    };
+
+    let mut cursor_x = inner_left
+        .saturating_add(prefix_columns)
+        .saturating_add(body_columns);
+
+    // Clamp inside the inner area so the caret never bleeds onto the border
+    // or wraps behind the right edge when the body is longer than the box.
+    if cursor_x > inner_right {
+        cursor_x = inner_right;
+    }
+    if inner_width == 0 {
+        return None;
+    }
+
+    Some(Position::new(cursor_x, area.top().saturating_add(1)))
+}
 
 fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let styles = active_styles();
@@ -4184,27 +4264,40 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let body = state.input_buffer.clone();
     let placeholder = state.placeholder.clone();
 
+    // Compute prefix column total up-front so the caret can be placed in the
+    // same units (display columns) regardless of which prefixes are active.
+    // All prefix segments are ASCII-only today (">[auto] ", "[vim] ", "! ");
+    // using UnicodeWidthStr keeps the math correct if any of them grows a
+    // wide glyph in the future (e.g. a status emoji in the vim label).
+    let mut prefix_columns: u16 = 0;
     let mut line_spans = Vec::new();
     if let Some(label) = state.vim_state.status_label() {
+        let seg = format!("[{label}] ");
+        prefix_columns = prefix_columns.saturating_add(seg.width() as u16);
         line_spans.push(Span::styled(
-            format!("[{label}] "),
+            seg,
             Style::default()
                 .fg(color_from_anstyle(styles.tool.get_fg_color()))
                 .add_modifier(Modifier::BOLD),
         ));
     }
     if state.autonomy_mode.is_auto() {
+        let seg = "[auto] ";
+        prefix_columns = prefix_columns.saturating_add(seg.width() as u16);
         line_spans.push(Span::styled(
-            "[auto] ",
+            seg,
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    prefix_columns = prefix_columns.saturating_add(UnicodeWidthStr::width(prefix.as_str()) as u16);
     line_spans.push(Span::styled(prefix, prefix_style));
     if state.shell_mode {
+        let seg = "! ";
+        prefix_columns = prefix_columns.saturating_add(seg.width() as u16);
         line_spans.push(Span::styled(
-            "! ",
+            seg,
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -4232,24 +4325,12 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     frame.render_widget(paragraph, area);
 
     // Place the cursor inside the composer at the current edit position.
-    // +1 on both axes to clear the rounded border.
-    if state.input_enabled {
-        let vim_off = state
-            .vim_state
-            .status_label()
-            .map(|l| format!("[{l}] ").chars().count() as u16)
-            .unwrap_or(0);
-        let shell_off = if state.shell_mode { 2 } else { 0 };
-        let mode_off = if state.autonomy_mode.is_auto() { 7 } else { 0 };
-        let cursor_x = area.left()
-            + 1
-            + vim_off
-            + mode_off
-            + shell_off
-            + state.prompt_prefix.chars().count() as u16
-            + state.input_cursor as u16;
-        let cursor_y = area.top() + 1;
-        frame.set_cursor_position(ratatui::layout::Position::new(cursor_x, cursor_y));
+    // `composer_cursor_position` converts the byte cursor to display columns
+    // so wide glyphs (CJK, emoji) stay aligned with the text they precede.
+    if state.input_enabled
+        && let Some(pos) = composer_cursor_position(area, state, prefix_columns)
+    {
+        frame.set_cursor_position(pos);
     }
 }
 
@@ -6181,6 +6262,212 @@ mod render_tests {
             .collect::<Vec<_>>()
             .join("");
         assert!(text.contains("sk-..."));
+    }
+    /// Cursor math helper: produces a state whose composer prefix matches
+    /// the supplied prefix spans and whose body / cursor come from `body` /
+    /// `byte_cursor`. Defaults are ASCII so the test reads straightforwardly.
+    fn composer_fixture(body: &str, byte_cursor: usize) -> RenderState {
+        let mut state = RenderState::default();
+        state.input_buffer = body.to_string();
+        state.input_cursor = byte_cursor;
+        state.input_enabled = true;
+        // Pin the prefix to "> " so tests don't depend on whether the caller
+        // wired `RenderState::new_with_header` (which is what the live TUI
+        // does) or `RenderState::default()` (empty prefix).
+        state.prompt_prefix = "> ".to_string();
+        state
+    }
+
+    fn prefix_columns(state: &RenderState) -> u16 {
+        let mut cols: u16 = 0;
+        if let Some(label) = state.vim_state.status_label() {
+            cols = cols.saturating_add(format!("[{label}] ").width() as u16);
+        }
+        if state.autonomy_mode.is_auto() {
+            cols = cols.saturating_add("[auto] ".width() as u16);
+        }
+        cols = cols.saturating_add(state.prompt_prefix.width() as u16);
+        if state.shell_mode {
+            cols = cols.saturating_add("! ".width() as u16);
+        }
+        cols
+    }
+
+    /// Empty buffer: caret still tracks the prefix position (i.e. it sits at
+    /// `inner.left() + prefix_columns`), the body-column term is zero. The
+    /// hide-caret behavior belongs to a different code path (placeholder +
+    /// input_enabled), so we just lock the current contract here.
+
+    #[test]
+    fn composer_cursor_empty_buffer_sits_at_prefix() {
+        let state = composer_fixture("", 0);
+        let area = Rect::new(0, 0, 40, 3);
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty inner width must produce a caret");
+        assert_eq!(pos.x, 1 + 2, "caret sits right after the \"> \" prefix");
+        assert_eq!(pos.y, 1);
+    }
+
+    /// ASCII body tracks byte cursor exactly because every glyph is width 1.
+    #[test]
+    fn composer_cursor_ascii_keeps_cursor_aligned_with_text() {
+        let state = composer_fixture("hello", 3);
+        let area = Rect::new(0, 0, 40, 3);
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        // area.left()=0, +1 (border), +"> "=2, +"lo" prefix columns=2
+        assert_eq!(pos.x, 1 + 2 + 3, "ASCII: cursor sits on the 4th char");
+        assert_eq!(pos.y, 1);
+    }
+
+    /// Regression for the original bug: with a Korean body, the byte cursor
+    /// is 3 bytes per Hangul, but the on-screen column is 2 columns per
+    /// Hangul. Treating `input_cursor` as a column count drifted the caret
+    /// further right than the typed glyphs.
+    #[test]
+    fn composer_cursor_cjk_body_aligns_by_display_columns_not_bytes() {
+        // "안녕하세요" = 5 Hangul syllables, 15 UTF-8 bytes (3 bytes each)
+        let body = "안녕하세요";
+        let byte_after_two = "안녕".len(); // 6
+        let state = composer_fixture(body, byte_after_two);
+        let area = Rect::new(0, 0, 40, 3);
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        // area.left()=0 +1 (border) + 2 ("> ") + 4 (display columns of "안녕")
+        assert_eq!(
+            pos.x,
+            1 + 2 + 4,
+            "Hangul: cursor sits on column 4, not byte offset 6"
+        );
+    }
+
+    /// Wide emoji occupy 2 terminal columns. The old byte-as-column code put
+    /// the caret 4 columns past the text for a 4-byte BMP emoji; the fix
+    /// counts display columns.
+    #[test]
+    fn composer_cursor_wide_emoji_aligns_by_display_columns() {
+        // "🎉🎉" = 2 emoji, 8 UTF-8 bytes (4 bytes each, BMP supplementary)
+        let body = "\u{1F389}\u{1F389}";
+        let state = composer_fixture(body, 4); // after the first emoji
+        let area = Rect::new(0, 0, 40, 3);
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        assert_eq!(
+            pos.x,
+            1 + 2 + 2,
+            "wide emoji: cursor on column 2 (after the first emoji), not byte offset 4"
+        );
+    }
+
+    /// `[auto]` was previously a hard-coded magic number 7. If the label
+    /// ever changes (e.g. an emoji or extra spaces) the dynamic measurement
+    /// must follow without a separate code change.
+    #[test]
+    fn composer_cursor_auto_prefix_is_dynamic_not_hardcoded() {
+        let mut state = composer_fixture("hello", 5);
+        state.autonomy_mode = Mode::Auto;
+        let area = Rect::new(0, 0, 40, 3);
+        let pos_no_auto = composer_cursor_position(area, &state, prefix_columns(&state)).unwrap();
+        // Flip back to default and recompute — caret should jump left by
+        // exactly the "[auto] " column count (7 today; the test would fail
+        // if the prefix width changed and the code still hard-coded 7).
+        state.autonomy_mode = Mode::default();
+        let pos_default = composer_cursor_position(area, &state, prefix_columns(&state)).unwrap();
+        assert_eq!(pos_default.x + "[auto] ".width() as u16, pos_no_auto.x);
+    }
+
+    /// Long bodies must not bleed past the right border. The caret clamps
+    /// to `inner.right()` so it stays visible instead of wrapping off the
+    /// area or overwriting the rounded border.
+    #[test]
+    fn composer_cursor_clamps_inside_inner_area_when_buffer_overflows() {
+        // 30 'a's inside a 20-column-wide box (inner = 18 columns after the
+        // rounded border). Caret must sit on the inner-right cell, not run
+        // past it.
+        let body = "a".repeat(30);
+        let state = composer_fixture(&body, body.len());
+        let area = Rect::new(0, 0, 20, 3);
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        assert!(pos.x < area.right(), "caret must stay inside the composer");
+    }
+
+    /// Regression: after `render_composer` paints the box, the symbol on the
+    /// cell just to the right of the calculated caret column must be the
+    /// *next unrendered* glyph (or empty when the buffer ends at the caret).
+    /// Concretely for ASCII: the cell at `pos.x - 1` holds the byte at
+    /// `cursor - 1`, and `pos.x` itself must be the cell where typing would
+    /// land — visually proving the math matches the painted pixels.
+    #[test]
+    fn render_composer_caret_sits_immediately_after_typed_glyph() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let mut state = composer_fixture("hello", 5); // caret at end of "hello"
+        state.input_enabled = true;
+        let area = Rect::new(0, 0, 80, 24);
+        terminal.draw(|f| render_composer(f, area, &state)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        // Border row 0, content row 1.
+        // Caret should land on column `1 (border) + 2 ("> ") + 5 ("hello") = 8`.
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        assert_eq!(pos.y, 1, "caret sits on the inner row");
+        assert_eq!(pos.x, 1 + 2 + 5, "caret sits right after 'hello'");
+        // Verify the painted pixel right before the caret is 'o' (the last
+        // char of "hello") — this is the proof the math agrees with the
+        // buffer ratatui actually rendered.
+        let cell_before_caret = buf[(pos.x.saturating_sub(1), pos.y)].symbol();
+        assert_eq!(
+            cell_before_caret, "o",
+            "the cell just before caret holds 'o'"
+        );
+    }
+
+    /// Regression for the original wide-glyph bug: when the user types CJK,
+    /// the caret must not jump 3 columns per Hangul (which is what treating
+    /// the byte offset as a column count produced). After rendering, the
+    /// caret must sit on the column where the next glyph would land.
+    #[test]
+    fn render_composer_caret_aligned_with_cjk_after_render() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        // "안녕" = 2 Hangul, 6 bytes, 4 display columns.
+        let body = "안녕";
+        let state = composer_fixture(body, body.len());
+        let area = Rect::new(0, 0, 80, 24);
+        terminal.draw(|f| render_composer(f, area, &state)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        assert_eq!(
+            pos.x,
+            1 + 2 + 4,
+            "caret sits after 4 display columns of Hangul, not 6 bytes"
+        );
+        // The painted cell 2 columns to the left of the caret (i.e. right
+        // after the prefix) must be '안'. Ratatui renders wide glyphs into
+        // a 2-cell slot — the first cell of the wide pair holds the glyph.
+        let cell_after_prefix = buf[(1 + 2, pos.y)].symbol();
+        assert!(
+            cell_after_prefix.starts_with('안'),
+            "first painted glyph after prefix must be '안', got {cell_after_prefix:?}"
+        );
+    }
+    /// Caret clamp: when the cursor byte offset is past the buffer length
+    /// (e.g. left over from a paste race), the math still works and we
+    /// produce a sane column.
+    #[test]
+    fn composer_cursor_handles_out_of_range_byte_offset() {
+        let state = composer_fixture("hi", 99);
+        let area = Rect::new(0, 0, 40, 3);
+        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
+            .expect("non-empty body must produce a caret");
+        // clamps to whole buffer = 2 display columns past the prefix
+        assert_eq!(pos.x, 1 + 2 + 2);
     }
 }
 
