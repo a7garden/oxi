@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **TUI `/model` is now a picker, not a transcript line.** Was: a single
+  read-only `Current model: <id>` line. Now: a searchable overlay that
+  lists every model from providers with a stored API key, pins the
+  active model at the top of the list (even when its key has been
+  removed mid-session), and falls back to the full catalog when no
+  providers are keyed so a fresh TUI is never empty. Selection switches
+  the model end-to-end through the existing overlay-submission handler.
+  The `next`/`cycle` arm of `/model` still emits the
+  "No scoped models configured to cycle" warning (`ScopedModel` is the
+  config-curated cycling set and is out of scope here).
 ## [0.74.0] - 2026-08-12
 
 ### Added
