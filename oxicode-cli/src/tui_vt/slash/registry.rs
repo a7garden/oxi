@@ -13,7 +13,8 @@
 //! `/issue` is not yet wired (no issue overlay in this harness).
 
 use oxicode_vtui::tui::core::{
-    InlineHandle, InlineListItem, InlineListSelection, InlineMessageKind,
+    InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection,
+    InlineMessageKind,
 };
 
 use crate::app::agent_session::AgentSessionHandle;
@@ -603,59 +604,105 @@ impl SlashCommand for ModelCommand {
     fn execute(&self, args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
         match args.trim() {
             "" => {
-                let models = ctx.session.scoped_models();
-                if models.is_empty() {
+                let Some(catalog) = ctx.state.catalog.as_ref() else {
+                    // Catalog never loaded — keep the existing read-only
+                    // message so the user still gets *some* answer.
                     ctx.reply(
                         InlineMessageKind::Info,
                         format!("Current model: {}", ctx.session.model_id()),
                     );
+                    return SlashOutcome::Handled;
+                };
+
+                let auth = crate::store::auth_storage::shared_auth_storage();
+                let current = ctx.session.model_id();
+                let (cur_provider, cur_model_id) =
+                    super::commands::split_model_id(&current);
+
+                let (rows, used_fallback) = model_picker_rows(
+                    catalog,
+                    &auth,
+                    cur_provider,
+                    cur_model_id,
+                );
+
+                let keyed_provider_count = rows
+                    .iter()
+                    .filter(|e| auth.has(&e.provider))
+                    .map(|e| e.provider.as_str())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len();
+                let filter_label = if used_fallback {
+                    "Showing full catalog — no providers with keys configured yet"
+                        .to_string()
                 } else {
-                    // Open a model picker overlay.
-                    ctx.state.overlay_model_ids = models
-                        .iter()
-                        .map(|m| format!("{}/{}", m.provider, m.model_id))
-                        .collect();
-                    let current = ctx.session.model_id();
-                    let items: Vec<InlineListItem> = models
-                        .iter()
-                        .enumerate()
-                        .map(|(i, m)| {
-                            let id = format!("{}/{}", m.provider, m.model_id);
-                            let sub = ctx
-                                .state
-                                .catalog
-                                .as_ref()
-                                .and_then(|c| c.get_model_sync(&m.provider, &m.model_id))
-                                .map(|e| {
-                                    format!(
-                                        "{} · {}",
-                                        m.provider,
-                                        super::commands::fmt_ctx(e.context_window)
-                                    )
-                                })
-                                .unwrap_or_else(|| m.provider.clone());
-                            InlineListItem {
-                                title: id.clone(),
-                                subtitle: Some(sub),
-                                badge: if id == current {
-                                    Some("active".to_string())
-                                } else {
-                                    None
-                                },
-                                indent: 0,
-                                selection: Some(InlineListSelection::Model(i)),
-                                search_value: None,
-                            }
-                        })
-                        .collect();
-                    ctx.handle.show_list_modal(
-                        "Models".to_string(),
-                        vec!["Select a model (Esc to close)".to_string()],
-                        items,
-                        None,
-                        None,
-                    );
-                }
+                    format!(
+                        "Showing models from {keyed_provider_count} keyed provider{}",
+                        if keyed_provider_count == 1 { "" } else { "s" },
+                    )
+                };
+
+                ctx.state.overlay_model_ids = rows
+                    .iter()
+                    .map(|e| format!("{}/{}", e.provider, e.model_id))
+                    .collect();
+
+                let items: Vec<InlineListItem> = rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        let id = format!("{}/{}", e.provider, e.model_id);
+                        let mut sub = format!(
+                            "{} \u{00b7} {} in / {} out",
+                            super::commands::fmt_ctx(e.context_window),
+                            super::commands::fmt_cost(e.cost_input),
+                            super::commands::fmt_cost(e.cost_output),
+                        );
+                        if e.reasoning {
+                            sub.push_str(" \u{00b7} reasoning");
+                        }
+                        if e.supports_vision {
+                            sub.push_str(" \u{00b7} vision");
+                        }
+                        let badge = if id == current {
+                            Some("active".to_string())
+                        } else if used_fallback {
+                            None
+                        } else if !auth.has(&e.provider) {
+                            Some("no-key".to_string())
+                        } else {
+                            None
+                        };
+                        InlineListItem {
+                            title: id.clone(),
+                            subtitle: Some(sub),
+                            badge,
+                            indent: 0,
+                            selection: Some(InlineListSelection::Model(i)),
+                            search_value: Some(format!(
+                                "{} {} {}",
+                                e.provider, e.model_id, e.name,
+                            )),
+                        }
+                    })
+                    .collect();
+
+                let total = items.len();
+                let search = InlineListSearchConfig {
+                    label: "Filter models".into(),
+                    placeholder: Some(
+                        "Type to filter (provider / model / name)\u{2026}".into(),
+                    ),
+                };
+                ctx.handle.show_list_modal(
+                    format!("Models ({total})"),
+                    vec![format!(
+                        "{filter_label} \u{2014} Enter to switch, Esc to close"
+                    )],
+                    items,
+                    None,
+                    Some(search),
+                );
             }
             "next" | "cycle" => match ctx.session.cycle_model() {
                 Some(new_id) => ctx.reply(InlineMessageKind::Info, format!("Switched to {new_id}")),
