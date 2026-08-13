@@ -20,3 +20,13 @@ fuzzy-matcher = { workspace = true }
 itertools = { workspace = true }
 pretty_assertions = { workspace = true }
 rand = { workspace = true }
+
+# Mirrors the `debug-logs` feature gate grok defined with an optional
+# `tracing` dependency. The textarea's `#[cfg(feature = "debug-logs")]`
+# branch in `input()` is currently a no-op (we do not yet depend on
+# `tracing`), but declaring the feature here satisfies clippy's
+# `unexpected_cfgs` lint and preserves the upstream feature contract for
+# future use. See `textarea.rs:2092`.
+[features]
+default = []
+debug-logs = []

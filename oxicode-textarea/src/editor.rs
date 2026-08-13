@@ -33,7 +33,7 @@ pub enum EditCommand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Used by the textarea.rs port (Task 4/5); pub(crate) keeps it reserved for that work.
+
 pub(crate) enum EditCommandCategory {
     Insert,
     Navigation,
@@ -42,7 +42,6 @@ pub(crate) enum EditCommandCategory {
 }
 
 impl EditCommand {
-    #[allow(dead_code)] // Used by the textarea.rs port (Task 4/5); pub(crate) keeps it reserved for that work.
     pub(crate) fn category(self) -> EditCommandCategory {
         match self {
             Self::Insert(_) => EditCommandCategory::Insert,
