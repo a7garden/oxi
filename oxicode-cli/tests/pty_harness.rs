@@ -160,6 +160,7 @@ impl PtySession {
 
     /// Check if the child process has exited. Returns `Some(code)` if exited.
     /// Exit code is `u32` (matches portable_pty::ExitStatus::exit_code).
+    #[allow(dead_code)] // used by some test binaries (pty_e2e) but not others (sessions_resume)
     pub fn try_wait(&mut self) -> io::Result<Option<u32>> {
         self.child
             .try_wait()
