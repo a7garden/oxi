@@ -5,8 +5,15 @@ pub mod render;
 pub mod textarea;
 pub mod wrapping;
 
-// Re-exports restored from grok lib.rs in the port task:
-//   editor:: {ApplyEditPlanError, EditBuffer, EditCommand, EditDelta, EditOutcome, EditPlan, PostEditCursorAffinity, SingleLineViewport, WordStyle, classify_key_event}
+pub use editor::{
+    ApplyEditPlanError, EditBuffer, EditCommand, EditDelta, EditOutcome, EditPlan,
+    PostEditCursorAffinity, SingleLineViewport, WordStyle, classify_key_event,
+};
+pub use textarea::{
+    ClipboardProvider, ElementId, ElementKind, InternalClipboard, MouseAction, TextArea,
+    TextAreaState, TextElement, TextElementEvent, TextElementEventKind, is_undo_input,
+};
+
 use crossterm::event::KeyModifiers;
 
 // On Windows, AltGr arrives as Ctrl+Alt; on other platforms it's composed before reaching us.
