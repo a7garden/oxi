@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New `oxicode-textarea` crate** — an atomic-mutation text editor widget
+  ported from grok's `xai-ratatui-textarea` (MIT, Apache-2.0-compatible).
+  Single source of truth for editable text with correct CJK/emoji caret
+  positioning, soft-wrap, horizontal scroll, undo/redo, selection, atomic
+  `TextElement`s, and a grapheme-aware `EditBuffer`. 351 tests.
+
+### Changed
+
+- **TUI composer renders through `TextArea`.** The hand-rolled
+  `input_buffer: String` + `input_cursor: usize` byte-math is gone; the
+  composer now owns an `oxicode_textarea::TextArea` that renders the
+  editable body and reports the caret via `cursor_pos_with_state`. This
+  fixes the long-standing caret drift on CJK/emoji input (each Hangul is 3
+  bytes but 2 columns; the old code counted bytes as columns). Soft-wrap
+  and horizontal scroll now keep the caret aligned on long or wide-glyph
+  prompts.
+- **TUI secure prompt (API-key entry) masks via a `TextElement`,** so the
+  real key never reaches a rendered terminal line. The overlay owns an
+  `EditBuffer` and paints asterisks through the element's `display`.
+- **vim mode relocated into `oxicode-cli`** as an app-owned module;
+  `oxicode-vtui::vim` is deprecated (removal in a later release). The vim
+  engine mutates the composer's `TextArea` through the existing
+  `InputEditor` adapter, so caret/undo stay owned by the editor.
+
 ## [0.75.0] - 2026-08-13
 
 ### Fixed

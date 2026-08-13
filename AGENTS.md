@@ -30,6 +30,7 @@ oxicode/
 ├── oxicode-lsp/           LSP bridge
 ├── oxicode-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
 ├── oxicode-snapcompact/   Context compaction via PNG rasterization (fontdue)
+├── oxicode-textarea/      Atomic-mutation text editor widget (ported from grok's xai-ratatui-textarea)
 ├── oxicode-vtui/          Terminal UI framework — theme registry, design/layout, markdown, vim engine
 ├── oxicode-vtui-compat/   Compat stubs for vendored vtcode-ui (protocol types + substrate)
 ```
@@ -53,7 +54,7 @@ oxicode-agent  ←  oxicode-ai, oxicode-hashline
   ↓
 oxicode-sdk  ←  oxicode-ai, oxicode-agent, oxicode-snapcompact
   ↓
-oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-mnemopi, oxicode-vtui
+oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-mnemopi, oxicode-vtui, oxicode-textarea
 ```
 
 `oxicode-ai` is the foundation layer with zero internal dependencies.
@@ -170,10 +171,10 @@ Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 
 `oxicode-vtui` is an adapted re-vendoring of the third-party vtcode-ui
 framework (itself ported from grok-build). It provides the theme registry,
-design/layout primitives, the markdown renderer, and the vim engine consumed
-by the CLI host. `oxicode-vtui-compat` is a thin stub substrate (protocol data
-types + no-op shims) that lets the vendored framework compile without its
-original vtcode-config/vtcode-commons deps.
+design/layout primitives, and the markdown renderer consumed by the CLI host.
+`oxicode-vtui-compat` is a thin stub substrate (protocol data types + no-op
+shims) that lets the vendored framework compile without its original
+vtcode-config/vtcode-commons deps.
 
 **No `oxicode-*` dependencies** — pure UI framework. The CLI host
 (`oxicode-cli/src/tui_vt/`) owns the event loop and the render driver
@@ -181,8 +182,15 @@ original vtcode-config/vtcode-commons deps.
 via ratatui (NOT an alternate screen, NOT a tape engine). `oxicode-vtui`
 supplies the parts: `theme::` (62-theme registry + contrast pipeline),
 `design::layout` (chrome/agent-view/welcome geometry), `tui::ui::markdown`
-(the production `render_markdown`), `tui::core_tui` (the `InlineCommand`/
-`InlineEvent`/`InlineHandle` protocol), and `vim::` (Insert+Normal engine).
+(the production `render_markdown`), and `tui::core_tui` (the `InlineCommand`/
+`InlineEvent`/`InlineHandle` protocol).
+
+> **Composer text + vim now live outside vtui.** The editable composer buffer
+> is `oxicode_textarea::TextArea` (grok's `xai-ratatui-textarea`, ported into
+> the `oxicode-textarea` crate) — correct CJK/emoji caret, soft-wrap,
+> horizontal scroll, undo/redo. Vim mode is an app-owned module at
+> `oxicode-cli/src/tui_vt/vim/`. The old `oxicode-vtui::vim` is **deprecated**
+> (removal in a later release).
 
 - **Theme system** (`theme/registry.rs`): 62 themes (58 static + 4 Catppuccin),
   a `ThemePalette`→`ThemeStyles` derivation with WCAG contrast guarantees, and
@@ -200,9 +208,10 @@ supplies the parts: `theme::` (62-theme registry + contrast pipeline),
   Monokai, Zenburn, Tomorrow, ayu, …) fall back to `base16-ocean.dark` (colored,
   not plain). The default `"oxi"` theme maps to `base16-ocean.dark` and works.
   To get true per-theme colors, vendor extra `.tmTheme` files into the ThemeSet.
-- **Vim engine** (`vim/`): motions, operators, text objects, find, `.` repeat.
-  Insert + Normal modes only (no Visual/counts/search/registers). The host
-  routes printable keys to it.
+- **Vim engine** (`vim/`): **deprecated** — relocated to
+  `oxicode-cli/src/tui_vt/vim/` (app-owned). The CLI's `InputEditor` adapter
+  bridges vim mutations onto the composer's `oxicode_textarea::TextArea`, so
+  caret/undo stay owned by the editor.
 - **Glyphs are currently hardcoded** in the host render code (`main_loop.rs`
   emits `⚙ ✓ ☑ ☐ ▸ █` directly). There is no production glyph-set system; the
   `glyph_set` setting has no effect on the live TUI.

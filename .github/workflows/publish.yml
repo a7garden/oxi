@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxicode-catalog oxicode-hashline oxicode-api-stability oxicode-vtui-compat oxicode-mnemopi oxicode-lsp oxicode-snapcompact; do
+          for crate in oxicode-catalog oxicode-hashline oxicode-api-stability oxicode-vtui-compat oxicode-mnemopi oxicode-lsp oxicode-snapcompact oxicode-textarea; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -128,6 +128,7 @@ jobs:
           - oxicode-mnemopi
           - oxicode-lsp
           - oxicode-snapcompact
+          - oxicode-textarea
           - oxicode-ai
           - oxicode-agent
           - oxicode-sdk
@@ -145,12 +146,12 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxicode-catalog|oxicode-hashline|oxicode-api-stability|oxicode-vtui-compat|oxicode-mnemopi|oxicode-lsp|oxicode-snapcompact) exit 0 ;;
+            oxicode-catalog|oxicode-hashline|oxicode-api-stability|oxicode-vtui-compat|oxicode-mnemopi|oxicode-lsp|oxicode-snapcompact|oxicode-textarea) exit 0 ;;
             oxicode-vtui) WAITS="oxicode-vtui-compat" ;;
             oxicode-ai) WAITS="oxicode-catalog oxicode-api-stability" ;;
             oxicode-agent) WAITS="oxicode-ai oxicode-hashline" ;;
             oxicode-sdk) WAITS="oxicode-agent oxicode-snapcompact" ;;
-            oxicode-cli) WAITS="oxicode-sdk oxicode-vtui oxicode-vtui-compat" ;;
+            oxicode-cli) WAITS="oxicode-sdk oxicode-vtui oxicode-vtui-compat oxicode-textarea" ;;
             *) exit 0 ;;
           esac
           for WAIT in $WAITS; do
