@@ -82,9 +82,9 @@ pub struct RtOptions<'a> {
     /// `self.width`. See the [`Options::break_words`] method.
     pub break_words: bool,
     /// Wrapping algorithm to use, see the implementations of the
-    /// [`WrapAlgorithm`] trait for details.
+    /// [`textwrap::WrapAlgorithm`] trait for details.
     pub wrap_algorithm: textwrap::WrapAlgorithm,
-    /// The line breaking algorithm to use, see the [`WordSeparator`]
+    /// The line breaking algorithm to use, see the [`textwrap::WordSeparator`]
     /// trait for an overview and possible implementations.
     pub word_separator: textwrap::WordSeparator,
     /// The method for splitting words. This can be used to prohibit

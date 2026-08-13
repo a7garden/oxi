@@ -725,7 +725,7 @@ impl TextArea {
     /// Returns `None` if the cursor is not visible in the current viewport
     /// (e.g. the user scrolled the viewport away from the cursor via mousewheel).
     ///
-    /// Unlike [`screen_position_of`], this applies a wrap-boundary adjustment:
+    /// Unlike [`Self::screen_position_of`], this applies a wrap-boundary adjustment:
     /// when the cursor sits at the exact wrap boundary (col == content width),
     /// it is shown at the start of the next visual line instead of on the
     /// invisible right border.
@@ -761,7 +761,7 @@ impl TextArea {
     ///
     /// Returns `None` if the position is outside the visible viewport.
     /// Does not apply cursor-specific wrap-boundary adjustments — see
-    /// [`cursor_pos_with_state`] for cursor positioning.
+    /// [`Self::cursor_pos_with_state`] for cursor positioning.
     pub fn screen_position_of(
         &self,
         pos: usize,
@@ -787,7 +787,7 @@ impl TextArea {
     /// Compute the on-screen cells covered by a buffer byte range.
     ///
     /// A soft-wrapped range can cross visual rows, so unlike
-    /// [`screen_position_of`] this returns one height-1 [`Rect`] per visual
+    /// [`Self::screen_position_of`] this returns one height-1 [`Rect`] per visual
     /// row the range intersects, top to bottom, clamped to the content
     /// region (`text_width` columns — excludes any scrollbar column). Rows
     /// scrolled outside the viewport are skipped, so a partially visible
@@ -2708,7 +2708,7 @@ impl TextArea {
         &self.elements
     }
 
-    /// Re-register elements after a [`set_text`] call that placed their
+    /// Re-register elements after a [`Self::set_text`] call that placed their
     /// buffer text back verbatim. Each `(range, kind, display)` tuple
     /// describes one element whose text already occupies `range` in the
     /// buffer. No text is inserted — this only recreates the element
