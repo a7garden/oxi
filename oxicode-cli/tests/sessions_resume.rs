@@ -182,8 +182,26 @@ fn sessions_direct_resume_does_not_reopen_picker() {
     //     reply) — the picker title would also start with `S`, so
     //     `Resum` is the minimal needle that pins the synchronous
     //     reply without depending on the full Unicode `…` glyph.
-    pty.send_line(&format!("/sessions {STUB_SESSION_ID}"))
-        .expect("failed to send /sessions command");
+    //
+    //     Send the command text WITHOUT Enter first, then wait for the
+    //     composer to render the full line (the TUI repaints the
+    //     composer every 50ms). Confirming the stub id is in the buffer
+    //     before pressing Enter removes a burst-input flake where the
+    //     id could be dropped and the bare `/sessions` (empty arg)
+    //     would open the picker instead of resuming.
+    pty.send_raw(format!("/sessions {STUB_SESSION_ID}").as_bytes())
+        .expect("send /sessions text without enter");
+
+    read_until_contains(
+        &mut pty,
+        STUB_SESSION_ID,
+        Duration::from_secs(10),
+        "composer render of the /sessions line",
+    );
+    // Now press Enter: the slash command replies "Resuming ..."
+    // synchronously (proves the direct-resume path did NOT open the
+    // picker).
+    pty.send_raw(b"\r").expect("send enter");
     read_until_contains(
         &mut pty,
         "Resum",

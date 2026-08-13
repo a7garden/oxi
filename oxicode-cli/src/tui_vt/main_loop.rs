@@ -2259,6 +2259,13 @@ fn spawn_input_thread(
                 let cursor = s.input_cursor;
                 s.input_buffer.insert_str(cursor, &pasted);
                 s.input_cursor = cursor + pasted.len();
+                // Refresh popups so e.g. a paste that turns the buffer
+                // into `/sessions <id>` closes the slash autocomplete
+                // (it deactivates when `buf[1..].contains(' ')`). Without
+                // this, the popup stays open with stale items and the
+                // next Enter would replace the buffer with the bare
+                // command name, dropping the pasted args.
+                refresh_input_popups(&mut s);
                 continue;
             }
 
