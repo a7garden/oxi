@@ -5942,6 +5942,7 @@ dependencies = [
  "oxicode-lsp",
  "oxicode-mnemopi",
  "oxicode-sdk",
+ "oxicode-textarea",
  "oxicode-vtui",
  "oxicode-vtui-compat",
  "parking_lot",

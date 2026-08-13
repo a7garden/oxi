@@ -37,7 +37,7 @@ use oxicode_vtui::tui::core::{
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Alignment, Position, Rect},
+    layout::{Alignment, Margin, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
@@ -50,7 +50,8 @@ use crate::app::agent_session::SessionEvent;
 use crate::tui_vt::slash::file_commands::FileCommand;
 use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
 
-// ─────────────────────────────────────────────────────────────────────────
+use oxicode_textarea::TextAreaState;
+use ratatui::widgets::FrameExt;
 // Terminal lifecycle (RAII)
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -146,12 +147,15 @@ impl Drop for Tui {
 
 /// Mutable state the input thread edits (text buffer, scroll, footer) and
 /// the main loop reads for rendering.
-#[derive(Default)]
+//
+// `composer` is the single source of truth for the editable text. It owns
+// the buffer (replacing the old `input_buffer: String` + `input_cursor: usize
+// pair) and gives us correct CJK/emoji caret math, soft-wrap, horizontal
+// scroll, selection, and undo/redo for free. Hand-rolled byte math was
+// removed in Task 6 of the textarea port.
 pub struct RenderState {
-    /// Editable text in the composer.
-    pub input_buffer: String,
-    /// Cursor position inside `input_buffer` (byte index).
-    pub input_cursor: usize,
+    /// Editable text in the composer. Source of truth for the prompt line.
+    pub composer: oxicode_textarea::TextArea,
     /// Transcript lines, in display order.
     pub transcript: Vec<TranscriptLine>,
     /// Index of the line currently pinned at the top of the viewport.
@@ -278,6 +282,65 @@ pub struct RenderState {
     /// `AgentSession::resume_from_file`. `Option` because
     /// `#[derive(Default)]` requires it.
     pub session_state: Option<crate::SessionState>,
+}
+
+impl Default for RenderState {
+    fn default() -> Self {
+        // `TextArea` does not derive `Default` (it owns a `RefCell` and
+        // other non-`Default` machinery), so we hand-roll the constructor
+        // for every other field. The composer starts empty.
+        Self {
+            composer: oxicode_textarea::TextArea::new(),
+            transcript: Vec::new(),
+            scroll_offset: usize::MAX,
+            header_context: InlineHeaderContext::default(),
+            input_enabled: false,
+            footer_left: None,
+            footer_right: None,
+            prompt_prefix: String::new(),
+            placeholder: None,
+            shutdown_requested: false,
+            message_buffer: String::new(),
+            agent_hub_open: false,
+            hub_entries: Vec::new(),
+            pending_quit: false,
+            slash_popup: SlashPopup::default(),
+            reasoning_stage: None,
+            overlay: None,
+            overlay_model_ids: Vec::new(),
+            overlay_catalog_models: Vec::new(),
+            overlay_providers: Vec::new(),
+            catalog: None,
+            queued_inputs: Vec::new(),
+            queue_panel_open: false,
+            queue_selected: 0,
+            shell_mode: false,
+            follow_ups: Vec::new(),
+            todo_items: Vec::new(),
+            todo_provider: None,
+            vim_state: oxicode_vtui::vim::VimState::default(),
+            vim_clipboard: String::new(),
+            search: None,
+            block_display: std::collections::HashMap::new(),
+            last_esc_at: None,
+            multiline_mode: false,
+            autonomy_mode: Mode::default(),
+            prompt_history: Vec::new(),
+            history_pos: None,
+            next_block_id: 0,
+            cancel_grace_until: None,
+            confirmation: None,
+            tip: None,
+            cwd: PathBuf::new(),
+            file_search: None,
+            seen_tips: std::collections::HashMap::new(),
+            file_commands: Vec::new(),
+            secure_input_origin: None,
+            session_swapper: None,
+            pending_resume: None,
+            session_state: None,
+        }
+    }
 }
 
 /// Where a secure prompt came from. The `SecureInput` overlay has just one
@@ -903,9 +966,8 @@ async fn run_event_loop(
                             doc_path
                         ))],
                     );
-                    let user_typed = !s.input_buffer.trim().is_empty();
-                    s.input_buffer.clear();
-                    s.input_cursor = 0;
+                    let user_typed = !s.composer.text().trim().is_empty();
+                    s.composer.set_text("");
                     if *auto_continue && !user_typed {
                         drop(s);
                         let _ = prompt_tx.send(format!(
@@ -1750,8 +1812,7 @@ fn handle_inline_event(
             // local copy once Submit fired, but we keep the canonical
             // buffer here in sync.
             let prompt = text.to_string();
-            state.input_buffer.clear();
-            state.input_cursor = 0;
+            state.composer.set_text("");
             if prompt.is_empty() {
                 return LoopOutcome::Continue;
             }
@@ -1896,8 +1957,7 @@ fn handle_inline_event(
                     if let OverlaySubmission::Selection(InlineListSelection::SlashCommand(name)) =
                         &sub
                     {
-                        state.input_buffer = format!("/{name} ");
-                        state.input_cursor = state.input_buffer.len();
+                        state.composer.set_text(&format!("/{name} "));
                     }
                     // Settings overlay: toggle/cycle the selected setting.
                     if let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
@@ -2257,9 +2317,7 @@ fn spawn_input_thread(
                     continue;
                 }
                 let mut s = state.lock();
-                let cursor = s.input_cursor;
-                s.input_buffer.insert_str(cursor, &pasted);
-                s.input_cursor = cursor + pasted.len();
+                s.composer.insert_str(&pasted);
                 // Refresh popups so e.g. a paste that turns the buffer
                 // into `/sessions <id>` closes the slash autocomplete
                 // (it deactivates when `buf[1..].contains(' ')`). Without
@@ -2319,9 +2377,10 @@ fn spawn_input_thread(
                     let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
                         format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
                     } else {
-                        std::mem::take(&mut s.input_buffer)
+                        let buf = s.composer.text().to_string();
+                        s.composer.set_text("");
+                        buf
                     };
-                    s.input_cursor = 0;
                     s.slash_popup = SlashPopup::default();
                     s.history_pos = None;
                     if !buf.is_empty() && !buf.starts_with('/') {
@@ -2410,9 +2469,7 @@ fn spawn_input_thread(
 
                     if !send {
                         let mut s = state.lock();
-                        let cursor = s.input_cursor;
-                        s.input_buffer.insert(cursor, '\n');
-                        s.input_cursor = cursor + 1;
+                        s.composer.insert_str("\n");
                         continue;
                     }
 
@@ -2421,8 +2478,8 @@ fn spawn_input_thread(
                     if shell_cmd {
                         let submitted = {
                             let mut s = state.lock();
-                            let buf = std::mem::take(&mut s.input_buffer);
-                            s.input_cursor = 0;
+                            let buf = s.composer.text().to_string();
+                            s.composer.set_text("");
                             s.shell_mode = false;
                             s.history_pos = None;
                             if !buf.is_empty() {
@@ -2444,9 +2501,10 @@ fn spawn_input_thread(
                             let item = &s.slash_popup.items[s.slash_popup.selected];
                             format!("/{}", item.name)
                         } else {
-                            std::mem::take(&mut s.input_buffer)
+                            let buf = s.composer.text().to_string();
+                            s.composer.set_text("");
+                            buf
                         };
-                        s.input_cursor = 0;
                         s.slash_popup = SlashPopup::default();
                         s.history_pos = None;
                         // Record non-empty, non-command prompts in history.
@@ -2468,19 +2526,17 @@ fn spawn_input_thread(
                     let mut s = state.lock();
                     if s.shell_mode {
                         s.shell_mode = false;
-                        s.input_buffer.clear();
-                        s.input_cursor = 0;
+                        s.composer.set_text("");
                     } else if s.slash_popup.open {
                         s.slash_popup = SlashPopup::default();
-                    } else if !s.input_buffer.is_empty() {
+                    } else if !s.composer.is_empty() {
                         let now = std::time::Instant::now();
                         let is_double = s
                             .last_esc_at
                             .map(|t| now.duration_since(t).as_millis() < 800)
                             .unwrap_or(false);
                         if is_double {
-                            s.input_buffer.clear();
-                            s.input_cursor = 0;
+                            s.composer.set_text("");
                             s.last_esc_at = None;
                         } else {
                             s.last_esc_at = Some(now);
@@ -2509,54 +2565,42 @@ fn spawn_input_thread(
                 }
                 KeyCode::Tab => {
                     // Complete the selected slash command into the buffer
-                    // (without submitting) so the user can type arguments.
                     let mut s = state.lock();
                     if s.slash_popup.open && !s.slash_popup.items.is_empty() {
                         let name = s.slash_popup.items[s.slash_popup.selected].name.clone();
-                        s.input_buffer = format!("/{} ", name);
-                        s.input_cursor = s.input_buffer.len();
+                        s.composer.set_text(&format!("/{} ", name));
                         refresh_input_popups(&mut s);
                     }
                 }
                 KeyCode::Backspace => {
                     let mut s = state.lock();
-                    if s.input_cursor > 0 {
-                        let cursor = s.input_cursor;
-                        // Walk back one UTF-8 char (not necessarily one
-                        // byte, but chars are 1+ bytes).
-                        let prev = s
-                            .input_buffer
-                            .char_indices()
-                            .take_while(|(i, _)| *i < cursor)
-                            .last()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        s.input_buffer.replace_range(prev..cursor, "");
-                        s.input_cursor = prev;
-                    }
+                    s.composer.input(crossterm::event::KeyEvent::new(
+                        KeyCode::Backspace,
+                        KeyModifiers::NONE,
+                    ));
                     refresh_input_popups(&mut s);
                 }
                 KeyCode::Delete => {
                     let mut s = state.lock();
-                    if s.input_cursor < s.input_buffer.len() {
-                        let cursor = s.input_cursor;
-                        let next = s.input_buffer[cursor..]
-                            .char_indices()
-                            .nth(1)
-                            .map(|(i, _)| cursor + i)
-                            .unwrap_or(s.input_buffer.len());
-                        s.input_buffer.replace_range(cursor..next, "");
-                    }
+                    s.composer.input(crossterm::event::KeyEvent::new(
+                        KeyCode::Delete,
+                        KeyModifiers::NONE,
+                    ));
                     refresh_input_popups(&mut s);
                 }
                 KeyCode::Left => {
                     let mut s = state.lock();
-                    s.input_cursor = s.input_cursor.saturating_sub(1);
+                    s.composer.input(crossterm::event::KeyEvent::new(
+                        KeyCode::Left,
+                        KeyModifiers::NONE,
+                    ));
                 }
                 KeyCode::Right => {
                     let mut s = state.lock();
-                    let len = s.input_buffer.len();
-                    s.input_cursor = (s.input_cursor + 1).min(len);
+                    s.composer.input(crossterm::event::KeyEvent::new(
+                        KeyCode::Right,
+                        KeyModifiers::NONE,
+                    ));
                 }
                 KeyCode::Up => {
                     let mut s = state.lock();
@@ -2569,21 +2613,20 @@ fn spawn_input_thread(
                         };
                     } else if s.queue_panel_open
                         && !s.queued_inputs.is_empty()
-                        && s.input_buffer.is_empty()
+                        && s.composer.is_empty()
                     {
                         s.queue_selected = if s.queue_selected == 0 {
                             s.queued_inputs.len() - 1
                         } else {
                             s.queue_selected - 1
                         };
-                    } else if s.input_buffer.is_empty() && !s.prompt_history.is_empty() {
+                    } else if s.composer.is_empty() && !s.prompt_history.is_empty() {
                         // History recall: fill the prompt with the previous entry.
                         let pos = s.history_pos.unwrap_or(0);
                         let next = (pos + 1).min(s.prompt_history.len() - 1);
                         s.history_pos = Some(next);
-                        s.input_buffer = s.prompt_history[next].clone();
-                        s.input_cursor = s.input_buffer.len();
-                    } else {
+                        let entry = s.prompt_history[next].clone();
+                        s.composer.set_text(&entry);
                         drop(s);
                         let _ = evt_tx.send(InlineEvent::ScrollLineUp);
                     }
@@ -2599,7 +2642,7 @@ fn spawn_input_thread(
                         };
                     } else if s.queue_panel_open
                         && !s.queued_inputs.is_empty()
-                        && s.input_buffer.is_empty()
+                        && s.composer.is_empty()
                     {
                         s.queue_selected = if s.queue_selected + 1 >= s.queued_inputs.len() {
                             0
@@ -2624,7 +2667,7 @@ fn spawn_input_thread(
                     // instead of inserting '!'.
                     if s.file_search.is_some()
                         && ch == '!'
-                        && s.input_buffer[..s.input_cursor].ends_with('@')
+                        && s.composer.text()[..s.composer.cursor()].ends_with('@')
                     {
                         let cwd = s.cwd.clone();
                         if let Some(fs) = s.file_search.as_mut() {
@@ -2640,10 +2683,7 @@ fn spawn_input_thread(
                         let s = &mut *s;
                         let vkey =
                             crossterm::event::KeyEvent::new(KeyCode::Char(ch), key.modifiers);
-                        let mut editor = InputEditor {
-                            buffer: &mut s.input_buffer,
-                            cursor: &mut s.input_cursor,
-                        };
+                        let mut editor = InputEditor::new(&mut s.composer);
                         let outcome = oxicode_vtui::vim::handle_key(
                             &mut s.vim_state,
                             &mut editor,
@@ -2652,13 +2692,8 @@ fn spawn_input_thread(
                         );
                         if outcome.handled {
                             refresh_input_popups(s);
-                        } else {
-                            let cursor = s.input_cursor;
-                            s.input_buffer.insert(cursor, ch);
-                            s.input_cursor = cursor + ch.len_utf8();
-                            refresh_input_popups(s);
                         }
-                    } else if s.input_buffer.is_empty() && !s.slash_popup.open {
+                    } else if s.composer.is_empty() && !s.slash_popup.open {
                         // Shell mode: `!` on empty buffer enters bash mode.
                         if ch == '!' && !s.shell_mode {
                             s.shell_mode = true;
@@ -2681,8 +2716,7 @@ fn spawn_input_thread(
                                 }
                                 'e' => {
                                     let entry = s.queued_inputs.remove(idx);
-                                    s.input_buffer = entry;
-                                    s.input_cursor = s.input_buffer.len();
+                                    s.composer.set_text(&entry);
                                     s.queue_panel_open = false;
                                     continue;
                                 }
@@ -2725,20 +2759,22 @@ fn spawn_input_thread(
                             'n' if s.search.is_some() => s.search_next(),
                             'N' if s.search.is_some() => s.search_prev(),
                             _ => {
-                                let cursor = s.input_cursor;
-                                s.input_buffer.insert(cursor, ch);
-                                s.input_cursor = cursor + ch.len_utf8();
+                                s.composer.input(crossterm::event::KeyEvent::new(
+                                    KeyCode::Char(ch),
+                                    key.modifiers,
+                                ));
                                 refresh_input_popups(&mut s);
                             }
                         }
                     } else {
-                        let cursor = s.input_cursor;
-                        s.input_buffer.insert(cursor, ch);
-                        s.input_cursor = cursor + ch.len_utf8();
+                        s.composer.input(crossterm::event::KeyEvent::new(
+                            KeyCode::Char(ch),
+                            key.modifiers,
+                        ));
                         refresh_input_popups(&mut s);
                     }
                     // plan_nudge: surface /compact when user mentions "plan".
-                    if s.tip.is_none() && s.input_buffer.to_lowercase().contains("plan") {
+                    if s.tip.is_none() && s.composer.text().to_lowercase().contains("plan") {
                         s.show_tip(
                             "plan_nudge",
                             "Try /compact to summarize and plan ahead",
@@ -4201,79 +4237,27 @@ fn segment_style(segment: &InlineSegment, fallback: Style, styles: &ThemeStyles)
     }
     style
 }
-/// Compute the on-screen cursor position for the composer.
-///
-/// The input cursor is a UTF-8 byte offset into `input_buffer`, but the
-/// terminal cell count depends on each grapheme's column width — ASCII is 1,
-/// CJK / wide emoji is 2, ZWJ emoji sequences and combining marks are also
-/// grapheme-aware. Treating `input_cursor` as a column count silently drifts
-/// the caret further right than the typed text the moment any wide glyph is
-/// inserted.
-///
-/// `prefix_segments` mirrors the spans pushed before the body in
-/// [`render_composer`]; its total column width is added to the byte-prefix
-/// column of the body so the caret lands exactly on the next edit cell.
-/// Returns `None` when the body length is empty AND no placeholder is shown
-/// (cursor is hidden), or when the body has wrapped past the visible row.
-fn composer_cursor_position(
-    area: Rect,
-    state: &RenderState,
-    prefix_columns: u16,
-) -> Option<Position> {
-    // Inner area = block borders (1 on each side).
-    let inner_left = area.left().saturating_add(1);
-    let inner_right = area.right().saturating_sub(1);
-    let inner_width = inner_right.saturating_sub(inner_left);
-
-    // When the body is empty and a placeholder is shown, the caret sits at
-    // the start of the placeholder so the user sees where typing will land.
-    // Otherwise the caret tracks `input_cursor` columns into the body.
-    let body_columns: u16 = if state.input_buffer.is_empty() {
-        0
-    } else {
-        let cursor = state.input_cursor.min(state.input_buffer.len());
-        // The body is rendered as a single Span; width() handles graphemes,
-        // wide glyphs, and ZWJ correctly via UnicodeWidthStr.
-        UnicodeWidthStr::width(&state.input_buffer[..cursor]) as u16
-    };
-
-    let mut cursor_x = inner_left
-        .saturating_add(prefix_columns)
-        .saturating_add(body_columns);
-
-    // Clamp inside the inner area so the caret never bleeds onto the border
-    // or wraps behind the right edge when the body is longer than the box.
-    if cursor_x > inner_right {
-        cursor_x = inner_right;
-    }
-    if inner_width == 0 {
-        return None;
-    }
-
-    Some(Position::new(cursor_x, area.top().saturating_add(1)))
-}
-
 fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let styles = active_styles();
     let prefix_style = Style::default()
         .fg(color_from_anstyle(styles.primary.get_fg_color()))
         .bold();
-    let text_style = Style::default().fg(color_from_anstyle(Some(styles.foreground)));
 
     let prefix = state.prompt_prefix.clone();
-    let body = state.input_buffer.clone();
     let placeholder = state.placeholder.clone();
 
-    // Compute prefix column total up-front so the caret can be placed in the
-    // same units (display columns) regardless of which prefixes are active.
+    // Build prefix spans. The prefix lives in a static leading region of the
+    // composer box; the textarea renders the editable body in the
+    // remaining area (right of `prefix_w`). The textarea's own
+    // `cursor_pos_with_state` reports the cursor relative to that area.
     // All prefix segments are ASCII-only today (">[auto] ", "[vim] ", "! ");
     // using UnicodeWidthStr keeps the math correct if any of them grows a
     // wide glyph in the future (e.g. a status emoji in the vim label).
-    let mut prefix_columns: u16 = 0;
+    let mut prefix_w: u16 = 0;
     let mut line_spans = Vec::new();
     if let Some(label) = state.vim_state.status_label() {
         let seg = format!("[{label}] ");
-        prefix_columns = prefix_columns.saturating_add(seg.width() as u16);
+        prefix_w = prefix_w.saturating_add(seg.width() as u16);
         line_spans.push(Span::styled(
             seg,
             Style::default()
@@ -4283,7 +4267,7 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     }
     if state.autonomy_mode.is_auto() {
         let seg = "[auto] ";
-        prefix_columns = prefix_columns.saturating_add(seg.width() as u16);
+        prefix_w = prefix_w.saturating_add(seg.width() as u16);
         line_spans.push(Span::styled(
             seg,
             Style::default()
@@ -4291,11 +4275,11 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    prefix_columns = prefix_columns.saturating_add(UnicodeWidthStr::width(prefix.as_str()) as u16);
+    prefix_w = prefix_w.saturating_add(UnicodeWidthStr::width(prefix.as_str()) as u16);
     line_spans.push(Span::styled(prefix, prefix_style));
     if state.shell_mode {
         let seg = "! ";
-        prefix_columns = prefix_columns.saturating_add(seg.width() as u16);
+        prefix_w = prefix_w.saturating_add(seg.width() as u16);
         line_spans.push(Span::styled(
             seg,
             Style::default()
@@ -4303,34 +4287,77 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    if body.is_empty()
-        && let Some(ph) = placeholder
-    {
-        line_spans.push(Span::styled(
-            ph,
-            Style::default()
-                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
-                .dim(),
-        ));
-    } else {
-        line_spans.push(Span::styled(body, text_style));
-    }
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
-    let paragraph = Paragraph::new(Line::from(line_spans))
+
+    // Place the prefix in a leading line, then render the textarea in the
+    // remaining width. When the body is empty AND a placeholder is
+    // configured, render the placeholder as dimmed text (preserving the
+    // pre-port look) and put the caret at the placeholder start.
+    let inner = area.inner(Margin::new(1, 1));
+    let textarea_area = Rect {
+        x: inner.left().saturating_add(prefix_w),
+        y: inner.top(),
+        width: inner.width.saturating_sub(prefix_w),
+        height: inner.height,
+    };
+    if state.composer.is_empty()
+        && let Some(ph) = placeholder.as_deref()
+    {
+        // Prefix + placeholder as a single paragraph (no body).
+        line_spans.push(Span::styled(
+            ph.to_string(),
+            Style::default()
+                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+                .dim(),
+        ));
+        let paragraph = Paragraph::new(Line::from(line_spans))
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, area);
+        if state.input_enabled {
+            // Caret sits at the start of the placeholder so the user sees
+            // where typing will land — same behavior as before the port.
+            frame.set_cursor_position(Position::new(
+                inner.left().saturating_add(prefix_w),
+                area.top().saturating_add(1),
+            ));
+        }
+        return;
+    }
+    // Paint the prefix in the first `prefix_w` columns of the inner box,
+    // then the textarea paints the editable body. The textarea reports
+    // its caret position relative to `textarea_area`; we add the
+    // area origin at the end.
+    let prefix_area = Rect {
+        x: inner.left(),
+        y: inner.top(),
+        width: prefix_w,
+        height: inner.height,
+    };
+    // Render the bordered box (with no body content) and the prefix
+    // spans inside it.
+    let frame_paragraph = Paragraph::new(Line::from(Vec::<Span>::new()))
         .block(block)
         .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, area);
+    frame.render_widget(frame_paragraph, area);
+    frame.render_widget(Paragraph::new(Line::from(line_spans)), prefix_area);
+    frame.render_widget_ref(&state.composer, textarea_area);
 
-    // Place the cursor inside the composer at the current edit position.
-    // `composer_cursor_position` converts the byte cursor to display columns
-    // so wide glyphs (CJK, emoji) stay aligned with the text they precede.
     if state.input_enabled
-        && let Some(pos) = composer_cursor_position(area, state, prefix_columns)
+        && let Some((lx, ly)) = state
+            .composer
+            .cursor_pos_with_state(textarea_area, TextAreaState::default())
     {
-        frame.set_cursor_position(pos);
+        // The textarea's cursor is relative to `textarea_area`; add the
+        // prefix offset (and the area origin is already inside the box).
+        frame.set_cursor_position(Position::new(
+            textarea_area.left().saturating_add(lx),
+            textarea_area.top().saturating_add(ly),
+        ));
     }
 }
 
@@ -4763,48 +4790,58 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
 // Vim mode — Editor adapter for the input buffer
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Adapter that lets the vim engine operate on `RenderState`'s input buffer.
+/// Adapter that lets the vim engine operate on the composer's [`TextArea`].
+///
+/// The host TUI keeps a single [`TextArea`](oxicode_textarea::TextArea)
+/// (the composer) as the source of truth for editable text; the vim engine
+/// still wants a `&str` + byte-cursor handle. This adapter forwards each
+/// trait call to the textarea so cursor math, grapheme boundaries, and
+/// undo history are owned by the textarea.
 struct InputEditor<'a> {
-    buffer: &'a mut String,
-    cursor: &'a mut usize,
+    composer: &'a mut oxicode_textarea::TextArea,
+}
+
+impl<'a> InputEditor<'a> {
+    fn new(composer: &'a mut oxicode_textarea::TextArea) -> Self {
+        Self { composer }
+    }
 }
 
 impl<'a> oxicode_vtui::vim::Editor for InputEditor<'a> {
     fn content(&self) -> &str {
-        self.buffer
+        self.composer.text()
     }
     fn cursor(&self) -> usize {
-        *self.cursor
+        self.composer.cursor()
     }
     fn set_cursor(&mut self, pos: usize) {
-        *self.cursor = pos.min(self.buffer.len());
+        self.composer.set_cursor(pos);
     }
     fn move_left(&mut self) {
-        *self.cursor = self.cursor.saturating_sub(1);
+        // The textarea's `set_cursor` clamps to the nearest grapheme
+        // boundary, so we just step back one byte and let it clean up.
+        let new_pos = self.composer.cursor().saturating_sub(1);
+        self.composer.set_cursor(new_pos);
     }
     fn move_right(&mut self) {
-        let len = self.buffer.len();
-        *self.cursor = (*self.cursor + 1).min(len);
+        let new_pos = self.composer.cursor().saturating_add(1);
+        self.composer.set_cursor(new_pos);
     }
     fn delete_char_forward(&mut self) {
-        let cursor = *self.cursor;
-        if cursor < self.buffer.len() {
-            let next = self.buffer[cursor..]
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| cursor + i)
-                .unwrap_or(self.buffer.len());
-            self.buffer.replace_range(cursor..next, "");
-        }
+        self.composer.input(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Delete,
+            crossterm::event::KeyModifiers::NONE,
+        ));
     }
     fn insert_text(&mut self, text: &str) {
-        let cursor = *self.cursor;
-        self.buffer.insert_str(cursor, text);
-        *self.cursor = cursor + text.len();
+        self.composer.insert_str(text);
     }
     fn replace(&mut self, content: String, cursor: usize) {
-        *self.buffer = content;
-        *self.cursor = cursor.min(self.buffer.len());
+        self.composer.set_text(&content);
+        self.composer.set_cursor(cursor);
+    }
+    fn replace_range(&mut self, start: usize, end: usize, text: &str) {
+        self.composer.replace_range(start..end, text);
     }
 }
 
@@ -4952,7 +4989,7 @@ fn slash_filter(token: &str, file_commands: &[FileCommand]) -> Vec<SlashPopupIte
 /// still composing the command token, not its arguments). Called after every
 /// buffer mutation in the input thread.
 fn refresh_slash_popup(state: &mut RenderState) {
-    let buf = state.input_buffer.clone();
+    let buf = state.composer.text();
     let active = buf.starts_with('/') && !buf[1..].contains(' ');
     if !active {
         state.slash_popup.open = false;
@@ -4990,7 +5027,7 @@ fn refresh_file_search(state: &mut RenderState) {
         state.file_search = None;
         return;
     }
-    match file_search::parse_at_cursor(&state.input_buffer, state.input_cursor) {
+    match file_search::parse_at_cursor(state.composer.text(), state.composer.cursor()) {
         Some(token) => match &mut state.file_search {
             None => {
                 let cwd = state.cwd.clone();
@@ -5020,12 +5057,13 @@ fn accept_file_search(state: &mut RenderState, line_mode: bool) -> bool {
     };
     let at_offset = fs.at_offset;
     let text = file_search::insertion_text(&result.path, None, line_mode);
-    let cursor_end = state.input_cursor;
+    let cursor_end = state.composer.cursor();
     // Replace everything from `@` to the current cursor with the insertion.
-    state
-        .input_buffer
-        .replace_range(at_offset..cursor_end.min(state.input_buffer.len()), &text);
-    state.input_cursor = at_offset + text.len();
+    state.composer.replace_range(
+        at_offset..cursor_end.min(state.composer.text().len()),
+        &text,
+    );
+    state.composer.set_cursor(at_offset + text.len());
     state.file_search = None;
     true
 }
@@ -5232,7 +5270,7 @@ mod slash_popup_tests {
     #[test]
     fn popup_opens_on_slash() {
         let mut state = RenderState::default();
-        state.input_buffer = "/".to_string();
+        state.composer.set_text("/");
         refresh_input_popups(&mut state);
         assert!(state.slash_popup.open);
         assert!(!state.slash_popup.items.is_empty());
@@ -5241,7 +5279,7 @@ mod slash_popup_tests {
     #[test]
     fn popup_closes_on_space() {
         let mut state = RenderState::default();
-        state.input_buffer = "/quit ".to_string();
+        state.composer.set_text("/quit ");
         refresh_input_popups(&mut state);
         assert!(!state.slash_popup.open);
     }
@@ -5249,7 +5287,7 @@ mod slash_popup_tests {
     #[test]
     fn popup_closes_on_non_slash() {
         let mut state = RenderState::default();
-        state.input_buffer = "hello".to_string();
+        state.composer.set_text("hello");
         refresh_input_popups(&mut state);
         assert!(!state.slash_popup.open);
     }
@@ -5257,7 +5295,7 @@ mod slash_popup_tests {
     #[test]
     fn popup_filters_as_user_types() {
         let mut state = RenderState::default();
-        state.input_buffer = "/m".to_string();
+        state.composer.set_text("/m");
         refresh_input_popups(&mut state);
         assert!(state.slash_popup.open);
         // Every item's canonical name must start with 'm' (model is the
@@ -5274,12 +5312,12 @@ mod slash_popup_tests {
     #[test]
     fn popup_selection_clamps_on_shrink() {
         let mut state = RenderState::default();
-        state.input_buffer = "/".to_string();
+        state.composer.set_text("/");
         refresh_input_popups(&mut state);
         let full_count = state.slash_popup.items.len();
         state.slash_popup.selected = full_count - 1;
         // Narrow the filter so fewer items remain.
-        state.input_buffer = "/qu".to_string();
+        state.composer.set_text("/qu");
         refresh_input_popups(&mut state);
         assert!(state.slash_popup.selected < state.slash_popup.items.len());
     }
@@ -5357,7 +5395,7 @@ mod render_tests {
     fn composer_and_popup_render_together() {
         let mut state = RenderState::default();
         state.prompt_prefix = "> ".to_string();
-        state.input_buffer = "/qu".to_string();
+        state.composer.set_text("/qu");
         state.slash_popup.open = true;
         state.slash_popup.items = slash_filter("qu", &[]);
         let rendered = render_frame_to_string(&state);
@@ -6099,8 +6137,7 @@ mod render_tests {
         let mut state = RenderState::default();
         state.input_enabled = true;
         state.prompt_prefix = "> ".into();
-        state.input_buffer = "@main".into();
-        state.input_cursor = 5;
+        state.composer.set_text("@main");
         state.file_search = Some(FileSearchState {
             query: "main".into(),
             at_offset: 0,
@@ -6263,212 +6300,10 @@ mod render_tests {
             .join("");
         assert!(text.contains("sk-..."));
     }
-    /// Cursor math helper: produces a state whose composer prefix matches
-    /// the supplied prefix spans and whose body / cursor come from `body` /
-    /// `byte_cursor`. Defaults are ASCII so the test reads straightforwardly.
-    fn composer_fixture(body: &str, byte_cursor: usize) -> RenderState {
-        let mut state = RenderState::default();
-        state.input_buffer = body.to_string();
-        state.input_cursor = byte_cursor;
-        state.input_enabled = true;
-        // Pin the prefix to "> " so tests don't depend on whether the caller
-        // wired `RenderState::new_with_header` (which is what the live TUI
-        // does) or `RenderState::default()` (empty prefix).
-        state.prompt_prefix = "> ".to_string();
-        state
-    }
-
-    fn prefix_columns(state: &RenderState) -> u16 {
-        let mut cols: u16 = 0;
-        if let Some(label) = state.vim_state.status_label() {
-            cols = cols.saturating_add(format!("[{label}] ").width() as u16);
-        }
-        if state.autonomy_mode.is_auto() {
-            cols = cols.saturating_add("[auto] ".width() as u16);
-        }
-        cols = cols.saturating_add(state.prompt_prefix.width() as u16);
-        if state.shell_mode {
-            cols = cols.saturating_add("! ".width() as u16);
-        }
-        cols
-    }
-
-    /// Empty buffer: caret still tracks the prefix position (i.e. it sits at
-    /// `inner.left() + prefix_columns`), the body-column term is zero. The
-    /// hide-caret behavior belongs to a different code path (placeholder +
-    /// input_enabled), so we just lock the current contract here.
-
-    #[test]
-    fn composer_cursor_empty_buffer_sits_at_prefix() {
-        let state = composer_fixture("", 0);
-        let area = Rect::new(0, 0, 40, 3);
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty inner width must produce a caret");
-        assert_eq!(pos.x, 1 + 2, "caret sits right after the \"> \" prefix");
-        assert_eq!(pos.y, 1);
-    }
-
-    /// ASCII body tracks byte cursor exactly because every glyph is width 1.
-    #[test]
-    fn composer_cursor_ascii_keeps_cursor_aligned_with_text() {
-        let state = composer_fixture("hello", 3);
-        let area = Rect::new(0, 0, 40, 3);
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        // area.left()=0, +1 (border), +"> "=2, +"lo" prefix columns=2
-        assert_eq!(pos.x, 1 + 2 + 3, "ASCII: cursor sits on the 4th char");
-        assert_eq!(pos.y, 1);
-    }
-
-    /// Regression for the original bug: with a Korean body, the byte cursor
-    /// is 3 bytes per Hangul, but the on-screen column is 2 columns per
-    /// Hangul. Treating `input_cursor` as a column count drifted the caret
-    /// further right than the typed glyphs.
-    #[test]
-    fn composer_cursor_cjk_body_aligns_by_display_columns_not_bytes() {
-        // "안녕하세요" = 5 Hangul syllables, 15 UTF-8 bytes (3 bytes each)
-        let body = "안녕하세요";
-        let byte_after_two = "안녕".len(); // 6
-        let state = composer_fixture(body, byte_after_two);
-        let area = Rect::new(0, 0, 40, 3);
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        // area.left()=0 +1 (border) + 2 ("> ") + 4 (display columns of "안녕")
-        assert_eq!(
-            pos.x,
-            1 + 2 + 4,
-            "Hangul: cursor sits on column 4, not byte offset 6"
-        );
-    }
-
-    /// Wide emoji occupy 2 terminal columns. The old byte-as-column code put
-    /// the caret 4 columns past the text for a 4-byte BMP emoji; the fix
-    /// counts display columns.
-    #[test]
-    fn composer_cursor_wide_emoji_aligns_by_display_columns() {
-        // "🎉🎉" = 2 emoji, 8 UTF-8 bytes (4 bytes each, BMP supplementary)
-        let body = "\u{1F389}\u{1F389}";
-        let state = composer_fixture(body, 4); // after the first emoji
-        let area = Rect::new(0, 0, 40, 3);
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        assert_eq!(
-            pos.x,
-            1 + 2 + 2,
-            "wide emoji: cursor on column 2 (after the first emoji), not byte offset 4"
-        );
-    }
-
-    /// `[auto]` was previously a hard-coded magic number 7. If the label
-    /// ever changes (e.g. an emoji or extra spaces) the dynamic measurement
-    /// must follow without a separate code change.
-    #[test]
-    fn composer_cursor_auto_prefix_is_dynamic_not_hardcoded() {
-        let mut state = composer_fixture("hello", 5);
-        state.autonomy_mode = Mode::Auto;
-        let area = Rect::new(0, 0, 40, 3);
-        let pos_no_auto = composer_cursor_position(area, &state, prefix_columns(&state)).unwrap();
-        // Flip back to default and recompute — caret should jump left by
-        // exactly the "[auto] " column count (7 today; the test would fail
-        // if the prefix width changed and the code still hard-coded 7).
-        state.autonomy_mode = Mode::default();
-        let pos_default = composer_cursor_position(area, &state, prefix_columns(&state)).unwrap();
-        assert_eq!(pos_default.x + "[auto] ".width() as u16, pos_no_auto.x);
-    }
-
-    /// Long bodies must not bleed past the right border. The caret clamps
-    /// to `inner.right()` so it stays visible instead of wrapping off the
-    /// area or overwriting the rounded border.
-    #[test]
-    fn composer_cursor_clamps_inside_inner_area_when_buffer_overflows() {
-        // 30 'a's inside a 20-column-wide box (inner = 18 columns after the
-        // rounded border). Caret must sit on the inner-right cell, not run
-        // past it.
-        let body = "a".repeat(30);
-        let state = composer_fixture(&body, body.len());
-        let area = Rect::new(0, 0, 20, 3);
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        assert!(pos.x < area.right(), "caret must stay inside the composer");
-    }
-
-    /// Regression: after `render_composer` paints the box, the symbol on the
-    /// cell just to the right of the calculated caret column must be the
-    /// *next unrendered* glyph (or empty when the buffer ends at the caret).
-    /// Concretely for ASCII: the cell at `pos.x - 1` holds the byte at
-    /// `cursor - 1`, and `pos.x` itself must be the cell where typing would
-    /// land — visually proving the math matches the painted pixels.
-    #[test]
-    fn render_composer_caret_sits_immediately_after_typed_glyph() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).expect("backend");
-        let mut state = composer_fixture("hello", 5); // caret at end of "hello"
-        state.input_enabled = true;
-        let area = Rect::new(0, 0, 80, 24);
-        terminal.draw(|f| render_composer(f, area, &state)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        // Border row 0, content row 1.
-        // Caret should land on column `1 (border) + 2 ("> ") + 5 ("hello") = 8`.
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        assert_eq!(pos.y, 1, "caret sits on the inner row");
-        assert_eq!(pos.x, 1 + 2 + 5, "caret sits right after 'hello'");
-        // Verify the painted pixel right before the caret is 'o' (the last
-        // char of "hello") — this is the proof the math agrees with the
-        // buffer ratatui actually rendered.
-        let cell_before_caret = buf[(pos.x.saturating_sub(1), pos.y)].symbol();
-        assert_eq!(
-            cell_before_caret, "o",
-            "the cell just before caret holds 'o'"
-        );
-    }
-
-    /// Regression for the original wide-glyph bug: when the user types CJK,
-    /// the caret must not jump 3 columns per Hangul (which is what treating
-    /// the byte offset as a column count produced). After rendering, the
-    /// caret must sit on the column where the next glyph would land.
-    #[test]
-    fn render_composer_caret_aligned_with_cjk_after_render() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).expect("backend");
-        // "안녕" = 2 Hangul, 6 bytes, 4 display columns.
-        let body = "안녕";
-        let state = composer_fixture(body, body.len());
-        let area = Rect::new(0, 0, 80, 24);
-        terminal.draw(|f| render_composer(f, area, &state)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        assert_eq!(
-            pos.x,
-            1 + 2 + 4,
-            "caret sits after 4 display columns of Hangul, not 6 bytes"
-        );
-        // The painted cell 2 columns to the left of the caret (i.e. right
-        // after the prefix) must be '안'. Ratatui renders wide glyphs into
-        // a 2-cell slot — the first cell of the wide pair holds the glyph.
-        let cell_after_prefix = buf[(1 + 2, pos.y)].symbol();
-        assert!(
-            cell_after_prefix.starts_with('안'),
-            "first painted glyph after prefix must be '안', got {cell_after_prefix:?}"
-        );
-    }
-    /// Caret clamp: when the cursor byte offset is past the buffer length
-    /// (e.g. left over from a paste race), the math still works and we
-    /// produce a sane column.
-    #[test]
-    fn composer_cursor_handles_out_of_range_byte_offset() {
-        let state = composer_fixture("hi", 99);
-        let area = Rect::new(0, 0, 40, 3);
-        let pos = composer_cursor_position(area, &state, prefix_columns(&state))
-            .expect("non-empty body must produce a caret");
-        // clamps to whole buffer = 2 display columns past the prefix
-        assert_eq!(pos.x, 1 + 2 + 2);
-    }
+    // Cursor math for the composer is now owned by `oxicode_textarea::
+    // TextArea::cursor_pos_with_state`, which is exercised by the
+    // 351 tests in `oxicode-textarea`. The byte-cursor column math
+    // these tests used to pin (composer_cursor_position) is gone.
 }
 
 #[cfg(test)]

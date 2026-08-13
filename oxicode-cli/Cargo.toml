@@ -27,6 +27,7 @@ oxicode-agent = { version = "0.75.0", path = "../oxicode-agent" }
 oxicode-sdk = { version = "0.75.0", path = "../oxicode-sdk", features = ["router", "role-routing", "role-switching", "url-resolver"] }
 oxicode-vtui = { version = "0.75.0", path = "../oxicode-vtui" }
 oxicode-vtui-compat = { version = "0.75.0", path = "../oxicode-vtui-compat" }
+oxicode-textarea = { version = "0.75.0", path = "../oxicode-textarea" }
 oxicode-mnemopi = { version = "0.75.0", path = "../oxicode-mnemopi", features = ["remote-embeddings"] }
 oxicode-lsp = { version = "0.75.0", path = "../oxicode-lsp" }
 lsp-types = "0.95"

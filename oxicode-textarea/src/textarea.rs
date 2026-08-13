@@ -55,7 +55,7 @@ pub struct ElementKind(pub u16);
 /// The default implementation ([`InternalClipboard`]) stores text in memory.
 /// Host apps can provide a system clipboard backend (e.g. `arboard`) via
 /// [`TextArea::set_clipboard_provider`].
-pub trait ClipboardProvider: std::fmt::Debug {
+pub trait ClipboardProvider: std::fmt::Debug + Send {
     /// Read the current clipboard contents (for paste).
     fn get(&mut self) -> Option<String>;
     /// Write text to the clipboard (on copy/cut).
@@ -199,8 +199,7 @@ pub struct TextArea {
     selection: Option<Selection>,
     /// Clipboard provider — defaults to [`InternalClipboard`].
     /// Swap with [`set_clipboard_provider`](Self::set_clipboard_provider)
-    /// for system clipboard support.
-    clipboard_provider: Box<dyn ClipboardProvider>,
+    clipboard_provider: Box<dyn ClipboardProvider + Send>,
     /// Last copied text — set on copy/cut, cleared by `take_clipboard()`.
     /// This is the "notification" channel: the host calls `take_clipboard()`
     /// to detect that something was just copied.
@@ -1021,7 +1020,7 @@ impl TextArea {
     /// Replace the clipboard provider. The default is [`InternalClipboard`]
     /// (in-memory only). Pass an `arboard`-backed implementation to sync
     /// copy/cut/paste with the system clipboard.
-    pub fn set_clipboard_provider(&mut self, provider: Box<dyn ClipboardProvider>) {
+    pub fn set_clipboard_provider(&mut self, provider: Box<dyn ClipboardProvider + Send>) {
         self.clipboard_provider = provider;
     }
 
