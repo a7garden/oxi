@@ -263,6 +263,82 @@ pub struct Settings {
 | `OXICODE_AUTO_COMPACTION` | `auto_compaction` |
 | `OXICODE_TOOL_TIMEOUT` | `tool_timeout_seconds` |
 
+## Oxi Foundation host
+
+oxicode is an **Oxi Foundation v1 host**. It reads the versioned contract
+under `~/.oxi/foundation/v1/` (gated by `$OXI_FOUNDATION_HOME`), resolves
+provider profiles and package sources through it, and uses
+[`oxibrain`](https://github.com/project-oxi/oxibrain) as its only durable
+memory authority. The wired engine exposes:
+
+```
+services::build_oxicode_with_catalog(paths, catalog, embedding, hooks)
+└── foundation::discover(home)?
+    ├── compatibility compliant?
+    ├── profiles::resolve(explicit?, env?, role?) → ResolvedProfile
+    ├── credentials::resolve(&profile) → KeychainCredential
+    └── packages::verify(lockfile) → TrustedPackages
+└── brain::connect() → Option<BrainClient>  (degraded if absent)
+```
+
+### Resolution precedence
+
+1. **Environment override** (`OXICODE_PROVIDER` / `OXICODE_MODEL`) — non-persistent automation override; never logs the value.
+2. **Explicit profile** (`--profile` / `OXICODE_PROFILE`) — the selected profile id.
+3. **Role-compatible profile** — first profile in `profiles.json` whose `roles` contains the requested role. Ambiguous matches fail visibly.
+4. **Compatibility import** — one-time legacy import, gated by `OXICODE_FOUNDATION_MIGRATION=1`. Disabled by default.
+
+### Capability mapping
+
+Foundation packages declare abstract requirements. oxicode maps each to
+its existing policy:
+
+| Requirement | Gate |
+|---|---|
+| `workspace.read` | `AccessGate::allow_workspace_read` + workspace approval |
+| `workspace.patch` | `AccessGate::allow_workspace_write` + run approval |
+| `shell.execute` | `AccessGate::allow_shell` + `ToolPolicy::bash` |
+| `browser.navigate` | `ToolPolicy::web_search` + `native-browser` feature |
+| `brain.query` | scoped `BrainClient` already installed at composition root |
+| `schedule.manage` | `CronScheduler` port per active scope |
+
+A verified package is **not** automatically authorized. Every requirement
+must pass oxicode's existing policy.
+
+### Credentials
+
+Plaintext `~/.oxicode/auth.json` is no longer the durable credential
+authority. Profiles carry a `{ service, account }` Keychain locator;
+`foundation::credentials::KeychainAuthProvider` resolves the locator
+on demand and retypes unavailable/locked/not-found without ever
+exposing the value through `Debug` or `Display`. A one-time legacy
+importer moves a legacy secret into the Keychain after explicit
+acknowledgement, then archives the source file outside the active
+credential path.
+
+### Memory
+
+The `MemoryBackend` implemented in `oxicode-agent` is bound at the
+composition root to a `BrainMemoryBackend` that wraps a typed
+`oxibrain_client::BrainClient`. Agent memory tools return Brain IDs
+and citations; consolidation is a Brain request, not a local summary
+rebuild. Loss of daemon connectivity is a surfaced degraded state —
+no local fallback.
+
+### Compatibility matrix
+
+| Host | Owns |
+|---|---|
+| **oxibrain** | durable memory, retrieval, projection, consolidation |
+| **oxicode** | code execution, workspace policy, tool invocation, package compilation |
+| **oxios** | orchestration, experience, persona composition (embeds `oxicode-sdk`) |
+
+oxios MUST NOT spawn the oxicode CLI as a child process for normal
+operation; when it needs the CLI surface, it ships its own binary.
+
+See [`docs/superpowers/specs/2026-08-17-oxi-foundation-contract.md`](../docs/superpowers/specs/2026-08-17-oxi-foundation-contract.md)
+for the full contract.
+
 ## AgentSession
 
 The `AgentSession` ties together the agent runtime with session persistence:

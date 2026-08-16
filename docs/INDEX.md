@@ -30,6 +30,8 @@ intentionally preserved as written; this index exists to make them findable.
 ### Architecture & design system
 - `oxicode-design.md` — top-level oxicode design narrative.
 - `oxicode-architecture.md` — repo-wide architecture overview.
+- `superpowers/specs/2026-08-17-oxi-foundation-contract.md` — Oxi Foundation v1 contract (oxicode host side).
+- `superpowers/plans/2026-08-17-oxi-foundation-integration.md` — implementation plan for the Foundation host cutover.
 - `extensions.md` — extension system design.
 
 ### SDK

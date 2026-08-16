@@ -247,3 +247,32 @@ pub enum ProviderError {
 ```
 
 Retry logic is handled by the caller (typically `oxicode-agent`).
+
+## Oxi Foundation provider resolution
+
+Provider registrations live in
+`providers/register_builtins.rs` and are populated into the
+`ProviderRegistry` exactly once per process. The registry is generic
+and provider-agnostic; it does **not** decide which provider an agent
+talks to. Selection is driven by the Oxi Foundation profile resolved
+at the composition root (`oxicode-cli/src/foundation/profiles.rs`).
+
+```
+build_oxicode_with_catalog(paths, ...)
+└── foundation::discover(foundation_root)?
+    ├── foundation::profiles::resolve(...)  → ResolvedProfile
+    └── foundation::credentials::resolve(&profile) → Locator
+        └── provider_registry.register(only_if_validated)
+```
+
+Once a profile resolves, oxicode instantiates **only** the provider
+whose `provider` field matches the profile id. Other provider
+implementations remain available for explicit overrides
+(`--provider <name>`) and environment-variable selection
+(`OXICODE_PROVIDER`), but never for silent fallback.
+
+The `Model` rows used at runtime come from the existing catalog
+(`FileModelCatalog`, SNAPSHOT/LIVE/USER/LOCAL layers). The catalog is
+the source of truth for context window, pricing, and feature flags;
+the foundation profile is the source of truth for *which* provider
+and *which* model the active agent uses.

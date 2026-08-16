@@ -130,6 +130,37 @@ graph LR
 | [**oxicode-sdk**](oxicode-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |
 | [**oxicode-cli**](oxicode-cli/) | CLI binary — ties everything together (TUI + RPC + port composition root) |
 
+## Oxi Foundation host
+
+oxicode is an **Oxi Foundation v1 host**. It resolves provider profiles and
+packages from a shared installation under `~/.oxi/foundation/v1/`, treats
+[`oxibrain`](https://github.com/project-oxi/oxibrain) as its only durable
+memory authority, and keeps its own access policy, sandbox, and tool
+approvals intact. Foundation packages declare abstract capabilities
+(`workspace.read`, `shell.execute`, `brain.query`, …); oxicode maps each
+declared requirement to its existing policy gate. A verified foundation
+package is **not** automatically authorized.
+
+```
+~/.oxi/foundation/v1/
+├── foundation.json          # schema version + host compatibility
+├── profiles.json            # non-secret provider/model profiles
+├── packages.lock            # immutable resolved package records
+└── packages/<sha256>/       # verified immutable package content
+```
+
+Credentials live in the OS Keychain. No profile, lockfile, log, or
+diagnostic carries a secret value. The contract is documented in
+[`docs/superpowers/specs/2026-08-17-oxi-foundation-contract.md`](docs/superpowers/specs/2026-08-17-oxi-foundation-contract.md);
+the host role is part of a three-host agreement with `oxibrain` (durable
+memory) and `oxios` (orchestration).
+
+If no Foundation installation is present, oxicode runs in offline mode
+with environment-variable credentials only. Existing `~/.oxicode/auth.json`
+credentials can be migrated one-time into the Keychain via the
+`oxicode memory migrate-brain` (memory) and `oxicode config migrate-foundation`
+(credential) commands.
+
 ## Configuration
 
 Settings are layered — later layers override earlier ones:
