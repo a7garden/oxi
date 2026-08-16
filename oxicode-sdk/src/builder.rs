@@ -287,6 +287,14 @@ impl OxicodeBuilder {
         self
     }
 
+    /// Register a custom provider from a pre-boxed `Arc<dyn Provider>`.
+    /// Useful when the provider comes from a factory that returns a
+    /// trait object (e.g. the Oxi Foundation profile resolver).
+    pub fn provider_arc(self, name: &str, p: Arc<dyn Provider>) -> Self {
+        self.providers.register_arc(name, p);
+        self
+    }
+
     /// Register a custom tool in the shared tool registry.
     pub fn tool(self, tool: impl oxicode_agent::AgentTool + 'static) -> Self {
         self.tools.register(tool);

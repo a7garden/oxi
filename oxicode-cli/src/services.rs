@@ -31,9 +31,6 @@ use oxicode_sdk::ports::inmem::url_router::CompositeUrlRouter;
 use crate::internal_urls::issue_handler::IssueProtocolHandler;
 use crate::internal_urls::memory_handler::MemoryProtocolHandler;
 use crate::internal_urls::pr_handler::PrProtocolHandler;
-use crate::store::extracting_backend;
-use crate::store::memory_summary;
-use crate::store::memory_workers;
 
 /// Resolved paths under the oxicode home directory.
 #[derive(Debug, Clone)]
@@ -48,6 +45,11 @@ pub struct OxicodePaths {
     pub sessions: PathBuf,
     /// Skills root.
     pub skills: PathBuf,
+    /// Oxi Foundation root. Independent from `home` and resolved
+    /// via `$OXI_FOUNDATION_HOME` or `~/.oxi/foundation/v1`. Set
+    /// to `None` when the foundation is not installed; the
+    /// composition root enters offline mode in that case.
+    pub foundation: Option<PathBuf>,
 }
 
 impl OxicodePaths {
@@ -60,6 +62,7 @@ impl OxicodePaths {
             sessions: home.join("sessions"),
             skills: home.join("skills"),
             home,
+            foundation: crate::foundation::foundation_root(),
         }
     }
 
@@ -110,6 +113,38 @@ pub async fn build_oxicode_with_catalog(
     ensure_parent(&paths.config)?;
     ensure_parent(&paths.sessions)?;
 
+    // Foundation v1 host: when a foundation installation is present,
+    // resolve the profile (explicit id → role → env override →
+    // one-time compatibility import), look up the Keychain credential,
+    // and register ONLY the selected provider with the resolved key.
+    // Provider/model registration is gated on profile + credential
+    // validation succeeding — plan §3.b, §3.f. Other built-in
+    // providers remain constructable but cannot be invoked because
+    // they carry no credentials. The same pattern handles the
+    // `OXICODE_PROVIDER`/`OXICODE_MODEL` automation override.
+    let foundation_provider: Option<Arc<dyn oxicode_ai::Provider>> = if let Some(froot) = paths
+        .foundation
+        .clone()
+        .or_else(crate::foundation::foundation_root)
+    {
+        if crate::foundation::foundation_present(&froot) {
+            match resolve_and_register_profile(&froot).await {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    tracing::warn!(
+                        "Foundation v1 profile resolution failed: {e}; \
+                             engine will start without a registered provider"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let catalog: Arc<dyn oxicode_sdk::ports::catalog::ModelCatalog> =
         match FileModelCatalog::init(catalog_config).await {
             Ok(c) => c,
@@ -156,9 +191,11 @@ pub async fn build_oxicode_with_catalog(
     if let Some(ep) = embedding_provider {
         builder = builder.with_embeddings(ep);
     }
-
     if let Some(runner) = hook_runner {
-        builder = builder.with_hooks(runner);
+        builder = builder.with_hooks(runner.clone());
+    }
+    if let Some(provider) = foundation_provider {
+        builder = builder.provider_arc("<foundation>", provider);
     }
 
     let oxicode = builder.build();
@@ -174,7 +211,60 @@ fn build_url_router(
 ) -> Arc<dyn InternalUrlRouter> {
     let memory_root = paths.home.join("memory");
     let router = CompositeUrlRouter::new();
-    router.register(Arc::new(MemoryProtocolHandler::new(memory_root)));
+    // Foundation v1 host: `memory://` resolves through the
+    // brain-backed handler when the foundation installation is
+    // present. When no foundation is present (test fixtures, host
+    // without oxibrain yet), the handler falls back to the legacy
+    // disk-rooted resolver so pre-Foundation callers continue to
+    // work.
+    let handler: Arc<dyn oxicode_sdk::ports::ProtocolHandler> =
+        if crate::foundation::foundation_present(
+            &crate::foundation::foundation_root()
+                .unwrap_or_else(|| std::path::PathBuf::from("~/.oxi/foundation/v1")),
+        ) {
+            let socket = crate::foundation::brain::default_socket_path();
+            let brain = Arc::new(crate::foundation::brain::BrainMemoryBackend::new(socket));
+            Arc::new(MemoryProtocolHandler::new(brain))
+        } else {
+            // Legacy disk-rooted fallback. NOT used under the
+            // Foundation v1 host — see
+            // `resolve_memory_url_legacy` for the deprecation
+            // context.
+            struct LegacyHandler {
+                memory_root: PathBuf,
+            }
+            #[async_trait::async_trait]
+            impl oxicode_sdk::ports::ProtocolHandler for LegacyHandler {
+                fn scheme(&self) -> &str {
+                    "memory"
+                }
+                async fn resolve(
+                    &self,
+                    url: &str,
+                    _selector: Option<&str>,
+                    _ctx: &oxicode_sdk::ports::ResolveContext,
+                ) -> Result<oxicode_sdk::ports::ResolvedUrl, oxicode_sdk::SdkError>
+                {
+                    let content = crate::internal_urls::memory_handler::resolve_memory_url_legacy(
+                        url,
+                        &self.memory_root,
+                    )
+                    .ok_or_else(|| oxicode_sdk::SdkError::PortNotConfigured { port: "memory" })?;
+                    let size = content.len();
+                    Ok(oxicode_sdk::ports::ResolvedUrl {
+                        url: url.to_string(),
+                        content,
+                        content_type: "text/markdown".to_string(),
+                        size: Some(size),
+                        source_path: None,
+                        notes: vec![],
+                        immutable: true,
+                    })
+                }
+            }
+            Arc::new(LegacyHandler { memory_root })
+        };
+    router.register(handler);
     router.register(Arc::new(IssueProtocolHandler));
     router.register(Arc::new(PrProtocolHandler));
     router.register(Arc::new(
@@ -361,64 +451,104 @@ impl oxicode_sdk::ports::EmbeddingProvider for MnemopiEmbeddingBridge {
 
 /// Create a memory backend if memory is enabled in settings.
 ///
-/// Returns `None` when `memory_enabled` is false or the database
-/// cannot be opened.
+/// Under the Oxi Foundation v1 host, the only durable-memory authority
+/// is the oxibrain daemon (plan §5). Local SQLite/Mnemopi/JSON/
+/// file-summary fallbacks are explicitly forbidden (§5.h, §6.f):
+/// the Foundation host MUST NOT silently run a second durable store.
+///
+/// When the Foundation installation is present, returns a
+/// [`BrainMemoryBackend`] wrapping a typed `oxibrain_client` over the
+/// default socket path. When the Foundation is absent, returns
+/// `None` — the agent memory tools surface a typed
+/// "backend unavailable: ..." result with the recovery command. Code
+/// work continues; only durable-memory tool calls fail visibly.
 pub fn create_memory_backend(
     settings: &crate::store::settings::Settings,
 ) -> Option<Arc<dyn oxicode_agent::tools::MemoryBackend>> {
     if !settings.memory_enabled {
         return None;
     }
-    let db_path = settings.memory_db_path.clone().unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".oxicode")
-            .join("memory")
-            .join("project.db")
-    });
-    // Ensure the parent directory exists.
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let foundation_root = crate::foundation::foundation_root()
+        .unwrap_or_else(|| std::path::PathBuf::from("~/.oxi/foundation/v1"));
+    if crate::foundation::foundation_present(&foundation_root) {
+        let socket = crate::foundation::brain::default_socket_path();
+        let backend = crate::foundation::brain::BrainMemoryBackend::new(socket);
+        tracing::info!(
+            "Foundation v1 host active: durable memory authority is oxibrain \
+             (health: {})",
+            backend.health().info()
+        );
+        return Some(Arc::new(backend));
     }
-    if settings.mnemopi_engine {
-        let embedding_provider = build_embedding_provider(settings);
-        let embedding_model = settings.embedding_model.clone();
-        match crate::store::memory_mnemopi::MnemopiMemoryBackend::open(
-            &db_path,
-            "default",
-            embedding_provider,
-            &embedding_model,
-        ) {
-            Ok(store) => Some(Arc::new(store)),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to open Mnemopi engine at {}: {e}",
-                    db_path.display()
-                );
-                None
-            }
-        }
-    } else {
-        match crate::store::memory_sqlite::SqliteMemoryStore::open(&db_path) {
-            Ok(store) => Some(Arc::new(store)),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to open memory database at {}: {e}",
-                    db_path.display()
-                );
-                None
-            }
-        }
-    }
+    tracing::warn!(
+        "Foundation v1 host: oxibrain daemon unavailable; durable-memory \
+         tools will return typed unavailable results. Run `oxicode setup` to \
+         initialize the Foundation installation, or start the oxibrain daemon."
+    );
+    None
 }
 
-/// Wrap a memory backend with the LLM/heuristic fact extractor.
-pub fn wrap_extracting(
-    backend: Arc<dyn oxicode_agent::tools::MemoryBackend>,
-    settings: &crate::store::settings::Settings,
-    oxicode: Option<&oxicode_sdk::Oxicode>,
-) -> Arc<dyn oxicode_agent::tools::MemoryBackend> {
-    extracting_backend::wrap_with_extractor(backend, settings, oxicode)
+#[cfg(test)]
+mod memory_backend_tests {
+    use super::*;
+
+    #[test]
+    fn brain_backend_returned_when_foundation_present() {
+        let tmp = tempdir_fixture();
+        unsafe {
+            std::env::set_var("OXI_FOUNDATION_HOME", &tmp);
+        }
+        // Build a minimal `foundation.json` + `profiles.json` so
+        // `foundation_present` returns true.
+        std::fs::write(
+            tmp.join("foundation.json"),
+            r#"{"schema_version":1,"foundation":{"hosts":{"oxicode":">=0.1.0"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("profiles.json"),
+            r#"{"schema_version":1,"profiles":[]}"#,
+        )
+        .unwrap();
+        let backend = create_memory_backend(&test_settings());
+        assert!(backend.is_some(), "foundation fixture ⇒ brain backend");
+        unsafe {
+            std::env::remove_var("OXI_FOUNDATION_HOME");
+        }
+    }
+
+    #[test]
+    fn absent_foundation_returns_none() {
+        unsafe {
+            std::env::set_var("OXI_FOUNDATION_HOME", "/tmp/does-not-exist-foundation");
+        }
+        let backend = create_memory_backend(&test_settings());
+        assert!(
+            backend.is_none(),
+            "absent foundation ⇒ no local durable fallback (plan §5.h)"
+        );
+        unsafe {
+            std::env::remove_var("OXI_FOUNDATION_HOME");
+        }
+    }
+
+    fn test_settings() -> crate::store::settings::Settings {
+        let mut s = crate::store::settings::Settings::default();
+        s.memory_enabled = true;
+        s
+    }
+
+    fn tempdir_fixture() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "oxicode-services-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 }
 
 /// Build a project-memory recall block for injection into the system
@@ -439,17 +569,6 @@ pub async fn build_memory_recall(
         }
         _ => String::new(),
     }
-}
-
-/// Build the autonomous-memory read-path block (omp `read-path.md`)
-/// by reading `<memory-root>/memory_summary.md` if it exists.
-pub fn read_path_block(home: &Path, cwd: &Path) -> Option<String> {
-    let cwd_str = cwd.to_string_lossy().to_string();
-    let memory_root = memory_summary::memory_root(home, &cwd_str);
-    let (_, memory_summary_text) =
-        memory_summary::load_consolidated_artifacts(&memory_root).ok()?;
-    let summary = memory_summary_text?;
-    Some(memory_summary::render_read_path(Some(&summary), None))
 }
 
 /// Store a session summary into the memory backend.
@@ -474,118 +593,90 @@ pub async fn session_reflect(
 /// When `oxicode` is `Some`, the pipeline resolves a memory extraction
 /// model from settings and creates a provider for actual LLM calls.
 /// Without it, workers run but skip LLM-dependent work.
+/// Stub. Plan §5.e/§6.f: durable-memory consolidation runs on the
+/// oxibrain daemon, never as a local worker pipeline. This stub
+/// remains so callers compile; it always returns `None`.
 pub fn start_memory_pipeline(
-    settings: &crate::store::settings::Settings,
-    cwd: &Path,
-    oxicode: Option<&oxicode_sdk::Oxicode>,
+    _settings: &crate::store::settings::Settings,
+    _cwd: &Path,
+    _oxicode: Option<&oxicode_sdk::Oxicode>,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    let backend = settings.memory_backend.as_deref().unwrap_or("off");
-    if backend != "local" {
-        tracing::debug!("autonomous memory pipeline: backend='{backend}' — disabled");
-        return None;
-    }
-
-    let home = crate::store::settings::Settings::settings_dir().ok()?;
-    let db_path = memory_workers::pipeline_db_path(&home);
-    let sessions_dir = home.join("sessions");
-
-    let cwd_str = cwd.to_string_lossy().to_string();
-    let memory_root = memory_summary::memory_root(&home, &cwd_str);
-
-    // Resolve memory extraction model + provider from the Oxicode engine.
-    let (provider, model) = if let Some(oxicode) = oxicode {
-        let model_id = if settings.memory_llm_extract_model.is_empty() {
-            settings.effective_model(None).unwrap_or_default()
-        } else {
-            settings.memory_llm_extract_model.clone()
-        };
-        if model_id.is_empty() {
-            tracing::warn!("memory pipeline: no model configured for extraction");
-            (None, None)
-        } else {
-            match oxicode.resolve_model(&model_id) {
-                Ok(model) => match oxicode.create_provider(&model.provider) {
-                    Ok(provider) => (Some(provider), Some(model)),
-                    Err(e) => {
-                        tracing::warn!("memory pipeline: provider creation failed: {e}");
-                        (None, None)
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("memory pipeline: model resolution failed: {e}");
-                    (None, None)
-                }
-            }
-        }
-    } else {
-        tracing::warn!("memory pipeline: no Oxicode engine, LLM calls will be skipped");
-        (None, None)
-    };
-
-    let poll_interval = std::time::Duration::from_secs(60);
-
-    let handle = tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("memory pipeline runtime");
-        rt.block_on(async move {
-            let conn = match memory_workers::open_db(&db_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(
-                        "autonomous memory pipeline: open_db({}) failed: {e}",
-                        db_path.display()
-                    );
-                    return;
-                }
-            };
-
-            tracing::info!(
-                "autonomous memory pipeline: workers started (provider={})",
-                if provider.is_some() { "wired" } else { "none" }
-            );
-
-            loop {
-                let now = chrono::Utc::now().timestamp();
-
-                match memory_workers::run_stage1_iteration(
-                    &conn,
-                    &sessions_dir,
-                    &cwd_str,
-                    now,
-                    provider.as_ref(),
-                    model.as_ref(),
-                )
-                .await
-                {
-                    Ok(true) => tracing::debug!("memory pipeline: stage 1 processed a job"),
-                    Ok(false) => tracing::trace!("memory pipeline: stage 1 idle"),
-                    Err(e) => tracing::warn!("memory pipeline: stage 1 error: {e}"),
-                }
-
-                match memory_workers::run_stage2_iteration(
-                    &conn,
-                    &memory_root,
-                    &cwd_str,
-                    now,
-                    provider.as_ref(),
-                    model.as_ref(),
-                )
-                .await
-                {
-                    Ok(true) => tracing::info!("memory pipeline: stage 2 consolidated"),
-                    Ok(false) => tracing::trace!("memory pipeline: stage 2 idle"),
-                    Err(e) => tracing::warn!("memory pipeline: stage 2 error: {e}"),
-                }
-
-                tokio::time::sleep(poll_interval).await;
-            }
-        });
-    });
-    Some(handle)
+    None
 }
 
+// ── Foundation profile → provider registration ────────────────────────────
+
+/// Resolve a Foundation profile and register the selected provider.
+///
+/// Precedence (plan §2.c):
+///   1. `OXICODE_PROVIDER` + `OXICODE_MODEL` env override.
+///   2. Explicit `--profile` / `OXICODE_PROFILE` id.
+///   3. Role-compatible Foundation profile.
+///   4. One-time compatibility import (gated by `OXICODE_FOUNDATION_MIGRATION=1`).
+///
+/// The resolved credential is read from the OS Keychain; the
+/// provider/model is registered only when profile + credential
+/// validation succeeds. Errors are reported but never silently
+/// replaced by another remote provider (plan §3.f).
+async fn resolve_and_register_profile(
+    foundation_root: &Path,
+) -> Result<Arc<dyn oxicode_ai::Provider>, crate::foundation::FoundationError> {
+    use crate::foundation::profiles::{
+        EnvironmentOverride, ResolveInput, read as read_profiles, resolve_profile,
+    };
+
+    let profiles_path = foundation_root.join(crate::foundation::files::PROFILES);
+    let profiles =
+        read_profiles(&profiles_path).map_err(crate::foundation::FoundationError::from)?;
+    let explicit_profile = std::env::var("OXICODE_PROFILE")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let compat_import_path = foundation_root.join("compatibility.json");
+    let compat_import =
+        crate::foundation::compat_import::read_compatibility_shim(&compat_import_path)
+            .map_err(crate::foundation::FoundationError::from)?;
+
+    let env_override = EnvironmentOverride::from_env();
+
+    let resolved = resolve_profile(ResolveInput {
+        explicit_profile: explicit_profile.as_deref(),
+        explicit_environment_override: env_override.as_ref(),
+        requested_role: None,
+        foundation_profiles: &profiles,
+        compatibility_import: compat_import.as_ref(),
+    })?;
+
+    let resolver = crate::foundation::credentials::KeychainCredentialResolver::default();
+    let credential = resolver.resolve(&resolved.profile);
+    let api_key = match credential {
+        crate::foundation::credentials::Credential::Keychain(s)
+        | crate::foundation::credentials::Credential::Environment(s) => s,
+        crate::foundation::credentials::Credential::Unavailable(e) => {
+            return Err(crate::foundation::FoundationError::KeychainUnavailable(
+                e.to_string(),
+            ));
+        }
+    };
+    let provider_name = resolved.profile.provider.as_str();
+    let provider: Arc<dyn oxicode_ai::Provider> = Arc::from(
+        oxicode_ai::register_builtins::create_builtin_provider_with_options(
+            provider_name,
+            Some(&api_key),
+            None,
+        )
+        .ok_or_else(|| {
+            crate::foundation::FoundationError::IncompatibleHost(provider_name.to_string())
+        })?,
+    );
+
+    tracing::info!(
+        provider = provider_name,
+        model = %resolved.profile.model,
+        source = ?resolved.source,
+        "Foundation profile resolved with Keychain credential"
+    );
+    Ok(provider)
+}
 #[cfg(test)]
 mod tests {
 

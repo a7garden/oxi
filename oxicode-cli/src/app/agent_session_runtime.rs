@@ -248,6 +248,10 @@ pub struct CreateAgentSessionFromServicesOptions {
     /// Pre-configured tool registry to copy into the new agent.
     /// If None, builtin tools are registered automatically.
     pub tool_registry: Option<Arc<oxicode_agent::ToolRegistry>>,
+    /// SDK engine that owns provider construction and live credential
+    /// resolution. Interactive callers must supply this so credentials saved
+    /// in the TUI are used both at session creation and on refresh.
+    pub oxicode: Option<oxicode_sdk::Oxicode>,
     /// Pre-built session queues + stop flag. When `None`, fresh state is
     /// constructed (sufficient for the headless paths that don't share
     /// state with an `App`). The TUI/RPC entry points pass the shared
@@ -314,7 +318,8 @@ pub async fn create_agent_session_from_services(
         // No model — return minimal session, TUI setup wizard will handle configuration
         let memory_block = if settings.memory_enabled {
             let backend = crate::services::create_memory_backend(settings);
-            let backend = backend.map(|b| crate::services::wrap_extracting(b, settings, None));
+            // Plan §5.h/§6.f: durable memory is the Brain backend as-is.
+            // No extraction wrapper — that path was a local authority.
             if let Some(ref backend) = backend {
                 crate::services::build_memory_recall(backend.as_ref(), &cwd).await
             } else {
@@ -368,7 +373,7 @@ pub async fn create_agent_session_from_services(
             system_prompt: Some(build_system_prompt_with_memory(
                 thinking_level,
                 memory_opt,
-                crate::services::read_path_block(&services.agent_dir, &services.cwd),
+                None,
                 persona.as_ref(),
             )),
             timeout_seconds: settings.tool_timeout_seconds,
@@ -414,11 +419,17 @@ pub async fn create_agent_session_from_services(
 
     let (provider_name, _model_name) = parse_model_id(&model_id);
 
-    let provider = oxicode_sdk::get_provider(&provider_name)
-        .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
+    let provider: Arc<dyn oxicode_sdk::Provider> = if let Some(oxicode) = &options.oxicode {
+        oxicode.create_provider(&provider_name)?
+    } else {
+        Arc::from(
+            oxicode_sdk::get_provider(&provider_name)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?,
+        )
+    };
     let memory_backend: Option<Arc<dyn oxicode_agent::tools::MemoryBackend>> =
-        crate::services::create_memory_backend(settings)
-            .map(|b| crate::services::wrap_extracting(b, settings, None));
+        crate::services::create_memory_backend(settings);
+
     let memory_block = if let Some(ref backend) = memory_backend {
         crate::services::build_memory_recall(backend.as_ref(), &cwd).await
     } else {
@@ -469,12 +480,8 @@ pub async fn create_agent_session_from_services(
     } else {
         Some(memory_block)
     };
-    let system_prompt = build_system_prompt_with_memory(
-        thinking_level,
-        memory_block_opt,
-        crate::services::read_path_block(&services.agent_dir, &services.cwd),
-        persona.as_ref(),
-    );
+    let system_prompt =
+        build_system_prompt_with_memory(thinking_level, memory_block_opt, None, persona.as_ref());
     let compaction_strategy = if settings.auto_compaction {
         oxicode_sdk::CompactionStrategy::Threshold(0.8)
     } else {
@@ -504,20 +511,29 @@ pub async fn create_agent_session_from_services(
         ..Default::default()
     };
 
-    let base: Arc<dyn oxicode_sdk::Provider> = Arc::from(provider);
     // Always wrap with the role router so UI edits to `model_roles` apply live
     // (the wrapper passes through unchanged while the registry is empty).
     let role_registry = std::sync::Arc::new(parking_lot::RwLock::new(
         oxicode_sdk::RoleRegistry::from_map(settings.model_roles.clone()),
     ));
     oxicode_sdk::set_live_role_registry(std::sync::Arc::clone(&role_registry));
-    let provider: Arc<dyn oxicode_sdk::Provider> =
-        Arc::new(oxicode_sdk::RoleRoutingProvider::new(base, role_registry));
-    let agent = Arc::new(oxicode_agent::Agent::new(
+    let provider: Arc<dyn oxicode_sdk::Provider> = Arc::new(oxicode_sdk::RoleRoutingProvider::new(
         provider,
-        config,
-        Arc::new(oxicode_agent::ToolRegistry::new()),
+        role_registry,
     ));
+    let agent = Arc::new(match options.oxicode.clone() {
+        Some(oxicode) => oxicode_agent::Agent::new_with_resolver(
+            provider,
+            config,
+            Arc::new(oxicode_agent::ToolRegistry::new()),
+            Arc::new(oxicode),
+        ),
+        None => oxicode_agent::Agent::new(
+            provider,
+            config,
+            Arc::new(oxicode_agent::ToolRegistry::new()),
+        ),
+    });
 
     // Register tools: use provided registry or fallback to builtins
     let registry = options.tool_registry.unwrap_or_else(|| {
@@ -1104,6 +1120,7 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
                 thinking_level: None,
                 scoped_models: Vec::new(),
                 tool_registry: None,
+                oxicode: None,
                 // The default factory runs without an App, so fresh
                 // state is constructed — fine for tests / RPC paths
                 // that don't need to share queues with another surface.

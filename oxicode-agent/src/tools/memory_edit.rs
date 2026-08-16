@@ -85,14 +85,14 @@ impl AgentTool for MemoryEditTool {
 
             let new_id = backend.put(content, kind, subject).await?;
             Ok(AgentToolResult::success(format!(
-                "Updated memory item (old id: {}, new id: {}).",
+                "Updated memory item (Brain old id: {}, new id: {}).",
                 id, new_id
             )))
         } else {
             // Delete path: content is absent.
             backend.delete(id).await?;
             Ok(AgentToolResult::success(format!(
-                "Deleted memory item (id: {}).",
+                "Deleted memory item (Brain id: {}).",
                 id
             )))
         }
@@ -183,7 +183,7 @@ mod tests {
         assert!(result.success);
         assert_eq!(
             result.output,
-            "Updated memory item (old id: mem-1, new id: new-id)."
+            "Updated memory item (Brain old id: mem-1, new id: new-id)."
         );
         let puts = mock.puts.lock();
         assert_eq!(puts.len(), 1);
@@ -202,7 +202,7 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert_eq!(result.output, "Deleted memory item (id: mem-1).");
+        assert_eq!(result.output, "Deleted memory item (Brain id: mem-1).");
         assert_eq!(mock.deletes.lock().len(), 1);
         assert_eq!(mock.deletes.lock()[0], "mem-1");
         assert_eq!(mock.puts.lock().len(), 0);

@@ -99,15 +99,17 @@ impl AgentTool for MemoryRetainTool {
         }
 
         let subject = ctx.session_id.as_deref().unwrap_or("default");
-        backend.put(content, kind, subject).await?;
+        let id = backend.put(content, kind, subject).await?;
 
+        // Plan §5.d: surface the Brain ID + scope the durable
+        // authority acknowledged. The tool must NOT claim success
+        // until the ledger append is acknowledged (which `put` does).
         Ok(AgentToolResult::success(format!(
-            "Retained [{}] to memory.",
-            kind
+            "Retained [{}] (Brain id: {}) to scope '{}'.",
+            kind, id, subject
         )))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,7 +189,10 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert_eq!(result.output, "Retained [fact] to memory.");
+        assert_eq!(
+            result.output,
+            "Retained [fact] (Brain id: mem-1) to scope 'sess-42'."
+        );
         let puts = mock.puts.lock();
         assert_eq!(puts.len(), 1);
         assert_eq!(puts[0].0, "hello");
@@ -203,7 +208,10 @@ mod tests {
             .execute("c1", json!({"content": "x"}), None, &ctx)
             .await
             .unwrap();
-        assert_eq!(result.output, "Retained [fact] to memory.");
+        assert_eq!(
+            result.output,
+            "Retained [fact] (Brain id: mem-1) to scope 'default'."
+        );
         assert_eq!(mock.puts.lock()[0].1, "fact");
     }
 

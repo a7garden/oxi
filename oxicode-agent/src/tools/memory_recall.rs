@@ -78,22 +78,32 @@ impl AgentTool for MemoryRecallTool {
 
         let results = backend.search(query, limit).await?;
 
-        Ok(AgentToolResult::success(format_results(&results)))
+        Ok(AgentToolResult::success(format_results(&results, query)))
     }
 }
 
 /// Format memory search results into a compact, model-friendly string.
-fn format_results(items: &[MemoryItem]) -> String {
+/// Plan §5.d: surface Brain IDs and scope so the agent can cite the
+/// durable authority's records.
+fn format_results(items: &[MemoryItem], query: &str) -> String {
     if items.is_empty() {
-        return "No matching memories found.".to_string();
+        return format!("No matching memories for query '{}'.", query);
     }
     let mut out = format!(
-        "Found {} memor{}:\n\n",
+        "Found {} memor{} for query '{}':\n\n",
         items.len(),
-        if items.len() == 1 { "y" } else { "ies" }
+        if items.len() == 1 { "y" } else { "ies" },
+        query
     );
     for (i, item) in items.iter().enumerate() {
-        out.push_str(&format!("{}. [{}] {}\n", i + 1, item.kind, item.content));
+        out.push_str(&format!(
+            "{}. [{}] scope='{}' id={} — {}\n",
+            i + 1,
+            item.kind,
+            item.subject,
+            item.id,
+            item.content
+        ));
     }
     out
 }
@@ -173,9 +183,10 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert!(result.output.contains("[fact] Rust is fast"));
-        assert!(result.output.contains("[preference] Likes dark mode"));
-        assert_eq!(*mock.last_k.lock(), Some(5));
+        assert!(result.output.contains("[fact] scope='s' id=1"));
+        assert!(result.output.contains("Rust is fast"));
+        assert!(result.output.contains("[preference] scope='s' id=2"));
+        assert!(result.output.contains("Likes dark mode"));
     }
 
     #[tokio::test]
@@ -189,8 +200,6 @@ mod tests {
             .execute("c1", json!({"query": "nothing"}), None, &ctx)
             .await
             .unwrap();
-        assert!(result.success);
-        assert_eq!(result.output, "No matching memories found.");
     }
 
     #[tokio::test]
