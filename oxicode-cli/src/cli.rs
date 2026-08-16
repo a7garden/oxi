@@ -201,6 +201,40 @@ pub enum Commands {
         #[arg(long, short)]
         context: Option<String>,
     },
+    /// Foundation v1 migration routines
+    Migrate {
+        /// Action
+        #[command(subcommand)]
+        action: MigrationCommands,
+    },
+}
+
+/// `oxicode migrate` subcommands.
+#[derive(Debug, Clone, Subcommand)]
+pub enum MigrationCommands {
+    /// Migrate legacy durable memory to the oxibrain daemon.
+    Brain(MigrateBrainArgs),
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct MigrateBrainArgs {
+    /// oxibrain socket path. Defaults to `$OXIBRAIN_SOCKET`,
+    /// `$XDG_RUNTIME_DIR/oxibrain.sock`, or `~/.oxi/run/oxibrain.sock`.
+    #[arg(long)]
+    pub socket: Option<PathBuf>,
+    /// Do not write to the brain; just enumerate the legacy store.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Move the legacy store to `~/.oxicode/archive/memory/<ts>/`
+    /// after a successful migration.
+    #[arg(long)]
+    pub archive_legacy: bool,
+    /// Migration checkpoint file.
+    #[arg(long, default_value = "~/.oxicode/migration/brain.json")]
+    pub checkpoint: PathBuf,
+    /// Items per batch.
+    #[arg(long, default_value = "64")]
+    pub batch_size: usize,
 }
 
 // ── Package subcommands ────────────────────────────────────────────

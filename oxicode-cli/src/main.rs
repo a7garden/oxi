@@ -56,6 +56,12 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
             dry_run,
             context,
         } => handle_commit(*push, *dry_run, context.as_deref()).await?,
+        Commands::Migrate { action } => {
+            let code = handle_migrate(action.clone());
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
     }
 
     Ok(())
