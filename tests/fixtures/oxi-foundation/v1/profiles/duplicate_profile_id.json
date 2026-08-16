@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "dup",
+      "provider": "anthropic",
+      "model": "claude-sonnet",
+      "roles": ["coding.primary"],
+      "credential": { "service": "dev.oxi.foundation", "account": "dup" }
+    },
+    {
+      "id": "dup",
+      "provider": "openai",
+      "model": "gpt-4o",
+      "roles": ["assistant.general"],
+      "credential": { "service": "dev.oxi.foundation", "account": "dup-2" }
+    }
+  ]
+}

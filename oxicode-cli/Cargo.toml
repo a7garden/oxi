@@ -103,6 +103,15 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 self_update = { version = "0.41", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"], optional = true }
 serde_yaml = "0.9"
 
+# Oxi Foundation host support.
+#
+#   keyring   — OS Keychain credential backend (macOS Keychain, Linux libsecret,
+#               Windows Credential Manager). Used by
+#               `crate::foundation::credentials::SystemKeychain`. The
+#               resolver picks the in-memory backend for tests and the
+#               system backend in production.
+keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native", "sync-secret-service", "windows-native"] }
+
 # OAuth support
 urlencoding = "2.1"
 open = "5"
@@ -116,14 +125,26 @@ flate2 = "1"
 tar = "0.4"
 zip = "8"
 
-# Unix primitives for SIGTSTP
+# Unix primitives for Foundation v1 host:
+#   - libc           — SIGTSTP, setpriority, etc.
+#   - oxibrain-client — Unix-domain socket client to the OxiBrain daemon
+#                       (see `crate::foundation::brain::BrainMemoryBackend`).
+#     oxibrain-client is Unix-only; on Windows/macOS without Unix sockets
+#     the daemon falls back to a TCP client (future work).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+oxibrain-client = { version = "0.2", path = "/Volumes/MERCURY/PROJECTS/oxibrain/crates/oxibrain-client" }
 
 [features]
-default = ["self-update", "native-browser"]
+default = ["self-update", "native-browser", "foundation"]
 self-update = ["dep:self_update"]
 native-browser = ["oxicode-agent/native-browser"]
+# `foundation` is the Oxi Foundation v1 host feature. Disabling it pulls
+# nothing extra — the `keyring` crate and `oxibrain-client` (Unix) are
+# always present. The flag is a marker for downstream tooling that
+# resolves capabilities; the resolver itself lives in
+# `oxicode-cli/src/foundation/`.
+foundation = []
 
 [dev-dependencies]
 tempfile = "3"

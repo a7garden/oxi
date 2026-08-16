@@ -19,6 +19,7 @@
 // cli must be pub for main.rs binary
 pub mod bootstrap;
 pub mod cli;
+pub mod foundation;
 pub mod internal_urls;
 pub mod lsp;
 pub mod main_dispatch;
@@ -30,7 +31,6 @@ pub mod provider_oauth;
 pub mod services;
 pub mod setup_wizard;
 pub mod store;
-
 // ─── Directory groups ───────────────────────────────────────────────────────
 pub(crate) mod app;
 pub(crate) mod context;

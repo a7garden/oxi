@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "alpha",
+      "provider": "anthropic",
+      "model": "claude-sonnet",
+      "roles": ["coding.primary"],
+      "credential": { "service": "dev.oxi.foundation", "account": "alpha" }
+    },
+    {
+      "id": "beta",
+      "provider": "openai",
+      "model": "gpt-4o",
+      "roles": ["coding.primary"],
+      "credential": { "service": "dev.oxi.foundation", "account": "beta" }
+    }
+  ]
+}

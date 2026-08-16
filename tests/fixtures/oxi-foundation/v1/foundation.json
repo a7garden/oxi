@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "host_compatibility": {
+    "oxicode": ">=0.75.0",
+    "oxibrain": ">=0.2.0",
+    "oxios": ">=0.1.0"
+  }
+}

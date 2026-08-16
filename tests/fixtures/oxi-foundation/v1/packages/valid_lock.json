@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "packages": [
+    {
+      "name": "@oxi/code-review",
+      "version": "1.4.0",
+      "digest": "sha256-0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "foundation",
+      "trust": "verified",
+      "targets": ["oxicode"],
+      "requirements": ["workspace.read", "workspace.patch", "brain.query"]
+    }
+  ]
+}

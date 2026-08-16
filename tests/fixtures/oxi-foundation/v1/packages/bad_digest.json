@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "packages": [
+    {
+      "name": "@oxi/tampered",
+      "version": "1.0.0",
+      "digest": "sha256-deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "source": "foundation",
+      "trust": "verified",
+      "targets": ["oxicode"],
+      "requirements": []
+    }
+  ]
+}

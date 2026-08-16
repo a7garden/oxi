@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "personal-coding",
+      "provider": "anthropic",
+      "model": "claude-sonnet",
+      "roles": ["coding.primary", "assistant.general"],
+      "credential": {
+        "service": "dev.oxi.foundation",
+        "account": "personal-coding"
+      }
+    }
+  ]
+}

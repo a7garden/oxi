@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "packages": [
+    {
+      "name": "@oxi/unknown-cap",
+      "version": "0.1.0",
+      "digest": "sha256-0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "foundation",
+      "trust": "verified",
+      "targets": ["oxicode"],
+      "requirements": ["kernel.modify"]
+    }
+  ]
+}
