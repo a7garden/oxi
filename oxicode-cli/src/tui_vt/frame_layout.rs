@@ -292,10 +292,20 @@ mod tests {
 
         let rendered = render_to_string(&state, 80, 24);
 
-        // StatusBar carries the model name.
+        // Status bar is quiet chrome: app badge, workspace, run status.
         assert!(
-            rendered.contains("smoke-model"),
-            "status bar must render the header model name"
+            rendered.contains("APP") && rendered.contains("workspace"),
+            "status bar must render the app badge and workspace"
+        );
+        assert!(
+            rendered.contains("ready"),
+            "status bar must render the run status"
+        );
+        // The model name deliberately does NOT render here — it lives on the
+        // composer's top border so it is not shown twice.
+        assert!(
+            !rendered.contains("smoke-model"),
+            "status bar must not duplicate the composer-border model name"
         );
         // ShortcutsBar carries the verified keyboard hints.
         assert!(
