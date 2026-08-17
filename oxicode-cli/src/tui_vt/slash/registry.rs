@@ -153,7 +153,7 @@ impl SlashRegistry {
         items.sort_by(|a, b| a.title.cmp(&b.title));
         ctx.handle.show_list_modal(
             "Commands".to_string(),
-            vec!["Select a command (Esc to close)".to_string()],
+            vec!["Browse commands and insert one into the composer.".to_string()],
             items,
             None,
             None,
@@ -191,44 +191,41 @@ impl SlashCommand for SettingsCommand {
         // items without are read-only display.
         let items = vec![
             InlineListItem {
-                title: format!("Model: {model}"),
-                subtitle: Some("Use /model to switch".into()),
-                badge: None,
+                title: "Model".into(),
+                subtitle: Some("Use /model to change the active model".into()),
+                badge: Some(model),
                 indent: 0,
                 selection: None,
                 search_value: Some("model".into()),
             },
             InlineListItem {
-                title: format!("Thinking: {thinking:?}"),
+                title: "Thinking".into(),
                 subtitle: Some("Enter to cycle".into()),
-                badge: None,
+                badge: Some(format!("{thinking:?}")),
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("thinking_level".into())),
                 search_value: Some("thinking".into()),
             },
             InlineListItem {
-                title: format!(
-                    "Auto-compaction: {}",
-                    if auto_compaction { "on" } else { "off" }
-                ),
+                title: "Auto-compaction".into(),
                 subtitle: Some("Enter to toggle".into()),
-                badge: None,
+                badge: Some(if auto_compaction { "on" } else { "off" }.into()),
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("auto_compaction".into())),
                 search_value: Some("compaction".into()),
             },
             InlineListItem {
-                title: format!("Auto-retry: {}", if auto_retry { "on" } else { "off" }),
+                title: "Auto-retry".into(),
                 subtitle: Some("Enter to toggle".into()),
-                badge: None,
+                badge: Some(if auto_retry { "on" } else { "off" }.into()),
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("auto_retry".into())),
                 search_value: Some("retry".into()),
             },
             InlineListItem {
-                title: format!("Advisor: {}", if advisor { "on" } else { "off" }),
+                title: "Advisor".into(),
                 subtitle: Some("Enter to toggle".into()),
-                badge: None,
+                badge: Some(if advisor { "on" } else { "off" }.into()),
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("advisor".into())),
                 search_value: Some("advisor".into()),
@@ -237,11 +234,11 @@ impl SlashCommand for SettingsCommand {
 
         let search = InlineListSearchConfig {
             label: "Filter settings".into(),
-            placeholder: Some("Type to filter\u{2026}".into()),
+            placeholder: Some("Type to filter".into()),
         };
         ctx.handle.show_list_modal(
             "Settings".into(),
-            vec!["Select a setting to toggle/cycle (Esc to close)".into()],
+            vec!["Current session settings. Values update immediately.".into()],
             items,
             None,
             Some(search),

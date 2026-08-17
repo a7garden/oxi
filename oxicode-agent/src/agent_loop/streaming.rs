@@ -636,13 +636,13 @@ pub(crate) async fn stream_assistant_response(
                     message: Message::Assistant(error.clone()),
                 });
                 emit(super::AgentEvent::Error {
-                    message: format!("⚠ {}", friendly),
+                    message: friendly.clone(),
                     session_id: loop_ref.session_id.clone(),
                 });
 
                 return StreamOutcome::Error {
                     message: error,
-                    detail: format!("⚠ {}", friendly),
+                    detail: friendly,
                 };
             }
 

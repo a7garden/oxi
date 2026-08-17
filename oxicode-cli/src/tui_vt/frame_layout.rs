@@ -28,6 +28,19 @@ const COMPOSER_HEIGHT: u16 = 3;
 /// Shortcuts bar height (1 row).
 const SHORTCUTS_HEIGHT: u16 = 1;
 
+/// The live chat surface is intentionally denser than the generic vtui
+/// defaults: it should reserve space for conversation, not decorative frame
+/// padding.  A single horizontal gutter keeps text off the terminal edge;
+/// vertical gutters and their implied separator rows are unnecessary here.
+const CHAT_LAYOUT: LayoutConfig = LayoutConfig {
+    hpad_left: 1,
+    hpad_right: 1,
+    hpad_left_compact: 1,
+    hpad_right_compact: 1,
+    outer_vpad: 0,
+    outer_vpad_compact: 0,
+};
+
 // ─────────────────────────────────────────────────────────────────────────
 // Color helper (mirrors `main_loop::color_from_anstyle` — kept local so this
 // module is self-contained and `main_loop` needs no extra `pub` edits).
@@ -136,7 +149,7 @@ pub(super) fn render_chrome(
 
     let layout = AgentViewLayout::compute(
         area,
-        &LayoutConfig::default(),
+        &CHAT_LAYOUT,
         &ScrollbarConfig {
             enabled: false,
             ..Default::default()
@@ -175,7 +188,9 @@ pub(super) fn render_chrome(
     layout
 }
 
-/// Header context line: app · provider — model · git · tools.
+/// Quiet application chrome. Detailed session facts belong on the composer's
+/// top border, immediately beside the place where the user acts; keeping this
+/// row quiet avoids showing the model, path, and branch twice.
 fn header_line<'a>(state: &'a RenderState, styles: &ThemeStyles) -> Line<'a> {
     let ctx = &state.header_context;
     let fg = color_from_anstyle(Some(styles.foreground));
@@ -183,27 +198,23 @@ fn header_line<'a>(state: &'a RenderState, styles: &ThemeStyles) -> Line<'a> {
     let secondary = color_from_anstyle(styles.secondary.get_fg_color());
     let info = color_from_anstyle(styles.info.get_fg_color());
 
+    let workspace = ctx
+        .search_tools
+        .as_ref()
+        .map(|badge| badge.text.as_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("workspace");
+    let run_status = state.reasoning_stage.as_deref().unwrap_or("ready");
     Line::from(vec![
         Span::styled(
-            format!(" {} ", ctx.app_name),
+            format!(" {} ", ctx.app_name.to_ascii_uppercase()),
             Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!(" {} ", ctx.provider), Style::default().fg(info)),
-        Span::raw("  "),
-        Span::styled(
-            format!("\u{2500} {} ", ctx.model),
-            Style::default().fg(secondary),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("\u{2387} {} ", ctx.git),
-            Style::default().fg(secondary),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("\u{2699} {}", ctx.tools),
-            Style::default().fg(secondary),
-        ),
+        Span::styled(format!(" {workspace} "), Style::default().fg(secondary)),
+        Span::raw(" | "),
+        Span::styled(run_status.to_string(), Style::default().fg(info)),
+        Span::raw(" | "),
+        Span::styled(ctx.tools.clone(), Style::default().fg(secondary)),
     ])
 }
 

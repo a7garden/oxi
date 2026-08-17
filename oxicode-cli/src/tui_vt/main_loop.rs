@@ -7,6 +7,7 @@
 //! TUI main event loop — connects oxicode's `AgentSession` to vtcode-ui's
 //! `InlineSession` protocol and a ratatui rendering backend.
 
+use std::collections::VecDeque;
 use std::io::{self, Stdout, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +50,7 @@ use crate::app::agent_hub_registry::HubEntry;
 use crate::app::agent_session::SessionEvent;
 use crate::tui_vt::slash::file_commands::FileCommand;
 use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
+use oxicode_vtui::presentation::{BlockDisplayMode, TranscriptLine, VisibleItem, visible_items};
 
 use oxicode_textarea::{EditBuffer, ElementKind, TextArea, TextAreaState};
 
@@ -151,6 +153,48 @@ impl Drop for Tui {
 // Render state — shared between the input thread and the main loop.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// The one authoritative prompt queue shared by the input handler and agent
+/// worker.  The visible queue is a projection of this deque, never a second
+/// queue that can drift from execution order.
+#[derive(Default)]
+struct PromptQueue {
+    pending: parking_lot::Mutex<VecDeque<String>>,
+    wake: tokio::sync::Notify,
+}
+
+impl PromptQueue {
+    fn enqueue(&self, prompt: String) {
+        self.pending.lock().push_back(prompt);
+        self.wake.notify_one();
+    }
+
+    fn remove(&self, index: usize) -> Option<String> {
+        self.pending.lock().remove(index)
+    }
+
+    fn move_by(&self, index: usize, delta: isize) -> bool {
+        let mut pending = self.pending.lock();
+        let Some(target) = index.checked_add_signed(delta) else {
+            return false;
+        };
+        if index >= pending.len() || target >= pending.len() {
+            return false;
+        }
+        pending.swap(index, target);
+        true
+    }
+
+    async fn next(&self) -> String {
+        loop {
+            let notified = self.wake.notified();
+            if let Some(prompt) = self.pending.lock().pop_front() {
+                return prompt;
+            }
+            notified.await;
+        }
+    }
+}
+
 /// Mutable state the input thread edits (text buffer, scroll, footer) and
 /// the main loop reads for rendering.
 //
@@ -192,6 +236,13 @@ pub struct RenderState {
     pub slash_popup: SlashPopup,
     /// Current reasoning/tool stage (e.g. "tool: read"), shown above the composer.
     pub reasoning_stage: Option<String>,
+    /// Selected reasoning effort, reflected in the composer's context bar.
+    pub thinking_level: String,
+    /// Provider-reported prompt tokens for the most recently completed turn.
+    /// This is the closest available snapshot of the live context size.
+    pub context_tokens: Option<usize>,
+    /// Context capacity configured for the active agent session.
+    pub context_window: usize,
     /// Overlay modal/list state — `Some` when an overlay is open.
     pub overlay: Option<OverlayState>,
     /// Model IDs for the /model overlay picker (ordered same as overlay items).
@@ -312,6 +363,9 @@ impl Default for RenderState {
             pending_quit: false,
             slash_popup: SlashPopup::default(),
             reasoning_stage: None,
+            thinking_level: "medium".to_string(),
+            context_tokens: None,
+            context_window: 128_000,
             overlay: None,
             overlay_model_ids: Vec::new(),
             overlay_catalog_models: Vec::new(),
@@ -363,32 +417,6 @@ pub enum SecureInputOrigin {
     /// chaining straight into the key prompt so they can finish the
     /// setup without another navigation step.
     NewlyAdded { provider: String },
-}
-
-/// One rendered transcript line.
-#[derive(Debug, Clone)]
-pub struct TranscriptLine {
-    pub kind: InlineMessageKind,
-    pub segments: Vec<InlineSegment>,
-    /// Block group ID — consecutive lines of the same kind share a block.
-    /// Assigned incrementally when lines are appended.
-    pub block_id: usize,
-}
-
-/// Three-state display mode for a transcript block (grok-build parity).
-///
-/// The default is [`BlockDisplayMode::Truncated`] — finished long blocks
-/// show their head, an ellipsis gap, and a tail snippet rather than the
-/// full body, keeping the scrollback scannable.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum BlockDisplayMode {
-    /// Fully collapsed — only the first line shows (▸ marker).
-    Collapsed,
-    /// Default — first line + ellipsis gap + last N lines, body DIM.
-    #[default]
-    Truncated,
-    /// Fully expanded — every line shows at full weight.
-    Expanded,
 }
 
 /// In-transcript search state.
@@ -830,7 +858,9 @@ pub async fn run_tui(app: App) -> Result<()> {
     // `SetPrompt` / `SetPlaceholder` commands once it spins up its own
     // consumer; we set them eagerly so the very first frame is correct.
     handle.set_prompt("> ".to_string(), InlineTextStyle::default());
-    handle.set_placeholder(Some("Describe what you want to build\u{2026}".to_string()));
+    handle.set_placeholder(Some(
+        "Describe the task, or type / for commands".to_string(),
+    ));
 
     // Render state — shared between the input thread (which edits the
     // buffer) and the main loop (which reads it for drawing).
@@ -843,10 +873,11 @@ pub async fn run_tui(app: App) -> Result<()> {
     state.lock().todo_provider = session_handle.todo_provider();
     state.lock().session_swapper = Some(session_swapper.clone());
     state.lock().session_state = Some(app.session_state().clone());
+    state.lock().thinking_level = format!("{:?}", session.thinking_level()).to_ascii_lowercase();
     // Onboarding tip: surfaces the cheatsheet and help command on first run,
     // auto-dismisses after ~30s of rendering.
     state.lock().tip = Some(EphemeralTip {
-        text: "Press ? for shortcuts  \u{00b7}  /help for commands".to_string(),
+        text: "Press ? for shortcuts | /help for commands".to_string(),
         born_tick: 0,
         ttl_ticks: 900,
         key: "onboarding",
@@ -869,14 +900,20 @@ pub async fn run_tui(app: App) -> Result<()> {
         state.lock().autonomy_mode = Mode::load(&handle);
         handle
     });
-    spawn_input_thread(state.clone(), evt_tx.clone(), mode_handle);
+    let prompt_queue = Arc::new(PromptQueue::default());
+    spawn_input_thread(
+        state.clone(),
+        evt_tx.clone(),
+        mode_handle,
+        prompt_queue.clone(),
+    );
 
-    // Worker thread that owns the agent loop. Receives prompts over a
-    // tokio mpsc and dispatches them through `run_with_channel`. The
+    // Worker thread owns the agent loop and takes prompts from the shared
+    // authoritative queue before dispatching them through `run_with_channel`. The
     // returned `AgentEvent`s flow through a `std::sync::mpsc`; a paired
     // forwarder thread funnels them into the session's listener bus so
     // our subscriber above picks them up.
-    let prompt_tx = spawn_agent_worker(session_swapper.clone());
+    spawn_agent_worker(session_swapper.clone(), prompt_queue.clone());
 
     let result = run_event_loop(
         &mut tui.terminal,
@@ -886,13 +923,10 @@ pub async fn run_tui(app: App) -> Result<()> {
         &handle,
         &state,
         &session_swapper,
-        prompt_tx.clone(),
+        &prompt_queue,
     )
     .await;
 
-    // Drain the harness before tearing down the terminal. Even if the
-    // loop exited early we want to release the worker.
-    drop(prompt_tx);
     handle.shutdown();
     // Dropping `tui` restores the terminal. Drop is at function return.
     drop(tui);
@@ -913,7 +947,7 @@ async fn run_event_loop(
     handle: &InlineHandle,
     state: &Arc<parking_lot::Mutex<RenderState>>,
     session_swapper: &Arc<crate::app::agent_session_handle::SessionSwapper>,
-    prompt_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    prompt_queue: &Arc<PromptQueue>,
 ) -> Result<()> {
     // Drain any pending InlineCommands so the harness's initial set_header_context
     // (and similar) is observed before the first frame.
@@ -978,7 +1012,7 @@ async fn run_event_loop(
                     s.composer.set_text("");
                     if *auto_continue && !user_typed {
                         drop(s);
-                        let _ = prompt_tx.send(format!(
+                        prompt_queue.enqueue(format!(
                             "Read the handoff document at {} and continue \
                              from where the previous session left off.",
                             doc_path
@@ -996,7 +1030,17 @@ async fn run_event_loop(
                             )],
                         );
                     }
-                    handle_session_event(&mut state.lock(), handle, &event);
+                    let session = session_swapper.current();
+                    handle_session_event(&mut state.lock(), handle, &event, Some(&session));
+                } else {
+                    // Every regular agent event must reach the presentation
+                    // bridge.  The handoff path above already does this after
+                    // resetting the transcript; previously it was the *only*
+                    // path that did.  As a result, prompts ran in the worker
+                    // but token deltas, tool progress, and provider errors
+                    // were silently discarded before a frame could render.
+                    let session = session_swapper.current();
+                    handle_session_event(&mut state.lock(), handle, &event, Some(&session));
                 }
             }
 
@@ -1006,7 +1050,7 @@ async fn run_event_loop(
                     &mut state.lock(),
                     handle,
                     &session_swapper.current(),
-                    &prompt_tx,
+                    prompt_queue,
                     evt,
                 );
                 if outcome == LoopOutcome::Exit {
@@ -1251,10 +1295,28 @@ fn overlay_item_from(item: InlineListItem) -> OverlayListItem {
 /// Map a `SessionEvent` to the matching `InlineHandle` calls. This is the
 /// single place where the agent's event vocabulary meets the harness's
 /// transcript vocabulary.
-fn handle_session_event(state: &mut RenderState, handle: &InlineHandle, event: &SessionEvent) {
+fn handle_session_event(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    event: &SessionEvent,
+    session: Option<&crate::app::agent_session::AgentSessionHandle>,
+) {
     match event {
         SessionEvent::Agent(boxed) => {
-            map_agent_event(handle, *boxed.clone(), state);
+            let event = *boxed.clone();
+            if let (AgentEvent::Error { message, .. }, Some(session)) = (&event, session)
+                && is_missing_api_key_error(message)
+            {
+                let provider = provider_from_model_id(&session.model_id());
+                handle.append_line(
+                    InlineMessageKind::Info,
+                    vec![plain_segment(format!(
+                        "Authentication is required for '{provider}'. Enter an API key to continue."
+                    ))],
+                );
+                open_secure_prompt(state, handle, SecureInputOrigin::SetKey { provider });
+            }
+            map_agent_event(handle, event, state);
         }
         SessionEvent::CompactionStart { .. } => {
             handle.set_reasoning_stage(Some("Compacting\u{2026}".to_string()));
@@ -1268,9 +1330,8 @@ fn handle_session_event(state: &mut RenderState, handle: &InlineHandle, event: &
                 );
             }
         }
-        SessionEvent::ThinkingLevelChanged { .. } => {
-            // No rendering — the footer reflects this implicitly via the
-            // header context.
+        SessionEvent::ThinkingLevelChanged { level } => {
+            state.thinking_level = format!("{level:?}").to_ascii_lowercase();
         }
         SessionEvent::QueueUpdate { .. } => {
             // Surface the queue length as a footer status update.
@@ -1307,14 +1368,35 @@ fn handle_session_event(state: &mut RenderState, handle: &InlineHandle, event: &
     }
 }
 
+/// Whether a provider failure means the active credential is absent. Keep this
+/// deliberately narrow: transport, quota, and invalid-key errors must remain
+/// visible as errors instead of unexpectedly opening a credential prompt.
+fn is_missing_api_key_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("missing api key") || message.contains("api key is required")
+}
+
+/// The agent model id is always represented as `provider/model`. A malformed
+/// legacy id still gets a usable, explicit destination for the credential UI.
+fn provider_from_model_id(model_id: &str) -> String {
+    model_id
+        .split_once('/')
+        .map(|(provider, _)| provider)
+        .filter(|provider| !provider.is_empty())
+        .unwrap_or("provider")
+        .to_string()
+}
+
 /// Project the agent-level event variants onto the harness transcript.
 fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderState) {
     match event {
         AgentEvent::TextChunk { text } => {
+            state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.push_str(&text);
             handle.inline(InlineMessageKind::Agent, plain_segment(text));
         }
         AgentEvent::MessageStart { .. } => {
+            state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.clear();
         }
         AgentEvent::MessageUpdate { delta, .. } => match &delta {
@@ -1323,12 +1405,13 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 handle.inline(InlineMessageKind::Agent, plain_segment(text.clone()));
             }
             oxicode_sdk::StreamDelta::Thinking(text) => {
-                // Show thinking blocks as dimmed Info lines with a ✻ marker,
+                // Keep reasoning visually distinct without relying on symbols
+                // that vary across terminal fonts.
                 // visually distinct from the actual response text.
                 let mut style = InlineTextStyle::default();
                 style.effects |= anstyle::Effects::DIMMED;
                 let seg = InlineSegment {
-                    text: format!("\u{2733} {text}"),
+                    text: format!("[thinking] {text}"),
                     style: Arc::new(style),
                 };
                 handle.inline(InlineMessageKind::Info, seg);
@@ -1360,9 +1443,11 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::ToolStart { tool_name, .. } => {
             handle.append_line(
                 InlineMessageKind::Tool,
-                vec![plain_segment(format!("\u{2699} {tool_name}"))],
+                vec![plain_segment(format!("[tool] {tool_name}"))],
             );
-            handle.set_reasoning_stage(Some(format!("tool: {tool_name}")));
+            let stage = format!("tool: {tool_name}");
+            state.reasoning_stage = Some(stage.clone());
+            handle.set_reasoning_stage(Some(stage));
         }
         AgentEvent::ToolComplete { result } => {
             // If the result looks like a diff, render with green/red coloring.
@@ -1373,24 +1458,27 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 handle.append_line(
                     InlineMessageKind::Tool,
                     vec![InlineSegment {
-                        text: format!("\u{2713} {preview}"),
+                        text: format!("[done] {preview}"),
                         style: Arc::new(style),
                     }],
                 );
             }
-            handle.set_reasoning_stage(None);
+            state.reasoning_stage = Some("generating response".to_string());
+            handle.set_reasoning_stage(Some("generating response".to_string()));
             handle.set_input_enabled(true);
         }
         AgentEvent::ToolError { error, .. } => {
             handle.append_line(
                 InlineMessageKind::Error,
-                vec![plain_segment(format!("\u{2717} {error}"))],
+                vec![plain_segment(format!("[error] {error}"))],
             );
+            state.reasoning_stage = None;
             handle.set_reasoning_stage(None);
             handle.set_input_enabled(true);
         }
         AgentEvent::Error { message, .. } => {
             handle.append_line(InlineMessageKind::Error, vec![plain_segment(message)]);
+            state.reasoning_stage = None;
             handle.set_input_enabled(true);
             handle.set_input_status(None, None);
         }
@@ -1399,6 +1487,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             // (CompactionStart/End SessionEvents).
         }
         AgentEvent::Cancelled => {
+            state.reasoning_stage = None;
             handle.set_input_enabled(true);
             handle.set_input_status(None, Some("cancelled".to_string()));
         }
@@ -1407,6 +1496,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             max_attempts,
             ..
         } => {
+            state.reasoning_stage = Some(format!("retrying {attempt} of {max_attempts}"));
             handle.set_input_status(None, Some(format!("retry {attempt}/{max_attempts}")));
         }
         AgentEvent::TurnEnd { .. } => {
@@ -1419,6 +1509,13 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             // inputs.
             state.drain_queue_head();
             handle.set_reasoning_stage(None);
+        }
+        AgentEvent::Usage { input_tokens, .. } => {
+            // `input_tokens` is the provider's tokenization of the complete
+            // prompt for this turn, so it is a useful live snapshot of the
+            // context currently occupying the window (unlike a character
+            // count or a local approximation).
+            state.context_tokens = Some(input_tokens);
         }
         _ => {
             // Other variants (TurnStart/End, AgentStart/End, Usage, …) are
@@ -1758,7 +1855,7 @@ fn handle_inline_event(
     state: &mut RenderState,
     handle: &InlineHandle,
     session: &crate::app::agent_session::AgentSessionHandle,
-    prompt_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    prompt_queue: &Arc<PromptQueue>,
     evt: InlineEvent,
 ) -> LoopOutcome {
     match evt {
@@ -1846,7 +1943,7 @@ fn handle_inline_event(
                         ) {
                             // Send expanded text directly to the agent worker.
                             // The original `/cmd args` is already echoed above.
-                            let _ = prompt_tx.send(expanded);
+                            prompt_queue.enqueue(expanded);
                             LoopOutcome::Continue
                         } else {
                             ctx.reply(
@@ -1866,14 +1963,14 @@ fn handle_inline_event(
                 state.queued_inputs.push(prompt.clone());
                 state.show_tip(
                     "send_now",
-                    "Ctrl+Enter sends now  \u{00b7}  Ctrl+; manages queue",
+                    "Ctrl+Enter sends now | Ctrl+; manages queue",
                     240,
                     true,
                 );
             }
             // Hand the prompt to the worker thread. If the worker has
             // already exited (e.g. shutdown), drop it on the floor.
-            let _ = prompt_tx.send(prompt);
+            prompt_queue.enqueue(prompt);
         }
         InlineEvent::Cancel => {
             // Esc-driven cancel. While a stream is running, abort it (the
@@ -2145,15 +2242,26 @@ fn handle_inline_event(
                         };
                         let auth = crate::store::auth_storage::shared_auth_storage();
                         auth.set_api_key(&provider, text.clone());
+                        // The agent keeps a constructed provider instance. Saving a
+                        // key alone is not enough for an already-open session: ask
+                        // the resolver for a fresh provider immediately so the next
+                        // message uses this credential without a restart or model
+                        // switch.
+                        let refreshed = session.refresh_api_key();
                         let msg = match origin {
                             SecureInputOrigin::SetKey { .. } => format!(
-                                "Saved API key for '{provider}' ({} chars).",
-                                text.chars().count()
+                                "Saved API key for '{provider}'. {}",
+                                match refreshed {
+                                    Ok(()) => "Ready to retry your message.",
+                                    Err(_) => "Restart this session before retrying.",
+                                }
                             ),
                             SecureInputOrigin::NewlyAdded { .. } => format!(
-                                "Added and configured '{provider}' ({} chars).\n\
-                                 Run /models to browse available models, or /providers to manage.",
-                                text.chars().count()
+                                "Added and configured '{provider}'. {}",
+                                match refreshed {
+                                    Ok(()) => "Use /models to choose a model, or send a message.",
+                                    Err(_) => "Restart this session before using it.",
+                                }
                             ),
                         };
                         handle.append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
@@ -2267,6 +2375,7 @@ fn spawn_input_thread(
     state: Arc<parking_lot::Mutex<RenderState>>,
     evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
     mode_handle: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
+    prompt_queue: Arc<PromptQueue>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         // Poll stdin in a tight loop. `event::poll` returns `Ok(false)` on
@@ -2718,6 +2827,7 @@ fn spawn_input_thread(
                             let idx = s.queue_selected.min(s.queued_inputs.len() - 1);
                             match ch {
                                 'x' | 'X' => {
+                                    let _ = prompt_queue.remove(idx);
                                     s.queued_inputs.remove(idx);
                                     if s.queue_selected >= s.queued_inputs.len()
                                         && !s.queued_inputs.is_empty()
@@ -2727,20 +2837,24 @@ fn spawn_input_thread(
                                     continue;
                                 }
                                 'e' => {
-                                    let entry = s.queued_inputs.remove(idx);
-                                    s.composer.set_text(&entry);
-                                    s.queue_panel_open = false;
-                                    continue;
+                                    if let Some(entry) = prompt_queue.remove(idx) {
+                                        s.queued_inputs.remove(idx);
+                                        s.composer.set_text(&entry);
+                                        s.queue_panel_open = false;
+                                        continue;
+                                    }
                                 }
                                 'J' => {
-                                    if idx + 1 < s.queued_inputs.len() {
+                                    if prompt_queue.move_by(idx, 1)
+                                        && idx + 1 < s.queued_inputs.len()
+                                    {
                                         s.queued_inputs.swap(idx, idx + 1);
                                         s.queue_selected = idx + 1;
                                     }
                                     continue;
                                 }
                                 'K' => {
-                                    if idx > 0 {
+                                    if idx > 0 && prompt_queue.move_by(idx, -1) {
                                         s.queued_inputs.swap(idx, idx - 1);
                                         s.queue_selected = idx - 1;
                                     }
@@ -3081,9 +3195,8 @@ fn handle_file_search_key(
 
 fn spawn_agent_worker(
     session_swapper: Arc<crate::app::agent_session_handle::SessionSwapper>,
-) -> tokio::sync::mpsc::UnboundedSender<String> {
-    let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-
+    prompt_queue: Arc<PromptQueue>,
+) {
     std::thread::spawn(move || {
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -3100,15 +3213,14 @@ fn spawn_agent_worker(
             let local = tokio::task::LocalSet::new();
             local
                 .run_until(async move {
-                    while let Some(prompt) = prompt_rx.recv().await {
+                    loop {
+                        let prompt = prompt_queue.next().await;
                         run_one_prompt(&session_swapper.current(), prompt).await;
                     }
                 })
                 .await;
         });
     });
-
-    prompt_tx
 }
 
 async fn run_one_prompt(session: &crate::app::agent_session::AgentSessionHandle, prompt: String) {
@@ -3221,6 +3333,7 @@ async fn build_agent_session(app: &App) -> Result<crate::app::agent_session::Age
         thinking_level: None,
         scoped_models: Vec::new(),
         tool_registry: Some(tools),
+        oxicode: Some(app.oxicode().clone()),
         // TUI runtime: share the App's session state so /steer, /follow_up,
         // and Ctrl+C continue to take effect across the session.
         session_state: Some(app.session_state().clone()),
@@ -3338,10 +3451,8 @@ fn build_command_palette() -> OverlayState {
 static FRAME_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Tracks whether the terminal title currently shows a running state.
 static TITLE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Braille spinner frames for the tab title.
-const TITLE_SPINNER: &[&str] = &[
-    "\u{2807}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
-];
+/// ASCII spinner frames for the tab title. They remain readable in every font.
+const TITLE_SPINNER: &[&str] = &["-", "\\", "|", "/"];
 
 /// Wave brightness for accent rail animation: sin²(tick·speed + row/rows·2π).
 /// Returns [0.0, 1.0] — 1.0 = full color, 0.0 = dimmed toward background.
@@ -3418,27 +3529,33 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
         }
     }
     render_transcript(frame, layout.scrollback, state, tick);
+    let mut pinned_area = layout.scrollback;
     if !state.queued_inputs.is_empty() {
-        render_queue_pane(frame, layout.scrollback, state);
+        let used = render_queue_pane(frame, pinned_area, state);
+        pinned_area.y = pinned_area.y.saturating_add(used);
+        pinned_area.height = pinned_area.height.saturating_sub(used);
     }
     if !state.todo_items.is_empty() {
-        render_todo_pane(frame, layout.scrollback, &state.todo_items);
+        render_todo_pane(frame, pinned_area, &state.todo_items);
     }
-    if !state.follow_ups.is_empty() {
-        render_follow_ups(frame, layout.prompt, &state.follow_ups);
-    }
+    // The row above the composer has one owner per frame. A live run takes
+    // precedence over passive suggestions and tips, so status never vanishes
+    // beneath onboarding text.
     if let Some(stage) = &state.reasoning_stage {
         render_reasoning_indicator(frame, layout.prompt, stage);
+    } else if !state.follow_ups.is_empty() {
+        render_follow_ups(frame, layout.prompt, &state.follow_ups);
+    } else {
+        // Ephemeral tip banner above the composer (auto-dismissed by tick TTL).
+        let occluded = state.overlay.is_some() || state.confirmation.is_some();
+        if let Some(tip) = &state.tip
+            && tip_is_visible(tip, tick)
+            && !(tip.ambient && occluded)
+        {
+            render_tip(frame, layout.prompt, &tip.text);
+        }
     }
     render_composer(frame, layout.prompt, state);
-    // Ephemeral tip banner above the composer (auto-dismissed by tick TTL).
-    let occluded = state.overlay.is_some() || state.confirmation.is_some();
-    if let Some(tip) = &state.tip
-        && tip_is_visible(tip, tick)
-        && !(tip.ambient && occluded)
-    {
-        render_tip(frame, layout.prompt, &tip.text);
-    }
     if state.slash_popup.open {
         render_slash_popup(frame, layout.prompt, state);
     }
@@ -3538,7 +3655,7 @@ fn render_agent_hub(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 /// Render an overlay (Modal / List) as a centered, bordered panel. Modals
 /// show only their title + descriptive lines; lists also render a search bar
 /// (when configured) and a scrollable item list with the selected item
-/// marked by ▸.
+/// marked by a plain-text cursor.
 fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     let styles = active_styles();
     // Secure-input overlays draw a compact frame: title + lines + a single
@@ -3565,7 +3682,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         ));
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Plain)
             .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
             .title(title);
         let inner = block.inner(rect);
@@ -3671,7 +3788,9 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         }
         return;
     }
-    let visible_max = (area.height as usize).saturating_sub(6).max(3);
+    // Keep space for the title, contextual content, and a stable key-help
+    // footer. The item viewport itself scrolls around the active item.
+    let visible_max = (area.height as usize).saturating_sub(7).max(3);
 
     // Filter items by the search value when search is enabled.
     let filtered: Vec<usize> = match &overlay.search {
@@ -3703,7 +3822,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     let lines_count = overlay.lines.len();
     let items_count = filtered.len().min(visible_max);
     let height_inner = (lines_count + items_count + if has_search { 1 } else { 0 }) as u16;
-    let desired_h = height_inner.saturating_add(2); // borders
+    let desired_h = height_inner.saturating_add(3); // borders + key-help footer
     let height = desired_h.min(area.height.saturating_sub(2));
     let width = area.width.clamp(30, 80);
     let rect = Rect {
@@ -3722,7 +3841,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     ));
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Plain)
         .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
         .title(title);
     let inner = block.inner(rect);
@@ -3811,10 +3930,13 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             row_area,
         );
     } else {
-        for (display_idx, &item_idx) in filtered.iter().take(visible_max).enumerate() {
+        let first_visible = selected_filtered_pos
+            .saturating_sub(visible_max / 2)
+            .min(filtered.len().saturating_sub(visible_max));
+        for &item_idx in filtered.iter().skip(first_visible).take(visible_max) {
             let item = &overlay.items[item_idx];
-            let is_selected = display_idx == selected_filtered_pos;
-            let marker = if is_selected { "\u{25b8} " } else { "  " };
+            let is_selected = item_idx == overlay.selected;
+            let marker = if is_selected { "> " } else { "  " };
             let indent = "  ".repeat(item.indent as usize);
             let item_style = if is_selected {
                 Style::default().fg(primary).add_modifier(Modifier::BOLD)
@@ -3851,11 +3973,33 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             row = row.saturating_add(1);
         }
     }
+
+    // A panel should always explain how to leave it and how to commit a
+    // choice. This avoids hiding essential controls in a separate help view.
+    if row < inner.bottom() {
+        let hint = if overlay.items.iter().any(|item| item.selection.is_some()) {
+            "Enter select | Up/Down move | Esc close"
+        } else {
+            "Esc close"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                hint,
+                Style::default().fg(secondary).add_modifier(Modifier::DIM),
+            ))),
+            Rect {
+                x: inner.left(),
+                y: inner.bottom().saturating_sub(1),
+                width: inner.width,
+                height: 1,
+            },
+        );
+    }
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tick: u64) {
     if state.transcript.is_empty() {
-        render_welcome(frame, area);
+        render_welcome(frame, area, state);
         return;
     }
     let styles = active_styles();
@@ -3885,91 +4029,33 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
 
     let mut display: Vec<(usize, InlineMessageKind, Line<'_>)> =
         Vec::with_capacity(state.transcript.len());
-    // Group consecutive lines into blocks, then render each block according
-    // to its display mode (Collapsed / Truncated / Expanded). Absent
-    // overrides fall back to Truncated — the grok-build default that keeps
-    // long finished blocks scannable (head + ellipsis gap + tail).
-    const TRUNC_TAIL: usize = 3;
     let dim_style = Style::default()
         .fg(color_from_anstyle(styles.secondary.get_fg_color()))
         .add_modifier(Modifier::DIM);
-
-    let mut blocks: Vec<(usize, Vec<(usize, &TranscriptLine)>)> = Vec::new();
-    for (idx, tl) in state.transcript.iter().enumerate() {
-        if blocks.last().is_some_and(|(id, _)| *id == tl.block_id) {
-            blocks.last_mut().unwrap().1.push((idx, tl));
-        } else {
-            blocks.push((tl.block_id, vec![(idx, tl)]));
-        }
-    }
-
-    for (block_id, lines) in &blocks {
-        let mode = state.block_mode(*block_id);
-        let len = lines.len();
-        match mode {
-            BlockDisplayMode::Collapsed => {
-                let &(idx, tl) = &lines[0];
-                let is_match = search_set.contains(&idx);
-                let line =
-                    transcript_line_marked(tl, &styles, true, is_match, current_match == Some(idx));
-                display.push((idx, tl.kind, line));
+    for item in visible_items(&state.transcript, |block_id| state.block_mode(block_id)) {
+        match item {
+            VisibleItem::Line {
+                source_index,
+                folded,
+            } => {
+                let tl = &state.transcript[source_index];
+                let is_match = search_set.contains(&source_index);
+                let line = transcript_line_marked(
+                    tl,
+                    &styles,
+                    folded,
+                    is_match,
+                    current_match == Some(source_index),
+                );
+                display.push((source_index, tl.kind, line));
             }
-            BlockDisplayMode::Expanded => {
-                for &(idx, tl) in lines {
-                    let is_match = search_set.contains(&idx);
-                    let line = transcript_line_marked(
-                        tl,
-                        &styles,
-                        false,
-                        is_match,
-                        current_match == Some(idx),
-                    );
-                    display.push((idx, tl.kind, line));
-                }
-            }
-            BlockDisplayMode::Truncated => {
-                if len <= TRUNC_TAIL + 1 {
-                    // Short enough — show every line at full weight.
-                    for &(idx, tl) in lines {
-                        let is_match = search_set.contains(&idx);
-                        let line = transcript_line_marked(
-                            tl,
-                            &styles,
-                            false,
-                            is_match,
-                            current_match == Some(idx),
-                        );
-                        display.push((idx, tl.kind, line));
-                    }
-                } else {
-                    // Head (first line, full weight).
-                    let &(hidx, htl) = &lines[0];
-                    let is_match = search_set.contains(&hidx);
-                    let line = transcript_line_marked(
-                        htl,
-                        &styles,
-                        false,
-                        is_match,
-                        current_match == Some(hidx),
-                    );
-                    display.push((hidx, htl.kind, line));
-                    // Ellipsis gap summarising the hidden middle.
-                    let hidden = len - 1 - TRUNC_TAIL;
-                    let gap = Line::styled(format!("  \u{2026} +{hidden} lines"), dim_style);
-                    display.push((hidx, htl.kind, gap));
-                    // Tail (last N lines, in order).
-                    for &(idx, tl) in lines.iter().rev().take(TRUNC_TAIL).rev() {
-                        let is_match = search_set.contains(&idx);
-                        let line = transcript_line_marked(
-                            tl,
-                            &styles,
-                            false,
-                            is_match,
-                            current_match == Some(idx),
-                        );
-                        display.push((idx, tl.kind, line));
-                    }
-                }
+            VisibleItem::Gap {
+                source_index,
+                hidden_lines,
+            } => {
+                let tl = &state.transcript[source_index];
+                let gap = Line::styled(format!("  \u{2026} +{hidden_lines} lines"), dim_style);
+                display.push((source_index, tl.kind, gap));
             }
         }
     }
@@ -4183,43 +4269,43 @@ fn transcript_line_marked<'a>(
     let (kind_style, marker) = match line.kind {
         InlineMessageKind::Agent => (
             Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
-            "\u{25cf}", // ●
+            "assistant",
         ),
         InlineMessageKind::User => (
             Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
-            "\u{276f}", // ❯
+            "you",
         ),
         InlineMessageKind::Tool => (
             Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
-            "\u{2699}", // ⚙
+            "tool",
         ),
         InlineMessageKind::Error => (
             Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
-            "\u{2717}", // ✗
+            "error",
         ),
         InlineMessageKind::Warning => (
             Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
-            "\u{26a0}", // ⚠
+            "warning",
         ),
         InlineMessageKind::Info => (
             Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-            "\u{2139}", // ℹ
+            "info",
         ),
         InlineMessageKind::Policy => (
             Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
-            "\u{25c6}", // ◆
+            "policy",
         ),
         InlineMessageKind::Pty => (
             Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
-            "\u{258c}", // ▌
+            "shell",
         ),
     };
 
-    // Fold marker: ▸ for folded, ▾ for unfolded (shown on first line of block).
+    // Use text labels rather than font-dependent pictograms.
     let prefix = if folded {
-        format!("\u{25b8} {} ", marker) // ▸
+        format!("[+] {marker}: ")
     } else {
-        format!("{} ", marker)
+        format!("{marker}: ")
     };
 
     // Highlight background for search matches.
@@ -4321,8 +4407,12 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())));
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
+        // The top border is useful real estate. It carries the active session
+        // context instead of spending a full row on a generic "MESSAGE"
+        // label, while the border still makes the input target unmistakable.
+        .title(composer_context_line(state, area.width));
 
     // Place the prefix in a leading line, then render the textarea in the
     // remaining width. When the body is empty AND a placeholder is
@@ -4393,77 +4483,163 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     }
 }
 
-/// Render a welcome banner when the transcript is empty, using the vtui
-/// `WelcomeLayout` for proper geometry on wide terminals.
-fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
+/// Compact session facts embedded in the composer's top border.
+///
+/// The field order is deliberately task-oriented: model and reasoning first,
+/// then place/version-control context, then the capacity signal. At narrower
+/// widths lower-priority facts disappear as complete fields rather than being
+/// clipped halfway through a path or branch name.
+fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
+    let styles = active_styles();
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
+    let fg = color_from_anstyle(Some(styles.foreground));
+    let muted = color_from_anstyle(styles.secondary.get_fg_color());
+    let info = color_from_anstyle(styles.info.get_fg_color());
+
+    let model = state
+        .header_context
+        .model
+        .strip_prefix(&format!("{}/", state.header_context.provider))
+        .unwrap_or(&state.header_context.model);
+    let workspace = state
+        .cwd
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "workspace".to_string());
+    let branch = state
+        .header_context
+        .persistent_memory
+        .as_ref()
+        .map(|badge| badge.text.as_str())
+        .filter(|branch| !branch.is_empty())
+        .unwrap_or("—");
+    let context = match state.context_tokens {
+        Some(used) => {
+            let percent = used.saturating_mul(100) / state.context_window.max(1);
+            format!(
+                "{}/{} {percent}%",
+                compact_token_count(used),
+                compact_token_count(state.context_window)
+            )
+        }
+        None => format!("0/{}", compact_token_count(state.context_window)),
+    };
+
+    let mut spans = vec![Span::styled(
+        " OXICODE ",
+        Style::default().fg(primary).add_modifier(Modifier::BOLD),
+    )];
+    let mut field = |label: &str, value: &str, value_style: Style| {
+        spans.push(Span::styled(" | ", Style::default().fg(muted)));
+        spans.push(Span::styled(label.to_string(), Style::default().fg(muted)));
+        spans.push(Span::styled(value.to_string(), value_style));
+    };
+
+    field(
+        "MODEL ",
+        model,
+        Style::default().fg(fg).add_modifier(Modifier::BOLD),
+    );
+    if width >= 58 {
+        field("THINK ", &state.thinking_level, Style::default().fg(info));
+    }
+    if width >= 82 {
+        field("DIR ", &workspace, Style::default().fg(fg));
+    }
+    if width >= 104 {
+        field("GIT ", branch, Style::default().fg(fg));
+    }
+    if width >= 124 {
+        field("CTX ", &context, Style::default().fg(info));
+    }
+    if width >= 148
+        && let Some(stage) = &state.reasoning_stage
+    {
+        field(
+            "RUN ",
+            stage,
+            Style::default().fg(primary).add_modifier(Modifier::BOLD),
+        );
+    }
+    spans.push(Span::raw(" "));
+    Line::from(spans)
+}
+
+fn compact_token_count(tokens: usize) -> String {
+    if tokens >= 1_000 {
+        let whole = tokens / 1_000;
+        let decimal = (tokens % 1_000) / 100;
+        if decimal == 0 {
+            format!("{whole}K")
+        } else {
+            format!("{whole}.{decimal}K")
+        }
+    } else {
+        tokens.to_string()
+    }
+}
+
+/// Render a compact onboarding card when the transcript is empty.
+///
+/// The card answers the three questions a fresh terminal should answer at a
+/// glance: where am I, which model will answer, and what can I do next.
+fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let styles = active_styles();
     let primary = color_from_anstyle(styles.primary.get_fg_color());
     let fg = color_from_anstyle(Some(styles.foreground));
     let secondary = color_from_anstyle(styles.secondary.get_fg_color());
-
-    // For wide terminals, use the hero-box layout; otherwise a simple
-    // centered paragraph is more reliable for narrow viewports.
-    if area.width >= 90 {
-        use oxicode_vtui::design::layout::WelcomeLayout;
-        let layout = WelcomeLayout::compute(area, 3, 0, 0, 1, 0, false);
-        let logo_area = if layout.has_hero_box() {
-            layout.hero_logo
-        } else {
-            layout.logo
-        };
-        if logo_area.height > 0 {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    "\u{25cf} oxicode",
-                    Style::default().fg(primary).add_modifier(Modifier::BOLD),
-                )))
-                .alignment(Alignment::Center),
-                logo_area,
-            );
-        }
-        if layout.tip.height > 0 {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    "Type a message to begin, or press / for commands.",
-                    Style::default().fg(fg),
-                )))
-                .alignment(Alignment::Center),
-                layout.tip,
-            );
-        }
-        if layout.version.height > 0 {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("v{}", env!("CARGO_PKG_VERSION")),
-                    Style::default().fg(secondary).add_modifier(Modifier::DIM),
-                )))
-                .alignment(Alignment::Center),
-                layout.version,
-            );
-        }
-        return;
-    }
-
-    // Narrow terminal fallback — simple centered paragraph.
-    let version = env!("CARGO_PKG_VERSION");
-    let text = vec![
-        Line::from(""),
-        Line::from(""),
+    let workspace = state
+        .cwd
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "workspace".to_string());
+    let lines = vec![
         Line::from(Span::styled(
-            "\u{25cf} oxicode",
+            "OXICODE",
             Style::default().fg(primary).add_modifier(Modifier::BOLD),
         )),
+        Line::from(Span::styled(
+            "Terminal coding assistant",
+            Style::default().fg(secondary).add_modifier(Modifier::DIM),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("WORKSPACE  ", Style::default().fg(secondary)),
+            Span::styled(
+                workspace,
+                Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("MODEL      ", Style::default().fg(secondary)),
+            Span::styled(
+                format!(
+                    "{} / {}",
+                    state.header_context.provider, state.header_context.model
+                ),
+                Style::default().fg(fg),
+            ),
+        ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Type a message to begin, or press / for commands.",
+            "Enter  send     /  commands     @  attach a file",
             Style::default().fg(fg),
         )),
         Line::from(Span::styled(
-            format!("v{version} \u{2014} /help for commands"),
+            "?  shortcuts     /model  change model     /help  all commands",
             Style::default().fg(secondary),
         )),
     ];
-    frame.render_widget(Paragraph::new(text).alignment(Alignment::Center), area);
+    let height = lines.len().min(area.height as usize) as u16;
+    let card = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width: area.width,
+        height,
+    };
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), card);
 }
 
 /// Render a 1-row reasoning/tool-stage indicator just above the composer.
@@ -4475,11 +4651,16 @@ fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage:
         width: composer_area.width,
         height: 1,
     };
-    let spinner = "\u{25cc}"; // ◌
     let line = Line::from(vec![
         Span::styled(
-            format!("{spinner} "),
-            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
+            "RUNNING",
+            Style::default()
+                .fg(color_from_anstyle(styles.primary.get_fg_color()))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " | ",
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
         ),
         Span::styled(
             stage.to_string(),
@@ -4492,12 +4673,16 @@ fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage:
 }
 
 /// Render queued input prompts as a compact pane at the top of the scrollback.
-fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderState) {
+fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderState) -> u16 {
     let styles = active_styles();
     let entries = &state.queued_inputs;
     let interactive = state.queue_panel_open;
     let selected = state.queue_selected.min(entries.len().saturating_sub(1));
-    let height = entries.len() as u16 + 1;
+    let height = if interactive {
+        entries.len() as u16 + 1
+    } else {
+        1
+    };
     let area = Rect {
         x: scrollback.x,
         y: scrollback.y,
@@ -4507,30 +4692,38 @@ fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderStat
     let info = color_from_anstyle(styles.info.get_fg_color());
     let secondary = color_from_anstyle(styles.secondary.get_fg_color());
     let primary = color_from_anstyle(styles.primary.get_fg_color());
+    if !interactive {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    format!("QUEUED {}", entries.len()),
+                    Style::default().fg(primary).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " | Ctrl+; manage",
+                    Style::default().fg(secondary).add_modifier(Modifier::DIM),
+                ),
+            ])),
+            area,
+        );
+        return height;
+    }
     let items: Vec<Line<'_>> = entries
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let prefix = if interactive {
-                format!("#{} ", i + 1)
-            } else {
-                "\u{2261} ".to_string()
-            };
-            let prefix_style = if interactive && i == selected {
+            let prefix = format!("#{} ", i + 1);
+            let prefix_style = if i == selected {
                 Style::default().fg(primary).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(info)
             };
-            let text_style = if interactive && i == selected {
+            let text_style = if i == selected {
                 Style::default().fg(primary).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(secondary)
             };
-            let marker = if interactive && i == selected {
-                "\u{25b8} " // ▸
-            } else {
-                "  "
-            };
+            let marker = if i == selected { "> " } else { "  " };
             Line::from(vec![
                 Span::styled(prefix, prefix_style),
                 Span::styled(marker, prefix_style),
@@ -4544,6 +4737,7 @@ fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderStat
         )),
         area,
     );
+    height
 }
 
 /// Flatten todo phases into `(content, status)` pairs for the sticky pane.
@@ -4569,15 +4763,14 @@ fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, T
     let lines: Vec<Line<'_>> = items
         .iter()
         .map(|(text, status)| {
-            // Per-status glyph + color so the current task (▶), blocked
-            // tasks (⏸), and abandoned tasks (✗) are distinguishable at a
-            // glance, not just done (☑) vs. open (☐).
+            // Text markers work in every terminal font and do not depend on
+            // pictograms for status recognition.
             let (marker, color) = match status {
-                TodoStatus::Completed => ("\u{2611}", Some(styles.foreground)), // ☑
-                TodoStatus::InProgress => ("\u{25B6}", styles.primary.get_fg_color()), // ▶
-                TodoStatus::Blocked => ("\u{23F8}", styles.info.get_fg_color()), // ⏸
-                TodoStatus::Abandoned => ("\u{2717}", styles.error.get_fg_color()), // ✗
-                TodoStatus::Pending => ("\u{2610}", styles.secondary.get_fg_color()), // ☐
+                TodoStatus::Completed => ("done", Some(styles.foreground)),
+                TodoStatus::InProgress => ("now", styles.primary.get_fg_color()),
+                TodoStatus::Blocked => ("wait", styles.info.get_fg_color()),
+                TodoStatus::Abandoned => ("skip", styles.error.get_fg_color()),
+                TodoStatus::Pending => ("todo", styles.secondary.get_fg_color()),
             };
             let text_style = if *status == TodoStatus::Completed {
                 Style::default()
@@ -4618,7 +4811,7 @@ fn render_follow_ups(frame: &mut Frame<'_>, composer_area: Rect, chips: &[String
             spans.push(Span::raw("  "));
         }
         spans.push(Span::styled(
-            format!("\u{25b8} {chip}"),
+            format!("[{}]", chip),
             Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
         ));
     }
@@ -4640,7 +4833,7 @@ fn render_tip(frame: &mut Frame, composer_area: Rect, text: &str) {
         height: 1,
     };
     let line = Line::styled(
-        format!(" \u{2139} {text}"),
+        format!(" note: {text}"),
         Style::default()
             .fg(color_from_anstyle(styles.info.get_fg_color()))
             .add_modifier(Modifier::DIM),
@@ -4657,9 +4850,9 @@ fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &Render
         return;
     }
 
-    let max_visible = 8usize;
+    let max_visible = 7usize;
     let visible = items.len().min(max_visible);
-    let popup_h = visible as u16 + 2; // +2 for top/bottom border
+    let popup_h = visible as u16 + 3; // borders + persistent key-help row
     let width = composer_area.width.min(64);
     let popup_area = Rect {
         x: composer_area.left(),
@@ -4671,14 +4864,14 @@ fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &Render
 
     let border_color = color_from_anstyle(styles.secondary.get_fg_color());
     let title = Line::from(Span::styled(
-        " Commands ",
+        " COMMANDS ",
         Style::default()
             .fg(color_from_anstyle(styles.primary.get_fg_color()))
             .add_modifier(Modifier::BOLD),
     ));
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Plain)
         .border_style(Style::default().fg(border_color))
         .title(title);
     let inner = block.inner(popup_area);
@@ -4706,7 +4899,7 @@ fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &Render
             height: 1,
         };
 
-        let marker = if is_selected { "\u{25b8} " } else { "  " }; // ▸ or space
+        let marker = if is_selected { "> " } else { "  " };
         let label_style = if is_selected {
             Style::default().fg(primary).add_modifier(Modifier::BOLD)
         } else {
@@ -4721,6 +4914,18 @@ fn render_slash_popup(frame: &mut Frame<'_>, composer_area: Rect, state: &Render
         ]);
         frame.render_widget(Paragraph::new(line), row_area);
     }
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "Enter insert | Up/Down move | Esc close",
+            Style::default().fg(secondary).add_modifier(Modifier::DIM),
+        ))),
+        Rect {
+            x: inner.left(),
+            y: inner.bottom().saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        },
+    );
 }
 
 /// Render the @-file-search dropdown as a floating panel above the
@@ -4738,7 +4943,7 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
 
     let max_visible = 10usize;
     let visible = items.len().min(max_visible);
-    let popup_h = visible as u16 + 2; // +2 for top/bottom border
+    let popup_h = visible as u16 + 3; // borders + persistent key-help row
     let width = composer_area.width.min(72);
     let popup_area = Rect {
         x: composer_area.left(),
@@ -4750,9 +4955,9 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
 
     let border_color = color_from_anstyle(styles.secondary.get_fg_color());
     let title_str = if fs.hidden_mode {
-        " Files (hidden) "
+        " FILES: HIDDEN "
     } else {
-        " Files "
+        " FILES "
     };
     let title = Line::from(Span::styled(
         title_str,
@@ -4762,7 +4967,7 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
     ));
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Plain)
         .border_style(Style::default().fg(border_color))
         .title(title);
     let inner = block.inner(popup_area);
@@ -4782,7 +4987,7 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
             height: 1,
         };
 
-        let marker = if is_selected { "\u{25b8} " } else { "  " }; // ▸ or space
+        let marker = if is_selected { "> " } else { "  " };
         let path_style = if is_selected {
             Style::default().fg(primary).add_modifier(Modifier::BOLD)
         } else {
@@ -4797,7 +5002,7 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
 
     // Footer hint: show result count + key bindings.
     if popup_h >= 4 {
-        let hint_y = inner.bottom();
+        let hint_y = inner.bottom().saturating_sub(1);
         let hint_area = Rect {
             x: inner.left(),
             y: hint_y,
@@ -4805,7 +5010,7 @@ fn render_file_search_dropdown(frame: &mut Frame<'_>, composer_area: Rect, state
             height: 1,
         };
         let count = items.len();
-        let hint = format!("{count} files  \u{00b7}  Tab accept  Esc cancel");
+        let hint = format!("{count} files | Tab accept | Esc cancel");
         let _ = secondary; // suppress unused warning
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -5088,7 +5293,7 @@ fn try_render_diff(content: &str, handle: &InlineHandle) -> bool {
     handle.append_line(
         InlineMessageKind::Tool,
         vec![InlineSegment {
-            text: format!("\u{2713} diff (+{additions} \u{2212}{deletions})"),
+            text: format!("[diff] +{additions} -{deletions}"),
             style: Arc::new(hdr_style),
         }],
     );
@@ -5356,12 +5561,12 @@ mod render_tests {
         composer.set_cursor(5);
         state.composer = composer;
         let caret = terminal_caret(&state);
-        // layout.prompt = Rect{x:2,y:18,w:76,h:3}; inner = Rect{x:3,y:19};
-        // textarea_area = Rect{x:3+prefix_w(2)=5, y:19}; cursor_pos_with_state
-        // returns (area.x + col, area.y + row) = (5 + 5, 19 + 0) = (10, 19).
+        // The dense chat layout leaves a 1-column side gutter and no outer
+        // vertical padding: prompt = Rect{x:1,y:20,w:78,h:3}; inner starts at
+        // (2, 21), and the 2-column prefix puts the body at x=4.
         assert_eq!(
             caret,
-            Some((10, 19)),
+            Some((9, 21)),
             "ASCII caret must sit right after '> hello'"
         );
     }
@@ -5377,10 +5582,10 @@ mod render_tests {
         composer.set_cursor(body.len()); // 6 bytes (end), 4 display cols
         state.composer = composer;
         let caret = terminal_caret(&state);
-        // textarea_area.x = 5, col = 4 -> (5 + 4, 19) = (9, 19).
+        // textarea_area.x = 4, col = 4 -> (4 + 4, 21) = (8, 21).
         assert_eq!(
             caret,
-            Some((9, 19)),
+            Some((8, 21)),
             "CJK caret must sit after 4 display columns (not 6 bytes)"
         );
     }
@@ -5396,12 +5601,61 @@ mod render_tests {
         composer.set_cursor(body.len()); // 8 bytes, 6 display cols
         state.composer = composer;
         let caret = terminal_caret(&state);
-        // textarea_area.x = 5, col = 6 -> (5 + 6, 19) = (11, 19).
+        // textarea_area.x = 4, col = 6 -> (4 + 6, 21) = (10, 21).
         assert_eq!(
             caret,
-            Some((11, 19)),
+            Some((10, 21)),
             "Mixed caret must sit after 6 display columns"
         );
+    }
+
+    #[test]
+    fn agent_session_event_reaches_the_transcript_bridge() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        let mut state = RenderState::default();
+
+        handle_session_event(
+            &mut state,
+            &handle,
+            &SessionEvent::Agent(Box::new(AgentEvent::TextChunk {
+                text: "streamed reply".to_string(),
+            })),
+            None,
+        );
+
+        let command = rx
+            .try_recv()
+            .expect("an agent event must produce a render command");
+        apply_command(&mut state, command);
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].kind, InlineMessageKind::Agent);
+        assert_eq!(state.transcript[0].segments[0].text, "streamed reply");
+    }
+
+    #[test]
+    fn missing_key_errors_are_distinguished_from_other_provider_failures() {
+        assert!(is_missing_api_key_error(
+            "Provider stream error: Missing API key — configure a credential"
+        ));
+        assert!(!is_missing_api_key_error("Provider returned HTTP 429"));
+        assert_eq!(
+            provider_from_model_id("deepseek/deepseek-v4-flash"),
+            "deepseek"
+        );
+    }
+
+    #[test]
+    fn prompt_queue_mutations_change_the_execution_queue() {
+        let queue = PromptQueue::default();
+        queue.enqueue("first".to_string());
+        queue.enqueue("second".to_string());
+        queue.enqueue("third".to_string());
+
+        assert!(queue.move_by(2, -1));
+        assert_eq!(queue.remove(0).as_deref(), Some("first"));
+        let pending: Vec<_> = queue.pending.lock().iter().cloned().collect();
+        assert_eq!(pending, ["third", "second"]);
     }
 
     #[test]
@@ -5409,7 +5663,7 @@ mod render_tests {
         let state = RenderState::default();
         let rendered = render_frame_to_string(&state);
         assert!(
-            rendered.contains("oxicode"),
+            rendered.contains("OXICODE") && rendered.contains("WORKSPACE"),
             "welcome banner must appear when transcript is empty"
         );
     }
@@ -5435,7 +5689,7 @@ mod render_tests {
         state.slash_popup.open = true;
         state.slash_popup.items = slash_filter("", &[]);
         let rendered = render_frame_to_string(&state);
-        assert!(rendered.contains("Commands"), "popup title must render");
+        assert!(rendered.contains("COMMANDS"), "popup title must render");
         assert!(rendered.contains("/quit"), "popup must list /quit");
     }
 
@@ -5447,7 +5701,7 @@ mod render_tests {
         state.slash_popup.open = true;
         state.slash_popup.items = slash_filter("qu", &[]);
         let rendered = render_frame_to_string(&state);
-        assert!(rendered.contains("Commands"), "popup must render");
+        assert!(rendered.contains("COMMANDS"), "popup must render");
         assert!(rendered.contains("/quit"), "popup must list /quit");
         assert!(rendered.contains('>'), "composer must still render");
     }
@@ -6148,7 +6402,7 @@ mod render_tests {
             line_mode: false,
         });
         let rendered = render_frame_to_string(&state);
-        assert!(rendered.contains("Files"), "dropdown title must render");
+        assert!(rendered.contains("FILES"), "dropdown title must render");
         assert!(
             rendered.contains("src/main.rs"),
             "dropdown must show file paths"
@@ -6174,7 +6428,7 @@ mod render_tests {
         });
         let rendered = render_frame_to_string(&state);
         assert!(
-            rendered.contains("hidden"),
+            rendered.contains("HIDDEN"),
             "hidden mode must be indicated in title"
         );
     }
@@ -6263,11 +6517,8 @@ mod render_tests {
             "in-progress task must render"
         );
         assert!(rendered.contains("open task"), "pending task must render");
-        // The in-progress glyph (▶) must distinguish the active task.
-        assert!(
-            rendered.contains('\u{25B6}'),
-            "in-progress glyph must render"
-        );
+        // The text status must distinguish the active task without symbols.
+        assert!(rendered.contains("now"), "in-progress status must render");
     }
 
     #[test]
@@ -6275,7 +6526,7 @@ mod render_tests {
         let state = RenderState::default();
         let rendered = render_frame_to_string(&state);
         // No todo content should leak when the list is empty.
-        assert!(!rendered.contains('\u{2611}'), "no checkmark when empty");
+        assert!(!rendered.contains("done"), "no completed state when empty");
     }
 
     #[test]
@@ -6688,12 +6939,12 @@ mod provider_overlay_tests {
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
         let handle = InlineHandle::new_for_tests(cmd_tx);
-        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let prompt_queue = Arc::new(PromptQueue::default());
 
         let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
             InlineListSelection::ProviderRow(0),
         )));
-        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_queue, evt);
 
         let cmds: Vec<InlineCommand> = {
             let mut out = Vec::new();
@@ -6761,12 +7012,12 @@ mod provider_overlay_tests {
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
         let handle = InlineHandle::new_for_tests(cmd_tx);
-        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let prompt_queue = Arc::new(PromptQueue::default());
 
         let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
             InlineListSelection::ProviderRow(0),
         )));
-        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_queue, evt);
 
         let cmds: Vec<InlineCommand> = {
             let mut out = Vec::new();
@@ -6833,12 +7084,12 @@ mod provider_overlay_tests {
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
         let handle = InlineHandle::new_for_tests(cmd_tx);
-        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let prompt_queue = Arc::new(PromptQueue::default());
 
         let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
             InlineListSelection::CatalogModel(0),
         )));
-        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_queue, evt);
 
         let cmds: Vec<InlineCommand> = {
             let mut out = Vec::new();
@@ -6915,12 +7166,12 @@ mod provider_overlay_tests {
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
         let handle = InlineHandle::new_for_tests(cmd_tx);
-        let (prompt_tx, _prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let prompt_queue = Arc::new(PromptQueue::default());
 
         let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
             InlineListSelection::Session("some-id".to_string()),
         )));
-        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_tx, evt);
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_queue, evt);
 
         // The gate must have refused: pending_resume stays None.
         assert!(
