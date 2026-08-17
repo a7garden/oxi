@@ -97,33 +97,27 @@ gamma), computed 2026-08-07. Registered as the `"oxi"` theme in
 
 | `ThemePalette` field | OKLCH source (DESIGN.md) | sRGB hex | Mapping rationale |
 |---|---|---|---|
-| `background` | — (pure black) | `#000000` | **Owner constraint:** canvas must be pure black. Deviation from the spec's cool near-black `oklch(0.13 0.020 265)` (`#04070f`). |
-| `foreground` | `0.985 0.004 95` (`p-neutral-0`, warm) | `#fbfaf7` | Warm near-white ink — not pure white |
-| `primary_accent` | neutral chrome | `#c8c8c8` | Calm gray chrome — "color is data," chrome stays neutral |
-| `secondary_accent` | `0.70 0.14 250` (interactive primary, dark) | `#53a3f2` | Blue — info/structure/user input |
-| `alert` | `0.704 0.191 22.216` (status error, dark APCA) | `#ff6467` | Red — errors |
-| `logo_accent` | `0.76 0.14 310` (purple hue label, dark) | `#cc97f3` | Purple — logo/MCP branding |
+| `background` | cool near-black | `#0d1117` | Soft slate canvas reduces glare while remaining terminal-dark |
+| `foreground` | cool near-white | `#e6edf3` | Neutral, legible ink |
+| `primary_accent` | neutral chrome | `#8b949e` | Quiet gray chrome; color is not decoration |
+| `secondary_accent` | interactive accent | `#58a6a6` | Teal for focus, links, and active interaction |
+| `alert` | restrained error | `#e06c75` | Red only for failure or destructive state |
+| `logo_accent` | interaction accent | `#58a6a6` | Same teal: no separate branding hue |
 
 All other visible colors (response text, reasoning, tool chrome, status banner,
-PTY output, …) are **derived** by the pipeline against the pure-black
-background — they are not listed here because they are not hand-set.
+PTY output, …) are **derived** by the pipeline against the slate canvas —
+they are not listed here because they are not hand-set.
 
 ---
 
-## 4. Pure-black deviation (recorded)
+## 4. Slate canvas (recorded)
 
-The brand spec's dark canvas is `oklch(0.13 0.020 265)` (`#04070f`, a cool
-near-black). The owner requires a **pure-black** canvas (`#000000`) — the sole
-intentional deviation. Effects:
+The default canvas is `#0d1117`: close enough to black for a terminal, but
+less harsh on large displays. `#e6edf3` is cool neutral ink. Teal is the sole
+interactive hue; red is reserved for errors. This keeps transcript text more
+important than chrome and prevents a rainbow of status colors.
 
-- Maximum contrast headroom: every derived color passes `min_contrast`
-  trivially; the pipeline barely nudges the seeds.
-- `is_light_theme("oxi")` returns `false` (luminance 0 ≤ 0.5) — correct.
-- `suggest_theme_for_terminal()` returns `"oxi"` for dark/unknown terminals.
-- On a pure-black background the warm ink (`#fbfaf7`) reads as off-white with a
-  barely-perceptible warm tint — still "calm," never brown.
-
-Guarded by `theme::tests::test_oxi_palette_is_pure_black`.
+Guarded by `theme::tests::test_oxi_palette_is_soft_slate`.
 
 ---
 
@@ -143,7 +137,7 @@ Guarded by `theme::tests::test_oxi_palette_is_pure_black`.
    `set_active_theme("oxi")` (no silent fallback).
 5. **Wizard** — `setup_wizard.rs` theme defaults are `"oxi"`.
 6. **Tests** — `theme::tests`: `test_oxi_is_default`, `test_oxi_theme_exists`,
-   `test_oxi_contrast`, `test_oxi_suite`, `test_oxi_palette_is_pure_black`.
+   `test_oxi_contrast`, `test_oxi_suite`, `test_oxi_palette_is_soft_slate`.
 
 `oxide-dark` (the prior GrokNight-inspired neutral-gray default) is preserved
 as an opt-in alternative.

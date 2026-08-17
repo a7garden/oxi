@@ -30,8 +30,7 @@ fn test_oxide_dark_theme_exists() {
 
 #[test]
 fn test_oxi_is_default() {
-    // The oxi-design-system brand theme is the default — pure-black canvas,
-    // warm ink, color-as-data. See docs/oxi-design-system-tui.md.
+    // The oxi theme is the default — slate canvas, cool ink, restrained color.
     assert_eq!(DEFAULT_THEME_ID, "oxi");
 }
 
@@ -59,12 +58,12 @@ fn test_oxi_suite() {
 }
 
 #[test]
-fn test_oxi_palette_is_pure_black() {
-    // The oxi theme mandates a pure-black canvas (#000000) — the sole
-    // intentional deviation from the design system's cool near-black canvas.
+fn test_oxi_palette_is_soft_slate() {
+    // The live chat surface uses a near-black slate canvas rather than pure
+    // black to reduce glare while preserving a dark-terminal contrast ratio.
     let theme = all_theme_definitions().get("oxi").expect("oxi exists");
     let RgbColor(r, g, b) = theme.palette.background;
-    assert_eq!((r, g, b), (0, 0, 0), "oxi background must be pure black");
+    assert_eq!((r, g, b), (0x0D, 0x11, 0x17), "oxi canvas must stay slate");
 }
 
 #[test]

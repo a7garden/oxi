@@ -883,20 +883,18 @@ static REGISTRY: Lazy<HashMap<&'static str, ThemeDefinition>> = Lazy::new(|| {
             id: "oxi",
             label: "Oxi",
             palette: ThemePalette {
-                // oxi-design-system brand palette (DESIGN.md v1.0) on a
-                // pure-black canvas — the sole intentional deviation from the
-                // spec's cool near-black canvas (oklch 0.13 0.020 265).
-                // Identity comes from neutrals (warm near-white ink on true
-                // black); color is data — blue = info/structure, red = alert,
-                // purple = logo. The derivation pipeline (color_math) computes
-                // every derived style with contrast guarantees against the
-                // pure-black background. See docs/oxi-design-system-tui.md.
-                primary_accent: RgbColor(0xC8, 0xC8, 0xC8), // #c8c8c8 calm gray chrome
-                background: RgbColor(0x00, 0x00, 0x00),     // #000000 pure black
-                foreground: RgbColor(0xFB, 0xFA, 0xF7),     // #fbfaf7 warm ink
-                secondary_accent: RgbColor(0x53, 0xA3, 0xF2), // #53a3f2 blue (info)
-                alert: RgbColor(0xFF, 0x64, 0x67),          // #ff6467 red (errors)
-                logo_accent: RgbColor(0xCC, 0x97, 0xF3),    // #cc97f3 purple (logo)
+                // Restrained terminal palette: a soft slate canvas, cool ink,
+                // neutral chrome, and one teal interaction accent.  Hue is
+                // reserved for meaning (teal = active/interactive, red =
+                // failure); branding deliberately does not add a second color.
+                // The derivation pipeline computes the remaining styles with
+                // contrast guarantees. See docs/oxi-design-system-tui.md.
+                primary_accent: RgbColor(0x8B, 0x94, 0x9E), // #8b949e slate chrome
+                background: RgbColor(0x0D, 0x11, 0x17),     // #0d1117 soft slate canvas
+                foreground: RgbColor(0xE6, 0xED, 0xF3),     // #e6edf3 cool ink
+                secondary_accent: RgbColor(0x58, 0xA6, 0xA6), // #58a6a6 teal interaction
+                alert: RgbColor(0xE0, 0x6C, 0x75),          // #e06c75 restrained error
+                logo_accent: RgbColor(0x58, 0xA6, 0xA6),    // #58a6a6 no separate brand hue
             },
         },
     );
