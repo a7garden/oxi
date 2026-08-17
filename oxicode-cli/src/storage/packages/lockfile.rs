@@ -33,6 +33,58 @@ pub struct LockEntry {
     /// Dependencies
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
+    /// Foundation provenance. `None` for non-Foundation packages.
+    /// When `Some`, the package originated from `~/.oxi/foundation/v1/packages.lock`
+    /// and the listed requirements have been validated against the
+    /// Foundation contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foundation: Option<FoundationPackageProvenance>,
+}
+
+impl LockEntry {
+    /// Build a new install entry. The `foundation` field is `None`
+    /// by default; use [`with_foundation`](Self::with_foundation)
+    /// to attach provenance.
+    pub fn new(
+        source: impl Into<String>,
+        name: impl Into<String>,
+        version: impl Into<String>,
+        integrity: Option<String>,
+        scope: SourceScope,
+        source_type: impl Into<String>,
+        dependencies: BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            name: name.into(),
+            version: version.into(),
+            integrity,
+            scope,
+            source_type: source_type.into(),
+            dependencies,
+            foundation: None,
+        }
+    }
+
+    /// Attach Foundation provenance.
+    pub fn with_foundation(mut self, foundation: FoundationPackageProvenance) -> Self {
+        self.foundation = Some(foundation);
+        self
+    }
+}
+/// Provenance record attached to a Foundation-managed package entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FoundationPackageProvenance {
+    /// `sha256-<hex>` digest of the verified content root.
+    pub digest: String,
+    /// Trust decision recorded in the lockfile.
+    pub trust: String,
+    /// Hosts the package is allowed to load on.
+    #[serde(default)]
+    pub targets: Vec<String>,
+    /// Abstract requirements declared by the package.
+    #[serde(default)]
+    pub requirements: Vec<String>,
 }
 
 /// The lockfile structure

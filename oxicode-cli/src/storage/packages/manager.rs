@@ -290,15 +290,15 @@ impl PackageManager {
 
         let integrity = compute_dir_hash(&dest);
 
-        self.lockfile.insert(LockEntry {
-            source: path.to_string(),
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
+        self.lockfile.insert(LockEntry::new(
+            path.to_string(),
+            manifest.name.clone(),
+            manifest.version.clone(),
             integrity,
-            scope: SourceScope::User,
-            source_type: "local".to_string(),
-            dependencies: manifest.dependencies.clone(),
-        });
+            SourceScope::User,
+            "local",
+            manifest.dependencies.clone(),
+        ));
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
@@ -494,15 +494,15 @@ impl PackageManager {
 
         let integrity = compute_dir_hash(&dest);
 
-        self.lockfile.insert(LockEntry {
-            source: format!("npm:{}", spec),
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
+        self.lockfile.insert(LockEntry::new(
+            format!("npm:{}", spec),
+            manifest.name.clone(),
+            manifest.version.clone(),
             integrity,
             scope,
-            source_type: "npm".to_string(),
-            dependencies: manifest.dependencies.clone(),
-        });
+            "npm",
+            manifest.dependencies.clone(),
+        ));
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
@@ -582,15 +582,15 @@ impl PackageManager {
 
         let integrity = compute_dir_hash(dir);
 
-        self.lockfile.insert(LockEntry {
-            source: source.to_string(),
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
+        self.lockfile.insert(LockEntry::new(
+            source.to_string(),
+            manifest.name.clone(),
+            manifest.version.clone(),
             integrity,
             scope,
-            source_type: "git".to_string(),
-            dependencies: manifest.dependencies.clone(),
-        });
+            "git",
+            manifest.dependencies.clone(),
+        ));
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
@@ -673,20 +673,17 @@ impl PackageManager {
         if dest.exists() {
             fs::remove_dir_all(&dest)?;
         }
-
         copy_dir_recursive(&pkg_dir, &dest)?;
-
         let integrity = compute_dir_hash(&dest);
-
-        self.lockfile.insert(LockEntry {
-            source: url.to_string(),
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
+        self.lockfile.insert(LockEntry::new(
+            url.to_string(),
+            manifest.name.clone(),
+            manifest.version.clone(),
             integrity,
             scope,
-            source_type: "url".to_string(),
-            dependencies: manifest.dependencies.clone(),
-        });
+            "url",
+            manifest.dependencies.clone(),
+        ));
 
         self.installed
             .insert(manifest.name.clone(), manifest.clone());
@@ -1797,15 +1794,15 @@ mod tests {
         let lock_path = tmp.path().join(LOCKFILE_NAME);
 
         let mut lock = Lockfile::new();
-        lock.insert(LockEntry {
-            source: "npm:express@4.18.0".to_string(),
-            name: "express".to_string(),
-            version: "4.18.0".to_string(),
-            integrity: Some("sha256-abc123".to_string()),
-            scope: SourceScope::User,
-            source_type: "npm".to_string(),
-            dependencies: BTreeMap::new(),
-        });
+        lock.insert(LockEntry::new(
+            "npm:express@4.18.0",
+            "express",
+            "4.18.0",
+            Some("sha256-abc123".to_string()),
+            SourceScope::User,
+            "npm",
+            BTreeMap::new(),
+        ));
 
         lock.write(&lock_path).unwrap();
 
