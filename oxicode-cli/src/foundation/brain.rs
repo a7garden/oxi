@@ -98,8 +98,10 @@ pub enum MigrationError {
     BackendOffline,
     /// The write returned a `ToolError` (= `String`).
     Backend(String),
-    /// The on-migration runtime failed to build or execute.
+    /// The migration runtime failed to build or execute.
     Runtime(String),
+    /// The resumable checkpoint could not be written.
+    Checkpoint(String),
 }
 
 impl std::fmt::Display for MigrationError {
@@ -108,6 +110,7 @@ impl std::fmt::Display for MigrationError {
             MigrationError::BackendOffline => f.write_str("brain daemon offline"),
             MigrationError::Backend(e) => write!(f, "brain write failed: {e}"),
             MigrationError::Runtime(e) => write!(f, "migration runtime: {e}"),
+            MigrationError::Checkpoint(e) => write!(f, "checkpoint write failed: {e}"),
         }
     }
 }
@@ -222,10 +225,7 @@ impl BrainMemoryBackend {
         self.ensure_connected().await?;
         let mut guard = self.client.lock().await;
         let client = guard.as_mut().ok_or_else(|| {
-            format!(
-                "backend unavailable: {}",
-                "oxibrain client missing after handshake".to_string()
-            )
+            "backend unavailable: oxibrain client missing after handshake".to_string()
         })?;
         match f(client).await {
             Ok(v) => {

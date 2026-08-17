@@ -132,10 +132,10 @@ impl<B: KeychainBackend + Clone> KeychainCredentialResolver<B> {
             // Env override is recorded under either OXICODE_API_KEY
             // (default) or a profile-local variable.
             let env_var = std::env::var("OXICODE_API_KEY").ok();
-            if let Some(value) = env_var {
-                if !value.is_empty() {
-                    return Credential::Environment(value);
-                }
+            if let Some(value) = env_var
+                && !value.is_empty()
+            {
+                return Credential::Environment(value);
             }
             return Credential::Unavailable(CredentialError::NotFound {
                 service: loc.service.clone(),

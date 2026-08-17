@@ -626,15 +626,13 @@ async fn resolve_and_register_profile(
     };
 
     let profiles_path = foundation_root.join(crate::foundation::files::PROFILES);
-    let profiles =
-        read_profiles(&profiles_path).map_err(crate::foundation::FoundationError::from)?;
+    let profiles = read_profiles(&profiles_path)?;
     let explicit_profile = std::env::var("OXICODE_PROFILE")
         .ok()
         .filter(|s| !s.trim().is_empty());
     let compat_import_path = foundation_root.join("compatibility.json");
     let compat_import =
-        crate::foundation::compat_import::read_compatibility_shim(&compat_import_path)
-            .map_err(crate::foundation::FoundationError::from)?;
+        crate::foundation::compat_import::read_compatibility_shim(&compat_import_path)?;
 
     let env_override = EnvironmentOverride::from_env();
 

@@ -200,6 +200,14 @@ mod tests {
             .execute("c1", json!({"query": "nothing"}), None, &ctx)
             .await
             .unwrap();
+        assert!(result.success);
+        assert!(
+            result
+                .output
+                .contains("No matching memories for query 'nothing'."),
+            "output was: {}",
+            result.output
+        );
     }
 
     #[tokio::test]

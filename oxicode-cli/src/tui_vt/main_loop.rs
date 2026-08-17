@@ -5548,7 +5548,10 @@ mod render_tests {
         terminal
             .draw(|f| render_frame(f, state, &handle))
             .expect("draw");
-        terminal.get_cursor().ok()
+        terminal
+            .get_cursor_position()
+            .ok()
+            .map(|position| (position.x, position.y))
     }
 
     #[test]

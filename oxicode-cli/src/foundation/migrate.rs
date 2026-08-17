@@ -160,9 +160,9 @@ impl<'a> Migration<'a> {
 
         self.state.last_id = Some(id.clone());
         self.state.migrated += 1;
-        let cp = self.checkpoint_path.to_path_buf();
-        let snap = self.state.clone();
-        let _ = tokio::task::spawn_blocking(move || snap.save(&cp));
+        self.state
+            .save(self.checkpoint_path)
+            .map_err(|e| crate::foundation::brain::MigrationError::Checkpoint(e.to_string()))?;
 
         Ok(MigrationOutcome::Inserted(id))
     }

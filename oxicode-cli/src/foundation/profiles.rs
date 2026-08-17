@@ -140,13 +140,13 @@ impl CredentialLocator {
 /// reason. See the contract spec for precedence rules.
 pub fn resolve_profile(input: ResolveInput<'_>) -> Result<ResolvedProfile, FoundationError> {
     // 1. Environment override — non-persistent automation.
-    if let Some(env) = input.explicit_environment_override {
-        if let Some(profile) = env_into_profile(env) {
-            return Ok(ResolvedProfile {
-                profile,
-                source: super::CredentialSource::Environment,
-            });
-        }
+    if let Some(env) = input.explicit_environment_override
+        && let Some(profile) = env_into_profile(env)
+    {
+        return Ok(ResolvedProfile {
+            profile,
+            source: super::CredentialSource::Environment,
+        });
     }
 
     // 2. Explicit profile id.
