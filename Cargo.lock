@@ -5788,6 +5788,8 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 [[package]]
 name = "oxibrain-client"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9518986ab0e08db480a7b7d6600989691a13631705038c877ccf2685e2a59003"
 dependencies = [
  "anyhow",
  "serde",

@@ -129,11 +129,13 @@ zip = "8"
 #   - libc           — SIGTSTP, setpriority, etc.
 #   - oxibrain-client — Unix-domain socket client to the OxiBrain daemon
 #                       (see `crate::foundation::brain::BrainMemoryBackend`).
-#     oxibrain-client is Unix-only; on Windows/macOS without Unix sockets
-#     the daemon falls back to a TCP client (future work).
+#     Resolved from crates.io. To hack against a live oxibrain checkout,
+#     temporarily add to the WORKSPACE root Cargo.toml (do not commit):
+#       [patch.crates-io]
+#       oxibrain-client = { path = "../oxibrain/crates/oxibrain-client" }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-oxibrain-client = { version = "0.2", path = "/Volumes/MERCURY/PROJECTS/oxibrain/crates/oxibrain-client" }
+oxibrain-client = "0.2"
 
 [features]
 default = ["self-update", "native-browser", "foundation"]
