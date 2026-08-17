@@ -457,8 +457,9 @@ impl oxicode_sdk::ports::EmbeddingProvider for MnemopiEmbeddingBridge {
 /// the Foundation host MUST NOT silently run a second durable store.
 ///
 /// When the Foundation installation is present, returns a
-/// [`BrainMemoryBackend`] wrapping a typed `oxibrain_client` over the
-/// default socket path. When the Foundation is absent, returns
+/// [`crate::foundation::brain::BrainMemoryBackend`] wrapping a typed
+/// `oxibrain_client` over the default socket path. When the Foundation
+/// is absent, returns
 /// `None` — the agent memory tools surface a typed
 /// "backend unavailable: ..." result with the recovery command. Code
 /// work continues; only durable-memory tool calls fail visibly.

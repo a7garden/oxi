@@ -3,8 +3,9 @@
 //! While the migration is enabled (`OXICODE_FOUNDATION_MIGRATION=1`),
 //! oxicode reads a single legacy profile from a host-provided
 //! compatibility shim, writes a structured migration marker, and
-//! resolves the profile through the same [`resolve_profile`]
-//! decision function as a normal Foundation profile.
+//! resolves the profile through the same decision function
+//! ([`crate::foundation::profiles::resolve_profile`]) as a normal
+//! Foundation profile.
 //!
 //! Defaults: disabled. The importer never reads from `~/.oxicode/auth.json`
 //! on its own — the user explicitly acknowledges the import via

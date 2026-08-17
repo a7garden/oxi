@@ -195,7 +195,7 @@ pub fn resolve_profile(input: ResolveInput<'_>) -> Result<ResolvedProfile, Found
 pub struct ResolveInput<'a> {
     /// `--profile` / `OXICODE_PROFILE`.
     pub explicit_profile: Option<&'a str>,
-    /// Parsed environment override. See [`resolve_environment_override`].
+    /// Parsed environment override. See [`EnvironmentOverride::from_env`].
     pub explicit_environment_override: Option<&'a EnvironmentOverride>,
     /// Requested role id (e.g. `coding.primary`).
     pub requested_role: Option<&'a str>,
