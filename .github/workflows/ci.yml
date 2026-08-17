@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libdbus-1-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION_MSRV }}
@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libdbus-1-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION_MSRV }}
@@ -96,7 +96,7 @@ jobs:
         with:
           shared-key: "smoke-test"
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfontconfig1-dev libdbus-1-dev
       - uses: taiki-e/install-action@nextest
       - name: Run smoke tests
         # Exclude long-running / network-dependent tests; those run in test.yml
@@ -146,7 +146,7 @@ jobs:
         with:
           shared-key: "msrv"
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfontconfig1-dev libdbus-1-dev
       - name: Verify workspace builds at MSRV
         # Override RUSTFLAGS so we don't treat legacy-toolchain warnings
         # as build errors. This job's purpose is buildability, not lint.
@@ -174,7 +174,7 @@ jobs:
         with:
           shared-key: "doc"
       - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libdbus-1-dev
       - name: Build docs (treat warnings as errors)
         env:
           RUSTDOCFLAGS: "-D warnings"

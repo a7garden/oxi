@@ -52,6 +52,6 @@ jobs:
         with:
           shared-key: "test-doc"
       - name: Install system deps (fontconfig for blitz-paint via oxibrowser-render)
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libdbus-1-dev
       - name: Run doc tests
         run: cargo test --workspace --doc

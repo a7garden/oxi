@@ -67,7 +67,7 @@ jobs:
         # transitive openssl-sys link step needs the system libssl.
         # ci.yml's smoke-test (L93) and msrv (L143) install the
         # same package for the same reason.
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libdbus-1-dev
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "api-diff"
