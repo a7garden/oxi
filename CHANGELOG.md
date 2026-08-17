@@ -7,13 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.76.0] - 2026-08-17
+
 ### Added
 
 - **New `oxicode-textarea` crate** — an atomic-mutation text editor widget
   ported from grok's `xai-ratatui-textarea` (MIT, Apache-2.0-compatible).
   Single source of truth for editable text with correct CJK/emoji caret
   positioning, soft-wrap, horizontal scroll, undo/redo, selection, atomic
-  `TextElement`s, and a grapheme-aware `EditBuffer`. 351 tests.
+  `EditBuffer`. 351 tests.
+- **Oxi Foundation v1 host** — keychain-backed credentials, profile
+  providers, package installation from a foundation lockfile (with
+  provenance), and the `oxibrain` daemon as the durable-memory
+  authority. The brain client (`oxibrain-client` 0.2) is consumed
+  from crates.io so the binary builds on a clean checkout; live
+  development override via `[patch.crates-io]` documented in
+  `oxicode-cli/Cargo.toml`.
+- **New `oxicode migrate brain` command** — one-shot legacy-memory
+  import into the brain daemon.
+- **TUI: codex-derived presentation primitives** — additive layer
+  reused by the host for chrome, agent view, and welcome screens.
+- **TUI: restrained slate/teal palette reseed** for the `oxi` theme.
+- **TUI `/model` is now a picker, not a transcript line.** Was: a single
+  read-only `Current model: <id>` line. Now: a searchable overlay that
+  lists every model from providers with a stored API key, pins the
+  active model at the top of the list (even when its key has been
+  removed mid-session), and falls back to the full catalog when no
+  providers are keyed so a fresh TUI is never empty. Selection switches
+  the model end-to-end through the existing overlay-submission handler.
+  The `next`/`cycle` arm of `/model` still emits the
+  "No scoped models configured to cycle" warning (`ScopedModel` is the
+  config-curated cycling set and is out of scope here).
+- **TUI `/sessions` is now a real resume, not a no-op.** `/sessions <id>`
+  (and the `/resume <id>` alias) opens the file via
+  `SessionManager::open`, validates the cwd, and atomically swaps the
+  live `AgentSessionHandle` so the conversation continues with the prior
+  history. Selection from the `/sessions` picker enqueues the same resume
+  path (was: re-dispatched to the same picker). `Cannot resume while
+  agent is running. Use /cancel first.` gates the same way `/handoff`
+  does.
 
 ### Changed
 
@@ -32,6 +64,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oxicode-vtui::vim` is deprecated (removal in a later release). The vim
   engine mutates the composer's `TextArea` through the existing
   `InputEditor` adapter, so caret/undo stay owned by the editor.
+- **TUI host adopts the presentation layer** for chrome layout; the
+  `oxicode-vtui` design/layout primitives are now wired as the host's
+  rendering source.
+
+### Fixed
+
+- **TUI composer caret no longer double-offsets** on CJK/emoji input.
+  `input_cursor` was a byte index combined with a `chars().count()`
+  prompt offset — for multi-byte glyphs the result drifted visibly.
+  Resolved by the `TextArea` migration above; the helper
+  `composer_cursor_position` is now redundant and removed.
+
+### Infrastructure
+
+- `oxibrain-client` resolved from crates.io (drops an absolute
+  path dependency that broke CI and `cargo publish`).
+- `libdbus-1-dev` installed on ubuntu build jobs (keyring
+  `sync-secret-service` backend links libdbus on Linux).
+- Smoke/MSRV/Doc Tests job timeouts bumped 15 → 30 min; macos
+  nextest 25 → 40 min. Cold-cache builds of the expanded workspace
+  exceeded the prior caps.
 
 ## [0.75.0] - 2026-08-13
 
