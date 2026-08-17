@@ -18,6 +18,7 @@
 //! standalone `vtcode-design` / `vtcode-theme` crates (now consolidated into `vtcode-ui`).
 
 pub mod design;
+pub mod presentation;
 pub mod theme;
 pub mod tui;
 pub mod vim;
