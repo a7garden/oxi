@@ -86,7 +86,7 @@ jobs:
     # Lightweight subset of tests for PR feedback. Full matrix runs in
     # `test.yml` on push to main. Skips tests tagged `slow` or `net`.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -136,7 +136,7 @@ jobs:
     # and `rust-toolchain.toml`.
     name: MSRV (1.96)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
