@@ -205,7 +205,7 @@ fn header_line<'a>(state: &'a RenderState, styles: &ThemeStyles) -> Line<'a> {
         .filter(|name| !name.is_empty())
         .unwrap_or("workspace");
     let run_status = state.reasoning_stage.as_deref().unwrap_or("ready");
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             format!(" {} ", ctx.app_name.to_ascii_uppercase()),
             Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
@@ -215,7 +215,19 @@ fn header_line<'a>(state: &'a RenderState, styles: &ThemeStyles) -> Line<'a> {
         Span::styled(run_status.to_string(), Style::default().fg(info)),
         Span::raw(" | "),
         Span::styled(ctx.tools.clone(), Style::default().fg(secondary)),
-    ])
+    ];
+    // oxibrain daemon chip: hidden when memory is disabled (Off); healthy
+    // reads as info-blue, unreachable as the theme's error color.
+    if let Some((label, healthy)) = state.brain.chip_label() {
+        let chip_color = if healthy {
+            info
+        } else {
+            color_from_anstyle(styles.error.get_fg_color())
+        };
+        spans.push(Span::raw(" | "));
+        spans.push(Span::styled(label, Style::default().fg(chip_color)));
+    }
+    Line::from(spans)
 }
 
 /// Right-aligned footer status (left status + line position).
@@ -319,6 +331,31 @@ mod tests {
         assert!(
             rendered.contains("cancel"),
             "shortcuts bar must show Esc:cancel"
+        );
+    }
+
+    #[test]
+    fn brain_chip_renders_by_health() {
+        // Off (memory disabled) — chip hidden per the quiet-chrome contract.
+        let mut state = RenderState::default();
+        state.header_context = InlineHeaderContext::default();
+        let off = render_to_string(&state, 80, 24);
+        assert!(
+            !off.contains("brain"),
+            "chip must stay hidden when memory is disabled"
+        );
+
+        // Ok — healthy chip renders.
+        state.brain = crate::tui_vt::main_loop::BrainChip::Ok;
+        let ok = render_to_string(&state, 80, 24);
+        assert!(ok.contains("brain·ok"), "healthy chip must render: {ok}");
+
+        // Down — degraded chip renders.
+        state.brain = crate::tui_vt::main_loop::BrainChip::Down;
+        let down = render_to_string(&state, 80, 24);
+        assert!(
+            down.contains("brain·down"),
+            "degraded chip must render: {down}"
         );
     }
 

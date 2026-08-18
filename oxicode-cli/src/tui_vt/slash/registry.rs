@@ -393,6 +393,7 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(SessionsCommand));
     registry.register(Box::new(ShortcutsCommand));
     registry.register(Box::new(HandoffCommand));
+    registry.register(Box::new(MemoryCommand));
     super::commands::register_extra(registry);
 }
 
@@ -417,6 +418,84 @@ impl SlashCommand for VimCommand {
                 "Vim mode: OFF".to_string()
             },
         );
+        SlashOutcome::Handled
+    }
+}
+
+/// `/memory` — oxibrain durable-memory status: daemon health, space stats,
+/// and recovery hints. Aliases: `/brain`, `/mem`.
+struct MemoryCommand;
+
+impl SlashCommand for MemoryCommand {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["brain", "mem"]
+    }
+    fn description(&self) -> &'static str {
+        "Show oxibrain memory status (health, stats, recovery hints)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let handle = ctx.handle.clone();
+        ctx.reply(InlineMessageKind::Info, "Brain memory — querying daemon…");
+        // The command runs inside the TUI's tokio runtime, so the daemon
+        // round-trips go through `tokio::spawn`; replies land on the
+        // transcript via the cloned `InlineHandle`.
+        tokio::spawn(async move {
+            fn append(handle: &oxicode_vtui::tui::core::InlineHandle, text: String) {
+                for line in text.split('\n') {
+                    handle.append_line(
+                        InlineMessageKind::Info,
+                        vec![plain_segment(line.to_string())],
+                    );
+                }
+            }
+
+            let socket = crate::foundation::brain::default_socket_path();
+            let backend = crate::foundation::brain::BrainMemoryBackend::new(socket.clone());
+            let enabled = crate::store::settings::Settings::load()
+                .map(|s| s.memory_enabled)
+                .unwrap_or(true);
+            let mut out = format!("socket:    {}", socket.display());
+            out.push_str(if enabled {
+                "\ntools:     enabled (memory_enabled)"
+            } else {
+                "\ntools:     disabled (memory_enabled = false in settings)"
+            });
+            match backend.ping().await {
+                Ok(()) => {
+                    out.push_str("\nhealth:    ok — oxibrain daemon connected");
+                    if let Ok(stats) = backend.stats().await {
+                        out.push_str(&format!(
+                            "\nstats:     episodes {} · entities {} · statements {} · contradictions {}",
+                            stats.get("episodes").and_then(|v| v.as_i64()).unwrap_or(-1),
+                            stats.get("entities").and_then(|v| v.as_i64()).unwrap_or(-1),
+                            stats.get("statements").and_then(|v| v.as_i64()).unwrap_or(-1),
+                            stats.get("contradictions").and_then(|v| v.as_i64()).unwrap_or(-1),
+                        ));
+                    }
+                    out.push_str(
+                        "\nhints:     chat tools memory_retain / memory_recall / memory_reflect \
+                         / memory_edit read+write this daemon",
+                    );
+                }
+                Err(e) => {
+                    out.push_str(&format!("\nhealth:    degraded — {e}"));
+                    out.push_str(
+                        "\nhints:     start the daemon with `oxibrain serve`, or set \
+                         OXIBRAIN_SOCKET; no local fallback exists by design",
+                    );
+                }
+            }
+            if crate::foundation::migrate::default_legacy_path().exists() {
+                out.push_str(
+                    "\nlegacy:    a legacy local store exists — run `oxicode migrate brain` \
+                     to move it into the daemon",
+                );
+            }
+            append(&handle, out);
+        });
         SlashOutcome::Handled
     }
 }
@@ -1081,7 +1160,7 @@ mod tests {
         let names: Vec<&str> = reg.builtins.iter().map(|c| c.name()).collect();
         assert!(names.contains(&"quit"));
         assert!(names.contains(&"clear"));
-        assert!(names.contains(&"compact"));
+        assert!(names.contains(&"memory"));
         assert!(names.contains(&"model"));
         assert!(names.contains(&"cancel"));
         assert!(names.contains(&"status"));

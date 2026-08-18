@@ -203,6 +203,33 @@ impl PromptQueue {
 // pair) and gives us correct CJK/emoji caret math, soft-wrap, horizontal
 // scroll, selection, and undo/redo for free. Hand-rolled byte math was
 // removed in Task 6 of the textarea port.
+/// oxibrain daemon connection state for the status-bar chip. Driven by a
+/// background prober (see `run_tui`); `Off` means the memory tools are
+/// disabled in settings and the chip renders nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum BrainChip {
+    /// Memory disabled — chip hidden (quiet-chrome contract).
+    #[default]
+    Off,
+    /// Enabled but the daemon socket is absent.
+    Down,
+    /// Socket present but the last ping failed.
+    Degraded,
+    /// Ping succeeded.
+    Ok,
+}
+
+impl BrainChip {
+    /// `(label, healthy)` for the status bar; `None` hides the chip.
+    pub(crate) fn chip_label(self) -> Option<(&'static str, bool)> {
+        match self {
+            BrainChip::Off => None,
+            BrainChip::Ok => Some(("brain·ok", true)),
+            BrainChip::Degraded | BrainChip::Down => Some(("brain·down", false)),
+        }
+    }
+}
+
 pub struct RenderState {
     /// Editable text in the composer. Source of truth for the prompt line.
     pub composer: oxicode_textarea::TextArea,
@@ -236,6 +263,8 @@ pub struct RenderState {
     pub slash_popup: SlashPopup,
     /// Current reasoning/tool stage (e.g. "tool: read"), shown above the composer.
     pub reasoning_stage: Option<String>,
+    /// oxibrain daemon health for the status-bar chip (prober-fed).
+    pub(crate) brain: BrainChip,
     /// Selected reasoning effort, reflected in the composer's context bar.
     pub thinking_level: String,
     /// Provider-reported prompt tokens for the most recently completed turn.
@@ -399,6 +428,7 @@ impl Default for RenderState {
             session_swapper: None,
             pending_resume: None,
             session_state: None,
+            brain: BrainChip::default(),
         }
     }
 }
@@ -914,12 +944,53 @@ pub async fn run_tui(app: App) -> Result<()> {
     // forwarder thread funnels them into the session's listener bus so
     // our subscriber above picks them up.
     spawn_agent_worker(session_swapper.clone(), prompt_queue.clone());
+    // Brain health prober: pings the oxibrain daemon and feeds the
+    // status-bar chip through a watch channel. The interval's first tick is
+    // immediate, so the chip reflects reality on the first frame after a
+    // brief probe; every 20 s afterwards. A slow/absent daemon never blocks
+    // the loop — the ping is timeout-bounded.
+    let (brain_tx, mut brain_rx) =
+        tokio::sync::watch::channel(crate::services::initial_brain_chip(app.settings()));
+    {
+        let memory_enabled = app.settings().memory_enabled;
+        tokio::spawn(async move {
+            let backend = crate::foundation::brain::BrainMemoryBackend::new(
+                crate::foundation::brain::default_socket_path(),
+            );
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                if !memory_enabled {
+                    let _ = brain_tx.send(BrainChip::Off);
+                    continue;
+                }
+                if !crate::services::brain_socket_present(
+                    &crate::foundation::brain::default_socket_path(),
+                ) {
+                    let _ = brain_tx.send(BrainChip::Down);
+                    continue;
+                }
+                let chip = match tokio::time::timeout(
+                    std::time::Duration::from_millis(1500),
+                    backend.ping(),
+                )
+                .await
+                {
+                    Ok(Ok(())) => BrainChip::Ok,
+                    Ok(Err(_)) | Err(_) => BrainChip::Degraded,
+                };
+                let _ = brain_tx.send(chip);
+            }
+        });
+    }
 
     let result = run_event_loop(
         &mut tui.terminal,
         &mut cmd_rx,
         &mut evt_rx,
         &mut session_rx,
+        &mut brain_rx,
         &handle,
         &state,
         &session_swapper,
@@ -944,6 +1015,7 @@ async fn run_event_loop(
     cmd_rx: &mut tokio::sync::mpsc::UnboundedReceiver<InlineCommand>,
     evt_rx: &mut tokio::sync::mpsc::UnboundedReceiver<InlineEvent>,
     session_rx: &mut tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
+    brain_rx: &mut tokio::sync::watch::Receiver<BrainChip>,
     handle: &InlineHandle,
     state: &Arc<parking_lot::Mutex<RenderState>>,
     session_swapper: &Arc<crate::app::agent_session_handle::SessionSwapper>,
@@ -1070,8 +1142,14 @@ async fn run_event_loop(
                     break;
                 }
             }
+            // 5. Brain health chip updates from the background prober.
+            changed = brain_rx.changed() => {
+                if changed.is_ok() {
+                    state.lock().brain = *brain_rx.borrow_and_update();
+                }
+            }
 
-            // 5. Periodic repaint — echoes typed input and drives animation
+            // 6. Periodic repaint — echoes typed input and drives animation
             //    even when no other event is ready.
             _ = render_tick.tick() => {}
         }
