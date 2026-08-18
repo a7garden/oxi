@@ -28,13 +28,13 @@ use std::path::PathBuf;
 use crate::cli::{MigrateBrainArgs, MigrationCommands};
 
 /// Top-level dispatcher. Returns the exit code.
-pub fn handle_migrate(cmd: MigrationCommands) -> i32 {
+pub async fn handle_migrate(cmd: MigrationCommands) -> i32 {
     match cmd {
-        MigrationCommands::Brain(args) => handle_migrate_brain(args),
+        MigrationCommands::Brain(args) => handle_migrate_brain(args).await,
     }
 }
 
-fn handle_migrate_brain(args: MigrateBrainArgs) -> i32 {
+async fn handle_migrate_brain(args: MigrateBrainArgs) -> i32 {
     let socket = args
         .socket
         .unwrap_or_else(crate::foundation::brain::default_socket_path);
@@ -53,7 +53,16 @@ fn handle_migrate_brain(args: MigrateBrainArgs) -> i32 {
     }
 
     let backend = crate::foundation::brain::BrainMemoryBackend::new(socket.clone());
-    println!("\nbackend health:      {}", backend.health().info());
+    // Probe the daemon so the printed health is a live measurement —
+    // construction alone leaves the cached state at `Unavailable`.
+    let probe = backend.ping().await;
+    println!(
+        "\nbackend health:      {}",
+        match &probe {
+            Ok(()) => "ok: oxibrain daemon connected".to_string(),
+            Err(e) => format!("degraded ({e})"),
+        }
+    );
 
     if args.dry_run {
         println!("\nDry run complete. Re-run without --dry-run to perform the migration.");

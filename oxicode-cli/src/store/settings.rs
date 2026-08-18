@@ -261,62 +261,12 @@ pub struct Settings {
     pub commit_tool_enabled: bool,
 
     // ── Hindsight memory (④) ─────────────────────────────────────────
-    /// Enable session-spanning memory tools (retain/recall/reflect/edit).
-    /// Default: false (opt-in).
-    #[serde(default = "default_false")]
+    /// Enable session-spanning memory tools (retain/recall/reflect/edit)
+    /// backed by the oxibrain daemon — the Oxi Foundation host's only
+    /// durable-memory authority. Default: true. Machines without the
+    /// daemon degrade honestly (tools return typed unavailable results).
+    #[serde(default = "default_true")]
     pub memory_enabled: bool,
-
-    /// Path to the SQLite memory database. Default: `~/.oxicode/memory/<project>.db`
-    /// when empty.
-    #[serde(default)]
-    pub memory_db_path: Option<PathBuf>,
-
-    /// Use the Mnemopi engine (FTS5 + vector recall) instead of the basic
-    /// SQLite LIKE-search backend. Requires `memory_enabled = true`.
-    /// Default: false (uses basic SqliteMemoryStore).
-    #[serde(default = "default_false")]
-    pub mnemopi_engine: bool,
-
-    /// Backend selector for the autonomous memory pipeline (omp
-    /// `local-backend` analog). `None` (default) disables the
-    /// pipeline; `Some("local")` enables per-session extraction
-    /// + cross-session consolidation.
-    #[serde(default)]
-    pub memory_backend: Option<String>,
-
-    /// LLM fact extraction for `memory_retain`. When `true`, the
-    /// `memory_retain` tool is wrapped so each `put(content, …)`
-    /// call is sent through the configured model's
-    /// structured-extraction prompt and the resulting atomic
-    /// facts are stored individually.
-    #[serde(default = "default_false")]
-    pub memory_llm_extract: bool,
-
-    /// Model pattern used for LLM fact extraction when
-    /// `memory_llm_extract = true`. Empty means "use the
-    /// session's default model".
-    #[serde(default)]
-    pub memory_llm_extract_model: String,
-
-    /// Embedding provider for the Mnemopi engine. One of:
-    /// - `"none"` (default) — recall runs in FTS5-only mode.
-    /// - `"remote"` — OpenAI-compatible `/v1/embeddings`.
-    #[serde(default = "default_embedding_provider")]
-    pub embedding_provider: String,
-
-    /// Base URL for the remote embedding provider (no trailing slash).
-    #[serde(default)]
-    pub embedding_base_url: Option<String>,
-
-    /// Env-var holding the remote-embedding API key (so the key
-    /// never lands in `settings.toml`). Default `OPENAI_API_KEY`.
-    #[serde(default = "default_embedding_api_key_env")]
-    pub embedding_api_key_env: String,
-
-    /// Logical embedding model name. Recorded alongside stored
-    /// embeddings for cache keying and diagnostics.
-    #[serde(default = "default_embedding_model")]
-    pub embedding_model: String,
 
     // ── TTSR (③) ─────────────────────────────────────────────────────
     /// Enable Time-Traveling Stream Rules (stream interrupt on rule violation).
@@ -419,22 +369,6 @@ fn default_tool_timeout() -> u64 {
     120
 }
 
-fn default_memory_backend() -> Option<String> {
-    None
-}
-
-fn default_embedding_provider() -> String {
-    "none".to_string()
-}
-
-fn default_embedding_model() -> String {
-    String::new()
-}
-
-fn default_embedding_api_key_env() -> String {
-    "OPENAI_API_KEY".to_string()
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -465,16 +399,7 @@ impl Default for Settings {
             dynamic_models: HashMap::new(),
             keybindings: HashMap::new(),
             edit_format: EditFormat::default(),
-            memory_enabled: false,
-            memory_db_path: None,
-            mnemopi_engine: false,
-            memory_backend: default_memory_backend(),
-            memory_llm_extract: false,
-            memory_llm_extract_model: String::new(),
-            embedding_provider: default_embedding_provider(),
-            embedding_base_url: None,
-            embedding_api_key_env: default_embedding_api_key_env(),
-            embedding_model: default_embedding_model(),
+            memory_enabled: true,
             todo_panel_enabled: true,
             agent_hub_enabled: true,
             snapcompact_enabled: false,

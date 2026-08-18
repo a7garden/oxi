@@ -165,15 +165,13 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         }
     }
 
+    // Durable memory: oxibrain daemon is the sole authority (Foundation
+    // plan §5). The backend is constructed per AgentSession via
+    // services::create_memory_backend; no local pipeline is spawned.
     // Build the wired Oxicode engine + Agent via the SDK composition root.
-    // Build embedding port from settings (mnemopi → SDK async bridge).
-    let embedding_provider = crate::services::build_embedding_provider(&settings).map(|p| {
-        std::sync::Arc::new(crate::services::MnemopiEmbeddingBridge::new(p))
-            as std::sync::Arc<dyn oxicode_sdk::ports::EmbeddingProvider>
-    });
-
-    let oxicode =
-        crate::build_oxicode_engine(embedding_provider, Some(hook_runner.clone())).await?;
+    // (The SDK embeddings port stays at its Noop default — durable memory is
+    // the oxibrain daemon, not an embedding pipeline.)
+    let oxicode = crate::build_oxicode_engine(None, Some(hook_runner.clone())).await?;
 
     // Fire SessionStart (fail-open: a hook that errors must not block boot).
     {
@@ -318,19 +316,6 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         app.agent().set_system_prompt(content);
     }
 
-    // Spawn the autonomous memory pipeline if `memory_backend = "local"`.
-    // This is **opt-in**: when the user keeps the default `None`, the
-    // pipeline stays disabled and the boot path is side-effect free.
-    if let Some(handle) = crate::services::start_memory_pipeline(
-        app.settings(),
-        std::env::current_dir()
-            .as_ref()
-            .unwrap_or(&PathBuf::from(".")),
-        Some(app.oxicode()),
-    ) {
-        tracing::debug!("memory pipeline spawn handle stored on app");
-        drop(handle); // joined on shutdown via App drop
-    }
     Ok(app)
 }
 

@@ -28,7 +28,6 @@ oxicode-sdk = { version = "0.76.0", path = "../oxicode-sdk", features = ["router
 oxicode-vtui = { version = "0.76.0", path = "../oxicode-vtui" }
 oxicode-vtui-compat = { version = "0.76.0", path = "../oxicode-vtui-compat" }
 oxicode-textarea = { version = "0.76.0", path = "../oxicode-textarea" }
-oxicode-mnemopi = { version = "0.76.0", path = "../oxicode-mnemopi", features = ["remote-embeddings"] }
 oxicode-lsp = { version = "0.76.0", path = "../oxicode-lsp" }
 lsp-types = "0.95"
 
@@ -53,7 +52,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Error handling
 anyhow = "1"
 thiserror = { workspace = true }
-rusqlite = { version = "0.40", features = ["bundled"] }
+# (rusqlite removed with the legacy local-memory stack — durable memory is
+# the oxibrain daemon over oxibrain-client.)
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }

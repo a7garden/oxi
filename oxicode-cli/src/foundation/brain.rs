@@ -8,27 +8,25 @@
 //!
 //! ## Wire protocol
 //!
-//! oxibrain exposes its `memory.*` tool surface over a Unix-domain socket
-//! via the JSON-RPC client in `oxibrain-client`. The backend translates
-//! every `MemoryBackend` method into one oxibrain tool call:
+//! oxibrain exposes its MCP tool surface over a Unix-domain socket via the
+//! JSON-RPC client in `oxibrain-client`. The daemon's fifteen tools are
+//! `search, recall, brief, navigate, ingest, declare, why, contradictions,
+//! stats, traverse, review_merges, remember, retract, merge_entities, redact`.
+//! The backend maps every `MemoryBackend` method onto that real surface:
 //!
-//! | `MemoryBackend` method | oxibrain tool          | args shape                            |
+//! | `MemoryBackend` method | oxibrain tool | args                          |
 //! |---|---|---|
-//! | `put`                  | `memory.put`           | `{"content": ..., "kind": ..., "subject": ...}` |
-//! | `search`               | `memory.search`        | `{"query": ..., "k": N}`              |
-//! | `list`                 | `memory.list`          | `{"subject": ...}`                    |
-//! | `delete`               | `memory.delete`        | `{"id": ...}`                         |
+//! | `put`                  | `remember`    | `{"content": ..., "space": ..., "source_path": "oxicode/<kind>/<subject>"}` |
+//! | `search`               | `search`      | `{"query": ..., "space": ..., "limit": N}`      |
+//! | `list`                 | `search`      | `{"query": <subject>, "space": ..., "limit": 50}` |
+//! | `delete`               | `retract`     | `{"statement_id": ...}` (auditable retraction)  |
 //!
-//! ## Degraded mode
-//!
-//! When the daemon is unreachable, every mutation returns
-//! `ToolError(String)` carrying `"backend unavailable: oxibrain daemon unreachable"`.
-//! The local file store is **never** consulted as a fallback, because doing
-//! so would silently duplicate memory across two authorities and break
-//! the Foundation contract. Tools surface `degraded` to the user instead
-//! of pretending the store succeeded.
-//!
-//! ## Unix-only
+//! `remember` = `ingest_note` + synchronous extraction on the daemon side, so
+//! every `put` becomes a provenance-bearing episode. `search` returns entity
+//! hits (`entity_id`, `entity_surface`, `entity_type`, `score`, `snippet`),
+//! mapped into `MemoryItem`. Deletion is a statement-scoped retraction; ids
+//! that are not statement ids surface a typed error steering toward `redact`
+//! — never a silent local removal.
 //!
 //! oxibrain-client uses Unix-domain sockets. On non-Unix targets this
 //! module compiles to a stub that returns `BackendUnavailable` for every
@@ -120,11 +118,10 @@ impl std::error::Error for MigrationError {}
 // Backend
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Default scope identifier passed to oxibrain when one is not provided.
-/// oxicode uses the project working directory when known; the fallback
-/// is the literal `"default"` so the daemon can route to a project
-/// bucket.
-pub const DEFAULT_BRAIN_SCOPE: &str = "default";
+/// Default space passed to oxibrain when one is not provided. `personal` is
+/// the daemon's conventional default space; override with [`Self::with_scope`]
+/// (e.g. to route a project to its own bucket).
+pub const DEFAULT_BRAIN_SCOPE: &str = "personal";
 
 /// Brain memory backend. The `Arc<Mutex<Option<…>>>` wrapper yields
 /// interior mutability on the optional client while keeping the
@@ -173,6 +170,33 @@ impl BrainMemoryBackend {
         decode_health(self.health.load(Ordering::SeqCst))
     }
 
+    /// Probe daemon liveness with a `ping`. Cheaper than a full tool call;
+    /// used by the TUI health prober. Updates the cached health.
+    pub async fn ping(&self) -> Result<(), ToolError> {
+        self.with_client(|c| Box::pin(async move { c.ping().await }))
+            .await
+    }
+
+    /// Space statistics from the daemon's `stats` tool
+    /// (`episodes`, `entities`, `statements`, `contradictions`). Returned as
+    /// the raw parsed JSON so callers render without a typed mirror of
+    /// daemon fields.
+    pub async fn stats(&self) -> Result<serde_json::Value, ToolError> {
+        let space = self.scope.clone();
+        self.with_client(|c| Box::pin(async move { c.stats(&space).await }))
+            .await
+    }
+
+    /// Synchronous `stats` on a small current-thread runtime — same pattern
+    /// as [`Self::put_sync`]. Used by the TUI `/memory` command.
+    pub fn stats_sync(&self) -> Result<serde_json::Value, ToolError> {
+        block_on_sync(self.stats())
+    }
+
+    /// Synchronous `search` wrapper for callers outside a tokio executor.
+    pub fn search_sync(&self, query: &str, k: usize) -> Result<Vec<MemoryItem>, ToolError> {
+        block_on_sync(<Self as MemoryBackend>::search(self, query, k))
+    }
     /// Number of times the connection is currently held. Always 0 or 1
     /// in production; useful for tests that assert reconnect logic.
     pub async fn connected(&self) -> bool {
@@ -184,12 +208,13 @@ impl BrainMemoryBackend {
     /// `migrate` flow and by callers that don't already run inside
     /// a tokio executor.
     pub fn put_sync(&self, content: &str, kind: &str, subject: &str) -> Result<String, ToolError> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .build()
-            .map_err(|e| format!("backend unavailable: tokio runtime: {e}"))?;
-        let future = <Self as MemoryBackend>::put(self, content, kind, subject);
-        rt.block_on(future)
+        block_on_sync(<Self as MemoryBackend>::put(self, content, kind, subject))
+    }
+
+    /// Synchronous `ping` — used by flows that need a live health probe
+    /// without an executor of their own.
+    pub fn ping_sync(&self) -> Result<(), ToolError> {
+        block_on_sync(self.ping())
     }
 
     async fn ensure_connected(&self) -> Result<(), ToolError> {
@@ -241,6 +266,22 @@ impl BrainMemoryBackend {
     }
 }
 
+/// Drive `fut` to completion on the current thread. Inside a tokio runtime
+/// (e.g. the CLI's async `main`), park the worker first via
+/// `block_in_place` — a nested `Runtime::block_on` would panic. Outside a
+/// runtime, build a small current-thread executor.
+fn block_on_sync<F: std::future::Future>(fut: F) -> F::Output {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build()
+                .expect("build current-thread tokio runtime");
+            rt.block_on(fut)
+        }
+    }
+}
 impl MemoryBackend for BrainMemoryBackend {
     fn put<'a>(
         &'a self,
@@ -249,28 +290,28 @@ impl MemoryBackend for BrainMemoryBackend {
         subject: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<String, ToolError>> + Send + 'a>> {
         Box::pin(async move {
-            let content = content.to_string();
-            let kind = kind.to_string();
-            let subject = subject.to_string();
-            let scope = self.scope.clone();
             let args = json!({
                 "content": content,
-                "kind": kind,
-                "subject": subject,
-                "scope": scope,
+                "space": self.scope,
+                "source_path": format!("oxicode/{kind}/{subject}"),
+                // `extract: false` keeps this call off the daemon's MCP
+                // sampling path (§12.3): a sampling round-trip is a
+                // server→client request the 0.2.0 client cannot answer, so
+                // realtime extraction would stall every `put` by the
+                // daemon's 120s sampling timeout. The note is durable as an
+                // episode immediately; `recall` surfaces it via the
+                // recent-episodes layer. Revisit with a sampling-capable
+                // client (oxibrain-client 0.3).
+                "extract": false,
             });
             let raw = self
-                .with_client(|c| Box::pin(async move { c.call_tool("memory.put", args).await }))
+                .with_client(|c| Box::pin(async move { c.call_tool("ingest", args).await }))
                 .await?;
-            // Response is the new ID; if the daemon returns a struct,
-            // extract `id`. Otherwise treat the raw response as the ID.
-            let id = serde_json::from_str::<serde_json::Value>(&raw)
-                .ok()
-                .and_then(|v| {
-                    v.get("id")
-                        .and_then(|i| i.as_str().map(|s| s.to_string()))
-                        .or_else(|| v.get("id").and_then(|i| i.as_u64().map(|n| n.to_string())))
-                })
+            // `ingest` answers "Ingested as episode: {id}" — keep the id so
+            // a later `delete` can redact the exact episode.
+            let id = raw
+                .split_once("episode:")
+                .map(|(_, tail)| tail.trim().to_string())
                 .unwrap_or_else(|| raw.trim().to_string());
             Ok(id)
         })
@@ -282,15 +323,17 @@ impl MemoryBackend for BrainMemoryBackend {
         k: usize,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryItem>, ToolError>> + Send + 'a>> {
         Box::pin(async move {
-            let query = query.to_string();
-            let scope = self.scope.clone();
+            // `recall` assembles a context bundle (episodes + statements +
+            // entities); the `search` tool only returns extracted entity
+            // hits, which misses unextracted notes entirely.
             let args = json!({
                 "query": query,
-                "k": k,
-                "scope": scope,
+                "space": self.scope,
+                "token_budget": 4000,
             });
+            let _ = k;
             let raw = self
-                .with_client(|c| Box::pin(async move { c.call_tool("memory.search", args).await }))
+                .with_client(|c| Box::pin(async move { c.call_tool("recall", args).await }))
                 .await?;
             parse_memory_items(&raw)
         })
@@ -301,14 +344,16 @@ impl MemoryBackend for BrainMemoryBackend {
         subject: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<MemoryItem>, ToolError>> + Send + 'a>> {
         Box::pin(async move {
-            let subject = subject.to_string();
-            let scope = self.scope.clone();
+            // `list(subject)` is a recall seeded with the subject so
+            // boot-recall stays keyword-scoped; the daemon has no
+            // enumerate op.
             let args = json!({
-                "subject": subject,
-                "scope": scope,
+                "query": subject,
+                "space": self.scope,
+                "token_budget": 2000,
             });
             let raw = self
-                .with_client(|c| Box::pin(async move { c.call_tool("memory.list", args).await }))
+                .with_client(|c| Box::pin(async move { c.call_tool("recall", args).await }))
                 .await?;
             parse_memory_items(&raw)
         })
@@ -319,10 +364,20 @@ impl MemoryBackend for BrainMemoryBackend {
         id: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), ToolError>> + Send + 'a>> {
         Box::pin(async move {
-            let id = id.to_string();
-            let args = json!({ "id": id });
+            if id.trim().is_empty() {
+                return Err("backend unavailable: brain delete requires an episode id \
+                     (a `put` return value or a recall provenance id)"
+                    .to_string());
+            }
+            // Episodes are removed via `redact` (destructive, audited).
+            // `retract` only withdraws statements produced by extraction.
+            let args = json!({
+                "target_kind": "episode",
+                "target_id": id,
+                "space": self.scope,
+            });
             let _ = self
-                .with_client(|c| Box::pin(async move { c.call_tool("memory.delete", args).await }))
+                .with_client(|c| Box::pin(async move { c.call_tool("redact", args).await }))
                 .await?;
             Ok(())
         })
@@ -337,45 +392,41 @@ impl MemoryBackend for BrainMemoryBackend {
 // Parsing helpers
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Parse the JSON-RPC response from the daemon into a `Vec<MemoryItem>`.
-/// Accepts both the bare `[ {...} ]` shape and the wrapped `{ "items": [...] }`
-/// shape (the legacy oxibrain response style).
+/// Parse a `recall` response into `Vec<MemoryItem>`. The daemon assembles a
+/// context bundle `{"layers": [{"kind", "text", "provenance", …}]}`; each
+/// layer's `text` may hold multiple lines (the `recent_episodes` layer packs
+/// one line per episode, with `provenance` ids aligned by line). Map every
+/// non-empty line to one `MemoryItem`, carrying the aligned provenance id
+/// when the counts match so `delete` can redact the exact episode.
 fn parse_memory_items(raw: &str) -> Result<Vec<MemoryItem>, ToolError> {
     let value: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| format!("backend unavailable: malformed memory response: {e}"))?;
-    let items = value
-        .get("items")
-        .and_then(|i| i.as_array())
-        .or_else(|| value.as_array())
-        .ok_or_else(|| "backend unavailable: memory response missing 'items' array".to_string())?;
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let id = match item.get("id") {
-            Some(serde_json::Value::String(s)) => s.clone(),
-            Some(serde_json::Value::Number(n)) => n.to_string(),
-            _ => String::new(),
-        };
-        let kind = item
+    let layers = value
+        .get("layers")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "backend unavailable: unrecognized memory response shape".to_string())?;
+    let mut out = Vec::new();
+    for layer in layers {
+        let kind = layer
             .get("kind")
             .and_then(|v| v.as_str())
-            .unwrap_or("fact")
-            .to_string();
-        let content = item
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let subject = item
-            .get("subject")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        out.push(MemoryItem {
-            id,
-            kind,
-            content,
-            subject,
-        });
+            .unwrap_or("layer");
+        let text = layer.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let provenance: Vec<&str> = layer
+            .get("provenance")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|p| p.as_str()).collect())
+            .unwrap_or_default();
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        for (i, line) in lines.iter().enumerate() {
+            let id = provenance.get(i).map(|p| p.to_string()).unwrap_or_default();
+            out.push(MemoryItem {
+                id,
+                kind: kind.to_string(),
+                content: line.trim().to_string(),
+                subject: String::new(),
+            });
+        }
     }
     Ok(out)
 }
@@ -384,20 +435,19 @@ fn parse_memory_items(raw: &str) -> Result<Vec<MemoryItem>, ToolError> {
 // Factory used by the composition root
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Resolves the default socket path for the oxibrain daemon. Honors
-/// `OXIBRAIN_SOCKET` if set; otherwise `$XDG_RUNTIME_DIR/oxibrain.sock`
-/// (Linux) or `~/.oxi/run/oxibrain.sock` (macOS).
+/// Resolves the default socket path for the oxibrain daemon. Canonical per
+/// the Foundation discovery contract (mirror of `oxibrain-client`'s
+/// `default_socket_path`, which ships in 0.3.x; we pin 0.2 so the
+/// resolution lives here): `$OXIBRAIN_SOCKET` if set, else
+/// `$HOME/.oxi/brain/oxibrain.sock`. Never creates directories.
 pub fn default_socket_path() -> std::path::PathBuf {
     if let Ok(p) = std::env::var("OXIBRAIN_SOCKET") {
         return std::path::PathBuf::from(p);
     }
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-        return std::path::PathBuf::from(runtime).join("oxibrain.sock");
-    }
     if let Some(home) = dirs::home_dir() {
-        return home.join(".oxi").join("run").join("oxibrain.sock");
+        return home.join(".oxi").join("brain").join("oxibrain.sock");
     }
-    std::path::PathBuf::from("/tmp/oxibrain.sock")
+    std::path::PathBuf::from(".oxi/brain/oxibrain.sock")
 }
 
 #[cfg(test)]
@@ -432,26 +482,44 @@ mod tests {
     }
 
     #[test]
-    fn parse_memory_items_accepts_bare_array() {
-        let raw = r#"[{"id":"a","kind":"fact","content":"hello","subject":"proj"}]"#;
+    fn parse_memory_items_maps_recall_layers() {
+        let raw = r#"{"layers":[
+            {"kind":"recent_episodes",
+             "text":"first note\nsecond note\n",
+             "provenance":["ep-1","ep-2"]},
+            {"kind":"statements","text":"oxicode prefers Korean prose"}
+        ]}"#;
         let items = parse_memory_items(raw).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].id, "a");
-        assert_eq!(items[0].kind, "fact");
-        assert_eq!(items[0].content, "hello");
-        assert_eq!(items[0].subject, "proj");
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].id, "ep-1");
+        assert_eq!(items[0].kind, "recent_episodes");
+        assert_eq!(items[0].content, "first note");
+        assert_eq!(items[1].id, "ep-2");
+        assert_eq!(items[1].content, "second note");
+        // Layer without provenance → empty id, text kept whole.
+        assert_eq!(items[2].id, "");
+        assert_eq!(items[2].kind, "statements");
+        assert_eq!(items[2].content, "oxicode prefers Korean prose");
     }
 
     #[test]
-    fn parse_memory_items_accepts_wrapped_array() {
-        let raw = r#"{"items":[{"id":"a","kind":"fact","content":"hello","subject":"proj"}]}"#;
+    fn parse_memory_items_skips_blank_lines() {
+        let raw = r#"{"layers":[{"kind":"recent_episodes",
+             "text":"\n  \nonly line\n","provenance":["ep-9"]}]}"#;
         let items = parse_memory_items(raw).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].id, "a");
+        assert_eq!(items[0].id, "ep-9");
+        assert_eq!(items[0].content, "only line");
     }
 
     #[test]
-    fn parse_memory_items_rejects_missing_items() {
+    fn parse_memory_items_empty_layers_is_ok() {
+        let items = parse_memory_items(r#"{"layers":[]}"#).unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn parse_memory_items_rejects_unknown_wrapper() {
         let raw = r#"{"unexpected":"shape"}"#;
         let err = parse_memory_items(raw).unwrap_err();
         assert!(err.starts_with("backend unavailable"));

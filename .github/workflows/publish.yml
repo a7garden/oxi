@@ -70,7 +70,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify each crate packages cleanly
         run: |
-          for crate in oxicode-catalog oxicode-hashline oxicode-api-stability oxicode-vtui-compat oxicode-mnemopi oxicode-lsp oxicode-snapcompact oxicode-textarea; do
+          for crate in oxicode-catalog oxicode-hashline oxicode-api-stability oxicode-vtui-compat oxicode-lsp oxicode-snapcompact oxicode-textarea; do
             echo "─── $crate ───"
             (cd "$crate" && cargo package)  # verifies build + packaging (drops --no-verify --list)
           done
@@ -105,7 +105,7 @@ jobs:
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces topological order: leaves first
-  # (catalog, hashline, api-stability, vtui-compat, mnemopi, lsp, snapcompact) → vtui (dep
+  # (catalog, hashline, api-stability, vtui-compat, lsp, snapcompact) → vtui (dep
   # vtui-compat) → ai (dep catalog, api-stability) → agent (dep ai) → sdk (dep agent) →
   # cli (dep sdk, vtui, vtui-compat).
   # Each crate waits for its dependency's crates.io index to
@@ -125,7 +125,6 @@ jobs:
           - oxicode-api-stability
           - oxicode-vtui-compat
           - oxicode-vtui
-          - oxicode-mnemopi
           - oxicode-lsp
           - oxicode-snapcompact
           - oxicode-textarea
@@ -146,7 +145,7 @@ jobs:
           CRATE="${{ matrix.crate }}"
           # Define wait targets per crate (space-separated for multiple deps).
           case "$CRATE" in
-            oxicode-catalog|oxicode-hashline|oxicode-api-stability|oxicode-vtui-compat|oxicode-mnemopi|oxicode-lsp|oxicode-snapcompact|oxicode-textarea) exit 0 ;;
+            oxicode-catalog|oxicode-hashline|oxicode-api-stability|oxicode-vtui-compat|oxicode-lsp|oxicode-snapcompact|oxicode-textarea) exit 0 ;;
             oxicode-vtui) WAITS="oxicode-vtui-compat" ;;
             oxicode-ai) WAITS="oxicode-catalog oxicode-api-stability" ;;
             oxicode-agent) WAITS="oxicode-ai oxicode-hashline" ;;

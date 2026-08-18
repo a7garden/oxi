@@ -10,7 +10,6 @@
 //! - Both paths coexist; new run modes consume `build_oxicode(...)` here.
 
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -365,190 +364,153 @@ fn ensure_parent(path: &Path) -> Result<()> {
     Ok(())
 }
 
-// ── Memory embedding provider (Hindsight ④ + Gap-1 wiring) ────
+// ── Memory backend helpers ──────────────────────────────────────────────
 
-/// Build the embedding provider configured by the user.
-///
-/// Returns `None` when `settings.embedding_provider == "none"`,
-/// when base URL / API key are missing, or when the remote provider
-/// fails to construct. Failures are non-fatal.
-pub fn build_embedding_provider(
-    settings: &crate::store::settings::Settings,
-) -> Option<Arc<dyn oxicode_mnemopi::EmbeddingProvider>> {
-    match settings.embedding_provider.as_str() {
-        "remote" => build_remote_embedding_provider(settings),
-        _ => None,
+/// `true` when a Unix-domain socket file exists at `path` (best-effort:
+/// stat only, no connect). This is the "daemon installed" gate for durable
+/// memory — the Foundation layout gates profiles/packages, not the memory
+/// authority.
+pub(crate) fn brain_socket_present(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        path.exists()
     }
 }
-
-/// Construct a `RemoteEmbeddingProvider` from settings.
-fn build_remote_embedding_provider(
-    settings: &crate::store::settings::Settings,
-) -> Option<Arc<dyn oxicode_mnemopi::EmbeddingProvider>> {
-    let base_url = settings.embedding_base_url.as_deref()?.trim();
-    if base_url.is_empty() {
-        tracing::warn!("memory: embedding_provider='remote' but embedding_base_url is empty");
-        return None;
-    }
-    let api_key = std::env::var(&settings.embedding_api_key_env).ok()?;
-    if api_key.is_empty() {
-        tracing::warn!(
-            "memory: embedding_provider='remote' but env var {} is unset",
-            settings.embedding_api_key_env
-        );
-        return None;
-    }
-    let model = if settings.embedding_model.is_empty() {
-        "text-embedding-3-small".to_string()
-    } else {
-        settings.embedding_model.clone()
-    };
-    Some(Arc::new(oxicode_mnemopi::RemoteEmbeddingProvider::new(
-        base_url, &api_key, &model,
-    )))
-}
-
-// ── Embedding port bridge (mnemopi → SDK async port) ──────────────────
-
-/// Bridges oxicode-mnemopi's synchronous [`oxicode_mnemopi::EmbeddingProvider`] to the SDK's
-/// async [`oxicode_sdk::ports::EmbeddingProvider`] port trait. Each `embed()`
-/// call runs on the blocking thread pool via `spawn_blocking`.
-pub struct MnemopiEmbeddingBridge {
-    inner: Arc<dyn oxicode_mnemopi::EmbeddingProvider>,
-}
-
-impl MnemopiEmbeddingBridge {
-    /// Wrap a mnemopi embedding provider into the SDK port trait.
-    pub fn new(inner: Arc<dyn oxicode_mnemopi::EmbeddingProvider>) -> Self {
-        Self { inner }
-    }
-}
-
-impl oxicode_sdk::ports::EmbeddingProvider for MnemopiEmbeddingBridge {
-    fn embed<'a>(
-        &'a self,
-        text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<f32>, oxicode_sdk::SdkError>> + Send + 'a>> {
-        Box::pin(async move {
-            let inner = Arc::clone(&self.inner);
-            let text = text.to_string();
-            let result = tokio::task::spawn_blocking(move || inner.embed(&[text]))
-                .await
-                .map_err(|e| {
-                    oxicode_sdk::SdkError::Internal(anyhow::anyhow!("embedding task panicked: {e}"))
-                })?;
-            let mut vectors = result.map_err(|e| {
-                oxicode_sdk::SdkError::Internal(anyhow::anyhow!("embedding failed: {e}"))
-            })?;
-            vectors.pop().ok_or_else(|| {
-                oxicode_sdk::SdkError::Internal(anyhow::anyhow!("embedding returned no vectors"))
-            })
-        })
-    }
-}
-
-// ── Memory backend helpers (Hindsight ④) ──────────────────────────────
 
 /// Create a memory backend if memory is enabled in settings.
 ///
-/// Under the Oxi Foundation v1 host, the only durable-memory authority
-/// is the oxibrain daemon (plan §5). Local SQLite/Mnemopi/JSON/
-/// file-summary fallbacks are explicitly forbidden (§5.h, §6.f):
-/// the Foundation host MUST NOT silently run a second durable store.
+/// Under the Oxi Foundation v1 host, the only durable-memory authority is the
+/// oxibrain daemon (plan §5). Local SQLite/Mnemopi/JSON/file-summary
+/// fallbacks are explicitly forbidden (§5.h, §6.f): the Foundation host MUST
+/// NOT silently run a second durable store.
 ///
-/// When the Foundation installation is present, returns a
-/// [`crate::foundation::brain::BrainMemoryBackend`] wrapping a typed
-/// `oxibrain_client` over the default socket path. When the Foundation
-/// is absent, returns
-/// `None` — the agent memory tools surface a typed
-/// "backend unavailable: ..." result with the recovery command. Code
-/// work continues; only durable-memory tool calls fail visibly.
+/// Returns a [`crate::foundation::brain::BrainMemoryBackend`] when
+/// `memory_enabled` is set and the daemon's socket exists at the canonical
+/// path (or `$OXIBRAIN_SOCKET`). The backend is not eagerly connected — the
+/// first call attaches and surfaces `degraded` per call when the daemon is
+/// unreachable. When the socket is absent, returns `None`: the agent memory
+/// tools surface a typed "backend unavailable" result naming the socket and
+/// the recovery command (`oxibrain serve`). Code work continues; only
+/// durable-memory tool calls fail visibly.
 pub fn create_memory_backend(
     settings: &crate::store::settings::Settings,
 ) -> Option<Arc<dyn oxicode_agent::tools::MemoryBackend>> {
     if !settings.memory_enabled {
         return None;
     }
-    let foundation_root = crate::foundation::foundation_root()
-        .unwrap_or_else(|| std::path::PathBuf::from("~/.oxi/foundation/v1"));
-    if crate::foundation::foundation_present(&foundation_root) {
-        let socket = crate::foundation::brain::default_socket_path();
-        let backend = crate::foundation::brain::BrainMemoryBackend::new(socket);
+    let socket = crate::foundation::brain::default_socket_path();
+    if brain_socket_present(&socket) {
+        let backend = crate::foundation::brain::BrainMemoryBackend::new(socket.clone());
         tracing::info!(
-            "Foundation v1 host active: durable memory authority is oxibrain \
-             (health: {})",
-            backend.health().info()
+            "durable memory authority is oxibrain at {}",
+            socket.display()
         );
         return Some(Arc::new(backend));
     }
     tracing::warn!(
-        "Foundation v1 host: oxibrain daemon unavailable; durable-memory \
-         tools will return typed unavailable results. Run `oxicode setup` to \
-         initialize the Foundation installation, or start the oxibrain daemon."
+        "memory_enabled but no oxibrain socket at {} — durable-memory tools \
+         will return typed unavailable results. Start the daemon with \
+         `oxibrain serve` or set OXIBRAIN_SOCKET.",
+        socket.display()
     );
     None
 }
 
+/// Initial status-bar chip value before the prober's first tick lands.
+pub(crate) fn initial_brain_chip(
+    settings: &crate::store::settings::Settings,
+) -> crate::tui_vt::main_loop::BrainChip {
+    use crate::tui_vt::main_loop::BrainChip;
+    if !settings.memory_enabled {
+        return BrainChip::Off;
+    }
+    if brain_socket_present(&crate::foundation::brain::default_socket_path()) {
+        // Socket present; the immediate first probe will confirm or degrade.
+        BrainChip::Degraded
+    } else {
+        BrainChip::Down
+    }
+}
 #[cfg(test)]
 mod memory_backend_tests {
     use super::*;
 
-    #[test]
-    fn brain_backend_returned_when_foundation_present() {
-        let tmp = tempdir_fixture();
-        unsafe {
-            std::env::set_var("OXI_FOUNDATION_HOME", &tmp);
-        }
-        // Build a minimal `foundation.json` + `profiles.json` so
-        // `foundation_present` returns true.
-        std::fs::write(
-            tmp.join("foundation.json"),
-            r#"{"schema_version":1,"foundation":{"hosts":{"oxicode":">=0.1.0"}}}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            tmp.join("profiles.json"),
-            r#"{"schema_version":1,"profiles":[]}"#,
-        )
-        .unwrap();
-        let backend = create_memory_backend(&test_settings());
-        assert!(backend.is_some(), "foundation fixture ⇒ brain backend");
-        unsafe {
-            std::env::remove_var("OXI_FOUNDATION_HOME");
-        }
-    }
-
-    #[test]
-    fn absent_foundation_returns_none() {
-        unsafe {
-            std::env::set_var("OXI_FOUNDATION_HOME", "/tmp/does-not-exist-foundation");
-        }
-        let backend = create_memory_backend(&test_settings());
-        assert!(
-            backend.is_none(),
-            "absent foundation ⇒ no local durable fallback (plan §5.h)"
-        );
-        unsafe {
-            std::env::remove_var("OXI_FOUNDATION_HOME");
-        }
-    }
-
+    #[cfg(unix)]
     fn test_settings() -> crate::store::settings::Settings {
         let mut s = crate::store::settings::Settings::default();
         s.memory_enabled = true;
         s
     }
 
-    fn tempdir_fixture() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "oxicode-services-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    #[cfg(unix)]
+    #[test]
+    fn brain_backend_returned_when_socket_present() {
+        // Bind a real unix socket in a tempdir so the daemon-present gate
+        // sees an actual socket file, not a regular file.
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = dir.path().join("oxibrain.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        unsafe {
+            std::env::set_var("OXIBRAIN_SOCKET", &sock);
+        }
+        let backend = create_memory_backend(&test_settings());
+        assert!(backend.is_some(), "socket present ⇒ brain backend");
+        unsafe {
+            std::env::remove_var("OXIBRAIN_SOCKET");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absent_socket_returns_none() {
+        let dir = tempfile::TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("OXIBRAIN_SOCKET", dir.path().join("missing.sock"));
+        }
+        let backend = create_memory_backend(&test_settings());
+        assert!(
+            backend.is_none(),
+            "absent socket ⇒ no local durable fallback (plan §5.h)"
+        );
+        unsafe {
+            std::env::remove_var("OXIBRAIN_SOCKET");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_file_is_not_a_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let fake = dir.path().join("oxibrain.sock");
+        std::fs::write(&fake, b"not a socket").unwrap();
+        unsafe {
+            std::env::set_var("OXIBRAIN_SOCKET", &fake);
+        }
+        let backend = create_memory_backend(&test_settings());
+        assert!(
+            backend.is_none(),
+            "regular file must not pass the socket gate"
+        );
+        unsafe {
+            std::env::remove_var("OXIBRAIN_SOCKET");
+        }
+    }
+
+    #[test]
+    fn memory_disabled_returns_none() {
+        // `memory_enabled` defaults to true (the daemon is the authority);
+        // disabling it must yield no backend regardless of socket state.
+        let mut s = crate::store::settings::Settings::default();
+        assert!(s.memory_enabled, "memory_enabled default flipped to true");
+        s.memory_enabled = false;
+        assert!(create_memory_backend(&s).is_none());
     }
 }
 
@@ -585,24 +547,6 @@ pub async fn session_reflect(
     if let Err(e) = backend.put(summary, "summary", subject).await {
         tracing::warn!("Failed to store session memory: {e}");
     }
-}
-
-/// Open (or create) the autonomous-memory pipeline DB and spawn the
-/// background Phase-1 / Phase-2 workers. Returns `None` when the
-/// pipeline is disabled (default).
-///
-/// When `oxicode` is `Some`, the pipeline resolves a memory extraction
-/// model from settings and creates a provider for actual LLM calls.
-/// Without it, workers run but skip LLM-dependent work.
-/// Stub. Plan §5.e/§6.f: durable-memory consolidation runs on the
-/// oxibrain daemon, never as a local worker pipeline. This stub
-/// remains so callers compile; it always returns `None`.
-pub fn start_memory_pipeline(
-    _settings: &crate::store::settings::Settings,
-    _cwd: &Path,
-    _oxicode: Option<&oxicode_sdk::Oxicode>,
-) -> Option<tokio::task::JoinHandle<()>> {
-    None
 }
 
 // ── Foundation profile → provider registration ────────────────────────────
