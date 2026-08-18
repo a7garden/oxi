@@ -21,7 +21,6 @@ pub mod design;
 pub mod presentation;
 pub mod theme;
 pub mod tui;
-pub mod vim;
 
 // Backward-compat re-exports so `vtcode_ui::ThemeStyles`, `vtcode_ui::color::*`,
 // etc. continue to work without path-qualified imports.
