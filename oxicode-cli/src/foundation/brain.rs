@@ -119,8 +119,9 @@ impl std::error::Error for MigrationError {}
 // ───────────────────────────────────────────────────────────────────────────
 
 /// Default space passed to oxibrain when one is not provided. `personal` is
-/// the daemon's conventional default space; override with [`Self::with_scope`]
-/// (e.g. to route a project to its own bucket).
+/// the daemon's conventional default space; override with
+/// [`BrainMemoryBackend::with_scope`] (e.g. to route a project to its own
+/// bucket).
 pub const DEFAULT_BRAIN_SCOPE: &str = "personal";
 
 /// Brain memory backend. The `Arc<Mutex<Option<…>>>` wrapper yields
