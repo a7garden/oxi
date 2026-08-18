@@ -7,7 +7,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Item | Value |
 |------|-------|
 | Language | Rust 2024 edition |
-|Workspace crates|10 crates — see "Workspace Layout" below (do NOT hardcode the count; the set evolves)|
+|Workspace crates|12 crates — see "Workspace Layout" below (do NOT hardcode the count; the set evolves)|
 | Version | see `Cargo.toml` / `git tag` — single source of truth (do NOT hardcode the number here; it drifts) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
@@ -26,12 +26,13 @@ oxicode/
 ├── oxicode-agent/         Agent runtime — tool-calling loop, MCP client, built-in tools
 ├── oxicode-sdk/           Multi-agent SDK + port contract: 15 port traits + reference impls
 ├── oxicode-cli/           CLI binary — composition root (TUI + RPC + print modes)
+├── oxicode-catalog/       Shared model-catalog types (models.dev snapshot consumers)
 ├── oxicode-hashline/      Line-anchored patch format for AI-assisted code editing
 ├── oxicode-lsp/           LSP bridge
-├── oxicode-mnemopi/       Local SQLite vector memory engine (ported from omp Mnemopi)
+├── oxicode-api-stability/ Semver-stability lint helpers for the public API surface
 ├── oxicode-snapcompact/   Context compaction via PNG rasterization (fontdue)
 ├── oxicode-textarea/      Atomic-mutation text editor widget (ported from grok's xai-ratatui-textarea)
-├── oxicode-vtui/          Terminal UI framework — theme registry, design/layout, markdown, vim engine
+├── oxicode-vtui/          Terminal UI framework — theme registry, design/layout, markdown
 ├── oxicode-vtui-compat/   Compat stubs for vendored vtcode-ui (protocol types + substrate)
 ```
 
@@ -44,8 +45,9 @@ oxicode/
 
 ### Dependency Flow
 
-Leaf crates (zero internal `oxicode-*` deps): `oxicode-ai`, `oxicode-hashline`, `oxicode-lsp`,
-`oxicode-mnemopi`, `oxicode-snapcompact`, `oxicode-vtui` (+ `oxicode-vtui-compat`).
+Leaf crates (zero internal `oxicode-*` deps): `oxicode-hashline`, `oxicode-lsp`,
+`oxicode-catalog`, `oxicode-api-stability`, `oxicode-snapcompact`, `oxicode-vtui`
+(`+ oxicode-vtui-compat`).
 
 ```
 oxicode-ai  (foundation)              oxicode-hashline (independent)
@@ -54,7 +56,7 @@ oxicode-agent  ←  oxicode-ai, oxicode-hashline
   ↓
 oxicode-sdk  ←  oxicode-ai, oxicode-agent, oxicode-snapcompact
   ↓
-oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-mnemopi, oxicode-vtui, oxicode-textarea
+oxicode-cli  ←  oxicode-ai, oxicode-agent, oxicode-sdk, oxicode-lsp, oxicode-vtui, oxicode-textarea
 ```
 
 `oxicode-ai` is the foundation layer with zero internal dependencies.
@@ -84,7 +86,7 @@ or `with_ports(PortRegistry)`.
 | `InternalUrlRouter` | Resolve internal URIs (`skill://`, `issue://`, …) | ✅ wired | 🔜 TBD |
 | `ProtocolHandler` | Handle internal-protocol requests | ✅ wired (7 impls: issue, pr, memory, skill, rule, agent, local in `services.rs`) | 🔜 TBD |
 | `RuleRegistry` | Project steering rules (TTSR) | ✅ wired | 🔜 TBD |
-| `EmbeddingProvider` | Vector embeddings for memory | ✅ `MnemopiEmbeddingBridge` | 🔜 TBD |
+| `EmbeddingProvider` | Vector embeddings for memory | — (noop; durable memory = oxibrain daemon) | 🔜 TBD |
 
 (Plus `ModelCatalog` in `ports/catalog.rs` for catalog/model-data access.) See `oxicode-sdk/src/ports/mod.rs` for the canonical trait list.
 
@@ -217,7 +219,7 @@ supplies the parts: `theme::` (62-theme registry + contrast pipeline),
   `glyph_set` setting has no effect on the live TUI.
 
 Key types: `ThemeStyles`, `ThemeDefinition`, `InlineSegment`, `InlineTextStyle`,
-`InlineCommand`, `HostAdapter`, `VimState`.
+`InlineCommand`, `HostAdapter`.
 
 ### oxicode-sdk — Multi-Agent SDK + Port Contract
 
@@ -311,15 +313,16 @@ Extension system (`src/extensions/types.rs`):
   `#![cfg_attr(test, allow(...))]` at each library crate root; shipped
   (non-test) code still `warn`s on `unwrap_used`. Every other lint
   (correctness, suspicious, style, complexity) is enforced even in tests.
-- **`native-browser` feature must always compile.** The `ci.yml`
-  `clippy-native-browser` job runs `cargo clippy -p oxicode-sdk --features
-  native-browser -- -D warnings` on every PR. This feature compiles
-  `oxibrowser_backend.rs` — if you change `BrowserTab`/`BrowserEngine`
-  traits or their impls, this job catches edition-2024 lifetime bugs
-  that `cargo clippy --workspace` (default features) cannot see. To
-  verify locally:
+- **`native-browser` must always compile.** `native-browser` is a default
+  feature of `oxicode-cli` (browsing is a product capability, not an SDK
+  contract). The `ci.yml` `clippy-native-browser` job runs
+  `cargo clippy -p oxicode-cli -- -D warnings` (compiles
+  `oxibrowser_backend.rs`, the pure-Rust headless browser backend) plus
+  `cargo build -p oxicode-agent --features native-browser`. This path was
+  previously never CI-verified, which let edition-2024 lifetime bugs ship
+  (0.32.0–0.34.0). To verify locally:
   ```bash
-  cargo clippy -p oxicode-sdk --features native-browser -- -D warnings
+  cargo clippy -p oxicode-cli -- -D warnings
   cargo build -p oxicode-agent --features native-browser
   ```
 - **Pre-commit hooks** — `.pre-commit-config.yaml` mirrors the ci.yml
@@ -412,7 +415,8 @@ cargo test --workspace --doc         # Doc tests
 | Sessions | `~/.oxicode/sessions/` |
 | Extensions | `~/.oxicode/extensions/` |
 | Skills | `~/.oxicode/skills/<name>/SKILL.md` |
-| **models.dev cache** | `~/.oxicode/cache/models-dev.json` (5-min TTL, atomic writes) |
+| **models.dev cache** | `~/.oxicode/cache/models-dev.json` (~1h mtime window, atomic writes) |
+| **oxibrain socket** | `~/.oxi/brain/oxibrain.sock` (override: `OXIBRAIN_SOCKET`) |
 | MCP config | `~/.config/oxicode/mcp.json` or `.oxicode/mcp.json` |
 | Logs | `~/.oxicode/logs/` |
 | Nextest config | `.config/nextest.toml` |
@@ -467,7 +471,20 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
 
 ## Pitfalls
 
-- `oxicode-ai` has no dependency on other oxicode crates. Do not import `oxicode_agent` or `oxicode_store` from it.
+- **Durable memory = oxibrain daemon, nothing else.** The only memory
+  authority is the local oxibrain daemon over its unix socket
+  (`~/.oxi/brain/oxibrain.sock`, override `OXIBRAIN_SOCKET`; resolver:
+  `oxicode-cli/src/foundation/brain.rs::default_socket_path`). Do NOT add
+  local fallback stores (SQLite/JSONL) — `memory_enabled && socket present`
+  is the gate (`services.rs::brain_socket_present`); without the daemon the
+  memory tools degrade to typed unavailable errors. The legacy
+  `oxicode-mnemopi` crate and the cli's local memory stack were deleted
+  (2026-08-18); the `oxicode-sdk` `EmbeddingProvider` port remains for
+  feature-gated consumers (oxios). Legacy `~/.oxicode/memory/items.jsonl`
+  migrates via `oxicode migrate brain`. TUI surfaces health via the
+  `brain·ok`/`brain·down` status chip and the `/memory` slash command.
+
+- `oxicode-ai` has no dependency on other oxicode crates. Do not import `oxicode_agent` from it.
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
 - Provider message formats differ significantly (Anthropic vs OpenAI). Use `transform.rs` for conversion.
 - The tool-calling loop in `agent_loop/` has retry logic — tool implementations must be idempotent.

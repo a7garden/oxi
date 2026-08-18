@@ -156,10 +156,13 @@ the host role is part of a three-host agreement with `oxibrain` (durable
 memory) and `oxios` (orchestration).
 
 If no Foundation installation is present, oxicode runs in offline mode
-with environment-variable credentials only. Existing `~/.oxicode/auth.json`
-credentials can be migrated one-time into the Keychain via the
-`oxicode memory migrate-brain` (memory) and `oxicode config migrate-foundation`
-(credential) commands.
+with environment-variable credentials only. The oxibrain daemon is
+discovered via its unix socket (`~/.oxi/brain/oxibrain.sock`, override
+`OXIBRAIN_SOCKET`); when the socket is absent the memory tools degrade to
+typed unavailable errors — there is no local fallback store. Existing
+`~/.oxicode/auth.json` credentials can be migrated one-time into the
+Keychain via `oxicode config migrate-foundation`, and legacy
+`~/.oxicode/memory/items.jsonl` memories via `oxicode migrate brain`.
 
 ## Configuration
 

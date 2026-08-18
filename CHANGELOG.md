@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **oxibrain integration fixed.** The memory backend now connects to the
+  daemon's real socket (`~/.oxi/brain/oxibrain.sock`, override
+  `OXIBRAIN_SOCKET`) instead of the never-used `XDG_RUNTIME_DIR` resolution,
+  and calls the daemon's actual tool set (`remember`/`search`/`retract`
+  instead of nonexistent `memory.put`/`memory.delete`). `memory_enabled`
+  now defaults to `true`; the backend is gated on daemon socket presence,
+  not on a Foundation install.
+- **TUI memory visibility.** The status bar gains a `brain·ok`/`brain·down`
+  health chip (background ping every 20s) and a `/memory` slash command
+  (aliases `/brain`, `/mem`) showing socket path, enabled state, daemon
+  stats, and recovery hints.
+
+### Removed
+
+- **`oxicode-mnemopi` crate deleted** (local SQLite vector memory engine).
+  The oxibrain daemon is the only durable-memory authority; there is no
+  local fallback. The cli's local memory stack (sqlite/mnemopi backends,
+  workers, summary, extraction) and the `embedding_*` / `memory_backend`
+  settings were removed with it. `oxicode-sdk`'s `EmbeddingProvider` port
+  remains for feature-gated consumers.
+- **`oxicode-vtui::vim` deleted** — deprecated since the textarea port;
+  the live vim engine is app-owned at `oxicode-cli/src/tui_vt/vim/`.
+
 ## [0.76.0] - 2026-08-17
 
 ### Added

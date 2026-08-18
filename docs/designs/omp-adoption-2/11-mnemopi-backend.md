@@ -23,3 +23,27 @@
 > omp 분석: `packages/mnemopi/` (~9,000줄), `packages/coding-agent/src/mnemopi/` (래퍼 4파일)
 > 후속: N3 구현 → CHANGELOG.md
 > 짝: [`12-hindsight-memory.md`](./12-hindsight-memory.md) (응용 계층)
+
+---
+
+## Addendum (2026-08-18): 설계 폐기 — oxibrain 단일 권위로 대체
+
+이 문서가 설계한 로컬 Mnemopi 백엔드(oxicode-mnemopi 크레이트, SQLite
+저장, 임베딩 파이프라인)는 제거되었다. Oxi Foundation 계획(§5.h/§6.f)에
+따라 **oxibrain 데몬이 유일한 durable-memory 권위**이며 로컬 폴백은
+존재하지 않는다.
+
+- `oxicode-mnemopi/` 크레이트 삭제. `oxicode-cli/src/store/`의
+  `memory_sqlite`, `memory_mnemopi`, `memory_workers`, `memory_summary`,
+  `mnemopi`, `extracting_backend` 삭제.
+- 임베딩 파이프라인(`embedding_provider` 등 설정 포함) 제거.
+  `oxicode-sdk`의 `EmbeddingProvider` 포트는 feature-gated 소비자
+  (oxios)용으로만 유지.
+- 대체 구현: `oxicode-cli/src/foundation/brain.rs` — 유닉스 소켓
+  `~/.oxi/brain/oxibrain.sock`(`OXIBRAIN_SOCKET` 오버라이드) 위
+  `oxibrain-client`로 `remember`/`search`/`retract` 매핑.
+  게이트 조건은 `memory_enabled && 소켓 존재`.
+- 레거시 `~/.oxicode/memory/items.jsonl`은 `oxicode migrate brain`으로
+  이전(`foundation/migrate.rs`, `--archive-legacy` 지원).
+
+본 문서는 역사 기록으로만 유효하다.
