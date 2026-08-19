@@ -565,3 +565,30 @@ layout, markdown, vim, and the `InlineCommand`/`InlineEvent` protocol. The
 older grok-inspired `oxicode-tui` v2 (RetainedTree/DiffBackend) and the legacy
 widget library (`oxicode-tui`, tape engine, glyph system) are both DELETED as
 dead code — neither was in the production path.
+
+## Adding a TUI Slash Command
+
+Slash commands run in the VT TUI host (`oxicode-cli/src/tui_vt/slash/`):
+
+- `slash/registry.rs` — `SlashCommand` trait, `SlashCtx`, `SlashRegistry::builtins()`, `register_all()` (core commands: quit/clear/model/theme/find/…). `/help` auto-enumerates the registry; autocomplete uses `builtin_commands()`.
+- `slash/commands.rs` — extended commands, registered via `register_extra()` (catalog/introspection-related ones go here).
+
+1. Implement `SlashCommand`: `name`, `description`, optional `aliases()`, `execute(&self, args: &str, ctx: &mut SlashCtx) -> SlashOutcome`.
+2. Register in `register_all()` (registry.rs) or `register_extra()` (commands.rs).
+3. Picker UI: build `Vec<InlineListItem>` + an `InlineListSelection` variant, call `ctx.handle.show_list_modal(title, header_lines, items, selected, search)`. New selection variants live in `oxicode-vtui-compat/src/ui_protocol/selection.rs`; backing data in a `RenderState` field (`main_loop.rs`).
+4. Handle the selection in `main_loop.rs`'s `OverlayEvent::Submitted` arm (mirror the `Model`/`Theme`/`CatalogModel` handlers).
+
+Reachable from `SlashCtx`: `ctx.session` (Deref→`AgentSession`: `model_id`/`set_model`/`cycle_model`/`thinking_level`/`session_stats`/`export_html`/`agent_ref().tools()`/`mcp_manager().dashboard_data()`), `ctx.state.catalog` (`Option<Arc<dyn ModelCatalog>>`, sync `search_sync`/`list_providers_sync`/… methods), `crate::store::auth_storage::shared_auth_storage()` (`get_api_key`/`set_api_key`/`configured_providers`). Reply via `ctx.reply(InlineMessageKind::{Info,Warning,Error}, text)`.
+
+Limits: the list overlay has NO free-text input — secret *entry* routes to `oxicode setup`; *removal* can stay in-TUI via `ModalConfirmation` + `ConfirmationAction` (mirror the `/clear --yes` re-dispatch in `handle_confirmation_key`). `execute` is synchronous — `tokio::spawn` async work (see `CompactCommand`).
+
+Verify: `cargo fmt` · `cargo clippy -p oxicode-cli --all-targets -- -D warnings` · `cargo nextest run -p oxicode-cli`. Reference impls in `commands.rs`: `/models`, `/providers`, `/tools`, `/mcp`, `/info`, `/export`.
+
+## Verifying platform-gated clippy locally
+
+Host `cargo clippy` skips `#[cfg(target_os = "...")]` modules for other platforms entirely. Verify locally instead of burning CI round-trips (~5–7 min each):
+
+1. `rustup target add x86_64-unknown-linux-gnu` (one-time)
+2. `cargo clippy --target x86_64-unknown-linux-gnu -p <crate> --all-targets -- -D warnings`
+
+Works only when the crate's dep tree is pure-Rust (no C libs/linkers: serde, thiserror, tracing, parking_lot, …). If cross-compile fails for unrelated reasons, fall back to CI. ALWAYS rerun `cargo fmt --all -- --check` after editing platform-gated source — rustfmt expands `vec![]` macros one element per line; a grouped `["a","b","c",]` style passes review but fails fmt on CI.
