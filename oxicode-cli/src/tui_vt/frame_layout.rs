@@ -2,16 +2,18 @@
 //! (`oxicode_vtui::design::layout`) to the live ratatui render path.
 //!
 //! `render_chrome` computes the [`AgentViewLayout`] for the current frame and
-//! renders the top [`StatusBar`] (header context + footer status) and the
-//! bottom [`ShortcutsBar`] (keyboard hints). It returns the layout so the
-//! caller can place the transcript and composer into `scrollback` / `prompt`.
+//! renders the bottom [`ShortcutsBar`] (keyboard hints + scroll position). It
+//! returns the layout so the caller can place the transcript and composer
+//! into `scrollback` / `prompt`. There is no top status bar — session facts
+//! live on the composer's top border, so a dedicated chrome row was pure
+//! space cost.
 //!
 //! All keyboard hints advertised by the shortcuts bar are verified against the
 //! real key dispatch in `super::main_loop::spawn_input_thread` — a hint that
 //! does not match a real handler is a misleading-UI defect.
 use oxicode_vtui::design::layout::{
     AgentViewLayout, CompactConfig, HintItem, LayoutConfig, LayoutInput, PendingHint,
-    ScrollbarConfig, ShortcutBarStyling, ShortcutsBar, StatusBar, effective_compact,
+    ScrollbarConfig, ShortcutBarStyling, ShortcutsBar, effective_compact,
 };
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use ratatui::{
@@ -136,8 +138,8 @@ fn shortcut_hints() -> Vec<HintItem> {
 // Chrome rendering
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Compute the agent view layout and render the top status bar + bottom
-/// shortcuts bar. Returns the layout so the caller places the transcript into
+/// Compute the agent view layout and render the bottom shortcuts bar.
+/// Returns the layout so the caller places the transcript into
 /// `layout.scrollback` and the composer into `layout.prompt`.
 pub(super) fn render_chrome(
     frame: &mut Frame<'_>,
@@ -162,17 +164,11 @@ pub(super) fn render_chrome(
         },
     );
 
-    // ── Status bar (replaces render_header + render_footer's status line) ──
-    let bg = color_from_anstyle(Some(styles.background));
-    let status = StatusBar::new(header_line(state, &styles))
-        .right(footer_line(state, &styles, layout.scrollback))
-        .style(Style::default().bg(bg));
-    frame.render_widget(status, layout.status_bar);
-
-    // ── Shortcuts bar ──
+    // ── Shortcuts bar (hints + right-aligned brain health) ──
     let hints = shortcut_hints();
     let shortcut_styles = ThemeShortcutStyles { styles: &styles };
-    let mut bar = ShortcutsBar::new(&hints, &shortcut_styles);
+    let mut bar =
+        ShortcutsBar::new(&hints, &shortcut_styles).right(shortcuts_right_line(state, &styles));
     if state.pending_quit {
         bar = bar.pending(PendingHint {
             key: "Ctrl+C",
@@ -188,81 +184,27 @@ pub(super) fn render_chrome(
     layout
 }
 
-/// Quiet application chrome. Detailed session facts belong on the composer's
-/// top border, immediately beside the place where the user acts; keeping this
-/// row quiet avoids showing the model, path, and branch twice.
-fn header_line<'a>(state: &'a RenderState, styles: &ThemeStyles) -> Line<'a> {
-    let ctx = &state.header_context;
-    let fg = color_from_anstyle(Some(styles.foreground));
-    let bg = color_from_anstyle(Some(styles.background));
-    let secondary = color_from_anstyle(styles.secondary.get_fg_color());
-    let info = color_from_anstyle(styles.info.get_fg_color());
-
-    let workspace = ctx
-        .search_tools
-        .as_ref()
-        .map(|badge| badge.text.as_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("workspace");
-    let run_status = state.reasoning_stage.as_deref().unwrap_or("ready");
-    let mut spans = vec![
-        Span::styled(
-            format!(" {} ", ctx.app_name.to_ascii_uppercase()),
-            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!(" {workspace} "), Style::default().fg(secondary)),
-        Span::raw(" | "),
-        Span::styled(run_status.to_string(), Style::default().fg(info)),
-        Span::raw(" | "),
-        Span::styled(ctx.tools.clone(), Style::default().fg(secondary)),
-    ];
-    // oxibrain daemon chip: hidden when memory is disabled (Off); healthy
-    // reads as info-blue, unreachable as the theme's error color.
-    if let Some((label, healthy)) = state.brain.chip_label() {
-        let chip_color = if healthy {
-            info
-        } else {
-            color_from_anstyle(styles.error.get_fg_color())
-        };
-        spans.push(Span::raw(" | "));
-        spans.push(Span::styled(label, Style::default().fg(chip_color)));
-    }
-    Line::from(spans)
-}
-
-/// Right-aligned footer status (left status + line position).
-fn footer_line<'a>(state: &'a RenderState, styles: &ThemeStyles, area: Rect) -> Line<'a> {
-    let left = state.footer_left.clone().unwrap_or_default();
-    // `footer_right` is set by the app (SetInputStatus); only fall back to a
-    // computed line-position when the app has not supplied one. The viewport
-    // is the scrollback height so the position matches what render_transcript
-    // actually displays (the old footer used its own 1-row height, which was
-    // inconsistent with the transcript scroll).
-    let right = state.footer_right.clone().unwrap_or_else(|| {
-        let total = state.transcript.len();
-        if state.scroll_offset == usize::MAX {
-            format!("line {total}/{total}")
-        } else {
-            let off = super::main_loop::effective_scroll_offset(
-                state.scroll_offset,
-                total,
-                area.height as usize,
-            );
-            format!("line {}/{}", off.min(total), total)
-        }
-    });
-
-    Line::from(vec![
-        Span::styled(
-            left,
-            Style::default().fg(color_from_anstyle(Some(styles.foreground))),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            right,
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-        ),
-    ])
+/// Right-aligned oxibrain health chip for the shortcuts bar.
+///
+/// Health is ambient state, so it lives in the always-visible right side —
+/// healthy reads as info, unreachable as the theme's error color, and the
+/// chip is absent when memory is disabled (Off). Scroll position is
+/// deliberately not mirrored here: the scrollbar thumb already encodes it.
+fn shortcuts_right_line(state: &RenderState, styles: &ThemeStyles) -> Line<'static> {
+    state
+        .brain
+        .chip_label()
+        .map_or_else(Line::default, |(label, healthy)| {
+            let chip_color = if healthy {
+                color_from_anstyle(styles.info.get_fg_color())
+            } else {
+                color_from_anstyle(styles.error.get_fg_color())
+            };
+            Line::from(Span::styled(
+                label.to_string(),
+                Style::default().fg(chip_color),
+            ))
+        })
 }
 
 #[cfg(test)]
@@ -295,67 +237,98 @@ mod tests {
     }
 
     #[test]
-    fn chrome_paints_status_bar_and_shortcuts_bar() {
-        // Default state is enough — we only assert the chrome regions render,
-        // not specific header content (theme/header fields are app-supplied).
+    fn chrome_has_no_top_status_row() {
         let mut state = RenderState::default();
         state.header_context = InlineHeaderContext::default();
         state.header_context.model = "smoke-model".to_string();
 
-        let rendered = render_to_string(&state, 80, 24);
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let mut layout = None;
+        terminal
+            .draw(|f| {
+                layout = Some(render_chrome(f, f.area(), &state));
+            })
+            .expect("draw");
+        let layout = layout.expect("layout");
 
-        // Status bar is quiet chrome: app badge, workspace, run status.
-        assert!(
-            rendered.contains("APP") && rendered.contains("workspace"),
-            "status bar must render the app badge and workspace"
+        // The scrollback IS the top of the frame — no chrome row above it.
+        assert_eq!(layout.scrollback.y, 0, "scrollback starts at row 0");
+        assert_eq!(
+            layout.scrollback.height,
+            24 - COMPOSER_HEIGHT - SHORTCUTS_HEIGHT,
+            "the reclaimed status-bar row belongs to the scrollback"
         );
+        // Old chrome content must not render anywhere: no app badge, no
+        // workspace/run-status/tools chips (session facts live on the
+        // composer border, rendered by main_loop).
+        let rendered = render_to_string(&state, 80, 24);
         assert!(
-            rendered.contains("ready"),
-            "status bar must render the run status"
+            !rendered.contains("APP") && !rendered.contains("[ready]"),
+            "top status bar must be gone: {rendered}"
         );
-        // The model name deliberately does NOT render here — it lives on the
-        // composer's top border so it is not shown twice.
         assert!(
             !rendered.contains("smoke-model"),
-            "status bar must not duplicate the composer-border model name"
-        );
-        // ShortcutsBar carries the verified keyboard hints.
-        assert!(
-            rendered.contains("send"),
-            "shortcuts bar must show Enter:send"
-        );
-        assert!(
-            rendered.contains("interrupt"),
-            "shortcuts bar must show Ctrl+C:interrupt"
-        );
-        assert!(
-            rendered.contains("cancel"),
-            "shortcuts bar must show Esc:cancel"
+            "model belongs to the composer border, not chrome"
         );
     }
 
     #[test]
-    fn brain_chip_renders_by_health() {
-        // Off (memory disabled) — chip hidden per the quiet-chrome contract.
+    fn shortcuts_bar_carries_hints_only_by_default() {
         let mut state = RenderState::default();
         state.header_context = InlineHeaderContext::default();
-        let off = render_to_string(&state, 80, 24);
+
+        let rendered = render_to_string(&state, 120, 24);
+
+        // Verified keyboard hints.
+        assert!(rendered.contains("send"), "must show Enter:send");
+        assert!(rendered.contains("interrupt"), "must show Ctrl+C:interrupt");
+        assert!(rendered.contains("cancel"), "must show Esc:cancel");
+
+        // The scroll-position text chip is gone — the scrollbar thumb
+        // already encodes position.
+        assert!(
+            !rendered.contains("line 0/0"),
+            "no scroll-position chip: {rendered}"
+        );
+    }
+
+    #[test]
+    fn brain_chip_renders_by_health_on_shortcuts_row() {
+        // Off (memory disabled) — the right side is empty.
+        let mut state = RenderState::default();
+        state.header_context = InlineHeaderContext::default();
+        let off = render_to_string(&state, 120, 24);
         assert!(
             !off.contains("brain"),
-            "chip must stay hidden when memory is disabled"
+            "chip hidden when memory is off: {off}"
         );
 
-        // Ok — healthy chip renders.
+        // Ok — healthy chip on the right.
         state.brain = crate::tui_vt::main_loop::BrainChip::Ok;
-        let ok = render_to_string(&state, 80, 24);
-        assert!(ok.contains("brain·ok"), "healthy chip must render: {ok}");
+        let ok = render_to_string(&state, 120, 24);
+        assert!(ok.contains("brain·ok"), "healthy chip renders: {ok}");
 
         // Down — degraded chip renders.
         state.brain = crate::tui_vt::main_loop::BrainChip::Down;
-        let down = render_to_string(&state, 80, 24);
+        let down = render_to_string(&state, 120, 24);
+        assert!(down.contains("brain·down"), "degraded chip renders: {down}");
+    }
+
+    #[test]
+    fn pending_quit_hint_owns_the_shortcuts_row() {
+        let mut state = RenderState::default();
+        state.header_context = InlineHeaderContext::default();
+        state.pending_quit = true;
+
+        let rendered = render_to_string(&state, 120, 24);
         assert!(
-            down.contains("brain·down"),
-            "degraded chip must render: {down}"
+            rendered.contains("press Ctrl+C again to quit"),
+            "pending hint replaces hints and the brain chip: {rendered}"
+        );
+        assert!(
+            !rendered.contains("brain·"),
+            "the confirmation hint owns the row while pending"
         );
     }
 

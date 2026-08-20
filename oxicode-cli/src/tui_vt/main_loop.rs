@@ -242,9 +242,6 @@ pub struct RenderState {
     pub header_context: InlineHeaderContext,
     /// Composer enabled state — mirrored from `SetInputEnabled`.
     pub input_enabled: bool,
-    /// Footer status (left + right) — mirrored from `SetInputStatus`.
-    pub footer_left: Option<String>,
-    pub footer_right: Option<String>,
     /// Composer prompt prefix — mirrored from `SetPrompt`.
     pub prompt_prefix: String,
     /// Composer placeholder — mirrored from `SetPlaceholder`.
@@ -381,8 +378,6 @@ impl Default for RenderState {
             scroll_offset: usize::MAX,
             header_context: InlineHeaderContext::default(),
             input_enabled: false,
-            footer_left: None,
-            footer_right: None,
             prompt_prefix: String::new(),
             placeholder: None,
             shutdown_requested: false,
@@ -591,32 +586,76 @@ impl RenderState {
             .expect("RenderState::session_swapper must be initialized at TUI startup")
     }
 
-    /// Append a brand-new line to the transcript.
+    /// Append one or more brand-new transcript lines.
+    ///
+    /// `ratatui::text::Line` is a single visual line: embedded `\n`
+    /// characters are flattened. Normalize protocol segments at this
+    /// boundary so `TranscriptLine` keeps its name and rendering contract.
     fn append_line(&mut self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
         let block_id = self.block_id_for_kind(kind);
-        self.transcript.push(TranscriptLine {
+        self.transcript
+            .extend(
+                Self::segments_by_explicit_line(segments)
+                    .into_iter()
+                    .map(|segments| TranscriptLine {
+                        kind,
+                        segments,
+                        block_id,
+                    }),
+            );
+    }
+
+    /// Append a streaming delta to the active line. Explicit newlines finish
+    /// the current line and open another line in the same semantic block.
+    fn inline_segment(&mut self, kind: InlineMessageKind, segment: InlineSegment) {
+        let block_id = self.block_id_for_kind(kind);
+        let mut lines = Self::segments_by_explicit_line(vec![segment]).into_iter();
+
+        if let Some(first) = lines.next() {
+            if let Some(last) = self.transcript.last_mut()
+                && last.kind == kind
+            {
+                last.segments.extend(first);
+            } else {
+                self.transcript.push(TranscriptLine {
+                    kind,
+                    segments: first,
+                    block_id,
+                });
+            }
+        }
+        self.transcript.extend(lines.map(|segments| TranscriptLine {
             kind,
             segments,
             block_id,
-        });
+        }));
     }
 
-    /// Append a segment to the most recent transcript line, or create a new
-    /// line if the transcript is empty. Used for `Inline { kind, segment }`
-    /// where the segment is a streaming delta.
-    fn inline_segment(&mut self, kind: InlineMessageKind, segment: InlineSegment) {
-        if let Some(last) = self.transcript.last_mut()
-            && last.kind == kind
-        {
-            last.segments.push(segment);
-            return;
+    /// Split styled segments without allocating on the common single-line
+    /// path. Empty chunks are retained because blank lines carry layout.
+    fn segments_by_explicit_line(segments: Vec<InlineSegment>) -> Vec<Vec<InlineSegment>> {
+        if !segments.iter().any(|segment| segment.text.contains('\n')) {
+            return vec![segments];
         }
-        let block_id = self.block_id_for_kind(kind);
-        self.transcript.push(TranscriptLine {
-            kind,
-            segments: vec![segment],
-            block_id,
-        });
+
+        let mut lines = vec![Vec::new()];
+        for segment in segments {
+            let InlineSegment { text, style } = segment;
+            for (index, part) in text.split('\n').enumerate() {
+                if index > 0 {
+                    lines.push(Vec::new());
+                }
+                if !part.is_empty()
+                    && let Some(line) = lines.last_mut()
+                {
+                    line.push(InlineSegment {
+                        text: part.to_string(),
+                        style: Arc::clone(&style),
+                    });
+                }
+            }
+        }
+        lines
     }
 
     /// Determine the block_id for a new line: reuse the last line's block
@@ -1257,9 +1296,10 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         InlineCommand::SetHeaderContext { context } => {
             state.header_context = *context;
         }
-        InlineCommand::SetInputStatus { left, right } => {
-            state.footer_left = left;
-            state.footer_right = right;
+        InlineCommand::SetInputStatus { .. } => {
+            // The dedicated status row was removed; input-status text has
+            // no render surface. Kept as a graceful no-op for protocol
+            // compatibility with harnesses that still send it.
         }
         InlineCommand::SetInputEnabled(enabled) => {
             state.input_enabled = enabled;
@@ -1479,20 +1519,26 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         }
         AgentEvent::MessageUpdate { delta, .. } => match &delta {
             oxicode_sdk::StreamDelta::Text(text) => {
+                // The Text delta is the lifecycle owner of the visible
+                // answer: the first one transitions the reasoning stage
+                // off `thinking…` into `generating response`. Raw
+                // `MessageUpdate { delta: Text }` is the live streaming
+                // path (oxicode-agent/src/agent_loop/streaming.rs:277-280).
+                state.reasoning_stage = Some("generating response".to_string());
                 state.message_buffer.push_str(text);
                 handle.inline(InlineMessageKind::Agent, plain_segment(text.clone()));
             }
-            oxicode_sdk::StreamDelta::Thinking(text) => {
-                // Keep reasoning visually distinct without relying on symbols
-                // that vary across terminal fonts.
-                // visually distinct from the actual response text.
-                let mut style = InlineTextStyle::default();
-                style.effects |= anstyle::Effects::DIMMED;
-                let seg = InlineSegment {
-                    text: format!("[thinking] {text}"),
-                    style: Arc::new(style),
-                };
-                handle.inline(InlineMessageKind::Info, seg);
+            oxicode_sdk::StreamDelta::Thinking(_text) => {
+                // The reasoning content itself never leaves the model:
+                // streaming raw fragments into `reasoning_stage` would
+                // leak them through two surfaces — the composer
+                // `RUN ` field (`composer_context_line`) and the
+                // reasoning indicator above the composer.
+                // A fixed `thinking…` label is the only thing that
+                // should occupy `reasoning_stage` while the model is
+                // reasoning; the next Text or ToolStart delta overwrites
+                // it with `generating response` / `tool: …` respectively.
+                state.reasoning_stage = Some("thinking\u{2026}".to_string());
             }
             oxicode_sdk::StreamDelta::Sync => {
                 // Re-render the complete message as markdown
@@ -1508,6 +1554,9 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             }
         },
         AgentEvent::MessageEnd { .. } => {
+            // Hide the reasoning indicator once the turn has ended so the
+            // composer row reverts to follow-ups / tips.
+            state.reasoning_stage = None;
             // Final rendering (same as delta:None for completeness)
             if !state.message_buffer.is_empty() {
                 let lines = oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
@@ -2417,10 +2466,8 @@ fn handle_interrupt(
         tokio::spawn(async move {
             s.abort().await;
         });
-        state.footer_left = Some("Stopping\u{2026} press Ctrl+C again to confirm quit".to_string());
         state.pending_quit = true;
     } else {
-        state.footer_left = None;
         state.confirmation = Some(quit_confirmation());
     }
     LoopOutcome::Continue
@@ -3569,10 +3616,10 @@ fn accent_color_for_kind(kind: InlineMessageKind, styles: &ThemeStyles) -> Color
 }
 
 /// Compose one frame using the agent view layout (grok-build-style):
-/// StatusBar (top) → Scrollback (dominant) → Prompt → ShortcutsBar (bottom).
-/// Chrome geometry and the status/shortcuts bars are rendered by
-/// [`render_chrome`](crate::tui_vt::frame_layout::render_chrome); the transcript and composer are placed
-/// into the returned layout rects.
+/// Scrollback (dominant, top) → Prompt → ShortcutsBar (bottom).
+/// Chrome geometry and the shortcuts bar are rendered by
+/// [`render_chrome`](crate::tui_vt::frame_layout::render_chrome); the
+/// transcript and composer are placed into the returned layout rects.
 fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHandle) {
     let area = frame.area();
     // Paint the theme background across the whole frame first. Without this
@@ -4105,11 +4152,14 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
         .as_ref()
         .and_then(|s| (!s.matches.is_empty()).then(|| s.matches[s.current]));
 
-    let mut display: Vec<(usize, InlineMessageKind, Line<'_>)> =
+    // `None` marks a turn spacer: a blank breathing row before a user
+    // block. Spacers carry no rail and no content.
+    let mut display: Vec<(usize, InlineMessageKind, Option<Line<'_>>)> =
         Vec::with_capacity(state.transcript.len());
     let dim_style = Style::default()
         .fg(color_from_anstyle(styles.secondary.get_fg_color()))
         .add_modifier(Modifier::DIM);
+    let mut prev_block: Option<usize> = None;
     for item in visible_items(&state.transcript, |block_id| state.block_mode(block_id)) {
         match item {
             VisibleItem::Line {
@@ -4117,6 +4167,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
                 folded,
             } => {
                 let tl = &state.transcript[source_index];
+                let is_block_start = prev_block != Some(tl.block_id);
+                // One blank row sets each user turn apart from the flow
+                // above it (never at the very top of the transcript).
+                if tl.kind == InlineMessageKind::User && prev_block.is_some() && is_block_start {
+                    display.push((source_index, tl.kind, None));
+                }
                 let is_match = search_set.contains(&source_index);
                 let line = transcript_line_marked(
                     tl,
@@ -4124,8 +4180,10 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
                     folded,
                     is_match,
                     current_match == Some(source_index),
+                    is_block_start,
                 );
-                display.push((source_index, tl.kind, line));
+                display.push((source_index, tl.kind, Some(line)));
+                prev_block = Some(tl.block_id);
             }
             VisibleItem::Gap {
                 source_index,
@@ -4133,7 +4191,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
             } => {
                 let tl = &state.transcript[source_index];
                 let gap = Line::styled(format!("  \u{2026} +{hidden_lines} lines"), dim_style);
-                display.push((source_index, tl.kind, gap));
+                display.push((source_index, tl.kind, Some(gap)));
             }
         }
     }
@@ -4203,7 +4261,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
             cell.set_char('\u{2503}');
             cell.set_style(Style::default().fg(blend_rgb(bg_color, accent_base, rail_blend)));
         }
-        let line = transcript_line_marked(tl, &styles, false, false, false);
+        let line = transcript_line_marked(tl, &styles, false, false, false, true);
         let row = Rect {
             x: content_area.x,
             y: content_area.top(),
@@ -4227,6 +4285,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
         if y >= content_area.bottom() {
             break;
         }
+        // Turn spacer: one blank breathing row — no rail, no content.
+        let Some(line) = line else {
+            y += 1;
+            visual_row += 1;
+            continue;
+        };
         let text_w = line.width();
         let wrapped_h = if text_w == 0 {
             1
@@ -4337,54 +4401,78 @@ fn render_scrollbar(
 
 /// Build a ratatui `Line` from a transcript line, with optional fold marker
 /// and search-match highlighting.
+///
+/// Speaker identity is structural, not prose: the per-kind accent rail plus
+/// text weight carry WHO is speaking, so the transcript never renders
+/// `you: `/`assistant: `-style labels. Concretely:
+///
+/// - **User** blocks get the composer's `> ` glyph on the first line,
+///   aligned continuation lines, and bold text — one prompt reads as one
+///   turn even when it contains explicit newlines.
+/// - **Agent**, **Tool**, and **Pty** lines carry no prefix: the agent is
+///   the transcript's default voice, and tool/shell blocks render their own
+///   structured glyphs internally.
+/// - **Error / Warning / Info / Policy** keep a short colored label —
+///   severity is data — but only on the block's first line (and on folded
+///   heads); continuation lines render plain.
 fn transcript_line_marked<'a>(
     line: &'a TranscriptLine,
     styles: &'a ThemeStyles,
     folded: bool,
     is_match: bool,
     is_current: bool,
+    is_block_start: bool,
 ) -> Line<'a> {
     let (kind_style, marker) = match line.kind {
         InlineMessageKind::Agent => (
             Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
-            "assistant",
+            None,
         ),
         InlineMessageKind::User => (
             Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
-            "you",
+            Some("> "),
         ),
         InlineMessageKind::Tool => (
             Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
-            "tool",
+            None,
         ),
         InlineMessageKind::Error => (
             Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
-            "error",
+            Some("error: "),
         ),
         InlineMessageKind::Warning => (
             Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
-            "warning",
+            Some("warning: "),
         ),
         InlineMessageKind::Info => (
             Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-            "info",
+            Some("info: "),
         ),
         InlineMessageKind::Policy => (
             Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
-            "policy",
+            Some("policy: "),
         ),
         InlineMessageKind::Pty => (
             Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
-            "shell",
+            None,
         ),
     };
 
-    // Use text labels rather than font-dependent pictograms.
-    let prefix = if folded {
-        format!("[+] {marker}: ")
-    } else {
-        format!("{marker}: ")
-    };
+    // System labels appear on the block's first line only. User continuation
+    // rows keep a two-cell indent instead of repeating `> ` and pretending
+    // that one multi-line prompt is several turns. Folded heads always show
+    // the marker so a collapsed block stays identifiable.
+    let mut prefix = String::new();
+    if folded {
+        prefix.push_str("[+] ");
+    }
+    if line.kind == InlineMessageKind::User {
+        prefix.push_str(if folded || is_block_start { "> " } else { "  " });
+    } else if let Some(marker) = marker
+        && (folded || is_block_start)
+    {
+        prefix.push_str(marker);
+    }
 
     // Highlight background for search matches.
     let highlight = if is_current {
@@ -4396,9 +4484,15 @@ fn transcript_line_marked<'a>(
     };
 
     let mut spans = Vec::with_capacity(line.segments.len() + 1);
-    spans.push(Span::styled(prefix, kind_style));
+    if !prefix.is_empty() {
+        spans.push(Span::styled(prefix, kind_style));
+    }
     for segment in &line.segments {
         let mut style = segment_style(segment, kind_style, styles);
+        // Weight-led hierarchy: user input is the only bold body text.
+        if line.kind == InlineMessageKind::User {
+            style = style.add_modifier(Modifier::BOLD);
+        }
         if let Some(h) = highlight {
             style = style.patch(h);
         }
@@ -4564,9 +4658,9 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 /// Compact session facts embedded in the composer's top border.
 ///
 /// The field order is deliberately task-oriented: model and reasoning first,
-/// then place/version-control context, then the capacity signal. At narrower
-/// widths lower-priority facts disappear as complete fields rather than being
-/// clipped halfway through a path or branch name.
+/// then place/version-control context, then the capacity signal.
+/// At narrower widths lower-priority facts disappear as complete fields
+/// rather than being clipped halfway through a path or branch name.
 fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
     let styles = active_styles();
     let primary = color_from_anstyle(styles.primary.get_fg_color());
@@ -4604,41 +4698,47 @@ fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
         None => format!("0/{}", compact_token_count(state.context_window)),
     };
 
-    let mut spans = vec![Span::styled(
-        " OXICODE ",
-        Style::default().fg(primary).add_modifier(Modifier::BOLD),
-    )];
-    let mut field = |label: &str, value: &str, value_style: Style| {
-        spans.push(Span::styled(" | ", Style::default().fg(muted)));
-        spans.push(Span::styled(label.to_string(), Style::default().fg(muted)));
-        spans.push(Span::styled(value.to_string(), value_style));
-    };
-
-    field(
-        "MODEL ",
-        model,
-        Style::default().fg(fg).add_modifier(Modifier::BOLD),
-    );
-    if width >= 58 {
-        field("THINK ", &state.thinking_level, Style::default().fg(info));
-    }
-    if width >= 82 {
-        field("DIR ", &workspace, Style::default().fg(fg));
-    }
-    if width >= 104 {
-        field("GIT ", branch, Style::default().fg(fg));
-    }
-    if width >= 124 {
-        field("CTX ", &context, Style::default().fg(info));
-    }
-    if width >= 148
-        && let Some(stage) = &state.reasoning_stage
-    {
-        field(
+    // (label, value, value style, minimum width). The first surviving field
+    // renders without a leading separator — there is no app badge.
+    let mut fields: Vec<(&str, String, Style, u16)> = vec![
+        (
+            "MODEL ",
+            model.to_string(),
+            Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            0,
+        ),
+        (
+            "THINK ",
+            state.thinking_level.clone(),
+            Style::default().fg(info),
+            58,
+        ),
+        ("DIR ", workspace, Style::default().fg(fg), 82),
+        ("GIT ", branch.to_string(), Style::default().fg(fg), 104),
+        ("CTX ", context, Style::default().fg(info), 124),
+    ];
+    if let Some(stage) = state.reasoning_stage.clone() {
+        fields.push((
             "RUN ",
             stage,
             Style::default().fg(primary).add_modifier(Modifier::BOLD),
-        );
+            148,
+        ));
+    }
+
+    let mut spans = Vec::new();
+    for (i, (label, value, value_style, min_width)) in fields.into_iter().enumerate() {
+        if width < min_width {
+            break;
+        }
+        if i > 0 {
+            spans.push(Span::styled(" | ", Style::default().fg(muted)));
+        }
+        spans.push(Span::styled(
+            (*label).to_string(),
+            Style::default().fg(muted),
+        ));
+        spans.push(Span::styled(value, value_style));
     }
     spans.push(Span::raw(" "));
     Line::from(spans)
@@ -5616,6 +5716,32 @@ mod render_tests {
         out
     }
 
+    /// Render the full frame at the requested size. Mirrors
+    /// `render_frame_to_string` but at the documented width so PTY-style
+    /// snapshot tests can assert on a representative viewport.
+    #[allow(dead_code)]
+    fn render_frame_to_string_at(state: &RenderState, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        terminal
+            .draw(|f| render_frame(f, state, &handle))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    out.push_str(cell.symbol());
+                }
+            }
+            out.push('\n');
+        }
+        out
+    }
+
     /// Diagnostic helper: render the full frame and return the terminal
     /// caret position (where render_composer set it).
     fn terminal_caret(state: &RenderState) -> Option<(u16, u16)> {
@@ -6460,6 +6586,183 @@ mod render_tests {
     }
 
     #[test]
+    fn user_turns_get_one_blank_spacer_row() {
+        let mut state = RenderState::default();
+        state.transcript = vec![
+            TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment("agent-answer")],
+                block_id: 0,
+            },
+            TranscriptLine {
+                kind: InlineMessageKind::User,
+                segments: vec![plain_segment("next-question")],
+                block_id: 1,
+            },
+        ];
+        let rendered = render_frame_to_string(&state);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let agent_row = rows
+            .iter()
+            .position(|r| r.contains("agent-answer"))
+            .expect("agent row");
+        assert!(
+            rows[agent_row + 2].contains("> next-question"),
+            "user line follows the spacer with its glyph"
+        );
+    }
+
+    #[test]
+    fn transcript_snapshot_at_120_cols_matches_role_layout() {
+        let mut state = RenderState::default();
+        state.brain = BrainChip::Ok;
+        state.append_line(
+            InlineMessageKind::User,
+            vec![plain_segment("intro message\nsecond line")],
+        );
+        state.append_line(
+            InlineMessageKind::Agent,
+            vec![plain_segment("answer paragraph line one\nline two")],
+        );
+        state.append_line(
+            InlineMessageKind::User,
+            vec![plain_segment("follow-up question")],
+        );
+        let rendered = render_frame_to_string_at(&state, 120, 24);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let first_user = rows
+            .iter()
+            .position(|row| row.contains("> intro message"))
+            .expect("intro user row");
+        let continuation = rows
+            .iter()
+            .position(|row| row.contains("second line"))
+            .expect("user continuation visible");
+        assert!(
+            rows[first_user].contains("> intro message"),
+            "first user row keeps the prompt glyph"
+        );
+        assert_eq!(
+            continuation,
+            first_user + 1,
+            "user continuation on next row"
+        );
+        assert!(
+            !rows[continuation].contains("> second"),
+            "continuation row must not show the prompt glyph"
+        );
+
+        // Spacer row separates the agent turn from the next user turn.
+        let spacer_after_agent = rows
+            .iter()
+            .enumerate()
+            .skip(continuation + 1)
+            .find(|(_, row)| row.trim().is_empty())
+            .map(|(idx, _)| idx)
+            .expect("spacer before user turn");
+
+        let next_user = rows
+            .iter()
+            .position(|row| row.contains("> follow-up question"))
+            .expect("second user row");
+        assert_eq!(
+            next_user,
+            spacer_after_agent + 1,
+            "user turn follows the spacer"
+        );
+
+        // Agent block has no prefix marker.
+        let agent_row = rows
+            .iter()
+            .position(|row| row.contains("answer paragraph"))
+            .expect("agent row");
+        assert!(
+            !rows[agent_row].trim_start().starts_with('>'),
+            "agent rows carry no prompt glyph: {rows:?}"
+        );
+
+        // Brain chip lives on the shortcuts bar, not the composer border.
+        let shortcuts_row = rows
+            .iter()
+            .position(|row| row.contains("brain·ok"))
+            .expect("brain chip on shortcuts row");
+        assert!(shortcuts_row > next_user, "chip below the chat surface");
+    }
+
+    #[test]
+    fn no_spacer_above_the_first_transcript_line() {
+        let mut state = RenderState::default();
+        state.transcript = vec![TranscriptLine {
+            kind: InlineMessageKind::User,
+            segments: vec![plain_segment("opening-question")],
+            block_id: 0,
+        }];
+        let rendered = render_frame_to_string(&state);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let user_row = rows
+            .iter()
+            .position(|r| r.contains("> opening-question"))
+            .expect("user row");
+        assert!(
+            rows[..user_row].iter().all(|r| r.trim().is_empty()),
+            "transcript starts at the top with no spacer"
+        );
+    }
+
+    #[test]
+    fn multiline_user_input_renders_every_explicit_line() {
+        let mut state = RenderState::default();
+        state.append_line(
+            InlineMessageKind::User,
+            vec![plain_segment("first line\nsecond line")],
+        );
+        let rendered = render_frame_to_string(&state);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let first_row = rows
+            .iter()
+            .position(|row| row.contains("> first line"))
+            .expect("first user row keeps the prompt glyph");
+        let second_row = rows
+            .iter()
+            .position(|row| row.contains("second line"))
+            .expect("explicit continuation line is visible");
+        assert_eq!(
+            second_row,
+            first_row + 1,
+            "explicit newline must occupy the following visual row"
+        );
+
+        assert!(
+            !rows[second_row].contains("> second line"),
+            "continuation row must not look like a second user turn"
+        );
+    }
+
+    #[test]
+    fn streaming_agent_delta_renders_every_explicit_line() {
+        let mut state = RenderState::default();
+        state.inline_segment(
+            InlineMessageKind::Agent,
+            plain_segment("first answer\nsecond answer"),
+        );
+        let rendered = render_frame_to_string(&state);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let first_row = rows
+            .iter()
+            .position(|row| row.contains("first answer"))
+            .expect("first agent row");
+        let second_row = rows
+            .iter()
+            .position(|row| row.contains("second answer"))
+            .expect("second agent row");
+        assert_eq!(
+            second_row,
+            first_row + 1,
+            "streamed newline must occupy the following visual row"
+        );
+    }
+
+    #[test]
     fn file_search_dropdown_renders_results() {
         use crate::tui_vt::file_search::{FileSearchResult, FileSearchState};
         let mut state = RenderState::default();
@@ -7295,5 +7598,246 @@ mod provider_overlay_tests {
         session
             .streaming_flag()
             .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+#[cfg(test)]
+mod thinking_stream_tests {
+    //! Regression: a `StreamDelta::Thinking` delta must (a) never append
+    //! to the transcript, and (b) only set a fixed `thinking…` label on
+    //! the reasoning stage — never the streamed fragment. Raw reasoning
+    //! fragments would otherwise leak through two render surfaces
+    //! (the composer `RUN ` field in `composer_context_line`, and the
+    //! reasoning indicator above the composer).
+    use super::*;
+    use oxicode_ai::{Api, AssistantMessage, Message};
+    use oxicode_vtui::tui::core::InlineHandle;
+    use tokio::sync::mpsc;
+
+    fn fresh_handle() -> (InlineHandle, mpsc::UnboundedReceiver<InlineCommand>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (InlineHandle::new_for_tests(tx), rx)
+    }
+
+    fn assistant() -> Message {
+        Message::Assistant(AssistantMessage::new(
+            Api::OpenAiCompletions,
+            "test",
+            "test",
+        ))
+    }
+
+    #[test]
+    fn thinking_delta_sets_fixed_stage_label_not_raw_text() {
+        let mut state = RenderState::default();
+        let (handle, mut cmd_rx) = fresh_handle();
+        let baseline = state.transcript.len();
+
+        // The exact text the model streamed for reasoning MUST NOT appear
+        // in the stage indicator.
+        let event = AgentEvent::MessageUpdate {
+            message: assistant(),
+            delta: oxicode_sdk::StreamDelta::Thinking("considering options".into()),
+        };
+        map_agent_event(&handle, event, &mut state);
+
+        assert_eq!(
+            state.transcript.len(),
+            baseline,
+            "thinking delta must not append to transcript"
+        );
+        assert_eq!(
+            state.reasoning_stage.as_deref(),
+            Some("thinking\u{2026}"),
+            "reasoning stage must show a fixed label, never the streamed fragment"
+        );
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            assert!(
+                !matches!(cmd, InlineCommand::Inline { .. }),
+                "thinking must not emit a transcript Inline command"
+            );
+        }
+    }
+
+    #[test]
+    fn first_text_delta_overrides_thinking_stage_with_generating_response() {
+        let mut state = RenderState::default();
+        let (handle, _cmd_rx) = fresh_handle();
+
+        // The real streaming path emits Thinking and Text deltas as
+        // `AgentEvent::MessageUpdate { delta: StreamDelta::* }`
+        // (oxicode-agent/src/agent_loop/streaming.rs:277-280). TextChunk
+        // is legacy and no producer emits it. The Text arm is the
+        // lifecycle owner that moves the stage off `thinking…`.
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Thinking("considering".into()),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("hi".into()),
+            },
+            &mut state,
+        );
+
+        assert_eq!(
+            state.reasoning_stage.as_deref(),
+            Some("generating response"),
+            "first Text delta must move the stage off `thinking\u{2026}`"
+        );
+    }
+
+    #[test]
+    fn message_end_clears_reasoning_stage() {
+        let mut state = RenderState::default();
+        let (handle, _cmd_rx) = fresh_handle();
+        state.reasoning_stage = Some("thinking\u{2026}".into());
+
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+
+        assert!(
+            state.reasoning_stage.is_none(),
+            "MessageEnd must clear the reasoning stage so follow-ups / tips can render"
+        );
+    }
+}
+
+#[cfg(test)]
+mod composer_border_tests {
+    //! The composer's top border is the single chrome surface after the
+    //! status bar's removal: session facts + brain health, no app badge.
+    use super::*;
+
+    fn spans_to_string(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn composer_border_has_no_app_badge() {
+        let mut state = RenderState::default();
+        state.header_context.provider = "prov".to_string();
+        state.header_context.model = "prov/m-1".to_string();
+
+        let text = spans_to_string(&composer_context_line(&state, 200));
+
+        assert!(
+            text.starts_with("MODEL "),
+            "model leads with no leading separator: {text}"
+        );
+        assert!(
+            text.contains("MODEL m-1"),
+            "provider prefix is stripped from the model: {text}"
+        );
+    }
+
+    #[test]
+    fn composer_border_fields_drop_by_width() {
+        let mut state = RenderState::default();
+        state.header_context.provider = "prov".to_string();
+        state.header_context.model = "prov/m-1".to_string();
+
+        // Narrow: only the model survives; wide: context usage joins.
+        let narrow = spans_to_string(&composer_context_line(&state, 60));
+        assert!(
+            narrow.contains("MODEL ") && !narrow.contains("CTX "),
+            "narrow keeps the model only: {narrow}"
+        );
+        let wide = spans_to_string(&composer_context_line(&state, 140));
+        assert!(wide.contains("CTX "), "wide carries context usage: {wide}");
+    }
+}
+#[cfg(test)]
+mod transcript_turn_tests {
+    //! Speaker identity is structural (accent rail + weight), never prose
+    //! labels. See docs/superpowers/specs/2026-08-20-transcript-turn-rendering-design.md.
+    use super::*;
+    fn tl(kind: InlineMessageKind, text: &str, block_id: usize) -> TranscriptLine {
+        TranscriptLine {
+            kind,
+            segments: vec![plain_segment(text)],
+            block_id,
+        }
+    }
+
+    fn spans_to_string(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn user_lines_get_prompt_glyph_and_bold_body() {
+        let styles = active_styles();
+        let line = tl(InlineMessageKind::User, "refactor the parser", 0);
+        let rendered = transcript_line_marked(&line, &styles, false, false, false, true);
+        assert_eq!(rendered.spans[0].content.as_ref(), "> ");
+        assert_eq!(
+            spans_to_string(&rendered),
+            "> refactor the parser",
+            "user input echoes the composer glyph"
+        );
+        assert!(
+            rendered.spans[1]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD),
+            "user body is the only bold transcript text"
+        );
+    }
+
+    #[test]
+    fn agent_tool_and_shell_lines_have_no_prefix() {
+        let styles = active_styles();
+        for (kind, label) in [
+            (InlineMessageKind::Agent, "agent"),
+            (InlineMessageKind::Tool, "tool"),
+            (InlineMessageKind::Pty, "shell"),
+        ] {
+            let line = tl(kind, &format!("{label}-content"), 0);
+            let rendered = transcript_line_marked(&line, &styles, false, false, false, true);
+            assert_eq!(
+                rendered.spans.len(),
+                1,
+                "{label} lines carry no marker spans"
+            );
+            assert_eq!(spans_to_string(&rendered), format!("{label}-content"));
+        }
+    }
+
+    #[test]
+    fn system_labels_render_on_block_start_only() {
+        let styles = active_styles();
+        let line = tl(InlineMessageKind::Error, "boom", 0);
+
+        let head = transcript_line_marked(&line, &styles, false, false, false, true);
+        assert_eq!(spans_to_string(&head), "error: boom");
+
+        let body = transcript_line_marked(&line, &styles, false, false, false, false);
+        assert_eq!(
+            spans_to_string(&body),
+            "boom",
+            "continuation lines drop the label"
+        );
+    }
+
+    #[test]
+    fn folded_head_keeps_the_block_label() {
+        let styles = active_styles();
+        let line = tl(InlineMessageKind::Error, "boom", 0);
+        let rendered = transcript_line_marked(&line, &styles, true, false, false, false);
+        assert_eq!(
+            spans_to_string(&rendered),
+            "[+] error: boom",
+            "a collapsed block stays identifiable"
+        );
     }
 }

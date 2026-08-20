@@ -9,8 +9,6 @@
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────┐
-//! │ StatusBar                          1 row    │
-//! ├─────────────────────────────────────────────┤
 //! │ [Startup warnings]                optional  │
 //! │ [Tasks pane]                      optional  │
 //! │ [Catalog pane]                    optional  │
@@ -169,8 +167,6 @@ pub fn effective_compact(user_compact: bool, terminal_rows: u16) -> bool {
 /// per-pane heights via [`compute`](Self::compute).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AgentViewLayout {
-    /// 1-row top status bar.
-    pub status_bar: Rect,
     /// Startup warning banner.
     pub startup_warnings: Rect,
     /// Background tasks pane.
@@ -287,7 +283,7 @@ impl AgentViewLayout {
         ));
         let inner_area = outer_block.inner(area);
 
-        let mut constraints = vec![Constraint::Length(1)]; // StatusBar
+        let mut constraints: Vec<Constraint> = Vec::new();
 
         if input.startup_warning_height > 0 {
             constraints.push(Constraint::Length(input.startup_warning_height));
@@ -352,8 +348,6 @@ impl AgentViewLayout {
         let chunks = Layout::vertical(constraints).split(inner_area);
 
         let mut i = 0;
-        let status_bar = chunks[i];
-        i += 1;
 
         let startup_warnings =
             Self::take_optional(&chunks, &mut i, input.startup_warning_height > 0);
@@ -361,7 +355,7 @@ impl AgentViewLayout {
         let catalog = Self::take_pane(&chunks, &mut i, input.catalog_height > 0);
         let todo = Self::take_pane(&chunks, &mut i, input.todo_height > 0);
 
-        i += 1; // status_gap
+        i += 1; // gap between the top panes and the scrollback
         let scrollback = chunks[i];
         i += 1;
 
@@ -408,7 +402,6 @@ impl AgentViewLayout {
         };
 
         Self {
-            status_bar,
             startup_warnings,
             tasks,
             catalog,
@@ -509,7 +502,14 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(layout.status_bar.height, 1);
+        // No dedicated chrome row above the scrollback: it starts directly
+        // under the outer vpad plus the pane/scrollback separator gap.
+        let vpad = LayoutConfig::default().eff_outer_vpad(false);
+        assert_eq!(
+            layout.scrollback.y,
+            vpad + u16::from(vpad > 0),
+            "scrollback starts at the vpad (+gap), no status-bar row"
+        );
         assert!(layout.scrollback.height >= 5);
         assert!(layout.prompt.y < layout.shortcuts.y);
     }

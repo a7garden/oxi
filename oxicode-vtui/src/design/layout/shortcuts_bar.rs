@@ -152,6 +152,7 @@ pub struct ShortcutsBar<'a, S: ShortcutBarStyling> {
     styles: &'a S,
     compact: Option<&'a CompactConfig>,
     pending: Option<PendingHint>,
+    right: Option<Line<'a>>,
 }
 
 impl<'a, S: ShortcutBarStyling> ShortcutsBar<'a, S> {
@@ -163,6 +164,7 @@ impl<'a, S: ShortcutBarStyling> ShortcutsBar<'a, S> {
             styles,
             compact: None,
             pending: None,
+            right: None,
         }
     }
 
@@ -177,6 +179,16 @@ impl<'a, S: ShortcutBarStyling> ShortcutsBar<'a, S> {
     #[must_use]
     pub fn pending(mut self, hint: PendingHint) -> Self {
         self.pending = Some(hint);
+        self
+    }
+
+    /// Set a right-aligned status line (e.g. scroll position).
+    ///
+    /// Skipped when it would overlap the left hints or while a pending
+    /// confirmation hint owns the row.
+    #[must_use]
+    pub fn right(mut self, line: Line<'a>) -> Self {
+        self.right = Some(line);
         self
     }
 }
@@ -220,6 +232,14 @@ impl<S: ShortcutBarStyling> Widget for ShortcutsBar<'_, S> {
             }
             buf.set_line(x, area.y, &line, w);
             x += w;
+        }
+
+        if let Some(right) = self.right {
+            let w = right.width() as u16;
+            let right_x = area.x + area.width.saturating_sub(w);
+            if right_x > x {
+                buf.set_line(right_x, area.y, &right, w);
+            }
         }
     }
 }

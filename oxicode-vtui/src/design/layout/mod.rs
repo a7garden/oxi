@@ -6,7 +6,6 @@
 //! |---|---|
 //! | [`agent`] | `AgentViewLayout`, `ActivePane`, `PaneAreas` — pure geometry |
 //! | [`config`] | `LayoutConfig`, `ScrollbarConfig` — appearance settings |
-//! | [`status_bar`] | `StatusBar` + `StatusBarBuilder` — 1-row top bar |
 //! | [`shortcuts_bar`] | `ShortcutsBar` + `HintItem` — bottom keyboard hints |
 //! | [`welcome`] | `WelcomeLayout` — welcome screen geometry |
 //!
@@ -17,7 +16,6 @@
 pub mod agent;
 pub mod config;
 pub mod shortcuts_bar;
-pub mod status_bar;
 pub mod welcome;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -32,7 +30,7 @@ pub use config::{LayoutConfig, ScrollbarConfig};
 pub use shortcuts_bar::{
     CompactConfig, HintItem, PendingHint, ShortcutBarStyling, ShortcutsBar, compute_effective_hints,
 };
-pub use status_bar::{StatusBar, StatusBarBuilder, StatusBarStyling};
+
 pub use welcome::{HERO_BOX_MIN_WIDTH, PROMPT_HEIGHT, WelcomeLayout, WelcomePromptFocus};
 
 // ───────────────────────────────────────────────────────────────────────────
