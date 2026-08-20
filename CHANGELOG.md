@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **TUI: top status bar removed.** The 1-row status bar (`OXICODE | …`
+  chrome) was pure space cost — every session fact already lives on the
+  composer's top border. The app-badge prefix was dropped from the border
+  (branding stays on the welcome card only), the oxibrain health chip
+  (`brain·ok`/`brain·down`, info/error colored) moved to the right side of
+  the shortcuts bar ahead of the transcript position (`line N/M`), and the
+  reclaimed row belongs to the scrollback. `oxicode-vtui`'s
+  `StatusBar`/`StatusBarBuilder` widgets and `AgentViewLayout::status_bar`
+  were deleted with it; `ShortcutsBar` gained a `right(...)` status line.
 
 - **oxibrain integration fixed.** The memory backend now connects to the
   daemon's real socket (`~/.oxi/brain/oxibrain.sock`, override
@@ -16,8 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of nonexistent `memory.put`/`memory.delete`). `memory_enabled`
   now defaults to `true`; the backend is gated on daemon socket presence,
   not on a Foundation install.
-- **TUI memory visibility.** The status bar gains a `brain·ok`/`brain·down`
-  health chip (background ping every 20s) and a `/memory` slash command
+- **TUI memory visibility.** The TUI gains a `brain·ok`/`brain·down`
+  health indicator (background ping every 20s; rendered on the shortcuts
+  bar's right side) and a `/memory` slash command
   (aliases `/brain`, `/mem`) showing socket path, enabled state, daemon
   stats, and recovery hints.
 

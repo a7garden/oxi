@@ -482,7 +482,8 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   (2026-08-18); the `oxicode-sdk` `EmbeddingProvider` port remains for
   feature-gated consumers (oxios). Legacy `~/.oxicode/memory/items.jsonl`
   migrates via `oxicode migrate brain`. TUI surfaces health via the
-  `brain·ok`/`brain·down` status chip and the `/memory` slash command.
+  `brain·ok`/`brain·down` chip on the shortcuts bar's right side and the
+  `/memory` slash command (the top status bar was removed 2026-08-20).
 
 - `oxicode-ai` has no dependency on other oxicode crates. Do not import `oxicode_agent` from it.
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
