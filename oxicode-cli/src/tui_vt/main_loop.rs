@@ -36,8 +36,9 @@ use oxicode_vtui::tui::core::{
     SecurePromptConfig,
 };
 use ratatui::{
-    Frame, Terminal,
+    Frame, Terminal, TerminalOptions, Viewport,
     backend::CrosstermBackend,
+    buffer::Buffer,
     layout::{Alignment, Margin, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -75,8 +76,13 @@ pub struct Tui {
 }
 
 impl Tui {
-    /// Enter the alternate screen, enable raw mode, push keyboard flags,
-    /// enable bracketed paste, hide the cursor, install the panic hook.
+    /// Enable raw mode, push keyboard flags, enable bracketed paste,
+    /// hide the cursor, and enter an **inline viewport** anchored at the
+    /// cursor. The inline viewport is what lets finalized transcript
+    /// rows be printed into the host terminal's real scrollback
+    /// (`Terminal::insert_before`) — a fullscreen viewport would keep
+    /// every line inside the repaint region and native scroll-up would
+    /// show only pre-session content.
     pub fn enter() -> Result<Self> {
         Self::set_panic_hook();
 
@@ -103,15 +109,37 @@ impl Tui {
             let _ = stdout.flush();
         }
 
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
+        // Inline viewport sized to the full terminal height (the live
+        // region keeps today's look: transcript tail + composer). On a
+        // non-tty (piped) run there is no scrollback to feed — fall
+        // back to fullscreen, where `insert_before` is a no-op.
+        //
+        // Entering the inline viewport also queries the cursor position
+        // (`CSI 6n`); a terminal that does not answer (piped pty, slow
+        // link) must not kill the app — degrade to fullscreen: no host
+        // scrollback committing, everything else identical.
+        let mut terminal = None;
+        if tty_ok {
+            let height = crossterm::terminal::size().map(|s| s.1).unwrap_or(24);
+            let backend = CrosstermBackend::new(stdout);
+            terminal = Terminal::with_options(
+                backend,
+                TerminalOptions {
+                    viewport: Viewport::Inline(height),
+                },
+            )
+            .ok();
+        }
+        let mut terminal = match terminal {
+            Some(t) => t,
+            None => Terminal::new(CrosstermBackend::new(io::stdout()))?,
+        };
         if tty_ok {
             let _ = terminal.clear();
         }
 
         Ok(Self { terminal, tty_ok })
     }
-
     /// Restore the terminal to its pre-TUI state. Each step is independent;
     /// errors are swallowed so a partial restoration never strands the user
     /// in raw mode.
@@ -238,6 +266,11 @@ pub struct RenderState {
     /// Index of the line currently pinned at the top of the viewport.
     /// `usize::MAX` means "follow the tail" (auto-scroll).
     pub scroll_offset: usize,
+    /// Transcript entries [0, committed) are frozen in the host
+    /// terminal's real scrollback (printed above the viewport via
+    /// `Terminal::insert_before`). They never render in the live
+    /// viewport again — native scroll-up reads them.
+    pub committed_entries: usize,
     /// Header context mirrored from `InlineHeaderContext`.
     pub header_context: InlineHeaderContext,
     /// Composer enabled state — mirrored from `SetInputEnabled`.
@@ -378,13 +411,12 @@ pub struct RenderState {
 
 impl Default for RenderState {
     fn default() -> Self {
-        // `TextArea` does not derive `Default` (it owns a `RefCell` and
-        // other non-`Default` machinery), so we hand-roll the constructor
         // for every other field. The composer starts empty.
         Self {
             composer: oxicode_textarea::TextArea::new(),
             transcript: Vec::new(),
             scroll_offset: usize::MAX,
+            committed_entries: 0,
             header_context: InlineHeaderContext::default(),
             input_enabled: false,
             prompt_prefix: String::new(),
@@ -713,6 +745,9 @@ impl RenderState {
             .transcript
             .iter()
             .enumerate()
+            // Committed entries are frozen in the host scrollback —
+            // the live region cannot scroll to them, so search skips.
+            .filter(|(i, _)| *i >= self.committed_entries)
             .filter(|(_, line)| {
                 line.segments
                     .iter()
@@ -1253,6 +1288,10 @@ async fn run_event_loop(
         if let Some(provider) = snapshot.todo_provider.as_ref() {
             snapshot.todo_items = flatten_todo_items(&provider.get_phases());
         }
+        // Shed finalized rows into the host scrollback before the
+        // synchronized repaint so the commit and the viewport redraw
+        // land as one visual update.
+        commit_scrollback(terminal, &mut snapshot);
         let _ = execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
         let draw_err = terminal
             .draw(|frame| render_frame(frame, &snapshot, handle))
@@ -1297,9 +1336,6 @@ fn route_cancel(is_streaming: bool) -> CancelRoute {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Command / event handlers
-// ─────────────────────────────────────────────────────────────────────────
-
 /// Apply a single `InlineCommand` to the render state. Returns `true`
 /// when the harness has requested a shutdown.
 fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
@@ -1314,6 +1350,14 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
             // A new streamed message opens: drop the anchor so the first
             // delta starts a fresh block instead of merging into the
             // previous message's rendered lines.
+            state.stream_anchor = None;
+        }
+        InlineCommand::EndStream => {
+            // The streamed message finalized: release the anchor so the
+            // finished block can commit to the host scrollback. Travels
+            // in the command stream after the final ReplaceLast — the
+            // causal order keeps the anchor pinned through the last
+            // re-render.
             state.stream_anchor = None;
         }
         InlineCommand::ReplaceLast { kind, lines, .. } => {
@@ -1679,6 +1723,10 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 state.message_buffer.clear();
                 state.thinking_buffer.clear();
             }
+            // The message is final: release the anchor in the command
+            // stream (after the final ReplaceLast above) so the finished
+            // block becomes committable to the host scrollback.
+            handle.end_stream();
         }
         AgentEvent::ToolExecutionStart {
             tool_name, args, ..
@@ -4262,69 +4310,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         height: area.height,
     };
 
-    // Build the visible-line list, respecting block folding.
-    let search_set: std::collections::HashSet<usize> = state
-        .search
-        .as_ref()
-        .map(|s| s.matches.iter().copied().collect())
-        .unwrap_or_default();
-    let current_match = state
-        .search
-        .as_ref()
-        .and_then(|s| (!s.matches.is_empty()).then(|| s.matches[s.current]));
-
-    // `None` marks a turn spacer: a blank breathing row. Turn rhythm —
-    // one blank before a user block (never at the transcript top) and
-    // one blank after it, so a request and its response never glue
-    // together. The assistant's internal flow (agent → tool → agent)
-    // stays contiguous: it is one turn.
-    let mut display: Vec<(usize, InlineMessageKind, Option<Line<'_>>)> =
-        Vec::with_capacity(state.transcript.len());
-    let dim_style = Style::default()
-        .fg(color_from_anstyle(styles.secondary.get_fg_color()))
-        .add_modifier(Modifier::DIM);
-    let mut prev_block: Option<usize> = None;
-    let mut prev_kind: Option<InlineMessageKind> = None;
-    for item in visible_items(&state.transcript, |block_id| state.block_mode(block_id)) {
-        match item {
-            VisibleItem::Line {
-                source_index,
-                folded,
-            } => {
-                let tl = &state.transcript[source_index];
-                let is_block_start = prev_block != Some(tl.block_id);
-                // Turn rhythm: breathe before a user block and after one,
-                // so a request and its response never glue together.
-                let needs_spacer = is_block_start
-                    && prev_block.is_some()
-                    && (tl.kind == InlineMessageKind::User
-                        || prev_kind == Some(InlineMessageKind::User));
-                if needs_spacer {
-                    display.push((source_index, tl.kind, None));
-                }
-                let is_match = search_set.contains(&source_index);
-                let line = transcript_line_marked(
-                    tl,
-                    &styles,
-                    folded,
-                    is_match,
-                    current_match == Some(source_index),
-                    is_block_start,
-                );
-                display.push((source_index, tl.kind, Some(line)));
-                prev_block = Some(tl.block_id);
-                prev_kind = Some(tl.kind);
-            }
-            VisibleItem::Gap {
-                source_index,
-                hidden_lines,
-            } => {
-                let tl = &state.transcript[source_index];
-                let gap = Line::styled(format!("  \u{2026} +{hidden_lines} lines"), dim_style);
-                display.push((source_index, tl.kind, Some(gap)));
-            }
-        }
-    }
+    let display = build_transcript_display(state, &styles, state.committed_entries);
 
     // Resolve scroll offset into the display list.
     let total = display.len();
@@ -4333,7 +4319,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     } else {
         display
             .iter()
-            .position(|(orig_idx, _, _)| *orig_idx >= state.scroll_offset)
+            .position(|d| d.source_index >= state.scroll_offset)
             .unwrap_or(total.saturating_sub(1))
     };
     let start = effective_scroll_offset(raw_start, total, content_area.height as usize);
@@ -4341,10 +4327,10 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     // Sticky header (grok-build parity): when the viewport top sits inside a
     // block's body (not on its head), pin the block's first line at the top
     // so the user can tell which block they are scrolling through.
-    let sticky_first: Option<usize> = display.get(start).and_then(|(orig_idx, _, _)| {
-        let bid = state.transcript.get(*orig_idx)?.block_id;
+    let sticky_first: Option<usize> = display.get(start).and_then(|d| {
+        let bid = state.transcript.get(d.source_index)?.block_id;
         let first_idx = state.transcript.iter().position(|l| l.block_id == bid)?;
-        (first_idx != *orig_idx).then_some(first_idx)
+        (first_idx != d.source_index).then_some(first_idx)
     });
     let sticky_h: u16 = if sticky_first.is_some() { 1 } else { 0 };
     let body_top = content_area.top() + sticky_h;
@@ -4358,10 +4344,10 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         let sticky_bid = state.transcript[sidx].block_id;
         // Walk display from `start` to find the first visual row belonging to
         // a different block.
-        let next_offset = display.iter().skip(start).position(|(orig_idx, _, _)| {
+        let next_offset = display.iter().skip(start).position(|d| {
             state
                 .transcript
-                .get(*orig_idx)
+                .get(d.source_index)
                 .map(|l| l.block_id != sticky_bid)
                 .unwrap_or(false)
         });
@@ -4398,12 +4384,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     // Render top-down, wrapping each line into multiple visual rows.
     let mut y = body_top;
     let width = content_area.width.max(1) as usize;
-    for (_, _, line) in display.into_iter().skip(start) {
+    for d in display.into_iter().skip(start) {
         if y >= content_area.bottom() {
             break;
         }
         // Turn spacer: one blank breathing row — no content.
-        let Some(line) = line else {
+        let Some(line) = d.line else {
             y += 1;
             continue;
         };
@@ -4413,7 +4399,6 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         } else {
             text_w.div_ceil(width).max(1) as u16
         };
-
         let row = Rect {
             x: content_area.x,
             y,
@@ -4441,6 +4426,304 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
             &styles,
             bg_color,
         );
+    }
+}
+
+/// One visible row of the transcript: a rendered line (or a turn
+/// spacer, `line: None`) plus the transcript entry it belongs to.
+#[derive(Clone)]
+struct TranscriptDisplayItem<'a> {
+    source_index: usize,
+    /// `None` marks a turn spacer: a blank breathing row.
+    line: Option<Line<'a>>,
+}
+
+/// Build the visible-row list, respecting block folding, search marks
+/// and turn rhythm. Entries below `from_entry` (committed to the host
+/// scrollback) are skipped — they are frozen and must not render in
+/// the live viewport again.
+fn build_transcript_display<'a>(
+    state: &'a RenderState,
+    styles: &'a ThemeStyles,
+    from_entry: usize,
+) -> Vec<TranscriptDisplayItem<'a>> {
+    let search_set: std::collections::HashSet<usize> = state
+        .search
+        .as_ref()
+        .map(|s| s.matches.iter().copied().collect())
+        .unwrap_or_default();
+    let current_match = state
+        .search
+        .as_ref()
+        .and_then(|s| (!s.matches.is_empty()).then(|| s.matches[s.current]));
+
+    let mut display = Vec::with_capacity(state.transcript.len());
+    let dim_style = Style::default()
+        .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+        .add_modifier(Modifier::DIM);
+    let mut prev_block: Option<usize> = None;
+    let mut prev_kind: Option<InlineMessageKind> = None;
+    for item in visible_items(&state.transcript, |block_id| state.block_mode(block_id)) {
+        match item {
+            VisibleItem::Line {
+                source_index,
+                folded,
+            } => {
+                if source_index < from_entry {
+                    continue;
+                }
+                let tl = &state.transcript[source_index];
+                let is_block_start = prev_block != Some(tl.block_id);
+                // Turn rhythm: breathe before a user block and after one,
+                // so a request and its response never glue together.
+                let needs_spacer = is_block_start
+                    && prev_block.is_some()
+                    && (tl.kind == InlineMessageKind::User
+                        || prev_kind == Some(InlineMessageKind::User));
+                if needs_spacer {
+                    display.push(TranscriptDisplayItem {
+                        source_index,
+                        line: None,
+                    });
+                }
+                let is_match = search_set.contains(&source_index);
+                let line = transcript_line_marked(
+                    tl,
+                    styles,
+                    folded,
+                    is_match,
+                    current_match == Some(source_index),
+                    is_block_start,
+                );
+                display.push(TranscriptDisplayItem {
+                    source_index,
+                    line: Some(line),
+                });
+                prev_block = Some(tl.block_id);
+                prev_kind = Some(tl.kind);
+            }
+            VisibleItem::Gap {
+                source_index,
+                hidden_lines,
+            } => {
+                if source_index < from_entry {
+                    continue;
+                }
+                let gap = Line::styled(format!("  \u{2026} +{hidden_lines} lines"), dim_style);
+                display.push(TranscriptDisplayItem {
+                    source_index,
+                    line: Some(gap),
+                });
+            }
+        }
+    }
+    display
+}
+
+/// A planned flush of finalized rows into the host terminal's real
+/// scrollback.
+struct ScrollbackCommit {
+    /// Display rows to print above the viewport.
+    rows: u16,
+    /// Display items [0, boundary_item) are the committed chunk.
+    boundary_item: usize,
+    /// New `committed_entries`: transcript index of the first live entry.
+    new_committed_entries: usize,
+}
+
+/// Decide which leading display rows to shed into the host scrollback so
+/// the live region keeps only `keep_rows` (the viewport). The boundary is
+/// **block-atomic** (never splits a block) and never touches the anchored
+/// streaming block or anything below it — those lines are still being
+/// rewritten by `ReplaceLast`.
+fn scrollback_commit_plan(
+    display: &[TranscriptDisplayItem<'_>],
+    transcript: &[TranscriptLine],
+    width: usize,
+    keep_rows: usize,
+    anchor_entry: Option<usize>,
+) -> Option<ScrollbackCommit> {
+    let width = width.max(1);
+    // Cumulative display rows through each item (spacers cost 1 row;
+    // lines wrap to ceil(width / content width)).
+    let mut ends: Vec<usize> = Vec::with_capacity(display.len());
+    let mut y = 0usize;
+    for d in display {
+        let h = match &d.line {
+            None => 1,
+            Some(line) => {
+                let w = line.width();
+                if w == 0 { 1 } else { w.div_ceil(width).max(1) }
+            }
+        };
+        y += h;
+        ends.push(y);
+    }
+    let total_rows = y;
+    if total_rows <= keep_rows || display.is_empty() {
+        return None;
+    }
+    let limit = total_rows - keep_rows;
+
+    // Everything whose last row ends at/below the keep window stays live.
+    let mut boundary_item = ends.iter().rposition(|&e| e <= limit)? + 1;
+
+    // The anchored streaming block (and everything after it) never
+    // commits: its lines are still being rewritten in place.
+    if let Some(anchor) = anchor_entry
+        && let Some(anchor_item) = display.iter().position(|d| d.source_index >= anchor)
+    {
+        boundary_item = boundary_item.min(anchor_item);
+    }
+
+    // Block-atomic: shrink until the boundary sits between blocks.
+    boundary_item = boundary_item.min(display.len().saturating_sub(1));
+    let bid_of = |i: usize| transcript.get(display[i].source_index).map(|t| t.block_id);
+    while boundary_item > 0 {
+        let last = display[boundary_item - 1].source_index;
+        let next = display[boundary_item].source_index;
+        let same_block = matches!(
+            (transcript.get(last), transcript.get(next)),
+            (Some(a), Some(b)) if a.block_id == b.block_id
+        );
+        if !same_block {
+            break;
+        }
+        // Block-atomic by default — but a FINALIZED block taller than
+        // the viewport can never fit the live region; committing its
+        // head at a line boundary is the only way it reaches the host
+        // scrollback (long messages; Claude Code / Ink print the same
+        // way). The anchor cap above already keeps the streaming block
+        // out, so anything this split touches is final.
+        let block_bid = bid_of(boundary_item);
+        let block_start = (0..boundary_item)
+            .rev()
+            .find(|&i| bid_of(i) != block_bid)
+            .map_or(0, |i| i + 1);
+        let block_end = (boundary_item..display.len())
+            .find(|&i| bid_of(i) != block_bid)
+            .unwrap_or(display.len());
+        let before_rows = if block_start == 0 {
+            0
+        } else {
+            ends[block_start - 1]
+        };
+        if ends[block_end - 1] - before_rows > keep_rows {
+            break; // oversized: keep the line boundary inside it
+        }
+        boundary_item -= 1;
+    }
+    if boundary_item == 0 {
+        return None;
+    }
+
+    // Committed entries run to the first live row: normally the START of
+    // the next block (a folded block's gap row can point inside its
+    // block), but an oversized split commits at line granularity.
+    let first_live = display[boundary_item].source_index;
+    let last_committed = display[boundary_item - 1].source_index;
+    let new_committed_entries = if matches!(
+        (transcript.get(last_committed), transcript.get(first_live)),
+        (Some(a), Some(b)) if a.block_id == b.block_id
+    ) {
+        first_live
+    } else {
+        let live_bid = transcript.get(first_live)?.block_id;
+        transcript.iter().position(|t| t.block_id == live_bid)?
+    };
+
+    let rows = ends[boundary_item - 1].min(u16::MAX as usize) as u16;
+    Some(ScrollbackCommit {
+        rows,
+        boundary_item,
+        new_committed_entries,
+    })
+}
+
+/// Render the committed chunk into the `insert_before` buffer. Mirrors
+/// the viewport's wrapping math so the frozen rows match what the live
+/// region showed.
+fn render_committed_chunk(buf: &mut Buffer, items: &[TranscriptDisplayItem<'_>], width: u16) {
+    use ratatui::widgets::Widget;
+    let width = width.max(1);
+    let mut y = 0u16;
+    for item in items {
+        let Some(line) = &item.line else {
+            y += 1;
+            continue;
+        };
+        let text_w = line.width();
+        let wrapped_h = if text_w == 0 {
+            1
+        } else {
+            text_w.div_ceil(width as usize).max(1) as u16
+        };
+        let area = Rect {
+            x: 0,
+            y,
+            width,
+            height: wrapped_h,
+        };
+        Paragraph::new(line.clone())
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+        y += wrapped_h;
+    }
+}
+
+/// Flush finalized transcript rows into the host terminal's real
+/// scrollback (inline-viewport pattern — peer parity with Claude Code /
+/// pi). Runs only when the live content overflows the viewport and the
+/// user is not browsing: streaming buffers must be empty (the anchored
+/// block is still being rewritten otherwise) and manual scrolling /
+/// overlays / search pause committing so the live region stays put.
+/// Committed blocks are frozen — block-mode cycling applies to live
+/// blocks only (Claude Code behaves the same way).
+fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &mut RenderState) {
+    if state.scroll_offset != usize::MAX
+        || !state.message_buffer.is_empty()
+        || !state.thinking_buffer.is_empty()
+        || state.overlay.is_some()
+        || state.confirmation.is_some()
+        || state.agent_hub_open
+        || state.slash_popup.open
+        || state.file_search.is_some()
+        || state.search.is_some()
+        || state.transcript.is_empty()
+    {
+        return;
+    }
+    let Ok(size) = terminal.size() else {
+        return;
+    };
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: size.width,
+        height: size.height,
+    };
+    let keep_rows = super::frame_layout::scrollback_height(area) as usize;
+    if keep_rows == 0 {
+        return;
+    }
+    let styles = active_styles();
+    let display = build_transcript_display(state, &styles, state.committed_entries);
+    let content_w = area.width.saturating_sub(1) as usize;
+    let Some(plan) = scrollback_commit_plan(
+        &display,
+        &state.transcript,
+        content_w,
+        keep_rows,
+        state.stream_anchor,
+    ) else {
+        return;
+    };
+    let chunk = &display[..plan.boundary_item];
+    let res = terminal.insert_before(plan.rows, |buf| {
+        render_committed_chunk(buf, chunk, area.width.saturating_sub(1));
+    });
+    if res.is_ok() {
+        state.committed_entries = plan.new_committed_entries;
     }
 }
 
@@ -8229,6 +8512,41 @@ mod thinking_stream_tests {
             "MessageEnd must clear the reasoning stage so follow-ups / tips can render"
         );
     }
+
+    #[test]
+    fn message_end_releases_the_stream_anchor() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("done".into()),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        while let Ok(cmd) = rx.try_recv() {
+            apply_command(&mut state, cmd);
+        }
+        assert!(
+            state.stream_anchor.is_none(),
+            "MessageEnd finalizes the message — the anchor must release so the finished block can commit to scrollback"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -8385,5 +8703,173 @@ mod transcript_turn_tests {
             "[+] error: boom",
             "a collapsed block stays identifiable"
         );
+    }
+}
+
+#[cfg(test)]
+mod scrollback_commit_tests {
+    //! Host-scrollback committing (inline-viewport pattern — peer parity
+    //! with Claude Code / pi): finalized transcript blocks are printed
+    //! into the terminal's real scrollback so native scroll-up shows the
+    //! conversation. Commits are block-atomic, never touch the anchored
+    //! streaming block, and pause while the user browses.
+    use super::*;
+
+    fn tl(kind: InlineMessageKind, text: &str, block_id: usize) -> TranscriptLine {
+        TranscriptLine {
+            kind,
+            segments: vec![plain_segment(text)],
+            block_id,
+        }
+    }
+
+    /// 6 agent blocks × 2 lines = 12 entries; one display row each at
+    /// width 80 (no spacers — agent flow stays contiguous).
+    fn long_transcript() -> Vec<TranscriptLine> {
+        (0..6)
+            .flat_map(|b| {
+                [
+                    tl(InlineMessageKind::Agent, &format!("b{b}-line-one"), b),
+                    tl(InlineMessageKind::Agent, &format!("b{b}-line-two"), b),
+                ]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn commit_plan_sheds_oldest_blocks_and_keeps_the_tail() {
+        let state = RenderState {
+            transcript: long_transcript(),
+            ..Default::default()
+        };
+        let styles = active_styles();
+        let display = build_transcript_display(&state, &styles, 0);
+        // 12 rows, keep 4 → 8 rows commit; entry 8 starts block b4, so
+        // the boundary is already block-atomic (b3 ends at entry 7).
+        let plan = scrollback_commit_plan(&display, &state.transcript, 80, 4, None).expect("plan");
+        assert_eq!(plan.rows, 8, "12 rows total, keep 4 → commit 8");
+        assert_eq!(plan.new_committed_entries, 8);
+    }
+
+    #[test]
+    fn commit_plan_never_splits_a_block() {
+        // Blocks of 3; the keep-window boundary lands mid-block and must
+        // snap back to the block start.
+        let transcript: Vec<TranscriptLine> = (0..3)
+            .flat_map(|b| {
+                (0..3).map(move |i| tl(InlineMessageKind::Agent, &format!("b{b}-{i}"), b))
+            })
+            .collect();
+        let state = RenderState {
+            transcript,
+            ..Default::default()
+        };
+        let styles = active_styles();
+        let display = build_transcript_display(&state, &styles, 0);
+        // 9 rows, keep 4 → limit 5 → boundary would split b1 (3,4,5).
+        let plan = scrollback_commit_plan(&display, &state.transcript, 80, 4, None).expect("plan");
+        assert_eq!(
+            plan.new_committed_entries, 3,
+            "boundary snaps to block start"
+        );
+        assert_eq!(plan.rows, 3);
+    }
+
+    #[test]
+    fn commit_plan_excludes_the_streaming_anchor() {
+        let state = RenderState {
+            transcript: long_transcript(),
+            stream_anchor: Some(4),
+            ..Default::default()
+        };
+        let styles = active_styles();
+        let display = build_transcript_display(&state, &styles, 0);
+        let plan = scrollback_commit_plan(&display, &state.transcript, 80, 4, state.stream_anchor)
+            .expect("plan");
+        assert!(
+            plan.new_committed_entries <= 4,
+            "nothing at/after the anchored (streaming) block commits"
+        );
+    }
+    #[test]
+    fn committed_entries_floor_the_live_render() {
+        let mut state = RenderState::default();
+        state.transcript = long_transcript();
+        state.committed_entries = 8;
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        terminal
+            .draw(|f| render_frame(f, &state, &unused_handle()))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut rendered = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    rendered.push_str(cell.symbol());
+                }
+            }
+            rendered.push('\n');
+        }
+        assert!(
+            !rendered.contains("b0-line-one"),
+            "committed blocks leave the viewport"
+        );
+        assert!(rendered.contains("b5-line"), "the live tail stays");
+    }
+
+    #[test]
+    fn search_skips_committed_entries() {
+        let mut state = RenderState::default();
+        state.transcript = long_transcript();
+        state.committed_entries = 8;
+        state.start_search("line-one");
+        let s = state.search.as_ref().expect("search open");
+        assert!(
+            s.matches.iter().all(|&i| i >= 8),
+            "matches confined to the live region: {:?}",
+            s.matches
+        );
+        assert!(!s.matches.is_empty());
+    }
+
+    fn unused_handle() -> InlineHandle {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        InlineHandle::new_for_tests(tx)
+    }
+
+    #[test]
+    fn commit_plan_noop_when_tail_fits() {
+        let state = RenderState {
+            transcript: long_transcript(),
+            ..Default::default()
+        };
+        let styles = active_styles();
+        let display = build_transcript_display(&state, &styles, 0);
+        assert!(scrollback_commit_plan(&display, &state.transcript, 80, 12, None).is_none());
+    }
+
+    #[test]
+    fn oversized_block_commits_its_head_at_line_granularity() {
+        // One 30-row block + a trailing 2-row block, viewport keeps 10:
+        // the big block cannot fit the live region, so its head commits.
+        let mut transcript: Vec<TranscriptLine> = (0..30)
+            .map(|i| tl(InlineMessageKind::Agent, &format!("big-{i:02}"), 0))
+            .collect();
+        transcript.push(tl(InlineMessageKind::Agent, "tail-a", 1));
+        transcript.push(tl(InlineMessageKind::Agent, "tail-b", 1));
+        let state = RenderState {
+            transcript,
+            ..Default::default()
+        };
+        let styles = active_styles();
+        let display = build_transcript_display(&state, &styles, 0);
+        let plan = scrollback_commit_plan(&display, &state.transcript, 80, 10, None).expect("plan");
+        assert_eq!(
+            plan.new_committed_entries, 22,
+            "32 rows, keep 10 → head 22 rows commit"
+        );
+        assert_eq!(plan.rows, 22);
     }
 }

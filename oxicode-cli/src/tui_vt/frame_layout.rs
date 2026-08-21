@@ -184,6 +184,30 @@ pub(super) fn render_chrome(
     layout
 }
 
+/// Transcript (scrollback) area height for a terminal of this size,
+/// without rendering. The scrollback-commit path needs the live
+/// region's height to decide how many rows to shed into the host
+/// terminal's real scrollback.
+pub(super) fn scrollback_height(area: Rect) -> u16 {
+    let compact = effective_compact(false, area.height);
+    AgentViewLayout::compute(
+        area,
+        &CHAT_LAYOUT,
+        &ScrollbarConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        LayoutInput {
+            prompt_height: COMPOSER_HEIGHT,
+            shortcuts_height: SHORTCUTS_HEIGHT,
+            compact,
+            ..LayoutInput::default()
+        },
+    )
+    .scrollback
+    .height
+}
+
 /// Right-aligned oxibrain health chip for the shortcuts bar.
 ///
 /// Health is ambient state, so it lives in the always-visible right side —

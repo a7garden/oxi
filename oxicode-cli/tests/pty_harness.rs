@@ -109,11 +109,24 @@ impl PtySession {
     pub fn read_until(&mut self, pattern: &str, timeout: Duration) -> io::Result<String> {
         let deadline = Instant::now() + timeout;
         let mut buf = String::new();
+        // Terminal emulation: answer cursor-position reports (CSI 6n).
+        // The inline viewport queries the cursor at startup; a harness
+        // that never replies makes crossterm time out and the TUI
+        // degrade to fullscreen.
+        let mut answered_queries = 0usize;
 
         loop {
             match self.reader_rx.try_recv() {
                 Ok(bytes) => {
                     buf.push_str(&String::from_utf8_lossy(&bytes));
+                    let queries = buf.matches("\x1b[6n").count();
+                    if queries > answered_queries {
+                        for _ in answered_queries..queries {
+                            self.writer.write_all(b"\x1b[24;1R")?;
+                        }
+                        self.writer.flush()?;
+                        answered_queries = queries;
+                    }
                     if buf.contains(pattern) {
                         return Ok(buf);
                     }

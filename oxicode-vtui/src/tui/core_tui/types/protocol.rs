@@ -115,6 +115,13 @@ pub enum InlineCommand {
     BeginStream {
         kind: InlineMessageKind,
     },
+    /// Finalize the streamed message: releases the stream anchor so the
+    /// finished block becomes committable to the host scrollback. Sent
+    /// after the message's final `ReplaceLast` — the command stream's
+    /// causal order guarantees the anchor stays pinned through the last
+    /// re-render and releases only after it.
+    EndStream,
+
     ReplaceLast {
         count: usize,
         kind: InlineMessageKind,
@@ -275,6 +282,10 @@ impl InlineHandle {
 
     pub fn begin_stream(&self, kind: InlineMessageKind) {
         self.send_command(InlineCommand::BeginStream { kind });
+    }
+
+    pub fn end_stream(&self) {
+        self.send_command(InlineCommand::EndStream);
     }
 
     pub fn replace_last(
