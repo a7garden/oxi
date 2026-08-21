@@ -271,6 +271,11 @@ pub struct RenderState {
     /// `Terminal::insert_before`). They never render in the live
     /// viewport again — native scroll-up reads them.
     pub committed_entries: usize,
+    /// Last known terminal width — omp-style tool boxes size their
+    /// borders to it. Refreshed each render pass; frozen transcript
+    /// lines keep the width they were built at (printed text does not
+    /// rewrap either).
+    pub viewport_width: u16,
     /// Header context mirrored from `InlineHeaderContext`.
     pub header_context: InlineHeaderContext,
     /// Composer enabled state — mirrored from `SetInputEnabled`.
@@ -431,8 +436,7 @@ impl Default for RenderState {
             slash_popup: SlashPopup::default(),
             reasoning_stage: None,
             thinking_level: "medium".to_string(),
-            context_tokens: None,
-            context_window: 128_000,
+            viewport_width: 80,
             overlay: None,
             overlay_model_ids: Vec::new(),
             overlay_catalog_models: Vec::new(),
@@ -466,6 +470,8 @@ impl Default for RenderState {
             session_swapper: None,
             pending_resume: None,
             session_state: None,
+            context_tokens: None,
+            context_window: 128_000,
             brain: BrainChip::default(),
         }
     }
@@ -636,6 +642,23 @@ impl RenderState {
     /// boundary so `TranscriptLine` keeps its name and rendering contract.
     fn append_line(&mut self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
         let block_id = self.block_id_for_kind(kind);
+        self.transcript
+            .extend(
+                Self::segments_by_explicit_line(segments)
+                    .into_iter()
+                    .map(|segments| TranscriptLine {
+                        kind,
+                        segments,
+                        block_id,
+                    }),
+            );
+    }
+
+    /// Append line(s) that open a NEW block instead of merging into the
+    /// last block of the same kind — omp-style tool boxes are one
+    /// atomic block per call (border, command, output, border).
+    fn append_line_new_block(&mut self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
+        let block_id = self.fresh_block_id();
         self.transcript
             .extend(
                 Self::segments_by_explicit_line(segments)
@@ -1283,7 +1306,10 @@ async fn run_event_loop(
         // Redraw every iteration. The harness's redraw is idempotent —
         // the ratatui backend coalesces unchanged frames.
         let mut snapshot = state.lock();
-        // Refresh the todo checklist from the live provider so the sticky
+        // Tool boxes size their borders to the live terminal width.
+        if let Ok(size) = terminal.size() {
+            snapshot.viewport_width = size.width;
+        }
         // pane reflects phase changes written by the `todo` agent tool.
         if let Some(provider) = snapshot.todo_provider.as_ref() {
             snapshot.todo_items = flatten_todo_items(&provider.get_phases());
@@ -1359,6 +1385,9 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
             // causal order keeps the anchor pinned through the last
             // re-render.
             state.stream_anchor = None;
+        }
+        InlineCommand::AppendLineBlockStart { kind, segments } => {
+            state.append_line_new_block(kind, segments);
         }
         InlineCommand::ReplaceLast { kind, lines, .. } => {
             // The anchor records where this message's streamed block
@@ -1662,6 +1691,163 @@ fn tool_args_preview(args: &serde_json::Value) -> String {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// omp-style tool boxes
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Tool box content width: terminal width minus the scrollbar column,
+/// floored so narrow terminals still draw a coherent box.
+fn tool_box_width(state: &RenderState) -> usize {
+    (state.viewport_width.saturating_sub(1).max(24)) as usize
+}
+
+fn border_segment(text: impl Into<String>, color: anstyle::Color) -> InlineSegment {
+    let mut style = InlineTextStyle::default();
+    style.color = Some(color);
+    InlineSegment {
+        text: text.into(),
+        style: Arc::new(style),
+    }
+}
+
+/// `╭────╮` — rounded top border, no interior fill.
+fn tool_box_top(w: usize, color: anstyle::Color) -> Vec<InlineSegment> {
+    vec![border_segment(
+        format!("\u{256D}{}\u{256E}", "\u{2500}".repeat(w.saturating_sub(2))),
+        color,
+    )]
+}
+
+/// `╰────╯` — rounded bottom border.
+fn tool_box_bottom(w: usize, color: anstyle::Color) -> Vec<InlineSegment> {
+    vec![border_segment(
+        format!("\u{2570}{}\u{256F}", "\u{2500}".repeat(w.saturating_sub(2))),
+        color,
+    )]
+}
+
+/// `├── Output ───┤` — section divider with a label, omp-style.
+fn tool_box_divider(label: &str, w: usize, color: anstyle::Color) -> Vec<InlineSegment> {
+    let text = format!(" {label} ");
+    let dashes = w
+        .saturating_sub(2)
+        .saturating_sub(text.chars().count())
+        .saturating_sub(2);
+    vec![border_segment(
+        format!(
+            "\u{251C}\u{2500}{}{}\u{2500}\u{2524}",
+            text,
+            "\u{2500}".repeat(dashes)
+        ),
+        color,
+    )]
+}
+
+/// `│ text │` rows with the right border aligned at `w`. Long text
+/// hard-wraps at the inner width; explicit newlines open new rows.
+fn tool_box_rows(
+    text: &str,
+    w: usize,
+    style: InlineTextStyle,
+    color: anstyle::Color,
+) -> Vec<Vec<InlineSegment>> {
+    let inner = w.saturating_sub(4).max(1);
+    text.split('\n')
+        .flat_map(|line| wrap_by_display_width(line, inner))
+        .map(|chunk| {
+            // Pad by DISPLAY width — CJK chars occupy two cells, so a
+            // char-count pad misaligns the right border on Korean text.
+            let pad = inner.saturating_sub(chunk.width());
+            vec![
+                border_segment("\u{2502} ", color),
+                InlineSegment {
+                    text: chunk,
+                    style: Arc::new(style.clone()),
+                },
+                border_segment(format!("{} \u{2502}", " ".repeat(pad)), color),
+            ]
+        })
+        .collect()
+}
+
+/// Hard-wrap a line into chunks of at most `inner` DISPLAY cells
+/// (Korean/CJK glyphs count as 2). Zero-width chars never break a chunk.
+fn wrap_by_display_width(line: &str, inner: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar as _;
+    if line.width() <= inner {
+        return vec![line.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    for ch in line.chars() {
+        let ch_w = ch.width().unwrap_or(0);
+        if cur_w + ch_w > inner && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            cur_w = 0;
+        }
+        cur.push(ch);
+        cur_w += ch_w;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Diff rows for a tool box: colored +/- lines plus a diffstat header.
+/// Returns `None` when the content is not a recognizable diff.
+fn diff_rows(content: &str) -> Option<Vec<(String, InlineTextStyle)>> {
+    let lines: Vec<&str> = content.lines().collect();
+    // Require a unified-diff hunk header (`@@ … @@`) as a strong signal that
+    // the content is actually a diff — prevents grep context lines, bullet
+    // lists, and shell output from being mis-rendered as deletions.
+    if !lines.iter().any(|l| l.starts_with("@@")) {
+        return None;
+    }
+    let additions = lines
+        .iter()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .count();
+    let deletions = lines
+        .iter()
+        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+        .count();
+    if additions + deletions < 2 {
+        return None;
+    }
+
+    let styles = active_styles();
+    let green = styles.secondary.get_fg_color();
+    let red = styles.error.get_fg_color();
+    const MAX_DIFF_LINES: usize = 30;
+
+    let mut rows: Vec<(String, InlineTextStyle)> = Vec::new();
+    let mut hdr = InlineTextStyle::default();
+    hdr.effects |= anstyle::Effects::DIMMED;
+    rows.push((format!("diff +{additions} -{deletions}"), hdr));
+    for line in lines.iter().take(MAX_DIFF_LINES) {
+        let mut style = InlineTextStyle::default();
+        if line.starts_with('+') && !line.starts_with("+++") {
+            style.color = green;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            style.color = red;
+        } else {
+            style.effects |= anstyle::Effects::DIMMED;
+        }
+        rows.push(((*line).to_string(), style));
+    }
+    if lines.len() > MAX_DIFF_LINES {
+        let mut more = InlineTextStyle::default();
+        more.effects |= anstyle::Effects::DIMMED;
+        rows.push((
+            format!("\u{2026} +{} lines", lines.len() - MAX_DIFF_LINES),
+            more,
+        ));
+    }
+    Some(rows)
+}
+
 fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderState) {
     match event {
         AgentEvent::TextChunk { text } => {
@@ -1731,19 +1917,29 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::ToolExecutionStart {
             tool_name, args, ..
         } => {
-            // Tool row: name in the tool color, arguments preview dimmed —
-            // "which command ran" is the headline fact (peer parity).
-            let mut segments = vec![plain_segment(tool_name.clone())];
-            let preview = tool_args_preview(&args);
-            if !preview.is_empty() {
-                let mut style = InlineTextStyle::default();
-                style.effects |= anstyle::Effects::DIMMED;
-                segments.push(InlineSegment {
-                    text: format!("  {preview}"),
-                    style: Arc::new(style),
-                });
+            // omp-style tool box: rounded border, no fill, the call in
+            // the header — "which command ran" is the headline fact.
+            let styles = active_styles();
+            let border = styles
+                .tool
+                .get_fg_color()
+                .unwrap_or(anstyle::Color::Ansi(anstyle::AnsiColor::White));
+            let w = tool_box_width(state);
+            let header = match args.get("command").and_then(|v| v.as_str()) {
+                Some(cmd) => format!("$ {cmd}"),
+                None => {
+                    let preview = tool_args_preview(&args);
+                    if preview.is_empty() {
+                        tool_name.clone()
+                    } else {
+                        format!("{tool_name}  {preview}")
+                    }
+                }
+            };
+            handle.append_line_block_start(InlineMessageKind::Tool, tool_box_top(w, border));
+            for row in tool_box_rows(&header, w, InlineTextStyle::default(), border) {
+                handle.append_line(InlineMessageKind::Tool, row);
             }
-            handle.append_line(InlineMessageKind::Tool, segments);
             let stage = format!("tool: {tool_name}");
             state.reasoning_stage = Some(stage.clone());
             handle.set_reasoning_stage(Some(stage));
@@ -1751,32 +1947,54 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::ToolExecutionEnd {
             result, is_error, ..
         } => {
-            // If the result looks like a diff, render with green/red coloring.
-            if !try_render_diff(&result.content, handle) {
+            // Close the box: a labeled divider separates the call from
+            // its output (errors redden the border and the label), then
+            // the bottom border. Diffs render colored inside the box.
+            let styles = active_styles();
+            let (border, label) = if is_error {
+                (
+                    styles
+                        .error
+                        .get_fg_color()
+                        .unwrap_or(anstyle::Color::Ansi(anstyle::AnsiColor::White)),
+                    "Error",
+                )
+            } else {
+                (
+                    styles
+                        .tool
+                        .get_fg_color()
+                        .unwrap_or(anstyle::Color::Ansi(anstyle::AnsiColor::White)),
+                    "Output",
+                )
+            };
+            let w = tool_box_width(state);
+            handle.append_line(InlineMessageKind::Tool, tool_box_divider(label, w, border));
+            if let Some(rows) = diff_rows(&result.content) {
+                for (text, style) in rows {
+                    for row in tool_box_rows(&text, w, style, border) {
+                        handle.append_line(InlineMessageKind::Tool, row);
+                    }
+                }
+            } else {
+                const MAX_BOX_LINES: usize = 12;
                 let preview = preview_tool_result(&result.content);
-                let mut style = InlineTextStyle::default();
-                style.effects |= anstyle::Effects::DIMMED;
-                if is_error {
-                    // Error-kind block: the severity label ("error: ")
-                    // renders on its first line by the existing contract.
-                    handle.append_line(
-                        InlineMessageKind::Error,
-                        vec![InlineSegment {
-                            text: preview,
-                            style: Arc::new(style),
-                        }],
-                    );
-                } else {
-                    // Nested under the tool row: dim ✓ + preview.
-                    handle.append_line(
-                        InlineMessageKind::Tool,
-                        vec![InlineSegment {
-                            text: format!("  \u{2713} {preview}"),
-                            style: Arc::new(style),
-                        }],
-                    );
+                let lines: Vec<&str> = preview.split('\n').collect();
+                let mut dim = InlineTextStyle::default();
+                dim.effects |= anstyle::Effects::DIMMED;
+                for line in lines.iter().take(MAX_BOX_LINES) {
+                    for row in tool_box_rows(line, w, dim.clone(), border) {
+                        handle.append_line(InlineMessageKind::Tool, row);
+                    }
+                }
+                if lines.len() > MAX_BOX_LINES {
+                    let more = format!("\u{2026} +{} lines", lines.len() - MAX_BOX_LINES);
+                    for row in tool_box_rows(&more, w, dim, border) {
+                        handle.append_line(InlineMessageKind::Tool, row);
+                    }
                 }
             }
+            handle.append_line(InlineMessageKind::Tool, tool_box_bottom(w, border));
             state.reasoning_stage = Some("generating response".to_string());
             handle.set_reasoning_stage(Some("generating response".to_string()));
             handle.set_input_enabled(true);
@@ -5801,79 +6019,6 @@ fn preview_tool_result(content: &str) -> String {
     format!("{truncated}\u{2026}")
 }
 
-/// Try to render tool result content as a colored diff. Returns `true` if the
-/// content was recognized as a diff and rendered, `false` to fall back to the
-/// plain preview.
-fn try_render_diff(content: &str, handle: &InlineHandle) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    // Require a unified-diff hunk header (`@@ … @@`) as a strong signal that
-    // the content is actually a diff — prevents grep context lines, bullet
-    // lists, and shell output from being mis-rendered as deletions.
-    if !lines.iter().any(|l| l.starts_with("@@")) {
-        return false;
-    }
-    let additions = lines
-        .iter()
-        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
-        .count();
-    let deletions = lines
-        .iter()
-        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
-        .count();
-    if additions + deletions < 2 {
-        return false;
-    }
-
-    let styles = active_styles();
-    let green = styles.secondary.get_fg_color();
-    let red = styles.error.get_fg_color();
-    const MAX_DIFF_LINES: usize = 30;
-
-    // Header line with diffstat.
-    let mut hdr_style = InlineTextStyle::default();
-    hdr_style.effects |= anstyle::Effects::DIMMED;
-    handle.append_line(
-        InlineMessageKind::Tool,
-        vec![InlineSegment {
-            text: format!("[diff] +{additions} -{deletions}"),
-            style: Arc::new(hdr_style),
-        }],
-    );
-
-    // Render diff lines with green/red coloring.
-    for line in lines.iter().take(MAX_DIFF_LINES) {
-        let mut style = InlineTextStyle::default();
-        if line.starts_with('+') && !line.starts_with("+++") {
-            style.color = green;
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            style.color = red;
-        } else {
-            style.effects |= anstyle::Effects::DIMMED;
-        }
-        handle.append_line(
-            InlineMessageKind::Tool,
-            vec![InlineSegment {
-                text: format!("  {line}"),
-                style: Arc::new(style),
-            }],
-        );
-    }
-
-    if lines.len() > MAX_DIFF_LINES {
-        let mut more_style = InlineTextStyle::default();
-        more_style.effects |= anstyle::Effects::DIMMED;
-        handle.append_line(
-            InlineMessageKind::Tool,
-            vec![InlineSegment {
-                text: format!("  \u{2026} {} more lines", lines.len() - MAX_DIFF_LINES),
-                style: Arc::new(more_style),
-            }],
-        );
-    }
-
-    true
-}
-
 fn color_from_anstyle(color: Option<anstyle::Color>) -> Color {
     match color {
         Some(anstyle::Color::Ansi(a)) => ansi_to_ratatui(a),
@@ -8254,13 +8399,26 @@ mod thinking_stream_tests {
             .collect::<Vec<_>>()
             .join("|");
         assert!(
-            text.contains("bash") && text.contains("echo hi"),
-            "tool row shows the name and its arguments: {text}"
+            text.contains("$ echo hi"),
+            "box header shows the shell command: {text}"
         );
         assert!(
-            text.contains("\u{2713}"),
-            "completion renders the dim check line: {text}"
+            text.contains("Output") && text.contains("ls output"),
+            "labeled divider separates the call from its output: {text}"
         );
+        assert!(
+            text.contains("\u{256D}") && text.contains("\u{2570}"),
+            "rounded top and bottom borders close the box: {text}"
+        );
+        // The whole box is ONE block: folding and scrollback commits stay
+        // atomic per call.
+        let block_ids: std::collections::HashSet<usize> = state
+            .transcript
+            .iter()
+            .filter(|l| l.kind == InlineMessageKind::Tool)
+            .map(|l| l.block_id)
+            .collect();
+        assert_eq!(block_ids.len(), 1, "one tool call = one block");
     }
     #[test]
     fn first_text_delta_overrides_thinking_stage_with_generating_response() {
@@ -8871,5 +9029,54 @@ mod scrollback_commit_tests {
             "32 rows, keep 10 → head 22 rows commit"
         );
         assert_eq!(plan.rows, 22);
+    }
+}
+
+#[cfg(test)]
+mod tool_box_tests {
+    //! omp-style tool boxes: borders, divider labels, and — critically —
+    //! display-width math. Korean text is width-2 per glyph; a char-count
+    //! wrap or pad misaligns the right border instantly.
+    use super::*;
+
+    fn row_text(row: &[InlineSegment]) -> String {
+        row.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    #[test]
+    fn korean_rows_keep_the_right_border_aligned() {
+        // w=20 → inner=16 cells. "한글" = 4 cells per word.
+        let rows = tool_box_rows(
+            "한글테스트 명령어",
+            20,
+            InlineTextStyle::default(),
+            anstyle::Color::Ansi(anstyle::AnsiColor::White),
+        );
+        for row in &rows {
+            let text = row_text(row);
+            assert_eq!(text.width(), 20, "row must fill exactly 20 cells: {text:?}");
+            assert!(text.starts_with('\u{2502}'), "left border: {text:?}");
+            assert!(text.ends_with('\u{2502}'), "right border: {text:?}");
+        }
+        assert!(!rows.is_empty());
+        // Wrapping counts cells, not chars: 9 Korean chars = 18 cells >
+        // 16 inner → two rows.
+        assert_eq!(rows.len(), 2, "wraps by display width");
+    }
+
+    #[test]
+    fn divider_carries_the_label() {
+        let seg = tool_box_divider(
+            "Output",
+            30,
+            anstyle::Color::Ansi(anstyle::AnsiColor::White),
+        );
+        let text = row_text(&seg);
+        assert!(
+            text.starts_with("\u{251C}\u{2500} Output"),
+            "label after ├─: {text:?}"
+        );
+        assert!(text.ends_with('\u{2524}'), "closes with ┤: {text:?}");
+        assert_eq!(text.width(), 30, "divider fills the box width");
     }
 }

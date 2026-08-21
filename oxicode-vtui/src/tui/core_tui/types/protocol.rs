@@ -115,6 +115,13 @@ pub enum InlineCommand {
     BeginStream {
         kind: InlineMessageKind,
     },
+    /// Append line(s) that open a NEW block instead of merging into the
+    /// last block of the same kind. Used for omp-style tool boxes: each
+    /// call's box is its own atomic block (borders, command, output).
+    AppendLineBlockStart {
+        kind: InlineMessageKind,
+        segments: Vec<InlineSegment>,
+    },
     /// Finalize the streamed message: releases the stream anchor so the
     /// finished block becomes committable to the host scrollback. Sent
     /// after the message's final `ReplaceLast` — the command stream's
@@ -286,6 +293,10 @@ impl InlineHandle {
 
     pub fn end_stream(&self) {
         self.send_command(InlineCommand::EndStream);
+    }
+
+    pub fn append_line_block_start(&self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
+        self.send_command(InlineCommand::AppendLineBlockStart { kind, segments });
     }
 
     pub fn replace_last(
