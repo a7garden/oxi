@@ -4185,14 +4185,18 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         .as_ref()
         .and_then(|s| (!s.matches.is_empty()).then(|| s.matches[s.current]));
 
-    // `None` marks a turn spacer: a blank breathing row before a user
-    // block. Spacers carry no rail and no content.
+    // `None` marks a turn spacer: a blank breathing row. Turn rhythm —
+    // one blank before a user block (never at the transcript top) and
+    // one blank after it, so a request and its response never glue
+    // together. The assistant's internal flow (agent → tool → agent)
+    // stays contiguous: it is one turn.
     let mut display: Vec<(usize, InlineMessageKind, Option<Line<'_>>)> =
         Vec::with_capacity(state.transcript.len());
     let dim_style = Style::default()
         .fg(color_from_anstyle(styles.secondary.get_fg_color()))
         .add_modifier(Modifier::DIM);
     let mut prev_block: Option<usize> = None;
+    let mut prev_kind: Option<InlineMessageKind> = None;
     for item in visible_items(&state.transcript, |block_id| state.block_mode(block_id)) {
         match item {
             VisibleItem::Line {
@@ -4201,9 +4205,13 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
             } => {
                 let tl = &state.transcript[source_index];
                 let is_block_start = prev_block != Some(tl.block_id);
-                // One blank row sets each user turn apart from the flow
-                // above it (never at the very top of the transcript).
-                if tl.kind == InlineMessageKind::User && prev_block.is_some() && is_block_start {
+                // Turn rhythm: breathe before a user block and after one,
+                // so a request and its response never glue together.
+                let needs_spacer = is_block_start
+                    && prev_block.is_some()
+                    && (tl.kind == InlineMessageKind::User
+                        || prev_kind == Some(InlineMessageKind::User));
+                if needs_spacer {
                     display.push((source_index, tl.kind, None));
                 }
                 let is_match = search_set.contains(&source_index);
@@ -4217,6 +4225,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
                 );
                 display.push((source_index, tl.kind, Some(line)));
                 prev_block = Some(tl.block_id);
+                prev_kind = Some(tl.kind);
             }
             VisibleItem::Gap {
                 source_index,
@@ -6637,13 +6646,23 @@ mod render_tests {
             !rows[first_user].contains("> "),
             "plain style has no prompt glyph: {rows:?}"
         );
-        let spacer_after_agent = rows
+
+        // Turn rhythm: a blank row breathes between the request and the
+        // response, and again before the next user turn.
+        let agent_row = rows
             .iter()
-            .enumerate()
-            .skip(continuation + 1)
-            .find(|(_, row)| row.trim().is_empty())
-            .map(|(idx, _)| idx)
-            .expect("spacer before user turn");
+            .position(|row| row.contains("answer paragraph"))
+            .expect("agent row");
+        assert_eq!(
+            agent_row,
+            continuation + 2,
+            "one blank row separates request from response: {:?}",
+            &rows[continuation..=agent_row]
+        );
+        assert!(
+            !rows[agent_row].trim_start().starts_with('>'),
+            "agent rows carry no prompt glyph: {rows:?}"
+        );
 
         let next_user = rows
             .iter()
@@ -6651,18 +6670,9 @@ mod render_tests {
             .expect("second user row");
         assert_eq!(
             next_user,
-            spacer_after_agent + 1,
-            "user turn follows the spacer"
-        );
-
-        // Agent block has no prefix marker.
-        let agent_row = rows
-            .iter()
-            .position(|row| row.contains("answer paragraph"))
-            .expect("agent row");
-        assert!(
-            !rows[agent_row].trim_start().starts_with('>'),
-            "agent rows carry no prompt glyph: {rows:?}"
+            agent_row + 3,
+            "answer (2 rows) + one blank + next user turn: {:?}",
+            &rows[agent_row..=next_user]
         );
 
         // Brain chip lives on the shortcuts bar, not the composer border.
@@ -6671,6 +6681,53 @@ mod render_tests {
             .position(|row| row.contains("brain·ok"))
             .expect("brain chip on shortcuts row");
         assert!(shortcuts_row > next_user, "chip below the chat surface");
+    }
+
+    #[test]
+    fn response_breathes_after_the_user_request() {
+        let mut state = RenderState::default();
+        state.append_line(InlineMessageKind::User, vec![plain_segment("the request")]);
+        state.append_line(InlineMessageKind::Agent, vec![plain_segment("the answer")]);
+        let rendered = render_frame_to_string(&state);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let request_row = rows
+            .iter()
+            .position(|r| r.contains("the request"))
+            .expect("request row");
+        let answer_row = rows
+            .iter()
+            .position(|r| r.contains("the answer"))
+            .expect("answer row");
+        assert_eq!(
+            answer_row,
+            request_row + 2,
+            "one blank row must separate request from response: {:?}",
+            &rows[request_row..=answer_row]
+        );
+    }
+
+    #[test]
+    fn assistant_tool_flow_stays_contiguous() {
+        let mut state = RenderState::default();
+        state.append_line(InlineMessageKind::Tool, vec![plain_segment("[tool] read")]);
+        state.append_line(InlineMessageKind::Tool, vec![plain_segment("[done] ok")]);
+        state.append_line(InlineMessageKind::Agent, vec![plain_segment("the answer")]);
+        let rendered = render_frame_to_string(&state);
+        let rows: Vec<&str> = rendered.split('\n').collect();
+        let tool_row = rows
+            .iter()
+            .position(|r| r.contains("[tool] read"))
+            .expect("tool row");
+        let answer_row = rows
+            .iter()
+            .position(|r| r.contains("the answer"))
+            .expect("answer row");
+        assert_eq!(
+            answer_row,
+            tool_row + 2,
+            "tool → answer is one assistant turn — no blank inside it: {:?}",
+            &rows[tool_row..=answer_row]
+        );
     }
 
     #[test]
