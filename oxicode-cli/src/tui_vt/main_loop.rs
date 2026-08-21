@@ -1570,6 +1570,11 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
                 style: Arc::new(style.clone()),
             }]);
         }
+        // One blank row breathes between the thinking block and the
+        // answer — only once the answer has started streaming.
+        if !state.message_buffer.is_empty() {
+            lines.push(vec![plain_segment("")]);
+        }
     }
     if !state.message_buffer.is_empty() {
         lines.extend(oxicode_vtui::tui::ui::markdown::render_markdown(
@@ -1642,7 +1647,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 state.thinking_buffer.clear();
             }
         }
-        AgentEvent::ToolStart { tool_name, .. } => {
+        AgentEvent::ToolExecutionStart { tool_name, .. } => {
             handle.append_line(
                 InlineMessageKind::Tool,
                 vec![plain_segment(format!("[tool] {tool_name}"))],
@@ -1651,31 +1656,29 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             state.reasoning_stage = Some(stage.clone());
             handle.set_reasoning_stage(Some(stage));
         }
-        AgentEvent::ToolComplete { result } => {
+        AgentEvent::ToolExecutionEnd {
+            result, is_error, ..
+        } => {
             // If the result looks like a diff, render with green/red coloring.
             if !try_render_diff(&result.content, handle) {
                 let preview = preview_tool_result(&result.content);
                 let mut style = InlineTextStyle::default();
                 style.effects |= anstyle::Effects::DIMMED;
+                let (kind, tag) = if is_error {
+                    (InlineMessageKind::Error, "[error]")
+                } else {
+                    (InlineMessageKind::Tool, "[done]")
+                };
                 handle.append_line(
-                    InlineMessageKind::Tool,
+                    kind,
                     vec![InlineSegment {
-                        text: format!("[done] {preview}"),
+                        text: format!("{tag} {preview}"),
                         style: Arc::new(style),
                     }],
                 );
             }
             state.reasoning_stage = Some("generating response".to_string());
             handle.set_reasoning_stage(Some("generating response".to_string()));
-            handle.set_input_enabled(true);
-        }
-        AgentEvent::ToolError { error, .. } => {
-            handle.append_line(
-                InlineMessageKind::Error,
-                vec![plain_segment(format!("[error] {error}"))],
-            );
-            state.reasoning_stage = None;
-            handle.set_reasoning_stage(None);
             handle.set_input_enabled(true);
         }
         AgentEvent::Error { message, .. } => {
@@ -7799,15 +7802,37 @@ mod thinking_stream_tests {
             &mut state,
         );
         apply_all(&mut state, &mut rx);
-        let text: String = state
+
+        // One blank row breathes between the thinking block and the answer.
+        let texts: Vec<String> = state
             .transcript
             .iter()
-            .flat_map(|l| l.segments.iter().map(|s| s.text.as_str()))
-            .collect::<Vec<_>>()
-            .join(" ");
+            .map(|l| {
+                l.segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect();
+        let think_idx = texts
+            .iter()
+            .position(|t| t.contains("weighing alternatives"))
+            .expect("thinking line");
+        let answer_idx = texts
+            .iter()
+            .position(|t| t.contains("the answer"))
+            .expect("answer line");
         assert!(
-            text.contains("weighing alternatives") && text.contains("the answer"),
-            "thinking block survives above the answer: {text}"
+            answer_idx >= think_idx + 2,
+            "blank row between thinking and answer: {texts:?}"
+        );
+        assert!(
+            texts[think_idx + 1].trim().is_empty(),
+            "the row right below thinking is blank: {texts:?}"
+        );
+        assert!(
+            texts[think_idx].contains("weighing alternatives"),
+            "thinking block survives above the answer"
         );
         assert_eq!(
             state.reasoning_stage.as_deref(),
@@ -7816,6 +7841,100 @@ mod thinking_stream_tests {
         );
     }
 
+    #[test]
+    fn tool_lines_survive_the_full_turn_event_sequence() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+
+        // Real order (agent_loop): assistant text → MessageEnd → ToolStart
+        // → ToolComplete → ToolResult(MessageStart+MessageEnd) → next text.
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("I will check.".into()),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionStart {
+                tool_call_id: "tc1".into(),
+                tool_name: "bash".into(),
+                args: serde_json::json!({}),
+                intent: None,
+                context: None,
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id: "tc1".into(),
+                tool_name: "bash".into(),
+                intent: None,
+                result: oxicode_ai::ToolResult {
+                    tool_call_id: "tc1".into(),
+                    content: "ls output".into(),
+                    status: "success".into(),
+                },
+                is_error: false,
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("All done.".into()),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+
+        let text: String = state
+            .transcript
+            .iter()
+            .flat_map(|l| l.segments.iter().map(|s| s.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("|");
+        assert!(
+            text.contains("[tool] bash"),
+            "tool start line must survive: {text}"
+        );
+        assert!(
+            text.contains("[done]"),
+            "tool completion line must survive: {text}"
+        );
+    }
     #[test]
     fn first_text_delta_overrides_thinking_stage_with_generating_response() {
         let mut state = RenderState::default();
