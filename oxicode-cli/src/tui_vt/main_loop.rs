@@ -250,6 +250,12 @@ pub struct RenderState {
     pub shutdown_requested: bool,
     /// Accumulated text for markdown rendering at message end.
     pub message_buffer: String,
+    /// Transcript index where the in-flight assistant message's streamed
+    /// lines begin. `None` while nothing is streaming. The markdown
+    /// re-render at `MessageEnd` replaces from this anchor — a blind
+    /// tail-count would duplicate raw streamed lines whenever markdown
+    /// collapses the paragraph structure differently.
+    pub stream_anchor: Option<usize>,
     /// Agent Hub overlay open.
     pub agent_hub_open: bool,
     /// Hub entries snapshotted when the overlay was opened (`/agents`).
@@ -382,6 +388,7 @@ impl Default for RenderState {
             placeholder: None,
             shutdown_requested: false,
             message_buffer: String::new(),
+            stream_anchor: None,
             agent_hub_open: false,
             hub_entries: Vec::new(),
             pending_quit: false,
@@ -608,15 +615,25 @@ impl RenderState {
     /// Append a streaming delta to the active line. Explicit newlines finish
     /// the current line and open another line in the same semantic block.
     fn inline_segment(&mut self, kind: InlineMessageKind, segment: InlineSegment) {
-        let block_id = self.block_id_for_kind(kind);
         let mut lines = Self::segments_by_explicit_line(vec![segment]).into_iter();
 
+        // Merge into the tail line only while it belongs to the in-flight
+        // stream. Without the anchor guard, the first delta of a NEW
+        // message would append into the previous message's final line —
+        // mutating history the user already read.
+        let streaming = self.stream_anchor.is_some();
         if let Some(first) = lines.next() {
-            if let Some(last) = self.transcript.last_mut()
-                && last.kind == kind
-            {
+            let merge_ok =
+                streaming && self.transcript.last().is_some_and(|last| last.kind == kind);
+            if merge_ok && let Some(last) = self.transcript.last_mut() {
                 last.segments.extend(first);
             } else {
+                // A fresh streamed message opens its own block so folding
+                // and turn structure cannot bleed across messages.
+                let block_id = self.fresh_block_id();
+                if self.stream_anchor.is_none() {
+                    self.stream_anchor = Some(self.transcript.len());
+                }
                 self.transcript.push(TranscriptLine {
                     kind,
                     segments: first,
@@ -624,6 +641,11 @@ impl RenderState {
                 });
             }
         }
+        let block_id = self
+            .stream_anchor
+            .and_then(|a| self.transcript.get(a))
+            .map(|l| l.block_id)
+            .unwrap_or_else(|| self.fresh_block_id());
         self.transcript.extend(lines.map(|segments| TranscriptLine {
             kind,
             segments,
@@ -666,6 +688,13 @@ impl RenderState {
         {
             return last.block_id;
         }
+        let id = self.next_block_id;
+        self.next_block_id += 1;
+        id
+    }
+
+    /// Allocate a block id that cannot merge with an existing block.
+    fn fresh_block_id(&mut self) -> usize {
         let id = self.next_block_id;
         self.next_block_id += 1;
         id
@@ -1275,14 +1304,23 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         InlineCommand::ReplaceLast {
             count, kind, lines, ..
         } => {
-            // Drop the last `count` lines and replace with the new ones.
-            let drop = count.min(state.transcript.len());
-            for _ in 0..drop {
-                state.transcript.pop();
-            }
+            // Replace the in-flight streamed block, not a blind tail count:
+            // the markdown re-render collapses paragraph structure that the
+            // raw stream split across lines, so the counts legitimately
+            // differ. The anchor records where this message's streamed
+            // lines begin; `count` is only a fallback when no stream was
+            // recorded (e.g. replayed sessions).
+            let from = state.stream_anchor.unwrap_or_else(|| {
+                state
+                    .transcript
+                    .len()
+                    .saturating_sub(count.min(state.transcript.len()))
+            });
+            state.transcript.truncate(from);
             for line in lines {
                 state.append_line(kind, line);
             }
+            state.stream_anchor = None;
         }
         InlineCommand::AppendPastedMessage { kind, text, .. } => {
             state.append_line(kind, vec![plain_segment(text)]);
@@ -1516,6 +1554,10 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::MessageStart { .. } => {
             state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.clear();
+            // A new message must not merge into the previous message's
+            // rendered lines: the anchor guard in `inline_segment` keys on
+            // this reset.
+            state.stream_anchor = None;
         }
         AgentEvent::MessageUpdate { delta, .. } => match &delta {
             oxicode_sdk::StreamDelta::Text(text) => {
@@ -3595,7 +3637,7 @@ fn blend_rgb(base: Color, target: Color, ratio: f64) -> Color {
 /// Accent rail color for a transcript line kind.
 fn accent_color_for_kind(kind: InlineMessageKind, styles: &ThemeStyles) -> Color {
     match kind {
-        InlineMessageKind::User => color_from_anstyle(styles.primary.get_fg_color()),
+        InlineMessageKind::User => color_from_anstyle(styles.user.get_fg_color()),
         InlineMessageKind::Agent => color_from_anstyle(styles.response.get_fg_color()),
         InlineMessageKind::Tool => color_from_anstyle(styles.tool.get_fg_color()),
         InlineMessageKind::Error => color_from_anstyle(styles.error.get_fg_color()),
@@ -4377,7 +4419,7 @@ fn transcript_line_marked<'a>(
             Style::default().fg(color_from_anstyle(styles.response.get_fg_color()))
         }
         InlineMessageKind::User => {
-            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color()))
+            Style::default().fg(color_from_anstyle(styles.user.get_fg_color()))
         }
         InlineMessageKind::Tool => {
             Style::default().fg(color_from_anstyle(styles.tool.get_fg_color()))
@@ -4445,17 +4487,15 @@ fn transcript_line_marked<'a>(
     Line::from(spans)
 }
 
-fn segment_style(segment: &InlineSegment, fallback: Style, styles: &ThemeStyles) -> Style {
+fn segment_style(segment: &InlineSegment, fallback: Style, _styles: &ThemeStyles) -> Style {
     let mut style = fallback;
     let inline = segment.style.as_ref();
     if let Some(color) = inline.color {
         style = style.fg(color_from_anstyle(Some(color)));
-    } else {
-        // Fall back to the active palette's default for the kind. We
-        // pick `response` for agent segments since the harness doesn't
-        // carry its own theme.
-        style = style.fg(color_from_anstyle(styles.response.get_fg_color()));
     }
+    // No inline color: keep the kind fallback (`fallback`). Overriding
+    // with a fixed `response` ink made user turns indistinguishable from
+    // agent output — the kind color is the speaker signal in plain style.
     if inline.effects.contains(anstyle::Effects::BOLD) {
         style = style.add_modifier(Modifier::BOLD);
     }
@@ -7636,6 +7676,114 @@ mod thinking_stream_tests {
         );
     }
 
+    fn apply_all(state: &mut RenderState, rx: &mut mpsc::UnboundedReceiver<InlineCommand>) {
+        while let Ok(cmd) = rx.try_recv() {
+            apply_command(state, cmd);
+        }
+    }
+
+    #[test]
+    fn message_end_replaces_the_streamed_block_without_duplicates() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("para one".into()),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("\n\npara two".into()),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+
+        let text: String = state
+            .transcript
+            .iter()
+            .flat_map(|l| l.segments.iter().map(|s| s.text.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            text.matches("para one").count(),
+            1,
+            "the markdown re-render must fully replace the streamed raw lines: {text}"
+        );
+    }
+
+    #[test]
+    fn consecutive_messages_stream_into_separate_blocks() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+
+        for body in ["first answer", "second answer"] {
+            map_agent_event(
+                &handle,
+                AgentEvent::MessageStart {
+                    message: assistant(),
+                },
+                &mut state,
+            );
+            map_agent_event(
+                &handle,
+                AgentEvent::MessageUpdate {
+                    message: assistant(),
+                    delta: oxicode_sdk::StreamDelta::Text(body.into()),
+                },
+                &mut state,
+            );
+            map_agent_event(
+                &handle,
+                AgentEvent::MessageEnd {
+                    message: assistant(),
+                },
+                &mut state,
+            );
+        }
+        apply_all(&mut state, &mut rx);
+
+        let joined = state
+            .transcript
+            .iter()
+            .map(|l| {
+                l.segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        assert!(
+            joined.contains("first answer") && joined.contains("second answer"),
+            "both messages survive: {joined}"
+        );
+        assert!(
+            !joined.contains("first answersecond answer"),
+            "a new message must not append into the previous message's line: {joined}"
+        );
+    }
+
     #[test]
     fn message_end_clears_reasoning_stage() {
         let mut state = RenderState::default();
@@ -7699,6 +7847,30 @@ mod composer_border_tests {
         );
         let wide = spans_to_string(&composer_context_line(&state, 140));
         assert!(wide.contains("CTX "), "wide carries context usage: {wide}");
+    }
+
+    #[test]
+    fn plain_segments_render_in_their_kind_color_not_response() {
+        let styles = active_styles();
+        let user_color = color_from_anstyle(styles.user.get_fg_color());
+        let response = color_from_anstyle(styles.response.get_fg_color());
+        let line = |kind| TranscriptLine {
+            kind,
+            segments: vec![plain_segment("body")],
+            block_id: 0,
+        };
+
+        let user_line = line(InlineMessageKind::User);
+        let user = transcript_line_marked(&user_line, &styles, false, false, false, true);
+        assert_eq!(
+            user.spans[0].style.fg,
+            Some(user_color),
+            "user text must read in the user color — response-ink makes turns indistinguishable"
+        );
+
+        let agent_line = line(InlineMessageKind::Agent);
+        let agent = transcript_line_marked(&agent_line, &styles, false, false, false, true);
+        assert_eq!(agent.spans[0].style.fg, Some(response));
     }
 }
 #[cfg(test)]
