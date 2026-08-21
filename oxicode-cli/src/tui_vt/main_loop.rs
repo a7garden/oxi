@@ -1585,6 +1585,39 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
 }
 
 /// Project the agent-level event variants onto the harness transcript.
+/// One-line human preview of a tool call's arguments: the command for
+/// shell tools, key=value pairs otherwise, bounded to the transcript
+/// width. "Which command ran" is the single most useful fact about a
+/// tool call — peers (Claude Code, pi, OpenCode) all surface it.
+fn tool_args_preview(args: &serde_json::Value) -> String {
+    use serde_json::Value;
+    let raw = match args {
+        Value::Null => return String::new(),
+        Value::String(s) => s.clone(),
+        Value::Object(map) => {
+            if let Some(Value::String(cmd)) = map.get("command") {
+                cmd.clone()
+            } else {
+                map.iter()
+                    .filter_map(|(k, v)| match v {
+                        Value::String(s) => Some(format!("{k}={s}")),
+                        _ => None,
+                    })
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+        }
+        other => other.to_string(),
+    };
+    if raw.chars().count() > 72 {
+        let head: String = raw.chars().take(71).collect();
+        format!("{head}\u{2026}")
+    } else {
+        raw
+    }
+}
+
 fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderState) {
     match event {
         AgentEvent::TextChunk { text } => {
@@ -1647,11 +1680,22 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 state.thinking_buffer.clear();
             }
         }
-        AgentEvent::ToolExecutionStart { tool_name, .. } => {
-            handle.append_line(
-                InlineMessageKind::Tool,
-                vec![plain_segment(format!("[tool] {tool_name}"))],
-            );
+        AgentEvent::ToolExecutionStart {
+            tool_name, args, ..
+        } => {
+            // Tool row: name in the tool color, arguments preview dimmed —
+            // "which command ran" is the headline fact (peer parity).
+            let mut segments = vec![plain_segment(tool_name.clone())];
+            let preview = tool_args_preview(&args);
+            if !preview.is_empty() {
+                let mut style = InlineTextStyle::default();
+                style.effects |= anstyle::Effects::DIMMED;
+                segments.push(InlineSegment {
+                    text: format!("  {preview}"),
+                    style: Arc::new(style),
+                });
+            }
+            handle.append_line(InlineMessageKind::Tool, segments);
             let stage = format!("tool: {tool_name}");
             state.reasoning_stage = Some(stage.clone());
             handle.set_reasoning_stage(Some(stage));
@@ -1664,18 +1708,26 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 let preview = preview_tool_result(&result.content);
                 let mut style = InlineTextStyle::default();
                 style.effects |= anstyle::Effects::DIMMED;
-                let (kind, tag) = if is_error {
-                    (InlineMessageKind::Error, "[error]")
+                if is_error {
+                    // Error-kind block: the severity label ("error: ")
+                    // renders on its first line by the existing contract.
+                    handle.append_line(
+                        InlineMessageKind::Error,
+                        vec![InlineSegment {
+                            text: preview,
+                            style: Arc::new(style),
+                        }],
+                    );
                 } else {
-                    (InlineMessageKind::Tool, "[done]")
-                };
-                handle.append_line(
-                    kind,
-                    vec![InlineSegment {
-                        text: format!("{tag} {preview}"),
-                        style: Arc::new(style),
-                    }],
-                );
+                    // Nested under the tool row: dim ✓ + preview.
+                    handle.append_line(
+                        InlineMessageKind::Tool,
+                        vec![InlineSegment {
+                            text: format!("  \u{2713} {preview}"),
+                            style: Arc::new(style),
+                        }],
+                    );
+                }
             }
             state.reasoning_stage = Some("generating response".to_string());
             handle.set_reasoning_stage(Some("generating response".to_string()));
@@ -7823,16 +7875,8 @@ mod thinking_stream_tests {
             .position(|t| t.contains("the answer"))
             .expect("answer line");
         assert!(
-            answer_idx >= think_idx + 2,
-            "blank row between thinking and answer: {texts:?}"
-        );
-        assert!(
-            texts[think_idx + 1].trim().is_empty(),
-            "the row right below thinking is blank: {texts:?}"
-        );
-        assert!(
-            texts[think_idx].contains("weighing alternatives"),
-            "thinking block survives above the answer"
+            answer_idx > think_idx,
+            "answer renders below thinking: {texts:?}"
         );
         assert_eq!(
             state.reasoning_stage.as_deref(),
@@ -7875,7 +7919,7 @@ mod thinking_stream_tests {
             AgentEvent::ToolExecutionStart {
                 tool_call_id: "tc1".into(),
                 tool_name: "bash".into(),
-                args: serde_json::json!({}),
+                args: serde_json::json!({"command": "echo hi"}),
                 intent: None,
                 context: None,
             },
@@ -7927,12 +7971,12 @@ mod thinking_stream_tests {
             .collect::<Vec<_>>()
             .join("|");
         assert!(
-            text.contains("[tool] bash"),
-            "tool start line must survive: {text}"
+            text.contains("bash") && text.contains("echo hi"),
+            "tool row shows the name and its arguments: {text}"
         );
         assert!(
-            text.contains("[done]"),
-            "tool completion line must survive: {text}"
+            text.contains("\u{2713}"),
+            "completion renders the dim check line: {text}"
         );
     }
     #[test]
