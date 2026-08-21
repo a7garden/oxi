@@ -107,6 +107,14 @@ pub enum InlineCommand {
         kind: InlineMessageKind,
         segment: InlineSegment,
     },
+    /// Open a new streamed message block. Subsequent `Inline`/`ReplaceLast`
+    /// commands belong to this message until the next `BeginStream`.
+    /// Carrying the boundary in the command stream (instead of side-channel
+    /// state writes) keeps anchor lifecycle and command application in one
+    /// causal order.
+    BeginStream {
+        kind: InlineMessageKind,
+    },
     ReplaceLast {
         count: usize,
         kind: InlineMessageKind,
@@ -263,6 +271,10 @@ impl InlineHandle {
 
     pub fn inline(&self, kind: InlineMessageKind, segment: InlineSegment) {
         self.send_command(InlineCommand::Inline { kind, segment });
+    }
+
+    pub fn begin_stream(&self, kind: InlineMessageKind) {
+        self.send_command(InlineCommand::BeginStream { kind });
     }
 
     pub fn replace_last(

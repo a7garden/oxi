@@ -1307,26 +1307,29 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
         InlineCommand::Inline { kind, segment } => {
             state.inline_segment(kind, segment);
         }
-        InlineCommand::ReplaceLast {
-            count, kind, lines, ..
-        } => {
-            // Replace the in-flight streamed block, not a blind tail count:
-            // the markdown re-render collapses paragraph structure that the
-            // raw stream split across lines, so the counts legitimately
-            // differ. The anchor records where this message's streamed
-            // lines begin; `count` is only a fallback when no stream was
-            // recorded (e.g. replayed sessions).
-            let from = state.stream_anchor.unwrap_or_else(|| {
-                state
-                    .transcript
-                    .len()
-                    .saturating_sub(count.min(state.transcript.len()))
-            });
+        InlineCommand::BeginStream { .. } => {
+            // A new streamed message opens: drop the anchor so the first
+            // delta starts a fresh block instead of merging into the
+            // previous message's rendered lines.
+            state.stream_anchor = None;
+        }
+        InlineCommand::ReplaceLast { kind, lines, .. } => {
+            // The anchor records where this message's streamed block
+            // begins; the markdown re-render replaces the whole block
+            // from there (the raw stream and the markdown render split
+            // the same text across different line counts, so a tail-pop
+            // by count would duplicate or eat lines). Without an anchor
+            // the lines append — a blind tail-pop could eat unrelated
+            // transcript history.
+            let from = state.stream_anchor.unwrap_or(state.transcript.len());
             state.transcript.truncate(from);
             for line in lines {
                 state.append_line(kind, line);
             }
-            state.stream_anchor = None;
+            // Keep the anchor pinned at the block start: every later
+            // delta of the same message re-renders from here. BeginStream
+            // clears it when the next message opens.
+            state.stream_anchor = Some(from);
         }
         InlineCommand::AppendPastedMessage { kind, text, .. } => {
             state.append_line(kind, vec![plain_segment(text)]);
@@ -1391,7 +1394,6 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
             OverlayState {
                 title: req.title,
                 lines: req.lines,
-
                 items: Vec::new(),
                 selected: 0,
                 search: None,
@@ -1560,10 +1562,11 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::MessageStart { .. } => {
             state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.clear();
-            // A new message must not merge into the previous message's
-            // rendered lines: the anchor guard in `inline_segment` keys on
-            // this reset.
-            state.stream_anchor = None;
+            // The stream boundary travels in the command stream so the
+            // anchor lifecycle shares one causal order with Inline and
+            // ReplaceLast — a direct state write here would race batched
+            // command application.
+            handle.begin_stream(InlineMessageKind::Agent);
         }
         AgentEvent::MessageUpdate { delta, .. } => match &delta {
             oxicode_sdk::StreamDelta::Text(text) => {
@@ -1574,7 +1577,14 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 // path (oxicode-agent/src/agent_loop/streaming.rs:277-280).
                 state.reasoning_stage = Some("generating response".to_string());
                 state.message_buffer.push_str(text);
-                handle.inline(InlineMessageKind::Agent, plain_segment(text.clone()));
+                // Render the growing buffer as markdown on every delta so
+                // the live view equals the final render — no raw-syntax
+                // flash, no reflow snap at message end. ReplaceLast owns
+                // the block from the anchor; no raw Inline is sent.
+                let lines = oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
+                if !lines.is_empty() {
+                    handle.replace_last(lines.len(), InlineMessageKind::Agent, lines);
+                }
             }
             oxicode_sdk::StreamDelta::Thinking(_text) => {
                 // The reasoning content itself never leaves the model:
@@ -7863,6 +7873,95 @@ mod thinking_stream_tests {
         assert!(
             !joined.contains("first answersecond answer"),
             "a new message must not append into the previous message's line: {joined}"
+        );
+    }
+
+    #[test]
+    fn text_deltas_render_markdown_live_not_raw() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("a **bold** claim".into()),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+
+        let text = state
+            .transcript
+            .iter()
+            .flat_map(|l| l.segments.iter().map(|s| s.text.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            !text.contains("**"),
+            "the live stream must render markdown, not raw syntax: {text}"
+        );
+        assert!(text.contains("bold"), "content survives: {text}");
+    }
+
+    #[test]
+    fn message_end_does_not_reflow_the_streamed_block() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("hello **world**".into()),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        let streamed: Vec<String> = state
+            .transcript
+            .iter()
+            .map(|l| {
+                l.segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect();
+
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        let final_: Vec<String> = state
+            .transcript
+            .iter()
+            .map(|l| {
+                l.segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect();
+        assert_eq!(
+            streamed, final_,
+            "MessageEnd must not re-render what the live stream already shows"
         );
     }
 
