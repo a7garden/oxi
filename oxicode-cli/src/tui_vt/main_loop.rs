@@ -250,6 +250,8 @@ pub struct RenderState {
     pub shutdown_requested: bool,
     /// Accumulated text for markdown rendering at message end.
     pub message_buffer: String,
+    /// Accumulated reasoning text for the dimmed thinking block.
+    pub thinking_buffer: String,
     /// Transcript index where the in-flight assistant message's streamed
     /// lines begin. `None` while nothing is streaming. The markdown
     /// re-render at `MessageEnd` replaces from this anchor — a blind
@@ -387,6 +389,7 @@ impl Default for RenderState {
             input_enabled: false,
             prompt_prefix: String::new(),
             placeholder: None,
+            thinking_buffer: String::new(),
             shutdown_requested: false,
             message_buffer: String::new(),
             stream_anchor: None,
@@ -1550,6 +1553,31 @@ fn provider_from_model_id(model_id: &str) -> String {
         .unwrap_or("provider")
         .to_string()
 }
+/// Render the in-flight message: the dimmed italic thinking block (one
+/// line per explicit newline, reasoning-styled) above the markdown-rendered
+/// answer. Re-rendered whole on every delta so the live view equals the
+/// final render.
+fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
+    let mut lines = Vec::new();
+    if !state.thinking_buffer.is_empty() {
+        let styles = active_styles();
+        let mut style = InlineTextStyle::default();
+        style.color = styles.reasoning.get_fg_color();
+        style.effects |= anstyle::Effects::DIMMED | anstyle::Effects::ITALIC;
+        for chunk in state.thinking_buffer.split('\n') {
+            lines.push(vec![InlineSegment {
+                text: chunk.to_string(),
+                style: Arc::new(style.clone()),
+            }]);
+        }
+    }
+    if !state.message_buffer.is_empty() {
+        lines.extend(oxicode_vtui::tui::ui::markdown::render_markdown(
+            &state.message_buffer,
+        ));
+    }
+    lines
+}
 
 /// Project the agent-level event variants onto the harness transcript.
 fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderState) {
@@ -1562,6 +1590,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         AgentEvent::MessageStart { .. } => {
             state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.clear();
+            state.thinking_buffer.clear();
             // The stream boundary travels in the command stream so the
             // anchor lifecycle shares one causal order with Inline and
             // ReplaceLast — a direct state write here would race batched
@@ -1577,37 +1606,28 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 // path (oxicode-agent/src/agent_loop/streaming.rs:277-280).
                 state.reasoning_stage = Some("generating response".to_string());
                 state.message_buffer.push_str(text);
-                // Render the growing buffer as markdown on every delta so
-                // the live view equals the final render — no raw-syntax
-                // flash, no reflow snap at message end. ReplaceLast owns
-                // the block from the anchor; no raw Inline is sent.
-                let lines = oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
-                if !lines.is_empty() {
-                    handle.replace_last(lines.len(), InlineMessageKind::Agent, lines);
-                }
+                handle.replace_last(0, InlineMessageKind::Agent, render_streamed_message(state));
             }
-            oxicode_sdk::StreamDelta::Thinking(_text) => {
-                // The reasoning content itself never leaves the model:
-                // streaming raw fragments into `reasoning_stage` would
-                // leak them through two surfaces — the composer
-                // `RUN ` field (`composer_context_line`) and the
-                // reasoning indicator above the composer.
-                // A fixed `thinking…` label is the only thing that
-                // should occupy `reasoning_stage` while the model is
-                // reasoning; the next Text or ToolStart delta overwrites
-                // it with `generating response` / `tool: …` respectively.
+            oxicode_sdk::StreamDelta::Thinking(text) => {
+                // The reasoning text renders as a dimmed italic block above
+                // the answer (peer parity: Claude Code / pi). The stage
+                // indicator keeps a fixed `thinking…` label — streaming raw
+                // fragments into `reasoning_stage` would leak them through
+                // the composer `RUN ` field and the indicator row.
                 state.reasoning_stage = Some("thinking\u{2026}".to_string());
+                state.thinking_buffer.push_str(text);
+                handle.replace_last(0, InlineMessageKind::Agent, render_streamed_message(state));
             }
             oxicode_sdk::StreamDelta::Sync => {
                 // Re-render the complete message as markdown
-                if !state.message_buffer.is_empty() {
-                    let lines =
-                        oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
-                    let count = lines.len();
-                    if count > 0 {
-                        handle.replace_last(count, InlineMessageKind::Agent, lines);
-                    }
+                if !state.message_buffer.is_empty() || !state.thinking_buffer.is_empty() {
+                    handle.replace_last(
+                        0,
+                        InlineMessageKind::Agent,
+                        render_streamed_message(state),
+                    );
                     state.message_buffer.clear();
+                    state.thinking_buffer.clear();
                 }
             }
         },
@@ -1616,13 +1636,10 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             // composer row reverts to follow-ups / tips.
             state.reasoning_stage = None;
             // Final rendering (same as delta:None for completeness)
-            if !state.message_buffer.is_empty() {
-                let lines = oxicode_vtui::tui::ui::markdown::render_markdown(&state.message_buffer);
-                let count = lines.len();
-                if count > 0 {
-                    handle.replace_last(count, InlineMessageKind::Agent, lines);
-                }
+            if !state.message_buffer.is_empty() || !state.thinking_buffer.is_empty() {
+                handle.replace_last(0, InlineMessageKind::Agent, render_streamed_message(state));
                 state.message_buffer.clear();
+                state.thinking_buffer.clear();
             }
         }
         AgentEvent::ToolStart { tool_name, .. } => {
@@ -7706,21 +7723,16 @@ mod thinking_stream_tests {
     fn thinking_delta_sets_fixed_stage_label_not_raw_text() {
         let mut state = RenderState::default();
         let (handle, mut cmd_rx) = fresh_handle();
-        let baseline = state.transcript.len();
 
         // The exact text the model streamed for reasoning MUST NOT appear
-        // in the stage indicator.
+        // in the stage indicator — it renders in the transcript's dimmed
+        // reasoning block instead.
         let event = AgentEvent::MessageUpdate {
             message: assistant(),
             delta: oxicode_sdk::StreamDelta::Thinking("considering options".into()),
         };
         map_agent_event(&handle, event, &mut state);
 
-        assert_eq!(
-            state.transcript.len(),
-            baseline,
-            "thinking delta must not append to transcript"
-        );
         assert_eq!(
             state.reasoning_stage.as_deref(),
             Some("thinking\u{2026}"),
@@ -7732,6 +7744,76 @@ mod thinking_stream_tests {
                 "thinking must not emit a transcript Inline command"
             );
         }
+    }
+
+    #[test]
+    fn thinking_streams_as_dimmed_block_above_the_answer() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Thinking("weighing alternatives".into()),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        let text: String = state
+            .transcript
+            .iter()
+            .flat_map(|l| l.segments.iter().map(|s| s.text.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            text.contains("weighing alternatives"),
+            "thinking must render in the transcript: {text}"
+        );
+        let dim_italic = state.transcript.iter().any(|l| {
+            l.segments.iter().any(|s| {
+                let st = s.style.as_ref();
+                st.effects.contains(anstyle::Effects::DIMMED)
+                    && st.effects.contains(anstyle::Effects::ITALIC)
+            })
+        });
+        assert!(
+            dim_italic,
+            "thinking lines render in the dimmed italic reasoning style"
+        );
+
+        // The answer streams below the thinking block, and thinking survives.
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("the answer".into()),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        let text: String = state
+            .transcript
+            .iter()
+            .flat_map(|l| l.segments.iter().map(|s| s.text.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            text.contains("weighing alternatives") && text.contains("the answer"),
+            "thinking block survives above the answer: {text}"
+        );
+        assert_eq!(
+            state.reasoning_stage.as_deref(),
+            Some("generating response"),
+            "the stage label moves on once the answer streams"
+        );
     }
 
     #[test]
