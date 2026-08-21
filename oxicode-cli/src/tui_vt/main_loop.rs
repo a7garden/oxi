@@ -3579,15 +3579,6 @@ static TITLE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// ASCII spinner frames for the tab title. They remain readable in every font.
 const TITLE_SPINNER: &[&str] = &["-", "\\", "|", "/"];
 
-/// Wave brightness for accent rail animation: sin²(tick·speed + row/rows·2π).
-/// Returns [0.0, 1.0] — 1.0 = full color, 0.0 = dimmed toward background.
-fn wave_brightness(tick: u64, row: u16, wave_rows: u16, speed: f64) -> f64 {
-    let phase =
-        (tick as f64 * speed) + (row as f64 / wave_rows.max(1) as f64) * std::f64::consts::TAU;
-    let s = phase.sin();
-    s * s
-}
-
 /// Linear-interpolate between two RGB colors. `ratio` 0 = base, 1 = target.
 fn blend_rgb(base: Color, target: Color, ratio: f64) -> Color {
     match (base, target) {
@@ -3653,7 +3644,7 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
             let _ = std::io::stderr().flush();
         }
     }
-    render_transcript(frame, layout.scrollback, state, tick);
+    render_transcript(frame, layout.scrollback, state);
     let mut pinned_area = layout.scrollback;
     if !state.queued_inputs.is_empty() {
         let used = render_queue_pane(frame, pinned_area, state);
@@ -4122,7 +4113,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     }
 }
 
-fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tick: u64) {
+fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     if state.transcript.is_empty() {
         render_welcome(frame, area, state);
         return;
@@ -4130,18 +4121,18 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
     let styles = active_styles();
     let bg_color = color_from_anstyle(Some(styles.background));
 
-    // Split area: [1-col accent rail | content | 1-col scrollbar].
-    let accent_w: u16 = 1;
+    // Plain transcript surface (omp-style): no rail column, no speaker
+    // chrome. The content owns the full width minus the scrollbar; weight
+    // and color carry who is speaking, blank rows carry turn boundaries.
     let scrollbar_w: u16 = 1;
     let content_area = Rect {
-        x: area.x + accent_w,
+        x: area.x,
         y: area.y,
-        width: area.width.saturating_sub(accent_w + scrollbar_w),
+        width: area.width.saturating_sub(scrollbar_w),
         height: area.height,
     };
 
-    // Build the visible-line list, respecting block folding. Track the kind
-    // alongside each line so we can paint the accent rail in the role color.
+    // Build the visible-line list, respecting block folding.
     let search_set: std::collections::HashSet<usize> = state
         .search
         .as_ref()
@@ -4219,11 +4210,6 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
     let sticky_h: u16 = if sticky_first.is_some() { 1 } else { 0 };
     let body_top = content_area.top() + sticky_h;
 
-    // Determine animation state.
-    let running = state.reasoning_stage.is_some();
-    const WAVE_ROWS: u16 = 32;
-    const WAVE_SPEED: f64 = 0.15;
-
     // Push/fade (grok-build iOS-style 1D): detect the next block boundary
     // within the viewport. As it approaches the sticky row, fade the current
     // sticky header toward the background — a smooth handoff to the next
@@ -4248,19 +4234,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
         1.0
     };
 
-    // Sticky header row: accent rail + head line + faint bg highlight.
-    // Opacity fades as the next block pushes in.
+    // Sticky header row: head line + faint bg highlight, no rail. Opacity
+    // fades as the next block pushes in.
     if let Some(sidx) = sticky_first {
         let tl = &state.transcript[sidx];
         let accent_base = accent_color_for_kind(tl.kind, &styles);
-        let rail_blend = 0.7 * sticky_opacity;
         let bg_blend = 0.1 * sticky_opacity;
-        if sticky_opacity > 0.05
-            && let Some(cell) = frame.buffer_mut().cell_mut((area.x, content_area.top()))
-        {
-            cell.set_char('\u{2503}');
-            cell.set_style(Style::default().fg(blend_rgb(bg_color, accent_base, rail_blend)));
-        }
         let line = transcript_line_marked(tl, &styles, false, false, false, true);
         let row = Rect {
             x: content_area.x,
@@ -4280,15 +4259,13 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
     // Render top-down, wrapping each line into multiple visual rows.
     let mut y = body_top;
     let width = content_area.width.max(1) as usize;
-    let mut visual_row: u16 = 0;
-    for (_, kind, line) in display.into_iter().skip(start) {
+    for (_, _, line) in display.into_iter().skip(start) {
         if y >= content_area.bottom() {
             break;
         }
-        // Turn spacer: one blank breathing row — no rail, no content.
+        // Turn spacer: one blank breathing row — no content.
         let Some(line) = line else {
             y += 1;
-            visual_row += 1;
             continue;
         };
         let text_w = line.width();
@@ -4298,25 +4275,6 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
             text_w.div_ceil(width).max(1) as u16
         };
 
-        // Paint accent rail for each visual row of this line.
-        let accent_base = accent_color_for_kind(kind, &styles);
-        for row_offset in 0..wrapped_h {
-            let paint_y = y + row_offset;
-            if paint_y >= content_area.bottom() {
-                break;
-            }
-            let brightness = if running {
-                0.4 + 0.6 * wave_brightness(tick, visual_row + row_offset, WAVE_ROWS, WAVE_SPEED)
-            } else {
-                0.7
-            };
-            let rail_color = blend_rgb(bg_color, accent_base, brightness);
-            if let Some(cell) = frame.buffer_mut().cell_mut((area.x, paint_y)) {
-                cell.set_char('\u{2503}'); // ┃ heavy vertical
-                cell.set_style(Style::default().fg(rail_color));
-            }
-        }
-
         let row = Rect {
             x: content_area.x,
             y,
@@ -4325,7 +4283,6 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState, tic
         };
         frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), row);
         y += wrapped_h;
-        visual_row += wrapped_h;
     }
 
     // Scrollbar (rightmost column): shown only when content overflows.
@@ -4402,19 +4359,11 @@ fn render_scrollbar(
 /// Build a ratatui `Line` from a transcript line, with optional fold marker
 /// and search-match highlighting.
 ///
-/// Speaker identity is structural, not prose: the per-kind accent rail plus
-/// text weight carry WHO is speaking, so the transcript never renders
-/// `you: `/`assistant: `-style labels. Concretely:
-///
-/// - **User** blocks get the composer's `> ` glyph on the first line,
-///   aligned continuation lines, and bold text — one prompt reads as one
-///   turn even when it contains explicit newlines.
-/// - **Agent**, **Tool**, and **Pty** lines carry no prefix: the agent is
-///   the transcript's default voice, and tool/shell blocks render their own
-///   structured glyphs internally.
-/// - **Error / Warning / Info / Policy** keep a short colored label —
-///   severity is data — but only on the block's first line (and on folded
-///   heads); continuation lines render plain.
+/// Plain transcript (omp-style): speaker identity is weight and color, not
+/// chrome. There is no rail column, no speaker label, and no prefix glyph —
+/// the user's input is the only bold body text, in the primary color, and
+/// the agent's response reads in the default ink. System severities keep a
+/// short colored label on the block's first line because severity is data.
 fn transcript_line_marked<'a>(
     line: &'a TranscriptLine,
     styles: &'a ThemeStyles,
@@ -4423,55 +4372,50 @@ fn transcript_line_marked<'a>(
     is_current: bool,
     is_block_start: bool,
 ) -> Line<'a> {
-    let (kind_style, marker) = match line.kind {
-        InlineMessageKind::Agent => (
-            Style::default().fg(color_from_anstyle(styles.response.get_fg_color())),
-            None,
-        ),
-        InlineMessageKind::User => (
-            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color())),
-            Some("> "),
-        ),
-        InlineMessageKind::Tool => (
-            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color())),
-            None,
-        ),
-        InlineMessageKind::Error => (
-            Style::default().fg(color_from_anstyle(styles.error.get_fg_color())),
-            Some("error: "),
-        ),
-        InlineMessageKind::Warning => (
-            Style::default().fg(color_from_anstyle(styles.status.get_fg_color())),
-            Some("warning: "),
-        ),
-        InlineMessageKind::Info => (
-            Style::default().fg(color_from_anstyle(styles.info.get_fg_color())),
-            Some("info: "),
-        ),
-        InlineMessageKind::Policy => (
-            Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color())),
-            Some("policy: "),
-        ),
-        InlineMessageKind::Pty => (
-            Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color())),
-            None,
-        ),
+    let kind_style = match line.kind {
+        InlineMessageKind::Agent => {
+            Style::default().fg(color_from_anstyle(styles.response.get_fg_color()))
+        }
+        InlineMessageKind::User => {
+            Style::default().fg(color_from_anstyle(styles.primary.get_fg_color()))
+        }
+        InlineMessageKind::Tool => {
+            Style::default().fg(color_from_anstyle(styles.tool.get_fg_color()))
+        }
+        InlineMessageKind::Error => {
+            Style::default().fg(color_from_anstyle(styles.error.get_fg_color()))
+        }
+        InlineMessageKind::Warning => {
+            Style::default().fg(color_from_anstyle(styles.status.get_fg_color()))
+        }
+        InlineMessageKind::Info => {
+            Style::default().fg(color_from_anstyle(styles.info.get_fg_color()))
+        }
+        InlineMessageKind::Policy => {
+            Style::default().fg(color_from_anstyle(styles.mcp.get_fg_color()))
+        }
+        InlineMessageKind::Pty => {
+            Style::default().fg(color_from_anstyle(styles.pty_output.get_fg_color()))
+        }
     };
 
-    // System labels appear on the block's first line only. User continuation
-    // rows keep a two-cell indent instead of repeating `> ` and pretending
-    // that one multi-line prompt is several turns. Folded heads always show
-    // the marker so a collapsed block stays identifiable.
+    // Severity labels appear on the block's first line only; folded heads
+    // always show the marker so a collapsed block stays identifiable.
+    let severity_label = match line.kind {
+        InlineMessageKind::Error => Some("error: "),
+        InlineMessageKind::Warning => Some("warning: "),
+        InlineMessageKind::Info => Some("info: "),
+        InlineMessageKind::Policy => Some("policy: "),
+        _ => None,
+    };
     let mut prefix = String::new();
     if folded {
         prefix.push_str("[+] ");
     }
-    if line.kind == InlineMessageKind::User {
-        prefix.push_str(if folded || is_block_start { "> " } else { "  " });
-    } else if let Some(marker) = marker
+    if let Some(label) = severity_label
         && (folded || is_block_start)
     {
-        prefix.push_str(marker);
+        prefix.push_str(label);
     }
 
     // Highlight background for search matches.
@@ -6607,8 +6551,13 @@ mod render_tests {
             .position(|r| r.contains("agent-answer"))
             .expect("agent row");
         assert!(
-            rows[agent_row + 2].contains("> next-question"),
-            "user line follows the spacer with its glyph"
+            rows[agent_row + 1].trim().is_empty(),
+            "blank spacer between turns: {:?}",
+            &rows[agent_row..agent_row + 3]
+        );
+        assert!(
+            rows[agent_row + 2].contains("next-question"),
+            "user line follows the spacer"
         );
     }
 
@@ -6630,29 +6579,24 @@ mod render_tests {
         );
         let rendered = render_frame_to_string_at(&state, 120, 24);
         let rows: Vec<&str> = rendered.split('\n').collect();
+        // User rows carry no glyph — bold primary text only.
         let first_user = rows
             .iter()
-            .position(|row| row.contains("> intro message"))
+            .position(|row| row.contains("intro message"))
             .expect("intro user row");
         let continuation = rows
             .iter()
             .position(|row| row.contains("second line"))
             .expect("user continuation visible");
-        assert!(
-            rows[first_user].contains("> intro message"),
-            "first user row keeps the prompt glyph"
-        );
         assert_eq!(
             continuation,
             first_user + 1,
             "user continuation on next row"
         );
         assert!(
-            !rows[continuation].contains("> second"),
-            "continuation row must not show the prompt glyph"
+            !rows[first_user].contains("> "),
+            "plain style has no prompt glyph: {rows:?}"
         );
-
-        // Spacer row separates the agent turn from the next user turn.
         let spacer_after_agent = rows
             .iter()
             .enumerate()
@@ -6663,7 +6607,7 @@ mod render_tests {
 
         let next_user = rows
             .iter()
-            .position(|row| row.contains("> follow-up question"))
+            .position(|row| row.contains("follow-up question"))
             .expect("second user row");
         assert_eq!(
             next_user,
@@ -6701,7 +6645,7 @@ mod render_tests {
         let rows: Vec<&str> = rendered.split('\n').collect();
         let user_row = rows
             .iter()
-            .position(|r| r.contains("> opening-question"))
+            .position(|r| r.contains("opening-question"))
             .expect("user row");
         assert!(
             rows[..user_row].iter().all(|r| r.trim().is_empty()),
@@ -6720,8 +6664,8 @@ mod render_tests {
         let rows: Vec<&str> = rendered.split('\n').collect();
         let first_row = rows
             .iter()
-            .position(|row| row.contains("> first line"))
-            .expect("first user row keeps the prompt glyph");
+            .position(|row| row.contains("first line"))
+            .expect("first user row");
         let second_row = rows
             .iter()
             .position(|row| row.contains("second line"))
@@ -7775,18 +7719,22 @@ mod transcript_turn_tests {
     }
 
     #[test]
-    fn user_lines_get_prompt_glyph_and_bold_body() {
+    fn user_lines_are_bold_primary_without_prefix() {
         let styles = active_styles();
         let line = tl(InlineMessageKind::User, "refactor the parser", 0);
         let rendered = transcript_line_marked(&line, &styles, false, false, false, true);
-        assert_eq!(rendered.spans[0].content.as_ref(), "> ");
+        assert_eq!(
+            rendered.spans.len(),
+            1,
+            "plain style renders no prefix span"
+        );
         assert_eq!(
             spans_to_string(&rendered),
-            "> refactor the parser",
-            "user input echoes the composer glyph"
+            "refactor the parser",
+            "user text renders as typed, no glyph"
         );
         assert!(
-            rendered.spans[1]
+            rendered.spans[0]
                 .style
                 .add_modifier
                 .contains(Modifier::BOLD),

@@ -67,3 +67,23 @@ an unnecessary chip.
   no rail on spacer rows, scroll math unaffected.
 - Shortcuts bar: brain-only right cluster by health.
 - Full gates + PTY launch of the installed binary.
+
+## Addendum (2026-08-21): plain surface, rail removed
+
+Owner reviewed the shipped rail design against peer TUIs (Claude Code,
+pi, OpenCode, Codex CLI — see research notes in the session log) and
+rejected the accent rail: "레일은 일단 별로야" — omp-style agents carry no
+speaker chrome at all. Four directions were mocked up in HTML (box+label
+Claude-Code style / framed box / selectable styles / omp plain); the
+owner chose **plain (omp-style)**.
+
+Final contract:
+
+- No rail column, no rail animation (wave), no sticky-header rail.
+- No `> ` user prefix. User input = bold primary text; agent response =
+  default ink; tool/shell = their kind colors.
+- Blank spacer row before each user block remains the turn boundary.
+- System severities (`error:` `warning:` `info:` `policy:`) keep their
+  first-line label — severity is data, not speaker chrome.
+- Sticky header keeps its faint background tint only.
+- Scrollbar column unchanged.

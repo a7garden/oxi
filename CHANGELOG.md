@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+
+- **TUI: transcript is now a plain surface (omp-style).** The accent
+  rail column (`┃`), its running-wave animation, and the `> ` user
+  prefix are gone. Speaker identity is weight and color only: user
+  input renders bold in the primary color, agent responses in the
+  default ink, tools/shell in their kind colors; a blank spacer row
+  before each user block remains the turn boundary. System severities
+  (`error:` `warning:` `info:` `policy:`) keep their first-line label,
+  and the sticky block header keeps its faint background tint. The
+  reclaimed rail column belongs to the content.
+
 - **TUI: top status bar removed.** The 1-row status bar (`OXICODE | …`
   chrome) was pure space cost — every session fact already lives on the
   composer's top border. The app-badge prefix was dropped from the border
