@@ -309,7 +309,8 @@ pub struct RenderState {
     /// In-transcript search state — `None` when no search is active.
     pub search: Option<SearchState>,
     /// Per-block display override. An absent entry means the default
-    /// ([`BlockDisplayMode::Truncated]).
+    /// ([`BlockDisplayMode::Expanded] — chat responses must show their
+    /// full text; elision (`Truncated`) is opt-in via block cycling).
     pub block_display: std::collections::HashMap<usize, BlockDisplayMode>,
     /// Last Esc press timestamp (for double-Esc detection).
     pub last_esc_at: Option<std::time::Instant>,
@@ -757,12 +758,14 @@ impl RenderState {
 
     // ── Block display modes (Collapsed / Truncated / Expanded) ──
 
-    /// The display mode for a block — explicit override or the Truncated default.
+    /// The display mode for a block — explicit override or the Expanded
+    /// default. Chat content hides nothing by default: middle-elision
+    /// made long responses unreadable and unscrollable past the gap.
     pub fn block_mode(&self, block_id: usize) -> BlockDisplayMode {
         self.block_display
             .get(&block_id)
             .copied()
-            .unwrap_or_default()
+            .unwrap_or(BlockDisplayMode::Expanded)
     }
 
     /// Cycle the display mode of the block at (or nearest above) the current
@@ -776,9 +779,9 @@ impl RenderState {
                 BlockDisplayMode::Truncated => BlockDisplayMode::Expanded,
                 BlockDisplayMode::Expanded => BlockDisplayMode::Collapsed,
             };
-            // Truncated is the default — represent it by absence so the map
+            // Expanded is the default — represent it by absence so the map
             // only carries real overrides.
-            if next == BlockDisplayMode::Truncated {
+            if next == BlockDisplayMode::Expanded {
                 self.block_display.remove(&bid);
             } else {
                 self.block_display.insert(bid, next);
@@ -786,11 +789,10 @@ impl RenderState {
         }
     }
 
-    /// Expand every block (show every line at full weight).
+    /// Expand every block. Expanded is the default, so this simply drops
+    /// all overrides.
     pub fn expand_all(&mut self) {
-        for bid in self.all_block_ids() {
-            self.block_display.insert(bid, BlockDisplayMode::Expanded);
-        }
+        self.block_display.clear();
     }
 
     /// Collapse every block (first line only).
@@ -802,7 +804,11 @@ impl RenderState {
 
     /// Reset every block to the default Truncated mode.
     pub fn truncate_all(&mut self) {
-        self.block_display.clear();
+        // Truncated is no longer the default — it must be recorded
+        // explicitly for every block.
+        for bid in self.all_block_ids() {
+            self.block_display.insert(bid, BlockDisplayMode::Truncated);
+        }
     }
 
     /// Distinct block ids in transcript order.
@@ -6302,13 +6308,6 @@ mod render_tests {
     }
 
     #[test]
-    fn default_block_mode_is_truncated() {
-        let state = RenderState::default();
-        assert_eq!(state.block_mode(0), BlockDisplayMode::Truncated);
-        assert!(state.block_display.is_empty(), "default needs no map entry");
-    }
-
-    #[test]
     fn fold_all_collapses_every_block() {
         let mut state = RenderState::default();
         state.transcript = three_block_transcript();
@@ -6325,26 +6324,29 @@ mod render_tests {
         state.transcript = three_block_transcript();
         state.fold_all();
         state.expand_all();
-        assert_eq!(state.block_display.len(), 3);
+        assert!(
+            state.block_display.is_empty(),
+            "Expanded is the default — no overrides"
+        );
         assert_eq!(state.block_mode(0), BlockDisplayMode::Expanded);
         assert_eq!(state.block_mode(2), BlockDisplayMode::Expanded);
     }
 
     #[test]
-    fn truncate_all_resets_to_default() {
+    fn truncate_all_sets_explicit_truncated() {
         let mut state = RenderState::default();
         state.transcript = three_block_transcript();
         state.fold_all();
         state.truncate_all();
-        assert!(state.block_display.is_empty());
+        assert_eq!(state.block_display.len(), 3);
         assert_eq!(state.block_mode(1), BlockDisplayMode::Truncated);
     }
 
     #[test]
-    fn fold_all_on_empty_transcript_is_noop() {
-        let mut state = RenderState::default();
-        state.fold_all();
-        assert!(state.block_display.is_empty());
+    fn default_block_mode_is_expanded() {
+        let state = RenderState::default();
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Expanded);
+        assert!(state.block_display.is_empty(), "default needs no map entry");
     }
 
     #[test]
@@ -6352,15 +6354,15 @@ mod render_tests {
         let mut state = RenderState::default();
         state.transcript = three_block_transcript();
         state.scroll_offset = 0; // view on block 0
-        // Truncated (default) → Expanded
-        state.cycle_block_at_view();
-        assert_eq!(state.block_mode(0), BlockDisplayMode::Expanded);
-        // Expanded → Collapsed
+        // Expanded (default) → Collapsed
         state.cycle_block_at_view();
         assert_eq!(state.block_mode(0), BlockDisplayMode::Collapsed);
-        // Collapsed → Truncated (default — removed from the map)
+        // Collapsed → Truncated
         state.cycle_block_at_view();
         assert_eq!(state.block_mode(0), BlockDisplayMode::Truncated);
+        // Truncated → Expanded (default — removed from the map)
+        state.cycle_block_at_view();
+        assert_eq!(state.block_mode(0), BlockDisplayMode::Expanded);
         assert!(!state.block_display.contains_key(&0));
     }
 
@@ -6750,6 +6752,29 @@ mod render_tests {
         );
     }
 
+    #[test]
+    fn long_response_renders_every_line_by_default() {
+        let mut state = RenderState::default();
+        let mut segments = Vec::new();
+        for i in 0..8 {
+            if i > 0 {
+                segments.push(plain_segment("\n"));
+            }
+            segments.push(plain_segment(format!("line-{i}")));
+        }
+        state.append_line(InlineMessageKind::Agent, segments);
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            !rendered.contains("lines"),
+            "no elision gap by default — full text scrolls instead: {rendered}"
+        );
+        for i in 0..8 {
+            assert!(
+                rendered.contains(&format!("line-{i}")),
+                "line-{i} must be reachable by scrolling: {rendered}"
+            );
+        }
+    }
     #[test]
     fn multiline_user_input_renders_every_explicit_line() {
         let mut state = RenderState::default();
