@@ -104,6 +104,18 @@ pub fn service_loaded() -> bool {
     matches!(out, Ok(st) if st.success())
 }
 
+/// Whether the background prober should attempt an automatic revive.
+/// One attempt per session (success or failure — a broken daemon must
+/// not spawn a retry loop), only for users who enabled memory, and
+/// never when the binary is missing (that is an install decision, not a
+/// restart). Pure.
+pub fn should_auto_revive(
+    memory_enabled: bool,
+    daemon_down: bool,
+    already_attempted: bool,
+) -> bool {
+    memory_enabled && daemon_down && !already_attempted
+}
 fn whoami_uid() -> String {
     std::process::Command::new("id")
         .arg("-u")
@@ -251,5 +263,22 @@ mod tests {
             service_loaded: false,
         };
         assert_eq!(revive_plan(&report), ReviveAction::SpawnDetached(bin()));
+    }
+
+    #[test]
+    fn auto_revive_gates() {
+        assert!(should_auto_revive(true, true, false), "enabled+down → go");
+        assert!(
+            !should_auto_revive(false, true, false),
+            "memory disabled → never"
+        );
+        assert!(
+            !should_auto_revive(true, true, true),
+            "one attempt per session — no retry loops"
+        );
+        assert!(
+            !should_auto_revive(true, false, false),
+            "healthy daemon → nothing to do"
+        );
     }
 }

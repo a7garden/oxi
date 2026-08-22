@@ -1088,33 +1088,77 @@ pub async fn run_tui(app: App) -> Result<()> {
         tokio::sync::watch::channel(crate::services::initial_brain_chip(app.settings()));
     {
         let memory_enabled = app.settings().memory_enabled;
+        let announce = handle.clone();
         tokio::spawn(async move {
             let backend = crate::foundation::brain::BrainMemoryBackend::new(
                 crate::foundation::brain::default_socket_path(),
             );
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // One automatic revive per session (success or failure — a
+            // broken daemon must not turn the prober into a spawn loop).
+            let mut auto_revive_attempted = false;
             loop {
                 tick.tick().await;
-                if !memory_enabled {
-                    let _ = brain_tx.send(BrainChip::Off);
-                    continue;
-                }
-                if !crate::services::brain_socket_present(
+                let mut chip = if !memory_enabled {
+                    BrainChip::Off
+                } else if !crate::services::brain_socket_present(
                     &crate::foundation::brain::default_socket_path(),
                 ) {
-                    let _ = brain_tx.send(BrainChip::Down);
-                    continue;
-                }
-                let chip = match tokio::time::timeout(
-                    std::time::Duration::from_millis(1500),
-                    backend.ping(),
-                )
-                .await
-                {
-                    Ok(Ok(())) => BrainChip::Ok,
-                    Ok(Err(_)) | Err(_) => BrainChip::Degraded,
+                    BrainChip::Down
+                } else {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_millis(1500),
+                        backend.ping(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => BrainChip::Ok,
+                        Ok(Err(_)) | Err(_) => BrainChip::Degraded,
+                    }
                 };
+                // Auto-revive: memory users get their daemon back without
+                // typing /brain. Never installs (binary check), never
+                // retries, and says what it did on the transcript.
+                let down = matches!(chip, BrainChip::Down | BrainChip::Degraded);
+                if crate::foundation::brain_control::should_auto_revive(
+                    memory_enabled,
+                    down,
+                    auto_revive_attempted,
+                ) {
+                    auto_revive_attempted = true;
+                    let installed = crate::foundation::brain_control::probe_control()
+                        .binary
+                        .is_some();
+                    if installed {
+                        match crate::foundation::brain_control::revive().await {
+                            Ok(msg) => {
+                                announce.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!("brain: daemon was down — {msg}"))],
+                                );
+                                // Re-probe now instead of waiting a tick.
+                                chip = match tokio::time::timeout(
+                                    std::time::Duration::from_millis(1500),
+                                    backend.ping(),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(())) => BrainChip::Ok,
+                                    _ => chip,
+                                };
+                            }
+                            Err(e) => {
+                                announce.append_line(
+                                    InlineMessageKind::Warning,
+                                    vec![plain_segment(format!(
+                                        "brain: auto-restart failed — {e} (run /brain for details)"
+                                    ))],
+                                );
+                            }
+                        }
+                    }
+                }
                 let _ = brain_tx.send(chip);
             }
         });
