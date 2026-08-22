@@ -437,11 +437,12 @@ impl SlashCommand for MemoryCommand {
         "Show oxibrain memory status (health, stats, recovery hints)"
     }
     fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let args = _args.to_string();
         let handle = ctx.handle.clone();
-        ctx.reply(InlineMessageKind::Info, "Brain memory — querying daemon…");
         // The command runs inside the TUI's tokio runtime, so the daemon
         // round-trips go through `tokio::spawn`; replies land on the
         // transcript via the cloned `InlineHandle`.
+        ctx.reply(InlineMessageKind::Info, "Brain memory — querying daemon…");
         tokio::spawn(async move {
             fn append(handle: &oxicode_vtui::tui::core::InlineHandle, text: String) {
                 for line in text.split('\n') {
@@ -463,6 +464,13 @@ impl SlashCommand for MemoryCommand {
             } else {
                 "\ntools:     disabled (memory_enabled = false in settings)"
             });
+            let restart = args.trim().eq_ignore_ascii_case("restart");
+            if restart {
+                match crate::foundation::brain_control::revive().await {
+                    Ok(msg) => out.push_str(&format!("\nrestart:   {msg}")),
+                    Err(err) => out.push_str(&format!("\nrestart:   {err}")),
+                }
+            }
             match backend.ping().await {
                 Ok(()) => {
                     out.push_str("\nhealth:    ok — oxibrain daemon connected");
@@ -482,9 +490,19 @@ impl SlashCommand for MemoryCommand {
                 }
                 Err(e) => {
                     out.push_str(&format!("\nhealth:    degraded — {e}"));
+                    // Installed but stopped? Revive instead of just
+                    // hinting: launchd bootstrap/kickstart when
+                    // supervised, detached spawn otherwise.
+                    match crate::foundation::brain_control::revive().await {
+                        Ok(msg) => {
+                            out.push_str(&format!("\nrevive:    {msg}"));
+                            out.push_str("\n            the health chip refreshes within ~20s");
+                        }
+                        Err(err) => out.push_str(&format!("\nrevive:    {err}")),
+                    }
                     out.push_str(
-                        "\nhints:     start the daemon with `oxibrain serve`, or set \
-                         OXIBRAIN_SOCKET; no local fallback exists by design",
+                        "\nhints:     set OXIBRAIN_SOCKET if the daemon lives elsewhere; \
+                         no local fallback exists by design",
                     );
                 }
             }

@@ -41,6 +41,7 @@
 //!   socket; surfaces `degraded` state on connection failure.
 
 pub mod brain;
+pub mod brain_control;
 pub mod compat_import;
 pub mod compatibility;
 pub mod credentials;
