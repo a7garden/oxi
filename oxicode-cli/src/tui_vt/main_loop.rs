@@ -1694,11 +1694,19 @@ fn tool_args_preview(args: &serde_json::Value) -> String {
 // ─────────────────────────────────────────────────────────────────────────
 // omp-style tool boxes
 // ─────────────────────────────────────────────────────────────────────────
-
-/// Tool box content width: terminal width minus the scrollbar column,
-/// floored so narrow terminals still draw a coherent box.
+/// Tool box content width: the LIVE transcript content width (layout
+/// gutters minus the scrollbar column), floored so narrow terminals
+/// still draw a coherent box. Building at the terminal width would wrap
+/// every row's right border onto the next visual line.
 fn tool_box_width(state: &RenderState) -> usize {
-    (state.viewport_width.saturating_sub(1).max(24)) as usize
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: state.viewport_width,
+        height: 24,
+    };
+    let (_x, w) = super::frame_layout::scrollback_geometry(area);
+    w.saturating_sub(1).max(24) as usize
 }
 
 fn border_segment(text: impl Into<String>, color: anstyle::Color) -> InlineSegment {
@@ -4861,7 +4869,12 @@ fn scrollback_commit_plan(
 /// Render the committed chunk into the `insert_before` buffer. Mirrors
 /// the viewport's wrapping math so the frozen rows match what the live
 /// region showed.
-fn render_committed_chunk(buf: &mut Buffer, items: &[TranscriptDisplayItem<'_>], width: u16) {
+fn render_committed_chunk(
+    buf: &mut Buffer,
+    items: &[TranscriptDisplayItem<'_>],
+    x: u16,
+    width: u16,
+) {
     use ratatui::widgets::Widget;
     let width = width.max(1);
     let mut y = 0u16;
@@ -4877,7 +4890,7 @@ fn render_committed_chunk(buf: &mut Buffer, items: &[TranscriptDisplayItem<'_>],
             text_w.div_ceil(width as usize).max(1) as u16
         };
         let area = Rect {
-            x: 0,
+            x,
             y,
             width,
             height: wrapped_h,
@@ -4926,7 +4939,12 @@ fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &
     }
     let styles = active_styles();
     let display = build_transcript_display(state, &styles, state.committed_entries);
-    let content_w = area.width.saturating_sub(1) as usize;
+    // The plan's wrapping math must match the LIVE viewport's content
+    // width (layout gutters + scrollbar column), and the printed chunk
+    // must sit at the same left gutter — otherwise frozen rows wrap or
+    // shift a column relative to what the live region showed.
+    let (gutter_x, scrollback_w) = super::frame_layout::scrollback_geometry(area);
+    let content_w = scrollback_w.saturating_sub(1) as usize;
     let Some(plan) = scrollback_commit_plan(
         &display,
         &state.transcript,
@@ -4938,7 +4956,7 @@ fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &
     };
     let chunk = &display[..plan.boundary_item];
     let res = terminal.insert_before(plan.rows, |buf| {
-        render_committed_chunk(buf, chunk, area.width.saturating_sub(1));
+        render_committed_chunk(buf, chunk, gutter_x, content_w as u16);
     });
     if res.is_ok() {
         state.committed_entries = plan.new_committed_entries;
@@ -9076,7 +9094,27 @@ mod tool_box_tests {
             text.starts_with("\u{251C}\u{2500} Output"),
             "label after ├─: {text:?}"
         );
+
         assert!(text.ends_with('\u{2524}'), "closes with ┤: {text:?}");
         assert_eq!(text.width(), 30, "divider fills the box width");
+    }
+}
+
+#[cfg(test)]
+mod tool_box_width_tests {
+    //! Box width must equal the LIVE transcript content width (layout
+    //! gutters + scrollbar column). At the raw terminal width every
+    //! row's right border wraps onto the next visual line.
+    use super::*;
+
+    #[test]
+    fn tool_box_width_matches_live_content_width() {
+        let state = RenderState {
+            viewport_width: 100,
+            ..Default::default()
+        };
+        // CHAT_LAYOUT insets 1 column per side; the scrollbar column
+        // eats one more: 100 - 2 - 1 = 97.
+        assert_eq!(tool_box_width(&state), 97);
     }
 }

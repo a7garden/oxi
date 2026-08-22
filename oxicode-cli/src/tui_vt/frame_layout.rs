@@ -208,6 +208,30 @@ pub(super) fn scrollback_height(area: Rect) -> u16 {
     .height
 }
 
+/// Transcript (scrollback) area x/width for a terminal of this size,
+/// without rendering. The layout insets the terminal by one gutter
+/// column on each side (`CHAT_LAYOUT.hpad_*`), so tool boxes and
+/// scrollback commits must size themselves to THIS width — not the
+/// terminal width — or their right edges wrap in the live viewport.
+pub(super) fn scrollback_geometry(area: Rect) -> (u16, u16) {
+    let compact = effective_compact(false, area.height);
+    let layout = AgentViewLayout::compute(
+        area,
+        &CHAT_LAYOUT,
+        &ScrollbarConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        LayoutInput {
+            prompt_height: COMPOSER_HEIGHT,
+            shortcuts_height: SHORTCUTS_HEIGHT,
+            compact,
+            ..LayoutInput::default()
+        },
+    );
+    (layout.scrollback.x, layout.scrollback.width)
+}
+
 /// Right-aligned oxibrain health chip for the shortcuts bar.
 ///
 /// Health is ambient state, so it lives in the always-visible right side —
