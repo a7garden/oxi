@@ -815,6 +815,17 @@ pub(crate) async fn execute_prepared_tool_call_static(
         }
 
         enrich_context_from_metadata(&context_cell, &result);
+
+        // Drop the progress callback registered above. `on_progress`
+        // stores it on the shared, long-lived tool instance (tools are
+        // reused across every turn); leaving the closure attached keeps
+        // its captured `emit` (and the mpsc `Sender<AgentEvent>` inside
+        // it) alive forever, which never lets the event channel close.
+        // A run whose forwarder thread blocks on `event_rx.recv()`
+        // forever wedges the single-consumer prompt queue — every later
+        // queued prompt sits undelivered. Re-registering a no-op drops
+        // the previous closure immediately.
+        tool.on_progress(progress_callback(|_| {}));
     }
 
     if let Some(hook) = &after_hook {
@@ -1006,6 +1017,11 @@ async fn execute_prepared_tool_call(
         }
 
         enrich_context_from_metadata(&context_cell, &result);
+
+        // See the matching comment in `execute_prepared_tool_call_static`:
+        // drop the progress closure (and its captured `emit`/`Sender`)
+        // now instead of leaving it wired to the shared tool instance.
+        tool.on_progress(progress_callback(|_| {}));
     }
 
     ExecutedToolCallOutcome { result, is_error }
