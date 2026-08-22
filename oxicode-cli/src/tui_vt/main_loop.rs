@@ -2688,6 +2688,30 @@ fn handle_inline_event(
                                     vec![plain_segment(format!("Failed to toggle advisor: {e}"))],
                                 ),
                             },
+                            "glyph_set" => {
+                                // Cycle unicode → ascii → nerd, persist, and
+                                // apply LIVE — the composer border switches
+                                // on the next frame, no restart needed.
+                                let mut settings =
+                                    crate::store::settings::Settings::load().unwrap_or_default();
+                                let next = settings.glyph_set.next();
+                                settings.glyph_set = next;
+                                match settings.save() {
+                                    Ok(()) => {
+                                        state.glyph_set = next;
+                                        handle.append_line(
+                                            InlineMessageKind::Info,
+                                            vec![plain_segment(format!("Icons: {next}"))],
+                                        );
+                                    }
+                                    Err(e) => handle.append_line(
+                                        InlineMessageKind::Error,
+                                        vec![plain_segment(format!(
+                                            "Failed to save glyph_set: {e}"
+                                        ))],
+                                    ),
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -9339,5 +9363,16 @@ mod nerd_icon_tests {
         let text = border_text(&state);
         assert!(text.contains("MODEL "), "default keeps text: {text}");
         assert!(text.contains("brain\u{b7}ok"), "default chip text: {text}");
+    }
+}
+#[cfg(test)]
+mod glyph_cycle_tests {
+    use crate::symbols::GlyphSet;
+
+    #[test]
+    fn glyph_set_cycles_unicode_ascii_nerd() {
+        assert_eq!(GlyphSet::Unicode.next(), GlyphSet::Ascii);
+        assert_eq!(GlyphSet::Ascii.next(), GlyphSet::Nerd);
+        assert_eq!(GlyphSet::Nerd.next(), GlyphSet::Unicode);
     }
 }

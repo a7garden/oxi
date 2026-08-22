@@ -230,6 +230,18 @@ impl SlashCommand for SettingsCommand {
                 selection: Some(InlineListSelection::ConfigAction("advisor".into())),
                 search_value: Some("advisor".into()),
             },
+            InlineListItem {
+                title: "Icons".into(),
+                subtitle: Some("Enter to cycle unicode \u{2192} ascii \u{2192} nerd".into()),
+                badge: Some(
+                    crate::store::settings::Settings::load()
+                        .map(|s| s.glyph_set.to_string())
+                        .unwrap_or_else(|_| "unicode".into()),
+                ),
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction("glyph_set".into())),
+                search_value: Some("icons glyphs nerd font".into()),
+            },
         ];
 
         let search = InlineListSearchConfig {

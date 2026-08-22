@@ -50,6 +50,17 @@ impl GlyphSet {
     }
 }
 
+impl GlyphSet {
+    /// Cycle order for the settings overlay: unicode → ascii → nerd.
+    pub fn next(self) -> Self {
+        match self {
+            GlyphSet::Unicode => GlyphSet::Ascii,
+            GlyphSet::Ascii => GlyphSet::Nerd,
+            GlyphSet::Nerd => GlyphSet::Unicode,
+        }
+    }
+}
+
 /// Nerd Font icons for the composer's context row (`glyph_set = "nerd"`).
 ///
 /// All glyphs are Nerd Font private-use codepoints (Material Design
