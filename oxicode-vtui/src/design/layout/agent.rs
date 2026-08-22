@@ -339,11 +339,17 @@ impl AgentViewLayout {
         }
         constraints.push(Constraint::Length(input.prompt_height));
 
-        let shortcuts_gap: u16 = if bottom_vpad == 0 { 0 } else { 1 };
+        let shortcuts_gap: u16 = if input.shortcuts_height == 0 || bottom_vpad == 0 {
+            0
+        } else {
+            1
+        };
         if shortcuts_gap > 0 {
             constraints.push(Constraint::Length(shortcuts_gap));
         }
-        constraints.push(Constraint::Length(input.shortcuts_height));
+        if input.shortcuts_height > 0 {
+            constraints.push(Constraint::Length(input.shortcuts_height));
+        }
 
         let chunks = Layout::vertical(constraints).split(inner_area);
 
@@ -374,11 +380,14 @@ impl AgentViewLayout {
         let prompt = chunks[i];
         i += 1;
 
-        if shortcuts_gap > 0 {
-            i += 1;
-        }
-        let shortcuts = chunks[i];
-
+        let shortcuts = if input.shortcuts_height > 0 {
+            if shortcuts_gap > 0 {
+                i += 1;
+            }
+            chunks[i]
+        } else {
+            Rect::ZERO
+        };
         let scrollbar_x = area.right().saturating_sub(scrollbar_cfg.gap_right + 1);
         let timeline_width = if scrollbar_cfg.enabled {
             input.timeline_width

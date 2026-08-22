@@ -4025,7 +4025,7 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     frame
         .buffer_mut()
         .set_style(area, Style::default().bg(color_from_anstyle(Some(bg))));
-    let layout = super::frame_layout::render_chrome(frame, area, state);
+    let layout = super::frame_layout::compute_chrome(area);
     let tick = FRAME_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // Update terminal tab title: spinner while running, plain when idle.
     {
@@ -4059,10 +4059,10 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
         render_todo_pane(frame, pinned_area, &state.todo_items);
     }
     // The row above the composer has one owner per frame. A live run takes
-    // precedence over passive suggestions and tips, so status never vanishes
-    // beneath onboarding text.
     if let Some(stage) = &state.reasoning_stage {
         render_reasoning_indicator(frame, layout.prompt, stage);
+    } else if state.pending_quit {
+        render_pending_quit_hint(frame, layout.prompt);
     } else if !state.follow_ups.is_empty() {
         render_follow_ups(frame, layout.prompt, &state.follow_ups);
     } else {
@@ -5340,7 +5340,25 @@ fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
         ));
         spans.push(Span::styled(value, value_style));
     }
-    spans.push(Span::raw(" "));
+    // Right-aligned oxibrain health chip (moved off the removed
+    // shortcuts bar): healthy reads info, unreachable error, absent
+    // when memory is disabled. The border's title row is two cells
+    // narrower than the block.
+    if let Some((label, healthy)) = state.brain.chip_label() {
+        let chip_color = if healthy {
+            color_from_anstyle(styles.info.get_fg_color())
+        } else {
+            color_from_anstyle(styles.error.get_fg_color())
+        };
+        let usable = width.saturating_sub(2) as usize;
+        let used: usize = spans.iter().map(|s| s.width()).sum();
+        let chip = format!(" {label} ");
+        if used + chip.width() < usable {
+            let pad = usable - used - chip.width();
+            spans.push(Span::raw(" ".repeat(pad)));
+            spans.push(Span::styled(chip, Style::default().fg(chip_color)));
+        }
+    }
     Line::from(spans)
 }
 
@@ -5446,8 +5464,36 @@ fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage:
                 .fg(color_from_anstyle(styles.secondary.get_fg_color()))
                 .add_modifier(Modifier::DIM),
         ),
+        // Contextual abort hint (Claude Code pattern): shown only while
+        // a run is live — the static shortcuts bar is gone.
+        Span::styled(
+            "  Esc abort \u{b7} Ctrl+C quit",
+            Style::default()
+                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
+                .add_modifier(Modifier::DIM),
+        ),
     ]);
     frame.render_widget(Paragraph::new(line), indicator_area);
+}
+
+/// Pending-quit hint: shown in the row above the composer after the
+/// first Ctrl+C aborted a stream — the next press opens the quit
+/// confirmation. Submitting a new prompt cancels it.
+fn render_pending_quit_hint(frame: &mut Frame<'_>, composer_area: Rect) {
+    let styles = active_styles();
+    let hint_area = Rect {
+        x: composer_area.x,
+        y: composer_area.top().saturating_sub(1),
+        width: composer_area.width,
+        height: 1,
+    };
+    let line = Line::from(Span::styled(
+        "press Ctrl+C again to quit",
+        Style::default()
+            .fg(color_from_anstyle(styles.error.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    ));
+    frame.render_widget(Paragraph::new(line), hint_area);
 }
 
 /// Render queued input prompts as a compact pane at the top of the scrollback.
@@ -6296,11 +6342,11 @@ mod render_tests {
         state.composer = composer;
         let caret = terminal_caret(&state);
         // The dense chat layout leaves a 1-column side gutter and no outer
-        // vertical padding: prompt = Rect{x:1,y:20,w:78,h:3}; inner starts at
+        // vertical padding: prompt = Rect{x:1,y:21,w:78,h:3}; inner starts at
         // (2, 21), and the 2-column prefix puts the body at x=4.
         assert_eq!(
             caret,
-            Some((9, 21)),
+            Some((9, 22)),
             "ASCII caret must sit right after '> hello'"
         );
     }
@@ -6319,7 +6365,7 @@ mod render_tests {
         // textarea_area.x = 4, col = 4 -> (4 + 4, 21) = (8, 21).
         assert_eq!(
             caret,
-            Some((8, 21)),
+            Some((8, 22)),
             "CJK caret must sit after 4 display columns (not 6 bytes)"
         );
     }
@@ -6338,7 +6384,7 @@ mod render_tests {
         // textarea_area.x = 4, col = 6 -> (4 + 6, 21) = (10, 21).
         assert_eq!(
             caret,
-            Some((10, 21)),
+            Some((10, 22)),
             "Mixed caret must sit after 6 display columns"
         );
     }
@@ -9116,5 +9162,90 @@ mod tool_box_width_tests {
         // CHAT_LAYOUT insets 1 column per side; the scrollbar column
         // eats one more: 100 - 2 - 1 = 97.
         assert_eq!(tool_box_width(&state), 97);
+    }
+}
+
+#[cfg(test)]
+mod contextual_hint_tests {
+    //! The static shortcuts bar is gone; discoverability is contextual:
+    //! the brain chip lives on the composer border, abort/quit hints
+    //! appear only while a run is live or a quit is armed.
+    use super::*;
+
+    #[test]
+    fn brain_chip_lives_on_the_composer_border() {
+        let mut state = RenderState::default();
+        state.header_context.provider = "prov".to_string();
+        state.header_context.model = "prov/m-1".to_string();
+
+        // Off (memory disabled) — no chip.
+        let off = spans_to_string_border(&state);
+        assert!(!off.contains("brain"), "chip hidden when off: {off}");
+
+        // Ok — right side of the border.
+        state.brain = BrainChip::Ok;
+        let ok = spans_to_string_border(&state);
+        assert!(ok.contains("brain·ok"), "healthy chip on border: {ok}");
+        assert!(
+            ok.trim_end().ends_with("brain·ok"),
+            "chip is right-aligned: {ok}"
+        );
+
+        // Down — still renders.
+        state.brain = BrainChip::Down;
+        let down = spans_to_string_border(&state);
+        assert!(down.contains("brain·down"), "degraded chip: {down}");
+    }
+
+    #[test]
+    fn reasoning_row_carries_the_abort_hint() {
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let state = RenderState {
+            reasoning_stage: Some("thinking\u{2026}".into()),
+            ..Default::default()
+        };
+        terminal
+            .draw(|f| render_frame(f, &state, &unused_test_handle()))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let row: String = (0..buf.area().width)
+            .filter_map(|x| buf.cell((x, 20)).map(|c| c.symbol().to_string()))
+            .collect();
+        assert!(
+            row.contains("Esc abort"),
+            "streaming shows the contextual abort hint: {row}"
+        );
+    }
+
+    #[test]
+    fn pending_quit_owns_the_hint_row() {
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let state = RenderState {
+            pending_quit: true,
+            ..Default::default()
+        };
+        terminal
+            .draw(|f| render_frame(f, &state, &unused_test_handle()))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let row: String = (0..buf.area().width)
+            .filter_map(|x| buf.cell((x, 20)).map(|c| c.symbol().to_string()))
+            .collect();
+        assert!(
+            row.contains("press Ctrl+C again to quit"),
+            "armed quit shows its hint: {row}"
+        );
+    }
+
+    fn spans_to_string_border(state: &RenderState) -> String {
+        let line = composer_context_line(state, 200);
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    fn unused_test_handle() -> InlineHandle {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        InlineHandle::new_for_tests(tx)
     }
 }
