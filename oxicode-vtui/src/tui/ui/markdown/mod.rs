@@ -621,10 +621,7 @@ mod tests {
         assert!(!rows.is_empty(), "table produced no rows");
         for (i, row) in rows.iter().enumerate() {
             let w = unicode_width::UnicodeWidthStr::width(row.as_str());
-            assert!(
-                w <= width,
-                "row {i} overflows: {w} > {width}\n{row}"
-            );
+            assert!(w <= width, "row {i} overflows: {w} > {width}\n{row}");
         }
         let borders: Vec<usize> = rows
             .iter()
@@ -657,5 +654,5 @@ mod tests {
             unicode_width::UnicodeWidthStr::width(top.as_str()) <= 200,
             "natural width exceeds viewport"
         );
-}
+    }
 }
