@@ -5218,14 +5218,19 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         ));
     }
 
-    let block = Block::default()
+    let context_line = composer_context_line(state, area.width);
+    let used: usize = context_line.spans.iter().map(|s| s.width()).sum();
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
         .border_style(Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())))
         // The top border is useful real estate. It carries the active session
         // context instead of spending a full row on a generic "MESSAGE"
         // label, while the border still makes the input target unmistakable.
-        .title(composer_context_line(state, area.width));
+        .title(context_line);
+    if let Some(chip) = composer_brain_chip(state, area.width, used) {
+        block = block.title(chip);
+    }
 
     // Place the prefix in a leading line, then render the textarea in the
     // remaining width. When the body is empty AND a placeholder is
@@ -5401,33 +5406,39 @@ fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
         ));
         spans.push(Span::styled(value, value_style));
     }
-    // Right-aligned oxibrain health chip (moved off the removed
-    // shortcuts bar): healthy reads info, unreachable error, absent
-    // when memory is disabled. The border's title row is two cells
-    // narrower than the block. Nerd mode swaps the prefix for the brain
-    // glyph.
-    if let Some((chip_label, healthy)) = state.brain.chip_label() {
-        let chip_color = if healthy {
-            color_from_anstyle(styles.info.get_fg_color())
-        } else {
-            color_from_anstyle(styles.error.get_fg_color())
-        };
-        let text = if nerd {
-            let state_word = chip_label.trim_start_matches("brain\u{b7}");
-            format!("{} {}", crate::symbols::nerd::BRAIN, state_word)
-        } else {
-            chip_label.to_string()
-        };
-        let chip = format!(" {text} ");
-        let usable = width.saturating_sub(2) as usize;
-        let used: usize = spans.iter().map(|s| s.width()).sum();
-        if used + chip.width() < usable {
-            let pad = usable - used - chip.width();
-            spans.push(Span::raw(" ".repeat(pad)));
-            spans.push(Span::styled(chip, Style::default().fg(chip_color)));
-        }
-    }
     Line::from(spans)
+}
+
+/// Right-aligned oxibrain health chip rendered as its own border title
+/// (moved off the removed shortcuts bar): healthy reads info, unreachable
+/// error, absent when memory is disabled. Nerd mode swaps the prefix for
+/// the brain glyph.
+///
+/// The chip must NOT be space-padded into [`composer_context_line`]: a
+/// title overwrites the border row for its full width, and the padding
+/// would erase the `─` rule between the facts and the chip (it did —
+/// see `brain_chip_does_not_erase_the_border_rule`). A separate
+/// right-aligned title covers only the chip's own cells.
+fn composer_brain_chip<'a>(state: &'a RenderState, width: u16, used: usize) -> Option<Line<'a>> {
+    let styles = active_styles();
+    let (chip_label, healthy) = state.brain.chip_label()?;
+    let chip_color = if healthy {
+        color_from_anstyle(styles.info.get_fg_color())
+    } else {
+        color_from_anstyle(styles.error.get_fg_color())
+    };
+    let nerd = state.glyph_set == crate::symbols::GlyphSet::Nerd;
+    let text = if nerd {
+        let state_word = chip_label.trim_start_matches("brain\u{b7}");
+        format!("{} {}", crate::symbols::nerd::BRAIN, state_word)
+    } else {
+        chip_label.to_string()
+    };
+    let chip = format!(" {text} ");
+    // The border's title row is two cells narrower than the block.
+    let usable = width.saturating_sub(2) as usize;
+    (used + chip.width() < usable)
+        .then(|| Line::from(Span::styled(chip, Style::default().fg(chip_color))).right_aligned())
 }
 
 fn compact_token_count(tokens: usize) -> String {
@@ -9281,6 +9292,43 @@ mod contextual_hint_tests {
     }
 
     #[test]
+    fn brain_chip_does_not_erase_the_border_rule() {
+        // Regression: the chip used to be space-padded into the fields
+        // title. A title overwrites the border row for its full width,
+        // so the padding erased the `─` rule right of the facts.
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let mut state = RenderState::default();
+        state.header_context.provider = "prov".to_string();
+        state.header_context.model = "prov/m-1".to_string();
+        state.brain = BrainChip::Ok;
+        terminal
+            .draw(|f| render_frame(f, &state, &unused_test_handle()))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        // The welcome card also prints "MODEL" when the transcript is
+        // empty; the composer border row is the one with ` | ` field
+        // separators.
+        let border_row = (0..buf.area().height)
+            .map(|y| {
+                (0..buf.area().width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .find(|row| row.contains("MODEL") && row.contains(" | "))
+            .expect("composer border row rendered");
+        let rule_count = border_row.chars().filter(|c| *c == '\u{2500}').count();
+        assert!(
+            rule_count >= 10,
+            "the ─ rule must survive right of the facts: {border_row}"
+        );
+        assert!(
+            border_row.contains("brain\u{b7}ok"),
+            "chip still on the border: {border_row}"
+        );
+    }
+
+    #[test]
     fn reasoning_row_carries_the_abort_hint() {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).expect("backend");
@@ -9325,7 +9373,17 @@ mod contextual_hint_tests {
 
     fn spans_to_string_border(state: &RenderState) -> String {
         let line = composer_context_line(state, 200);
-        line.spans.iter().map(|s| s.content.as_ref()).collect()
+        let mut text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let used = line.spans.iter().map(|s| s.width()).sum();
+        if let Some(chip) = composer_brain_chip(state, 200, used) {
+            assert_eq!(
+                chip.alignment,
+                Some(Alignment::Right),
+                "the chip is its own right-aligned title"
+            );
+            text.extend(chip.spans.iter().map(|s| s.content.as_ref()));
+        }
+        text
     }
 
     fn unused_test_handle() -> InlineHandle {
@@ -9389,7 +9447,12 @@ mod nerd_icon_tests {
 
     fn border_text(state: &RenderState) -> String {
         let line = composer_context_line(state, 200);
-        line.spans.iter().map(|s| s.content.as_ref()).collect()
+        let mut text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let used = line.spans.iter().map(|s| s.width()).sum();
+        if let Some(chip) = composer_brain_chip(state, 200, used) {
+            text.extend(chip.spans.iter().map(|s| s.content.as_ref()));
+        }
+        text
     }
 
     fn base_state() -> RenderState {
