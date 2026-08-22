@@ -1806,7 +1806,8 @@ fn tool_box_rows(
 ) -> Vec<Vec<InlineSegment>> {
     let inner = w.saturating_sub(4).max(1);
     text.split('\n')
-        .flat_map(|line| wrap_by_display_width(line, inner))
+        .map(|line| expand_tabs(line, TAB_WIDTH))
+        .flat_map(|line| wrap_by_display_width(&line, inner))
         .map(|chunk| {
             // Pad by DISPLAY width — CJK chars occupy two cells, so a
             // char-count pad misaligns the right border on Korean text.
@@ -1844,6 +1845,36 @@ fn wrap_by_display_width(line: &str, inner: usize) -> Vec<String> {
     }
     if !cur.is_empty() {
         out.push(cur);
+    }
+    out
+}
+
+/// Tab stop for box-content expansion. Tool output (e.g. the read tool's
+/// `{:>6}\t{line}` numbering) carries literal tabs; ratatui drops them when
+/// filling cells while unicode-width 0.2 counts them as 1 — a row padded
+/// with tab width in its math renders one column short. Expand tabs to the
+/// next stop so builder and renderer agree on every cell.
+const TAB_WIDTH: usize = 4;
+
+/// Expand tabs to spaces at `TAB_WIDTH` display-column stops.
+fn expand_tabs(line: &str, tab_width: usize) -> String {
+    use unicode_width::UnicodeWidthChar as _;
+    if !line.contains('\t') {
+        return line.to_string();
+    }
+    let mut out = String::with_capacity(line.len() + tab_width);
+    let mut col = 0usize;
+    for ch in line.chars() {
+        if ch == '\t' {
+            let spaces = tab_width - (col % tab_width);
+            for _ in 0..spaces {
+                out.push(' ');
+                col += 1;
+            }
+        } else {
+            out.push(ch);
+            col += ch.width().unwrap_or(1).max(1);
+        }
     }
     out
 }
@@ -4793,18 +4824,6 @@ fn build_transcript_display<'a>(
                 });
             }
         }
-    }
-    // Trailing breath: one blank row after the last block so the most
-    // recent response never glues to the composer (the turn's other
-    // boundaries already breathe via needs_spacer).
-    if let Some(last) = display.last()
-        && last.line.is_some()
-    {
-        let source_index = last.source_index;
-        display.push(TranscriptDisplayItem {
-            source_index,
-            line: None,
-        });
     }
     display
 }
@@ -9013,8 +9032,8 @@ mod scrollback_commit_tests {
         };
         let styles = active_styles();
         let display = build_transcript_display(&state, &styles, 0);
-        // 9 rows + 1 trailing breath row = 10; keep 5 → limit 5 → the
-        // boundary would split b1 (items 3,4,5).
+        // 9 rows; keep 5 → limit 4 → the boundary would split b1
+        // (items 3,4,5).
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 5, None).expect("plan");
         assert_eq!(
             plan.new_committed_entries, 3,
@@ -9115,10 +9134,10 @@ mod scrollback_commit_tests {
         let display = build_transcript_display(&state, &styles, 0);
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 10, None).expect("plan");
         assert_eq!(
-            plan.new_committed_entries, 23,
-            "32 rows + 1 trailing breath = 33, keep 10 → head 23 rows commit"
+            plan.new_committed_entries, 22,
+            "32 rows, keep 10 → head 22 rows commit"
         );
-        assert_eq!(plan.rows, 23);
+        assert_eq!(plan.rows, 22);
     }
 }
 
@@ -9189,6 +9208,34 @@ mod tool_box_width_tests {
         // gone (native scrollback owns history): 100 - 2 = 98.
         assert_eq!(tool_box_width(&state), 98);
     }
+}
+
+#[test]
+fn tool_box_rows_expand_tabs_so_borders_align() {
+    // The read tool numbers lines as `{:>6}\t{content}`. unicode-width 0.2
+    // counts the tab as 1 (`UnicodeWidthStr::width`), but ratatui drops it
+    // when filling cells — a row built with tab width in its pad math
+    // renders one column short and the right border lands inside the box.
+    let chunk = format!("{:>6}\t{}", 1, "[package]");
+    let rows = tool_box_rows(
+        &chunk,
+        176,
+        InlineTextStyle::default(),
+        anstyle::Color::Ansi(anstyle::AnsiColor::White),
+    );
+    assert_eq!(rows.len(), 1);
+    for seg in &rows[0] {
+        assert!(
+            !seg.text.contains('\t'),
+            "tabs must be expanded: {:?}",
+            seg.text
+        );
+    }
+    let built: usize = rows[0]
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.text.as_str()))
+        .sum();
+    assert_eq!(built, 176, "built width must equal the box width exactly");
 }
 
 #[cfg(test)]
@@ -9279,12 +9326,14 @@ mod contextual_hint_tests {
 
 #[cfg(test)]
 mod trailing_breath_tests {
-    //! One blank row follows the transcript's last block so the newest
-    //! response never glues to the composer.
+    //! The gap between the transcript and the composer is LAYOUT: the
+    //! scrollback area reserves one blank row above the prompt, so the
+    //! newest response never glues to the composer at any height — and
+    //! the gap can't be windowed or committed away.
     use super::*;
 
     #[test]
-    fn last_block_gets_one_trailing_blank_row() {
+    fn display_ends_at_the_last_line_no_trailing_blank_item() {
         let state = RenderState {
             transcript: vec![TranscriptLine {
                 kind: InlineMessageKind::Agent,
@@ -9295,13 +9344,29 @@ mod trailing_breath_tests {
         };
         let styles = active_styles();
         let display = build_transcript_display(&state, &styles, 0);
-        assert_eq!(display.len(), 2, "line + one trailing spacer");
-        assert!(display[0].line.is_some(), "the response renders first");
-        assert!(display[1].line.is_none(), "trailing spacer is blank");
+        assert_eq!(display.len(), 1, "the gap is layout, not a display item");
+        assert!(display[0].line.is_some());
+    }
 
-        // Only ONE trailing row — no stacking.
-        let display2 = build_transcript_display(&state, &styles, 0);
-        assert_eq!(display2.len(), display.len());
+    #[test]
+    fn scrollback_area_reserves_one_breath_row_above_the_composer() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        };
+        let layout = super::super::frame_layout::compute_chrome(area);
+        assert_eq!(
+            layout.scrollback.bottom() + 1,
+            layout.prompt.y,
+            "exactly one row separates the transcript from the composer"
+        );
+        assert_eq!(
+            super::super::frame_layout::scrollback_height(area),
+            layout.scrollback.height,
+            "the commit keep-rows must match the rendered area"
+        );
     }
 }
 

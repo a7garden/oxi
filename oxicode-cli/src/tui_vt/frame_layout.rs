@@ -36,9 +36,19 @@ const CHAT_LAYOUT: LayoutConfig = LayoutConfig {
 
 /// Compute the agent view layout. The caller places the transcript into
 /// `layout.scrollback` and the composer into `layout.prompt`.
+/// One blank row kept between the transcript and the composer. The gap is
+/// LAYOUT, not content — a breath row inside the scrolling display gets
+/// windowed away exactly when the transcript is full, gluing the latest
+/// response to the composer. Reserved here, it survives every height and
+/// every scrollback commit; the streaming indicator / quit hint render
+/// into it while a run is live.
+const BREATH_ROW: u16 = 1;
+
+/// Compute the agent view layout. The caller places the transcript into
+/// `layout.scrollback` and the composer into `layout.prompt`.
 pub(super) fn compute_chrome(area: Rect) -> AgentViewLayout {
     let compact = effective_compact(false, area.height);
-    AgentViewLayout::compute(
+    let mut layout = AgentViewLayout::compute(
         area,
         &CHAT_LAYOUT,
         &ScrollbarConfig {
@@ -51,7 +61,9 @@ pub(super) fn compute_chrome(area: Rect) -> AgentViewLayout {
             compact,
             ..LayoutInput::default()
         },
-    )
+    );
+    layout.scrollback.height = layout.scrollback.height.saturating_sub(BREATH_ROW);
+    layout
 }
 
 /// Transcript (scrollback) area height for a terminal of this size,
@@ -76,6 +88,7 @@ pub(super) fn scrollback_height(area: Rect) -> u16 {
     )
     .scrollback
     .height
+    .saturating_sub(BREATH_ROW)
 }
 
 /// Transcript (scrollback) area x/width for a terminal of this size,
@@ -121,8 +134,13 @@ mod tests {
         assert_eq!(layout.scrollback.y, 0, "scrollback starts at row 0");
         assert_eq!(
             layout.scrollback.height,
-            24 - COMPOSER_HEIGHT - SHORTCUTS_HEIGHT,
-            "scrollback owns every row the composer does not"
+            24 - COMPOSER_HEIGHT - SHORTCUTS_HEIGHT - BREATH_ROW,
+            "scrollback owns every row the composer does not, minus the breath row"
+        );
+        assert_eq!(
+            layout.scrollback.bottom() + 1,
+            layout.prompt.y,
+            "the breath row separates transcript from composer"
         );
         assert_eq!(SHORTCUTS_HEIGHT, 0, "the static shortcuts bar is gone");
     }
