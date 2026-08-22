@@ -276,6 +276,9 @@ pub struct RenderState {
     /// lines keep the width they were built at (printed text does not
     /// rewrap either).
     pub viewport_width: u16,
+    /// Snapshot of the user's glyph-set setting — `nerd` swaps the
+    /// composer context labels for Nerd Font icons (never emoji).
+    pub glyph_set: crate::symbols::GlyphSet,
     /// Header context mirrored from `InlineHeaderContext`.
     pub header_context: InlineHeaderContext,
     /// Composer enabled state — mirrored from `SetInputEnabled`.
@@ -437,6 +440,7 @@ impl Default for RenderState {
             reasoning_stage: None,
             thinking_level: "medium".to_string(),
             viewport_width: 80,
+            glyph_set: crate::symbols::GlyphSet::default(),
             overlay: None,
             overlay_model_ids: Vec::new(),
             overlay_catalog_models: Vec::new(),
@@ -1065,6 +1069,7 @@ pub async fn run_tui(app: App) -> Result<()> {
         state.lock().autonomy_mode = Mode::load(&handle);
         handle
     });
+    state.lock().glyph_set = app.settings().glyph_set;
     let prompt_queue = Arc::new(PromptQueue::default());
     spawn_input_thread(
         state.clone(),
@@ -1734,14 +1739,10 @@ fn tool_args_preview(args: &serde_json::Value) -> String {
         raw
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// omp-style tool boxes
-// ─────────────────────────────────────────────────────────────────────────
 /// Tool box content width: the LIVE transcript content width (layout
-/// gutters minus the scrollbar column), floored so narrow terminals
-/// still draw a coherent box. Building at the terminal width would wrap
-/// every row's right border onto the next visual line.
+/// gutters), floored so narrow terminals still draw a coherent box.
+/// Building at the terminal width would wrap every row's right border
+/// onto the next visual line.
 fn tool_box_width(state: &RenderState) -> usize {
     let area = Rect {
         x: 0,
@@ -1750,7 +1751,7 @@ fn tool_box_width(state: &RenderState) -> usize {
         height: 24,
     };
     let (_x, w) = super::frame_layout::scrollback_geometry(area);
-    w.saturating_sub(1).max(24) as usize
+    w.max(24) as usize
 }
 
 fn border_segment(text: impl Into<String>, color: anstyle::Color) -> InlineSegment {
@@ -4570,13 +4571,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     let bg_color = color_from_anstyle(Some(styles.background));
 
     // Plain transcript surface (omp-style): no rail column, no speaker
-    // chrome. The content owns the full width minus the scrollbar; weight
-    // and color carry who is speaking, blank rows carry turn boundaries.
-    let scrollbar_w: u16 = 1;
+    // chrome, no in-app scrollbar — the host terminal's native
+    // scrollback owns history now. Content spans the full area.
     let content_area = Rect {
         x: area.x,
         y: area.y,
-        width: area.width.saturating_sub(scrollbar_w),
+        width: area.width,
         height: area.height,
     };
 
@@ -4679,24 +4679,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         y += wrapped_h;
     }
 
-    // Scrollbar (rightmost column): shown only when content overflows.
-    // Follow-tail dims the thumb; explicit scroll brightens it.
-    let body_viewport = (content_area.height as usize).saturating_sub(sticky_h as usize);
-    if total > body_viewport {
-        let follow = state.scroll_offset == usize::MAX;
-        render_scrollbar(
-            frame,
-            area.right().saturating_sub(1),
-            area.top(),
-            area.height,
-            total,
-            body_viewport,
-            start,
-            follow,
-            &styles,
-            bg_color,
-        );
-    }
+    let _ = (total, sticky_h);
 }
 
 /// One visible row of the transcript: a rendered line (or a turn
@@ -4786,6 +4769,18 @@ fn build_transcript_display<'a>(
                 });
             }
         }
+    }
+    // Trailing breath: one blank row after the last block so the most
+    // recent response never glues to the composer (the turn's other
+    // boundaries already breathe via needs_spacer).
+    if let Some(last) = display.last()
+        && last.line.is_some()
+    {
+        let source_index = last.source_index;
+        display.push(TranscriptDisplayItem {
+            source_index,
+            line: None,
+        });
     }
     display
 }
@@ -4988,7 +4983,7 @@ fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &
     // must sit at the same left gutter — otherwise frozen rows wrap or
     // shift a column relative to what the live region showed.
     let (gutter_x, scrollback_w) = super::frame_layout::scrollback_geometry(area);
-    let content_w = scrollback_w.saturating_sub(1) as usize;
+    let content_w = scrollback_w as usize;
     let Some(plan) = scrollback_commit_plan(
         &display,
         &state.transcript,
@@ -5004,57 +4999,6 @@ fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &
     });
     if res.is_ok() {
         state.committed_entries = plan.new_committed_entries;
-    }
-}
-
-/// Render a 1-column scrollbar in the rightmost cell column. The thumb
-/// represents the viewport's position within the full content; the rail is
-/// a faint track. Follow-tail (auto-scroll) dims the thumb toward the
-/// background; an explicit scroll offset paints it in the accent color.
-#[allow(clippy::too_many_arguments)]
-fn render_scrollbar(
-    frame: &mut Frame,
-    x: u16,
-    top: u16,
-    height: u16,
-    total: usize,
-    viewport: usize,
-    start: usize,
-    follow: bool,
-    styles: &ThemeStyles,
-    bg: Color,
-) {
-    if height == 0 {
-        return;
-    }
-    let ratio = (start as f64 / total.max(1) as f64).clamp(0.0, 1.0);
-    let thumb_h = (((viewport as f64 / total.max(1) as f64) * height as f64).ceil() as u16)
-        .max(1)
-        .min(height);
-    let track_h = height.saturating_sub(thumb_h);
-    let thumb_y = (ratio * track_h as f64).round() as u16;
-
-    let accent = color_from_anstyle(styles.primary.get_fg_color());
-    // Follow-tail: dim thumb so it recedes. Explicit scroll: bright accent.
-    let thumb_color = if follow {
-        blend_rgb(bg, accent, 0.35)
-    } else {
-        accent
-    };
-    let rail_color = blend_rgb(bg, accent, 0.1);
-
-    for row in 0..height {
-        let y = top + row;
-        let is_thumb = row >= thumb_y && row < thumb_y + thumb_h;
-        let (ch, color) = if is_thumb {
-            ('\u{2588}', thumb_color) // █
-        } else {
-            ('\u{2502}', rail_color) // │
-        };
-        if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
-            cell.set_char(ch);
-            cell.set_style(Style::default().fg(color));
-        }
     }
 }
 
@@ -5343,27 +5287,47 @@ fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
     };
 
     // (label, value, value style, minimum width). The first surviving field
-    // renders without a leading separator — there is no app badge.
+    // renders without a leading separator — there is no app badge. With
+    // `glyph_set = "nerd"`, labels become Nerd Font icons (never emoji).
+    use crate::symbols::nerd as icons;
+    let nerd = state.glyph_set == crate::symbols::GlyphSet::Nerd;
+    let label =
+        |text: &'static str, icon: &'static str| -> &'static str { if nerd { icon } else { text } };
     let mut fields: Vec<(&str, String, Style, u16)> = vec![
         (
-            "MODEL ",
+            label("MODEL ", icons::MODEL),
             model.to_string(),
             Style::default().fg(fg).add_modifier(Modifier::BOLD),
             0,
         ),
         (
-            "THINK ",
+            label("THINK ", icons::THINK),
             state.thinking_level.clone(),
             Style::default().fg(info),
             58,
         ),
-        ("DIR ", workspace, Style::default().fg(fg), 82),
-        ("GIT ", branch.to_string(), Style::default().fg(fg), 104),
-        ("CTX ", context, Style::default().fg(info), 124),
+        (
+            label("DIR ", icons::DIR),
+            workspace,
+            Style::default().fg(fg),
+            82,
+        ),
+        (
+            label("GIT ", icons::GIT),
+            branch.to_string(),
+            Style::default().fg(fg),
+            104,
+        ),
+        (
+            label("CTX ", icons::CTX),
+            context,
+            Style::default().fg(info),
+            124,
+        ),
     ];
     if let Some(stage) = state.reasoning_stage.clone() {
         fields.push((
-            "RUN ",
+            label("RUN ", icons::RUN),
             stage,
             Style::default().fg(primary).add_modifier(Modifier::BOLD),
             148,
@@ -5387,16 +5351,23 @@ fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
     // Right-aligned oxibrain health chip (moved off the removed
     // shortcuts bar): healthy reads info, unreachable error, absent
     // when memory is disabled. The border's title row is two cells
-    // narrower than the block.
-    if let Some((label, healthy)) = state.brain.chip_label() {
+    // narrower than the block. Nerd mode swaps the prefix for the brain
+    // glyph.
+    if let Some((chip_label, healthy)) = state.brain.chip_label() {
         let chip_color = if healthy {
             color_from_anstyle(styles.info.get_fg_color())
         } else {
             color_from_anstyle(styles.error.get_fg_color())
         };
+        let text = if nerd {
+            let state_word = chip_label.trim_start_matches("brain\u{b7}");
+            format!("{} {}", crate::symbols::nerd::BRAIN, state_word)
+        } else {
+            chip_label.to_string()
+        };
+        let chip = format!(" {text} ");
         let usable = width.saturating_sub(2) as usize;
         let used: usize = spans.iter().map(|s| s.width()).sum();
-        let chip = format!(" {label} ");
         if used + chip.width() < usable {
             let pad = usable - used - chip.width();
             spans.push(Span::raw(" ".repeat(pad)));
@@ -7011,9 +6982,11 @@ mod render_tests {
         );
     }
     #[test]
-    fn scrollbar_paints_thumb_when_content_overflows() {
-        // 40 distinct blocks in a 24-row viewport must produce a scrollbar
-        // thumb (█) in the rendered frame.
+    fn no_scrollbar_even_when_content_overflows() {
+        // The in-app scrollbar is gone — native terminal scrollback owns
+        // history and finalized rows commit above the viewport. Even a
+        // 40-block transcript overflowing the viewport must not paint a
+        // rail or thumb.
         let mut state = RenderState::default();
         for i in 0..40u32 {
             state.transcript.push(TranscriptLine {
@@ -7024,24 +6997,8 @@ mod render_tests {
         }
         let rendered = render_frame_to_string(&state);
         assert!(
-            rendered.contains('\u{2588}'),
-            "scrollbar thumb (█) must render when transcript overflows the viewport"
-        );
-    }
-
-    #[test]
-    fn scrollbar_absent_when_content_fits_viewport() {
-        // A single short line fits without overflow — no thumb character.
-        let mut state = RenderState::default();
-        state.transcript.push(TranscriptLine {
-            kind: InlineMessageKind::Agent,
-            segments: vec![plain_segment("hi")],
-            block_id: 0,
-        });
-        let rendered = render_frame_to_string(&state);
-        assert!(
             !rendered.contains('\u{2588}'),
-            "no scrollbar thumb when content fits the viewport"
+            "no scrollbar thumb (█): native scrollback owns history"
         );
     }
 
@@ -9032,8 +8989,9 @@ mod scrollback_commit_tests {
         };
         let styles = active_styles();
         let display = build_transcript_display(&state, &styles, 0);
-        // 9 rows, keep 4 → limit 5 → boundary would split b1 (3,4,5).
-        let plan = scrollback_commit_plan(&display, &state.transcript, 80, 4, None).expect("plan");
+        // 9 rows + 1 trailing breath row = 10; keep 5 → limit 5 → the
+        // boundary would split b1 (items 3,4,5).
+        let plan = scrollback_commit_plan(&display, &state.transcript, 80, 5, None).expect("plan");
         assert_eq!(
             plan.new_committed_entries, 3,
             "boundary snaps to block start"
@@ -9133,10 +9091,10 @@ mod scrollback_commit_tests {
         let display = build_transcript_display(&state, &styles, 0);
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 10, None).expect("plan");
         assert_eq!(
-            plan.new_committed_entries, 22,
-            "32 rows, keep 10 → head 22 rows commit"
+            plan.new_committed_entries, 23,
+            "32 rows + 1 trailing breath = 33, keep 10 → head 23 rows commit"
         );
-        assert_eq!(plan.rows, 22);
+        assert_eq!(plan.rows, 23);
     }
 }
 
@@ -9203,9 +9161,9 @@ mod tool_box_width_tests {
             viewport_width: 100,
             ..Default::default()
         };
-        // CHAT_LAYOUT insets 1 column per side; the scrollbar column
-        // eats one more: 100 - 2 - 1 = 97.
-        assert_eq!(tool_box_width(&state), 97);
+        // CHAT_LAYOUT insets 1 column per side; the in-app scrollbar is
+        // gone (native scrollback owns history): 100 - 2 = 98.
+        assert_eq!(tool_box_width(&state), 98);
     }
 }
 
@@ -9274,6 +9232,7 @@ mod contextual_hint_tests {
             .draw(|f| render_frame(f, &state, &unused_test_handle()))
             .expect("draw");
         let buf = terminal.backend().buffer();
+
         let row: String = (0..buf.area().width)
             .filter_map(|x| buf.cell((x, 20)).map(|c| c.symbol().to_string()))
             .collect();
@@ -9291,5 +9250,94 @@ mod contextual_hint_tests {
     fn unused_test_handle() -> InlineHandle {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         InlineHandle::new_for_tests(tx)
+    }
+}
+
+#[cfg(test)]
+mod trailing_breath_tests {
+    //! One blank row follows the transcript's last block so the newest
+    //! response never glues to the composer.
+    use super::*;
+
+    #[test]
+    fn last_block_gets_one_trailing_blank_row() {
+        let state = RenderState {
+            transcript: vec![TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment("answer")],
+                block_id: 0,
+            }],
+            ..Default::default()
+        };
+        let styles = active_styles();
+        let display = build_transcript_display(&state, &styles, 0);
+        assert_eq!(display.len(), 2, "line + one trailing spacer");
+        assert!(display[0].line.is_some(), "the response renders first");
+        assert!(display[1].line.is_none(), "trailing spacer is blank");
+
+        // Only ONE trailing row — no stacking.
+        let display2 = build_transcript_display(&state, &styles, 0);
+        assert_eq!(display2.len(), display.len());
+    }
+}
+
+#[cfg(test)]
+mod nerd_icon_tests {
+    //! `glyph_set = "nerd"` swaps the composer's text labels for Nerd
+    //! Font private-use glyphs — never emoji. Default (unicode) keeps
+    //! the text labels.
+    use super::*;
+
+    fn border_text(state: &RenderState) -> String {
+        let line = composer_context_line(state, 200);
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    fn base_state() -> RenderState {
+        let mut state = RenderState::default();
+        state.header_context.provider = "prov".to_string();
+        state.header_context.model = "prov/m-1".to_string();
+        state.brain = BrainChip::Ok;
+        state
+    }
+
+    #[test]
+    fn nerd_mode_replaces_labels_with_private_use_glyphs() {
+        let mut state = base_state();
+        state.glyph_set = crate::symbols::GlyphSet::Nerd;
+        let text = border_text(&state);
+        assert!(!text.contains("MODEL "), "text label gone: {text}");
+        assert!(
+            text.contains(crate::symbols::nerd::MODEL),
+            "robot glyph for the model: {text}"
+        );
+        assert!(
+            text.contains(crate::symbols::nerd::GIT),
+            "git glyph present: {text}"
+        );
+        assert!(
+            text.contains(crate::symbols::nerd::BRAIN),
+            "brain glyph chip: {text}"
+        );
+        // No emoji ever: all swaps live in the private-use area
+        // (U+E000–U+F8FF and the supplementary PUA planes).
+        for ch in text.chars() {
+            let cp = ch as u32;
+            let private_use = (0xE000..=0xF8FF).contains(&cp)
+                || (0xF0000..=0xFFFFD).contains(&cp)
+                || (0x100000..=0x10FFFD).contains(&cp);
+            assert!(
+                !('\u{1F300}'..='\u{1FAFF}').contains(&ch) || !private_use,
+                "sanity"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_default_keeps_text_labels() {
+        let state = base_state();
+        let text = border_text(&state);
+        assert!(text.contains("MODEL "), "default keeps text: {text}");
+        assert!(text.contains("brain\u{b7}ok"), "default chip text: {text}");
     }
 }

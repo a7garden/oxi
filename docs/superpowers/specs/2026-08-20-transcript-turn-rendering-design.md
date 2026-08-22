@@ -87,3 +87,15 @@ Final contract:
   first-line label — severity is data, not speaker chrome.
 - Sticky header keeps its faint background tint only.
 - Scrollbar column unchanged.
+
+## Addendum 2026-08-22 — scrollbar removal, trailing breath, icon mode
+
+- **No in-app scrollbar.** Native terminal scrollback owns history
+  (finalized rows are committed above the viewport via
+  `Terminal::insert_before`); the live region needs no position
+  indicator. The reclaimed column went back to content width.
+- **Trailing breath.** One blank display row follows the transcript's
+  last block so the newest response never glues to the composer.
+- **`glyph_set = "nerd"` is live.** The composer context row swaps text
+  labels for Nerd Font PUA glyphs (robot/lightbulb/rocket/folder/git/
+  database/brain — never emoji). Unicode default keeps text labels.

@@ -214,9 +214,11 @@ supplies the parts: `theme::` (62-theme registry + contrast pipeline),
   `oxicode-cli/src/tui_vt/vim/` (app-owned). The CLI's `InputEditor` adapter
   bridges vim mutations onto the composer's `oxicode_textarea::TextArea`, so
   caret/undo stay owned by the editor.
-- **Glyphs are currently hardcoded** in the host render code (`main_loop.rs`
-  emits `⚙ ✓ ☑ ☐ ▸ █` directly). There is no production glyph-set system; the
-  `glyph_set` setting has no effect on the live TUI.
+- **Glyphs**: the composer's context row honors `glyph_set = "nerd"` —
+  text labels (MODEL/THINK/RUN/DIR/GIT/CTX, brain chip) swap for Nerd
+  Font private-use glyphs (`oxicode-cli/src/symbols::nerd`, never
+  emoji). Other chrome glyphs (⚙ ✓ ☑ ☐ ▸) remain hardcoded in
+  `main_loop.rs`.
 
 Key types: `ThemeStyles`, `ThemeDefinition`, `InlineSegment`, `InlineTextStyle`,
 `InlineCommand`, `HostAdapter`.
@@ -482,8 +484,12 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   (2026-08-18); the `oxicode-sdk` `EmbeddingProvider` port remains for
   feature-gated consumers (oxios). Legacy `~/.oxicode/memory/items.jsonl`
   migrates via `oxicode migrate brain`. TUI surfaces health via the
-  `brain·ok`/`brain·down` chip on the shortcuts bar's right side and the
-  `/memory` slash command (the top status bar was removed 2026-08-20).
+  `brain·ok`/`brain·down` chip right-aligned on the composer's top
+  border and the `/brain` (alias `/memory`) slash command — which also
+  REVIVES a down daemon (launchd bootstrap/kickstart, detached spawn
+  fallback), and the TUI prober auto-revives once per session. The
+  static shortcuts bar was removed 2026-08-22 (contextual abort/quit
+  hints only).
 
 - `oxicode-ai` has no dependency on other oxicode crates. Do not import `oxicode_agent` from it.
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
