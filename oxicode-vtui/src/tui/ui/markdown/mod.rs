@@ -6,14 +6,20 @@ use std::sync::{Arc, LazyLock};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // Cached once at module scope — never rebuild per call.
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Parse markdown text into styled InlineSegment lines.
-pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
+///
+/// `width` is the usable cell width of the destination surface. Tables
+/// are the only block that pre-computes its own geometry — a table built
+/// wider than the viewport wraps at the terminal edge and every border
+/// row breaks. Pass the scrollback content width; other blocks wrap at
+/// render time as before.
+pub fn render_markdown(text: &str, width: usize) -> Vec<Vec<InlineSegment>> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -22,7 +28,6 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
     let mut lines: Vec<Vec<InlineSegment>> = Vec::new();
     let mut cur: Vec<InlineSegment> = Vec::new();
     let mut effects: Effects = Effects::default();
-
     let mut code_buf: Option<CodeBlockState> = None;
     let mut table_buf: Option<TableState> = None;
     let mut list_stack: Vec<ListLevel> = Vec::new();
@@ -47,7 +52,7 @@ pub fn render_markdown(text: &str) -> Vec<Vec<InlineSegment>> {
                 }
                 Event::End(TagEnd::Table) => {
                     let tb = table_buf.take().unwrap();
-                    let table_lines = render_table(&tb.header, &tb.rows);
+                    let table_lines = render_table(&tb.header, &tb.rows, width);
                     lines.extend(table_lines);
                     lines.push(Vec::new());
                 }
@@ -300,9 +305,15 @@ pub fn render_code_block(
     }
     lines
 }
-
-/// Render a GFM table with box-drawing borders and natural column widths.
-fn render_table(header: &[String], rows: &[Vec<String>]) -> Vec<Vec<InlineSegment>> {
+/// Render a GFM table with box-drawing borders, fitted to `max_w`.
+///
+/// Natural column widths come from cell contents; when the table would
+/// exceed `max_w`, the widest columns shrink one cell at a time (labels
+/// keep their width, prose columns pay) and cell text wraps inside its
+/// column, expanding short rows to as many physical lines as their
+/// tallest cell needs. The table never exceeds the viewport, so border
+/// rows never wrap at the terminal edge.
+fn render_table(header: &[String], rows: &[Vec<String>], max_w: usize) -> Vec<Vec<InlineSegment>> {
     let num_cols = std::cmp::max(
         header.len(),
         rows.iter().map(|r| r.len()).max().unwrap_or(0),
@@ -311,7 +322,7 @@ fn render_table(header: &[String], rows: &[Vec<String>]) -> Vec<Vec<InlineSegmen
         return Vec::new();
     }
 
-    // Compute natural column widths from display width.
+    // Natural column widths from display width.
     let mut col_width: Vec<usize> = vec![0; num_cols];
     for (c, cell) in header.iter().enumerate() {
         col_width[c] = std::cmp::max(col_width[c], cell.width());
@@ -322,33 +333,36 @@ fn render_table(header: &[String], rows: &[Vec<String>]) -> Vec<Vec<InlineSegmen
         }
     }
 
+    // Fit: total = Σ(w + 2) + (n − 1) + 2 border chars = Σw + 3n.
+    let chrome = 3 * num_cols;
+    let budget = max_w.saturating_sub(chrome);
+    while col_width.iter().sum::<usize>() > budget {
+        // Take one cell from the widest column; stop once every column
+        // is down to the floor of 1.
+        let widest = col_width
+            .iter()
+            .enumerate()
+            .max_by_key(|&(i, w)| (w, std::cmp::Reverse(i)))
+            .filter(|&(_, w)| *w > 1)
+            .map(|(i, _)| i);
+        match widest {
+            Some(i) => col_width[i] -= 1,
+            None => break,
+        }
+    }
+
     let mut out: Vec<Vec<InlineSegment>> = Vec::new();
 
-    // Border builders
-    let top = format!(
-        "┌{}┐",
-        col_width
-            .iter()
-            .map(|w| "─".repeat(w + 2))
-            .collect::<Vec<_>>()
-            .join("┬")
-    );
-    let mid = format!(
-        "├{}┤",
-        col_width
-            .iter()
-            .map(|w| "─".repeat(w + 2))
-            .collect::<Vec<_>>()
-            .join("┼")
-    );
-    let bot = format!(
-        "└{}┘",
-        col_width
-            .iter()
-            .map(|w| "─".repeat(w + 2))
-            .collect::<Vec<_>>()
-            .join("┴")
-    );
+    let border = |l: &str, j: &str, r: &str| {
+        format!(
+            "{l}{}{r}",
+            col_width
+                .iter()
+                .map(|w| "─".repeat(w + 2))
+                .collect::<Vec<_>>()
+                .join(j)
+        )
+    };
 
     let plain = |s: String| {
         vec![InlineSegment {
@@ -363,30 +377,74 @@ fn render_table(header: &[String], rows: &[Vec<String>]) -> Vec<Vec<InlineSegmen
         }]
     };
 
-    out.push(plain(top));
+    out.push(plain(border("┌", "┬", "┐")));
 
-    // Header row
-    let header_line = format_row(header, &col_width, num_cols);
-    out.push(bold(header_line));
-    out.push(plain(mid));
-
-    // Body rows
-    for row in rows {
-        out.push(plain(format_row(row, &col_width, num_cols)));
+    let mut cell_rows: Vec<(&[String], bool)> = vec![(header, true)];
+    cell_rows.extend(rows.iter().map(|r| (r.as_slice(), false)));
+    for (cells, is_header) in cell_rows {
+        // Wrap every cell to its column width, then emit one physical
+        // row per line of the tallest cell.
+        let wrapped: Vec<Vec<String>> = col_width
+            .iter()
+            .enumerate()
+            .map(|(c, &w)| wrap_cell(cells.get(c).map(String::as_str).unwrap_or(""), w))
+            .collect();
+        let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        for line_idx in 0..height {
+            let text = format_wrapped_row(&wrapped, line_idx, &col_width);
+            let segs = if is_header { bold(text) } else { plain(text) };
+            out.push(segs);
+        }
+        if is_header {
+            out.push(plain(border("├", "┼", "┤")));
+        }
     }
 
-    out.push(plain(bot));
+    out.push(plain(border("└", "┴", "┘")));
     out
 }
 
-fn format_row(cells: &[String], col_width: &[usize], num_cols: usize) -> String {
-    let mut parts: Vec<String> = Vec::with_capacity(num_cols);
+/// Hard-wrap one cell to its column's display width (CJK-aware).
+fn wrap_cell(text: &str, w: usize) -> Vec<String> {
+    if w == 0 {
+        return vec![String::new()];
+    }
+    if text.width() <= w {
+        return vec![text.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    for ch in text.chars() {
+        let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cur_w + ch_w > w && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            cur_w = 0;
+        }
+        cur.push(ch);
+        cur_w += ch_w;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+/// One physical row line: line `i` of every wrapped cell, padded to the
+/// column width so the right border stays aligned under CJK content.
+fn format_wrapped_row(wrapped: &[Vec<String>], line_idx: usize, col_width: &[usize]) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(col_width.len());
     for (c, &w) in col_width.iter().enumerate() {
-        let text = cells.get(c).map(String::as_str).unwrap_or("");
-        // Pad to display width `w` (not scalar count) so CJK / wide chars keep
-        // columns aligned — `{:<width$}` pads by char count and misaligns them.
+        let text = wrapped
+            .get(c)
+            .and_then(|lines| lines.get(line_idx))
+            .map(String::as_str)
+            .unwrap_or("");
         let pad = w.saturating_sub(text.width());
-        parts.push(format!(" {}{} ", text, " ".repeat(pad)));
+        parts.push(format!(" {text}{} ", " ".repeat(pad)));
     }
     format!("│{}│", parts.join("│"))
 }
@@ -455,7 +513,7 @@ mod tests {
 
     #[test]
     fn unordered_list_has_markers() {
-        let out = render_markdown("- a\n- b\n");
+        let out = render_markdown("- a\n- b\n", 200);
         // Find the lines that contain "a" and "b".
         let combined: Vec<String> = out.iter().map(|l| line_text(l)).collect();
         let line_a = combined
@@ -472,7 +530,7 @@ mod tests {
 
     #[test]
     fn ordered_list_has_numbers() {
-        let out = render_markdown("1. first\n2. second\n");
+        let out = render_markdown("1. first\n2. second\n", 200);
         let combined: Vec<String> = out.iter().map(|l| line_text(l)).collect();
         let has_one = combined
             .iter()
@@ -487,7 +545,7 @@ mod tests {
     #[test]
     fn table_renders_borders() {
         let md = "| h1 | h2 |\n|----|----|\n| a  | b  |\n| c  | d  |\n";
-        let out = render_markdown(md);
+        let out = render_markdown(md, 200);
         let combined: Vec<String> = out.iter().map(|l| line_text(l)).collect();
         let bar_lines = combined.iter().filter(|l| l.contains('\u{2502}')).count();
         assert!(bar_lines >= 3, "expected ≥3 lines with │, got {combined:?}");
@@ -502,7 +560,7 @@ mod tests {
 
     #[test]
     fn inline_still_works() {
-        let out = render_markdown("**bold**");
+        let out = render_markdown("**bold**", 200);
         let bold_found = out.iter().any(|line| {
             line.iter()
                 .any(|seg| seg.style.effects.contains(anstyle::Effects::BOLD))
@@ -514,7 +572,7 @@ mod tests {
         // Inline code (backticks) arrives as Event::Code, not Event::Text — the
         // table router must capture it or the cell renders blank.
         let md = "| type | example |\n|------|----------|\n| foo  | `bar`    |\n";
-        let out = render_markdown(md);
+        let out = render_markdown(md, 200);
         let joined: String = out
             .iter()
             .map(|l| line_text(l))
@@ -531,7 +589,7 @@ mod tests {
         // Wide chars (CJK) have display width 2; padding must use display width
         // so every data row has the same width and the │ borders line up.
         let md = "| a | b  |\n|---|----|\n| 中 | x  |\n| 1 | yy |\n";
-        let out = render_markdown(md);
+        let out = render_markdown(md, 200);
         let rows: Vec<String> = out
             .iter()
             .map(|l| line_text(l))
@@ -547,4 +605,57 @@ mod tests {
             "CJK column misalignment — row display widths differ: {widths:?}\n{rows:?}"
         );
     }
+
+    fn table_fits_the_given_width_and_wraps_cells() {
+        // A 4-column table with one column much wider than the viewport
+        // — natural width overflows — must shrink to fit. Border rows
+        // never exceed the width, and the long cell wraps inside its
+        // column instead of breaking the table.
+        let md = "\
+| colA | colB |\n\
+|------|------|\n\
+| alpha | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx |\n";
+        let width = 30usize;
+        let out = render_markdown(md, width);
+        let rows: Vec<String> = out.iter().map(|l| line_text(l)).collect();
+        assert!(!rows.is_empty(), "table produced no rows");
+        for (i, row) in rows.iter().enumerate() {
+            let w = unicode_width::UnicodeWidthStr::width(row.as_str());
+            assert!(
+                w <= width,
+                "row {i} overflows: {w} > {width}\n{row}"
+            );
+        }
+        let borders: Vec<usize> = rows
+            .iter()
+            .filter(|r| r.starts_with('┌') || r.starts_with('├') || r.starts_with('└'))
+            .map(|r| unicode_width::UnicodeWidthStr::width(r.as_str()))
+            .collect();
+        assert_eq!(borders.len(), 3, "top/mid/bottom borders");
+        assert!(
+            borders.iter().all(|&w| w == borders[0]),
+            "border widths differ: {borders:?}"
+        );
+        // The long cell must have wrapped into multiple physical rows.
+        let data_rows = rows.iter().filter(|r| r.starts_with('│')).count();
+        assert!(
+            data_rows > 1,
+            "the long cell should wrap to multiple rows, got {data_rows}\n{rows:?}"
+        );
+    }
+
+    #[test]
+    fn table_narrower_than_viewport_keeps_natural_width() {
+        let md = "| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let out = render_markdown(md, 200);
+        let top = out
+            .iter()
+            .map(|l| line_text(l))
+            .find(|l| l.starts_with('┌'))
+            .expect("top border");
+        assert!(
+            unicode_width::UnicodeWidthStr::width(top.as_str()) <= 200,
+            "natural width exceeds viewport"
+        );
+}
 }

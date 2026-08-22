@@ -1699,8 +1699,18 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
         }
     }
     if !state.message_buffer.is_empty() {
+        // Tables pre-compute their geometry, so they must know the real
+        // content width — a table built wider wraps at the terminal
+        // edge and every border row breaks.
+        let (_, content_w) = super::frame_layout::scrollback_geometry(Rect {
+            x: 0,
+            y: 0,
+            width: state.viewport_width,
+            height: 24,
+        });
         lines.extend(oxicode_vtui::tui::ui::markdown::render_markdown(
             &state.message_buffer,
+            content_w as usize,
         ));
     }
     lines
