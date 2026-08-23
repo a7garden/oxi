@@ -339,6 +339,12 @@ pub struct RenderState {
     /// indicator row across the per-turn stage clears so it never flickers
     /// to the idle row mid-run, and carries progress facts for display.
     pub(crate) active_run: Option<RunState>,
+    /// Typewriter reveal for the streamed body: how many BYTES of
+    /// `message_buffer` have been painted into the transcript.
+    /// `usize::MAX` = fully revealed (idle / finalized). The render tick
+    /// advances this so streamed text appears as a smooth flow instead
+    /// of per-network-chunk lumps.
+    pub stream_reveal: usize,
     /// oxibrain daemon health for the status-bar chip (prober-fed).
     pub(crate) brain: BrainChip,
     /// Selected reasoning effort, reflected in the composer's context bar.
@@ -469,6 +475,7 @@ impl Default for RenderState {
             slash_popup: SlashPopup::default(),
             reasoning_stage: None,
             active_run: None,
+            stream_reveal: usize::MAX,
             thinking_level: "medium".to_string(),
             viewport_width: 80,
             glyph_set: crate::symbols::GlyphSet::default(),
@@ -1394,6 +1401,9 @@ async fn run_event_loop(
         if let Some(provider) = snapshot.todo_provider.as_ref() {
             snapshot.todo_items = flatten_todo_items(&provider.get_phases());
         }
+        // Typewriter paint: reveal the streamed body a bounded step per
+        // frame so it types out instead of jumping per network chunk.
+        advance_stream_reveal(&mut snapshot);
         // Shed finalized rows into the host scrollback before the
         // synchronized repaint so the commit and the viewport redraw
         // land as one visual update.
@@ -1708,8 +1718,9 @@ fn provider_from_model_id(model_id: &str) -> String {
 }
 /// Render the in-flight message: the dimmed italic thinking block (one
 /// line per explicit newline, reasoning-styled) above the markdown-rendered
-/// answer. Re-rendered whole on every delta so the live view equals the
-/// final render.
+/// answer. Re-rendered whole on every reveal step so the live view equals
+/// the final render — but only for the REVEALED prefix of the body (see
+/// [`advance_stream_reveal`]).
 fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
     let mut lines = Vec::new();
     if !state.thinking_buffer.is_empty() {
@@ -1729,7 +1740,8 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
             lines.push(vec![plain_segment("")]);
         }
     }
-    if !state.message_buffer.is_empty() {
+    let body = revealed_stream_body(state);
+    if !body.is_empty() {
         // Tables pre-compute their geometry, so they must know the real
         // content width — a table built wider wraps at the terminal
         // edge and every border row breaks.
@@ -1740,11 +1752,68 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
             height: 24,
         });
         lines.extend(oxicode_vtui::tui::ui::markdown::render_markdown(
-            &state.message_buffer,
+            body,
             content_w as usize,
         ));
     }
     lines
+}
+
+/// The portion of the streamed body currently revealed by the
+/// typewriter (char-boundary-safe). `usize::MAX` reveals everything.
+fn revealed_stream_body(state: &RenderState) -> &str {
+    if state.stream_reveal == usize::MAX {
+        &state.message_buffer
+    } else {
+        let idx = floor_char_boundary(&state.message_buffer, state.stream_reveal);
+        &state.message_buffer[..idx]
+    }
+}
+
+/// Largest char-boundary index `<= i` (std's `floor_char_boundary` is
+/// still unstable).
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Advance the typewriter one frame and paint the newly revealed text
+/// into the streamed block. Returns `true` when something was painted.
+///
+/// Network chunks land in `message_buffer` whole; painting them whole
+/// made the transcript jump in lumps. The reveal advances per render
+/// tick (50 ms) by `remaining / 6` (min 8 bytes), so any backlog drains
+/// in a handful of frames while steady streams type out at their
+/// arrival pace. The final authoritative paint at `MessageEnd` reveals
+/// everything at once.
+fn advance_stream_reveal(state: &mut RenderState) -> bool {
+    if state.stream_anchor.is_none() || state.stream_reveal == usize::MAX {
+        return false;
+    }
+    let len = state.message_buffer.len();
+    if state.stream_reveal >= len {
+        state.stream_reveal = len;
+        return false;
+    }
+    let remaining = len - state.stream_reveal;
+    let step = (remaining / 6).max(8);
+    let target = (state.stream_reveal + step).min(len);
+    state.stream_reveal = floor_char_boundary(&state.message_buffer, target);
+    // Paint: replace the streamed block with the revealed prefix — the
+    // same mutation `InlineCommand::ReplaceLast` applies.
+    let lines = render_streamed_message(state);
+    let from = state.stream_anchor.unwrap_or(state.transcript.len());
+    state.transcript.truncate(from);
+    for line in lines {
+        state.append_line(InlineMessageKind::Agent, line);
+    }
+    state.stream_anchor = Some(from);
+    true
 }
 
 /// Project the agent-level event variants onto the harness transcript.
@@ -1993,6 +2062,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.clear();
             state.thinking_buffer.clear();
+            state.stream_reveal = 0;
             // The stream boundary travels in the command stream so the
             // anchor lifecycle shares one causal order with Inline and
             // ReplaceLast — a direct state write here would race batched
@@ -2030,10 +2100,11 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                     );
                     state.message_buffer.clear();
                     state.thinking_buffer.clear();
+                    state.stream_reveal = 0;
                 }
             }
         },
-        AgentEvent::MessageEnd { .. } => {
+        AgentEvent::MessageEnd { message } => {
             // Between turns of a live tool loop the stage is briefly
             // `None`; the run tracker keeps the indicator row up (the
             // renderer falls back to `working…`). Only a finished run
@@ -2041,7 +2112,22 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             if state.active_run.is_none() {
                 state.reasoning_stage = None;
             }
-            // Final rendering (same as delta:None for completeness)
+            // Authoritative final render: the Done message REPLACES the
+            // accumulated partial in agent_loop/streaming.rs, so the
+            // final message — not the delta buffers — carries the
+            // complete text. Providers can coalesce the stream tail
+            // into it without a matching delta; rendering from the
+            // buffers lost that tail until the next prompt rebuilt
+            // history from the session.
+            if let oxicode_ai::Message::Assistant(a) = &message {
+                state.thinking_buffer = a
+                    .content
+                    .iter()
+                    .filter_map(|b| b.as_thinking().map(|t| t.thinking.clone()))
+                    .collect();
+                state.message_buffer = a.text_content();
+                state.stream_reveal = usize::MAX;
+            }
             if !state.message_buffer.is_empty() || !state.thinking_buffer.is_empty() {
                 handle.replace_last(0, InlineMessageKind::Agent, render_streamed_message(state));
                 state.message_buffer.clear();
@@ -8424,7 +8510,7 @@ mod thinking_stream_tests {
     //! (the composer `RUN ` field in `composer_context_line`, and the
     //! reasoning indicator above the composer).
     use super::*;
-    use oxicode_ai::{Api, AssistantMessage, Message};
+    use oxicode_ai::{Api, AssistantMessage, ContentBlock, Message, TextContent};
     use oxicode_vtui::tui::core::InlineHandle;
     use tokio::sync::mpsc;
 
@@ -8441,6 +8527,11 @@ mod thinking_stream_tests {
         ))
     }
 
+    fn assistant_with_text(text: &str) -> Message {
+        let mut a = AssistantMessage::new(Api::OpenAiCompletions, "test", "test");
+        a.content.push(ContentBlock::Text(TextContent::new(text)));
+        Message::Assistant(a)
+    }
     #[test]
     fn thinking_delta_sets_fixed_stage_label_not_raw_text() {
         let mut state = RenderState::default();
@@ -8521,6 +8612,7 @@ mod thinking_stream_tests {
             &mut state,
         );
         apply_all(&mut state, &mut rx);
+        type_out_stream(&mut state);
 
         // One blank row breathes between the thinking block and the answer.
         let texts: Vec<String> = state
@@ -8730,7 +8822,7 @@ mod thinking_stream_tests {
         map_agent_event(
             &handle,
             AgentEvent::MessageEnd {
-                message: assistant(),
+                message: assistant_with_text("para one\n\npara two"),
             },
             &mut state,
         );
@@ -8773,7 +8865,7 @@ mod thinking_stream_tests {
             map_agent_event(
                 &handle,
                 AgentEvent::MessageEnd {
-                    message: assistant(),
+                    message: assistant_with_text(body),
                 },
                 &mut state,
             );
@@ -8821,6 +8913,7 @@ mod thinking_stream_tests {
             &mut state,
         );
         apply_all(&mut state, &mut rx);
+        type_out_stream(&mut state);
 
         let text = state
             .transcript
@@ -8855,6 +8948,7 @@ mod thinking_stream_tests {
             &mut state,
         );
         apply_all(&mut state, &mut rx);
+        type_out_stream(&mut state);
         let streamed: Vec<String> = state
             .transcript
             .iter()
@@ -8869,7 +8963,7 @@ mod thinking_stream_tests {
         map_agent_event(
             &handle,
             AgentEvent::MessageEnd {
-                message: assistant(),
+                message: assistant_with_text("hello **world**"),
             },
             &mut state,
         );
@@ -8888,6 +8982,108 @@ mod thinking_stream_tests {
             streamed, final_,
             "MessageEnd must not re-render what the live stream already shows"
         );
+    }
+
+    #[test]
+    fn final_message_renders_the_authoritative_tail() {
+        // Regression: providers can coalesce the stream tail into the
+        // final Done message without a matching delta (the Done message
+        // replaces the accumulated partial in agent_loop/streaming.rs).
+        // Rendering the final block from the delta buffers lost that
+        // tail until the next prompt rebuilt history from the session.
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageUpdate {
+                message: assistant(),
+                delta: oxicode_sdk::StreamDelta::Text("visible prefix ".into()),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        type_out_stream(&mut state);
+
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant_with_text("visible prefix HIDDEN-TAIL"),
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        let text: String = state
+            .transcript
+            .iter()
+            .map(|l| {
+                l.segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect();
+        assert!(
+            text.contains("HIDDEN-TAIL"),
+            "the final message is authoritative — its tail must render: {text}"
+        );
+        assert_eq!(
+            text.matches("visible prefix").count(),
+            1,
+            "no duplicated block: {text}"
+        );
+    }
+
+    #[test]
+    fn streamed_body_renders_only_the_revealed_prefix() {
+        let mut state = RenderState::default();
+        state.message_buffer = "hello world".to_string();
+        state.stream_reveal = 5; // bytes — "hello"
+        let lines = render_streamed_message(&state);
+        let text: String = lines
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect::<String>())
+            .collect();
+        assert!(text.contains("hello"), "revealed prefix renders: {text}");
+        assert!(!text.contains("world"), "unrevealed text waits: {text}");
+    }
+
+    #[test]
+    fn advance_stream_reveal_types_out_in_bounded_steps() {
+        let mut state = RenderState::default();
+        state.stream_anchor = Some(0);
+        state.message_buffer = "x".repeat(6000);
+        state.stream_reveal = 0;
+
+        assert!(advance_stream_reveal(&mut state), "first tick paints");
+        assert!(
+            state.stream_reveal > 0 && state.stream_reveal < 6000,
+            "bounded step, not a lump: {}",
+            state.stream_reveal
+        );
+        let transcript_after_step: usize = state.transcript.len();
+        assert!(
+            transcript_after_step > 0,
+            "the revealed prefix lands in the transcript"
+        );
+
+        while advance_stream_reveal(&mut state) {}
+        assert_eq!(
+            state.stream_reveal, 6000,
+            "repeated ticks drain the backlog completely"
+        );
+    }
+
+    /// Drive the typewriter to completion (test-side stand-in for the
+    /// render tick).
+    fn type_out_stream(state: &mut RenderState) {
+        while advance_stream_reveal(state) {}
     }
 
     #[test]
