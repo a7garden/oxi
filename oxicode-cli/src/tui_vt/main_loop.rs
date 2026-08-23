@@ -4235,6 +4235,19 @@ fn build_command_palette() -> OverlayState {
 
 /// Global frame tick counter for animations (incremented per render).
 static FRAME_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Animation epoch for time-keyed animation frames. Spinner frames key
+/// on wall-clock time — NOT the draw count — because event bursts
+/// during streaming drive many draws per interval and made count-keyed
+/// spinners visibly race.
+static ANIMATION_T0: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
+/// The animation frame index for a spinner with the given frame period
+/// (milliseconds). Deterministic in wall-clock time: rapid
+/// back-to-back draws within one period show the same frame.
+fn animation_frame(period_ms: u64) -> u64 {
+    ANIMATION_T0.elapsed().as_millis() as u64 / period_ms.max(1)
+}
 /// Tracks whether the terminal title currently shows a running state.
 static TITLE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// ASCII spinner frames for the tab title. They remain readable in every font.
@@ -4308,7 +4321,7 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
         let was_running = TITLE_RUNNING.swap(running, std::sync::atomic::Ordering::Relaxed);
         if running || was_running {
             let title = if running {
-                let spin = TITLE_SPINNER[(tick as usize) % TITLE_SPINNER.len()];
+                let spin = TITLE_SPINNER[(animation_frame(120) as usize) % TITLE_SPINNER.len()];
                 let model = state
                     .header_context
                     .editor_context
@@ -4336,7 +4349,7 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     // The row above the composer has one owner per frame. A live run
     // (tracker or stage) takes it — the tracker spans turn boundaries.
     if state.active_run.is_some() || state.reasoning_stage.is_some() {
-        render_reasoning_indicator(frame, layout.prompt, state, tick);
+        render_reasoning_indicator(frame, layout.prompt, state);
     } else if state.pending_quit {
         render_pending_quit_hint(frame, layout.prompt);
     } else if !state.follow_ups.is_empty() {
@@ -5693,12 +5706,7 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
 /// row up (falling back to `working…`), so it never flickers to the idle
 /// row mid-loop. The spinner animates on the frame tick and the suffix
 /// carries progress facts (turn count, tool calls, elapsed time).
-fn render_reasoning_indicator(
-    frame: &mut Frame<'_>,
-    composer_area: Rect,
-    state: &RenderState,
-    tick: u64,
-) {
+fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, state: &RenderState) {
     let styles = active_styles();
     let indicator_area = Rect {
         x: composer_area.x,
@@ -5708,7 +5716,9 @@ fn render_reasoning_indicator(
     };
     let primary = color_from_anstyle(styles.primary.get_fg_color());
     let muted = color_from_anstyle(styles.secondary.get_fg_color());
-    let spin = RUN_SPINNER[(tick as usize) % RUN_SPINNER.len()];
+    // 12.5 fps: lively, but keyed on wall-clock so draw-count bursts
+    // during streaming can't make it race.
+    let spin = RUN_SPINNER[(animation_frame(80) as usize) % RUN_SPINNER.len()];
     let stage = state
         .reasoning_stage
         .as_deref()
@@ -9732,6 +9742,41 @@ mod contextual_hint_tests {
         assert!(
             RUN_SPINNER.iter().any(|f| row.contains(f)),
             "animated spinner frame: {row}"
+        );
+    }
+
+    #[test]
+    fn spinner_frame_is_wall_clock_not_draw_count() {
+        // Regression: the spinner advanced on FRAME_TICK (draw count).
+        // Event bursts during streaming drive many draws per interval,
+        // so the spinner raced. Animation frames must key on wall-clock
+        // time — rapid back-to-back draws show the SAME frame.
+        let state = || RenderState {
+            active_run: Some(RunState::default()),
+            reasoning_stage: None,
+            ..Default::default()
+        };
+        let spinner_of = |s: &RenderState| -> Option<char> {
+            let backend = ratatui::backend::TestBackend::new(80, 24);
+            let mut terminal = Terminal::new(backend).expect("backend");
+            terminal
+                .draw(|f| render_frame(f, s, &unused_test_handle()))
+                .expect("draw");
+            let buf = terminal.backend().buffer();
+            let row: String = (0..buf.area().width)
+                .filter_map(|x| buf.cell((x, 20)).map(|c| c.symbol().to_string()))
+                .collect();
+            row.chars()
+                .find(|c| RUN_SPINNER.iter().any(|f| f.starts_with(*c)))
+        };
+        // Two draws in the same animation period (sub-80ms apart, which
+        // consecutive draws in one test always are).
+        let first = spinner_of(&state());
+        let second = spinner_of(&state());
+        assert!(first.is_some(), "spinner renders");
+        assert_eq!(
+            first, second,
+            "back-to-back draws must not advance the spinner"
         );
     }
 
