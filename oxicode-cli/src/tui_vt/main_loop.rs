@@ -258,6 +258,32 @@ impl BrainChip {
     }
 }
 
+/// Progress facts for the live agent run (`AgentStart` → `AgentEnd`).
+///
+/// Presence of the tracker (not `reasoning_stage`) is what keeps the
+/// indicator row above the composer owned during a run: turn boundaries
+/// clear the stage label, but the row must not flicker to the idle row
+/// (follow-ups / tips) until the whole run is over.
+#[derive(Debug, Clone)]
+pub(crate) struct RunState {
+    /// When the run started — drives the elapsed-time readout.
+    pub started_at: std::time::Instant,
+    /// LLM requests started so far (incremented on `MessageStart`).
+    pub turn: u32,
+    /// Tool executions started so far (incremented on `ToolExecutionStart`).
+    pub tool_calls: u32,
+}
+
+impl Default for RunState {
+    fn default() -> Self {
+        Self {
+            started_at: std::time::Instant::now(),
+            turn: 0,
+            tool_calls: 0,
+        }
+    }
+}
+
 pub struct RenderState {
     /// Editable text in the composer. Source of truth for the prompt line.
     pub composer: oxicode_textarea::TextArea,
@@ -309,6 +335,10 @@ pub struct RenderState {
     pub slash_popup: SlashPopup,
     /// Current reasoning/tool stage (e.g. "tool: read"), shown above the composer.
     pub reasoning_stage: Option<String>,
+    /// Live-run tracker — `Some` from `AgentStart` to `AgentEnd`. Owns the
+    /// indicator row across the per-turn stage clears so it never flickers
+    /// to the idle row mid-run, and carries progress facts for display.
+    pub(crate) active_run: Option<RunState>,
     /// oxibrain daemon health for the status-bar chip (prober-fed).
     pub(crate) brain: BrainChip,
     /// Selected reasoning effort, reflected in the composer's context bar.
@@ -438,6 +468,7 @@ impl Default for RenderState {
             pending_quit: false,
             slash_popup: SlashPopup::default(),
             reasoning_stage: None,
+            active_run: None,
             thinking_level: "medium".to_string(),
             viewport_width: 80,
             glyph_set: crate::symbols::GlyphSet::default(),
@@ -1949,7 +1980,16 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             state.message_buffer.push_str(&text);
             handle.inline(InlineMessageKind::Agent, plain_segment(text));
         }
+        AgentEvent::AgentStart { .. } => {
+            // The run is live until the matching AgentEnd. The tracker —
+            // not the stage label — owns the indicator row, so the row
+            // survives the per-turn stage clears of a tool loop.
+            state.active_run = Some(RunState::default());
+        }
         AgentEvent::MessageStart { .. } => {
+            if let Some(run) = &mut state.active_run {
+                run.turn += 1;
+            }
             state.reasoning_stage = Some("generating response".to_string());
             state.message_buffer.clear();
             state.thinking_buffer.clear();
@@ -1994,9 +2034,13 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             }
         },
         AgentEvent::MessageEnd { .. } => {
-            // Hide the reasoning indicator once the turn has ended so the
-            // composer row reverts to follow-ups / tips.
-            state.reasoning_stage = None;
+            // Between turns of a live tool loop the stage is briefly
+            // `None`; the run tracker keeps the indicator row up (the
+            // renderer falls back to `working…`). Only a finished run
+            // releases the row to follow-ups / tips.
+            if state.active_run.is_none() {
+                state.reasoning_stage = None;
+            }
             // Final rendering (same as delta:None for completeness)
             if !state.message_buffer.is_empty() || !state.thinking_buffer.is_empty() {
                 handle.replace_last(0, InlineMessageKind::Agent, render_streamed_message(state));
@@ -2035,6 +2079,9 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
                 handle.append_line(InlineMessageKind::Tool, row);
             }
             let stage = format!("tool: {tool_name}");
+            if let Some(run) = &mut state.active_run {
+                run.tool_calls += 1;
+            }
             state.reasoning_stage = Some(stage.clone());
             handle.set_reasoning_stage(Some(stage));
         }
@@ -2095,6 +2142,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
         }
         AgentEvent::Error { message, .. } => {
             handle.append_line(InlineMessageKind::Error, vec![plain_segment(message)]);
+            state.active_run = None;
             state.reasoning_stage = None;
             handle.set_input_enabled(true);
             handle.set_input_status(None, None);
@@ -2104,6 +2152,7 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             // (CompactionStart/End SessionEvents).
         }
         AgentEvent::Cancelled => {
+            state.active_run = None;
             state.reasoning_stage = None;
             handle.set_input_enabled(true);
             handle.set_input_status(None, Some("cancelled".to_string()));
@@ -2125,7 +2174,12 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             // from the visible queue pane so the pane only shows still-pending
             // inputs.
             state.drain_queue_head();
-            handle.set_reasoning_stage(None);
+            // Mid-run TurnEnds (a tool loop turn boundary) must not clear
+            // the stage through the command path either — the run tracker
+            // owns the row until AgentEnd.
+            if state.active_run.is_none() {
+                handle.set_reasoning_stage(None);
+            }
         }
         AgentEvent::Usage { input_tokens, .. } => {
             // `input_tokens` is the provider's tokenization of the complete
@@ -2134,8 +2188,15 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             // count or a local approximation).
             state.context_tokens = Some(input_tokens);
         }
+        AgentEvent::AgentEnd { .. } => {
+            // The run is over: release the indicator row to follow-ups /
+            // tips and reset the tracker.
+            state.active_run = None;
+            state.reasoning_stage = None;
+            handle.set_reasoning_stage(None);
+        }
         _ => {
-            // Other variants (TurnStart/End, AgentStart/End, Usage, …) are
+            // Other variants (TurnStart, Compaction, ToolCallDelta, …) are
             // logged but not rendered — they're either metadata or covered
             // by the dedicated SessionEvent variants above.
             tracing::debug!(?event, "ignored AgentEvent variant");
@@ -4093,6 +4154,24 @@ static TITLE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// ASCII spinner frames for the tab title. They remain readable in every font.
 const TITLE_SPINNER: &[&str] = &["-", "\\", "|", "/"];
 
+/// Braille spinner frames for the in-TUI run indicator (the row above
+/// the composer). Braille is plain Unicode (U+2800 block) — no font or
+/// emoji caveats — and animates on the frame tick.
+const RUN_SPINNER: &[&str] = &[
+    "\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283C}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280F}",
+];
+
+/// `59s` under a minute, `2m 05s` beyond it — for the run indicator's
+/// elapsed readout.
+fn format_elapsed_secs(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    }
+}
+
 /// Linear-interpolate between two RGB colors. `ratio` 0 = base, 1 = target.
 fn blend_rgb(base: Color, target: Color, ratio: f64) -> Color {
     match (base, target) {
@@ -4139,7 +4218,7 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     let tick = FRAME_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // Update terminal tab title: spinner while running, plain when idle.
     {
-        let running = state.reasoning_stage.is_some();
+        let running = state.active_run.is_some() || state.reasoning_stage.is_some();
         let was_running = TITLE_RUNNING.swap(running, std::sync::atomic::Ordering::Relaxed);
         if running || was_running {
             let title = if running {
@@ -4168,9 +4247,10 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     if !state.todo_items.is_empty() {
         render_todo_pane(frame, pinned_area, &state.todo_items);
     }
-    // The row above the composer has one owner per frame. A live run takes
-    if let Some(stage) = &state.reasoning_stage {
-        render_reasoning_indicator(frame, layout.prompt, stage);
+    // The row above the composer has one owner per frame. A live run
+    // (tracker or stage) takes it — the tracker spans turn boundaries.
+    if state.active_run.is_some() || state.reasoning_stage.is_some() {
+        render_reasoning_indicator(frame, layout.prompt, state, tick);
     } else if state.pending_quit {
         render_pending_quit_hint(frame, layout.prompt);
     } else if !state.follow_ups.is_empty() {
@@ -5383,10 +5463,13 @@ fn composer_context_line<'a>(state: &'a RenderState, width: u16) -> Line<'a> {
             124,
         ),
     ];
-    if let Some(stage) = state.reasoning_stage.clone() {
+    if state.active_run.is_some() || state.reasoning_stage.is_some() {
         fields.push((
             label("RUN ", icons::RUN),
-            stage,
+            state
+                .reasoning_stage
+                .clone()
+                .unwrap_or_else(|| "working\u{2026}".to_string()),
             Style::default().fg(primary).add_modifier(Modifier::BOLD),
             148,
         ));
@@ -5517,8 +5600,19 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), card);
 }
 
-/// Render a 1-row reasoning/tool-stage indicator just above the composer.
-fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage: &str) {
+/// Render a 1-row run indicator just above the composer.
+///
+/// While a run is live this row is continuously owned by the indicator:
+/// turn boundaries clear `reasoning_stage` but the run tracker keeps the
+/// row up (falling back to `working…`), so it never flickers to the idle
+/// row mid-loop. The spinner animates on the frame tick and the suffix
+/// carries progress facts (turn count, tool calls, elapsed time).
+fn render_reasoning_indicator(
+    frame: &mut Frame<'_>,
+    composer_area: Rect,
+    state: &RenderState,
+    tick: u64,
+) {
     let styles = active_styles();
     let indicator_area = Rect {
         x: composer_area.x,
@@ -5526,33 +5620,49 @@ fn render_reasoning_indicator(frame: &mut Frame<'_>, composer_area: Rect, stage:
         width: composer_area.width,
         height: 1,
     };
-    let line = Line::from(vec![
+    let primary = color_from_anstyle(styles.primary.get_fg_color());
+    let muted = color_from_anstyle(styles.secondary.get_fg_color());
+    let spin = RUN_SPINNER[(tick as usize) % RUN_SPINNER.len()];
+    let stage = state
+        .reasoning_stage
+        .as_deref()
+        .unwrap_or("working\u{2026}");
+    let mut spans = vec![
+        Span::styled(spin, Style::default().fg(primary)),
         Span::styled(
-            "RUNNING",
-            Style::default()
-                .fg(color_from_anstyle(styles.primary.get_fg_color()))
-                .add_modifier(Modifier::BOLD),
+            " RUNNING",
+            Style::default().fg(primary).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            " | ",
-            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
-        ),
+        Span::styled(" | ", Style::default().fg(muted)),
         Span::styled(
             stage.to_string(),
-            Style::default()
-                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(muted).add_modifier(Modifier::DIM),
         ),
-        // Contextual abort hint (Claude Code pattern): shown only while
-        // a run is live — the static shortcuts bar is gone.
-        Span::styled(
-            "  Esc abort \u{b7} Ctrl+C quit",
-            Style::default()
-                .fg(color_from_anstyle(styles.secondary.get_fg_color()))
-                .add_modifier(Modifier::DIM),
-        ),
-    ]);
-    frame.render_widget(Paragraph::new(line), indicator_area);
+    ];
+    if let Some(run) = &state.active_run {
+        let elapsed = format_elapsed_secs(run.started_at.elapsed().as_secs());
+        let facts = if run.turn > 0 {
+            format!(
+                " \u{b7} turn {} \u{b7} {} tool call{} \u{b7} {elapsed}",
+                run.turn,
+                run.tool_calls,
+                if run.tool_calls == 1 { "" } else { "s" },
+            )
+        } else {
+            format!(" \u{b7} {elapsed}")
+        };
+        spans.push(Span::styled(
+            facts,
+            Style::default().fg(muted).add_modifier(Modifier::DIM),
+        ));
+    }
+    // Contextual abort hint (Claude Code pattern): shown only while
+    // a run is live — the static shortcuts bar is gone.
+    spans.push(Span::styled(
+        "  Esc abort \u{b7} Ctrl+C quit",
+        Style::default().fg(muted).add_modifier(Modifier::DIM),
+    ));
+    frame.render_widget(Paragraph::new(Line::from(spans)), indicator_area);
 }
 
 /// Pending-quit hint: shown in the row above the composer after the
@@ -8801,6 +8911,72 @@ mod thinking_stream_tests {
     }
 
     #[test]
+    fn run_tracker_spans_the_whole_tool_loop() {
+        let mut state = RenderState::default();
+        let (handle, _cmd_rx) = fresh_handle();
+
+        map_agent_event(
+            &handle,
+            AgentEvent::AgentStart {
+                prompts: vec![],
+                session_id: None,
+            },
+            &mut state,
+        );
+        assert!(
+            state.active_run.is_some(),
+            "AgentStart opens the run tracker"
+        );
+
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageStart {
+                message: assistant(),
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionStart {
+                tool_call_id: "tc-1".into(),
+                tool_name: "read".into(),
+                args: serde_json::json!({}),
+                intent: None,
+                context: None,
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::MessageEnd {
+                message: assistant(),
+            },
+            &mut state,
+        );
+
+        // Turn boundary: the stage may be cleared, but the run tracker —
+        // with its progress facts — stays live until AgentEnd.
+        let run = state.active_run.as_ref().expect("run stays live");
+        assert_eq!(run.turn, 1, "MessageStart counts a turn");
+        assert_eq!(run.tool_calls, 1, "ToolExecutionStart counts a call");
+
+        map_agent_event(
+            &handle,
+            AgentEvent::AgentEnd {
+                messages: vec![],
+                stop_reason: None,
+                session_id: None,
+            },
+            &mut state,
+        );
+        assert!(state.active_run.is_none(), "AgentEnd closes the tracker");
+        assert!(
+            state.reasoning_stage.is_none(),
+            "AgentEnd releases the indicator row"
+        );
+    }
+
+    #[test]
     fn message_end_releases_the_stream_anchor() {
         let mut state = RenderState::default();
         let (handle, mut rx) = fresh_handle();
@@ -9326,6 +9502,48 @@ mod contextual_hint_tests {
             border_row.contains("brain\u{b7}ok"),
             "chip still on the border: {border_row}"
         );
+    }
+
+    #[test]
+    fn run_indicator_stays_up_between_turns() {
+        // Mid-run the stage is cleared at each turn boundary
+        // (MessageEnd/TurnEnd); the run tracker must keep the indicator
+        // row owned so it never flickers to the idle row — and it should
+        // carry progress facts (spinner, turn/tool counts, elapsed).
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let state = RenderState {
+            active_run: Some(RunState {
+                started_at: std::time::Instant::now(),
+                turn: 2,
+                tool_calls: 3,
+            }),
+            reasoning_stage: None,
+            ..Default::default()
+        };
+        terminal
+            .draw(|f| render_frame(f, &state, &unused_test_handle()))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let row: String = (0..buf.area().width)
+            .filter_map(|x| buf.cell((x, 20)).map(|c| c.symbol().to_string()))
+            .collect();
+        assert!(row.contains("RUNNING"), "row stays up between turns: {row}");
+        assert!(row.contains("working"), "stage fallback label: {row}");
+        assert!(row.contains("turn 2"), "turn count: {row}");
+        assert!(row.contains("3 tool calls"), "tool count: {row}");
+        assert!(row.contains("Esc abort"), "abort hint stays: {row}");
+        assert!(
+            RUN_SPINNER.iter().any(|f| row.contains(f)),
+            "animated spinner frame: {row}"
+        );
+    }
+
+    #[test]
+    fn elapsed_formats_minutes_beyond_60s() {
+        assert_eq!(format_elapsed_secs(59), "59s");
+        assert_eq!(format_elapsed_secs(60), "1m 00s");
+        assert_eq!(format_elapsed_secs(125), "2m 05s");
     }
 
     #[test]
