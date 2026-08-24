@@ -2789,3 +2789,93 @@ async fn test_intent_tracing_reaches_events() {
     });
     assert_eq!(end, Some(Some("Echo back the user message".to_string())));
 }
+
+/// The agent's `context_window` (compaction denominator, CTX display)
+/// must follow the *resolved model*, not the construction-time default.
+///
+/// Regression test: every CLI construction site hardcodes 128_000, which
+/// made 1M-context models compact at ~102k (8x too early) and showed a
+/// wrong CTX total. `Agent::new*` and both switch paths must sync the
+/// config (and the manual compaction manager) from the model's
+/// `context_window` whenever it is positive.
+#[test]
+fn context_window_syncs_from_resolved_model() {
+    use crate::ProviderResolver;
+
+    struct CtxResolver {
+        provider: Arc<dyn Provider>,
+    }
+    impl ProviderResolver for CtxResolver {
+        fn resolve_provider(&self, _name: &str) -> Option<Arc<dyn Provider>> {
+            Some(Arc::clone(&self.provider))
+        }
+        fn resolve_model(&self, id: &str) -> Option<oxicode_ai::Model> {
+            let (mid, ctx, max_out) = match id {
+                "test/big" => ("big", 1_000_000_usize, 65_536),
+                "test/small" => ("small", 8_192, 4_096),
+                _ => return None,
+            };
+            Some(oxicode_ai::Model {
+                id: mid.to_string(),
+                name: mid.to_string(),
+                api: Api::AnthropicMessages,
+                provider: "test".to_string(),
+                base_url: String::new(),
+                reasoning: false,
+                input: vec![oxicode_ai::InputModality::Text],
+                cost: oxicode_ai::Cost::default(),
+                context_window: ctx,
+                max_tokens: max_out,
+                headers: HashMap::new(),
+                compat: None,
+            })
+        }
+    }
+
+    let provider = Arc::new(MockProvider::new(vec![]));
+
+    // Construction with a resolvable model id: 128k default must be
+    // replaced by the model's real 1M window.
+    let config = AgentConfig::new("test/big");
+    assert_eq!(config.context_window, 128_000, "test precondition");
+    let agent = Agent::new_with_resolver(
+        provider.clone(),
+        config,
+        Arc::new(ToolRegistry::new()),
+        Arc::new(CtxResolver {
+            provider: provider.clone(),
+        }),
+    );
+    assert_eq!(
+        agent.get_config().context_window,
+        1_000_000,
+        "Agent::new must sync context_window from the resolved model"
+    );
+    assert_eq!(
+        agent.compaction_manager().context_window(),
+        1_000_000,
+        "construction-time compaction manager gets the synced window"
+    );
+
+    // Mid-life switch to a small model: the per-run config (read fresh
+    // each run by the agent loop) must follow.
+    agent.switch_model("test/small").unwrap();
+    assert_eq!(
+        agent.get_config().context_window,
+        8_192,
+        "switch_model must sync context_window from the new model"
+    );
+
+    // switch_to_model takes a pre-resolved Model — same contract.
+    let big = CtxResolver {
+        provider: provider.clone(),
+    }
+    .resolve_model("test/big")
+    .unwrap();
+    agent.switch_to_model(&big).unwrap();
+    assert_eq!(
+        agent.get_config().context_window,
+        1_000_000,
+        "switch_to_model must sync context_window from the given model"
+    );
+}

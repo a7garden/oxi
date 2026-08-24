@@ -208,6 +208,15 @@ impl Agent {
         self.config().config.model_id.clone()
     }
 
+    /// Get the active model's context window (tokens).
+    ///
+    /// Synced from the resolved model at construction and on every model
+    /// switch — the authoritative value the per-run loop computes
+    /// compaction thresholds against. Hosts use it for CTX displays.
+    pub fn context_window(&self) -> usize {
+        self.config().config.context_window
+    }
+
     /// Get the agent configuration (full clone)
     pub fn get_config(&self) -> AgentConfig {
         self.config().config.clone()
@@ -229,6 +238,18 @@ impl Agent {
         resolver: Arc<dyn ProviderResolver>,
         custom_compactor: Option<Arc<dyn Compactor>>,
     ) -> Self {
+        // Resolve the initial model once: its real context window is the
+        // source of truth for compaction thresholds (construction sites
+        // pass a 128_000 placeholder). Overwrite only when positive —
+        // resolvers that cannot resolve leave the configured value alone.
+        let mut config = config;
+        let resolved_model = resolver.resolve_model(&config.model_id);
+        if let Some(model) = &resolved_model
+            && model.context_window > 0
+        {
+            config.context_window = model.context_window;
+        }
+
         let mut compaction_manager =
             CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
@@ -237,14 +258,11 @@ impl Agent {
         // manager follows the same replace semantics as the loop).
         if let Some(compactor) = &custom_compactor {
             compaction_manager.set_compactor(Arc::clone(compactor));
-        } else if config.compaction_strategy != CompactionStrategy::Disabled {
-            let model = resolver.resolve_model(&config.model_id);
-
-            if let Some(model) = model {
-                let llm_compactor =
-                    Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
-                compaction_manager.set_compactor(llm_compactor);
-            }
+        } else if config.compaction_strategy != CompactionStrategy::Disabled
+            && let Some(model) = resolved_model
+        {
+            let llm_compactor = Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
+            compaction_manager.set_compactor(llm_compactor);
         }
 
         Self {
@@ -268,11 +286,28 @@ impl Agent {
         }
     }
 
+    /// Sync the agent's context window from a resolved model.
+    ///
+    /// The per-run loop reads `inner.config.context_window` fresh each run
+    /// (the authoritative value — compaction thresholds, CTX display).
+    /// Construction sites pass a 128_000 placeholder; the resolved model's
+    /// real capacity overwrites it here. Zero-window models (LOCAL
+    /// discovery placeholders) keep the previous value.
+    ///
+    /// The construction-time [`CompactionManager`] field is not updated:
+    /// it only serves manual compaction (`compact_now`, window-independent)
+    /// and is built with the already-synced window at construction.
+    fn apply_context_window(&self, window: usize) {
+        if window == 0 {
+            return;
+        }
+        self.inner_mut().config.context_window = window;
+    }
+
     /// Get a reference to the provider resolver.
     pub fn resolver(&self) -> &Arc<dyn ProviderResolver> {
         &self.resolver
     }
-
     /// Switch the model used for future LLM calls.
     ///
     /// Switch model mid-conversation.
@@ -342,6 +377,7 @@ impl Agent {
                 let mut inner = self.inner_mut();
                 inner.config.model_id = model_id.to_string();
             }
+            self.apply_context_window(new_model.context_window);
             return Ok(());
         }
 
@@ -354,9 +390,12 @@ impl Agent {
             });
         }
 
-        let mut inner = self.inner_mut();
-        inner.config.model_id = model_id.to_string();
-        inner.provider = new_provider;
+        {
+            let mut inner = self.inner_mut();
+            inner.config.model_id = model_id.to_string();
+            inner.provider = new_provider;
+        }
+        self.apply_context_window(new_model.context_window);
 
         Ok(())
     }
@@ -406,8 +445,11 @@ impl Agent {
                 old_api,
                 new_api: model.api,
             });
-            let mut inner = self.inner_mut();
-            inner.config.model_id = model_id;
+            {
+                let mut inner = self.inner_mut();
+                inner.config.model_id = model_id;
+            }
+            self.apply_context_window(model.context_window);
             return Ok(());
         }
 
@@ -420,9 +462,12 @@ impl Agent {
             });
         }
 
-        let mut inner = self.inner_mut();
-        inner.config.model_id = model_id;
-        inner.provider = new_provider;
+        {
+            let mut inner = self.inner_mut();
+            inner.config.model_id = model_id;
+            inner.provider = new_provider;
+        }
+        self.apply_context_window(model.context_window);
 
         Ok(())
     }

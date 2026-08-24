@@ -918,6 +918,17 @@ impl CompactionManager {
         self.config = config;
     }
 
+    /// Get the context window this manager computes thresholds against.
+    pub fn context_window(&self) -> usize {
+        self.context_window
+    }
+
+    /// Update the context window (e.g. after a model switch changed the
+    /// real capacity). Affects subsequent [`should_compact`] checks.
+    pub fn set_context_window(&mut self, context_window: usize) {
+        self.context_window = context_window;
+    }
+
     /// Compact the given messages if appropriate
     pub async fn compact_if_needed(
         &self,
