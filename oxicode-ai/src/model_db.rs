@@ -365,6 +365,24 @@ pub fn search_models(pattern: &str) -> Vec<&'static ModelEntry> {
         .collect()
 }
 
+/// Find a catalog entry by bare model id (exact match), scanning every
+/// provider deterministically (providers are sorted in the materialized
+/// table, so the first hit is stable).
+///
+/// Used to cross-fill metadata for models registered outside the catalog
+/// (custom-provider `/v1/models` discovery, LOCAL servers): the ids such
+/// endpoints report are frequently upstream model ids (e.g. a proxy
+/// serving `claude-sonnet-4-6`), so models.dev often knows the real
+/// limits even though the provider is our own. Same id under multiple
+/// providers may differ in limits; the first provider's entry is an
+/// advisory best-effort — better than a hardcoded placeholder.
+pub fn find_entry_by_model_id(model_id: &str) -> Option<&'static ModelEntry> {
+    if model_id.is_empty() {
+        return None;
+    }
+    get_all_models().find(|m| m.id == model_id)
+}
+
 /// Find models that support reasoning/thinking.
 pub fn get_reasoning_models() -> Vec<&'static ModelEntry> {
     get_all_models().filter(|m| m.reasoning).collect()

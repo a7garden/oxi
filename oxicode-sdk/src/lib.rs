@@ -204,9 +204,9 @@ pub use oxicode_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_
 #[oxicode_internal]
 // Model database — provider catalog, model metadata
 pub use oxicode_ai::model_db::{
-    ModelEntry, builtin_model_count_sentinel, get_all_models, get_cheapest_models, get_model_entry,
-    get_provider_models, get_providers, get_reasoning_models, get_vision_models, model_count,
-    search_models,
+    ModelEntry, builtin_model_count_sentinel, find_entry_by_model_id, get_all_models,
+    get_cheapest_models, get_model_entry, get_provider_models, get_providers, get_reasoning_models,
+    get_vision_models, model_count, search_models,
 };
 
 // Catalog — models.dev-backed dynamic catalog (SNAP/LIVE/override/LOCAL).

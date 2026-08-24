@@ -944,7 +944,9 @@ fn draw_model_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) 
         .iter()
         .map(|&i| {
             let m = &state.models[i];
-            let ctx_str = if m.context_window >= 1_000_000 {
+            let ctx_str = if m.context_window == 0 {
+                "? ctx".to_string() // 0 = unknown, not a real window
+            } else if m.context_window >= 1_000_000 {
                 format!("{}M ctx", m.context_window / 1_000_000)
             } else {
                 format!("{}K ctx", m.context_window / 1_000)

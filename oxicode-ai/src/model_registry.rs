@@ -81,12 +81,51 @@ static STATIC_MODELS: LazyLock<HashMap<String, Model>> = LazyLock::new(|| {
 
     // ZAI models
     add_zai_models(&mut map);
-
     // MiniMax models
     add_minimax_models(&mut map);
 
+    // models.dev is the source of truth for numeric metadata. The static
+    // registry exists to carry hand-maintained transport quirks (compat
+    // settings, base URLs) — its hand-written numbers drift (e.g.
+    // gemini-2.5-pro listed at 2M while models.dev reports 1_048_576).
+    // Resolution prefers static over catalog, so refresh the numbers here
+    // or the stale hand values would shadow the catalog forever.
+    refresh_numerics_from_catalog(&mut map);
+
     map
 });
+
+/// Overwrite hand-maintained numeric metadata (context window, max output
+/// tokens, costs) with models.dev catalog values for every static entry
+/// the catalog knows. See the call site for why this runs at init.
+fn refresh_numerics_from_catalog(map: &mut HashMap<String, Model>) {
+    for (key, model) in map.iter_mut() {
+        let Some((provider, id)) = key.split_once('/') else {
+            continue;
+        };
+        let Some(entry) = crate::model_db::get_model_entry(provider, id) else {
+            continue;
+        };
+        if entry.context_window > 0 {
+            model.context_window = entry.context_window as usize;
+        }
+        if entry.max_tokens > 0 {
+            model.max_tokens = entry.max_tokens as usize;
+        }
+        if entry.cost_input > 0.0 {
+            model.cost.input = entry.cost_input;
+        }
+        if entry.cost_output > 0.0 {
+            model.cost.output = entry.cost_output;
+        }
+        if entry.cost_cache_read > 0.0 {
+            model.cost.cache_read = entry.cost_cache_read;
+        }
+        if entry.cost_cache_write > 0.0 {
+            model.cost.cache_write = entry.cost_cache_write;
+        }
+    }
+}
 
 fn add_openai_models(map: &mut HashMap<String, Model>) {
     let models = [
@@ -1038,6 +1077,47 @@ mod tests {
         let registry = ModelRegistry::from_static();
         assert!(registry.lookup("openai", "gpt-4o").is_some());
         assert!(registry.lookup("fake", "fake-model").is_none());
+    }
+
+    #[test]
+    fn static_registry_numerics_match_catalog() {
+        // Every static entry the models.dev catalog knows must carry the
+        // catalog's numeric metadata. Before `refresh_numerics_from_catalog`,
+        // hand-written values (gemini-2.5-pro 2M, zai/glm-4.7 200k, …)
+        // shadowed the catalog in `resolve_model_from_id` (static wins
+        // over catalog) and drifted from reality.
+        let mut checked = 0;
+        for provider in get_providers() {
+            for model in get_models(provider) {
+                let Some(entry) = crate::model_db::get_model_entry(provider, &model.id) else {
+                    continue; // catalog-only model, nothing to compare
+                };
+                if entry.context_window > 0 {
+                    assert_eq!(
+                        model.context_window, entry.context_window as usize,
+                        "{provider}/{} context window must match models.dev",
+                        model.id
+                    );
+                }
+                if entry.max_tokens > 0 {
+                    assert_eq!(
+                        model.max_tokens, entry.max_tokens as usize,
+                        "{provider}/{} max output tokens must match models.dev",
+                        model.id
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "expected a meaningful overlap, got {checked}");
+    }
+
+    #[test]
+    fn gemini_2_5_pro_uses_models_dev_window() {
+        // Concrete regression: the hand-written entry said 2_000_000 while
+        // models.dev (and Google's own docs for the GA API) say 1_048_576.
+        let m = get_model("google", "gemini-2.5-pro").expect("static gemini-2.5-pro");
+        assert_eq!(m.context_window, 1_048_576);
     }
 
     #[test]

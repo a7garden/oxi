@@ -818,24 +818,31 @@ async fn fetch_local_models(base_url: &str) -> std::io::Result<Vec<CatalogModelE
     let entries = resp
         .data
         .into_iter()
-        .map(|m| CatalogModelEntry {
-            provider: provider_id.clone(),
-            model_id: m.id.clone(),
-            name: m.id,
-            protocol: CatalogProtocol::OpenAiCompatible,
-            source: CatalogSource::Local,
-            base_url: Some(base_url.trim_end_matches('/').to_string()),
-            reasoning: false,
-            supports_vision: false,
-            cost_input: 0.0,
-            cost_output: 0.0,
-            cost_cache_read: 0.0,
-            cost_cache_write: 0.0,
-            context_window: 0,
-            max_tokens: 0,
-            input_modalities: vec!["text".to_string()],
-            release_date: None,
-            status: None,
+        .map(|m| {
+            // Local `/v1/models` reports bare ids with no limits. Servers
+            // usually serve upstream models (qwen3, llama-*, gemini-*, …),
+            // so advisory cross-fill from the embedded models.dev catalog
+            // beats a permanent "0 ctx" placeholder.
+            let known = oxicode_ai::model_db::find_entry_by_model_id(&m.id);
+            CatalogModelEntry {
+                provider: provider_id.clone(),
+                model_id: m.id.clone(),
+                name: m.id,
+                protocol: CatalogProtocol::OpenAiCompatible,
+                source: CatalogSource::Local,
+                base_url: Some(base_url.trim_end_matches('/').to_string()),
+                reasoning: known.map(|e| e.reasoning).unwrap_or(false),
+                supports_vision: known.map(|e| e.supports_vision()).unwrap_or(false),
+                cost_input: known.map(|e| e.cost_input.max(0.0)).unwrap_or(0.0),
+                cost_output: known.map(|e| e.cost_output.max(0.0)).unwrap_or(0.0),
+                cost_cache_read: known.map(|e| e.cost_cache_read.max(0.0)).unwrap_or(0.0),
+                cost_cache_write: known.map(|e| e.cost_cache_write.max(0.0)).unwrap_or(0.0),
+                context_window: known.map(|e| e.context_window).unwrap_or(0),
+                max_tokens: known.map(|e| e.max_tokens).unwrap_or(0),
+                input_modalities: vec!["text".to_string()],
+                release_date: None,
+                status: None,
+            }
         })
         .collect();
     Ok(entries)

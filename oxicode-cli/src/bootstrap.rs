@@ -470,17 +470,30 @@ fn fetch_and_register_models(
                         "openai-responses" | "responses" => oxicode_sdk::Api::OpenAiResponses,
                         _ => oxicode_sdk::Api::OpenAiCompletions,
                     };
+                    // `/v1/models` reports bare ids with no metadata.
+                    // Custom providers usually proxy upstream models
+                    // (claude-*, gemini-*, …), so cross-fill real limits
+                    // from the models.dev catalog before falling back to
+                    // the conservative placeholder.
+                    let known = oxicode_sdk::find_entry_by_model_id(model_id);
                     let model = oxicode_sdk::Model {
                         id: model_id.clone(),
                         name: model_id.clone(),
                         api: api_type,
                         provider: cp.name.clone(),
                         base_url: cp.base_url.clone(),
-                        reasoning: false,
+                        reasoning: known.map(|e| e.reasoning).unwrap_or(false),
                         input: vec![oxicode_sdk::InputModality::Text],
-                        cost: oxicode_sdk::Cost::default(),
-                        context_window: 128_000,
-                        max_tokens: 8_192,
+                        cost: known
+                            .map(|e| oxicode_sdk::Cost {
+                                input: e.cost_input.max(0.0),
+                                output: e.cost_output.max(0.0),
+                                cache_read: e.cost_cache_read.max(0.0),
+                                cache_write: e.cost_cache_write.max(0.0),
+                            })
+                            .unwrap_or_default(),
+                        context_window: known.map(|e| e.context_window as usize).unwrap_or(128_000),
+                        max_tokens: known.map(|e| e.max_tokens as usize).unwrap_or(8_192),
                         headers: Default::default(),
                         compat: None,
                     };

@@ -32,7 +32,10 @@ pub(crate) fn register_extra(registry: &mut SlashRegistry) {
 
 /// Format a token count as a compact context-window label.
 pub(super) fn fmt_ctx(tokens: u32) -> String {
-    if tokens >= 1_000_000 {
+    if tokens == 0 {
+        // 0 = unknown (LOCAL discovery placeholder), not a real window.
+        "? ctx".to_string()
+    } else if tokens >= 1_000_000 {
         format!("{:.1}M ctx", tokens as f64 / 1_000_000.0)
     } else if tokens >= 1000 {
         format!("{}K ctx", tokens / 1000)
@@ -731,10 +734,9 @@ impl SlashCommand for ExportCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn fmt_ctx_compact() {
-        assert_eq!(fmt_ctx(0), "0 ctx");
+        assert_eq!(fmt_ctx(0), "? ctx");
         assert_eq!(fmt_ctx(500), "500 ctx");
         assert_eq!(fmt_ctx(8192), "8K ctx");
         assert_eq!(fmt_ctx(128_000), "128K ctx");
