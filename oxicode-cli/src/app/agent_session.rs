@@ -495,6 +495,13 @@ impl AgentSession {
         self.agent.model_id()
     }
 
+    /// Get the active model's context window (tokens) — synced by the
+    /// agent from the resolved model (construction + every switch).
+    /// The TUI CTX chip denominator reads this.
+    pub fn context_window(&self) -> usize {
+        self.agent.context_window()
+    }
+
     /// Get the current agent state.
     #[allow(dead_code)]
     pub fn state(&self) -> AgentState {

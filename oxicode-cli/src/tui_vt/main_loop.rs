@@ -1081,6 +1081,12 @@ pub async fn run_tui(app: App) -> Result<()> {
     state.lock().session_swapper = Some(session_swapper.clone());
     state.lock().session_state = Some(app.session_state().clone());
     state.lock().thinking_level = format!("{:?}", session.thinking_level()).to_ascii_lowercase();
+    // MODEL chip + CTX denominator from the live session (the boot header
+    // context carries the model id; the context window comes from here).
+    {
+        let mut s = state.lock();
+        sync_model_chips(&mut s, &session_handle);
+    }
     // Onboarding tip: surfaces the cheatsheet and help command on first run,
     // auto-dismisses after ~30s of rendering.
     state.lock().tip = Some(EphemeralTip {
@@ -1715,6 +1721,33 @@ fn provider_from_model_id(model_id: &str) -> String {
         .filter(|provider| !provider.is_empty())
         .unwrap_or("provider")
         .to_string()
+}
+
+/// Push the active model into every render surface that shows it: the
+/// composer's MODEL field (`header_context`) and the CTX denominator.
+///
+/// Before this, both were written once at startup and went stale: the
+/// MODEL chip kept the boot model after `/model`, and `context_window`
+/// kept its 128_000 default forever — a 1M-context model showed a
+/// wrong CTX total for the whole session.
+pub(crate) fn apply_model_to_chips(state: &mut RenderState, model_id: &str, ctx_window: usize) {
+    if model_id.is_empty() {
+        return;
+    }
+    state.header_context.provider = provider_from_model_id(model_id);
+    state.header_context.model = model_id.to_string();
+    state.header_context.editor_context = Some(model_id.to_string());
+    if ctx_window > 0 {
+        state.context_window = ctx_window;
+    }
+}
+
+/// [`apply_model_to_chips`] sourced from the live session.
+pub(crate) fn sync_model_chips(
+    state: &mut RenderState,
+    session: &crate::app::agent_session::AgentSessionHandle,
+) {
+    apply_model_to_chips(state, &session.model_id(), session.context_window());
 }
 /// Render the in-flight message: the dimmed italic thinking block (one
 /// line per explicit newline, reasoning-styled) above the markdown-rendered
@@ -2793,10 +2826,13 @@ fn handle_inline_event(
                     {
                         let model_id = state.overlay_model_ids[*idx].clone();
                         match session.set_model(&model_id) {
-                            Ok(()) => handle.append_line(
-                                InlineMessageKind::Info,
-                                vec![plain_segment(format!("Switched to {model_id}"))],
-                            ),
+                            Ok(()) => {
+                                sync_model_chips(state, session);
+                                handle.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!("Switched to {model_id}"))],
+                                );
+                            }
                             Err(e) => handle.append_line(
                                 InlineMessageKind::Error,
                                 vec![plain_segment(format!("Failed to set model: {e}"))],
@@ -2942,10 +2978,13 @@ fn handle_inline_event(
                         let (provider, model_id) = &state.overlay_catalog_models[*idx];
                         let full = format!("{provider}/{model_id}");
                         match session.set_model(&full) {
-                            Ok(()) => handle.append_line(
-                                InlineMessageKind::Info,
-                                vec![plain_segment(format!("Switched to {full}"))],
-                            ),
+                            Ok(()) => {
+                                sync_model_chips(state, session);
+                                handle.append_line(
+                                    InlineMessageKind::Info,
+                                    vec![plain_segment(format!("Switched to {full}"))],
+                                );
+                            }
                             Err(e) => handle.append_line(
                                 InlineMessageKind::Error,
                                 vec![plain_segment(format!("Failed to set model: {e}"))],
@@ -9260,6 +9299,40 @@ mod composer_border_tests {
         );
         let wide = spans_to_string(&composer_context_line(&state, 140));
         assert!(wide.contains("CTX "), "wide carries context usage: {wide}");
+    }
+
+    #[test]
+    fn model_chips_follow_model_switch() {
+        let mut state = RenderState::default();
+        assert_eq!(state.context_window, 128_000, "default before sync");
+
+        // A 1M-context model must replace both the MODEL field and the
+        // CTX denominator (regression: the denominator was written once
+        // at startup and never updated).
+        apply_model_to_chips(&mut state, "google/gemini-2.5-pro", 1_048_576);
+        assert_eq!(state.header_context.provider, "google");
+        assert_eq!(state.header_context.model, "google/gemini-2.5-pro");
+        assert_eq!(
+            state.header_context.editor_context.as_deref(),
+            Some("google/gemini-2.5-pro")
+        );
+        assert_eq!(state.context_window, 1_048_576);
+
+        let wide = spans_to_string(&composer_context_line(&state, 140));
+        assert!(
+            wide.contains("CTX 0/1048.5K"),
+            "CTX chip renders the synced denominator: {wide}"
+        );
+
+        // Empty id is a no-op.
+        apply_model_to_chips(&mut state, "", 999);
+        assert_eq!(state.header_context.model, "google/gemini-2.5-pro");
+
+        // Zero window (unknown model): the MODEL chip follows the switch,
+        // the CTX denominator keeps the last known value instead of 0.
+        apply_model_to_chips(&mut state, "zai/glm-5.1", 0);
+        assert_eq!(state.header_context.model, "zai/glm-5.1");
+        assert_eq!(state.context_window, 1_048_576);
     }
 
     #[test]

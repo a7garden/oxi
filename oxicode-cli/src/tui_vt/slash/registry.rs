@@ -831,14 +831,20 @@ impl SlashCommand for ModelCommand {
                 );
             }
             "next" | "cycle" => match ctx.session.cycle_model() {
-                Some(new_id) => ctx.reply(InlineMessageKind::Info, format!("Switched to {new_id}")),
+                Some(new_id) => {
+                    crate::tui_vt::main_loop::sync_model_chips(ctx.state, ctx.session);
+                    ctx.reply(InlineMessageKind::Info, format!("Switched to {new_id}"))
+                }
                 None => ctx.reply(
                     InlineMessageKind::Warning,
                     "No scoped models configured to cycle.",
                 ),
             },
             id => match ctx.session.set_model(id) {
-                Ok(()) => ctx.reply(InlineMessageKind::Info, format!("Switched to {id}")),
+                Ok(()) => {
+                    crate::tui_vt::main_loop::sync_model_chips(ctx.state, ctx.session);
+                    ctx.reply(InlineMessageKind::Info, format!("Switched to {id}"))
+                }
                 Err(err) => ctx.reply(
                     InlineMessageKind::Error,
                     format!("Failed to set model {id}: {err}"),
