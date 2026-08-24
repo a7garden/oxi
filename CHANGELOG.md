@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Model context windows now follow models.dev end to end.** Four bugs
+  made big-context models (e.g. `zai/glm-5.2`, 1M tokens) display wrong
+  limits and compact far too early: (1) the TUI CTX denominator was
+  hardcoded `128_000` at startup and never re-synced, and the MODEL chip
+  kept the boot model after `/model` — both now update on every model
+  switch (overlay pickers, `/model`, `/model next`) and at startup via
+  `sync_model_chips`; (2) `AgentConfig.context_window` was a `128_000`
+  placeholder at every construction site — `Agent::new*`,
+  `switch_model`, and `switch_to_model` now sync it from the resolved
+  model, so threshold compaction fires against the real window (a 1M
+  model previously compacted at ~102k, 8x too early); (3) the
+  hand-written `STATIC_MODELS` registry shadowed the catalog with stale
+  numbers (gemini-2.5-pro 2M vs 1_048_576, zai/glm-4.7 200k vs 204_800,
+  anthropic max_tokens 8192 vs 64k) — numeric metadata is now refreshed
+  from the models.dev catalog at registry init, keeping hand-maintained
+  transport quirks (`compat`, base URLs) intact; (4) custom-provider and
+  LOCAL `/v1/models` discovery registered models with placeholder
+  `128_000`/`0` windows — ids matching upstream models now cross-fill
+  real metadata from the catalog (`find_entry_by_model_id`), and unknown
+  windows display as `? ctx` instead of `0`/`0K`. The embedded models.dev
+  snapshot was refreshed to 2026-08 (194 providers / 7290 models; adds
+  `zai/glm-5.2`, drops retired legacy ids), and snapshot-count tests now
+  pin floors instead of exact counts so future refreshes don't break the
+  build.
+
 ### Changed
 
 - **TUI: transcript is now a plain surface (omp-style).** The accent
