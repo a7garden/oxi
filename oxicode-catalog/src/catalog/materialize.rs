@@ -317,8 +317,14 @@ mod tests {
             super::materialize(&catalog, &ProductMeta::default(), &Default::default());
 
         assert!(!providers.is_empty(), "providers should not be empty");
-        assert_eq!(providers.len(), 145, "expected 145 providers");
+        // The snapshot tracks models.dev and grows between refreshes
+        // (145→194 providers as of 2026-08). Pin the floor, not the exact
+        // count, so refreshing the snapshot doesn't break the build.
+        assert!(providers.len() >= 145, "expected >= 145 providers");
         let model_count: usize = models.values().map(|v| v.len()).sum();
-        assert_eq!(model_count, 5277, "expected 5277 models");
+        assert!(
+            model_count >= 5277,
+            "expected >= 5277 models, got {model_count}"
+        );
     }
 }

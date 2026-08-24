@@ -85,12 +85,12 @@ async fn file_catalog_get_model_anthropic() {
     };
     let cat = FileModelCatalog::init(config).await.unwrap();
     let entry = cat
-        .get_model("anthropic", "claude-3-5-sonnet-20241022")
+        .get_model("anthropic", "claude-sonnet-4-6")
         .await
         .unwrap()
-        .expect("anthropic claude-3-5-sonnet should be present in SNAP");
+        .expect("anthropic claude-sonnet-4-6 should be present in SNAP");
     assert_eq!(entry.provider, "anthropic");
-    assert_eq!(entry.model_id, "claude-3-5-sonnet-20241022");
+    assert_eq!(entry.model_id, "claude-sonnet-4-6");
     assert_eq!(entry.protocol, CatalogProtocol::AnthropicMessages);
     assert!(entry.cost_input > 0.0, "cost should be populated");
     assert!(entry.context_window > 0);
@@ -421,10 +421,10 @@ async fn bridge_catalog_entry_to_model() {
     };
     let cat = FileModelCatalog::init(config).await.unwrap();
     let entry = cat
-        .get_model_sync("anthropic", "claude-sonnet-4-20250514")
+        .get_model_sync("anthropic", "claude-sonnet-4-6")
         .expect("entry exists");
     let model = oxicode_sdk::bridge::catalog_entry_to_model("anthropic", &entry);
-    assert_eq!(model.id, "claude-sonnet-4-20250514");
+    assert_eq!(model.id, "claude-sonnet-4-6");
     assert_eq!(model.provider, "anthropic");
     assert!(!model.name.is_empty());
 }

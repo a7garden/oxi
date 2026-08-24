@@ -14,9 +14,10 @@ single source of truth with progressive enhancement layers:
 ## How it works
 
 1. **SNAP** (`_snapshot.json.gz`): A gzip'd copy of
-   `https://models.dev/api.json` (202KB compressed, ~5277 models across 145
-   providers). Included at compile time via `include_bytes!`. This ensures
-   oxicode works fully offline on first run.
+   `https://models.dev/api.json` (~435KB compressed, ~7290 models across 194
+   providers as of 2026-08). Included at compile time via `include_bytes!`.
+   This ensures oxicode works fully offline on first run. Counts drift
+   between refreshes — do not pin them in code or docs.
 
 2. **LIVE** (runtime cache): On each run, oxicode checks the local cache mtime.
    If within the mtime window (default 1 hour), no HTTP request is made. If

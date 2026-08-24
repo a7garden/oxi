@@ -417,8 +417,10 @@ mod tests {
 
     #[test]
     fn test_get_anthropic_model() {
-        let m = get_model_entry("anthropic", "claude-3-5-sonnet-20240620");
-        assert!(m.is_some(), "Claude Sonnet 3.5 should exist");
+        // Anchor to a stable recent model; models.dev retires legacy ids
+        // (claude-3-5-* was dropped upstream in 2026-08).
+        let m = get_model_entry("anthropic", "claude-sonnet-4-6");
+        assert!(m.is_some(), "Claude Sonnet 4.6 should exist");
         let m = m.unwrap();
         assert_eq!(m.provider, "anthropic");
         assert!(m.context_window >= 200_000);
@@ -505,8 +507,10 @@ mod tests {
                 entries.push(super::ModelEntry::from(bm));
             }
         }
-        assert_eq!(entries.len(), 5277, "expected 5277 models");
-        assert_eq!(providers.len(), 145, "expected 145 providers");
+        // The snapshot grows between refreshes (5277→7290 models as of
+        // 2026-08); pin the floor so refreshing doesn't break the build.
+        assert!(entries.len() >= 5277, "expected >= 5277 models");
+        assert!(providers.len() >= 145, "expected >= 145 providers");
         // Every ModelEntry must have a valid API type
         for e in &entries {
             assert!(

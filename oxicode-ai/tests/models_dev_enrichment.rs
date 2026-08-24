@@ -92,7 +92,7 @@ const FIXTURE: &str = r#"{
 }"#;
 
 #[tokio::test]
-async fn cache_fixture_enriches_model_db() {
+async fn models_dev_cache_loads_and_model_db_serves_snap() {
     // Write the fixture to a temp file and point the cache at it. Disable
     // live fetch so the test is fully offline and deterministic.
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
@@ -108,62 +108,40 @@ async fn cache_fixture_enriches_model_db() {
         path.to_str().expect("utf8 path"),
     );
 
+    // LIVE layer: init_models_dev reads the cache fixture and exposes it
+    // via models_dev::get().
     oxicode_ai::catalog::models_dev::init_models_dev().await;
+    let md = oxicode_ai::catalog::models_dev::get().expect("cache fixture loaded");
+    let ds = md.0.get("deepseek").expect("fixture deepseek provider");
+    let chat = ds.models.get("deepseek-chat").expect("fixture model");
+    assert_eq!(chat.limit.context as u32, 1_000_000);
+    assert!((chat.cost.as_ref().expect("cost").input - 0.14).abs() < 1e-9);
+    let sonnet35 =
+        md.0.get("anthropic")
+            .expect("fixture anthropic provider")
+            .models
+            .get("claude-3-5-sonnet-20241022")
+            .expect("fixture legacy model present in cache layer");
+    assert_eq!(sonnet35.limit.context as u32, 200_000);
 
-    // deepseek-chat: Layer 1 ships context=131072, max=8192, cost=0.28/0.42.
-    // Enrichment should overwrite all of these with models.dev values.
-    let chat =
-        get_model_entry("deepseek", "deepseek-chat").expect("deepseek-chat present in Layer 1");
-    assert_eq!(
-        chat.context_window, 1_000_000,
-        "context_window enriched from 131072 → 1000000"
-    );
-    assert_eq!(
-        chat.max_tokens, 384_000,
-        "max_tokens enriched from 8192 → 384000"
-    );
+    // model_db serves the embedded SNAP (the legacy per-entry enrichment
+    // was removed with the TOML catalog — see the NOTE in models_dev.rs).
+    // models.dev retired the claude-3.5 ids upstream, so the fixture-only
+    // id must NOT appear in model_db, while current ids do.
     assert!(
-        (chat.cost_input - 0.14).abs() < 1e-9,
-        "cost_input enriched 0.28 → 0.14"
+        get_model_entry("anthropic", "claude-3-5-sonnet-20241022").is_none(),
+        "retired ids stay out of the embedded SNAP table"
     );
-    assert!(
-        (chat.cost_output - 0.28).abs() < 1e-9,
-        "cost_output enriched 0.42 → 0.28"
-    );
+    let sonnet = get_model_entry("anthropic", "claude-sonnet-4-6")
+        .expect("claude-sonnet-4-6 present in SNAP");
+    assert_eq!(sonnet.provider, "anthropic");
+    assert!(sonnet.context_window >= 200_000);
 
-    // deepseek-reasoner: reasoning flag should already be true in Layer 1;
-    // enrichment keeps it true. Limits also enriched.
-    let reasoner = get_model_entry("deepseek", "deepseek-reasoner")
-        .expect("deepseek-reasoner present in Layer 1");
-    assert!(reasoner.reasoning, "reasoning preserved");
-    assert_eq!(reasoner.context_window, 1_000_000);
-    assert_eq!(reasoner.max_tokens, 384_000);
-
-    // openai/gpt-4o: provider-id mapping collapse (oxicode `openai` → md
-    // `openai` directly; also covers openai-responses/openai-codex paths
-    // since PROVIDER_MAP collapses all of them). Layer 1 ships cost=2.5/10
-    // and ctx=128k — all match, but we still verify the wiring flows.
-    let gpt4o = get_model_entry("openai", "gpt-4o").expect("gpt-4o present");
-    assert!((gpt4o.cost_input - 2.5).abs() < 1e-9);
-    assert!((gpt4o.cost_output - 10.0).abs() < 1e-9);
-    assert!((gpt4o.cost_cache_read - 1.25).abs() < 1e-9);
-
-    // anthropic/claude-3-5-sonnet-20241022: this is the canonical "Layer 1
-    // ships 0.0" case (oxicode-original anthropic.toml has cost_input=0.0).
-    // After enrichment it must have a non-zero price.
-    let sonnet = get_model_entry("anthropic", "claude-3-5-sonnet-20241022")
-        .expect("claude-3-5-sonnet present");
-    assert!(
-        sonnet.cost_input > 0.0,
-        "anthropic cost_input must be enriched past Layer 1's 0.0, got {}",
-        sonnet.cost_input
-    );
-    assert!((sonnet.cost_input - 3.0).abs() < 1e-9);
-    assert!((sonnet.cost_output - 15.0).abs() < 1e-9);
-    assert!((sonnet.cost_cache_read - 0.3).abs() < 1e-9);
-    assert!((sonnet.cost_cache_write - 3.75).abs() < 1e-9);
-    assert_eq!(sonnet.context_window, 200_000);
-    assert_eq!(sonnet.max_tokens, 8192);
+    // deepseek values flow from the embedded snapshot.
+    let chat_snap =
+        get_model_entry("deepseek", "deepseek-chat").expect("deepseek-chat present in SNAP");
+    assert_eq!(chat_snap.context_window, 1_000_000);
+    assert_eq!(chat_snap.max_tokens, 384_000);
 
     let _ = std::fs::remove_file(&path);
 }
