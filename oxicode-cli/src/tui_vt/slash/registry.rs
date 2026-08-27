@@ -174,7 +174,7 @@ impl SlashRegistry {
 /// rows submit a `ConfigAction` carrying the `SettingKey` Debug name;
 /// the remaining widget kinds render read-only until their editors are
 /// wired into the overlay-event path (Task 5).
-fn settings_overlay_items(tab: SettingsTab, settings: &Settings) -> Vec<InlineListItem> {
+pub(crate) fn settings_overlay_items(tab: SettingsTab, settings: &Settings) -> Vec<InlineListItem> {
     let mut items: Vec<InlineListItem> = Vec::new();
     let mut last_group: Option<&'static str> = None;
     for def in defs_for_tab(tab, settings) {

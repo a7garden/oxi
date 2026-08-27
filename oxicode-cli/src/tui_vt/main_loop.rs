@@ -49,8 +49,14 @@ use unicode_width::UnicodeWidthStr;
 use crate::App;
 use crate::app::agent_hub_registry::HubEntry;
 use crate::app::agent_session::SessionEvent;
+use crate::tui_vt::keymap::{GlobalAction, Keymap};
+use crate::tui_vt::settings_defs::{
+    SETTING_DEFS, SettingKey, SettingWidget, SettingsTab, defs_for_tab, get_display_value,
+};
 use crate::tui_vt::slash::file_commands::FileCommand;
-use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
+use crate::tui_vt::slash::registry::{
+    SlashCtx, SlashOutcome, SlashRegistry, settings_overlay_items,
+};
 use oxicode_vtui::presentation::{BlockDisplayMode, TranscriptLine, VisibleItem, visible_items};
 
 use oxicode_textarea::{EditBuffer, ElementKind, TextArea, TextAreaState};
@@ -451,6 +457,16 @@ pub struct RenderState {
     /// `AgentSession::resume_from_file`. `Option` because
     /// `#[derive(Default)]` requires it.
     pub session_state: Option<crate::SessionState>,
+    /// Active `/settings` tab. Persisted across overlay reopens within
+    /// the session; drives both the tab-switch rebuild and the sidebar
+    /// highlight.
+    pub settings_active_tab: crate::tui_vt::settings_defs::SettingsTab,
+    /// Live global-shortcut resolver, seeded from
+    /// `Settings::keybindings` at TUI startup and swapped in place by
+    /// the keybindings editor. `parking_lot::RwLock` (not ArcSwap) — no
+    /// new dependency, and the per-keystroke read-lock cost is
+    /// negligible.
+    pub keymap: Arc<parking_lot::RwLock<crate::tui_vt::keymap::Keymap>>,
 }
 
 impl Default for RenderState {
@@ -514,6 +530,13 @@ impl Default for RenderState {
             session_state: None,
             context_tokens: None,
             context_window: 128_000,
+            settings_active_tab: crate::tui_vt::settings_defs::SettingsTab::General,
+            // Default bindings only — `new_with_header` (the real TUI
+            // startup) layers `Settings::keybindings` on top, keeping
+            // `Default` free of disk I/O for tests.
+            keymap: Arc::new(parking_lot::RwLock::new(Keymap::from_settings(
+                &std::collections::HashMap::new(),
+            ))),
             brain: BrainChip::default(),
         }
     }
@@ -585,7 +608,11 @@ pub struct OverlayListItem {
 /// `InlineCommand::ShowOverlay` arrives. The input thread mutates
 /// `selected` / `search` while the overlay is open and reads the same
 /// fields when forwarding `OverlayEvent`s.
-#[derive(Clone, Debug)]
+///
+/// `tabs` / `sections` carry the settings panel's tab bar and sidebar.
+/// Both stay default-empty for every other overlay — `render_overlay`
+/// only takes the tabbed/sidebar branches when they are populated.
+#[derive(Clone, Debug, Default)]
 pub struct OverlayState {
     pub title: String,
     pub lines: Vec<String>,
@@ -593,6 +620,16 @@ pub struct OverlayState {
     pub selected: usize,
     pub search: Option<OverlaySearchState>,
     pub secure_input: Option<OverlaySecureInput>,
+    /// Tab-bar labels (settings panel only; empty ⇒ no tab bar).
+    pub tabs: Vec<String>,
+    /// Index of the active tab into `tabs`.
+    pub active_tab: usize,
+    /// Sidebar section (group) labels for the active tab; the sidebar
+    /// renders when there are at least two.
+    pub sections: Vec<String>,
+    /// Index of the active section into `sections`, synced to the group
+    /// of the currently selected item.
+    pub active_section: usize,
 }
 
 /// Secure (masked) single-line input state carried by an overlay.
@@ -664,6 +701,12 @@ impl RenderState {
         s.header_context = header;
         s.prompt_prefix = "> ".to_string();
         s.input_enabled = true;
+        // Build the live keymap once at startup from the persisted
+        // bindings — the input loop resolves every keystroke against it.
+        let bindings = crate::store::settings::Settings::load()
+            .unwrap_or_default()
+            .keybindings;
+        *s.keymap.write() = Keymap::from_settings(&bindings);
         s
     }
 
@@ -1534,7 +1577,22 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
             state.queued_inputs = entries;
         }
         InlineCommand::ShowOverlay { request } => {
-            state.overlay = Some(materialize_overlay(*request));
+            let mut overlay = materialize_overlay(*request);
+            // The `/settings` panel arrives as the flat Task-4 list; its
+            // rows are the only producers of ConfigAction selections.
+            // Hydrate the full tabbed/sidebar overlay from the def table
+            // (reopening on the last active tab) instead.
+            if overlay.items.iter().any(|it| {
+                matches!(
+                    it.selection,
+                    Some(InlineListSelection::ConfigAction(_))
+                        | Some(InlineListSelection::SettingsTab(_))
+                        | Some(InlineListSelection::SettingsSection(_))
+                )
+            }) {
+                overlay = build_settings_overlay(state.settings_active_tab, None);
+            }
+            state.overlay = Some(overlay);
         }
         InlineCommand::CloseOverlay => {
             state.overlay = None;
@@ -1570,6 +1628,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 selected: 0,
                 search: None,
                 secure_input,
+                ..Default::default()
             }
         }
         OverlayRequest::List(req) => {
@@ -1585,6 +1644,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 selected: 0,
                 search,
                 secure_input: None,
+                ..Default::default()
             }
         }
         OverlayRequest::Wizard(req) => {
@@ -1613,6 +1673,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 selected: 0,
                 search,
                 secure_input: None,
+                ..Default::default()
             }
         }
     }
@@ -1625,6 +1686,178 @@ fn overlay_item_from(item: InlineListItem) -> OverlayListItem {
         indent: item.indent,
         search_value: item.search_value,
         selection: item.selection,
+    }
+}
+
+/// Canonical `/settings` tab order. Indices are the
+/// `InlineListSelection::SettingsTab(usize)` payloads and
+/// `OverlayState::active_tab`.
+const SETTINGS_TABS: &[(SettingsTab, &str)] = &[
+    (SettingsTab::General, "General"),
+    (SettingsTab::Model, "Model"),
+    (SettingsTab::Interaction, "Interaction"),
+    (SettingsTab::Tools, "Tools"),
+    (SettingsTab::Ui, "UI"),
+    (SettingsTab::AdvisorMemory, "Advisor & Memory"),
+    (SettingsTab::Keybindings, "Keybindings"),
+    (SettingsTab::Advanced, "Advanced"),
+];
+
+/// Build the full tabbed `/settings` overlay for `tab`: tab-bar labels,
+/// sidebar section labels (group names, declaration order), and one row
+/// per def via [`settings_overlay_items`] — the same row builder the
+/// `/settings` slash command uses, hydrated with the tab/sidebar state.
+/// `keep_search` preserves the live filter across tab switches.
+fn build_settings_overlay(
+    tab: SettingsTab,
+    keep_search: Option<OverlaySearchState>,
+) -> OverlayState {
+    let settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let items: Vec<OverlayListItem> = settings_overlay_items(tab, &settings)
+        .into_iter()
+        .map(overlay_item_from)
+        .collect();
+    let mut sections: Vec<String> = Vec::new();
+    for def in defs_for_tab(tab, &settings) {
+        if sections.last().map(String::as_str) != Some(def.group) {
+            sections.push(def.group.to_string());
+        }
+    }
+    let active_tab = SETTINGS_TABS
+        .iter()
+        .position(|(t, _)| *t == tab)
+        .unwrap_or(0);
+    OverlayState {
+        title: "Settings".into(),
+        lines: vec!["Browse settings by group; filter with the search bar.".into()],
+        items,
+        selected: 0,
+        search: keep_search.or(Some(OverlaySearchState {
+            label: "Filter settings".into(),
+            placeholder: Some("Type to filter".into()),
+            value: String::new(),
+        })),
+        secure_input: None,
+        tabs: SETTINGS_TABS
+            .iter()
+            .map(|(_, name)| name.to_string())
+            .collect(),
+        active_tab,
+        sections,
+        active_section: 0,
+    }
+}
+
+/// Switch the settings overlay to `SETTINGS_TABS[tab_idx]`: rebuild items
+/// and sections for that tab (keeping the live search filter) and sync
+/// `RenderState::settings_active_tab` so a later `/settings` reopens on
+/// the same tab. No-op when the index is out of range or no overlay is
+/// open.
+fn switch_settings_tab(state: &mut RenderState, tab_idx: usize) {
+    let Some(&(tab, _)) = SETTINGS_TABS.get(tab_idx) else {
+        return;
+    };
+    let search = state.overlay.as_ref().and_then(|o| o.search.clone());
+    state.settings_active_tab = tab;
+    state.overlay = Some(build_settings_overlay(tab, search));
+}
+
+/// Jump the settings overlay's selection to the first row of sidebar
+/// section `section_idx` (an index into `OverlayState::sections`).
+/// Rebuilds the overlay for the active tab first — submissions arrive
+/// after the overlay was closed, so the panel has to be reopened anyway.
+fn jump_settings_section(state: &mut RenderState, section_idx: usize) {
+    let tab = state.settings_active_tab;
+    let search = state.overlay.as_ref().and_then(|o| o.search.clone());
+    let mut overlay = build_settings_overlay(tab, search);
+    if let Some(target) = overlay.sections.get(section_idx).cloned() {
+        // Heading rows (title-only items, per the settings_overlay_items
+        // convention) delimit groups; the first selectable row after the
+        // target heading is the section's anchor.
+        let mut in_target = false;
+        let mut anchor: Option<usize> = None;
+        for (idx, item) in overlay.items.iter().enumerate() {
+            let is_heading =
+                item.selection.is_none() && item.badge.is_none() && item.subtitle.is_none();
+            if is_heading {
+                in_target = item.title == target;
+            } else if in_target && anchor.is_none() {
+                anchor = Some(idx);
+            }
+        }
+        if let Some(idx) = anchor {
+            overlay.selected = idx;
+            overlay.active_section = section_idx;
+        }
+    }
+    state.overlay = Some(overlay);
+}
+
+/// Sidebar section index an item belongs to: the group of the last
+/// heading row at or above it. Returns `None` for items outside every
+/// section (or when the overlay has no sections).
+fn item_section_idx(overlay: &OverlayState, idx: usize) -> Option<usize> {
+    let mut current: Option<String> = None;
+    for (i, item) in overlay.items.iter().enumerate() {
+        let is_heading =
+            item.selection.is_none() && item.badge.is_none() && item.subtitle.is_none();
+        if is_heading {
+            current = Some(item.title.clone());
+        }
+        if i == idx {
+            return current
+                .as_deref()
+                .and_then(|g| overlay.sections.iter().position(|s| s == g));
+        }
+    }
+    None
+}
+
+/// Next variant string for a `Cycle` widget row — the value an Enter
+/// submits to `settings_defs::apply_change`.
+fn next_cycle_value(key: SettingKey, s: &crate::store::settings::Settings) -> Option<String> {
+    match key {
+        // Mirrors `AgentSession::cycle_thinking_level`'s order.
+        SettingKey::ThinkingLevel => {
+            const LEVELS: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+            let cur = get_display_value(key, s);
+            let idx = LEVELS.iter().position(|l| *l == cur).unwrap_or(0);
+            Some(LEVELS[(idx + 1) % LEVELS.len()].to_string())
+        }
+        SettingKey::GlyphSet => Some(s.glyph_set.next().to_string()),
+        SettingKey::EditFormat => Some(
+            if get_display_value(key, s) == "hashline" {
+                "str_replace"
+            } else {
+                "hashline"
+            }
+            .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// Live-sync the handful of settings the open session / render state read
+/// eagerly, so an overlay edit takes effect without a restart. Everything
+/// else is re-read from disk on the next turn
+/// (`AgentSession::rebuild_system_prompt` already reloads on demand).
+fn sync_settings_live(
+    state: &mut RenderState,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    key: SettingKey,
+    settings: &crate::store::settings::Settings,
+) {
+    match key {
+        SettingKey::ThinkingLevel => {
+            session.set_thinking_level(settings.thinking_level);
+            state.thinking_level = get_display_value(key, settings);
+        }
+        SettingKey::GlyphSet => state.glyph_set = settings.glyph_set,
+        SettingKey::AutoCompaction => session.set_auto_compaction(settings.auto_compaction),
+        SettingKey::AdvisorEnabled if session.is_advisor_enabled() != settings.advisor.enabled => {
+            let _ = session.set_advisor_enabled(settings.advisor.enabled);
+        }
+        _ => {}
     }
 }
 
@@ -2865,79 +3098,105 @@ fn handle_inline_event(
                         state.composer.set_text(&format!("/{name} "));
                     }
                     // Settings overlay: toggle/cycle the selected setting.
+                    // `ConfigAction` carries the `SettingKey` Debug name
+                    // emitted by `settings_overlay_items`; dispatch goes
+                    // through the def table (`apply_change`), never a
+                    // per-name match.
                     if let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
                         &sub
                     {
-                        match key.as_str() {
-                            "thinking_level" => {
-                                if let Some(level) = session.cycle_thinking_level() {
-                                    handle.append_line(
-                                        InlineMessageKind::Info,
-                                        vec![plain_segment(format!("Thinking: {level:?}"))],
-                                    );
-                                }
-                            }
-                            "auto_compaction" => {
-                                let enabled = !session.auto_compaction_enabled();
-                                session.set_auto_compaction(enabled);
-                                handle.append_line(
-                                    InlineMessageKind::Info,
-                                    vec![plain_segment(format!(
-                                        "Auto-compaction: {}",
-                                        if enabled { "on" } else { "off" }
-                                    ))],
-                                );
-                            }
-                            "auto_retry" => {
-                                let enabled = !session.auto_retry_enabled();
-                                session.set_auto_retry(enabled);
-                                handle.append_line(
-                                    InlineMessageKind::Info,
-                                    vec![plain_segment(format!(
-                                        "Auto-retry: {}",
-                                        if enabled { "on" } else { "off" }
-                                    ))],
-                                );
-                            }
-                            "advisor" => match session.toggle_advisor() {
-                                Ok(enabled) => handle.append_line(
-                                    InlineMessageKind::Info,
-                                    vec![plain_segment(format!(
-                                        "Advisor: {}",
-                                        if enabled { "on" } else { "off" }
-                                    ))],
-                                ),
-                                Err(e) => handle.append_line(
-                                    InlineMessageKind::Error,
-                                    vec![plain_segment(format!("Failed to toggle advisor: {e}"))],
-                                ),
-                            },
-                            "glyph_set" => {
-                                // Cycle unicode → ascii → nerd, persist, and
-                                // apply LIVE — the composer border switches
-                                // on the next frame, no restart needed.
+                        let def = SETTING_DEFS.iter().find(|d| format!("{:?}", d.key) == *key);
+                        match def {
+                            Some(def) => {
                                 let mut settings =
                                     crate::store::settings::Settings::load().unwrap_or_default();
-                                let next = settings.glyph_set.next();
-                                settings.glyph_set = next;
-                                match settings.save() {
-                                    Ok(()) => {
-                                        state.glyph_set = next;
-                                        handle.append_line(
-                                            InlineMessageKind::Info,
-                                            vec![plain_segment(format!("Icons: {next}"))],
-                                        );
-                                    }
-                                    Err(e) => handle.append_line(
-                                        InlineMessageKind::Error,
-                                        vec![plain_segment(format!(
-                                            "Failed to save glyph_set: {e}"
-                                        ))],
+                                // Toggle submits the inverted bool; Cycle
+                                // the next variant. The structured editors
+                                // (Text/Submenu/Multiselect/MapEditor)
+                                // commit their own explicit values.
+                                let next_value = match def.widget {
+                                    SettingWidget::Toggle => Some(
+                                        (get_display_value(def.key, &settings) != "true")
+                                            .to_string(),
                                     ),
+                                    SettingWidget::Cycle => next_cycle_value(def.key, &settings),
+                                    _ => None,
+                                };
+                                if let Some(next) = next_value {
+                                    match crate::tui_vt::settings_defs::apply_change(
+                                        def.key,
+                                        &mut settings,
+                                        next,
+                                    ) {
+                                        Ok(()) => match settings.save() {
+                                            Ok(()) => {
+                                                sync_settings_live(
+                                                    state, session, def.key, &settings,
+                                                );
+                                                handle.append_line(
+                                                    InlineMessageKind::Info,
+                                                    vec![plain_segment(format!(
+                                                        "{}: {}",
+                                                        def.label,
+                                                        get_display_value(def.key, &settings)
+                                                    ))],
+                                                );
+                                            }
+                                            Err(e) => handle.append_line(
+                                                InlineMessageKind::Error,
+                                                vec![plain_segment(format!(
+                                                    "Failed to save {}: {e}",
+                                                    def.label
+                                                ))],
+                                            ),
+                                        },
+                                        Err(e) => handle.append_line(
+                                            InlineMessageKind::Error,
+                                            vec![plain_segment(format!(
+                                                "Failed to apply {}: {e}",
+                                                def.label
+                                            ))],
+                                        ),
+                                    }
                                 }
                             }
-                            _ => {}
+                            None => handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting: {key}"))],
+                            ),
                         }
+                    }
+                    // Settings panel tab switch: reopen the panel rebuilt
+                    // for the requested tab (Enter closes the overlay, so
+                    // the switch has to reopen it).
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingsTab(idx)) =
+                        &sub
+                    {
+                        switch_settings_tab(state, *idx);
+                        opened_new_overlay = state.overlay.is_some();
+                    }
+                    // Settings panel sidebar section jump: reopen on the
+                    // active tab with the selection moved to the section's
+                    // first row.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingsSection(idx)) =
+                        &sub
+                    {
+                        jump_settings_section(state, *idx);
+                        opened_new_overlay = state.overlay.is_some();
+                    }
+                    // Keybinding capture submenu — the capture flow is
+                    // Task 6's map editor; acknowledge instead of silently
+                    // dropping the selection.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingKeyCapture(
+                        name,
+                    )) = &sub
+                    {
+                        handle.append_line(
+                            InlineMessageKind::Info,
+                            vec![plain_segment(format!(
+                                "Keybinding capture for {name} is not wired yet"
+                            ))],
+                        );
                     }
                     // Session picker: enqueue the selected session. The next
                     // Submit event drains it before normal composer dispatch.
@@ -3196,6 +3455,72 @@ pub(super) fn clear_confirmation() -> ModalConfirmation {
 // lifecycle events (Submit, Cancel, …) over a tokio channel.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Execute a global shortcut resolved by the [`Keymap`]. The bodies are
+/// the original hardcoded Ctrl-* handlers from the input loop, unchanged
+/// — only the trigger condition became keymap-driven.
+fn apply_global_action(
+    action: GlobalAction,
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+) {
+    match action {
+        // Ctrl+C: even with raw mode enabled some terminals / shells
+        // fall back to delivering it as a SIGINT. Handle it as an
+        // explicit interrupt so we don't depend on the OS signal.
+        GlobalAction::Interrupt => {
+            let _ = evt_tx.send(InlineEvent::Interrupt);
+        }
+        // Ctrl+M: toggle multiline input mode.
+        GlobalAction::ToggleMultiline => {
+            let mut s = state.lock();
+            s.multiline_mode = !s.multiline_mode;
+        }
+        // Ctrl+P: open the command palette.
+        GlobalAction::OpenCommandPalette => {
+            let mut s = state.lock();
+            s.overlay = Some(build_command_palette());
+        }
+        // Ctrl+;: toggle the interactive queue panel.
+        GlobalAction::ToggleQueuePanel => {
+            let mut s = state.lock();
+            s.queue_panel_open = !s.queue_panel_open;
+            if s.queue_panel_open {
+                s.queue_selected = 0;
+            }
+        }
+        // Ctrl+E: fold all blocks (Shift+E expands all).
+        GlobalAction::FoldAll => {
+            let mut s = state.lock();
+            s.fold_all();
+        }
+        // Ctrl+Enter: send-now — abort the current run (if any) and submit
+        // the composed input immediately, bypassing the queue pane.
+        GlobalAction::SendNow => {
+            let submitted = {
+                let mut s = state.lock();
+                let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                    format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
+                } else {
+                    let buf = s.composer.text().to_string();
+                    s.composer.set_text("");
+                    buf
+                };
+                s.slash_popup = SlashPopup::default();
+                s.history_pos = None;
+                if !buf.is_empty() && !buf.starts_with('/') {
+                    s.prompt_history.insert(0, buf.clone());
+                    s.prompt_history.truncate(100);
+                }
+                buf
+            };
+            if !submitted.is_empty() {
+                let _ = evt_tx.send(InlineEvent::Interrupt);
+                let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+            }
+        }
+    }
+}
+
 fn spawn_input_thread(
     state: Arc<parking_lot::Mutex<RenderState>>,
     evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
@@ -3276,70 +3601,19 @@ fn spawn_input_thread(
 
             let Some(key) = key_event else { continue };
 
-            // Ctrl+C: even with raw mode enabled some terminals / shells
-            // fall back to delivering it as a SIGINT. Handle it as an
-            // explicit interrupt so we don't depend on the OS signal.
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let _ = evt_tx.send(InlineEvent::Interrupt);
-                continue;
-            }
-
-            // Ctrl+M: toggle multiline input mode.
-            if key.code == KeyCode::Char('m') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.multiline_mode = !s.multiline_mode;
-                continue;
-            }
-
-            // Ctrl+P: open the command palette.
-            if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.overlay = Some(build_command_palette());
-                continue;
-            }
-
-            // Ctrl+;: toggle the interactive queue panel.
-            if key.code == KeyCode::Char(';') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.queue_panel_open = !s.queue_panel_open;
-                if s.queue_panel_open {
-                    s.queue_selected = 0;
-                }
-                continue;
-            }
-
-            // Ctrl+E: fold all blocks (Shift+E expands all).
-            if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.fold_all();
-                continue;
-            }
-
-            // Ctrl+Enter: send-now — abort the current run (if any) and submit
-            // the composed input immediately, bypassing the queue pane.
-            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let submitted = {
-                    let mut s = state.lock();
-                    let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
-                        format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
-                    } else {
-                        let buf = s.composer.text().to_string();
-                        s.composer.set_text("");
-                        buf
-                    };
-                    s.slash_popup = SlashPopup::default();
-                    s.history_pos = None;
-                    if !buf.is_empty() && !buf.starts_with('/') {
-                        s.prompt_history.insert(0, buf.clone());
-                        s.prompt_history.truncate(100);
-                    }
-                    buf
+            // Global shortcuts: resolve through the live keymap. The
+            // defaults match the historical hardcoded Ctrl-* bindings;
+            // `settings.keybindings` can rebind any of them and Task 6's
+            // editor swaps the map in place.
+            {
+                let action = {
+                    let s = state.lock();
+                    s.keymap.read().resolve(key)
                 };
-                if !submitted.is_empty() {
-                    let _ = evt_tx.send(InlineEvent::Interrupt);
-                    let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+                if let Some(action) = action {
+                    apply_global_action(action, &state, &evt_tx);
+                    continue;
                 }
-                continue;
             }
 
             // Confirmation modal takes priority over everything except
@@ -3701,6 +3975,7 @@ fn spawn_input_thread(
                                     selected: 0,
                                     search: None,
                                     secure_input: None,
+                                    ..Default::default()
                                 });
                             }
                             'e' => s.cycle_block_at_view(),
@@ -3922,6 +4197,20 @@ fn handle_overlay_key(
             if let Some(search) = overlay.search.as_mut() {
                 search.value.push(ch);
                 overlay.selected = 0;
+            }
+        }
+        KeyCode::Left | KeyCode::Right => {
+            // Tabbed overlays (the settings panel): ←/→ cycle the tab
+            // bar, rebuilding items/sections for the new tab. The search
+            // filter survives the switch.
+            let tab_count = overlay.tabs.len();
+            if tab_count > 1 {
+                let next = if code == KeyCode::Right {
+                    (overlay.active_tab + 1) % tab_count
+                } else {
+                    overlay.active_tab.checked_sub(1).unwrap_or(tab_count - 1)
+                };
+                switch_settings_tab(&mut s, next);
             }
         }
         _ => {
@@ -4269,6 +4558,7 @@ fn build_command_palette() -> OverlayState {
             value: String::new(),
         }),
         secure_input: None,
+        ..Default::default()
     }
 }
 
@@ -4667,9 +4957,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     };
 
     let has_search = overlay.search.is_some();
+    let has_tabs = overlay.tabs.len() > 1;
     let lines_count = overlay.lines.len();
     let items_count = filtered.len().min(visible_max);
-    let height_inner = (lines_count + items_count + if has_search { 1 } else { 0 }) as u16;
+    let height_inner =
+        (lines_count + items_count + usize::from(has_search) + usize::from(has_tabs)) as u16;
     let desired_h = height_inner.saturating_add(3); // borders + key-help footer
     let height = desired_h.min(area.height.saturating_sub(2));
     let width = area.width.clamp(30, 80);
@@ -4706,6 +4998,31 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         .unwrap_or(0);
 
     let mut row = inner.top();
+
+    // Tab bar (settings panel): one line of tab names, the active tab
+    // bold+accent; ←/→ switch tabs.
+    if has_tabs {
+        let mut spans: Vec<Span> = Vec::new();
+        for (i, name) in overlay.tabs.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let style = if i == overlay.active_tab {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(secondary).add_modifier(Modifier::DIM)
+            };
+            spans.push(Span::styled(name.clone(), style));
+        }
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::from(spans)), row_area);
+        row = row.saturating_add(1);
+    }
     // Search bar (if present).
     if let Some(search) = &overlay.search {
         let prompt = format!("{}: {}", search.label, search.value);
@@ -4757,6 +5074,59 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         row = row.saturating_add(1);
     }
 
+    // Sidebar split (settings panel): with >= 2 sections and enough
+    // width, the left column lists section names (active bold+accent)
+    // and the item list moves to the right column with rows outside the
+    // active section dimmed. Falls back to the flat list while a filter
+    // is active (results cross sections) or when narrow.
+    let searching = overlay.search.as_ref().is_some_and(|s| !s.value.is_empty());
+    let use_sidebar = overlay.sections.len() >= 2 && inner.width >= 60 && !searching;
+    let sidebar_w = if use_sidebar {
+        let longest = overlay
+            .sections
+            .iter()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0);
+        (22usize.min(longest) + 4) as u16
+    } else {
+        0
+    };
+    // The active section tracks the selected item's group, not a stored
+    // index — selection moves across sections via Up/Down.
+    let active_section = if use_sidebar {
+        item_section_idx(overlay, overlay.selected).unwrap_or(overlay.active_section)
+    } else {
+        overlay.active_section
+    };
+    let list_x = inner.left() + sidebar_w;
+    let list_w = inner.width.saturating_sub(sidebar_w);
+    if use_sidebar {
+        let mut srow = row;
+        for (i, name) in overlay.sections.iter().enumerate() {
+            let style = if i == active_section {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(secondary)
+            };
+            let marker = if i == active_section { "> " } else { "  " };
+            let row_area = Rect {
+                x: inner.left(),
+                y: srow,
+                width: sidebar_w,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(marker, style),
+                    Span::styled(name.clone(), style),
+                ])),
+                row_area,
+            );
+            srow = srow.saturating_add(1);
+        }
+    }
+
     // Items.
     if filtered.is_empty() {
         let row_area = Rect {
@@ -4786,11 +5156,18 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             let is_selected = item_idx == overlay.selected;
             let marker = if is_selected { "> " } else { "  " };
             let indent = "  ".repeat(item.indent as usize);
-            let item_style = if is_selected {
+            let mut item_style = if is_selected {
                 Style::default().fg(primary).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(fg)
             };
+            // Rows outside the active section recede while the sidebar
+            // is up.
+            if use_sidebar
+                && item_section_idx(overlay, item_idx).is_some_and(|sec| sec != active_section)
+            {
+                item_style = item_style.add_modifier(Modifier::DIM);
+            }
             let mut spans = vec![
                 Span::styled(marker, item_style),
                 Span::styled(indent, item_style),
@@ -4812,9 +5189,9 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             }
             let line = Line::from(spans);
             let row_area = Rect {
-                x: inner.left(),
+                x: list_x,
                 y: row,
-                width: inner.width,
+                width: list_w,
                 height: 1,
             };
             frame.render_widget(Paragraph::new(line), row_area);
@@ -4826,7 +5203,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     // choice. This avoids hiding essential controls in a separate help view.
     if row < inner.bottom() {
         let hint = if overlay.items.iter().any(|item| item.selection.is_some()) {
-            "Enter select | Up/Down move | Esc close"
+            if has_tabs {
+                "Enter select | Up/Down move | ←/→ tabs | Esc close"
+            } else {
+                "Enter select | Up/Down move | Esc close"
+            }
         } else {
             "Esc close"
         };
@@ -6887,6 +7268,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let rendered = render_frame_to_string(&state);
         assert!(
@@ -6916,6 +7298,7 @@ mod render_tests {
                 value: "model-b".to_string(),
             }),
             secure_input: None,
+            ..Default::default()
         });
         let rendered = render_frame_to_string(&state);
         assert!(rendered.contains("model-b"), "matching item must render");
@@ -6940,6 +7323,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut _rx) = mpsc::unbounded_channel();
@@ -6991,6 +7375,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -7028,6 +7413,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -7058,6 +7444,7 @@ mod render_tests {
                 value: String::new(),
             }),
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -7882,6 +8269,7 @@ mod render_tests {
                 },
                 editor: oxicode_textarea::EditBuffer::from_parts("sk-abc", 6),
             }),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -7918,6 +8306,7 @@ mod render_tests {
                 },
                 editor: oxicode_textarea::EditBuffer::new(),
             }),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8004,6 +8393,7 @@ mod secure_input_tests {
             selected: 0,
             search: None,
             secure_input: Some(secure.clone()),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8068,6 +8458,7 @@ mod secure_input_tests {
             selected: 0,
             search: None,
             secure_input: Some(secure.clone()),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8269,6 +8660,7 @@ mod provider_overlay_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
@@ -8342,6 +8734,7 @@ mod provider_overlay_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
@@ -8414,6 +8807,7 @@ mod provider_overlay_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
@@ -8548,6 +8942,55 @@ mod provider_overlay_tests {
         session
             .streaming_flag()
             .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// `/settings` tab switch: submitting `SettingsTab(1)` must reopen the
+    /// panel rebuilt for tab 1 (Model) — tab bar, sidebar sections, and
+    /// the def-table rows for that tab — without emitting a CloseOverlay.
+    #[test]
+    fn settings_tab_selection_rebuilds_item_list() {
+        let session = make_session();
+        let mut state = RenderState::default();
+        // Enter already closed the overlay before the submission arrives.
+        state.overlay = None;
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+        let prompt_queue = Arc::new(PromptQueue::default());
+
+        let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+            InlineListSelection::SettingsTab(1),
+        )));
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_queue, evt);
+
+        let overlay = state.overlay.as_ref().expect("panel reopened on tab 1");
+        assert_eq!(overlay.active_tab, 1);
+        assert_eq!(overlay.tabs.get(1).map(String::as_str), Some("Model"));
+        assert_eq!(
+            overlay.sections,
+            vec!["Defaults".to_string(), "Pointers".to_string()]
+        );
+        // Rows come from the def table for the Model tab.
+        let settings = Settings::load().unwrap_or_default();
+        let expected = settings_overlay_items(SettingsTab::Model, &settings);
+        assert_eq!(overlay.items.len(), expected.len());
+        assert_eq!(
+            overlay
+                .items
+                .iter()
+                .map(|i| i.title.clone())
+                .collect::<Vec<_>>(),
+            expected.iter().map(|i| i.title.clone()).collect::<Vec<_>>(),
+        );
+        assert_eq!(state.settings_active_tab, SettingsTab::Model);
+        // The switch reopens in place — no close may leak through the
+        // cmd channel.
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            assert!(
+                !matches!(cmd, InlineCommand::CloseOverlay),
+                "tab switch must not close the reopened panel"
+            );
+        }
     }
 }
 #[cfg(test)]
@@ -10044,5 +10487,226 @@ mod glyph_cycle_tests {
         assert_eq!(GlyphSet::Unicode.next(), GlyphSet::Ascii);
         assert_eq!(GlyphSet::Ascii.next(), GlyphSet::Nerd);
         assert_eq!(GlyphSet::Nerd.next(), GlyphSet::Unicode);
+    }
+}
+
+#[cfg(test)]
+mod settings_panel_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use oxicode_vtui::tui::core::InlineListSelection;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn heading(title: &str) -> OverlayListItem {
+        OverlayListItem {
+            title: title.into(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            search_value: None,
+            selection: None,
+        }
+    }
+
+    fn row(title: &str, badge: &str, selection: Option<InlineListSelection>) -> OverlayListItem {
+        OverlayListItem {
+            title: title.into(),
+            subtitle: None,
+            badge: Some(badge.into()),
+            indent: 0,
+            search_value: None,
+            selection,
+        }
+    }
+
+    /// Collect each terminal row as (y, concatenated text, per-char x
+    /// positions) so tests can assert on WHERE content landed, not just
+    /// that it exists.
+    fn rows_with_positions(terminal: &Terminal<TestBackend>) -> Vec<(u16, String, Vec<u16>)> {
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = Vec::new();
+        for y in 0..area.height {
+            let mut text = String::new();
+            let mut xs = Vec::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    text.push_str(cell.symbol());
+                    xs.push(x);
+                }
+            }
+            out.push((y, text, xs));
+        }
+        out
+    }
+
+    /// All (y, x) offsets where `needle` starts in the rendered buffer.
+    fn occurrences(rows: &[(u16, String, Vec<u16>)], needle: &str) -> Vec<(u16, usize)> {
+        let mut hits = Vec::new();
+        for (y, text, xs) in rows {
+            let mut from = 0;
+            while let Some(rel) = text[from..].find(needle) {
+                let byte_idx = from + rel;
+                let char_idx = text[..byte_idx].chars().count();
+                if let Some(&x) = xs.get(char_idx) {
+                    hits.push((*y, x as usize));
+                }
+                from = byte_idx + needle.len();
+            }
+        }
+        hits
+    }
+
+    /// A tabbed overlay (>= 2 sections, width >= 60) renders the tab bar
+    /// and the sidebar column: section names appear BOTH in the sidebar
+    /// (left of the item column) and as in-list heading rows, and rows
+    /// outside the active section are dimmed.
+    #[test]
+    fn render_overlay_tabbed_settings_shows_tab_bar_and_sidebar() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let overlay = OverlayState {
+            title: "Settings".into(),
+            lines: Vec::new(),
+            items: vec![
+                heading("Defaults"),
+                row(
+                    "Thinking level",
+                    "medium",
+                    Some(InlineListSelection::ConfigAction("ThinkingLevel".into())),
+                ),
+                row("Model roles", "0", None),
+                heading("Pointers"),
+                row("Theme", "dark", None),
+            ],
+            selected: 1,
+            search: None,
+            secure_input: None,
+            tabs: vec!["General".into(), "Model".into(), "Interaction".into()],
+            active_tab: 1,
+            sections: vec!["Defaults".into(), "Pointers".into()],
+            active_section: 0,
+        };
+        terminal
+            .draw(|f| render_overlay(f, f.area(), &overlay))
+            .unwrap();
+        let rows = rows_with_positions(&terminal);
+
+        // Tab bar: one row names the inactive tabs flanking the active
+        // one.
+        let general = occurrences(&rows, "General");
+        let interaction = occurrences(&rows, "Interaction");
+        assert!(
+            general
+                .iter()
+                .any(|(gy, _)| interaction.iter().any(|(iy, _)| gy == iy)),
+            "tab bar must list tabs on one row"
+        );
+
+        // Sidebar geometry: sidebar width = min(22, longest)+4 = 12, so
+        // the sidebar column occupies x < 13 and the item list starts at
+        // x >= 13.
+        for name in ["Defaults", "Pointers"] {
+            let hits = occurrences(&rows, name);
+            assert!(hits.len() >= 2, "{name} must render in sidebar AND list");
+            assert!(
+                hits.iter().any(|(_, x)| *x < 13),
+                "{name} must render in the sidebar column"
+            );
+            assert!(
+                hits.iter().any(|(_, x)| *x >= 13),
+                "{name} must render in the item column"
+            );
+        }
+
+        // Out-of-section rows recede: the items-column "Pointers"
+        // heading is DIM while the active section's is not.
+        let buf = terminal.backend().buffer();
+        let pointers_item_col = occurrences(&rows, "Pointers")
+            .into_iter()
+            .find(|(_, x)| *x >= 13)
+            .expect("items-column Pointers heading");
+        let cell = buf
+            .cell((pointers_item_col.1 as u16, pointers_item_col.0))
+            .expect("cell");
+        assert!(
+            cell.modifier.contains(Modifier::DIM),
+            "out-of-section rows must be dimmed"
+        );
+        let defaults_item_col = occurrences(&rows, "Defaults")
+            .into_iter()
+            .find(|(_, x)| *x >= 13)
+            .expect("items-column Defaults heading");
+        let cell = buf
+            .cell((defaults_item_col.1 as u16, defaults_item_col.0))
+            .expect("cell");
+        assert!(
+            !cell.modifier.contains(Modifier::DIM),
+            "active-section rows must not be dimmed"
+        );
+    }
+
+    /// The input loop resolves shortcuts through the live keymap: with
+    /// `SendNow` rebound to `Alt+s`, that combo fires the send-now path
+    /// (interrupt + immediate submit of the composed buffer) while the
+    /// default `Ctrl+Enter` still resolves.
+    #[test]
+    fn rebound_send_now_combo_submits_immediately() {
+        let state = Arc::new(parking_lot::Mutex::new(RenderState::default()));
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("SendNow".to_string(), vec!["Alt+s".to_string()]);
+        *state.lock().keymap.write() = Keymap::from_settings(&overrides);
+
+        let alt_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT);
+        let action = state
+            .lock()
+            .keymap
+            .read()
+            .resolve(alt_s)
+            .expect("Alt+s must resolve to SendNow after the rebind");
+        assert!(matches!(action, GlobalAction::SendNow));
+        // Overrides replace only the named action's combo list: the old
+        // default combo no longer fires SendNow, while every other
+        // action keeps its default.
+        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
+        assert_eq!(state.lock().keymap.read().resolve(ctrl_enter), None);
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert!(matches!(
+            state.lock().keymap.read().resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette)
+        ));
+
+        state.lock().composer.set_text("send me now");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        apply_global_action(action, &state, &tx);
+
+        assert_eq!(state.lock().composer.text(), "");
+        match rx.try_recv().expect("interrupt fires first") {
+            InlineEvent::Interrupt => {}
+            other => panic!("expected Interrupt first, got {other:?}"),
+        }
+        match rx.try_recv().expect("submit fires second") {
+            InlineEvent::Submit(text) => assert_eq!(&*text, "send me now"),
+            other => panic!("expected Submit, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "no further events");
+    }
+
+    /// `OverlaySubmission` variants the settings panel emits must stay
+    /// constructible through the compat layer (compile-level contract).
+    #[test]
+    fn settings_selection_variants_round_trip_names() {
+        assert_eq!(
+            InlineListSelection::SettingsTab(1),
+            InlineListSelection::SettingsTab(1)
+        );
+        assert_eq!(
+            InlineListSelection::SettingsSection(0),
+            InlineListSelection::SettingsSection(0)
+        );
+        assert_eq!(
+            InlineListSelection::SettingKeyCapture("OpenCommandPalette".into()),
+            InlineListSelection::SettingKeyCapture("OpenCommandPalette".into())
+        );
     }
 }
