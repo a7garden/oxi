@@ -56,7 +56,7 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Tests assert: (a) every `SETTING_DEFS` entry has a non-empty group, and groups are contiguous within a tab; (b) `get_display_value`/`apply_change` round-trip for a representative scalar (`ThinkingLevel`), a toggle (`AutoCompaction`), and a map (`ModelRoles`); (c) `defs_for_tab` respects the `condition` predicate (e.g. `TtsrInterruptMode` hidden when `ttsr_enabled` is false). Use the inline-test pattern from `oxicode-cli/src/store/settings.rs`.
+Tests assert: (a) every `SETTING_DEFS` entry has a non-empty group, and groups are contiguous within a tab; (b) `get_display_value`/`apply_change` round-trip for a representative scalar (`ThinkingLevel`), a toggle (`AutoCompaction`), and a Text numeric (`ToolTimeoutSecs`); (c) `defs_for_tab` respects the `condition` predicate (e.g. `TtsrInterruptMode` hidden when `ttsr_enabled` is false), and that calling `apply_change` on `DisabledTools`/`ModelRoles`/`Keybindings` returns an `Err` (their editors land in Tasks 5/6). Use the inline-test pattern from `oxicode-cli/src/store/settings.rs`.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -251,9 +251,11 @@ pub fn apply_change(key: SettingKey, s: &mut Settings, new: String) -> anyhow::R
         AdvisorImmuneTurns => s.advisor.immune_turns = new.parse()?,
         TtsrInterruptMode => s.ttsr_interrupt_mode = new,
         AdvisorSyncBacklog => s.advisor.sync_backlog = new,
-        DisabledTools => { /* multiselect handled via set_disabled_tools below */ }
-        ModelRoles => { /* map-editor handled via set_model_roles below */ }
-        Keybindings => { /* map-editor handled via keymap.rs, Task 5 */ }
+        // Editors land in Tasks 5/6 — a stray scalar call here must be loud,
+        // never a silent no-op:
+        DisabledTools => anyhow::bail!("disabled_tools edited via its multiselect (Task 5)"),
+        ModelRoles => anyhow::bail!("model_roles edited via its map-editor (Task 6)"),
+        Keybindings => anyhow::bail!("keybindings edited via its map-editor (Task 6)"),
         // Pointer rows are read-only:
         Theme | Model | CustomProviders | Hooks | ExtensionPaths
         | SkillPaths | PromptPaths | ThemePaths => anyhow::bail!("read-only"),
