@@ -2,6 +2,7 @@
 pub mod file_search;
 pub mod frame_layout;
 pub mod host;
+pub mod keymap;
 pub mod main_loop;
 pub mod notifications;
 pub mod settings_defs;
