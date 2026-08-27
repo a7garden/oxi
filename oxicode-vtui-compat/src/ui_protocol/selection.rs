@@ -107,6 +107,15 @@ pub enum InlineListSelection {
     PlanApprovalSwitchBuild,
     /// Hand off to the auto primary agent (auto-execute with per-step HITL).
     PlanApprovalSwitchAuto,
+
+    /// Settings-panel tab switch (`/settings` tabs).
+    SettingsTab(usize),
+    /// Settings-panel sidebar section jump.
+    SettingsSection(usize),
+    /// Settings-panel key-capture submenu targeting a named `SettingKey`.
+    /// Carries the key's Debug name (a `String`) to avoid a dependency from
+    /// `oxicode-vtui-compat` onto `oxicode-cli`'s `SettingKey` enum.
+    SettingKeyCapture(String),
 }
 
 /// A selectable item inside a list overlay.
