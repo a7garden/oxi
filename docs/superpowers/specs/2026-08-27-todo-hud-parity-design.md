@@ -203,31 +203,69 @@ constant. `agent_loop` gains a `todo_reminders_enabled: bool` /
 `todo_clear_delay_secs: i64` on `AgentLoopConfig`, threaded from settings the
 same way `todo` (the provider) already is.
 
-### 6.2 Stop-reminder banner (transcript-committed, not just context injection)
+### 6.2 Message visibility primitive (new — corrects an earlier assumption)
 
-Today `build_stop_reminder`'s text is injected into agent context only — the
-user never sees *why* the agent kept going. Add a `TodoReminderEvent` variant
-(or reuse whatever event enum already carries `agent_loop` → TUI
-notifications — confirm during implementation) so `main_loop.rs` commits a
+Verified against `oxicode-ai/src/messages.rs`: `Message` has exactly three
+variants — `User`, `Assistant`, `ToolResult`. There is no `developer`/`system`/
+`custom` role and no `display`/`visible` flag anywhere in the model-facing
+message types. Concretely, `build_stop_reminder`'s text
+(`agent_loop/mod.rs:1251`) is injected as a plain `Message::User(UserMessage::new(text))`
+— today it is a **real, visible** user turn (it flows into `messages`, gets
+persisted via `SessionEntryEnum::Message`, and renders in the transcript like
+anything the human typed). This is the opposite of what a first read of the
+omp port suggests and must be fixed regardless of the new banner work: a user
+scrolling the transcript currently sees a fake "user message" they never
+typed.
+
+Fix: add `pub visible: bool` to `UserMessage` (default `true` via
+`#[serde(default = "default_true")]`, so every existing call site —
+`UserMessage::new` keeps a `pub fn new` that sets `visible: true`; add
+`UserMessage::hidden(content)` for the synthetic case). Two consumers:
+1. **Session persistence / transcript rendering** — wherever
+   `SessionEntryEnum::Message` entries become `TranscriptDisplayItem`s in
+   `oxicode-cli` (locate the exact conversion function during
+   implementation — `store/session.rs`'s `convert_to_session_entry`/
+   `convert_from_session_entry` persist the field; the TUI's transcript
+   builder must skip rendering a `User` message with `visible == false`).
+   The message still round-trips through the session file (so a resumed
+   session behaves identically), it is just not drawn as a chat bubble.
+2. **Provider request path** — unaffected. `visible` is display-only
+   metadata; every provider keeps sending the full message content
+   regardless of the flag.
+
+This one field is the shared primitive both the reminder banner (§6.3) and
+the eager/mid-run nudges (§6.5) build on: reminders/nudges become
+`UserMessage::hidden(text)` (invisible in transcript, visible to the model),
+and the *replacement* user-visible artifact for the stop reminder is the
+dedicated banner in §6.3, not the injected message itself.
+
+### 6.3 Stop-reminder banner (transcript-committed, replaces the fake user turn)
+
+Today's visible-fake-user-message bug (§6.2) means the stop reminder gets a
+two-part fix: (a) switch the injected message to `UserMessage::hidden(text)`
+so it no longer masquerades as user input, (b) separately commit a
 warning-styled block to scrollback via the existing `render_committed_chunk`
-path (`main_loop.rs:5182`), mirroring `TodoReminderComponent`
-(`todo-reminder.ts`): header `⚠ N incomplete todos — reminder A/B`, then the
-unchecked list, inverse/warning background. This is additive to the existing
-context-injection behavior, which is unchanged.
+path (`main_loop.rs:5182`) so the user still sees *why* the agent kept going
+— mirroring `TodoReminderComponent` (`todo-reminder.ts`): header
+`⚠ N incomplete todos — reminder A/B`, then the unchecked list, inverse/
+warning background. Wire this by having `run_loop` emit a new
+`AgentEvent::TodoReminder { open: Vec<TodoItem>, attempt: u32, max: u32 }`
+right where `build_stop_reminder` succeeds (`agent_loop/mod.rs:1246-1252`);
+`main_loop.rs`'s existing event-dispatch match gains one arm that renders the
+banner and does not touch `pending_messages` (that plumbing is unchanged,
+just now carries a hidden message).
 
-### 6.3 Mid-run nudge
+### 6.4 Mid-run nudge
 
 Port `MID_RUN_NUDGE_MUTATION_THRESHOLD = 12`, `MID_RUN_NUDGE_MAX_PER_CYCLE = 2`
 from `todo-tracker.ts`. Track mutating-tool-call count since the last `todo`
 touch in `agent_loop`'s per-turn state (mirrors `#mutationsSinceLastTouch` /
-`onToolResult`); when the threshold is hit and budget remains, inject a
-hidden developer-role reminder message (same `Message { role: developer, .. }`
-shape `build_stop_reminder`'s caller already uses — no new message-role
-plumbing needed, unlike the eager prelude below) nudging the agent to
-reconcile its todo state. No transcript banner for this one (matches omp:
-mid-run nudges are silent).
+`onToolResult`); when the threshold is hit and budget remains, inject
+`UserMessage::hidden(text)` (§6.2) nudging the agent to reconcile its todo
+state. No transcript banner for this one (matches omp: mid-run nudges are
+silent).
 
-### 6.4 Eager todo prelude — requires `ToolChoice` on the provider layer
+### 6.5 Eager todo prelude — requires `ToolChoice` on the provider layer
 
 This is the one component that touches `oxicode-ai`, not just `oxicode-agent`/
 `oxicode-cli`. Confirmed: `Context` (`oxicode-ai/src/context.rs`) has `tools:
@@ -257,13 +295,13 @@ Plan:
    `oxicode-agent/src/agent_loop/todo_policy.rs`, ported from
    `todo-tracker.ts`'s eager-prelude half only — reminders/mid-run nudge stay
    in `agent_loop/mod.rs` next to the existing `build_stop_reminder` call per
-   §6.2/6.3, avoid inventing a second todo-state owner). On the first
+   §6.3/6.4, avoid inventing a second todo-state owner). On the first
    assistant turn, if `todo_eager_mode != Off`, no todo phases yet, not a
    sub-agent, and the prompt doesn't look like a question (port the regexes
    in `todo-tracker.ts:24-30` — `QUESTION_PROMPT_RE` etc. — as-is, they're
-   already language-agnostic via the non-ASCII fallback), inject a developer
-   message nudging todo creation; when `Always` *and* the resolved model's
-   provider supports `ToolChoice::Named`, also set
+   already language-agnostic via the non-ASCII fallback), inject
+   `UserMessage::hidden(text)` (§6.2) nudging todo creation; when `Always`
+   *and* the resolved model's provider supports `ToolChoice::Named`, also set
    `StreamOptions.tool_choice = Named("todo")` for that one request.
 4. New prompt text: `oxicode-agent/src/prompts/eager_todo.md` (or inline
    constant, matching oxicode's existing convention — check whether other
@@ -276,7 +314,7 @@ ships in this spec per user decision, but lands as its own commit/PR-sized
 unit so a regression in one provider's `tool_choice` mapping doesn't block
 the other four components.
 
-### 6.5 Auto-clear timer
+### 6.6 Auto-clear timer
 
 When `#is_todo_list_settled` (every task `Completed`/`Abandoned`) and
 `todo_clear_delay_secs >= 0`: start a timer (reuse whatever timer primitive
@@ -302,19 +340,18 @@ general preference for avoiding new crates when a single syscall suffices,
 and `pbcopy` is guaranteed present on the primary dev platform (macOS per
 AGENTS.md workstation).
 
-### 7.2 Hidden developer-role messages for the eager prelude
+### 7.2 Resolved: `visible` flag plumbing (was an open question, now decided)
 
-`build_stop_reminder`'s existing injection already proves oxicode's message
-model supports a role that's sent to the model but need not render in the
-transcript (confirm exact mechanism during implementation — likely a
-`developer`-role message that the TUI's transcript renderer already
-skips/dims, since the stop-reminder text isn't currently visible per §6.2's
-premise). If no such "invisible" mechanism exists yet, the eager-prelude
-message will need the same treatment as the new stop-reminder banner in
-reverse: a message the *agent* sees but the *transcript* does not render by
-default (as opposed to omp's explicit `display: false` field). Flag during
-implementation if this requires new plumbing in `oxicode-agent`'s message
-types beyond what §6.2/6.3 already assume.
+Confirmed by reading `oxicode-ai/src/messages.rs` directly: no hidden-message
+primitive exists today (§6.2 documents the fix). The remaining implementation
+detail — not a design decision — is locating every place a
+`SessionEntryEnum::Message`/`Message::User` gets converted into a
+`TranscriptDisplayItem` in `oxicode-cli`, so the `visible == false` skip is
+applied consistently (session replay/resume must also skip these rows, not
+just the live frame path). Grep `TranscriptDisplayItem` and
+`convert_to_session_entry`/`convert_from_session_entry` call sites in
+`oxicode-cli/src/tui_vt/` and `oxicode-cli/src/store/session.rs` at the start
+of Task work — do not assume there is exactly one call site.
 
 ## 8. Testing
 
