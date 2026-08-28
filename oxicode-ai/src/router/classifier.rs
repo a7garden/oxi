@@ -345,6 +345,7 @@ impl LlmClassifier {
                     role: crate::messages::UserRole::User,
                     content: crate::messages::MessageContent::Text(prompt),
                     timestamp: 0,
+                    visible: true,
                 },
             )],
             tools: vec![],

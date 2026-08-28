@@ -204,6 +204,17 @@ pub struct UserMessage {
     pub content: MessageContent,
     /// Unix-epoch milliseconds when the message was created.
     pub timestamp: i64,
+    /// Whether this message renders in the transcript. `false` for synthetic
+    /// reminders/nudges the model must see but the human should not (they are
+    /// not something the human typed). Always sent to the provider regardless
+    /// of this flag — it is display-only metadata. Missing on old session
+    /// files deserializes to `true` (backward compat).
+    #[serde(default = "default_visible")]
+    pub visible: bool,
+}
+
+fn default_visible() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -222,6 +233,17 @@ impl UserMessage {
             role: UserRole::User,
             content: content.into(),
             timestamp: chrono::Utc::now().timestamp_millis(),
+            visible: true,
+        }
+    }
+
+    /// A message sent to the model but not rendered in the transcript.
+    pub fn hidden(content: impl Into<MessageContent>) -> Self {
+        Self {
+            role: UserRole::User,
+            content: content.into(),
+            timestamp: chrono::Utc::now().timestamp_millis(),
+            visible: false,
         }
     }
 }
@@ -679,6 +701,25 @@ fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
 mod tests {
     use super::*;
     use crate::types::{Api, StopReason, Usage};
+
+    #[test]
+    fn user_message_new_defaults_visible_true() {
+        let m = UserMessage::new("hi");
+        assert!(m.visible);
+    }
+
+    #[test]
+    fn user_message_hidden_sets_visible_false() {
+        let m = UserMessage::hidden("system nudge");
+        assert!(!m.visible);
+    }
+
+    #[test]
+    fn user_message_deserializes_missing_visible_as_true() {
+        let json = r#"{"role":"user","content":"hi","timestamp":0}"#;
+        let m: UserMessage = serde_json::from_str(json).unwrap();
+        assert!(m.visible); // backward compat: old session files have no `visible`
+    }
 
     // ---- ContentBlock serialization roundtrip ----
 

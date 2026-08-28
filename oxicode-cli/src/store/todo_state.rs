@@ -67,6 +67,10 @@ impl TodoStateProvider for TodoState {
         TodoState::get_phases(self)
     }
 
+    fn set_phases_sync(&self, phases: Vec<TodoPhase>) {
+        *self.phases.write() = phases;
+    }
+
     fn apply_ops<'a>(
         &'a self,
         ops: Vec<TodoOp>,

@@ -510,6 +510,7 @@ mod vision_tests {
             role: crate::messages::UserRole::User,
             content: crate::messages::MessageContent::Text(s.to_string()),
             timestamp: 0,
+            visible: true,
         })
     }
 
@@ -524,6 +525,7 @@ mod vision_tests {
                 },
             )]),
             timestamp: 0,
+            visible: true,
         })
     }
 
@@ -649,6 +651,7 @@ mod message_content_tests {
             role: crate::messages::UserRole::User,
             content: crate::messages::MessageContent::Text(s.to_string()),
             timestamp: 0,
+            visible: true,
         })
     }
 

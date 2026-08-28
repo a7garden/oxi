@@ -255,6 +255,18 @@ pub struct AgentConfig {
     /// Todo state provider for the `todo` tool.
     #[serde(skip, default)]
     pub todo: Option<std::sync::Arc<dyn crate::tools::TodoStateProvider>>,
+    /// Whether to inject stop-time reminders for incomplete todos.
+    /// Default `true`. Threaded to `AgentLoopConfig::todo_reminders_enabled`.
+    #[serde(default = "default_true_bool")]
+    pub todo_reminders_enabled: bool,
+    /// Max stop-time todo reminders per run. Default
+    /// [`crate::tools::todo::MAX_TODO_STOP_REMINDERS`].
+    #[serde(default = "default_todo_reminders_max")]
+    pub todo_reminders_max: u32,
+    /// Eager first-turn todo-list creation policy. Default `Off` preserves
+    /// today's behavior. Threaded to `AgentLoopConfig::todo_eager_mode`.
+    #[serde(default = "default_todo_eager_mode")]
+    pub todo_eager_mode: crate::agent_loop::todo_policy::TodoEagerMode,
     /// Agent pool for Hub display and sub-agent matching.
     #[serde(skip, default)]
     pub agent_pool: Option<std::sync::Arc<dyn crate::tools::AgentPoolProvider>>,
@@ -303,10 +315,24 @@ pub struct AgentConfig {
     pub snapshot_store: Option<std::sync::Arc<dyn oxicode_hashline::SnapshotStore>>,
 }
 
+fn default_true_bool() -> bool {
+    true
+}
+
+fn default_todo_reminders_max() -> u32 {
+    crate::tools::todo::MAX_TODO_STOP_REMINDERS
+}
+fn default_todo_eager_mode() -> crate::agent_loop::todo_policy::TodoEagerMode {
+    crate::agent_loop::todo_policy::TodoEagerMode::Off
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             name: "oxicode-agent".to_string(),
+            todo_reminders_enabled: true,
+            todo_reminders_max: crate::tools::todo::MAX_TODO_STOP_REMINDERS,
+            todo_eager_mode: crate::agent_loop::todo_policy::TodoEagerMode::Off,
             description: None,
             model_id: "claude-sonnet-4-20250514".to_string(),
             system_prompt: None,

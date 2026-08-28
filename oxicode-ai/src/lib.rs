@@ -82,7 +82,7 @@ pub mod prelude {
     pub use crate::error::{Error, Result};
     pub use crate::messages::*;
     pub use crate::providers::{Provider, ProviderEvent, StreamOptions, StreamResult};
-    pub use crate::tools::{Tool, validate_args};
+    pub use crate::tools::{Tool, ToolChoice, validate_args};
     pub use crate::types::*;
 }
 
@@ -159,7 +159,9 @@ pub use providers::normalize_messages;
 
 /// Tool definition and argument validation.
 #[oxicode_stable(since = "0.63.0")]
-pub use tools::{ProgressCallback, Tool, ToolValidationError, progress_callback, validate_args};
+pub use tools::{
+    ProgressCallback, Tool, ToolChoice, ToolValidationError, progress_callback, validate_args,
+};
 
 pub use compaction::generate_branch_summary;
 /// Core type definitions (tokens, cost, etc.).

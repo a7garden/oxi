@@ -1908,6 +1908,8 @@ async fn todo_stop_reminder_fires_and_extends_loop_for_open_tasks() {
         fn get_phases(&self) -> Vec<TodoPhase> {
             self.0.clone()
         }
+        // Read-only stub: bulk-replace is a no-op (mirrors `apply_ops` erroring).
+        fn set_phases_sync(&self, _phases: Vec<TodoPhase>) {}
         fn apply_ops<'a>(
             &'a self,
             _ops: Vec<TodoOp>,
@@ -1998,6 +2000,29 @@ async fn todo_stop_reminder_fires_and_extends_loop_for_open_tasks() {
         .filter(|e| matches!(e, AgentEvent::TurnEnd { .. }))
         .count();
     assert_eq!(turn_ends, 2, "reminder should extend the run by one turn");
+
+    // The injected turn is hidden (not something the human typed) — it must
+    // not masquerade as a user message in persisted history.
+    let hidden = events.iter().find_map(|e| match e {
+        AgentEvent::SteeringMessage {
+            message: oxicode_ai::Message::User(u),
+        } => Some(u.visible),
+        AgentEvent::SteeringMessage { .. } => None,
+        _ => None,
+    });
+    assert_eq!(
+        hidden,
+        Some(false),
+        "stop-reminder turn must be marked hidden"
+    );
+
+    // A TodoReminder banner event is emitted so the TUI can show *why* the
+    // agent kept going.
+    let reminder_events = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TodoReminder { .. }))
+        .count();
+    assert_eq!(reminder_events, 1, "exactly one TodoReminder banner event");
 }
 
 #[tokio::test]
@@ -2016,6 +2041,8 @@ async fn todo_stop_reminder_silent_when_all_tasks_closed() {
         fn get_phases(&self) -> Vec<TodoPhase> {
             self.0.clone()
         }
+        // Read-only stub: bulk-replace is a no-op (mirrors `apply_ops` erroring).
+        fn set_phases_sync(&self, _phases: Vec<TodoPhase>) {}
         fn apply_ops<'a>(
             &'a self,
             _ops: Vec<TodoOp>,

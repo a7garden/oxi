@@ -481,6 +481,13 @@ impl AgentSession {
         &self.hub
     }
 
+    /// `Arc` handle to the shared Hub registry, for storing on `RenderState`
+    /// so the TUI frame loop can snapshot live subagent status (matched
+    /// todo highlight + auto-reconcile).
+    pub fn hub_arc(&self) -> super::agent_hub_registry::SharedHubRegistry {
+        std::sync::Arc::clone(&self.hub)
+    }
+
     /// Get the session's todo state provider, if configured. Lets the TUI
     /// observe todo phase changes live (the same source of truth the `todo`
     /// agent tool writes to).

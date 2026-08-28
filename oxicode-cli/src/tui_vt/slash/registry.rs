@@ -406,6 +406,7 @@ fn register_all(registry: &mut SlashRegistry) {
     registry.register(Box::new(ShortcutsCommand));
     registry.register(Box::new(HandoffCommand));
     registry.register(Box::new(MemoryCommand));
+    registry.register(Box::new(super::todo_command::TodoCommand));
     super::commands::register_extra(registry);
 }
 

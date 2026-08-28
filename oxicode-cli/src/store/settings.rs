@@ -101,6 +101,22 @@ pub(crate) fn default_custom_provider_api() -> String {
     "openai-completions".to_string()
 }
 
+/// How strongly to auto-create a todo list on the first turn. Mirrors omp's
+/// `todo.eager` (`default`/`preferred`/`always`), renamed to avoid the Rust
+/// keyword `default` as a variant name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoEagerMode {
+    /// Model decides; no automatic todo list. (default)
+    #[default]
+    Off,
+    /// Suggests a todo list on the first message (reminder, not forced).
+    Preferred,
+    /// Forces a todo list on the first message via `ToolChoice::Named("todo")`
+    /// when the resolved model's provider supports it.
+    Always,
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -240,6 +256,24 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub todo_panel_enabled: bool,
 
+    /// How strongly to auto-create a todo list on the first turn.
+    /// Default: off.
+    #[serde(default)]
+    pub todo_eager_mode: TodoEagerMode,
+
+    /// Remind the agent to finish open todos before it stops. Default: true.
+    #[serde(default = "default_true")]
+    pub todo_reminders_enabled: bool,
+
+    /// Max stop-time todo reminders per run. Default: 3.
+    #[serde(default = "default_todo_reminders_max")]
+    pub todo_reminders_max: u32,
+
+    /// Seconds after every todo closes before the HUD auto-clears.
+    /// Default: 60; `0` = instant; negative disables clearing.
+    #[serde(default = "default_todo_clear_delay_secs")]
+    pub todo_clear_delay_secs: i64,
+
     /// Enable the Agent Hub overlay (Ctrl+h / /agents).
     /// Default: true.
     #[serde(default = "default_true")]
@@ -360,6 +394,13 @@ fn default_true() -> bool {
 fn default_false() -> bool {
     false
 }
+fn default_todo_reminders_max() -> u32 {
+    3
+}
+
+fn default_todo_clear_delay_secs() -> i64 {
+    60
+}
 
 fn default_ttsr_mode() -> String {
     "prose_only".to_string()
@@ -401,6 +442,10 @@ impl Default for Settings {
             edit_format: EditFormat::default(),
             memory_enabled: true,
             todo_panel_enabled: true,
+            todo_eager_mode: TodoEagerMode::Off,
+            todo_reminders_enabled: true,
+            todo_reminders_max: default_todo_reminders_max(),
+            todo_clear_delay_secs: default_todo_clear_delay_secs(),
             agent_hub_enabled: true,
             snapcompact_enabled: false,
             advisor: AdvisorSettings::default(),
@@ -1118,6 +1163,23 @@ mod tests {
     use super::*;
     use std::io::Write as IoWrite;
     use std::sync::Mutex;
+
+    #[test]
+    fn todo_settings_default_preserve_current_behavior() {
+        let s = Settings::default();
+        assert_eq!(s.todo_eager_mode, TodoEagerMode::Off);
+        assert!(s.todo_reminders_enabled);
+        assert_eq!(s.todo_reminders_max, 3);
+        assert_eq!(s.todo_clear_delay_secs, 60);
+    }
+
+    #[test]
+    fn todo_eager_mode_round_trips_through_toml() {
+        let parsed: TodoEagerMode = toml::from_str("v = \"always\"")
+            .map(|t: toml::Value| TodoEagerMode::deserialize(t["v"].clone()).unwrap())
+            .unwrap();
+        assert_eq!(parsed, TodoEagerMode::Always);
+    }
 
     /// Global lock to serialize all tests that manipulate process-wide env vars.
     #[allow(dead_code)] // held implicitly via guard pattern; not all tests acquire it

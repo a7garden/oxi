@@ -219,6 +219,19 @@ pub enum AgentEvent {
         message: oxicode_ai::Message,
     },
 
+    // ── Todo session events ──────────────────────────────────────────
+    /// Emitted when the loop injects a stop-time incomplete-todo reminder
+    /// (the hidden user turn) so the TUI can commit a visible banner of
+    /// *why* the agent kept going.
+    TodoReminder {
+        /// The open (pending/in_progress) todo items being nudged.
+        open: Vec<crate::tools::todo::TodoItem>,
+        /// Which reminder attempt this is (1-based).
+        attempt: u32,
+        /// The configured max reminder count.
+        max: u32,
+    },
+
     // ── Tool execution events ────────────────────────────────────────
     /// A tool is about to be executed.
     ToolExecutionStart {
@@ -566,6 +579,7 @@ impl AgentEvent {
             AgentEvent::AutoRetryStart { .. } => "auto_retry_start",
             AgentEvent::AutoRetryEnd { .. } => "auto_retry_end",
             AgentEvent::SteeringMessage { .. } => "steering_message",
+            AgentEvent::TodoReminder { .. } => "todo_reminder",
             AgentEvent::FollowUpMessage { .. } => "follow_up_message",
             AgentEvent::ApprovalRequired { .. } => "approval_required",
             AgentEvent::ApprovalResult { .. } => "approval_result",

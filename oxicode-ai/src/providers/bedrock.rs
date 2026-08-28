@@ -9,6 +9,7 @@ use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -448,6 +449,11 @@ impl Provider for BedrockProvider {
                 body["toolConfig"] = build_bedrock_tool_config(&context.tools)?;
             }
 
+            // Force the tool choice when a Named choice is set (and tools exist).
+            if let Some(choice) = build_bedrock_tool_choice(options.tool_choice.as_ref()) {
+                body["toolChoice"] = choice;
+            }
+
             let body_bytes = serde_json::to_vec(&body)?;
 
             // Build headers
@@ -619,6 +625,14 @@ fn blocks_to_bedrock_content(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>, 
     }
 
     Ok(items)
+}
+
+/// Map a `ToolChoice` to Bedrock Converse's forced-tool-choice shape.
+fn build_bedrock_tool_choice(tool_choice: Option<&crate::tools::ToolChoice>) -> Option<JsonValue> {
+    match tool_choice {
+        None | Some(crate::tools::ToolChoice::Auto) => None,
+        Some(crate::tools::ToolChoice::Named(name)) => Some(json!({"tool": {"name": name}})),
+    }
 }
 
 /// Build tool config in Bedrock format
@@ -916,6 +930,16 @@ struct BedrockUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_bedrock_tool_choice_maps_named_to_tool_shape() {
+        assert!(build_bedrock_tool_choice(None).is_none());
+        assert!(build_bedrock_tool_choice(Some(&crate::tools::ToolChoice::Auto)).is_none());
+        assert_eq!(
+            build_bedrock_tool_choice(Some(&crate::tools::ToolChoice::Named("todo".into()))),
+            Some(serde_json::json!({"tool": {"name": "todo"}}))
+        );
+    }
     use crate::Message;
 
     #[test]

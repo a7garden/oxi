@@ -5,6 +5,7 @@ use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -192,6 +193,14 @@ impl Provider for AzureProvider {
                 body["tools"] = build_tools(&context.tools)?;
             }
 
+            // Force the tool choice when a Named choice is set (and tools exist).
+            if let Some(choice) = options
+                .as_ref()
+                .and_then(|o| build_tool_choice(o.tool_choice.as_ref()))
+            {
+                body["tool_choice"] = choice;
+            }
+
             // Build headers
             let headers = self.build_headers(&api_key, &options)?;
 
@@ -344,6 +353,16 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
         .collect();
 
     Ok(serde_json::json!(items?))
+}
+
+/// Map a `ToolChoice` to Azure OpenAI's forced-tool-choice shape.
+fn build_tool_choice(tool_choice: Option<&crate::tools::ToolChoice>) -> Option<JsonValue> {
+    match tool_choice {
+        None | Some(crate::tools::ToolChoice::Auto) => None,
+        Some(crate::tools::ToolChoice::Named(name)) => {
+            Some(json!({"type": "function", "function": {"name": name}}))
+        }
+    }
 }
 
 /// Build tools array
@@ -555,6 +574,16 @@ struct PromptTokensDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_tool_choice_maps_named_to_azure_shape() {
+        assert!(build_tool_choice(None).is_none());
+        assert!(build_tool_choice(Some(&crate::tools::ToolChoice::Auto)).is_none());
+        assert_eq!(
+            build_tool_choice(Some(&crate::tools::ToolChoice::Named("todo".into()))),
+            Some(serde_json::json!({"type": "function", "function": {"name": "todo"}}))
+        );
+    }
 
     fn make_test_model(id: &str, base_url: &str) -> Model {
         Model::new(id, id, Api::OpenAiCompletions, "azure", base_url)

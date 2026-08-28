@@ -72,6 +72,16 @@ pub struct AgentLoopConfig {
     pub url_resolver: Option<Arc<dyn crate::tools::UrlResolver>>,
     /// Todo state provider for the `todo` tool.
     pub todo: Option<Arc<dyn crate::tools::TodoStateProvider>>,
+    /// Whether to inject stop-time reminders for incomplete todos. Default
+    /// `true` (mirrors the always-on behavior before this setting existed).
+    pub todo_reminders_enabled: bool,
+    /// Max stop-time todo reminders per run. Default
+    /// [`crate::tools::todo::MAX_TODO_STOP_REMINDERS`].
+    pub todo_reminders_max: u32,
+    /// Eager first-turn todo-list creation policy. Default
+    /// [`crate::agent_loop::todo_policy::TodoEagerMode::Off`] preserves
+    /// today's behavior (no automatic prelude).
+    pub todo_eager_mode: crate::agent_loop::todo_policy::TodoEagerMode,
     /// Agent pool for Hub display.
     pub agent_pool: Option<Arc<dyn crate::tools::AgentPoolProvider>>,
     /// LSP provider for the `lsp` tool.
@@ -200,6 +210,9 @@ impl Default for AgentLoopConfig {
             memory: None,
             url_resolver: None,
             todo: None,
+            todo_reminders_enabled: true,
+            todo_reminders_max: crate::tools::todo::MAX_TODO_STOP_REMINDERS,
+            todo_eager_mode: crate::agent_loop::todo_policy::TodoEagerMode::Off,
             agent_pool: None,
             lsp: None,
             ttsr_engine: None,

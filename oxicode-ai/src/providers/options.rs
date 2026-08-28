@@ -145,6 +145,11 @@ pub struct StreamOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budgets: Option<ThinkingBudgets>,
 
+    /// Forces the next assistant turn's tool choice. `None`/`Auto` = no
+    /// change from today's behavior. See [`crate::tools::ToolChoice`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<crate::tools::ToolChoice>,
+
     /// Per-provider options for fine-grained control.
     ///
     /// Each provider reads only its own section. For example, the Anthropic
@@ -250,5 +255,25 @@ impl ThinkingBudgets {
     pub fn high(mut self, tokens: usize) -> Self {
         self.high = Some(tokens);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::ToolChoice;
+
+    #[test]
+    fn stream_options_default_has_no_tool_choice() {
+        let opts = StreamOptions::default();
+        assert!(opts.tool_choice.is_none());
+    }
+
+    #[test]
+    fn tool_choice_named_round_trips_through_serde() {
+        let tc = ToolChoice::Named("todo".to_string());
+        let json = serde_json::to_string(&tc).unwrap();
+        let back: ToolChoice = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, tc);
     }
 }

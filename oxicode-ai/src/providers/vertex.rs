@@ -158,12 +158,14 @@ impl Provider for VertexProvider {
             );
             let contents = convert_messages(context)?;
             let tools_json = convert_tools(&context.tools, false);
+            let tool_config = super::google_shared::build_tool_config(options.tool_choice.as_ref());
             let body = build_request_body(
                 &contents,
                 context.system_prompt.as_deref(),
                 tools_json.as_ref(),
                 options.temperature,
                 options.max_tokens,
+                tool_config.as_ref(),
             );
             let response = self
                 .client

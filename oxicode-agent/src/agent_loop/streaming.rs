@@ -23,6 +23,7 @@ pub(crate) async fn stream_assistant_response(
     messages: &mut Vec<Message>,
     emit: &super::EmitFn,
     ttsr: Option<&TtsrEngine>,
+    first_turn: bool,
 ) -> StreamOutcome {
     let model = match loop_ref.resolve_model() {
         Ok(m) => m,
@@ -37,6 +38,37 @@ pub(crate) async fn stream_assistant_response(
             };
         }
     };
+    // First-turn eager todo prelude: on the first turn only, inject a hidden
+    // message asking the model to create a todo plan, and (in Always mode with
+    // a capable provider) force the `todo` tool call. The message is `hidden`
+    // (F1) so it never renders in the transcript.
+    let mut first_turn_tool_choice: Option<oxicode_ai::ToolChoice> = None;
+    if first_turn {
+        let prompt_text = messages.iter().find_map(|m| match m {
+            Message::User(u) if u.visible => match &u.content {
+                oxicode_ai::MessageContent::Text(s) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        });
+        let has_existing_phases = loop_ref
+            .config
+            .todo
+            .as_ref()
+            .map(|p| !p.get_phases().is_empty())
+            .unwrap_or(true);
+        let is_subagent = loop_ref.config.subagent_depth > 0;
+        if let Some((msg, choice)) = super::todo_policy::build_eager_todo_prelude(
+            prompt_text.as_deref(),
+            loop_ref.config.todo_eager_mode,
+            has_existing_phases,
+            is_subagent,
+            super::todo_policy::provider_supports_tool_choice(model.api),
+        ) {
+            messages.push(msg);
+            first_turn_tool_choice = choice;
+        }
+    }
 
     // Proactively sanitize orphaned tool results to prevent provider
     // errors like "Messages with role 'tool' must be a response to a
@@ -99,6 +131,7 @@ pub(crate) async fn stream_assistant_response(
         temperature: Some(loop_ref.config.temperature as f64),
         max_tokens: Some(loop_ref.config.max_tokens as usize),
         provider_options: loop_ref.config.provider_options.clone(),
+        tool_choice: first_turn_tool_choice,
         ..Default::default()
     };
 
@@ -890,7 +923,7 @@ mod streaming_lifecycle_tests {
         let emit: Arc<dyn Fn(AgentEvent) + Send + Sync> =
             Arc::new(move |e| sink.lock().unwrap().push(e));
         let mut messages: Vec<Message> = vec![Message::User(UserMessage::new("hi".to_string()))];
-        let _ = stream_assistant_response(&agent_loop, &mut messages, &emit, None).await;
+        let _ = stream_assistant_response(&agent_loop, &mut messages, &emit, None, true).await;
         collected.lock().unwrap().clone()
     }
 

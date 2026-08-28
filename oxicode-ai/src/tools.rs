@@ -15,6 +15,23 @@ pub fn progress_callback<F: Fn(String) + Send + Sync + 'static>(f: F) -> Progres
     Arc::new(f)
 }
 
+/// Forces or leaves-to-the-model which tool the next assistant turn must
+/// call. `Auto` is the existing default behavior (model decides freely,
+/// including calling no tool). `Named` forces exactly one tool by name —
+/// only honored by providers with native forced-tool-choice support; owned
+/// (in-band XML) dialects and providers without the feature silently treat
+/// it as `Auto` (see each provider's mapping).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "type", content = "name", rename_all = "snake_case")]
+pub enum ToolChoice {
+    /// Let the model choose freely (the existing default behavior).
+    #[default]
+    Auto,
+    /// Force the next assistant turn to call the named tool. Only honored by
+    /// providers with native forced-tool-choice support.
+    Named(String),
+}
+
 /// Tool definition with JSON Schema parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tool {

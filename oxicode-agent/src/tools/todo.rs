@@ -327,6 +327,101 @@ fn resolve_targets(
     out
 }
 
+/// Quote-aware tokenizer: splits on whitespace, respects `"…"` groups, and
+/// honors backslash escapes. Ports omp's `tokenize`
+/// (`todo-command-controller.ts:37-58`).
+pub fn tokenize_quoted(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.next() {
+                current.push(next);
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_quote = !in_quote;
+            continue;
+        }
+        if !in_quote && ch.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Exact (case-insensitive) -> unique prefix -> unique substring. Ambiguous
+/// or no match -> `None`. Ports omp's `findPhaseFuzzy`
+/// (`todo-command-controller.ts:81-92`).
+pub fn find_phase_fuzzy<'a>(phases: &'a [TodoPhase], query: &str) -> Option<&'a TodoPhase> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return None;
+    }
+    if let Some(p) = phases.iter().find(|p| p.name.to_lowercase() == q) {
+        return Some(p);
+    }
+    let prefix: Vec<&TodoPhase> = phases
+        .iter()
+        .filter(|p| p.name.to_lowercase().starts_with(&q))
+        .collect();
+    if prefix.len() == 1 {
+        return Some(prefix[0]);
+    }
+    let sub: Vec<&TodoPhase> = phases
+        .iter()
+        .filter(|p| p.name.to_lowercase().contains(&q))
+        .collect();
+    if sub.len() == 1 { Some(sub[0]) } else { None }
+}
+
+/// Exact content match -> unique substring match -> if ambiguous, prefer a
+/// single in_progress/pending hit. Ports omp's `findTaskFuzzy`
+/// (`todo-command-controller.ts:94-113`).
+pub fn find_task_fuzzy<'a>(
+    phases: &'a [TodoPhase],
+    query: &str,
+) -> Option<(&'a TodoItem, &'a TodoPhase)> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return None;
+    }
+    for phase in phases {
+        for task in &phase.tasks {
+            if task.content.to_lowercase() == q {
+                return Some((task, phase));
+            }
+        }
+    }
+    let matches: Vec<(&TodoItem, &TodoPhase)> = phases
+        .iter()
+        .flat_map(|phase| phase.tasks.iter().map(move |t| (t, phase)))
+        .filter(|(t, _)| t.content.to_lowercase().contains(&q))
+        .collect();
+    if matches.len() == 1 {
+        return Some(matches[0]);
+    }
+    let active: Vec<(&TodoItem, &TodoPhase)> = matches
+        .into_iter()
+        .filter(|(t, _)| matches!(t.status, TodoStatus::InProgress | TodoStatus::Pending))
+        .collect();
+    if active.len() == 1 {
+        Some(active[0])
+    } else {
+        None
+    }
+}
+
 fn transition_status(
     phases: &mut [TodoPhase],
     task: Option<&str>,
@@ -468,6 +563,102 @@ fn auto_promote_next(phases: &mut [TodoPhase]) {
     }
 }
 
+// ── Collapsed-viewport selection (omp `selectCollapsedTodos` contract) ────
+
+/// One prior closed task stays visible above the open window so a completion
+/// is seen as it happens, not silently dropped. Ports omp's
+/// `COLLAPSED_CLOSED_CONTEXT` (`todo.ts:275`).
+const COLLAPSED_CLOSED_CONTEXT: usize = 1;
+
+/// Result of [`select_collapsed_todos`]: the rows to render plus an optional
+/// "… N more" summary line.
+pub struct CollapsedSelection<'a> {
+    /// The selected rows to render (already collapsed to the cap).
+    pub items: Vec<&'a TodoItem>,
+    /// Optional "… N more" line when rows were dropped.
+    pub summary: Option<String>,
+}
+
+fn is_closed(t: &TodoItem) -> bool {
+    matches!(t.status, TodoStatus::Completed | TodoStatus::Abandoned)
+}
+
+fn is_active(t: &TodoItem, is_matched: &impl Fn(&TodoItem) -> bool) -> bool {
+    t.status == TodoStatus::InProgress || (t.status == TodoStatus::Pending && is_matched(t))
+}
+
+fn select_within_cap<'a>(
+    base: &[&'a TodoItem],
+    is_matched: &impl Fn(&TodoItem) -> bool,
+    cap: usize,
+) -> CollapsedSelection<'a> {
+    if base.len() <= cap {
+        return CollapsedSelection {
+            items: base.to_vec(),
+            summary: None,
+        };
+    }
+    let active: Vec<&'a TodoItem> = base
+        .iter()
+        .copied()
+        .filter(|t| is_active(t, is_matched))
+        .collect();
+    if active.len() > cap {
+        let hidden = active.len() - cap;
+        return CollapsedSelection {
+            items: active.into_iter().take(cap).collect(),
+            summary: Some(format!(
+                "… {hidden} more active todo{}",
+                if hidden == 1 { "" } else { "s" }
+            )),
+        };
+    }
+    let first_active_idx = active
+        .first()
+        .and_then(|f| base.iter().position(|t| std::ptr::eq(*t, *f)))
+        .unwrap_or(0);
+    let mut items = active.clone();
+    for &t in base.iter().skip(first_active_idx) {
+        if items.len() >= cap {
+            break;
+        }
+        if !is_active(t, is_matched) && !items.iter().any(|x| std::ptr::eq(*x, t)) {
+            items.push(t);
+        }
+    }
+    let hidden = base.len() - items.len();
+    let summary =
+        (hidden > 0).then(|| format!("… {hidden} more todo{}", if hidden == 1 { "" } else { "s" }));
+    CollapsedSelection { items, summary }
+}
+
+/// Walking-viewport selection for a phase's collapsed todo preview. Ports
+/// omp's `selectCollapsedTodos` (`todo.ts:332-350`).
+pub fn select_collapsed_todos<'a>(
+    tasks: &'a [TodoItem],
+    is_matched: impl Fn(&TodoItem) -> bool,
+    cap: usize,
+) -> CollapsedSelection<'a> {
+    let open: Vec<&'a TodoItem> = tasks.iter().filter(|t| !is_closed(t)).collect();
+    if open.is_empty() {
+        let all: Vec<&'a TodoItem> = tasks.iter().collect();
+        return select_within_cap(&all, &is_matched, cap);
+    }
+    let mut lead: Vec<&'a TodoItem> = tasks
+        .iter()
+        .filter(|t| is_closed(t))
+        .rev()
+        .take(COLLAPSED_CLOSED_CONTEXT)
+        .collect();
+    lead.reverse();
+    let selected = select_within_cap(&open, &is_matched, cap);
+    lead.extend(selected.items);
+    CollapsedSelection {
+        items: lead,
+        summary: selected.summary,
+    }
+}
+
 /// 이전/이후 phase 배열을 비교해 새로 Completed가 된 task 목록.
 /// TUI 스트라이크루 애니메이션 트리거용.
 fn get_completion_transitions(
@@ -506,6 +697,50 @@ pub fn todo_matches_any_description(content: &str, descriptions: &[String]) -> b
         let d_norm = normalize_for_match(d);
         d_norm.contains(&normalized) || normalized.contains(&d_norm)
     })
+}
+
+/// Auto-complete open todos whose content matches a subagent that finished
+/// successfully. Ports omp's `#reconcileTodosWithSubagents`
+/// (`interactive-mode.ts:2369-2404`). Idempotent: never touches an already
+/// closed task. Failed/aborted subagents are the caller's responsibility to
+/// exclude from `completed_descriptions` — this function only matches.
+pub fn reconcile_with_subagents(
+    phases: &[TodoPhase],
+    completed_descriptions: &[String],
+) -> (Vec<TodoPhase>, bool) {
+    if completed_descriptions.is_empty() {
+        return (phases.to_vec(), false);
+    }
+    let mut mutated = false;
+    let updated = phases
+        .iter()
+        .map(|phase| TodoPhase {
+            name: phase.name.clone(),
+            tasks: phase
+                .tasks
+                .iter()
+                .map(|task| {
+                    if !matches!(
+                        task.status,
+                        TodoStatus::Pending | TodoStatus::InProgress | TodoStatus::Blocked
+                    ) {
+                        return task.clone();
+                    }
+                    if !todo_matches_any_description(&task.content, completed_descriptions) {
+                        return task.clone();
+                    }
+                    mutated = true;
+                    TodoItem {
+                        content: task.content.clone(),
+                        status: TodoStatus::Completed,
+                        notes: task.notes.clone(),
+                        block_reason: None,
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    (updated, mutated)
 }
 
 fn normalize_for_match(s: &str) -> String {
@@ -564,7 +799,9 @@ const ROMAN_PAIRS: &[(u32, &str)] = &[
     (1, "I"),
 ];
 
-fn roman_numeral(mut n: usize) -> String {
+/// Convert a small integer (1–3999) to its uppercase Roman-numeral string
+/// (e.g. `4` → `"IV"`, `6` → `"VI"`). Used for phase display names.
+pub fn roman_numeral(mut n: usize) -> String {
     let mut out = String::new();
     for &(value, sym) in ROMAN_PAIRS {
         while n >= value as usize {
@@ -772,6 +1009,59 @@ impl StopReminderState {
     }
 }
 
+/// Number of mutating tool calls (edit/write/bash/…) since the last `todo`
+/// touch before a mid-run reconciliation nudge fires. Ports omp's
+/// `MID_RUN_NUDGE_MUTATION_THRESHOLD` (`todo-tracker.ts:15`).
+const MID_RUN_NUDGE_MUTATION_THRESHOLD: u32 = 12;
+/// Max mid-run nudges per cycle (per run). Ports omp's
+/// `MID_RUN_NUDGE_MAX_PER_CYCLE` (`todo-tracker.ts:16`).
+const MID_RUN_NUDGE_MAX_PER_CYCLE: u32 = 2;
+/// Tools that count as "making progress without touching the todo list".
+const MUTATING_TOOLS: &[&str] = &["bash", "eval", "edit", "write", "ast_edit"];
+
+/// Tracks mutating-tool-call volume since the last `todo` touch, to fire a
+/// hidden mid-run reconciliation nudge. Ports omp's `TodoTracker`'s nudge
+/// half (`todo-tracker.ts:15-16, 110-116`).
+#[derive(Debug, Default)]
+pub struct MidRunNudgeState {
+    mutations_since_touch: u32,
+    nudge_count: u32,
+}
+
+impl MidRunNudgeState {
+    /// Record a completed tool result. A `todo` call resets the counter; a
+    /// mutating non-error tool increments it.
+    pub fn record_tool_result(&mut self, tool_name: &str, is_error: bool) {
+        if tool_name == "todo" {
+            self.mutations_since_touch = 0;
+        } else if !is_error && MUTATING_TOOLS.contains(&tool_name) {
+            self.mutations_since_touch += 1;
+        }
+    }
+
+    /// Whether a nudge is currently due (threshold reached, budget remains).
+    pub fn should_nudge(&self) -> bool {
+        self.mutations_since_touch >= MID_RUN_NUDGE_MUTATION_THRESHOLD
+            && self.nudge_count < MID_RUN_NUDGE_MAX_PER_CYCLE
+    }
+
+    /// Consume the nudge budget, returning the hidden reminder text to inject
+    /// (or `None` if not due).
+    pub fn take_nudge(&mut self) -> Option<String> {
+        if !self.should_nudge() {
+            return None;
+        }
+        self.nudge_count += 1;
+        self.mutations_since_touch = 0;
+        Some(
+            "You've made several file changes without touching your todo list. \
+             Reconcile it now: mark finished tasks done, update in-progress ones, \
+             and add anything new before continuing."
+                .to_string(),
+        )
+    }
+}
+
 /// Build a stop-time reminder when the todo list has open tasks.
 ///
 /// "Open" = `Pending` or `InProgress`. `Blocked` tasks are excluded — they
@@ -925,6 +1215,159 @@ mod tests {
             notes: None,
             block_reason: None,
         }
+    }
+
+    #[test]
+    fn select_collapsed_todos_leads_with_in_progress_then_pending() {
+        let tasks = vec![
+            make_task("a", TodoStatus::Completed),
+            make_task("b", TodoStatus::InProgress),
+            make_task("c", TodoStatus::Pending),
+            make_task("d", TodoStatus::Pending),
+            make_task("e", TodoStatus::Pending),
+            make_task("f", TodoStatus::Pending),
+        ];
+        let sel = select_collapsed_todos(&tasks, |_| false, 3);
+        let contents: Vec<&str> = sel.items.iter().map(|t| t.content.as_str()).collect();
+        assert_eq!(contents, vec!["a", "b", "c", "d"]);
+        assert_eq!(sel.summary.as_deref(), Some("… 2 more todos"));
+    }
+
+    #[test]
+    fn select_collapsed_todos_all_closed_falls_back_to_closed_tasks() {
+        let tasks = vec![
+            make_task("a", TodoStatus::Completed),
+            make_task("b", TodoStatus::Abandoned),
+        ];
+        let sel = select_collapsed_todos(&tasks, |_| false, 5);
+        assert_eq!(sel.items.len(), 2);
+        assert!(sel.summary.is_none());
+    }
+
+    #[test]
+    fn select_collapsed_todos_matched_pending_counts_as_active() {
+        let tasks = vec![
+            make_task("a", TodoStatus::Pending),
+            make_task("b", TodoStatus::Pending),
+            make_task("c", TodoStatus::Pending),
+        ];
+        let sel = select_collapsed_todos(&tasks, |t| t.content == "b", 2);
+        let contents: Vec<&str> = sel.items.iter().map(|t| t.content.as_str()).collect();
+        assert_eq!(contents, vec!["b", "c"]);
+        assert_eq!(sel.summary.as_deref(), Some("… 1 more todo"));
+    }
+
+    #[test]
+    fn select_collapsed_todos_no_cap_overflow_returns_everything() {
+        let tasks = vec![
+            make_task("a", TodoStatus::Pending),
+            make_task("b", TodoStatus::Pending),
+        ];
+        let sel = select_collapsed_todos(&tasks, |_| false, 5);
+        assert_eq!(sel.items.len(), 2);
+        assert!(sel.summary.is_none());
+    }
+
+    #[test]
+    fn reconcile_closes_matching_open_task() {
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![make_task(
+                "implement authentication module",
+                TodoStatus::Pending,
+            )],
+        }];
+        let (updated, mutated) =
+            reconcile_with_subagents(&phases, &["authentication module".to_string()]);
+        assert!(mutated);
+        assert_eq!(updated[0].tasks[0].status, TodoStatus::Completed);
+    }
+
+    #[test]
+    fn reconcile_clears_block_reason_on_close() {
+        let mut t = make_task("implement authentication module", TodoStatus::Blocked);
+        t.block_reason = Some("waiting on subagent".into());
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![t],
+        }];
+        let (updated, mutated) =
+            reconcile_with_subagents(&phases, &["authentication module".to_string()]);
+        assert!(mutated);
+        assert_eq!(updated[0].tasks[0].status, TodoStatus::Completed);
+        assert!(updated[0].tasks[0].block_reason.is_none());
+    }
+
+    #[test]
+    fn reconcile_does_not_touch_already_closed_or_unmatched() {
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![
+                make_task("unrelated task", TodoStatus::Pending),
+                make_task("done already", TodoStatus::Completed),
+            ],
+        }];
+        let (_updated, mutated) =
+            reconcile_with_subagents(&phases, &["authentication module".to_string()]);
+        assert!(!mutated);
+    }
+
+    #[test]
+    fn tokenize_quoted_respects_double_quotes() {
+        assert_eq!(
+            tokenize_quoted(r#"auth "wire oauth" now"#),
+            vec!["auth", "wire oauth", "now"]
+        );
+    }
+
+    #[test]
+    fn tokenize_quoted_handles_escaped_chars() {
+        assert_eq!(tokenize_quoted(r#"a\ b"#), vec!["a b"]);
+    }
+
+    #[test]
+    fn find_phase_fuzzy_prefers_exact_then_prefix_then_substring() {
+        let phases = vec![
+            TodoPhase {
+                name: "Authentication".into(),
+                tasks: vec![],
+            },
+            TodoPhase {
+                name: "Auth UI".into(),
+                tasks: vec![],
+            },
+        ];
+        assert_eq!(
+            find_phase_fuzzy(&phases, "Authentication").unwrap().name,
+            "Authentication"
+        );
+        // "auth " matches both "Auth UI" (prefix) and "Authentication"
+        // (substring) -> ambiguous -> None.
+        assert!(find_phase_fuzzy(&phases, "auth ").is_none());
+    }
+
+    #[test]
+    fn find_task_fuzzy_prefers_single_substring_match() {
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![make_task("Wire OAuth providers", TodoStatus::Pending)],
+        }];
+        let (t, p) = find_task_fuzzy(&phases, "oauth").unwrap();
+        assert_eq!(t.content, "Wire OAuth providers");
+        assert_eq!(p.name, "Auth");
+    }
+
+    #[test]
+    fn find_task_fuzzy_ambiguous_prefers_active_status() {
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![
+                make_task("Wire OAuth providers", TodoStatus::Completed),
+                make_task("Wire OAuth refresh", TodoStatus::InProgress),
+            ],
+        }];
+        let (t, _) = find_task_fuzzy(&phases, "wire oauth").unwrap();
+        assert_eq!(t.content, "Wire OAuth refresh");
     }
 
     #[test]
@@ -1388,6 +1831,45 @@ mod tests {
         assert!(first.is_some());
         assert!(second.is_none());
         assert_eq!(state.count(), 1);
+    }
+
+    #[test]
+    fn mid_run_nudge_fires_after_threshold_mutations_without_todo_touch() {
+        let mut state = MidRunNudgeState::default();
+        for _ in 0..11 {
+            state.record_tool_result("edit", false);
+            assert!(!state.should_nudge());
+        }
+        state.record_tool_result("edit", false);
+        assert!(state.should_nudge());
+    }
+
+    #[test]
+    fn mid_run_nudge_resets_on_todo_touch() {
+        let mut state = MidRunNudgeState::default();
+        for _ in 0..12 {
+            state.record_tool_result("edit", false);
+        }
+        assert!(state.should_nudge());
+        state.record_tool_result("todo", false);
+        assert!(!state.should_nudge());
+    }
+
+    #[test]
+    fn mid_run_nudge_caps_at_two_per_cycle() {
+        let mut state = MidRunNudgeState::default();
+        for _ in 0..12 {
+            state.record_tool_result("edit", false);
+        }
+        assert!(state.take_nudge().is_some());
+        for _ in 0..12 {
+            state.record_tool_result("edit", false);
+        }
+        assert!(state.take_nudge().is_some());
+        for _ in 0..12 {
+            state.record_tool_result("edit", false);
+        }
+        assert!(state.take_nudge().is_none());
     }
 
     #[test]

@@ -5,6 +5,7 @@ use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -152,6 +153,11 @@ impl Provider for OpenAiProvider {
             // Add tools if present
             if !context.tools.is_empty() {
                 body["tools"] = build_tools(&context.tools)?;
+            }
+
+            // Force the tool choice when a Named choice is set (and tools exist).
+            if let Some(choice) = build_tool_choice(options.tool_choice.as_ref()) {
+                body["tool_choice"] = choice;
             }
 
             // ── Reasoning effort (o1/o3/o4 models) ──────────────────────────
@@ -595,6 +601,16 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
     Ok(serde_json::json!(items?))
 }
 
+/// Map a `ToolChoice` to OpenAI's forced-tool-choice shape (Chat Completions).
+fn build_tool_choice(tool_choice: Option<&crate::tools::ToolChoice>) -> Option<JsonValue> {
+    match tool_choice {
+        None | Some(crate::tools::ToolChoice::Auto) => None,
+        Some(crate::tools::ToolChoice::Named(name)) => {
+            Some(json!({"type": "function", "function": {"name": name}}))
+        }
+    }
+}
+
 /// Build tools array
 fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
     let items: Vec<_> = tools
@@ -946,6 +962,7 @@ pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) 
                         role: u.role,
                         content: filtered.expect("checked above"),
                         timestamp: u.timestamp,
+                        visible: true,
                     }))
                 }
                 Message::Assistant(a) => {
@@ -1133,6 +1150,16 @@ fn scrub_tool_id(id: &str, is_mistral: bool, is_anthropic: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_tool_choice_maps_named_to_function_shape() {
+        assert!(build_tool_choice(None).is_none());
+        assert!(build_tool_choice(Some(&crate::tools::ToolChoice::Auto)).is_none());
+        assert_eq!(
+            build_tool_choice(Some(&crate::tools::ToolChoice::Named("todo".into()))),
+            Some(serde_json::json!({"type": "function", "function": {"name": "todo"}}))
+        );
+    }
 
     const PROVIDER: &str = "openai";
     const MODEL: &str = "gpt-4o";

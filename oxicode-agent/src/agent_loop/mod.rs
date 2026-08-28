@@ -30,6 +30,8 @@ pub mod retry;
 pub mod stream_outcome;
 /// Streaming response handling.
 pub mod streaming;
+/// Eager todo-list creation policy (first-turn prelude).
+pub mod todo_policy;
 /// Tool execution strategies.
 pub mod tool_exec;
 /// Time-Traveling Stream Rules engine.
@@ -40,7 +42,7 @@ use crate::agent::ProviderResolver;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::state::TokenSource;
-use crate::tools::todo::{MAX_TODO_STOP_REMINDERS, StopReminderState, build_stop_reminder};
+use crate::tools::todo::{MidRunNudgeState, StopReminderState, build_stop_reminder};
 use crate::{state::SharedState, tools::ToolContext, tools::ToolRegistry};
 use anyhow::{Error, Result};
 pub use config::{AfterToolCallHook, AgentLoopConfig, BeforeToolCallHook, ToolExecutionMode};
@@ -778,6 +780,9 @@ impl AgentLoop {
         // signature dedup + MAX_TODO_STOP_REMINDERS so nudging the agent to
         // finish open todos can never loop forever.
         let mut todo_reminder_state = StopReminderState::default();
+        // Mid-run reconciliation nudge state (per-run): fires after enough
+        // mutating tool calls without a `todo` touch.
+        let mut mid_run_nudge_state = MidRunNudgeState::default();
 
         // Append-only context for prefix-stable message management.
         let mut append_only =
@@ -792,6 +797,7 @@ impl AgentLoop {
             let mut has_more_tool_calls = true;
 
             while has_more_tool_calls || !pending_messages.is_empty() {
+                let is_first_turn = first_turn;
                 if !first_turn {
                     turn_number += 1;
                     emit(AgentEvent::TurnStart { turn_number });
@@ -826,7 +832,9 @@ impl AgentLoop {
 
                 tracing::info!("[AGENT-LOOP] About to call stream_assistant_response");
                 let ttsr = self.ttsr_engine.as_deref();
-                let outcome = stream_assistant_response(self, &mut messages, &emit, ttsr).await;
+                let outcome =
+                    stream_assistant_response(self, &mut messages, &emit, ttsr, is_first_turn)
+                        .await;
 
                 let assistant_message = match outcome {
                     StreamOutcome::Complete(msg) => msg,
@@ -1027,6 +1035,7 @@ impl AgentLoop {
                     }
 
                     for result in &tool_results {
+                        mid_run_nudge_state.record_tool_result(&result.tool_name, result.is_error);
                         let result = self.maybe_truncate_tool_result(result.clone());
                         messages.push(Message::ToolResult(result.clone()));
                         new_messages.push(Message::ToolResult(result));
@@ -1095,6 +1104,17 @@ impl AgentLoop {
                             self.tool_call_loop_guard.lock().reset();
                         }
                     }
+                }
+
+                // ── Mid-run todo nudge ──
+                // After a batch of mutating tool calls with no `todo` touch,
+                // inject a hidden reconciliation nudge (bounded, silent).
+                if let Some(text) = mid_run_nudge_state.take_nudge() {
+                    tracing::info!(
+                        session_id = ?self.session_id,
+                        "[AGENT-LOOP] injecting mid-run todo reconciliation nudge"
+                    );
+                    pending_messages.push(Message::User(UserMessage::hidden(text)));
                 }
 
                 // ── Soft requirement check ──
@@ -1237,18 +1257,41 @@ impl AgentLoop {
             // stop with open todos, inject one user-turn reminder so it
             // continues or explicitly closes them. Bounded (dedup + cap) so
             // it can't loop. Blocked/Completed/Abandoned are excluded.
-            if let Some(provider) = self.config.todo.as_ref()
+            if self.config.todo_reminders_enabled
+                && let Some(provider) = self.config.todo.as_ref()
+                && let phases = provider.get_phases()
                 && let Some(text) = build_stop_reminder(
-                    &provider.get_phases(),
+                    &phases,
                     &mut todo_reminder_state,
-                    MAX_TODO_STOP_REMINDERS,
+                    self.config.todo_reminders_max,
                 )
             {
                 tracing::info!(
                     count = todo_reminder_state.count(),
                     "[AGENT-LOOP] injecting incomplete-todo stop reminder"
                 );
-                pending_messages = vec![Message::User(UserMessage::new(text))];
+                let open: Vec<crate::tools::todo::TodoItem> = phases
+                    .iter()
+                    .flat_map(|p| p.tasks.iter())
+                    .filter(|t| {
+                        matches!(
+                            t.status,
+                            crate::tools::todo::TodoStatus::Pending
+                                | crate::tools::todo::TodoStatus::InProgress
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                let event = AgentEvent::TodoReminder {
+                    attempt: todo_reminder_state.count(),
+                    max: self.config.todo_reminders_max,
+                    open: open.clone(),
+                };
+                emit(event.clone());
+                events.push(event);
+                // Hidden: not a turn the human typed — the TUI shows a
+                // dedicated banner (TodoReminder event) instead.
+                pending_messages = vec![Message::User(UserMessage::hidden(text))];
                 continue;
             }
             break;

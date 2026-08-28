@@ -252,6 +252,7 @@ fn from_intermediate(im: &IntermediateMessage, to_api: &Api, opts: &TransformOpt
                 role: crate::UserRole::User,
                 content: native_content,
                 timestamp: chrono::Utc::now().timestamp_millis(),
+                visible: true,
             })
         }
 
@@ -475,6 +476,7 @@ fn downgrade_unsupported_images(messages: &[Message], model: &Model) -> Vec<Mess
                         role: u.role,
                         content: MessageContent::Blocks(replaced),
                         timestamp: u.timestamp,
+                        visible: true,
                     })
                 }
                 _ => msg.clone(),

@@ -137,6 +137,12 @@ pub trait TodoStateProvider: Send + Sync + std::fmt::Debug {
     /// Return a snapshot of the current phase list (read-only, for TUI).
     fn get_phases(&self) -> Vec<crate::tools::todo::TodoPhase>;
 
+    /// Synchronously replace the whole phase list. Used by the TUI's
+    /// subagent auto-reconcile path, which runs on the sync frame loop and
+    /// cannot `.await` `apply_ops`. Only meaningful for local in-process
+    /// providers; a remote provider may return a `not supported` error.
+    fn set_phases_sync(&self, phases: Vec<crate::tools::todo::TodoPhase>);
+
     /// Apply a sequence of todo ops, returning the updated state, the
     /// newly-completed transitions (for strikethrough animation), and
     /// any error messages from ambiguous op references.

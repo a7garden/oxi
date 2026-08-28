@@ -44,6 +44,24 @@ use std::sync::Arc;
 // ═══════════════════════════════════════════════════════════════════════════
 // Diagnostics
 // ═══════════════════════════════════════════════════════════════════════════
+/// Map the CLI settings `TodoEagerMode` onto the agent-loop enum (the two
+/// crates can't share a type, so this conversion mirrors the same pattern
+/// used for `todo_reminders_*`).
+fn convert_todo_eager_mode(
+    mode: crate::store::settings::TodoEagerMode,
+) -> oxicode_agent::agent_loop::todo_policy::TodoEagerMode {
+    match mode {
+        crate::store::settings::TodoEagerMode::Off => {
+            oxicode_agent::agent_loop::todo_policy::TodoEagerMode::Off
+        }
+        crate::store::settings::TodoEagerMode::Preferred => {
+            oxicode_agent::agent_loop::todo_policy::TodoEagerMode::Preferred
+        }
+        crate::store::settings::TodoEagerMode::Always => {
+            oxicode_agent::agent_loop::todo_policy::TodoEagerMode::Always
+        }
+    }
+}
 
 /// Non-fatal issues collected while creating services or sessions.
 ///
@@ -393,6 +411,9 @@ pub async fn create_agent_session_from_services(
             ttsr_engine,
             memory: None,
             todo: Some(Arc::new(crate::store::todo_state::TodoState::new())),
+            todo_reminders_enabled: settings.todo_reminders_enabled,
+            todo_reminders_max: settings.todo_reminders_max,
+            todo_eager_mode: convert_todo_eager_mode(settings.todo_eager_mode),
             agent_pool: None,
             ..Default::default()
         };
@@ -507,6 +528,9 @@ pub async fn create_agent_session_from_services(
         ttsr_engine,
         memory: memory_backend,
         todo: Some(Arc::new(crate::store::todo_state::TodoState::new())),
+        todo_reminders_enabled: settings.todo_reminders_enabled,
+        todo_reminders_max: settings.todo_reminders_max,
+        todo_eager_mode: convert_todo_eager_mode(settings.todo_eager_mode),
         agent_pool: None,
         ..Default::default()
     };
@@ -1144,6 +1168,22 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_todo_eager_mode_converts_to_loop_enum() {
+        assert_eq!(
+            convert_todo_eager_mode(crate::store::settings::TodoEagerMode::Always),
+            oxicode_agent::agent_loop::todo_policy::TodoEagerMode::Always
+        );
+        assert_eq!(
+            convert_todo_eager_mode(crate::store::settings::TodoEagerMode::Preferred),
+            oxicode_agent::agent_loop::todo_policy::TodoEagerMode::Preferred
+        );
+        assert_eq!(
+            convert_todo_eager_mode(crate::store::settings::TodoEagerMode::Off),
+            oxicode_agent::agent_loop::todo_policy::TodoEagerMode::Off
+        );
+    }
 
     #[test]
     fn test_parse_model_id_with_provider() {

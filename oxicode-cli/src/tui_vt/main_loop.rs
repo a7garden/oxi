@@ -27,7 +27,7 @@ use crossterm::{
 use oxicode_agent::AgentEvent;
 use oxicode_agent::config::Mode;
 use oxicode_agent::tools::TodoStateProvider;
-use oxicode_agent::tools::todo::TodoStatus;
+use oxicode_agent::tools::todo::{TodoItem, TodoPhase, TodoStatus};
 use oxicode_vtui::theme::{ThemeStyles, active_styles};
 use oxicode_vtui::tui::core::{
     AuthAction, InlineCommand, InlineEvent, InlineHandle, InlineHeaderContext,
@@ -329,6 +329,9 @@ pub struct RenderState {
     pub agent_hub_open: bool,
     /// Hub entries snapshotted when the overlay was opened (`/agents`).
     pub hub_entries: Vec<(String, HubEntry)>,
+    /// Live Hub registry for per-frame subagent status (matched todo
+    /// highlight + auto-reconcile). `None` when the session provides none.
+    pub hub: Option<crate::app::agent_hub_registry::SharedHubRegistry>,
     /// First Ctrl+C armed a quit; a second press exits (two-press quit).
     pub pending_quit: bool,
     /// Slash-command autocomplete popup state.
@@ -376,8 +379,15 @@ pub struct RenderState {
     pub shell_mode: bool,
     /// Follow-up suggestion chips.
     pub follow_ups: Vec<String>,
-    /// Todo checklist items (text, status) — refreshed from the live provider.
-    pub todo_items: Vec<(String, TodoStatus)>,
+    /// Live todo phases — refreshed from the live provider each frame.
+    pub todo_phases: Vec<TodoPhase>,
+    /// Whether the todo HUD is expanded (all phases) vs collapsed.
+    pub todo_expanded: bool,
+    /// HUD-only auto-clear deadline; does not mutate the underlying TodoState.
+    pub todo_clear_deadline: Option<std::time::Instant>,
+    /// Auto-clear delay (seconds) once the todo list settles (all closed).
+    /// `< 0` disables auto-clear. Wired from settings at TUI startup.
+    pub todo_clear_delay_secs: i64,
     /// Live todo state provider — the same source the `todo` agent tool
     /// writes to. `None` when todos are disabled; the pane stays hidden.
     pub todo_provider: Option<Arc<dyn TodoStateProvider>>,
@@ -471,6 +481,7 @@ impl Default for RenderState {
             stream_anchor: None,
             agent_hub_open: false,
             hub_entries: Vec::new(),
+            hub: None,
             pending_quit: false,
             slash_popup: SlashPopup::default(),
             reasoning_stage: None,
@@ -489,7 +500,10 @@ impl Default for RenderState {
             queue_selected: 0,
             shell_mode: false,
             follow_ups: Vec::new(),
-            todo_items: Vec::new(),
+            todo_phases: Vec::new(),
+            todo_expanded: false,
+            todo_clear_deadline: None,
+            todo_clear_delay_secs: -1,
             todo_provider: None,
             vim_state: crate::tui_vt::vim::VimState::default(),
             vim_clipboard: String::new(),
@@ -1078,6 +1092,8 @@ pub async fn run_tui(app: App) -> Result<()> {
     state.lock().catalog = Some(app.catalog());
     state.lock().file_commands = crate::tui_vt::slash::file_commands::load_file_commands(&cwd);
     state.lock().todo_provider = session_handle.todo_provider();
+    state.lock().todo_clear_delay_secs = app.settings().todo_clear_delay_secs;
+    state.lock().hub = Some(session_handle.hub_arc());
     state.lock().session_swapper = Some(session_swapper.clone());
     state.lock().session_state = Some(app.session_state().clone());
     state.lock().thinking_level = format!("{:?}", session.thinking_level()).to_ascii_lowercase();
@@ -1403,10 +1419,17 @@ async fn run_event_loop(
         if let Ok(size) = terminal.size() {
             snapshot.viewport_width = size.width;
         }
-        // pane reflects phase changes written by the `todo` agent tool.
+        // pane reflects phase changes written by the `todo` agent tool, plus
+        // subagent auto-reconcile (idle subagents close their matched todos).
         if let Some(provider) = snapshot.todo_provider.as_ref() {
-            snapshot.todo_items = flatten_todo_items(&provider.get_phases());
+            snapshot.todo_phases = refresh_todo_phases(provider, snapshot.hub.as_ref());
         }
+        // HUD-only auto-clear: once the list settles (all closed) and the
+        // delay elapses, drop the phases from the pane. The underlying
+        // TodoState is untouched, so a later `/todo` or `todo` tool call
+        // still sees the historical phases.
+        let clear_delay = snapshot.todo_clear_delay_secs;
+        sync_todo_clear_timer(&mut snapshot, clear_delay);
         // Typewriter paint: reveal the streamed body a bounded step per
         // frame so it types out instead of jumping per network chunk.
         advance_stream_reveal(&mut snapshot);
@@ -2313,6 +2336,22 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             state.active_run = None;
             state.reasoning_stage = None;
             handle.set_reasoning_stage(None);
+        }
+        AgentEvent::TodoReminder { open, attempt, max } => {
+            // Commit a visible banner of *why* the agent kept going; the
+            // injected user turn itself is hidden (UserMessage::hidden).
+            let header = format!(
+                "⚠ {} incomplete todo{} — reminder {attempt}/{max}",
+                open.len(),
+                if open.len() == 1 { "" } else { "s" }
+            );
+            handle.append_line(InlineMessageKind::Warning, vec![plain_segment(header)]);
+            for t in &open {
+                handle.append_line(
+                    InlineMessageKind::Warning,
+                    vec![plain_segment(format!("  ☐ {}", t.content))],
+                );
+            }
         }
         _ => {
             // Other variants (TurnStart, Compaction, ToolCallDelta, …) are
@@ -4382,8 +4421,26 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
         pinned_area.y = pinned_area.y.saturating_add(used);
         pinned_area.height = pinned_area.height.saturating_sub(used);
     }
-    if !state.todo_items.is_empty() {
-        render_todo_pane(frame, pinned_area, &state.todo_items);
+    if !state.todo_phases.is_empty() {
+        if frame.area().height < TODO_COMPACT_ROWS_THRESHOLD {
+            let line = render_todo_compact_line(&state.todo_phases);
+            frame.render_widget(
+                Paragraph::new(vec![line]),
+                Rect {
+                    height: 1,
+                    ..pinned_area
+                },
+            );
+        } else {
+            let is_matched = build_matched_closure(state.hub.as_ref());
+            render_todo_pane(
+                frame,
+                pinned_area,
+                &state.todo_phases,
+                state.todo_expanded,
+                is_matched,
+            );
+        }
     }
     // The row above the composer has one owner per frame. A live run
     // (tracker or stage) takes it — the tracker spans turn boundaries.
@@ -5888,55 +5945,383 @@ fn render_queue_pane(frame: &mut Frame<'_>, scrollback: Rect, state: &RenderStat
     height
 }
 
-/// Flatten todo phases into `(content, status)` pairs for the sticky pane.
-fn flatten_todo_items(
-    phases: &[oxicode_agent::tools::todo::TodoPhase],
-) -> Vec<(String, TodoStatus)> {
-    phases
-        .iter()
-        .flat_map(|p| p.tasks.iter().map(|t| (t.content.clone(), t.status)))
-        .collect()
+/// Format one todo row: marker + content + status-specific suffix + notes
+/// marker. Ports omp's `#formatTodoLine` (`interactive-mode.ts:2326-2341`).
+fn format_todo_line(todo: &TodoItem, matched: bool, styles: &ThemeStyles) -> Line<'static> {
+    let notes_marker = match todo.notes.as_ref().map(|n| n.len()).unwrap_or(0) {
+        0 => String::new(),
+        n => format!(" ·{n}"),
+    };
+    let (marker, color, strike, suffix) = match todo.status {
+        TodoStatus::Completed => ("✓", styles.foreground, true, String::new()),
+        TodoStatus::InProgress => (
+            "▸",
+            styles.primary.get_fg_color().unwrap_or(styles.foreground),
+            false,
+            String::new(),
+        ),
+        TodoStatus::Abandoned => (
+            "☐",
+            styles.error.get_fg_color().unwrap_or(styles.foreground),
+            true,
+            String::new(),
+        ),
+        TodoStatus::Blocked => {
+            let reason = todo
+                .block_reason
+                .as_deref()
+                .map(|r| format!(" (blocked: {r})"))
+                .unwrap_or_else(|| " (blocked)".to_string());
+            (
+                "☐",
+                styles.info.get_fg_color().unwrap_or(styles.foreground),
+                false,
+                reason,
+            )
+        }
+        TodoStatus::Pending if matched => (
+            "☐",
+            styles.primary.get_fg_color().unwrap_or(styles.foreground),
+            false,
+            String::new(),
+        ),
+        TodoStatus::Pending => (
+            "☐",
+            styles.secondary.get_fg_color().unwrap_or(styles.foreground),
+            false,
+            String::new(),
+        ),
+    };
+    let mut text_style = Style::default().fg(color_from_anstyle(Some(color)));
+    if strike {
+        text_style = text_style.add_modifier(Modifier::CROSSED_OUT);
+    }
+    Line::from(vec![
+        Span::styled(
+            format!("{marker} "),
+            Style::default().fg(color_from_anstyle(Some(color))),
+        ),
+        Span::styled(
+            format!("{}{}{}", todo.content, suffix, notes_marker),
+            text_style,
+        ),
+    ])
 }
 
-/// Render a compact todo checklist at the top of the scrollback area.
-fn render_todo_pane(frame: &mut Frame<'_>, scrollback: Rect, items: &[(String, TodoStatus)]) {
-    let styles = active_styles();
-    let height = items.len() as u16 + 1;
-    let area = Rect {
-        x: scrollback.x,
-        y: scrollback.y,
-        width: scrollback.width,
-        height,
-    };
-    let lines: Vec<Line<'_>> = items
+const TREE_BRANCH: &str = "├─";
+const TREE_VERTICAL: &str = "│ ";
+const TREE_HOOK: &str = "└";
+const SUBSEQUENT_STAGE_CAP: usize = 4;
+const ACTIVE_TASK_CAP: usize = 5;
+
+/// Index of the first phase with pending/in-progress work; falls back to the
+/// last phase. Ports omp's `#getActivePhase` (`interactive-mode.ts:2489`).
+fn active_phase_index(phases: &[&TodoPhase]) -> usize {
+    phases
         .iter()
-        .map(|(text, status)| {
-            // Text markers work in every terminal font and do not depend on
-            // pictograms for status recognition.
-            let (marker, color) = match status {
-                TodoStatus::Completed => ("done", Some(styles.foreground)),
-                TodoStatus::InProgress => ("now", styles.primary.get_fg_color()),
-                TodoStatus::Blocked => ("wait", styles.info.get_fg_color()),
-                TodoStatus::Abandoned => ("skip", styles.error.get_fg_color()),
-                TodoStatus::Pending => ("todo", styles.secondary.get_fg_color()),
-            };
-            let text_style = if *status == TodoStatus::Completed {
-                Style::default()
-                    .fg(color_from_anstyle(Some(styles.foreground)))
-                    .add_modifier(Modifier::CROSSED_OUT)
-            } else {
-                Style::default().fg(color_from_anstyle(Some(styles.foreground)))
-            };
-            Line::from(vec![
-                Span::styled(
-                    format!("{marker} "),
-                    Style::default().fg(color_from_anstyle(color)),
-                ),
-                Span::styled(text.clone(), text_style),
-            ])
+        .position(|p| {
+            p.tasks
+                .iter()
+                .any(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
         })
+        .unwrap_or_else(|| phases.len().saturating_sub(1))
+}
+
+/// Closed = completed or abandoned (the collapsed window hides both).
+fn closed_count(tasks: &[TodoItem]) -> usize {
+    tasks
+        .iter()
+        .filter(|t| matches!(t.status, TodoStatus::Completed | TodoStatus::Abandoned))
+        .count()
+}
+
+/// "I. Foundation", "II. Auth", … Reuses `roman_numeral` from `todo.rs`.
+fn phase_display_name(name: &str, one_based: usize) -> String {
+    format!(
+        "{}. {name}",
+        oxicode_agent::tools::todo::roman_numeral(one_based)
+    )
+}
+
+/// Render the sticky todo HUD: phase tree + progress spine. Ports omp's
+/// `#renderTodoList` (`interactive-mode.ts:2529-2643`). Returns rows used so
+/// callers can reserve the space (mirrors `render_queue_pane`).
+fn render_todo_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    phases: &[TodoPhase],
+    expanded: bool,
+    is_matched: impl Fn(&TodoItem) -> bool,
+) -> u16 {
+    let phases: Vec<&TodoPhase> = phases.iter().filter(|p| !p.tasks.is_empty()).collect();
+    if phases.is_empty() {
+        return 0;
+    }
+    let styles = active_styles();
+    let multi_phase = phases.len() > 1;
+    let active_idx = active_phase_index(&phases);
+
+    let render_tasks = |phase: &TodoPhase| -> Vec<Line<'static>> {
+        if expanded {
+            phase
+                .tasks
+                .iter()
+                .map(|t| format_todo_line(t, is_matched(t), &styles))
+                .collect()
+        } else {
+            let sel = oxicode_agent::tools::todo::select_collapsed_todos(
+                &phase.tasks,
+                &is_matched,
+                ACTIVE_TASK_CAP,
+            );
+            let mut lines: Vec<Line<'static>> = sel
+                .items
+                .iter()
+                .map(|t| format_todo_line(t, is_matched(t), &styles))
+                .collect();
+            if let Some(summary) = sel.summary {
+                lines.push(Line::from(Span::styled(
+                    summary,
+                    Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+                )));
+            }
+            lines
+        }
+    };
+
+    let base_idx = if expanded { 0 } else { active_idx };
+    let phase_slice: &[&TodoPhase] = if expanded {
+        &phases[base_idx..]
+    } else {
+        &phases[base_idx..(base_idx + 1 + SUBSEQUENT_STAGE_CAP).min(phases.len())]
+    };
+    let hidden_stages = phases.len() - base_idx - phase_slice.len();
+
+    let mut content_lines: Vec<Line<'static>> = Vec::new();
+    for (i, phase) in phase_slice.iter().enumerate() {
+        let one_based = base_idx + i + 1;
+        let is_active = base_idx + i == active_idx;
+        let done = closed_count(&phase.tasks);
+        let header_text = if multi_phase {
+            format!(
+                "{} · {done}/{}",
+                phase_display_name(&phase.name, one_based),
+                phase.tasks.len()
+            )
+        } else {
+            phase.name.clone()
+        };
+        let header_style = if is_active {
+            Style::default()
+                .fg(color_from_anstyle(styles.primary.get_fg_color()))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color()))
+        };
+        content_lines.push(Line::from(Span::styled(header_text, header_style)));
+        if is_active || expanded {
+            content_lines.extend(render_tasks(phase));
+        }
+    }
+    if hidden_stages > 0 {
+        content_lines.push(Line::from(Span::styled(
+            format!(
+                "… {hidden_stages} more stage{}",
+                if hidden_stages == 1 { "" } else { "s" }
+            ),
+            Style::default().fg(color_from_anstyle(styles.secondary.get_fg_color())),
+        )));
+    }
+
+    // Progress spine: `closed / total` across every phase fills the tree path
+    // (content rows + 1 closing-hook row) in accent, clamped so a partial
+    // plan lights at least one cell and a closed plan never overfills.
+    let total: usize = phases.iter().map(|p| p.tasks.len()).sum();
+    let closed: usize = phases.iter().map(|p| closed_count(&p.tasks)).sum();
+    let path_len = content_lines.len() + 1;
+    let mut filled = (closed * path_len).checked_div(total).unwrap_or(0);
+    if closed > 0 {
+        filled = filled.max(1);
+    }
+    if closed < total {
+        filled = filled.min(path_len.saturating_sub(1));
+    }
+
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        "TODO",
+        Style::default()
+            .fg(color_from_anstyle(styles.primary.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    ))];
+    for (i, content) in content_lines.into_iter().enumerate() {
+        let glyph = if i == 0 { TREE_BRANCH } else { TREE_VERTICAL };
+        let glyph_color = if i < filled {
+            styles.primary.get_fg_color()
+        } else {
+            styles.secondary.get_fg_color()
+        };
+        let mut spans = vec![Span::styled(
+            format!(" {glyph}"),
+            Style::default().fg(color_from_anstyle(glyph_color)),
+        )];
+        spans.extend(content.spans);
+        lines.push(Line::from(spans));
+    }
+    // path_len = content rows + 1 hook row; the hook fills only when every
+    // cell (including it) is lit, i.e. the whole list is closed.
+    let hook_color = if filled >= path_len {
+        styles.primary.get_fg_color()
+    } else {
+        styles.secondary.get_fg_color()
+    };
+    lines.push(Line::from(Span::styled(
+        format!(" {TREE_HOOK}"),
+        Style::default().fg(color_from_anstyle(hook_color)),
+    )));
+
+    let height = lines.len() as u16;
+    frame.render_widget(
+        Paragraph::new(lines),
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height,
+        },
+    );
+    height
+}
+
+const TODO_COMPACT_ROWS_THRESHOLD: u16 = 18;
+
+/// First in-progress task, else the first pending task, else `None`. Ports
+/// omp's `nextActionableTask` (`todo.ts:164-172`).
+fn next_actionable_task(phases: &[TodoPhase]) -> Option<&TodoItem> {
+    let mut first_pending = None;
+    for phase in phases {
+        for task in &phase.tasks {
+            if task.status == TodoStatus::InProgress {
+                return Some(task);
+            }
+            if first_pending.is_none() && task.status == TodoStatus::Pending {
+                first_pending = Some(task);
+            }
+        }
+    }
+    first_pending
+}
+
+/// Single-line HUD used on short terminals (< 18 rows): "TODO N/M · <task>".
+/// Ports omp's `renderCompactStatusLine` (`interactive-mode.ts:2645+`).
+fn render_todo_compact_line(phases: &[TodoPhase]) -> Line<'static> {
+    let styles = active_styles();
+    let total: usize = phases.iter().map(|p| p.tasks.len()).sum();
+    let closed: usize = phases.iter().map(|p| closed_count(&p.tasks)).sum();
+    let mut spans = vec![Span::styled(
+        format!("TODO {closed}/{total} "),
+        Style::default()
+            .fg(color_from_anstyle(styles.primary.get_fg_color()))
+            .add_modifier(Modifier::BOLD),
+    )];
+    match next_actionable_task(phases) {
+        Some(task) => spans.extend(format_todo_line(task, false, &styles).spans),
+        None => spans.push(Span::styled(
+            "✓ done",
+            Style::default().fg(color_from_anstyle(Some(styles.foreground))),
+        )),
+    }
+    Line::from(spans)
+}
+
+/// Pull the latest todo phases, auto-reconciling against the hub's *idle*
+/// sub-agents (a transition Running → Idle is a successful completion) and
+/// committing the reconciled result back when it changed. Ports omp's
+/// `#reconcileTodosWithSubagents` (`interactive-mode.ts:2369-2404`).
+fn refresh_todo_phases(
+    provider: &std::sync::Arc<dyn TodoStateProvider>,
+    hub: Option<&crate::app::agent_hub_registry::SharedHubRegistry>,
+) -> Vec<TodoPhase> {
+    let phases = provider.get_phases();
+    let Some(hub) = hub else {
+        return phases;
+    };
+    let completed: Vec<String> = hub
+        .snapshot()
+        .into_iter()
+        .filter(|(_, e)| {
+            e.kind == oxicode_sdk::HubKind::Subagent && e.status == oxicode_sdk::HubStatus::Idle
+        })
+        .filter_map(|(_, e)| e.current_task)
         .collect();
-    frame.render_widget(Paragraph::new(lines), area);
+    let (updated, mutated) =
+        oxicode_agent::tools::todo::reconcile_with_subagents(&phases, &completed);
+    if mutated {
+        provider.set_phases_sync(updated.clone());
+    }
+    updated
+}
+
+/// Whether every task in the list is closed (`Completed`/`Abandoned`) and at
+/// least one task exists. A list with zero phases or zero tasks is not
+/// "settled" — there's nothing meaningful to auto-clear.
+fn is_todo_list_settled(phases: &[TodoPhase]) -> bool {
+    let mut seen_task = false;
+    for phase in phases {
+        for task in &phase.tasks {
+            if !matches!(task.status, TodoStatus::Completed | TodoStatus::Abandoned) {
+                return false;
+            }
+            seen_task = true;
+        }
+    }
+    seen_task
+}
+
+/// HUD-only auto-clear: does not touch the underlying `TodoState`, so a
+/// `/todo` or `todo` tool call after clearing still sees the historical
+/// phases. `delay_secs < 0` disables clearing entirely. Called every frame
+/// after `refresh_todo_phases`, so a settled list stays visually cleared.
+fn sync_todo_clear_timer(state: &mut RenderState, delay_secs: i64) {
+    if delay_secs < 0 || !is_todo_list_settled(&state.todo_phases) {
+        state.todo_clear_deadline = None;
+        return;
+    }
+    if delay_secs == 0 {
+        state.todo_phases.clear();
+        state.todo_clear_deadline = None;
+        return;
+    }
+    let deadline = state.todo_clear_deadline.get_or_insert_with(|| {
+        std::time::Instant::now() + std::time::Duration::from_secs(delay_secs as u64)
+    });
+    if std::time::Instant::now() >= *deadline {
+        state.todo_phases.clear();
+        state.todo_clear_deadline = None;
+    }
+}
+
+/// Closure that lights a pending todo up (accent) when a *running* sub-agent
+/// is executing it, matched by normalized content overlap. Ports omp's
+/// `isMatched` (`interactive-mode.ts:2543`).
+fn build_matched_closure(
+    hub: Option<&crate::app::agent_hub_registry::SharedHubRegistry>,
+) -> impl Fn(&TodoItem) -> bool + '_ {
+    let active_descs: Vec<String> = hub
+        .map(|h| {
+            h.snapshot()
+                .into_iter()
+                .filter(|(_, e)| {
+                    e.kind == oxicode_sdk::HubKind::Subagent
+                        && e.status == oxicode_sdk::HubStatus::Running
+                })
+                .filter_map(|(_, e)| e.current_task)
+                .collect()
+        })
+        .unwrap_or_default();
+    move |t| {
+        !active_descs.is_empty()
+            && oxicode_agent::tools::todo::todo_matches_any_description(&t.content, &active_descs)
+    }
 }
 
 /// Render follow-up suggestion chips just above the composer.
@@ -7796,44 +8181,274 @@ mod render_tests {
     }
 
     #[test]
-    fn flatten_todo_items_preserves_order_and_status() {
+    fn format_todo_line_shows_block_reason_and_notes_marker() {
+        let styles = active_styles();
+        let todo = TodoItem {
+            content: "Wire OAuth".into(),
+            status: TodoStatus::Blocked,
+            notes: Some(vec!["waiting on vendor".into()]),
+            block_reason: Some("vendor sandbox pending".into()),
+        };
+        let line = format_todo_line(&todo, false, &styles);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Wire OAuth"));
+        assert!(text.contains("blocked: vendor sandbox pending"));
+        assert!(text.contains("·1"));
+    }
+
+    #[test]
+    fn format_todo_line_abandoned_is_strikethrough() {
+        let styles = active_styles();
+        let todo = TodoItem {
+            content: "Drop this".into(),
+            status: TodoStatus::Abandoned,
+            notes: None,
+            block_reason: None,
+        };
+        let line = format_todo_line(&todo, false, &styles);
+        assert!(
+            line.spans
+                .iter()
+                .any(|s| s.style.add_modifier.contains(Modifier::CROSSED_OUT))
+        );
+    }
+
+    #[test]
+    fn render_todo_pane_multi_phase_shows_roman_header_and_progress() {
         use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
-        let phases = vec![
+        let mut state = RenderState::default();
+        state.todo_phases = vec![
             TodoPhase {
-                name: "A".into(),
+                name: "Foundation".into(),
                 tasks: vec![
                     TodoItem {
-                        content: "write code".into(),
-                        status: TodoStatus::InProgress,
+                        content: "a".into(),
+                        status: TodoStatus::Completed,
                         notes: None,
                         block_reason: None,
                     },
                     TodoItem {
-                        content: "write tests".into(),
-                        status: TodoStatus::Pending,
+                        content: "b".into(),
+                        status: TodoStatus::Completed,
                         notes: None,
                         block_reason: None,
                     },
                 ],
             },
             TodoPhase {
-                name: "B".into(),
+                name: "Auth".into(),
+                tasks: vec![
+                    TodoItem {
+                        content: "c".into(),
+                        status: TodoStatus::Completed,
+                        notes: None,
+                        block_reason: None,
+                    },
+                    TodoItem {
+                        content: "d".into(),
+                        status: TodoStatus::InProgress,
+                        notes: None,
+                        block_reason: None,
+                    },
+                    TodoItem {
+                        content: "e".into(),
+                        status: TodoStatus::Pending,
+                        notes: None,
+                        block_reason: None,
+                    },
+                ],
+            },
+        ];
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            rendered.contains("II. Auth"),
+            "multi-phase HUD must show the roman-numeral phase header"
+        );
+        assert!(
+            rendered.contains("1/3"),
+            "active phase must show its done/total progress"
+        );
+    }
+
+    #[test]
+    fn todo_auto_clear_fires_after_delay_when_all_closed() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let mut state = RenderState::default();
+        state.todo_phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![TodoItem {
+                content: "a".into(),
+                status: TodoStatus::Completed,
+                notes: None,
+                block_reason: None,
+            }],
+        }];
+        sync_todo_clear_timer(&mut state, 0); // 0-second delay = instant
+        assert!(state.todo_phases.is_empty());
+    }
+
+    #[test]
+    fn todo_auto_clear_does_not_fire_while_open_tasks_remain() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let mut state = RenderState::default();
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![TodoItem {
+                content: "a".into(),
+                status: TodoStatus::Pending,
+                notes: None,
+                block_reason: None,
+            }],
+        }];
+        state.todo_phases = phases.clone();
+        sync_todo_clear_timer(&mut state, 0);
+        assert_eq!(state.todo_phases.len(), phases.len());
+        assert_eq!(state.todo_phases[0].name, "Auth");
+    }
+
+    #[test]
+    fn todo_auto_clear_negative_delay_disables_clearing() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let mut state = RenderState::default();
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![TodoItem {
+                content: "a".into(),
+                status: TodoStatus::Completed,
+                notes: None,
+                block_reason: None,
+            }],
+        }];
+        state.todo_phases = phases.clone();
+        sync_todo_clear_timer(&mut state, -1);
+        assert_eq!(state.todo_phases.len(), phases.len());
+    }
+
+    #[test]
+    fn render_todo_pane_single_phase_has_no_roman_header() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let mut state = RenderState::default();
+        state.todo_phases = vec![TodoPhase {
+            name: "Todos".into(),
+            tasks: vec![TodoItem {
+                content: "a".into(),
+                status: TodoStatus::Pending,
+                notes: None,
+                block_reason: None,
+            }],
+        }];
+        let rendered = render_frame_to_string(&state);
+        assert!(
+            !rendered.contains("I. Todos"),
+            "single phase must skip roman header"
+        );
+        assert!(rendered.contains("Todos"), "single-phase name must render");
+    }
+
+    #[test]
+    fn render_todo_compact_line_shows_counts_and_active_task() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![
+                TodoItem {
+                    content: "a".into(),
+                    status: TodoStatus::Completed,
+                    notes: None,
+                    block_reason: None,
+                },
+                TodoItem {
+                    content: "b".into(),
+                    status: TodoStatus::InProgress,
+                    notes: None,
+                    block_reason: None,
+                },
+            ],
+        }];
+        let line = render_todo_compact_line(&phases);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("TODO 1/2"));
+        assert!(text.contains("b"));
+    }
+
+    #[test]
+    fn render_todo_compact_line_all_done_shows_done_marker() {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        let phases = vec![TodoPhase {
+            name: "Auth".into(),
+            tasks: vec![TodoItem {
+                content: "a".into(),
+                status: TodoStatus::Completed,
+                notes: None,
+                block_reason: None,
+            }],
+        }];
+        let line = render_todo_compact_line(&phases);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("done"));
+    }
+
+    fn test_todo_state() -> std::sync::Arc<crate::store::todo_state::TodoState> {
+        use oxicode_agent::tools::todo::{TodoItem, TodoPhase};
+        std::sync::Arc::new(crate::store::todo_state::TodoState::with_phases(vec![
+            TodoPhase {
+                name: "Auth".into(),
                 tasks: vec![TodoItem {
-                    content: "waiting on review".into(),
-                    status: TodoStatus::Blocked,
+                    content: "implement authentication module".into(),
+                    status: TodoStatus::Pending,
                     notes: None,
                     block_reason: None,
                 }],
             },
-        ];
-        let flat = flatten_todo_items(&phases);
-        assert_eq!(flat.len(), 3);
-        assert_eq!(flat[0], ("write code".to_string(), TodoStatus::InProgress));
-        assert_eq!(flat[1], ("write tests".to_string(), TodoStatus::Pending));
-        assert_eq!(
-            flat[2],
-            ("waiting on review".to_string(), TodoStatus::Blocked)
+        ]))
+    }
+
+    fn hub_with_subagent(
+        status: oxicode_sdk::HubStatus,
+        current_task: Option<&str>,
+    ) -> std::sync::Arc<crate::app::agent_hub_registry::HubRegistry> {
+        use crate::app::agent_hub_registry::{HubEntry, HubRegistry};
+        let hub = HubRegistry::new();
+        hub.register(
+            "sub".into(),
+            HubEntry {
+                kind: oxicode_sdk::HubKind::Subagent,
+                status,
+                display_name: "sub".into(),
+                current_task: current_task.map(str::to_string),
+                last_activity_ms: 0,
+                session_file: None,
+            },
         );
+        std::sync::Arc::new(hub)
+    }
+
+    #[test]
+    fn frame_refresh_reconciles_todo_with_completed_subagent() {
+        let state = test_todo_state();
+        let provider: std::sync::Arc<dyn TodoStateProvider> =
+            crate::store::todo_state::provider_from_state(state.clone());
+        let hub = hub_with_subagent(oxicode_sdk::HubStatus::Idle, Some("authentication module"));
+        let phases = refresh_todo_phases(&provider, Some(&hub));
+        assert_eq!(phases[0].tasks[0].status, TodoStatus::Completed);
+        // The reconcile write-back persisted through the provider.
+        assert_eq!(state.get_phases()[0].tasks[0].status, TodoStatus::Completed);
+    }
+
+    #[test]
+    fn matched_closure_lights_pending_todo_for_running_subagent() {
+        let hub = hub_with_subagent(
+            oxicode_sdk::HubStatus::Running,
+            Some("authentication module"),
+        );
+        let matched = build_matched_closure(Some(&hub));
+        let t = oxicode_agent::tools::todo::TodoItem {
+            content: "implement authentication module".into(),
+            status: TodoStatus::Pending,
+            notes: None,
+            block_reason: None,
+        };
+        assert!(matched(&t));
     }
 
     #[test]
@@ -7841,18 +8456,31 @@ mod render_tests {
         // The sticky pane is populated from the live provider in the event
         // loop; here we seed it directly to assert the pane paints task text.
         let mut state = RenderState::default();
-        state.todo_items = vec![
-            ("active task".to_string(), TodoStatus::InProgress),
-            ("open task".to_string(), TodoStatus::Pending),
-        ];
+        state.todo_phases = vec![oxicode_agent::tools::todo::TodoPhase {
+            name: "Work".into(),
+            tasks: vec![
+                oxicode_agent::tools::todo::TodoItem {
+                    content: "active task".into(),
+                    status: TodoStatus::InProgress,
+                    notes: None,
+                    block_reason: None,
+                },
+                oxicode_agent::tools::todo::TodoItem {
+                    content: "open task".into(),
+                    status: TodoStatus::Pending,
+                    notes: None,
+                    block_reason: None,
+                },
+            ],
+        }];
         let rendered = render_frame_to_string(&state);
         assert!(
             rendered.contains("active task"),
             "in-progress task must render"
         );
         assert!(rendered.contains("open task"), "pending task must render");
-        // The text status must distinguish the active task without symbols.
-        assert!(rendered.contains("now"), "in-progress status must render");
+        // The active task is marked with the in-progress glyph.
+        assert!(rendered.contains("▸"), "in-progress status must render");
     }
 
     #[test]

@@ -12,6 +12,7 @@ use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -114,6 +115,11 @@ impl Provider for OpenAiResponsesProvider {
             // Add tools if present
             if !context.tools.is_empty() {
                 body["tools"] = build_tools(&context.tools);
+            }
+
+            // Force the tool choice when a Named choice is set (and tools exist).
+            if let Some(choice) = build_tool_choice(options.tool_choice.as_ref()) {
+                body["tool_choice"] = choice;
             }
 
             // Add reasoning if enabled via thinking level or provider_options.openai
@@ -333,6 +339,16 @@ fn blocks_to_json(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError> {
         .collect();
 
     Ok(serde_json::json!(items?))
+}
+
+/// Map a `ToolChoice` to the Responses API's forced-tool-choice shape.
+fn build_tool_choice(tool_choice: Option<&crate::tools::ToolChoice>) -> Option<JsonValue> {
+    match tool_choice {
+        None | Some(crate::tools::ToolChoice::Auto) => None,
+        Some(crate::tools::ToolChoice::Named(name)) => {
+            Some(json!({"type": "function", "name": name}))
+        }
+    }
 }
 
 /// Build tools array for the Responses API
@@ -833,6 +849,16 @@ struct InputTokensDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_tool_choice_maps_named_to_responses_shape() {
+        assert!(build_tool_choice(None).is_none());
+        assert!(build_tool_choice(Some(&crate::tools::ToolChoice::Auto)).is_none());
+        assert_eq!(
+            build_tool_choice(Some(&crate::tools::ToolChoice::Named("todo".into()))),
+            Some(serde_json::json!({"type": "function", "name": "todo"}))
+        );
+    }
     use crate::{Context, Message, Model, TextContent};
     use serde_json::json;
 

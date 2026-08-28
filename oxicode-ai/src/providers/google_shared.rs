@@ -6,6 +6,7 @@
 
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use std::sync::Arc;
 
 use super::{ProviderError, ProviderEvent};
@@ -298,12 +299,24 @@ pub fn blocks_to_google_parts(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>,
 // ---------------------------------------------------------------------------
 
 /// Build the Google/Vertex request body JSON.
+/// Map a `ToolChoice` to Gemini's forced-function-calling `tool_config`.
+pub fn build_tool_config(tool_choice: Option<&crate::tools::ToolChoice>) -> Option<JsonValue> {
+    match tool_choice {
+        None | Some(crate::tools::ToolChoice::Auto) => None,
+        Some(crate::tools::ToolChoice::Named(name)) => Some(json!({
+            "function_calling_config": {"mode": "ANY", "allowed_function_names": [name]}
+        })),
+    }
+}
+
+/// Build the Google/Vertex request body JSON.
 pub fn build_request_body(
     contents: &[JsonValue],
     system_prompt: Option<&str>,
     tools: Option<&JsonValue>,
     temperature: Option<f64>,
     max_tokens: Option<usize>,
+    tool_config: Option<&JsonValue>,
 ) -> JsonValue {
     let mut body = serde_json::json!({
         "contents": contents,
@@ -333,6 +346,11 @@ pub fn build_request_body(
     // Tools
     if let Some(tools_json) = tools {
         body["tools"] = tools_json.clone();
+    }
+
+    // Forced tool config
+    if let Some(tool_config_json) = tool_config {
+        body["tool_config"] = tool_config_json.clone();
     }
 
     body
@@ -532,6 +550,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn build_tool_config_maps_named_to_gemini_tool_config() {
+        assert!(build_tool_config(None).is_none());
+        assert!(build_tool_config(Some(&crate::tools::ToolChoice::Auto)).is_none());
+        assert_eq!(
+            build_tool_config(Some(&crate::tools::ToolChoice::Named("todo".into()))),
+            Some(serde_json::json!({
+                "function_calling_config": {"mode": "ANY", "allowed_function_names": ["todo"]}
+            }))
+        );
+    }
+
+    #[test]
     fn test_is_thinking_part() {
         let mut part = GooglePart {
             text: Some("thinking...".to_string()),
@@ -714,6 +744,7 @@ mod tests {
             None,
             Some(0.7),
             Some(1024),
+            None,
         );
         assert_eq!(&body["contents"], &serde_json::json!(contents));
         assert_eq!(body["generationConfig"]["temperature"], 0.7);

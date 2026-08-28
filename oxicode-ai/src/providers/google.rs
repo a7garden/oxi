@@ -70,12 +70,14 @@ impl Provider for GoogleProvider {
             let tools_json = convert_tools(&context.tools, false);
 
             // Build request body using shared helper
+            let tool_config = super::google_shared::build_tool_config(options.tool_choice.as_ref());
             let mut body = build_request_body(
                 &contents,
                 context.system_prompt.as_deref(),
                 tools_json.as_ref(),
                 options.temperature,
                 options.max_tokens,
+                tool_config.as_ref(),
             );
 
             // ── Google thinking config (via ProviderOptions) ────────────────
