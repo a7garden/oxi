@@ -22,6 +22,7 @@ pub(crate) fn register_extra(registry: &mut SlashRegistry) {
     registry.register(Box::new(ProvidersCommand));
     registry.register(Box::new(ToolsCommand));
     registry.register(Box::new(McpCommand));
+    registry.register(Box::new(HooksCommand));
     registry.register(Box::new(InfoCommand));
     registry.register(Box::new(ExportCommand));
 }
@@ -625,7 +626,65 @@ impl SlashCommand for McpCommand {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
+// /hooks — hooks dashboard
+// ──────────────────────────────────────────────────────────────────────
+
+/// Format the `/hooks` reply body from a slice of `HookSpec`s.
+///
+/// One line per hook: `[<event>] <command>`. The matcher (if any) is
+/// appended in parentheses for clarity. Pure helper so the dashboard can be
+/// unit-tested without touching the user's `~/.oxicode/settings.toml`.
+pub(super) fn fmt_hooks_dashboard(hooks: &[oxicode_sdk::ports::HookSpec]) -> String {
+    let mut out = String::new();
+    for h in hooks {
+        match h.matcher.as_deref() {
+            Some(matcher) => {
+                out.push_str(&format!(
+                    "- [{:?}] {} (matcher: {})\n",
+                    h.event, h.command, matcher
+                ));
+            }
+            None => {
+                out.push_str(&format!("- [{:?}] {}\n", h.event, h.command));
+            }
+        }
+    }
+    out
+}
+
+/// `/hooks` — show the configured event→command hooks (`[[hooks]]` in
+/// `~/.oxicode/settings.toml`). Read-only; mirrors the `/mcp` dashboard
+/// pattern: pull a snapshot synchronously, render a one-screen reply, and
+/// tell the user where to edit when the list is empty. Project-level
+/// approval state is not surfaced here — that flag is per-repo + per
+/// settings-hash and is intentionally not reachable from a generic slash
+/// context; run `/settings` (or open `.oxicode/settings.toml`) to inspect
+/// or revoke approvals.
+struct HooksCommand;
+
+impl SlashCommand for HooksCommand {
+    fn name(&self) -> &'static str {
+        "hooks"
+    }
+    fn description(&self) -> &'static str {
+        "List configured event hooks (read-only)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let settings = crate::store::settings::Settings::load().unwrap_or_default();
+        if settings.hooks.is_empty() {
+            ctx.reply(
+                InlineMessageKind::Info,
+                "No hooks configured. Edit [[hooks]] in ~/.oxicode/settings.toml.".to_string(),
+            );
+        } else {
+            let out = fmt_hooks_dashboard(&settings.hooks);
+            ctx.reply(InlineMessageKind::Info, out);
+        }
+        SlashOutcome::Handled
+    }
+}
+// ──────────────────────────────────────────────────────────────────────
 // /info — diagnostics
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -797,6 +856,37 @@ mod tests {
         assert_eq!(default_api_key_env("minimax"), "MINIMAX_API_KEY");
         assert_eq!(default_api_key_env("zai-org"), "ZAI_ORG_API_KEY");
         assert_eq!(default_api_key_env("Foo-Bar"), "FOO_BAR_API_KEY");
+    }
+
+    /// `/hooks` dashboard lists every configured hook: `[<event>] <command>`,
+    /// one per line. Empty list → the help message shown by the command.
+    /// Pure formatter, decoupled from `Settings::load()` so the test doesn't
+    /// touch the user's real `~/.oxicode/settings.toml`.
+    #[test]
+    fn fmt_hooks_dashboard_lists_events_and_commands() {
+        use oxicode_sdk::ports::{HookEvent, HookSpec};
+        let hooks = vec![
+            HookSpec {
+                event: HookEvent::PreToolUse,
+                matcher: None,
+                command: "echo pre".into(),
+                timeout_secs: None,
+            },
+            HookSpec {
+                event: HookEvent::Stop,
+                matcher: Some("bash".into()),
+                command: "logger post-stop".into(),
+                timeout_secs: Some(10),
+            },
+        ];
+        let out = fmt_hooks_dashboard(&hooks);
+        assert!(out.contains("[PreToolUse]"), "missing first event: {out}");
+        assert!(out.contains("echo pre"), "missing first command: {out}");
+        assert!(out.contains("[Stop]"), "missing second event: {out}");
+        assert!(
+            out.contains("logger post-stop"),
+            "missing second command: {out}"
+        );
     }
 
     // `add_custom_provider` is exercised end-to-end by the in-TUI flow. We

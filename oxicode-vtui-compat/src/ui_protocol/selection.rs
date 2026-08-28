@@ -107,6 +107,29 @@ pub enum InlineListSelection {
     PlanApprovalSwitchBuild,
     /// Hand off to the auto primary agent (auto-execute with per-step HITL).
     PlanApprovalSwitchAuto,
+
+    /// Settings-panel tab switch (`/settings` tabs).
+    SettingsTab(usize),
+    /// Settings-panel sidebar section jump.
+    SettingsSection(usize),
+    /// Settings-panel key-capture submenu targeting a named `SettingKey`.
+    /// Carries the key's Debug name (a `String`) to avoid a dependency from
+    /// `oxicode-vtui-compat` onto `oxicode-cli`'s `SettingKey` enum.
+    SettingKeyCapture(String),
+    /// Settings-panel text editor: Enter on a Text widget row opens a
+    /// single-line prompt; the submitted text is parsed via the def's
+    /// `apply_change` arm and committed (or rejected with an inline
+    /// error). Same String-payload convention as `SettingKeyCapture`.
+    SettingTextEdit(String),
+    /// Settings-panel submenu-select: Enter opens a child list of the
+    /// widget's allowed options; selecting one commits via the def's
+    /// `apply_change` arm.
+    SettingSubmenuOpen(String),
+    /// Settings-panel multiselect: Enter opens a list of the registered
+    /// tools (sourced from the live `ToolRegistry`); each row toggles
+    /// membership in `Settings::disabled_tools`. Essential tools are
+    /// shown but cannot be disabled.
+    SettingMultiselect(String),
 }
 
 /// A selectable item inside a list overlay.

@@ -17,7 +17,9 @@ use oxicode_vtui::tui::core::{
 };
 
 use crate::app::agent_session::AgentSessionHandle;
+use crate::store::settings::Settings;
 use crate::tui_vt::main_loop::{RenderState, plain_segment};
+use crate::tui_vt::settings_defs::{SettingWidget, SettingsTab, defs_for_tab, get_display_value};
 
 /// Outcome of dispatching a slash command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,8 +163,185 @@ impl SlashRegistry {
     }
 }
 
-/// `/settings` — open a settings overlay showing current configuration.
-/// Selecting a toggleable item cycles/toggles its value through the session.
+/// Build the `/settings` overlay rows for one tab from the
+/// [`SETTING_DEFS`](crate::tui_vt::settings_defs::SETTING_DEFS) table —
+/// never a hand-written list; adding a def is all it takes to show up.
+///
+/// Emits a non-interactive heading row (`selection: None`, no subtitle
+/// or badge — the same convention the old read-only "Model" row used)
+/// whenever the group label changes, then one row per def with its live
+/// value from [`get_display_value`] as the badge. `Toggle` and `Cycle`
+/// rows submit a `ConfigAction` carrying the `SettingKey` Debug name;
+/// `Text` / `SubmenuSelect` / `Multiselect` / `Pointer` rows stay
+/// read-only here (their editors route through the overlay-event path
+/// in `main_loop.rs`).
+///
+/// The two `MapEditor` defs expand in place into per-entry rows:
+/// - `Keybindings` → one action row per `GlobalAction` (Enter opens the
+///   key-capture submenu) plus one indented row per bound combo.
+/// - `ModelRoles` → one row per role.
+///
+/// Returns the items plus a parallel `SettingsMapRow` table (index
+/// aligned, `None` for ordinary rows) that the settings panel's input
+/// handling consults for `Enter` / `d` / `n` on map rows.
+pub(crate) fn settings_overlay_items(
+    tab: SettingsTab,
+    settings: &Settings,
+) -> (
+    Vec<InlineListItem>,
+    Vec<Option<crate::tui_vt::settings_defs::SettingsMapRow>>,
+) {
+    use crate::tui_vt::settings_defs::{SettingKey, SettingsMapRow};
+    let mut items: Vec<InlineListItem> = Vec::new();
+    let mut rows: Vec<Option<SettingsMapRow>> = Vec::new();
+    let mut last_group: Option<&'static str> = None;
+    for def in defs_for_tab(tab, settings) {
+        if last_group != Some(def.group) {
+            items.push(InlineListItem {
+                title: def.group.to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                selection: None,
+                search_value: None,
+            });
+            rows.push(None);
+            last_group = Some(def.group);
+        }
+        // Map editors expand into per-entry rows; the generic def row
+        // never renders for them.
+        match (def.widget, def.key) {
+            (SettingWidget::MapEditor, SettingKey::Keybindings) => {
+                expand_keybinding_rows(settings, &mut items, &mut rows);
+                continue;
+            }
+            (SettingWidget::MapEditor, SettingKey::ModelRoles) => {
+                expand_model_role_rows(settings, &mut items, &mut rows);
+                continue;
+            }
+            _ => {}
+        }
+        let selection = match def.widget {
+            // Toggle/Cycle commit through the ConfigAction path (the
+            // overlay-submission arm routes the SettingKey Debug name).
+            SettingWidget::Toggle | SettingWidget::Cycle => {
+                Some(InlineListSelection::ConfigAction(format!("{:?}", def.key)))
+            }
+            // Text/SubmenuSelect/Multiselect each get their own
+            // selection variant: the editor opens on Enter with the
+            // SettingKey Debug name as the payload, routed via the
+            // matching arm in `handle_inline_event`.
+            SettingWidget::Text => Some(InlineListSelection::SettingTextEdit(format!(
+                "{:?}",
+                def.key
+            ))),
+            SettingWidget::SubmenuSelect(_) => Some(InlineListSelection::SettingSubmenuOpen(
+                format!("{:?}", def.key),
+            )),
+            SettingWidget::Multiselect => Some(InlineListSelection::SettingMultiselect(format!(
+                "{:?}",
+                def.key
+            ))),
+            // Pointer + MapEditor rows stay read-only here (MapEditor
+            // is expanded above into per-entry rows with their own
+            // selection variants; Pointer rows are owned by
+            // slash commands).
+            SettingWidget::MapEditor | SettingWidget::Pointer => None,
+        };
+        items.push(InlineListItem {
+            title: def.label.to_string(),
+            subtitle: Some(def.description.to_string()),
+            badge: Some(get_display_value(def.key, settings)),
+            indent: 0,
+            selection,
+            search_value: Some(format!("{} {} {:?}", def.label, def.description, def.key)),
+        });
+        rows.push(None);
+    }
+    (items, rows)
+}
+
+/// Expand the `Keybindings` MapEditor def: one action row per
+/// `GlobalAction` (Enter → key-capture submenu, selection carries the
+/// action name) followed by one indented row per bound combo. The
+/// combo list comes from a keymap hydrated exactly like the live one
+/// (defaults + user overrides), so the rows mirror what the next
+/// keystroke actually resolves.
+fn expand_keybinding_rows(
+    settings: &Settings,
+    items: &mut Vec<InlineListItem>,
+    rows: &mut Vec<Option<crate::tui_vt::settings_defs::SettingsMapRow>>,
+) {
+    use crate::tui_vt::settings_defs::SettingsMapRow;
+    let keymap = crate::tui_vt::keymap::Keymap::from_settings(&settings.keybindings);
+    for action in crate::tui_vt::keymap::GlobalAction::all() {
+        let name = action.name();
+        items.push(InlineListItem {
+            title: name.to_string(),
+            subtitle: Some("Enter: capture a new combo".into()),
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::SettingKeyCapture(name.to_string())),
+            search_value: Some(name.to_string()),
+        });
+        rows.push(Some(SettingsMapRow::KeybindingAction(action)));
+        for combo in keymap.action_combos(action) {
+            let combo = combo.to_string();
+            items.push(InlineListItem {
+                title: combo.clone(),
+                subtitle: Some("d: remove".into()),
+                badge: None,
+                indent: 1,
+                selection: None,
+                search_value: Some(format!("{name} {combo}")),
+            });
+            rows.push(Some(SettingsMapRow::KeybindingCombo(action, combo)));
+        }
+    }
+}
+
+/// Expand the `ModelRoles` MapEditor def into one row per role
+/// (sorted by role so the list — and tests — stay deterministic):
+/// Enter edits the value, `d` deletes the role, `n` anywhere on the
+/// Model tab starts a new role. An empty map renders a hint row.
+fn expand_model_role_rows(
+    settings: &Settings,
+    items: &mut Vec<InlineListItem>,
+    rows: &mut Vec<Option<crate::tui_vt::settings_defs::SettingsMapRow>>,
+) {
+    use crate::tui_vt::settings_defs::SettingsMapRow;
+    if settings.model_roles.is_empty() {
+        items.push(InlineListItem {
+            title: "(no model roles)".into(),
+            subtitle: Some("n: add a role".into()),
+            badge: None,
+            indent: 1,
+            selection: None,
+            search_value: Some("model roles".into()),
+        });
+        rows.push(None);
+        return;
+    }
+    let mut roles: Vec<(&String, &String)> = settings.model_roles.iter().collect();
+    roles.sort();
+    for (role, model) in roles {
+        items.push(InlineListItem {
+            title: role.clone(),
+            subtitle: Some("Enter: edit \u{b7} d: delete".into()),
+            badge: Some(model.clone()),
+            indent: 0,
+            selection: None,
+            search_value: Some(format!("{role} {model}")),
+        });
+        rows.push(Some(SettingsMapRow::ModelRole(role.clone())));
+    }
+}
+
+/// `/settings` — open the settings panel overlay.
+///
+/// Rows come from the declarative settings table: a heading per group,
+/// one row per setting, live values as badges. Selecting a `Toggle` or
+/// `Cycle` row submits its `SettingKey` for an immediate apply.
 struct SettingsCommand;
 
 impl SlashCommand for SettingsCommand {
@@ -173,76 +352,15 @@ impl SlashCommand for SettingsCommand {
         &["config"]
     }
     fn description(&self) -> &'static str {
-        "Show settings overlay (toggle thinking, compaction, advisor)"
+        "Open the settings panel"
     }
     fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
-        use oxicode_vtui::tui::core::{
-            InlineListItem, InlineListSearchConfig, InlineListSelection,
-        };
-
-        let session = ctx.session;
-        let model = session.model_id();
-        let thinking = session.thinking_level();
-        let auto_compaction = session.auto_compaction_enabled();
-        let auto_retry = session.auto_retry_enabled();
-        let advisor = session.is_advisor_enabled();
-
-        // Build setting items. Items with a `selection` are interactive;
-        // items without are read-only display.
-        let items = vec![
-            InlineListItem {
-                title: "Model".into(),
-                subtitle: Some("Use /model to change the active model".into()),
-                badge: Some(model),
-                indent: 0,
-                selection: None,
-                search_value: Some("model".into()),
-            },
-            InlineListItem {
-                title: "Thinking".into(),
-                subtitle: Some("Enter to cycle".into()),
-                badge: Some(format!("{thinking:?}")),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction("thinking_level".into())),
-                search_value: Some("thinking".into()),
-            },
-            InlineListItem {
-                title: "Auto-compaction".into(),
-                subtitle: Some("Enter to toggle".into()),
-                badge: Some(if auto_compaction { "on" } else { "off" }.into()),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction("auto_compaction".into())),
-                search_value: Some("compaction".into()),
-            },
-            InlineListItem {
-                title: "Auto-retry".into(),
-                subtitle: Some("Enter to toggle".into()),
-                badge: Some(if auto_retry { "on" } else { "off" }.into()),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction("auto_retry".into())),
-                search_value: Some("retry".into()),
-            },
-            InlineListItem {
-                title: "Advisor".into(),
-                subtitle: Some("Enter to toggle".into()),
-                badge: Some(if advisor { "on" } else { "off" }.into()),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction("advisor".into())),
-                search_value: Some("advisor".into()),
-            },
-            InlineListItem {
-                title: "Icons".into(),
-                subtitle: Some("Enter to cycle unicode \u{2192} ascii \u{2192} nerd".into()),
-                badge: Some(
-                    crate::store::settings::Settings::load()
-                        .map(|s| s.glyph_set.to_string())
-                        .unwrap_or_else(|_| "unicode".into()),
-                ),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction("glyph_set".into())),
-                search_value: Some("icons glyphs nerd font".into()),
-            },
-        ];
+        let settings = Settings::load().unwrap_or_default();
+        // `handle_inline_event`'s ShowOverlay hydration replaces this
+        // flat list with the full tabbed panel (on the live tab); this
+        // request just carries the first tab's rows for harnesses that
+        // render the request verbatim.
+        let (items, _rows) = settings_overlay_items(SettingsTab::General, &settings);
 
         let search = InlineListSearchConfig {
             label: "Filter settings".into(),
@@ -250,7 +368,7 @@ impl SlashCommand for SettingsCommand {
         };
         ctx.handle.show_list_modal(
             "Settings".into(),
-            vec!["Current session settings. Values update immediately.".into()],
+            vec!["Browse settings by group; filter with the search bar.".into()],
             items,
             None,
             Some(search),
@@ -1188,8 +1306,10 @@ mod tests {
     use oxicode_sdk::ports::catalog::{
         CatalogEvent, CatalogModelEntry, CatalogProtocol, CatalogSource, ModelCatalog,
     };
-    use std::future::Future;
+    use oxicode_sdk::{Model, Provider, ProviderError, ProviderEvent};
+    use oxicode_vtui::tui::core::{InlineCommand, OverlayRequest};
     use std::pin::Pin;
+    use std::task::{Context as TaskContext, Poll};
 
     #[test]
     fn builtins_register_expected_commands() {
@@ -1496,5 +1616,182 @@ mod tests {
         fn search_sync(&self, _pattern: &str) -> Vec<CatalogModelEntry> {
             self.entries.clone()
         }
+    }
+
+    // ── /settings ────────────────────────────────────────────────────
+
+    /// `/settings` items are built from the `SETTING_DEFS` General tab:
+    /// a heading row at every group change, then one row per def in
+    /// table order with the per-widget selection mapping.
+    #[test]
+    fn settings_items_mirror_general_tab_defs() {
+        let settings = Settings::default();
+        let defs = defs_for_tab(SettingsTab::General, &settings);
+        assert!(!defs.is_empty(), "General tab must define settings");
+
+        let items = settings_overlay_items(SettingsTab::General, &settings).0;
+        assert!(!items.is_empty());
+
+        // Walk the emitted items against the table: heading rows (no
+        // subtitle/badge) must announce the next def's group and only
+        // when the group changed; setting rows must match the next def
+        // exactly. This pins both order and group contiguity.
+        let mut next_def = 0usize;
+        let mut last_group: Option<&str> = None;
+        let mut heading_count = 0usize;
+        for item in &items {
+            if item.subtitle.is_none() && item.badge.is_none() {
+                assert!(next_def < defs.len(), "heading with no def to follow");
+                let def = defs[next_def];
+                assert_eq!(item.title, def.group, "heading carries the group name");
+                assert!(item.selection.is_none(), "headings are never interactive");
+                assert_ne!(
+                    last_group,
+                    Some(def.group),
+                    "heading emitted without a group change"
+                );
+                last_group = Some(def.group);
+                heading_count += 1;
+            } else {
+                let def = defs[next_def];
+                assert_eq!(item.title, def.label, "rows follow SETTING_DEFS order");
+                assert_eq!(item.subtitle.as_deref(), Some(def.description));
+                assert_eq!(
+                    item.badge.as_deref(),
+                    Some(get_display_value(def.key, &settings).as_str())
+                );
+                let expected = match def.widget {
+                    SettingWidget::Toggle | SettingWidget::Cycle => {
+                        Some(InlineListSelection::ConfigAction(format!("{:?}", def.key)))
+                    }
+                    SettingWidget::Text => Some(InlineListSelection::SettingTextEdit(format!(
+                        "{:?}",
+                        def.key
+                    ))),
+                    SettingWidget::SubmenuSelect(_) => Some(
+                        InlineListSelection::SettingSubmenuOpen(format!("{:?}", def.key)),
+                    ),
+                    SettingWidget::Multiselect => Some(InlineListSelection::SettingMultiselect(
+                        format!("{:?}", def.key),
+                    )),
+                    SettingWidget::MapEditor | SettingWidget::Pointer => None,
+                };
+                assert_eq!(item.selection.as_ref(), expected.as_ref());
+                assert!(
+                    item.search_value
+                        .as_deref()
+                        .is_some_and(|v| v.contains(def.label))
+                );
+                next_def += 1;
+            }
+        }
+        assert_eq!(next_def, defs.len(), "exactly one row per General-tab def");
+        assert!(heading_count > 0, "at least one group heading emitted");
+    }
+
+    /// Minimal provider double so a real `AgentSessionHandle` can back
+    /// the `SlashCtx` — `/settings` itself never calls the model.
+    struct NullProvider;
+
+    struct EmptyStream;
+
+    impl futures::Stream for EmptyStream {
+        type Item = ProviderEvent;
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(None)
+        }
+    }
+
+    impl Provider for NullProvider {
+        fn stream<'a>(
+            &'a self,
+            _model: &'a Model,
+            _context: &'a oxicode_sdk::Context,
+            _options: Option<oxicode_sdk::StreamOptions>,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<
+                            Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
+                            ProviderError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                Ok::<_, ProviderError>(Box::pin(EmptyStream)
+                    as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+            })
+        }
+    }
+
+    /// Dispatching `/settings` opens a "Settings" list overlay whose
+    /// items are exactly the table-built General-tab rows.
+    #[test]
+    fn settings_command_opens_table_driven_overlay() {
+        use crate::app::agent_session::AgentSession;
+        use crate::store::session::SessionManager;
+        use oxicode_agent::{Agent, AgentConfig, ToolRegistry};
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+
+        let session = AgentSession::new(
+            std::sync::Arc::new(Agent::new(
+                std::sync::Arc::new(NullProvider),
+                AgentConfig::new("anthropic/claude-sonnet-4-20250514"),
+                std::sync::Arc::new(ToolRegistry::new()),
+            )),
+            Settings::default(),
+            SessionManager::in_memory("/tmp/test"),
+            "/tmp/test".to_string(),
+            crate::SessionState::default(),
+        )
+        .clone_handle();
+
+        let mut state = RenderState::default();
+        let mut ctx = SlashCtx {
+            session: &session,
+            handle: &handle,
+            state: &mut state,
+        };
+        assert!(matches!(
+            SlashRegistry::builtins().dispatch("/settings", &mut ctx),
+            SlashOutcome::Handled
+        ));
+
+        // Drain the command channel for the overlay-open command.
+        let list = loop {
+            match cmd_rx.try_recv().expect("overlay command emitted") {
+                InlineCommand::ShowOverlay { request } => match *request {
+                    OverlayRequest::List(list) => break list,
+                    _ => panic!("expected a list overlay request"),
+                },
+                _ => continue,
+            }
+        };
+        assert_eq!(list.title, "Settings");
+        assert!(list.search.is_some(), "settings overlay is filterable");
+
+        // `execute` loads settings from disk, so badge VALUES may differ
+        // from `Settings::default()` — but structure is table-determined.
+        // Assert the row titles mirror the General defs in order, with a
+        // heading row present.
+        let defs = defs_for_tab(SettingsTab::General, &Settings::default());
+        let rows: Vec<&str> = list
+            .items
+            .iter()
+            .filter(|i| i.subtitle.is_some())
+            .map(|i| i.title.as_str())
+            .collect();
+        let labels: Vec<&str> = defs.iter().map(|d| d.label).collect();
+        assert_eq!(rows, labels, "overlay rows mirror the General tab defs");
+        assert!(
+            list.items
+                .iter()
+                .any(|i| i.subtitle.is_none() && i.badge.is_none()),
+            "at least one group heading row present"
+        );
     }
 }

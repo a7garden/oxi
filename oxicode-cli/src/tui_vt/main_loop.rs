@@ -17,7 +17,7 @@ use anyhow::Result;
 use crossterm::{
     cursor::{Hide, Show},
     event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
         KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
     },
@@ -49,8 +49,15 @@ use unicode_width::UnicodeWidthStr;
 use crate::App;
 use crate::app::agent_hub_registry::HubEntry;
 use crate::app::agent_session::SessionEvent;
+use crate::tui_vt::keymap::{GlobalAction, KeyCombo, Keymap};
+use crate::tui_vt::settings_defs::{
+    SETTING_DEFS, SettingKey, SettingWidget, SettingsMapRow, SettingsTab, defs_for_tab,
+    get_display_value,
+};
 use crate::tui_vt::slash::file_commands::FileCommand;
-use crate::tui_vt::slash::registry::{SlashCtx, SlashOutcome, SlashRegistry};
+use crate::tui_vt::slash::registry::{
+    SlashCtx, SlashOutcome, SlashRegistry, settings_overlay_items,
+};
 use oxicode_vtui::presentation::{BlockDisplayMode, TranscriptLine, VisibleItem, visible_items};
 
 use oxicode_textarea::{EditBuffer, ElementKind, TextArea, TextAreaState};
@@ -461,6 +468,32 @@ pub struct RenderState {
     /// `AgentSession::resume_from_file`. `Option` because
     /// `#[derive(Default)]` requires it.
     pub session_state: Option<crate::SessionState>,
+    /// Active `/settings` tab. Persisted across overlay reopens within
+    /// the session; drives both the tab-switch rebuild and the sidebar
+    /// highlight.
+    pub settings_active_tab: crate::tui_vt::settings_defs::SettingsTab,
+    /// Row-kind table for the settings panel's map editors
+    /// (Keybindings / Model roles), index-aligned with
+    /// `overlay.items` while the tabbed panel is open. Built by the
+    /// same pass that builds the items; consulted by the input thread
+    /// to route `Enter` / `d` / `n` on map rows. Empty (or stale —
+    /// every consumer re-checks length alignment) for non-settings
+    /// overlays.
+    pub settings_map_rows: Vec<Option<SettingsMapRow>>,
+    /// Live global-shortcut resolver, seeded from
+    /// `Settings::keybindings` at TUI startup and swapped in place by
+    /// the keybindings editor. `parking_lot::RwLock` (not ArcSwap) — no
+    /// new dependency, and the per-keystroke read-lock cost is
+    /// negligible.
+    pub keymap: Arc<parking_lot::RwLock<crate::tui_vt::keymap::Keymap>>,
+    /// Test-only sandbox: when `Some`, the keybindings commit path
+    /// writes `Settings` to this path via `Settings::save_to` instead
+    /// of touching the real `~/.oxicode/settings.{json,toml}`. The
+    /// production TUI leaves this at `None`; only unit tests set it.
+    /// Thread-safety is the same as `RenderState` itself (single-thread
+    /// use in the input thread).
+    #[cfg(test)]
+    pub settings_override_path: Option<std::path::PathBuf>,
 }
 
 impl Default for RenderState {
@@ -528,15 +561,24 @@ impl Default for RenderState {
             session_state: None,
             context_tokens: None,
             context_window: 128_000,
+            settings_active_tab: crate::tui_vt::settings_defs::SettingsTab::General,
+            settings_map_rows: Vec::new(),
+            // Default bindings only — `new_with_header` (the real TUI
+            // startup) layers `Settings::keybindings` on top, keeping
+            // `Default` free of disk I/O for tests.
+            keymap: Arc::new(parking_lot::RwLock::new(Keymap::from_settings(
+                &std::collections::HashMap::new(),
+            ))),
+            #[cfg(test)]
+            settings_override_path: None,
             brain: BrainChip::default(),
         }
     }
 }
 
 /// Where a secure prompt came from. The `SecureInput` overlay has just one
-/// payload (the API key text); the origin discriminates the post-commit
-/// follow-up so the user gets a contextual message instead of a generic
-/// "saved" line.
+/// payload (the text); the origin discriminates the post-commit follow-up
+/// so the user gets a contextual flow instead of a generic "saved" line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SecureInputOrigin {
     /// User picked a provider row and chose "Set API key" (or hit Enter
@@ -547,6 +589,17 @@ pub enum SecureInputOrigin {
     /// chaining straight into the key prompt so they can finish the
     /// setup without another navigation step.
     NewlyAdded { provider: String },
+    /// Model-roles map editor: the user pressed `n` — the submitted
+    /// text is the new ROLE name; the value prompt follows.
+    ModelRoleKey,
+    /// Model-roles map editor: the submitted text is the model pattern
+    /// for `role`.
+    ModelRoleValue { role: String },
+    /// Generic settings-panel text editor: the submitted text is
+    /// committed via `settings_defs::apply_change` for the named
+    /// SettingKey. Empty input clears the override (where the field
+    /// is `Option`); invalid input is rejected with an inline error.
+    TextEdit(crate::tui_vt::settings_defs::SettingKey),
 }
 
 /// In-transcript search state.
@@ -599,7 +652,11 @@ pub struct OverlayListItem {
 /// `InlineCommand::ShowOverlay` arrives. The input thread mutates
 /// `selected` / `search` while the overlay is open and reads the same
 /// fields when forwarding `OverlayEvent`s.
-#[derive(Clone, Debug)]
+///
+/// `tabs` / `sections` carry the settings panel's tab bar and sidebar.
+/// Both stay default-empty for every other overlay — `render_overlay`
+/// only takes the tabbed/sidebar branches when they are populated.
+#[derive(Clone, Debug, Default)]
 pub struct OverlayState {
     pub title: String,
     pub lines: Vec<String>,
@@ -607,6 +664,22 @@ pub struct OverlayState {
     pub selected: usize,
     pub search: Option<OverlaySearchState>,
     pub secure_input: Option<OverlaySecureInput>,
+    /// Tab-bar labels (settings panel only; empty ⇒ no tab bar).
+    pub tabs: Vec<String>,
+    /// Index of the active tab into `tabs`.
+    pub active_tab: usize,
+    /// Sidebar section (group) labels for the active tab; the sidebar
+    /// renders when there are at least two.
+    pub sections: Vec<String>,
+    /// Index of the active section into `sections`, synced to the group
+    /// of the currently selected item.
+    pub active_section: usize,
+    /// Keybinding-capture mode (settings panel only): `Some(action
+    /// name)` while the "press a key combo" prompt is up. The input
+    /// thread intercepts the next key BEFORE global-shortcut resolution
+    /// so even a combo that currently triggers an action is captured
+    /// verbatim. Esc cancels.
+    pub key_capture: Option<String>,
 }
 
 /// Secure (masked) single-line input state carried by an overlay.
@@ -678,6 +751,12 @@ impl RenderState {
         s.header_context = header;
         s.prompt_prefix = "> ".to_string();
         s.input_enabled = true;
+        // Build the live keymap once at startup from the persisted
+        // bindings — the input loop resolves every keystroke against it.
+        let bindings = crate::store::settings::Settings::load()
+            .unwrap_or_default()
+            .keybindings;
+        *s.keymap.write() = Keymap::from_settings(&bindings);
         s
     }
 
@@ -1557,7 +1636,32 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
             state.queued_inputs = entries;
         }
         InlineCommand::ShowOverlay { request } => {
-            state.overlay = Some(materialize_overlay(*request));
+            let mut overlay = materialize_overlay(*request);
+            // The `/settings` panel arrives as the flat Task-4 list; its
+            // rows are the only producers of ConfigAction selections.
+            // Hydrate the full tabbed/sidebar overlay from the def table
+            // (reopening on the last active tab) instead. Map-editor row
+            // metadata rides along with the hydration; every other
+            // overlay invalidates it.
+            let mut map_rows = Vec::new();
+            if overlay.items.iter().any(|it| {
+                matches!(
+                    it.selection,
+                    Some(InlineListSelection::ConfigAction(_))
+                        | Some(InlineListSelection::SettingsTab(_))
+                        | Some(InlineListSelection::SettingsSection(_))
+                        | Some(InlineListSelection::SettingKeyCapture(_))
+                        | Some(InlineListSelection::SettingTextEdit(_))
+                        | Some(InlineListSelection::SettingSubmenuOpen(_))
+                        | Some(InlineListSelection::SettingMultiselect(_))
+                )
+            }) {
+                let (hydrated, rows) = build_settings_overlay(state.settings_active_tab, None);
+                overlay = hydrated;
+                map_rows = rows;
+            }
+            state.overlay = Some(overlay);
+            state.settings_map_rows = map_rows;
         }
         InlineCommand::CloseOverlay => {
             state.overlay = None;
@@ -1593,6 +1697,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 selected: 0,
                 search: None,
                 secure_input,
+                ..Default::default()
             }
         }
         OverlayRequest::List(req) => {
@@ -1608,6 +1713,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 selected: 0,
                 search,
                 secure_input: None,
+                ..Default::default()
             }
         }
         OverlayRequest::Wizard(req) => {
@@ -1636,6 +1742,7 @@ fn materialize_overlay(request: OverlayRequest) -> OverlayState {
                 selected: 0,
                 search,
                 secure_input: None,
+                ..Default::default()
             }
         }
     }
@@ -1649,6 +1756,859 @@ fn overlay_item_from(item: InlineListItem) -> OverlayListItem {
         search_value: item.search_value,
         selection: item.selection,
     }
+}
+
+/// Canonical `/settings` tab order. Indices are the
+/// `InlineListSelection::SettingsTab(usize)` payloads and
+/// `OverlayState::active_tab`.
+const SETTINGS_TABS: &[(SettingsTab, &str)] = &[
+    (SettingsTab::General, "General"),
+    (SettingsTab::Model, "Model"),
+    (SettingsTab::Interaction, "Interaction"),
+    (SettingsTab::Tools, "Tools"),
+    (SettingsTab::Ui, "UI"),
+    (SettingsTab::AdvisorMemory, "Advisor & Memory"),
+    (SettingsTab::Keybindings, "Keybindings"),
+    (SettingsTab::Advanced, "Advanced"),
+];
+
+/// Build the full tabbed `/settings` overlay for `tab`: tab-bar labels,
+/// sidebar section labels (group names, declaration order), and one row
+/// per def via [`settings_overlay_items`] — the same row builder the
+/// `/settings` slash command uses, hydrated with the tab/sidebar state.
+/// `keep_search` preserves the live filter across tab switches.
+///
+/// Returns the overlay plus the map-row table (index-aligned with the
+/// items) for the input thread's `Enter` / `d` / `n` routing.
+fn build_settings_overlay(
+    tab: SettingsTab,
+    keep_search: Option<OverlaySearchState>,
+) -> (OverlayState, Vec<Option<SettingsMapRow>>) {
+    let settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let (items, map_rows) = settings_overlay_items(tab, &settings);
+    let items: Vec<OverlayListItem> = items.into_iter().map(overlay_item_from).collect();
+    let mut sections: Vec<String> = Vec::new();
+    for def in defs_for_tab(tab, &settings) {
+        if sections.last().map(String::as_str) != Some(def.group) {
+            sections.push(def.group.to_string());
+        }
+    }
+    let active_tab = SETTINGS_TABS
+        .iter()
+        .position(|(t, _)| *t == tab)
+        .unwrap_or(0);
+    (
+        OverlayState {
+            title: "Settings".into(),
+            lines: vec!["Browse settings by group; filter with the search bar.".into()],
+            items,
+            selected: 0,
+            search: keep_search.or(Some(OverlaySearchState {
+                label: "Filter settings".into(),
+                placeholder: Some("Type to filter".into()),
+                value: String::new(),
+            })),
+            secure_input: None,
+            tabs: SETTINGS_TABS
+                .iter()
+                .map(|(_, name)| name.to_string())
+                .collect(),
+            active_tab,
+            sections,
+            active_section: 0,
+            key_capture: None,
+        },
+        map_rows,
+    )
+}
+
+/// Reopen (or switch) the settings panel on `tab`, replacing the first
+/// context line with `status` when given. Keeps the live search filter,
+/// syncs `settings_active_tab`, and refreshes the map-row table — the
+/// single assignment path for the tabbed panel so the rows can never
+/// drift from the items.
+fn reopen_settings_panel(state: &mut RenderState, tab: SettingsTab, status: Option<String>) {
+    let keep_search = state.overlay.as_ref().and_then(|o| o.search.clone());
+    state.settings_active_tab = tab;
+    let (mut overlay, map_rows) = build_settings_overlay(tab, keep_search);
+    if let Some(status) = status {
+        if overlay.lines.is_empty() {
+            overlay.lines.push(status);
+        } else {
+            overlay.lines[0] = status;
+        }
+    }
+    state.overlay = Some(overlay);
+    state.settings_map_rows = map_rows;
+}
+
+/// Switch the settings overlay to `SETTINGS_TABS[tab_idx]`: rebuild items
+/// and sections for that tab (keeping the live search filter) and sync
+/// `RenderState::settings_active_tab` so a later `/settings` reopens on
+/// the same tab. No-op when the index is out of range or no overlay is
+/// open.
+fn switch_settings_tab(state: &mut RenderState, tab_idx: usize) {
+    let Some(&(tab, _)) = SETTINGS_TABS.get(tab_idx) else {
+        return;
+    };
+    let search = state.overlay.as_ref().and_then(|o| o.search.clone());
+    state.settings_active_tab = tab;
+    let (overlay, map_rows) = build_settings_overlay(tab, search);
+    state.overlay = Some(overlay);
+    state.settings_map_rows = map_rows;
+}
+
+/// Jump the settings overlay's selection to the first row of sidebar
+/// section `section_idx` (an index into `OverlayState::sections`).
+/// Rebuilds the overlay for the active tab first — submissions arrive
+/// after the overlay was closed, so the panel has to be reopened anyway.
+fn jump_settings_section(state: &mut RenderState, section_idx: usize) {
+    let tab = state.settings_active_tab;
+    let search = state.overlay.as_ref().and_then(|o| o.search.clone());
+    let (mut overlay, map_rows) = build_settings_overlay(tab, search);
+    if let Some(target) = overlay.sections.get(section_idx).cloned() {
+        // Heading rows (title-only items, per the settings_overlay_items
+        // convention) delimit groups; the first selectable row after the
+        // target heading is the section's anchor.
+        let mut in_target = false;
+        let mut anchor: Option<usize> = None;
+        for (idx, item) in overlay.items.iter().enumerate() {
+            let is_heading =
+                item.selection.is_none() && item.badge.is_none() && item.subtitle.is_none();
+            if is_heading {
+                in_target = item.title == target;
+            } else if in_target && anchor.is_none() {
+                anchor = Some(idx);
+            }
+        }
+        if let Some(idx) = anchor {
+            overlay.selected = idx;
+            overlay.active_section = section_idx;
+        }
+    }
+    state.overlay = Some(overlay);
+    state.settings_map_rows = map_rows;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Keybindings map editor (capture / remove / live swap)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The "press a key combo" prompt shown after selecting an action row.
+/// `key_capture` marks capture mode for the input thread.
+fn build_key_capture_overlay(action_name: &str) -> OverlayState {
+    OverlayState {
+        title: format!("Keybinding: {action_name}"),
+        lines: vec![format!(
+            "Press a key combo for {action_name} (Esc to cancel)\u{2026}"
+        )],
+        key_capture: Some(action_name.to_string()),
+        ..Default::default()
+    }
+}
+
+/// Serialize an incoming key event into its canonical `KeyCombo` text.
+///
+/// Only `Ctrl` / `Alt` / `Shift` survive (SUPER & co. would never
+/// round-trip through `KeyCombo::parse`), and a shifted lowercase char
+/// is uppercased — the same canonicalization `parse` applies — so the
+/// serialization always round-trips. Kitty note (Task 2): with
+/// `OXICODE_KITTY_KEYBOARD` the terminal already clears SHIFT on
+/// shifted chars (they arrive uppercase), which this normalization is
+/// self-consistent with.
+fn key_event_to_combo_text(key: KeyEvent) -> Option<(String, KeyCombo)> {
+    use crossterm::event::KeyCode as Kc;
+    let mods = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let code = match key.code {
+        // Canonical shifted-letter form: uppercase char (crossterm's
+        // `normalize_case` shape), SHIFT retained.
+        Kc::Char(c) if c.is_ascii_lowercase() && mods.contains(KeyModifiers::SHIFT) => {
+            Kc::Char(c.to_ascii_uppercase())
+        }
+        other => other,
+    };
+    let combo = KeyCombo {
+        code,
+        modifiers: mods,
+    };
+    let text = combo.to_string();
+    // Reject anything that cannot round-trip through `KeyCombo::parse`
+    // (F-keys, arrows, Home/End, …): persisting them would write a
+    // binding that never resolves.
+    (KeyCombo::parse(&text) == Some(combo.clone())).then_some((text, combo))
+}
+
+/// Handle the next key while the key-capture prompt is open. Esc (no
+/// Ctrl/Alt) cancels back to the Keybindings tab; any other key is
+/// validated (`key_event_to_combo_text` + a Ctrl/Alt requirement, since
+/// an unmodified key would hijack typing) and, when valid, appended to
+/// the action's live combo list, persisted, and swapped into
+/// `RenderState::keymap`. Rejections keep the prompt open with the
+/// reason as its only line.
+fn handle_key_capture(state: &mut RenderState, key: KeyEvent) {
+    let Some(action_name) = state.overlay.as_ref().and_then(|o| o.key_capture.clone()) else {
+        return;
+    };
+    let Some(action) = GlobalAction::from_name(&action_name) else {
+        // Unreachable unless a capture overlay is built by hand with a
+        // bogus name — fail closed by closing the prompt.
+        state.overlay = None;
+        state.settings_map_rows.clear();
+        return;
+    };
+    // Esc cancels without capturing.
+    if key.code == KeyCode::Esc
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        reopen_settings_panel(state, SettingsTab::Keybindings, None);
+        return;
+    }
+    let Some((text, _combo)) = key_event_to_combo_text(key) else {
+        set_capture_prompt_line(
+            state,
+            "That key can't be captured (F-keys and arrows don't round-trip). \
+             Try another combo, Esc to cancel\u{2026}",
+        );
+        return;
+    };
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        set_capture_prompt_line(
+            state,
+            &format!(
+                "'{text}' has no Ctrl or Alt — it would hijack typing. \
+                 Try another combo, Esc to cancel\u{2026}"
+            ),
+        );
+        return;
+    }
+    // Append to the action's LIVE combo list (defaults + overrides),
+    // deduped: capturing an already-bound combo is a no-op edit.
+    let mut combos: Vec<String> = state
+        .keymap
+        .read()
+        .action_combos(action)
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
+    if !combos.iter().any(|c| c == &text) {
+        combos.push(text.clone());
+    }
+    match commit_keybindings(state, action, combos) {
+        Ok(()) => reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!("Captured {text} for {action_name}")),
+        ),
+        Err(e) => set_capture_prompt_line(
+            state,
+            &format!("Failed to save keybindings: {e} — Esc to cancel\u{2026}"),
+        ),
+    }
+}
+
+fn set_capture_prompt_line(state: &mut RenderState, line: &str) {
+    if let Some(overlay) = state.overlay.as_mut() {
+        overlay.lines = vec![line.to_string()];
+    }
+}
+
+/// Persist `action`'s new combo list and swap the rebuilt keymap into
+/// `RenderState::keymap` so the change takes effect on the very next
+/// keystroke — no restart. The keymap swap only happens after a
+/// successful save (never persist a binding the disk state disagrees
+/// with).
+fn commit_keybindings(
+    state: &mut RenderState,
+    action: GlobalAction,
+    combos: Vec<String>,
+) -> anyhow::Result<()> {
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    crate::tui_vt::settings_defs::set_action_combos(&mut settings, action, combos);
+    save_settings_sandboxed(state, &settings)?;
+    *state.keymap.write() = Keymap::from_settings(&settings.keybindings);
+    Ok(())
+}
+
+/// Persist `settings`, honoring the test-only
+/// `RenderState::settings_override_path` sandbox: when set, the write
+/// lands in the tempdir path via `Settings::save_to` instead of the
+/// real `~/.oxicode/settings.{json,toml}`. Production code paths never
+/// set the override, so they always take the plain `save()` branch.
+fn save_settings_sandboxed(
+    state: &RenderState,
+    settings: &crate::store::settings::Settings,
+) -> anyhow::Result<()> {
+    #[cfg(test)]
+    {
+        if let Some(path) = state.settings_override_path.as_ref() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            return settings.save_to(path);
+        }
+    }
+    let _ = state; // production builds don't read the sandbox field
+    settings.save()
+}
+
+/// `d` on a keybinding-combo row: remove that combo. Guarded — the
+/// final combo of an action is refused (an action with zero keys is a
+/// silent trap: the user could no longer trigger it, or reach this
+/// panel to fix it). A remove that lands back on the default list
+/// drops the override entry entirely.
+fn remove_keybinding_combo(state: &mut RenderState, action: GlobalAction, combo: &str) {
+    let current: Vec<String> = state
+        .keymap
+        .read()
+        .action_combos(action)
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
+    if current.len() <= 1 {
+        reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!(
+                "Refusing to remove the last combo for {} — add another first (Enter on the \
+                 action row)",
+                action.name()
+            )),
+        );
+        return;
+    }
+    let next: Vec<String> = current
+        .iter()
+        .filter(|c| c.as_str() != combo)
+        .cloned()
+        .collect();
+    if next.len() == current.len() {
+        // Not bound (stale row) — nothing to do.
+        return;
+    }
+    match commit_keybindings(state, action, next) {
+        Ok(()) => reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!("Removed {combo} from {}", action.name())),
+        ),
+        Err(e) => reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!("Failed to save keybindings: {e}")),
+        ),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Model roles map editor (n / Enter / d + text prompts)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Open the unmasked text prompt for a model-role value (Enter on a
+/// role row). Prefills the current model pattern so Enter-as-no-op is a
+/// cheap round-trip.
+fn open_model_role_value_prompt(state: &mut RenderState, role: &str) {
+    let current = crate::store::settings::Settings::load()
+        .map(|s| s.model_roles.get(role).cloned())
+        .ok()
+        .flatten();
+    state.secure_input_origin = Some(SecureInputOrigin::ModelRoleValue {
+        role: role.to_string(),
+    });
+    state.overlay = Some(text_prompt_overlay(
+        format!("Model for role '{role}'"),
+        "Enter the model pattern (provider/model). Enter saves, Esc cancels.".into(),
+        "model",
+        Some("provider/model".into()),
+        current.as_deref(),
+    ));
+    state.settings_map_rows.clear();
+}
+
+/// Open the unmasked text prompt naming a NEW model role (`n`).
+fn open_model_role_key_prompt(state: &mut RenderState) {
+    state.secure_input_origin = Some(SecureInputOrigin::ModelRoleKey);
+    state.overlay = Some(text_prompt_overlay(
+        "New model role".to_string(),
+        "Name the role (e.g. fast, reviewer). Enter continues, Esc cancels.".into(),
+        "role",
+        Some("role name".into()),
+        None,
+    ));
+    state.settings_map_rows.clear();
+}
+
+/// Single-line unmasked text prompt built directly on the secure-input
+/// machinery (`mask_input: false` renders the value in the clear).
+fn text_prompt_overlay(
+    title: String,
+    line: String,
+    label: &str,
+    placeholder: Option<String>,
+    prefill: Option<&str>,
+) -> OverlayState {
+    let mut editor = EditBuffer::new();
+    if let Some(text) = prefill {
+        let _ = editor.insert_str(text);
+    }
+    OverlayState {
+        title,
+        lines: vec![line],
+        secure_input: Some(OverlaySecureInput {
+            config: SecurePromptConfig {
+                label: label.to_string(),
+                placeholder,
+                mask_input: false,
+            },
+            editor,
+        }),
+        ..Default::default()
+    }
+}
+
+/// Whether the settings panel (tabbed overlay + fresh map-row table) is
+/// open — the precondition for the map-editor hotkeys.
+fn settings_map_editor_active(state: &RenderState) -> bool {
+    state.overlay.as_ref().is_some_and(|o| {
+        o.tabs.len() > 1
+            && o.key_capture.is_none()
+            && state.settings_map_rows.len() == o.items.len()
+    })
+}
+
+/// The map-row (if any) currently selected in the settings panel.
+fn selected_settings_map_row(state: &RenderState) -> Option<SettingsMapRow> {
+    if !settings_map_editor_active(state) {
+        return None;
+    }
+    let selected = state.overlay.as_ref().map(|o| o.selected)?;
+    state.settings_map_rows.get(selected).cloned().flatten()
+}
+
+/// `Enter` on a model-role row opens the value prompt. Returns whether
+/// the key was consumed (input thread only calls this for Enter).
+fn try_edit_model_role(state: &mut RenderState) -> bool {
+    match selected_settings_map_row(state) {
+        Some(SettingsMapRow::ModelRole(role)) => {
+            open_model_role_value_prompt(state, &role);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// `d` on a map row: remove a keybinding combo (guarded — see
+/// [`remove_keybinding_combo`]) or delete a model role. Returns whether
+/// the key was consumed.
+fn try_remove_settings_map_row(state: &mut RenderState) -> bool {
+    match selected_settings_map_row(state) {
+        Some(SettingsMapRow::KeybindingCombo(action, combo)) => {
+            remove_keybinding_combo(state, action, &combo);
+            true
+        }
+        Some(SettingsMapRow::ModelRole(role)) => {
+            let status = match crate::store::settings::Settings::load() {
+                Ok(mut settings) => {
+                    let existed =
+                        crate::tui_vt::settings_defs::remove_model_role(&mut settings, &role);
+                    match settings.save() {
+                        Ok(()) if existed => format!("Removed model role '{role}'"),
+                        Ok(()) => format!("Role '{role}' was already gone"),
+                        Err(e) => format!("Failed to save model roles: {e}"),
+                    }
+                }
+                Err(e) => format!("Failed to load settings: {e}"),
+            };
+            reopen_settings_panel(state, SettingsTab::Model, Some(status));
+            true
+        }
+        _ => false,
+    }
+}
+
+/// `n` on the Model tab starts a new model role (name first, then the
+/// model pattern). Returns whether the key was consumed.
+fn try_start_new_model_role(state: &mut RenderState) -> bool {
+    if settings_map_editor_active(state) && state.settings_active_tab == SettingsTab::Model {
+        open_model_role_key_prompt(state);
+        true
+    } else {
+        false
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Settings panel editors: Text / SubmenuSelect / Multiselect (Final-fix wave)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Open the unmasked text-prompt overlay for a `Text` widget row. The
+/// submitted text is routed through `SecureInputOrigin::TextEdit(key)`
+/// so the `OverlaySubmission::SecureInput` consumer commits via
+/// `settings_defs::apply_change` (parse-validated per-key).
+fn open_text_edit_prompt(state: &mut RenderState, key: SettingKey) {
+    let current = crate::store::settings::Settings::load()
+        .map(|s| get_display_value(key, &s))
+        .unwrap_or_default();
+    state.secure_input_origin = Some(SecureInputOrigin::TextEdit(key));
+    state.overlay = Some(text_prompt_overlay(
+        format!("Edit {}", label_for_setting(key)),
+        format!(
+            "Enter the new value for {} (Esc to cancel). Empty clears the override              when the field supports it.",
+            label_for_setting(key)
+        ),
+        "value",
+        None,
+        if current == "default" {
+            None
+        } else {
+            Some(current.as_str())
+        },
+    ));
+}
+
+/// Open the submenu-select overlay for a `SubmenuSelect` widget row:
+/// a child list of the widget's allowed strings; the active value is
+/// marked in the badge.
+fn open_submenu_select_prompt(state: &mut RenderState, key: SettingKey) {
+    let Some(options) = submenu_options_for(key) else {
+        // Defensive: a stray SettingSubmenuOpen against a non-submenu
+        // key shouldn't happen, but if it does, surface the mismatch
+        // and reopen the panel so the user is never stuck on a dead
+        // overlay.
+        reopen_settings_panel(
+            state,
+            state.settings_active_tab,
+            Some(format!("'{:?}' is not a submenu-select setting", key)),
+        );
+        return;
+    };
+    let current = crate::store::settings::Settings::load()
+        .map(|s| get_display_value(key, &s))
+        .unwrap_or_default();
+    let items: Vec<OverlayListItem> = options
+        .iter()
+        .map(|opt| InlineListItem {
+            title: (*opt).to_string(),
+            subtitle: None,
+            badge: if *opt == current {
+                Some("current".to_string())
+            } else {
+                None
+            },
+            indent: 0,
+            selection: Some(InlineListSelection::ConfigAction(format!(
+                "SubmenuCommit:{:?}:{}",
+                key, opt
+            ))),
+            search_value: None,
+        })
+        .map(overlay_item_from)
+        .collect();
+    let label = label_for_setting(key);
+    state.overlay = Some(OverlayState {
+        title: format!("Pick value for {label}"),
+        lines: vec![format!("Esc cancels — current: {current}")],
+        items,
+        selected: options.iter().position(|o| *o == current).unwrap_or(0),
+        ..Default::default()
+    });
+    state.settings_map_rows.clear();
+}
+
+/// Source the registered tool list (live `ToolRegistry`) and open the
+/// multiselect overlay for `DisabledTools`. Essential tools are shown
+/// with their badge but cannot be toggled off (the input handler
+/// refuses the toggle with an Error line).
+fn open_disabled_tools_multiselect(
+    state: &mut RenderState,
+    session: &crate::app::agent_session::AgentSessionHandle,
+) {
+    let mut tools = session.agent_ref().tools().get_tools();
+    tools.sort_by(|a, b| a.name().cmp(b.name()));
+    let settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let disabled: std::collections::HashSet<String> =
+        settings.disabled_tools.iter().cloned().collect();
+    let items: Vec<OverlayListItem> = tools
+        .iter()
+        .map(|t| {
+            let name = t.name();
+            let is_disabled = disabled.contains(name);
+            InlineListItem {
+                title: name.to_string(),
+                subtitle: Some(t.description().to_string()),
+                badge: Some(if t.essential() {
+                    if is_disabled {
+                        "essential — locked".to_string()
+                    } else {
+                        "essential".to_string()
+                    }
+                } else if is_disabled {
+                    "disabled".to_string()
+                } else {
+                    "enabled".to_string()
+                }),
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction(format!(
+                    "DisabledToolToggle:{}",
+                    name
+                ))),
+                search_value: None,
+            }
+        })
+        .map(overlay_item_from)
+        .collect();
+    let disabled_count = items
+        .iter()
+        .filter(|i| {
+            i.badge
+                .as_deref()
+                .map(|b| b == "disabled" || b == "essential — locked")
+                .unwrap_or(false)
+        })
+        .count();
+    state.overlay = Some(OverlayState {
+        title: "Disabled tools".into(),
+        lines: vec![format!(
+            "{disabled_count} disabled — Enter/Space toggles, Esc closes"
+        )],
+        items,
+        selected: 0,
+        ..Default::default()
+    });
+    state.settings_map_rows.clear();
+}
+
+/// Commit a `Text` widget edit: `apply_change` parses the input,
+/// `Settings::save` persists, and the panel reopens with a status
+/// line. Returns the outcome string for the caller to surface. The
+/// session is required only for `sync_settings_live`; callers that
+/// don't need live sync (e.g. model defaults — no live propagation
+/// today) can pass a real handle from `handle_inline_event`'s scope.
+/// Tests pass `&RenderState::default()` and skip the live sync via
+/// the `with_session` toggle.
+fn commit_text_edit(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    session: Option<&crate::app::agent_session::AgentSessionHandle>,
+    key: SettingKey,
+    text: String,
+) -> (anyhow::Result<()>, String) {
+    let label = label_for_setting(key);
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let outcome =
+        crate::tui_vt::settings_defs::apply_change(key, &mut settings, text.trim().to_string())
+            .and_then(|_| save_settings_sandboxed(state, &settings));
+    let new_display = get_display_value(key, &settings);
+    match &outcome {
+        Ok(()) => {
+            if let Some(session) = session {
+                // Best-effort live sync — `apply_change` already validated
+                // the parse; sync failures don't undo the save.
+                if let Err(e) = sync_settings_live(state, session, key, &settings) {
+                    handle.append_line(
+                        InlineMessageKind::Error,
+                        vec![plain_segment(format!("{label}: {e}"))],
+                    );
+                }
+            }
+            let status = format!("{label}: {new_display}");
+            // Match the ConfigAction path's transcript feedback: a
+            // saved scalar edit is surfaced as an Info line, not just
+            // the panel status.
+            handle.append_line(InlineMessageKind::Info, vec![plain_segment(status.clone())]);
+            reopen_settings_panel(state, state.settings_active_tab, Some(status.clone()));
+            (Ok(()), status)
+        }
+        Err(e) => {
+            let msg = format!("{label}: {e}");
+            handle.append_line(InlineMessageKind::Error, vec![plain_segment(msg.clone())]);
+            (Err(anyhow::anyhow!("{e}")), msg)
+        }
+    }
+}
+
+/// Commit a `SubmenuSelect` widget edit: write the chosen option,
+/// persist, reopen the panel with the new badge.
+fn commit_submenu_choice(
+    state: &mut RenderState,
+    key: SettingKey,
+    value: String,
+) -> anyhow::Result<String> {
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    crate::tui_vt::settings_defs::apply_change(key, &mut settings, value.clone())?;
+    save_settings_sandboxed(state, &settings)?;
+    let new_display = get_display_value(key, &settings);
+    let label = label_for_setting(key);
+    let status = format!("{label}: {new_display}");
+    reopen_settings_panel(state, state.settings_active_tab, Some(status.clone()));
+    Ok(status)
+}
+
+/// Toggle one tool in `Settings::disabled_tools`. Returns the outcome
+/// string for the caller to surface (success or refusal for
+/// essential tools).
+fn commit_disabled_tool_toggle(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    tool: String,
+    essential: bool,
+    currently_disabled: bool,
+) {
+    let label = label_for_setting(SettingKey::DisabledTools);
+    if essential {
+        handle.append_line(
+            InlineMessageKind::Error,
+            vec![plain_segment(format!(
+                "'{tool}' is essential and cannot be disabled"
+            ))],
+        );
+        // Refresh the overlay so the user's failed toggle doesn't show
+        // a stale badge.
+        open_disabled_tools_multiselect(state, session);
+        return;
+    }
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let new_enabled = currently_disabled; // toggling from disabled → enabled
+    crate::tui_vt::settings_defs::toggle_disabled_tool(&mut settings, &tool, new_enabled);
+    match save_settings_sandboxed(state, &settings) {
+        Ok(()) => {
+            let new_state = if new_enabled { "enabled" } else { "disabled" };
+            handle.append_line(
+                InlineMessageKind::Info,
+                vec![plain_segment(format!("{label}: '{tool}' {new_state}"))],
+            );
+            open_disabled_tools_multiselect(state, session);
+        }
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!("{label}: failed to save: {e}"))],
+            );
+        }
+    }
+}
+
+/// Human label for a SettingKey — mirrors the row label the user
+/// sees on the panel, used in overlay titles and status messages.
+fn label_for_setting(key: SettingKey) -> &'static str {
+    SETTING_DEFS
+        .iter()
+        .find(|d| d.key == key)
+        .map(|d| d.label)
+        .unwrap_or("setting")
+}
+
+/// Parse a `SettingKey::Debug`-formatted name (the payload the panel
+/// ships through `InlineListSelection::SettingTextEdit` et al.) back
+/// into a typed key. Returns `None` for unrecognized names; callers
+/// must surface that as an Error line (no silent no-op).
+fn parse_setting_key(name: &str) -> Option<SettingKey> {
+    SETTING_DEFS
+        .iter()
+        .map(|d| d.key)
+        .find(|k| format!("{k:?}") == name)
+}
+
+/// The allowed option list for a `SubmenuSelect` key, looked up from
+/// its def. Returns `None` for non-submenu keys.
+fn submenu_options_for(key: SettingKey) -> Option<&'static [&'static str]> {
+    SETTING_DEFS
+        .iter()
+        .find(|d| d.key == key)
+        .and_then(|d| match d.widget {
+            SettingWidget::SubmenuSelect(opts) => Some(opts),
+            _ => None,
+        })
+}
+
+/// Sidebar section index an item belongs to: the group of the last
+/// heading row at or above it. Returns `None` for items outside every
+/// section (or when the overlay has no sections).
+fn item_section_idx(overlay: &OverlayState, idx: usize) -> Option<usize> {
+    let mut current: Option<String> = None;
+    for (i, item) in overlay.items.iter().enumerate() {
+        let is_heading =
+            item.selection.is_none() && item.badge.is_none() && item.subtitle.is_none();
+        if is_heading {
+            current = Some(item.title.clone());
+        }
+        if i == idx {
+            return current
+                .as_deref()
+                .and_then(|g| overlay.sections.iter().position(|s| s == g));
+        }
+    }
+    None
+}
+
+/// Next variant string for a `Cycle` widget row — the value an Enter
+/// submits to `settings_defs::apply_change`.
+fn next_cycle_value(key: SettingKey, s: &crate::store::settings::Settings) -> Option<String> {
+    match key {
+        // Mirrors `AgentSession::cycle_thinking_level`'s order.
+        SettingKey::ThinkingLevel => {
+            const LEVELS: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+            let cur = get_display_value(key, s);
+            let idx = LEVELS.iter().position(|l| *l == cur).unwrap_or(0);
+            Some(LEVELS[(idx + 1) % LEVELS.len()].to_string())
+        }
+        SettingKey::GlyphSet => Some(s.glyph_set.next().to_string()),
+        SettingKey::EditFormat => Some(
+            if get_display_value(key, s) == "hashline" {
+                "str_replace"
+            } else {
+                "hashline"
+            }
+            .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// Live-sync the handful of settings the open session / render state read
+/// eagerly, so an overlay edit takes effect without a restart. Everything
+/// else is re-read from disk on the next turn
+/// (`AgentSession::rebuild_system_prompt` already reloads on demand).
+///
+/// Returns `Err` only when a live propagation genuinely failed (the
+/// advisor toggle can refuse to start/stop) — the caller surfaces that
+/// instead of a silent success; the disk value is already saved at that
+/// point, so the message says what the user must do (restart).
+fn sync_settings_live(
+    state: &mut RenderState,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    key: SettingKey,
+    settings: &crate::store::settings::Settings,
+) -> anyhow::Result<()> {
+    match key {
+        SettingKey::ThinkingLevel => {
+            session.set_thinking_level(settings.thinking_level);
+            state.thinking_level = get_display_value(key, settings);
+        }
+        SettingKey::GlyphSet => state.glyph_set = settings.glyph_set,
+        SettingKey::AutoCompaction => session.set_auto_compaction(settings.auto_compaction),
+        SettingKey::AdvisorEnabled if session.is_advisor_enabled() != settings.advisor.enabled => {
+            session
+                .set_advisor_enabled(settings.advisor.enabled)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "failed to {} the advisor live: {e} (saved; restart to apply)",
+                        if settings.advisor.enabled {
+                            "enable"
+                        } else {
+                            "disable"
+                        }
+                    )
+                })?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Map a `SessionEvent` to the matching `InlineHandle` calls. This is the
@@ -2393,17 +3353,19 @@ pub(crate) fn next_provider_actions(has_key: bool, oauth_capable: bool) -> Vec<A
 /// The caller must consume the boolean return value the same way it does
 /// for `handle_auth_action`: `true` means a new overlay was opened, so
 /// the previously-open overlay must NOT be closed in the same submit
-/// pass (the cmd channel processes `ShowOverlay` and `CloseOverlay` in
-/// submit order).
 pub(crate) fn open_secure_prompt(
     state: &mut RenderState,
     handle: &InlineHandle,
     origin: SecureInputOrigin,
 ) {
+    // Model-role prompts are built by their own (unmasked, prefilled)
+    // builders; this auth-specific helper is never called with them.
     let provider = match &origin {
         SecureInputOrigin::SetKey { provider } | SecureInputOrigin::NewlyAdded { provider } => {
             provider.clone()
         }
+        SecureInputOrigin::ModelRoleKey | SecureInputOrigin::ModelRoleValue { .. } => return,
+        SecureInputOrigin::TextEdit(_) => return,
     };
     state.secure_input_origin = Some(origin);
     handle.show_modal(
@@ -2904,78 +3866,257 @@ fn handle_inline_event(
                         state.composer.set_text(&format!("/{name} "));
                     }
                     // Settings overlay: toggle/cycle the selected setting.
-                    if let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
-                        &sub
+                    // `ConfigAction` carries the `SettingKey` Debug name
+                    // emitted by `settings_overlay_items`; dispatch goes
+                    // through the def table (`apply_change`), never a
+                    // per-name match.
+                    // Synthetic ConfigAction payloads emitted by the
+                    // panel editors: handled FIRST so they never reach
+                    // the generic `ConfigAction(name)` arm (which would
+                    // treat `SubmenuCommit:…` / `DisabledToolToggle:…`
+                    // as a bogus SettingKey name and error out).
+                    let synthetic_dispatched = if let OverlaySubmission::Selection(
+                        InlineListSelection::ConfigAction(payload),
+                    ) = &sub
                     {
-                        match key.as_str() {
-                            "thinking_level" => {
-                                if let Some(level) = session.cycle_thinking_level() {
-                                    handle.append_line(
-                                        InlineMessageKind::Info,
-                                        vec![plain_segment(format!("Thinking: {level:?}"))],
-                                    );
-                                }
-                            }
-                            "auto_compaction" => {
-                                let enabled = !session.auto_compaction_enabled();
-                                session.set_auto_compaction(enabled);
-                                handle.append_line(
-                                    InlineMessageKind::Info,
-                                    vec![plain_segment(format!(
-                                        "Auto-compaction: {}",
-                                        if enabled { "on" } else { "off" }
-                                    ))],
-                                );
-                            }
-                            "auto_retry" => {
-                                let enabled = !session.auto_retry_enabled();
-                                session.set_auto_retry(enabled);
-                                handle.append_line(
-                                    InlineMessageKind::Info,
-                                    vec![plain_segment(format!(
-                                        "Auto-retry: {}",
-                                        if enabled { "on" } else { "off" }
-                                    ))],
-                                );
-                            }
-                            "advisor" => match session.toggle_advisor() {
-                                Ok(enabled) => handle.append_line(
-                                    InlineMessageKind::Info,
-                                    vec![plain_segment(format!(
-                                        "Advisor: {}",
-                                        if enabled { "on" } else { "off" }
-                                    ))],
-                                ),
-                                Err(e) => handle.append_line(
-                                    InlineMessageKind::Error,
-                                    vec![plain_segment(format!("Failed to toggle advisor: {e}"))],
-                                ),
-                            },
-                            "glyph_set" => {
-                                // Cycle unicode → ascii → nerd, persist, and
-                                // apply LIVE — the composer border switches
-                                // on the next frame, no restart needed.
-                                let mut settings =
-                                    crate::store::settings::Settings::load().unwrap_or_default();
-                                let next = settings.glyph_set.next();
-                                settings.glyph_set = next;
-                                match settings.save() {
-                                    Ok(()) => {
-                                        state.glyph_set = next;
-                                        handle.append_line(
-                                            InlineMessageKind::Info,
-                                            vec![plain_segment(format!("Icons: {next}"))],
-                                        );
+                        if let Some(rest) = payload.strip_prefix("SubmenuCommit:") {
+                            if let Some((key_str, value)) = rest.split_once(':') {
+                                if let Some(key) = parse_setting_key(key_str) {
+                                    match commit_submenu_choice(state, key, value.to_string()) {
+                                        Ok(status) => {
+                                            handle.append_line(
+                                                InlineMessageKind::Info,
+                                                vec![plain_segment(status.clone())],
+                                            );
+                                            opened_new_overlay = state.overlay.is_some();
+                                        }
+                                        Err(e) => handle.append_line(
+                                            InlineMessageKind::Error,
+                                            vec![plain_segment(format!(
+                                                "Failed to save setting: {e}"
+                                            ))],
+                                        ),
                                     }
-                                    Err(e) => handle.append_line(
+                                } else {
+                                    handle.append_line(
                                         InlineMessageKind::Error,
                                         vec![plain_segment(format!(
-                                            "Failed to save glyph_set: {e}"
+                                            "Unknown setting key in submenu commit: {key_str}"
                                         ))],
+                                    );
+                                }
+                            } else {
+                                handle.append_line(
+                                    InlineMessageKind::Error,
+                                    vec![plain_segment(format!(
+                                        "Malformed submenu commit payload: {payload}"
+                                    ))],
+                                );
+                            }
+                            true
+                        } else if let Some(tool) = payload.strip_prefix("DisabledToolToggle:") {
+                            let essential = session
+                                .agent_ref()
+                                .tools()
+                                .get_tools()
+                                .into_iter()
+                                .find(|t| t.name() == tool)
+                                .is_some_and(|t| t.essential());
+                            let currently_disabled = crate::store::settings::Settings::load()
+                                .map(|s| s.disabled_tools.iter().any(|t| t == tool))
+                                .unwrap_or(false);
+                            commit_disabled_tool_toggle(
+                                state,
+                                handle,
+                                session,
+                                tool.to_string(),
+                                essential,
+                                currently_disabled,
+                            );
+                            opened_new_overlay = state.overlay.is_some();
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    if !synthetic_dispatched
+                        && let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
+                            &sub
+                    {
+                        let def = SETTING_DEFS.iter().find(|d| format!("{:?}", d.key) == *key);
+                        match def {
+                            Some(def) => {
+                                let mut settings =
+                                    crate::store::settings::Settings::load().unwrap_or_default();
+                                // Toggle submits the inverted bool; Cycle
+                                // the next variant. The structured editors
+                                // (Text/Submenu/Multiselect/MapEditor)
+                                // commit their own explicit values.
+                                let next_value = match def.widget {
+                                    SettingWidget::Toggle => Some(
+                                        (get_display_value(def.key, &settings) != "true")
+                                            .to_string(),
                                     ),
+                                    SettingWidget::Cycle => next_cycle_value(def.key, &settings),
+                                    _ => None,
+                                };
+                                if let Some(next) = next_value {
+                                    match crate::tui_vt::settings_defs::apply_change(
+                                        def.key,
+                                        &mut settings,
+                                        next,
+                                    ) {
+                                        Ok(()) => match settings.save() {
+                                            Ok(()) => {
+                                                if let Err(e) = sync_settings_live(
+                                                    state, session, def.key, &settings,
+                                                ) {
+                                                    // Saved, but the live
+                                                    // toggle failed — an
+                                                    // Error line, never a
+                                                    // silent success.
+                                                    handle.append_line(
+                                                        InlineMessageKind::Error,
+                                                        vec![plain_segment(format!(
+                                                            "{}: {e}",
+                                                            def.label
+                                                        ))],
+                                                    );
+                                                } else {
+                                                    handle.append_line(
+                                                        InlineMessageKind::Info,
+                                                        vec![plain_segment(format!(
+                                                            "{}: {}",
+                                                            def.label,
+                                                            get_display_value(def.key, &settings)
+                                                        ))],
+                                                    );
+                                                }
+                                            }
+                                            Err(e) => handle.append_line(
+                                                InlineMessageKind::Error,
+                                                vec![plain_segment(format!(
+                                                    "Failed to save {}: {e}",
+                                                    def.label
+                                                ))],
+                                            ),
+                                        },
+                                        Err(e) => handle.append_line(
+                                            InlineMessageKind::Error,
+                                            vec![plain_segment(format!(
+                                                "Failed to apply {}: {e}",
+                                                def.label
+                                            ))],
+                                        ),
+                                    }
                                 }
                             }
-                            _ => {}
+                            None => handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting: {key}"))],
+                            ),
+                        }
+                    }
+                    // Settings panel tab switch: reopen the panel rebuilt
+                    // for the requested tab (Enter closes the overlay, so
+                    // the switch has to reopen it).
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingsTab(idx)) =
+                        &sub
+                    {
+                        switch_settings_tab(state, *idx);
+                        opened_new_overlay = state.overlay.is_some();
+                    }
+                    // Settings panel sidebar section jump: reopen on the
+                    // active tab with the selection moved to the section's
+                    // first row.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingsSection(idx)) =
+                        &sub
+                    {
+                        jump_settings_section(state, *idx);
+                        opened_new_overlay = state.overlay.is_some();
+                    }
+                    // Keybinding capture: selecting an action row opens
+                    // the "press a key combo" prompt. The INPUT thread
+                    // consumes the next key before global-shortcut
+                    // resolution (`handle_key_capture`) and commits
+                    // through the keybindings map editor.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingKeyCapture(
+                        name,
+                    )) = &sub
+                    {
+                        if GlobalAction::from_name(name).is_some() {
+                            state.overlay = Some(build_key_capture_overlay(name));
+                            state.settings_map_rows.clear();
+                            opened_new_overlay = true;
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown keybinding action: {name}"))],
+                            );
+                        }
+                    }
+                    // Settings-panel text editor: open the prompt; the
+                    // submitted text arrives via the SecureInput arm
+                    // below (`SecureInputOrigin::TextEdit(key)`).
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingTextEdit(
+                        key_name,
+                    )) = &sub
+                    {
+                        if let Some(key) = parse_setting_key(key_name) {
+                            open_text_edit_prompt(state, key);
+                            opened_new_overlay = true;
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting key: {key_name}"))],
+                            );
+                        }
+                    }
+                    // Settings-panel submenu-select: open a child list
+                    // whose selections arrive as synthetic
+                    // `ConfigAction("SubmenuCommit:Key:value")` payloads
+                    // routed by the ConfigAction arm below.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingSubmenuOpen(
+                        key_name,
+                    )) = &sub
+                    {
+                        if let Some(key) = parse_setting_key(key_name) {
+                            open_submenu_select_prompt(state, key);
+                            opened_new_overlay = true;
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting key: {key_name}"))],
+                            );
+                        }
+                    }
+                    // Settings-panel multiselect: open a tool list
+                    // sourced live from `session.agent_ref().tools()`;
+                    // selections arrive as synthetic
+                    // `ConfigAction("DisabledToolToggle:tool")` payloads.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingMultiselect(
+                        key_name,
+                    )) = &sub
+                    {
+                        if let Some(parsed) = parse_setting_key(key_name) {
+                            if parsed == SettingKey::DisabledTools {
+                                open_disabled_tools_multiselect(state, session);
+                                opened_new_overlay = true;
+                            } else {
+                                handle.append_line(
+                                    InlineMessageKind::Error,
+                                    vec![plain_segment(format!(
+                                        "'{parsed:?}' has no multiselect editor"
+                                    ))],
+                                );
+                            }
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting key: {key_name}"))],
+                            );
                         }
                     }
                     // Session picker: enqueue the selected session. The next
@@ -3093,44 +4234,128 @@ fn handle_inline_event(
                         opened_new_overlay |=
                             handle_auth_action(provider, action, &auth, handle, state);
                     }
-                    // Secure (masked) prompt committed by the user. The
+                    // Text/secure prompt committed by the user. The
                     // matching open prompt must have stashed
                     // `state.secure_input_origin`; we trust that field
-                    // here because every prompt path goes through
-                    // `open_secure_prompt` (SetApiKey, add_custom_provider)
-                    // which sets it before opening the modal.
+                    // here because every prompt path sets it before
+                    // opening the modal (`open_secure_prompt` for auth,
+                    // the model-role prompt builders for the map
+                    // editor).
                     if let OverlaySubmission::SecureInput(text) = &sub
                         && let Some(origin) = state.secure_input_origin.take()
                     {
-                        let provider = match &origin {
-                            SecureInputOrigin::SetKey { provider }
-                            | SecureInputOrigin::NewlyAdded { provider } => provider.clone(),
-                        };
-                        let auth = crate::store::auth_storage::shared_auth_storage();
-                        auth.set_api_key(&provider, text.clone());
-                        // The agent keeps a constructed provider instance. Saving a
-                        // key alone is not enough for an already-open session: ask
-                        // the resolver for a fresh provider immediately so the next
-                        // message uses this credential without a restart or model
-                        // switch.
-                        let refreshed = session.refresh_api_key();
-                        let msg = match origin {
-                            SecureInputOrigin::SetKey { .. } => format!(
-                                "Saved API key for '{provider}'. {}",
-                                match refreshed {
-                                    Ok(()) => "Ready to retry your message.",
-                                    Err(_) => "Restart this session before retrying.",
+                        match origin {
+                            SecureInputOrigin::ModelRoleKey => {
+                                // Phase 1 of the new-role flow: the text
+                                // is the role NAME — chain straight into
+                                // the value prompt.
+                                let role = text.trim().to_string();
+                                if role.is_empty() {
+                                    handle.append_line(
+                                        InlineMessageKind::Error,
+                                        vec![plain_segment(
+                                            "Model role name can't be empty".to_string(),
+                                        )],
+                                    );
+                                } else {
+                                    open_model_role_value_prompt(state, &role);
+                                    opened_new_overlay = true;
                                 }
-                            ),
-                            SecureInputOrigin::NewlyAdded { .. } => format!(
-                                "Added and configured '{provider}'. {}",
-                                match refreshed {
-                                    Ok(()) => "Use /models to choose a model, or send a message.",
-                                    Err(_) => "Restart this session before using it.",
+                            }
+                            SecureInputOrigin::TextEdit(key) => {
+                                let (_outcome, _msg) = commit_text_edit(
+                                    state,
+                                    handle,
+                                    Some(session),
+                                    key,
+                                    text.clone(),
+                                );
+                                opened_new_overlay = state.overlay.is_some();
+                            }
+                            SecureInputOrigin::ModelRoleValue { role } => {
+                                let model = text.trim().to_string();
+                                let outcome = if model.is_empty() {
+                                    Err("model pattern can't be empty".to_string())
+                                } else {
+                                    crate::store::settings::Settings::load()
+                                        .map_err(|e| e.to_string())
+                                        .and_then(|mut settings| {
+                                            crate::tui_vt::settings_defs::set_model_role(
+                                                &mut settings,
+                                                &role,
+                                                model.clone(),
+                                            );
+                                            settings.save().map_err(|e| e.to_string())
+                                        })
+                                };
+                                match outcome {
+                                    Ok(()) => {
+                                        handle.append_line(
+                                            InlineMessageKind::Info,
+                                            vec![plain_segment(format!(
+                                                "Model role '{role}' \u{2192} {model}"
+                                            ))],
+                                        );
+                                        reopen_settings_panel(
+                                            state,
+                                            SettingsTab::Model,
+                                            Some(format!("Saved '{role}' \u{2192} {model}")),
+                                        );
+                                        opened_new_overlay = true;
+                                    }
+                                    Err(e) => handle.append_line(
+                                        InlineMessageKind::Error,
+                                        vec![plain_segment(format!(
+                                            "Failed to save model role '{role}': {e}"
+                                        ))],
+                                    ),
                                 }
-                            ),
-                        };
-                        handle.append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
+                            }
+                            origin @ (SecureInputOrigin::SetKey { .. }
+                            | SecureInputOrigin::NewlyAdded { .. }) => {
+                                let provider = match &origin {
+                                    SecureInputOrigin::SetKey { provider }
+                                    | SecureInputOrigin::NewlyAdded { provider } => {
+                                        provider.clone()
+                                    }
+                                    _ => unreachable!("auth arm only matches auth origins"),
+                                };
+                                let auth = crate::store::auth_storage::shared_auth_storage();
+                                auth.set_api_key(&provider, text.clone());
+                                // The agent keeps a constructed provider instance. Saving a
+                                // key alone is not enough for an already-open session: ask
+                                // the resolver for a fresh provider immediately so the next
+                                // message uses this credential without a restart or model
+                                // switch.
+                                let refreshed = session.refresh_api_key();
+                                let msg = match origin {
+                                    SecureInputOrigin::SetKey { .. } => format!(
+                                        "Saved API key for '{provider}'. {}",
+                                        match refreshed {
+                                            Ok(()) => "Ready to retry your message.",
+                                            Err(_) => "Restart this session before retrying.",
+                                        }
+                                    ),
+                                    SecureInputOrigin::NewlyAdded { .. } => format!(
+                                        "Added and configured '{provider}'. {}",
+                                        match refreshed {
+                                            Ok(()) =>
+                                                "Use /models to choose a model, or send a message.",
+                                            Err(_) => "Restart this session before using it.",
+                                        }
+                                    ),
+                                    SecureInputOrigin::ModelRoleKey
+                                    | SecureInputOrigin::ModelRoleValue { .. } => {
+                                        unreachable!("auth branch reached with a model-role origin")
+                                    }
+                                    SecureInputOrigin::TextEdit(_) => {
+                                        unreachable!("auth branch reached with a text-edit origin")
+                                    }
+                                };
+                                handle
+                                    .append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
+                            }
+                        }
                     }
                     state.overlay_catalog_models.clear();
                     state.overlay_providers.clear();
@@ -3235,6 +4460,72 @@ pub(super) fn clear_confirmation() -> ModalConfirmation {
 // lifecycle events (Submit, Cancel, …) over a tokio channel.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Execute a global shortcut resolved by the [`Keymap`]. The bodies are
+/// the original hardcoded Ctrl-* handlers from the input loop, unchanged
+/// — only the trigger condition became keymap-driven.
+fn apply_global_action(
+    action: GlobalAction,
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+) {
+    match action {
+        // Ctrl+C: even with raw mode enabled some terminals / shells
+        // fall back to delivering it as a SIGINT. Handle it as an
+        // explicit interrupt so we don't depend on the OS signal.
+        GlobalAction::Interrupt => {
+            let _ = evt_tx.send(InlineEvent::Interrupt);
+        }
+        // Ctrl+M: toggle multiline input mode.
+        GlobalAction::ToggleMultiline => {
+            let mut s = state.lock();
+            s.multiline_mode = !s.multiline_mode;
+        }
+        // Ctrl+P: open the command palette.
+        GlobalAction::OpenCommandPalette => {
+            let mut s = state.lock();
+            s.overlay = Some(build_command_palette());
+        }
+        // Ctrl+;: toggle the interactive queue panel.
+        GlobalAction::ToggleQueuePanel => {
+            let mut s = state.lock();
+            s.queue_panel_open = !s.queue_panel_open;
+            if s.queue_panel_open {
+                s.queue_selected = 0;
+            }
+        }
+        // Ctrl+E: fold all blocks (Shift+E expands all).
+        GlobalAction::FoldAll => {
+            let mut s = state.lock();
+            s.fold_all();
+        }
+        // Ctrl+Enter: send-now — abort the current run (if any) and submit
+        // the composed input immediately, bypassing the queue pane.
+        GlobalAction::SendNow => {
+            let submitted = {
+                let mut s = state.lock();
+                let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+                    format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
+                } else {
+                    let buf = s.composer.text().to_string();
+                    s.composer.set_text("");
+                    buf
+                };
+                s.slash_popup = SlashPopup::default();
+                s.history_pos = None;
+                if !buf.is_empty() && !buf.starts_with('/') {
+                    s.prompt_history.insert(0, buf.clone());
+                    s.prompt_history.truncate(100);
+                }
+                buf
+            };
+            if !submitted.is_empty() {
+                let _ = evt_tx.send(InlineEvent::Interrupt);
+                let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+            }
+        }
+    }
+}
+
 fn spawn_input_thread(
     state: Arc<parking_lot::Mutex<RenderState>>,
     evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
@@ -3315,70 +4606,36 @@ fn spawn_input_thread(
 
             let Some(key) = key_event else { continue };
 
-            // Ctrl+C: even with raw mode enabled some terminals / shells
-            // fall back to delivering it as a SIGINT. Handle it as an
-            // explicit interrupt so we don't depend on the OS signal.
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let _ = evt_tx.send(InlineEvent::Interrupt);
-                continue;
-            }
-
-            // Ctrl+M: toggle multiline input mode.
-            if key.code == KeyCode::Char('m') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.multiline_mode = !s.multiline_mode;
-                continue;
-            }
-
-            // Ctrl+P: open the command palette.
-            if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.overlay = Some(build_command_palette());
-                continue;
-            }
-
-            // Ctrl+;: toggle the interactive queue panel.
-            if key.code == KeyCode::Char(';') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.queue_panel_open = !s.queue_panel_open;
-                if s.queue_panel_open {
-                    s.queue_selected = 0;
-                }
-                continue;
-            }
-
-            // Ctrl+E: fold all blocks (Shift+E expands all).
-            if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let mut s = state.lock();
-                s.fold_all();
-                continue;
-            }
-
-            // Ctrl+Enter: send-now — abort the current run (if any) and submit
-            // the composed input immediately, bypassing the queue pane.
-            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let submitted = {
-                    let mut s = state.lock();
-                    let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
-                        format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
-                    } else {
-                        let buf = s.composer.text().to_string();
-                        s.composer.set_text("");
-                        buf
-                    };
-                    s.slash_popup = SlashPopup::default();
-                    s.history_pos = None;
-                    if !buf.is_empty() && !buf.starts_with('/') {
-                        s.prompt_history.insert(0, buf.clone());
-                        s.prompt_history.truncate(100);
-                    }
-                    buf
+            // Keybinding capture takes precedence over EVERYTHING — the
+            // whole point is to grab the next combo verbatim, even one
+            // that currently resolves to a global action (that's how
+            // you re-examine an existing binding) or lands in the
+            // overlay/search handling below.
+            {
+                let capturing = {
+                    let s = state.lock();
+                    s.overlay.as_ref().is_some_and(|o| o.key_capture.is_some())
                 };
-                if !submitted.is_empty() {
-                    let _ = evt_tx.send(InlineEvent::Interrupt);
-                    let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+                if capturing {
+                    let mut s = state.lock();
+                    handle_key_capture(&mut s, key);
+                    continue;
                 }
-                continue;
+            }
+
+            // Global shortcuts: resolve through the live keymap. The
+            // defaults match the historical hardcoded Ctrl-* bindings;
+            // `settings.keybindings` can rebind any of them and the
+            // keybindings editor swaps the map in place.
+            {
+                let action = {
+                    let s = state.lock();
+                    s.keymap.read().resolve(key)
+                };
+                if let Some(action) = action {
+                    apply_global_action(action, &state, &evt_tx);
+                    continue;
+                }
             }
 
             // Confirmation modal takes priority over everything except
@@ -3740,6 +4997,7 @@ fn spawn_input_thread(
                                     selected: 0,
                                     search: None,
                                     secure_input: None,
+                                    ..Default::default()
                                 });
                             }
                             'e' => s.cycle_block_at_view(),
@@ -3885,6 +5143,30 @@ fn handle_overlay_key(
         return true;
     }
 
+    // Settings map-editor hotkeys. These operate on `RenderState`
+    // directly (they persist + rebuild the panel), so the overlay
+    // borrow from the secure branch must end first. Only active with no
+    // search filter — while filtering, letters keep typing into the
+    // search box (the helpers re-check that the tabbed panel is open
+    // and the selected row is a map row).
+    let search_empty = s
+        .overlay
+        .as_ref()
+        .and_then(|o| o.search.as_ref())
+        .is_none_or(|search| search.value.is_empty());
+    let map_row_consumed = match code {
+        KeyCode::Enter if try_edit_model_role(&mut s) => true,
+        KeyCode::Char('d') if search_empty && try_remove_settings_map_row(&mut s) => true,
+        KeyCode::Char('n') if search_empty && try_start_new_model_role(&mut s) => true,
+        _ => false,
+    };
+    if map_row_consumed {
+        return true;
+    }
+    let Some(overlay) = s.overlay.as_mut() else {
+        return false;
+    };
+
     match code {
         KeyCode::Esc => {
             // Cancel the overlay and notify the harness.
@@ -3961,6 +5243,20 @@ fn handle_overlay_key(
             if let Some(search) = overlay.search.as_mut() {
                 search.value.push(ch);
                 overlay.selected = 0;
+            }
+        }
+        KeyCode::Left | KeyCode::Right => {
+            // Tabbed overlays (the settings panel): ←/→ cycle the tab
+            // bar, rebuilding items/sections for the new tab. The search
+            // filter survives the switch.
+            let tab_count = overlay.tabs.len();
+            if tab_count > 1 {
+                let next = if code == KeyCode::Right {
+                    (overlay.active_tab + 1) % tab_count
+                } else {
+                    overlay.active_tab.checked_sub(1).unwrap_or(tab_count - 1)
+                };
+                switch_settings_tab(&mut s, next);
             }
         }
         _ => {
@@ -4308,6 +5604,7 @@ fn build_command_palette() -> OverlayState {
             value: String::new(),
         }),
         secure_input: None,
+        ..Default::default()
     }
 }
 
@@ -4724,9 +6021,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     };
 
     let has_search = overlay.search.is_some();
+    let has_tabs = overlay.tabs.len() > 1;
     let lines_count = overlay.lines.len();
     let items_count = filtered.len().min(visible_max);
-    let height_inner = (lines_count + items_count + if has_search { 1 } else { 0 }) as u16;
+    let height_inner =
+        (lines_count + items_count + usize::from(has_search) + usize::from(has_tabs)) as u16;
     let desired_h = height_inner.saturating_add(3); // borders + key-help footer
     let height = desired_h.min(area.height.saturating_sub(2));
     let width = area.width.clamp(30, 80);
@@ -4763,6 +6062,31 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         .unwrap_or(0);
 
     let mut row = inner.top();
+
+    // Tab bar (settings panel): one line of tab names, the active tab
+    // bold+accent; ←/→ switch tabs.
+    if has_tabs {
+        let mut spans: Vec<Span> = Vec::new();
+        for (i, name) in overlay.tabs.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let style = if i == overlay.active_tab {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(secondary).add_modifier(Modifier::DIM)
+            };
+            spans.push(Span::styled(name.clone(), style));
+        }
+        let row_area = Rect {
+            x: inner.left(),
+            y: row,
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::from(spans)), row_area);
+        row = row.saturating_add(1);
+    }
     // Search bar (if present).
     if let Some(search) = &overlay.search {
         let prompt = format!("{}: {}", search.label, search.value);
@@ -4814,8 +6138,67 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
         row = row.saturating_add(1);
     }
 
+    // Sidebar split (settings panel): with >= 2 sections and enough
+    // width, the left column lists section names (active bold+accent)
+    // and the item list moves to the right column with rows outside the
+    // active section dimmed. Falls back to the flat list while a filter
+    // is active (results cross sections) or when narrow.
+    let searching = overlay.search.as_ref().is_some_and(|s| !s.value.is_empty());
+    let use_sidebar = overlay.sections.len() >= 2 && inner.width >= 60 && !searching;
+    let sidebar_w = if use_sidebar {
+        let longest = overlay
+            .sections
+            .iter()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0);
+        (22usize.min(longest) + 4) as u16
+    } else {
+        0
+    };
+    // The active section tracks the selected item's group, not a stored
+    // index — selection moves across sections via Up/Down.
+    let active_section = if use_sidebar {
+        item_section_idx(overlay, overlay.selected).unwrap_or(overlay.active_section)
+    } else {
+        overlay.active_section
+    };
+    let list_x = inner.left() + sidebar_w;
+    let list_w = inner.width.saturating_sub(sidebar_w);
+    if use_sidebar {
+        let mut srow = row;
+        for (i, name) in overlay.sections.iter().enumerate() {
+            let style = if i == active_section {
+                Style::default().fg(primary).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(secondary)
+            };
+            let marker = if i == active_section { "> " } else { "  " };
+            let row_area = Rect {
+                x: inner.left(),
+                y: srow,
+                width: sidebar_w,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(marker, style),
+                    Span::styled(name.clone(), style),
+                ])),
+                row_area,
+            );
+            srow = srow.saturating_add(1);
+        }
+    }
+
     // Items.
     if filtered.is_empty() {
+        // The key-capture prompt is items-free by design — the prompt
+        // line above IS the UI; a "(no items)" placeholder would be
+        // noise.
+        if overlay.key_capture.is_some() {
+            return;
+        }
         let row_area = Rect {
             x: inner.left(),
             y: row,
@@ -4843,11 +6226,18 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             let is_selected = item_idx == overlay.selected;
             let marker = if is_selected { "> " } else { "  " };
             let indent = "  ".repeat(item.indent as usize);
-            let item_style = if is_selected {
+            let mut item_style = if is_selected {
                 Style::default().fg(primary).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(fg)
             };
+            // Rows outside the active section recede while the sidebar
+            // is up.
+            if use_sidebar
+                && item_section_idx(overlay, item_idx).is_some_and(|sec| sec != active_section)
+            {
+                item_style = item_style.add_modifier(Modifier::DIM);
+            }
             let mut spans = vec![
                 Span::styled(marker, item_style),
                 Span::styled(indent, item_style),
@@ -4869,9 +6259,9 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
             }
             let line = Line::from(spans);
             let row_area = Rect {
-                x: inner.left(),
+                x: list_x,
                 y: row,
-                width: inner.width,
+                width: list_w,
                 height: 1,
             };
             frame.render_widget(Paragraph::new(line), row_area);
@@ -4883,7 +6273,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
     // choice. This avoids hiding essential controls in a separate help view.
     if row < inner.bottom() {
         let hint = if overlay.items.iter().any(|item| item.selection.is_some()) {
-            "Enter select | Up/Down move | Esc close"
+            if has_tabs {
+                "Enter select | Up/Down move | ←/→ tabs | Esc close"
+            } else {
+                "Enter select | Up/Down move | Esc close"
+            }
         } else {
             "Esc close"
         };
@@ -7272,6 +8666,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let rendered = render_frame_to_string(&state);
         assert!(
@@ -7301,6 +8696,7 @@ mod render_tests {
                 value: "model-b".to_string(),
             }),
             secure_input: None,
+            ..Default::default()
         });
         let rendered = render_frame_to_string(&state);
         assert!(rendered.contains("model-b"), "matching item must render");
@@ -7325,6 +8721,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut _rx) = mpsc::unbounded_channel();
@@ -7376,6 +8773,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -7413,6 +8811,7 @@ mod render_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -7443,6 +8842,7 @@ mod render_tests {
                 value: String::new(),
             }),
             secure_input: None,
+            ..Default::default()
         });
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -8510,6 +9910,7 @@ mod render_tests {
                 },
                 editor: oxicode_textarea::EditBuffer::from_parts("sk-abc", 6),
             }),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8546,6 +9947,7 @@ mod render_tests {
                 },
                 editor: oxicode_textarea::EditBuffer::new(),
             }),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8632,6 +10034,7 @@ mod secure_input_tests {
             selected: 0,
             search: None,
             secure_input: Some(secure.clone()),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8696,6 +10099,7 @@ mod secure_input_tests {
             selected: 0,
             search: None,
             secure_input: Some(secure.clone()),
+            ..Default::default()
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -8840,6 +10244,40 @@ mod provider_overlay_tests {
         }
     }
 
+    /// Minimal `AgentTool` fixture: name + essential flag, execute is a
+    /// stub. Used by `make_session_with_tools_for_tests`.
+    struct StubEssentialTool {
+        name: &'static str,
+        essential: bool,
+    }
+    #[async_trait::async_trait]
+    impl oxicode_agent::AgentTool for StubEssentialTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn label(&self) -> &str {
+            self.name
+        }
+        fn description(&self) -> &str {
+            "stub tool for multiselect editor tests"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object", "properties": {} })
+        }
+        fn essential(&self) -> bool {
+            self.essential
+        }
+        async fn execute(
+            &self,
+            _id: &str,
+            _params: serde_json::Value,
+            _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+            _ctx: &oxicode_agent::ToolContext,
+        ) -> Result<oxicode_agent::AgentToolResult, String> {
+            Ok(oxicode_agent::AgentToolResult::success("ok"))
+        }
+    }
+
     fn make_session() -> AgentSessionHandle {
         let provider = Arc::new(StubProvider);
         let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
@@ -8848,6 +10286,36 @@ mod provider_overlay_tests {
             config,
             Arc::new(oxicode_agent::ToolRegistry::new()),
         ));
+        let settings = Settings::default();
+        let session_manager = SessionManager::in_memory("/tmp/test_providers");
+        let session = AgentSession::new(
+            agent,
+            settings,
+            session_manager,
+            "/tmp/test_providers".to_string(),
+            crate::SessionState::default(),
+        );
+        session.clone_handle()
+    }
+
+    /// Session fixture with a registry holding one essential (`bash`)
+    /// and one optional (`commit`) tool — used by the settings-panel
+    /// multiselect editor tests (they source their row list from the
+    /// live registry). `pub(super)` so sibling test mods can reuse the
+    /// provider stub without duplicating it.
+    pub(super) fn make_session_with_tools_for_tests() -> AgentSessionHandle {
+        let provider = Arc::new(StubProvider);
+        let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+        let registry = oxicode_agent::ToolRegistry::new();
+        registry.register_arc(Arc::new(StubEssentialTool {
+            name: "bash",
+            essential: true,
+        }));
+        registry.register_arc(Arc::new(StubEssentialTool {
+            name: "commit",
+            essential: false,
+        }));
+        let agent = Arc::new(Agent::new(provider, config, Arc::new(registry)));
         let settings = Settings::default();
         let session_manager = SessionManager::in_memory("/tmp/test_providers");
         let session = AgentSession::new(
@@ -8897,6 +10365,7 @@ mod provider_overlay_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
@@ -8970,6 +10439,7 @@ mod provider_overlay_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
@@ -9042,6 +10512,7 @@ mod provider_overlay_tests {
             selected: 0,
             search: None,
             secure_input: None,
+            ..Default::default()
         });
 
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
@@ -9082,21 +10553,21 @@ mod provider_overlay_tests {
         };
         // `provider` must be reachable regardless of variant so the
         // `OverlaySubmission::SecureInput` consumer can route the key
-        // without a per-variant branch.
-        assert_eq!(
-            match &set {
-                SecureInputOrigin::SetKey { provider }
-                | SecureInputOrigin::NewlyAdded { provider } => provider,
-            },
-            "openai"
-        );
-        assert_eq!(
-            match &added {
-                SecureInputOrigin::SetKey { provider }
-                | SecureInputOrigin::NewlyAdded { provider } => provider,
-            },
-            "minimax"
-        );
+        // without a per-variant branch. (The model-role origins carry
+        // no provider — they route through their own arm.)
+        let provider_of = |o: &SecureInputOrigin| match o {
+            SecureInputOrigin::SetKey { provider } | SecureInputOrigin::NewlyAdded { provider } => {
+                provider.clone()
+            }
+            SecureInputOrigin::ModelRoleKey | SecureInputOrigin::ModelRoleValue { .. } => {
+                unreachable!("model-role origins have no provider")
+            }
+            SecureInputOrigin::TextEdit(_) => {
+                unreachable!("text-edit origin has no provider")
+            }
+        };
+        assert_eq!(provider_of(&set), "openai");
+        assert_eq!(provider_of(&added), "minimax");
         // Variants are distinct (so the follow-up message can branch).
         assert_ne!(set, added);
     }
@@ -9176,6 +10647,55 @@ mod provider_overlay_tests {
         session
             .streaming_flag()
             .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// `/settings` tab switch: submitting `SettingsTab(1)` must reopen the
+    /// panel rebuilt for tab 1 (Model) — tab bar, sidebar sections, and
+    /// the def-table rows for that tab — without emitting a CloseOverlay.
+    #[test]
+    fn settings_tab_selection_rebuilds_item_list() {
+        let session = make_session();
+        let mut state = RenderState::default();
+        // Enter already closed the overlay before the submission arrives.
+        state.overlay = None;
+
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<InlineCommand>();
+        let handle = InlineHandle::new_for_tests(cmd_tx);
+        let prompt_queue = Arc::new(PromptQueue::default());
+
+        let evt = InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+            InlineListSelection::SettingsTab(1),
+        )));
+        let _ = handle_inline_event(&mut state, &handle, &session, &prompt_queue, evt);
+
+        let overlay = state.overlay.as_ref().expect("panel reopened on tab 1");
+        assert_eq!(overlay.active_tab, 1);
+        assert_eq!(overlay.tabs.get(1).map(String::as_str), Some("Model"));
+        assert_eq!(
+            overlay.sections,
+            vec!["Defaults".to_string(), "Pointers".to_string()]
+        );
+        // Rows come from the def table for the Model tab.
+        let settings = Settings::load().unwrap_or_default();
+        let expected = settings_overlay_items(SettingsTab::Model, &settings).0;
+        assert_eq!(overlay.items.len(), expected.len());
+        assert_eq!(
+            overlay
+                .items
+                .iter()
+                .map(|i| i.title.clone())
+                .collect::<Vec<_>>(),
+            expected.iter().map(|i| i.title.clone()).collect::<Vec<_>>(),
+        );
+        assert_eq!(state.settings_active_tab, SettingsTab::Model);
+        // The switch reopens in place — no close may leak through the
+        // cmd channel.
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            assert!(
+                !matches!(cmd, InlineCommand::CloseOverlay),
+                "tab switch must not close the reopened panel"
+            );
+        }
     }
 }
 #[cfg(test)]
@@ -10672,5 +12192,680 @@ mod glyph_cycle_tests {
         assert_eq!(GlyphSet::Unicode.next(), GlyphSet::Ascii);
         assert_eq!(GlyphSet::Ascii.next(), GlyphSet::Nerd);
         assert_eq!(GlyphSet::Nerd.next(), GlyphSet::Unicode);
+    }
+}
+
+#[cfg(test)]
+mod settings_panel_tests {
+    use super::*;
+    use crate::app::agent_session::AgentSessionHandle;
+    use crate::store::settings::Settings;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn make_session_with_tools() -> AgentSessionHandle {
+        super::provider_overlay_tests::make_session_with_tools_for_tests()
+    }
+    use oxicode_vtui::tui::core::InlineListSelection;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn heading(title: &str) -> OverlayListItem {
+        OverlayListItem {
+            title: title.into(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            search_value: None,
+            selection: None,
+        }
+    }
+
+    fn row(title: &str, badge: &str, selection: Option<InlineListSelection>) -> OverlayListItem {
+        OverlayListItem {
+            title: title.into(),
+            subtitle: None,
+            badge: Some(badge.into()),
+            indent: 0,
+            search_value: None,
+            selection,
+        }
+    }
+
+    /// Collect each terminal row as (y, concatenated text, per-char x
+    /// positions) so tests can assert on WHERE content landed, not just
+    /// that it exists.
+    fn rows_with_positions(terminal: &Terminal<TestBackend>) -> Vec<(u16, String, Vec<u16>)> {
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut out = Vec::new();
+        for y in 0..area.height {
+            let mut text = String::new();
+            let mut xs = Vec::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    text.push_str(cell.symbol());
+                    xs.push(x);
+                }
+            }
+            out.push((y, text, xs));
+        }
+        out
+    }
+
+    /// All (y, x) offsets where `needle` starts in the rendered buffer.
+    fn occurrences(rows: &[(u16, String, Vec<u16>)], needle: &str) -> Vec<(u16, usize)> {
+        let mut hits = Vec::new();
+        for (y, text, xs) in rows {
+            let mut from = 0;
+            while let Some(rel) = text[from..].find(needle) {
+                let byte_idx = from + rel;
+                let char_idx = text[..byte_idx].chars().count();
+                if let Some(&x) = xs.get(char_idx) {
+                    hits.push((*y, x as usize));
+                }
+                from = byte_idx + needle.len();
+            }
+        }
+        hits
+    }
+
+    /// A tabbed overlay (>= 2 sections, width >= 60) renders the tab bar
+    /// and the sidebar column: section names appear BOTH in the sidebar
+    /// (left of the item column) and as in-list heading rows, and rows
+    /// outside the active section are dimmed.
+    #[test]
+    fn render_overlay_tabbed_settings_shows_tab_bar_and_sidebar() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let overlay = OverlayState {
+            title: "Settings".into(),
+            lines: Vec::new(),
+            items: vec![
+                heading("Defaults"),
+                row(
+                    "Thinking level",
+                    "medium",
+                    Some(InlineListSelection::ConfigAction("ThinkingLevel".into())),
+                ),
+                row("Model roles", "0", None),
+                heading("Pointers"),
+                row("Theme", "dark", None),
+            ],
+            selected: 1,
+            search: None,
+            secure_input: None,
+            tabs: vec!["General".into(), "Model".into(), "Interaction".into()],
+            active_tab: 1,
+            sections: vec!["Defaults".into(), "Pointers".into()],
+            active_section: 0,
+            key_capture: None,
+        };
+        terminal
+            .draw(|f| render_overlay(f, f.area(), &overlay))
+            .unwrap();
+        let rows = rows_with_positions(&terminal);
+
+        // Tab bar: one row names the inactive tabs flanking the active
+        // one.
+        let general = occurrences(&rows, "General");
+        let interaction = occurrences(&rows, "Interaction");
+        assert!(
+            general
+                .iter()
+                .any(|(gy, _)| interaction.iter().any(|(iy, _)| gy == iy)),
+            "tab bar must list tabs on one row"
+        );
+
+        // Sidebar geometry: sidebar width = min(22, longest)+4 = 12, so
+        // the sidebar column occupies x < 13 and the item list starts at
+        // x >= 13.
+        for name in ["Defaults", "Pointers"] {
+            let hits = occurrences(&rows, name);
+            assert!(hits.len() >= 2, "{name} must render in sidebar AND list");
+            assert!(
+                hits.iter().any(|(_, x)| *x < 13),
+                "{name} must render in the sidebar column"
+            );
+            assert!(
+                hits.iter().any(|(_, x)| *x >= 13),
+                "{name} must render in the item column"
+            );
+        }
+
+        // Out-of-section rows recede: the items-column "Pointers"
+        // heading is DIM while the active section's is not.
+        let buf = terminal.backend().buffer();
+        let pointers_item_col = occurrences(&rows, "Pointers")
+            .into_iter()
+            .find(|(_, x)| *x >= 13)
+            .expect("items-column Pointers heading");
+        let cell = buf
+            .cell((pointers_item_col.1 as u16, pointers_item_col.0))
+            .expect("cell");
+        assert!(
+            cell.modifier.contains(Modifier::DIM),
+            "out-of-section rows must be dimmed"
+        );
+        let defaults_item_col = occurrences(&rows, "Defaults")
+            .into_iter()
+            .find(|(_, x)| *x >= 13)
+            .expect("items-column Defaults heading");
+        let cell = buf
+            .cell((defaults_item_col.1 as u16, defaults_item_col.0))
+            .expect("cell");
+        assert!(
+            !cell.modifier.contains(Modifier::DIM),
+            "active-section rows must not be dimmed"
+        );
+    }
+
+    /// The input loop resolves shortcuts through the live keymap: with
+    /// `SendNow` rebound to `Alt+s`, that combo fires the send-now path
+    /// (interrupt + immediate submit of the composed buffer) while the
+    /// default `Ctrl+Enter` still resolves.
+    #[test]
+    fn rebound_send_now_combo_submits_immediately() {
+        let state = Arc::new(parking_lot::Mutex::new(RenderState::default()));
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("SendNow".to_string(), vec!["Alt+s".to_string()]);
+        *state.lock().keymap.write() = Keymap::from_settings(&overrides);
+
+        let alt_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT);
+        let action = state
+            .lock()
+            .keymap
+            .read()
+            .resolve(alt_s)
+            .expect("Alt+s must resolve to SendNow after the rebind");
+        assert!(matches!(action, GlobalAction::SendNow));
+        // Overrides replace only the named action's combo list: the old
+        // default combo no longer fires SendNow, while every other
+        // action keeps its default.
+        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
+        assert_eq!(state.lock().keymap.read().resolve(ctrl_enter), None);
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert!(matches!(
+            state.lock().keymap.read().resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette)
+        ));
+
+        state.lock().composer.set_text("send me now");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        apply_global_action(action, &state, &tx);
+
+        assert_eq!(state.lock().composer.text(), "");
+        match rx.try_recv().expect("interrupt fires first") {
+            InlineEvent::Interrupt => {}
+            other => panic!("expected Interrupt first, got {other:?}"),
+        }
+        match rx.try_recv().expect("submit fires second") {
+            InlineEvent::Submit(text) => assert_eq!(&*text, "send me now"),
+            other => panic!("expected Submit, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "no further events");
+    }
+
+    /// `OverlaySubmission` variants the settings panel emits must stay
+    /// constructible through the compat layer (compile-level contract).
+    #[test]
+    fn settings_selection_variants_round_trip_names() {
+        assert_eq!(
+            InlineListSelection::SettingsTab(1),
+            InlineListSelection::SettingsTab(1)
+        );
+        assert_eq!(
+            InlineListSelection::SettingsSection(0),
+            InlineListSelection::SettingsSection(0)
+        );
+        assert_eq!(
+            InlineListSelection::SettingKeyCapture("OpenCommandPalette".into()),
+            InlineListSelection::SettingKeyCapture("OpenCommandPalette".into())
+        );
+        assert_eq!(
+            InlineListSelection::SettingTextEdit("ToolTimeoutSecs".into()),
+            InlineListSelection::SettingTextEdit("ToolTimeoutSecs".into())
+        );
+        assert_eq!(
+            InlineListSelection::SettingSubmenuOpen("AdvisorSyncBacklog".into()),
+            InlineListSelection::SettingSubmenuOpen("AdvisorSyncBacklog".into())
+        );
+        assert_eq!(
+            InlineListSelection::SettingMultiselect("DisabledTools".into()),
+            InlineListSelection::SettingMultiselect("DisabledTools".into())
+        );
+    }
+
+    /// Capturing a new combo for `OpenCommandPalette` is additive: the
+    /// next `Keymap::resolve` call resolves BOTH the new combo and the
+    /// original default `Ctrl+P`. The capture path drives the round
+    /// trip end-to-end — `SettingKeyCapture` selection opens the
+    /// capture prompt, the simulated `KeyEvent` is fed straight to
+    /// `handle_key_capture`, and the live `RenderState::keymap` is the
+    /// single source of truth the test inspects.
+    ///
+    /// SANDBOXED: writes go to a tempdir `settings.json` via the
+    /// `settings_override_path` hook so the real `~/.oxicode/settings.*`
+    /// is never touched (the previous version of this test polluted the
+    /// developer's live config — see final-review finding 1).
+    #[test]
+    fn key_capture_appends_combo_and_keeps_default_resolving() {
+        // Snapshot the real ~/.oxicode settings.json mtime so the
+        // post-condition assertion catches accidental leakage.
+        let real_settings = dirs::home_dir()
+            .map(|h| h.join(".oxicode").join("settings.json"))
+            .filter(|p| p.exists());
+        let real_settings_mtime_before = real_settings
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        let real_settings_sha_before = real_settings
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                b.hash(&mut h);
+                h.finish()
+            });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        // Open the capture overlay for OpenCommandPalette — same
+        // selection variant `handle_inline_event` would dispatch from
+        // the settings panel.
+        state.overlay = Some(build_key_capture_overlay(
+            GlobalAction::OpenCommandPalette.name(),
+        ));
+        state.settings_map_rows.clear();
+
+        // Pre-condition: the default resolves, the new combo doesn't.
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        let alt_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT);
+        assert_eq!(
+            state.keymap.read().resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette)
+        );
+        assert_eq!(state.keymap.read().resolve(alt_p), None);
+
+        // Drive the capture flow with an Alt+P press.
+        handle_key_capture(&mut state, alt_p);
+
+        // Post-condition: both combos resolve (additive merge into the
+        // live keymap) — and the panel has been rebuilt back on the
+        // Keybindings tab with a success status, not the capture
+        // prompt.
+        let keymap = state.keymap.read();
+        assert_eq!(
+            keymap.resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette)
+        );
+        assert_eq!(
+            keymap.resolve(alt_p),
+            Some(GlobalAction::OpenCommandPalette)
+        );
+        drop(keymap);
+        let overlay = state
+            .overlay
+            .as_ref()
+            .expect("capture commits reopen the panel on Keybindings");
+        assert!(
+            overlay.key_capture.is_none(),
+            "capture prompt must be closed"
+        );
+        assert_eq!(
+            overlay.lines.first().map(String::as_str),
+            Some("Captured Alt+p for OpenCommandPalette")
+        );
+        assert_eq!(state.settings_active_tab, SettingsTab::Keybindings);
+
+        // Sandbox assertion: the tempdir received the write, the real
+        // `~/.oxicode/settings.json` is untouched (no mtime or
+        // content change).
+        let sandbox_contents = std::fs::read_to_string(&sandbox)
+            .expect("sandbox settings.json must exist after capture");
+        assert!(
+            sandbox_contents.contains("OpenCommandPalette"),
+            "sandbox file must contain the captured keybinding override; got {sandbox_contents}"
+        );
+        assert!(
+            sandbox_contents.contains("Alt+p"),
+            "sandbox file must contain the captured Alt+p combo; got {sandbox_contents}"
+        );
+        if let Some(before) = real_settings_mtime_before {
+            let after = real_settings
+                .as_ref()
+                .and_then(|p| std::fs::metadata(p).ok())
+                .and_then(|m| m.modified().ok())
+                .expect("real settings.json must still exist after capture");
+            assert_eq!(
+                before, after,
+                "real ~/.oxicode/settings.json mtime must not change (sandbox leak)"
+            );
+        }
+        if let (Some(before), Some(after)) = (
+            real_settings_sha_before,
+            real_settings
+                .as_ref()
+                .and_then(|p| std::fs::read(p).ok())
+                .map(|b| {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut h = DefaultHasher::new();
+                    b.hash(&mut h);
+                    h.finish()
+                }),
+        ) {
+            assert_eq!(
+                before, after,
+                "real ~/.oxicode/settings.json content must not change (sandbox leak)"
+            );
+        }
+    }
+
+    /// The remove-last-binding guard refuses to drop the final combo of
+    /// an action — an action with zero keys would be a silent trap
+    /// (the user could neither trigger it nor reach this panel to fix
+    /// it). We pre-bind `OpenCommandPalette` to a single combo (the
+    /// default) and confirm `remove_keybinding_combo` no-ops the
+    /// removal while surfacing the reason in the panel status.
+    #[test]
+    fn remove_keybinding_combo_refuses_to_drop_the_last_combo() {
+        let mut state = RenderState::default();
+        // Force a single-combo state: replace OpenCommandPalette's
+        // list with just `Ctrl+p` (the default minus all other
+        // combos the action doesn't have — the point is that the
+        // list ends up at length 1).
+        let mut settings = Settings::default();
+        crate::tui_vt::settings_defs::set_action_combos(
+            &mut settings,
+            GlobalAction::OpenCommandPalette,
+            vec!["Ctrl+p".to_string()],
+        );
+        *state.keymap.write() = Keymap::from_settings(&settings.keybindings);
+        assert_eq!(
+            state
+                .keymap
+                .read()
+                .action_combos(GlobalAction::OpenCommandPalette)
+                .len(),
+            1,
+            "test setup: action must start with exactly one combo"
+        );
+
+        // Place the panel somewhere (the guard reopens it, but
+        // starting state should be observable).
+        state.settings_active_tab = SettingsTab::Keybindings;
+
+        remove_keybinding_combo(&mut state, GlobalAction::OpenCommandPalette, "Ctrl+p");
+
+        // The combo is still live — the guard refused the removal.
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert_eq!(
+            state.keymap.read().resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette),
+            "the guard must not let OpenCommandPalette go combo-less"
+        );
+        assert_eq!(
+            state
+                .keymap
+                .read()
+                .action_combos(GlobalAction::OpenCommandPalette)
+                .len(),
+            1,
+            "no combo was removed"
+        );
+        // The reason is surfaced as the panel status line so the user
+        // knows why nothing happened.
+        let overlay = state.overlay.as_ref().expect("reopen leaves the panel up");
+        assert!(
+            overlay
+                .lines
+                .first()
+                .map(|l| l.contains("Refusing to remove the last combo"))
+                .unwrap_or(false),
+            "panel must explain why the removal was refused; got {:?}",
+            overlay.lines
+        );
+    }
+
+    // ── Final-fix wave: Text / SubmenuSelect / Multiselect editors ────
+
+    /// `commit_text_edit` with valid numeric input: the value is
+    /// parsed, persisted to the SANDBOX path, and the panel reopens
+    /// with a status line showing the new value.
+    #[test]
+    fn text_edit_commit_valid_input() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+
+        let (outcome, _msg) = commit_text_edit(
+            &mut state,
+            &handle,
+            None,
+            SettingKey::SessionHistorySize,
+            "300".to_string(),
+        );
+        assert!(outcome.is_ok(), "valid numeric input must commit");
+
+        // The sandbox file received the write with the new value.
+        let contents = std::fs::read_to_string(&sandbox).expect("sandbox written");
+        let saved: Settings = serde_json::from_str(&contents).expect("sandbox parses");
+        assert_eq!(
+            saved.session_history_size, 300,
+            "sandbox must hold session_history_size=300"
+        );
+
+        // The panel reopened with a status line naming the new value.
+        let overlay = state.overlay.as_ref().expect("panel reopened");
+        assert!(
+            overlay
+                .lines
+                .first()
+                .map(|l| l.contains("300"))
+                .unwrap_or(false),
+            "status line must show the new value; got {:?}",
+            overlay.lines
+        );
+        // And the transcript Info line was emitted.
+        let mut saw_info = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { kind, .. } = cmd
+                && matches!(kind, InlineMessageKind::Info)
+            {
+                saw_info = true;
+            }
+        }
+        assert!(saw_info, "commit must surface an Info line");
+    }
+
+    /// `commit_text_edit` with INVALID input: the parse fails, nothing
+    /// is persisted (no sandbox file), and the failure surfaces as an
+    /// Error line — never a silent no-op.
+    #[test]
+    fn text_edit_commit_invalid_input_is_rejected() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+
+        let (outcome, msg) = commit_text_edit(
+            &mut state,
+            &handle,
+            None,
+            SettingKey::SessionHistorySize,
+            "not-a-number".to_string(),
+        );
+        assert!(outcome.is_err(), "non-numeric input must be rejected");
+        assert!(
+            msg.contains("invalid") || msg.contains("ParseError") || !msg.is_empty(),
+            "rejection must carry a reason; got {msg}"
+        );
+        // No write happened.
+        assert!(
+            !sandbox.exists(),
+            "rejected input must not persist anything"
+        );
+        // The failure surfaced as an Error line.
+        let mut saw_error = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { kind, .. } = cmd
+                && matches!(kind, InlineMessageKind::Error)
+            {
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "rejection must surface an Error line");
+    }
+
+    /// `open_submenu_select_prompt` builds the option list from the
+    /// def's `SubmenuSelect` options with the current value marked, and
+    /// `commit_submenu_choice` persists the choice and reopens the
+    /// panel.
+    #[test]
+    fn submenu_select_commit_for_sync_backlog() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+
+        // Open the submenu: rows for off/sync/async, current marked.
+        open_submenu_select_prompt(&mut state, SettingKey::AdvisorSyncBacklog);
+        let overlay = state.overlay.as_ref().expect("submenu overlay opens");
+        assert_eq!(overlay.items.len(), 3, "off/sync/async rows");
+        let titles: Vec<&str> = overlay.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["off", "sync", "async"]);
+        // Every row carries a SubmenuCommit selection payload.
+        for item in &overlay.items {
+            let sel = item.selection.as_ref().expect("row is selectable");
+            match sel {
+                InlineListSelection::ConfigAction(p) => {
+                    assert!(
+                        p.starts_with("SubmenuCommit:AdvisorSyncBacklog:"),
+                        "payload must address the key; got {p}"
+                    );
+                }
+                other => panic!("expected ConfigAction, got {other:?}"),
+            }
+        }
+
+        // Commit "async" through the commit helper.
+        let status = commit_submenu_choice(
+            &mut state,
+            SettingKey::AdvisorSyncBacklog,
+            "async".to_string(),
+        )
+        .expect("valid option commits");
+        assert!(status.contains("async"), "status names the new value");
+
+        // The sandbox file holds the new value.
+        let contents = std::fs::read_to_string(&sandbox).expect("sandbox written");
+        assert!(
+            contents.contains("async"),
+            "sandbox must hold the async choice: {contents}"
+        );
+        // The panel reopened with the status line.
+        let overlay = state.overlay.as_ref().expect("panel reopened");
+        assert!(
+            overlay
+                .lines
+                .first()
+                .map(|l| l.contains("async"))
+                .unwrap_or(false),
+            "status line must show the new value"
+        );
+    }
+
+    /// The multiselect editor toggles a non-essential tool into (and
+    /// out of) `disabled_tools`, persisting through the sandbox, and
+    /// REFUSES an essential tool with an Error line and no write.
+    #[test]
+    fn multiselect_toggles_tool_and_refuses_essential() {
+        let session = make_session_with_tools();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+
+        // The overlay lists the registry's tools (bash + commit from
+        // the fixture), sorted, with essential badges.
+        open_disabled_tools_multiselect(&mut state, &session);
+        let overlay = state.overlay.as_ref().expect("multiselect opens");
+        let titles: Vec<&str> = overlay.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["bash", "commit"], "registry tools, sorted");
+        let bash = &overlay.items[0];
+        assert_eq!(bash.badge.as_deref(), Some("essential"));
+        let commit = &overlay.items[1];
+        assert_eq!(commit.badge.as_deref(), Some("enabled"));
+
+        // Toggle the optional tool OFF (disable): commit ∈ disabled_tools.
+        commit_disabled_tool_toggle(
+            &mut state,
+            &handle,
+            &session,
+            "commit".to_string(),
+            false, // not essential
+            false, // currently enabled
+        );
+        let saved: Settings = serde_json::from_str(&std::fs::read_to_string(&sandbox).unwrap())
+            .expect("sandbox parses");
+        assert!(
+            saved.disabled_tools.iter().any(|t| t == "commit"),
+            "toggle must add 'commit' to disabled_tools; got {:?}",
+            saved.disabled_tools
+        );
+
+        // Toggle it back ON (enable): commit ∉ disabled_tools.
+        commit_disabled_tool_toggle(
+            &mut state,
+            &handle,
+            &session,
+            "commit".to_string(),
+            false, // not essential
+            true,  // currently disabled
+        );
+        let saved: Settings = serde_json::from_str(&std::fs::read_to_string(&sandbox).unwrap())
+            .expect("sandbox parses");
+        assert!(
+            !saved.disabled_tools.iter().any(|t| t == "commit"),
+            "toggle must remove 'commit' from disabled_tools; got {:?}",
+            saved.disabled_tools
+        );
+
+        // Essential refusal: an Error line is emitted, no write happens.
+        let before = std::fs::read_to_string(&sandbox).unwrap();
+        commit_disabled_tool_toggle(
+            &mut state,
+            &handle,
+            &session,
+            "bash".to_string(),
+            true,  // essential
+            false, // currently enabled
+        );
+        let after = std::fs::read_to_string(&sandbox).unwrap();
+        assert_eq!(before, after, "essential refusal must not write");
+        let mut saw_refusal = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { kind, segments } = cmd
+                && matches!(kind, InlineMessageKind::Error)
+                && segments.iter().any(|s| s.text.contains("essential"))
+            {
+                saw_refusal = true;
+            }
+        }
+        assert!(
+            saw_refusal,
+            "essential refusal must surface an Error line mentioning 'essential'"
+        );
     }
 }
