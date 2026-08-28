@@ -26,6 +26,7 @@ pub(crate) fn register_extra(registry: &mut SlashRegistry) {
     registry.register(Box::new(InfoCommand));
     registry.register(Box::new(ExportCommand));
     registry.register(Box::new(GitCommand));
+    registry.register(Box::new(IssueCommand));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -821,6 +822,40 @@ impl SlashCommand for GitCommand {
 }
 
 // ───────────────────────────────────────────────────────────────────────
+// /issue — local issues panel
+// ─────────────────────────────────────────────────────────────────────────
+
+/// `/issue` — open the local issues panel (list, filter, create, edit,
+/// close/reopen). The store handle is opened lazily on first use and cached
+/// on `RenderState` so every later panel action reuses it.
+pub(crate) struct IssueCommand;
+
+impl SlashCommand for IssueCommand {
+    fn name(&self) -> &'static str {
+        "issue"
+    }
+    fn description(&self) -> &'static str {
+        "Open the issues panel (list, create, edit, close/reopen local issues)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let store = match crate::tui_vt::issues_panel::get_or_open_store(ctx.state) {
+            Ok(s) => s,
+            Err(e) => {
+                ctx.reply(
+                    InlineMessageKind::Error,
+                    format!("Could not open issue store: {e}"),
+                );
+                return SlashOutcome::Handled;
+            }
+        };
+        let mut panel = crate::tui_vt::issues_panel::IssuesPanelState::default();
+        panel.refresh(&store, &store.issues_dir());
+        ctx.state.issues_panel = Some(panel);
+        SlashOutcome::Handled
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Tests
 // ───────────────────────────────────────────────────────────────────────
 #[cfg(test)]

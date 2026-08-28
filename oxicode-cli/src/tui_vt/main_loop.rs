@@ -453,6 +453,10 @@ pub struct RenderState {
     pub cwd: PathBuf,
     /// Active @-file-search dropdown — `Some` while the picker is open.
     pub file_search: Option<crate::tui_vt::file_search::FileSearchState>,
+    /// `/issue` panel state. `None` = panel closed.
+    pub(crate) issues_panel: Option<crate::tui_vt::issues_panel::IssuesPanelState>,
+    /// Cached issue store handle, opened lazily on first `/issue` use.
+    pub issue_store: Option<std::sync::Arc<crate::store::issues::FileIssueStore>>,
     /// Per-tip-key show counter — suppresses ambient tips after SEEN_CAP views.
     pub seen_tips: std::collections::HashMap<&'static str, u32>,
     /// User-defined slash commands loaded once at startup from
@@ -578,6 +582,8 @@ impl Default for RenderState {
             tip: None,
             cwd: PathBuf::new(),
             file_search: None,
+            issues_panel: None,
+            issue_store: None,
             seen_tips: std::collections::HashMap::new(),
             file_commands: Vec::new(),
             secure_input_origin: None,
@@ -743,6 +749,8 @@ pub enum ConfirmationAction {
     ClearConversation,
     /// Remove the stored API key for a provider (`/providers` → confirm).
     RemoveProviderKey(String),
+    /// Close the given issue id (from the issues panel's `c` key).
+    CloseIssue(u32),
 }
 
 /// A short-lived contextual tip banner (grok-build ephemeral tips parity).
@@ -1247,11 +1255,14 @@ pub async fn run_tui(app: App) -> Result<()> {
     // from `Settings::keybindings` by `new_with_header` above and swapped
     // in place by the settings keybindings editor — no separate
     // keybindings.yml bootstrap.
+    let (issue_action_tx, mut issue_action_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tui_vt::issues_panel::IssueActionRequest>();
     spawn_input_thread(
         state.clone(),
         evt_tx.clone(),
         mode_handle,
         prompt_queue.clone(),
+        issue_action_tx.clone(),
     );
 
     // Worker thread owns the agent loop and takes prompts from the shared
@@ -1355,6 +1366,7 @@ pub async fn run_tui(app: App) -> Result<()> {
         &state,
         &session_swapper,
         &prompt_queue,
+        &mut issue_action_rx,
     )
     .await;
 
@@ -1368,7 +1380,6 @@ pub async fn run_tui(app: App) -> Result<()> {
 // ─────────────────────────────────────────────────────────────────────────
 // Event loop
 // ─────────────────────────────────────────────────────────────────────────
-
 #[allow(clippy::too_many_arguments)]
 async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
@@ -1380,6 +1391,9 @@ async fn run_event_loop(
     state: &Arc<parking_lot::Mutex<RenderState>>,
     session_swapper: &Arc<crate::app::agent_session_handle::SessionSwapper>,
     prompt_queue: &Arc<PromptQueue>,
+    issue_action_rx: &mut tokio::sync::mpsc::UnboundedReceiver<
+        crate::tui_vt::issues_panel::IssueActionRequest,
+    >,
 ) -> Result<()> {
     // Drain any pending InlineCommands so the harness's initial set_header_context
     // (and similar) is observed before the first frame.
@@ -1519,7 +1533,13 @@ async fn run_event_loop(
                 priority = true;
             }
 
-            // 4. External SIGINT — route through the same idle-vs-streaming
+            // 4. Issue panel action requests from the input thread (CAS-guarded
+            //    async store writes that can't run on the sync key path).
+            Some(req) = issue_action_rx.recv() => {
+                crate::tui_vt::issues_panel::dispatch_action(req, state.clone());
+            }
+
+            // 5. External SIGINT — route through the same idle-vs-streaming
             //    policy as the key path (some terminals deliver Ctrl+C both
             //    as a key event AND raise SIGINT; `kill -INT` also lands here).
             _ = tokio::signal::ctrl_c() => {
@@ -1532,7 +1552,7 @@ async fn run_event_loop(
                 }
                 priority = true;
             }
-            // 5. Brain health chip updates from the background prober.
+            // 6. Brain health chip updates from the background prober.
             changed = brain_rx.changed() => {
                 if changed.is_ok() {
                     state.lock().brain = *brain_rx.borrow_and_update();
@@ -1540,7 +1560,7 @@ async fn run_event_loop(
                 }
             }
 
-            // 6. Periodic repaint — echoes typed input and drives animation
+            // 7. Periodic repaint — echoes typed input and drives animation
             //    even when no other event is ready.
             _ = render_tick.tick() => {}
         }
@@ -4873,6 +4893,9 @@ fn spawn_input_thread(
     evt_tx: tokio::sync::mpsc::UnboundedSender<InlineEvent>,
     mode_handle: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     prompt_queue: Arc<PromptQueue>,
+    issue_action_tx: tokio::sync::mpsc::UnboundedSender<
+        crate::tui_vt::issues_panel::IssueActionRequest,
+    >,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         // Poll stdin in a tight loop. `event::poll` returns `Ok(false)` on
@@ -4903,8 +4926,15 @@ fn spawn_input_thread(
                 _ => {}
             }
 
+            // Modal hierarchy: `/issue` panel owns input while open.
+            // Bracketed paste must NOT leak into the hidden composer — the
+            // panel has no paste handler yet, so we absorb the paste here
+            // (forwarding it into FilterInput/Form is a later enhancement,
+            // out of scope today — per the controller's ledger note).
+            if !pasted.is_empty() && state.lock().issues_panel.is_some() {
+                continue;
+            }
             if !pasted.is_empty() {
-                // When an overlay with a secure prompt is open, the paste
                 // targets the masked input field instead of the main
                 // composer buffer. Single-line filter (drops non-graphic
                 // bytes, strips trailing newline) keeps secrets clean.
@@ -4971,6 +5001,39 @@ fn spawn_input_thread(
                 }
             }
 
+            // Confirmation modal takes priority over everything except
+            // Ctrl+C (handled above): y/Enter confirms, n/x/Esc cancels.
+            // The `/issue` panel sits *below* confirmation so that when
+            // Ctrl+C-armed quit confirmation pops over the panel, y/n
+            // still work and the dialog stays visible.
+            {
+                let s = state.lock();
+                if s.confirmation.is_some() {
+                    drop(s);
+                    handle_confirmation_key(&state, &evt_tx, &issue_action_tx, key.code);
+                    continue;
+                }
+            }
+
+            // `/issue` panel — modal: while open it consumes navigation,
+            // status-toggle, and dismissal keys so nothing leaks into the
+            // composer underneath. Outranks the global-shortcut resolution
+            // below so e.g. a remapped palette shortcut cannot open an
+            // invisible command palette that would then outrank the panel.
+            {
+                let s = state.lock();
+                if s.issues_panel.is_some() {
+                    drop(s);
+                    if crate::tui_vt::issues_panel::handle_issues_panel_key(
+                        &state,
+                        &issue_action_tx,
+                        key,
+                    ) {
+                        continue;
+                    }
+                }
+            }
+
             // Global shortcuts: resolve through the live keymap. The
             // defaults match the historical hardcoded Ctrl-* bindings;
             // `settings.keybindings` can rebind any of them and the
@@ -4984,17 +5047,6 @@ fn spawn_input_thread(
                 };
                 if let Some(action) = action {
                     apply_global_action(action, &state, &evt_tx);
-                    continue;
-                }
-            }
-
-            // Confirmation modal takes priority over everything except
-            // Ctrl+C (handled above): y/Enter confirms, n/x/Esc cancels.
-            {
-                let s = state.lock();
-                if s.confirmation.is_some() {
-                    drop(s);
-                    handle_confirmation_key(&state, &evt_tx, key.code);
                     continue;
                 }
             }
@@ -5416,6 +5468,9 @@ fn spawn_input_thread(
 fn handle_confirmation_key(
     state: &Arc<parking_lot::Mutex<RenderState>>,
     evt_tx: &tokio::sync::mpsc::UnboundedSender<InlineEvent>,
+    issue_action_tx: &tokio::sync::mpsc::UnboundedSender<
+        crate::tui_vt::issues_panel::IssueActionRequest,
+    >,
     code: KeyCode,
 ) {
     let mut s = state.lock();
@@ -5435,6 +5490,29 @@ fn handle_confirmation_key(
                     // normal command pipeline (where `session.reset()` is
                     // accessible). The sentinel arg bypasses the dialog.
                     let _ = evt_tx.send(InlineEvent::Submit("/clear --yes".into()));
+                }
+                ConfirmationAction::CloseIssue(id) => {
+                    let (caller, hash, cwd) = {
+                        let s = state.lock();
+                        let hash = s
+                            .issue_store
+                            .as_ref()
+                            .and_then(|store| store.read(id).ok())
+                            .map(|(_, h)| h);
+                        (
+                            crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string(),
+                            hash,
+                            s.cwd.clone(),
+                        )
+                    };
+                    let _ = cwd; // store is already rooted; kept for clarity/future use
+                    let _ = issue_action_tx.send(
+                        crate::tui_vt::issues_panel::IssueActionRequest::Close { id, caller, hash },
+                    );
+                    let mut s = state.lock();
+                    if let Some(panel) = s.issues_panel.as_mut() {
+                        panel.pending = true;
+                    }
                 }
                 ConfirmationAction::RemoveProviderKey(name) => {
                     // Re-dispatch /providers remove <name> --yes so it flows
@@ -6166,6 +6244,21 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
             let _ = write!(std::io::stderr(), "\x1b]2;{}\x07", title);
             let _ = std::io::stderr().flush();
         }
+    }
+    // `/issue` panel — full-screen modal overlay (design §5). Short-circuits
+    // the chat render entirely: nothing underneath is drawn while open.
+    // Higher-priority modals (overlay, confirmation) still stack on top so
+    // e.g. Ctrl+C-armed quit confirmation remains visible while its gate
+    // owns input.
+    if let Some(panel) = &state.issues_panel {
+        crate::tui_vt::issues_panel::render_issues_panel(frame, area, panel);
+        if let Some(overlay) = &state.overlay {
+            render_overlay(frame, area, overlay);
+        }
+        if let Some(confirm) = &state.confirmation {
+            render_confirmation(frame, area, confirm);
+        }
+        return;
     }
     // Git TUI overlay REPLACES the scrollback + composer region when
     // open. Skip both so the transcript doesn't bleed through, then
@@ -7767,7 +7860,11 @@ fn transcript_line_marked<'a>(
     Line::from(spans)
 }
 
-fn segment_style(segment: &InlineSegment, fallback: Style, _styles: &ThemeStyles) -> Style {
+pub(crate) fn segment_style(
+    segment: &InlineSegment,
+    fallback: Style,
+    _styles: &ThemeStyles,
+) -> Style {
     let mut style = fallback;
     let inline = segment.style.as_ref();
     if let Some(color) = inline.color {
@@ -10203,7 +10300,8 @@ mod render_tests {
         state.confirmation = Some(quit_confirmation());
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
-        handle_confirmation_key(&state_arc, &tx, KeyCode::Char('y'));
+        let (issue_tx, _issue_rx) = mpsc::unbounded_channel();
+        handle_confirmation_key(&state_arc, &tx, &issue_tx, KeyCode::Char('y'));
         assert!(
             state_arc.lock().confirmation.is_none(),
             "yes must close the modal"
@@ -10218,7 +10316,8 @@ mod render_tests {
         state.confirmation = Some(quit_confirmation());
         let state_arc = Arc::new(parking_lot::Mutex::new(state));
         let (tx, mut rx) = mpsc::unbounded_channel();
-        handle_confirmation_key(&state_arc, &tx, KeyCode::Char('n'));
+        let (issue_tx, _issue_rx) = mpsc::unbounded_channel();
+        handle_confirmation_key(&state_arc, &tx, &issue_tx, KeyCode::Char('n'));
         assert!(
             state_arc.lock().confirmation.is_none(),
             "no must close the modal"

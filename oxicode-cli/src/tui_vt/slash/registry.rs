@@ -10,7 +10,7 @@
 //! [`SlashRegistry::builtins`] (`register_all`). Overlay-driving commands
 //! (`/model`, `/settings`, `/sessions`, `/theme`) build an `InlineListSelection`
 //! modal whose submission is handled in `main_loop.rs`'s overlay-submission arm.
-//! `/issue` is not yet wired (no issue overlay in this harness).
+//! `/issue` opens the issues panel (see `commands.rs::IssueCommand`).
 
 use oxicode_vtui::tui::core::{
     InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection, InlineMessageKind,

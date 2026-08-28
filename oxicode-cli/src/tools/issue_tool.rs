@@ -394,7 +394,7 @@ const MAX_CAS_ATTEMPTS: u32 = 4;
 /// and never retries on its own (principle: strictness in the store, recovery
 /// in the tool). This helper owns the recovery — re-reading a fresh hash after
 /// each conflict and retrying up to [`MAX_CAS_ATTEMPTS`] times.
-async fn cas_retry<T, F, Fut>(
+pub(crate) async fn cas_retry<T, F, Fut>(
     store: &FileIssueStore,
     id: u32,
     agent_hash: Option<String>,

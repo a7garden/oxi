@@ -4,6 +4,7 @@ pub mod frame_layout;
 pub mod git_tui;
 pub mod host;
 pub mod image_preview;
+pub mod issues_panel;
 pub mod keymap;
 pub mod main_loop;
 pub mod notifications;
