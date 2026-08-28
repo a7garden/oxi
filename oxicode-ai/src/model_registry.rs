@@ -1062,6 +1062,24 @@ mod tests {
     }
 
     #[test]
+    fn test_minimax_m3_available_via_catalog() {
+        // MiniMax-M3 (released 2026-06-01) ships via the models.dev snapshot,
+        // NOT the hand-maintained static registry — the static numbers would
+        // shadow catalog refreshes. Pin the catalog contract here: 1M context,
+        // 128K output, multimodal input (Text + Image).
+        let m3 = crate::model_db::get_model_entry("minimax", "MiniMax-M3")
+            .expect("models.dev snapshot must carry MiniMax-M3");
+        assert_eq!(m3.context_window, 1_000_000);
+        assert_eq!(m3.max_tokens, 128_000);
+        assert!(m3.reasoning, "M3 supports thinking");
+        assert!(m3.input.contains(&InputModality::Text));
+        assert!(
+            m3.input.contains(&InputModality::Image),
+            "M3 is natively multimodal — must accept image input"
+        );
+    }
+
+    #[test]
     fn test_search_models() {
         let results = ModelRegistry::search("gpt");
         assert!(!results.is_empty());
