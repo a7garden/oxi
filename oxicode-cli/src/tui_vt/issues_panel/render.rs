@@ -117,6 +117,15 @@ fn render_detail(
         render_list(frame, area, panel);
         return;
     };
+    // Meta header per design §5: id / status / priority / title / labels on
+    // the first line; assignee badge + created/updated/closed timestamps on
+    // the second.
+    let badge = match &row.assignee_badge {
+        Some(AssigneeBadge::Live(s)) => format!(" [working: {s}]"),
+        Some(AssigneeBadge::Stale(s)) => format!(" [stale claim: {s}]"),
+        None => String::new(),
+    };
+    let stamp = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M").to_string();
     let header = format!(
         "#{} {}  [{}] {}  labels: {}",
         row.id,
@@ -124,6 +133,13 @@ fn render_detail(
         row.priority,
         row.title,
         row.labels.join(",")
+    );
+    let meta_header = format!(
+        "assignee:{}  created {}  updated {}  closed {}",
+        badge,
+        stamp(row.created_at),
+        stamp(row.updated_at),
+        row.closed_at.map(stamp).unwrap_or_else(|| "—".into()),
     );
     // F3 fix: surface pending state in the title (mirror of render_list).
     let busy_suffix = if panel.pending { " (busy\u{2026})" } else { "" };
@@ -135,10 +151,19 @@ fn render_detail(
 
     let header_area = Rect { height: 1, ..inner };
     frame.render_widget(Paragraph::new(header), header_area);
+    let meta_area = Rect {
+        y: inner.y + 1,
+        height: 1,
+        ..inner
+    };
+    frame.render_widget(
+        Paragraph::new(meta_header).style(Style::default().add_modifier(Modifier::DIM)),
+        meta_area,
+    );
 
     let body_area = Rect {
-        y: inner.y + 2,
-        height: inner.height.saturating_sub(2),
+        y: inner.y + 3,
+        height: inner.height.saturating_sub(3),
         ..inner
     };
     let body_text = panel.detail_body_cache.as_deref().unwrap_or("(loading…)");
@@ -259,6 +284,8 @@ mod render_tests {
     use crate::store::issues::{Priority, Status};
 
     fn sample_row() -> IssueRow {
+        use chrono::TimeZone;
+        let t = chrono::Utc.with_ymd_and_hms(2026, 8, 27, 12, 0, 0).unwrap();
         IssueRow {
             id: 1,
             title: "sample issue".into(),
@@ -266,6 +293,9 @@ mod render_tests {
             priority: Priority::High,
             labels: vec!["auth".into()],
             assignee_badge: Some(AssigneeBadge::Live("tui".into())),
+            created_at: t,
+            updated_at: t,
+            closed_at: None,
         }
     }
 
@@ -307,8 +337,21 @@ mod render_tests {
             detail_body_cache: Some("# Heading\n\nSome **body** text.".into()),
             ..Default::default()
         };
-        let text = draw(&panel, 80, 24);
+        // 100 cols: the §5 meta line (~86 chars) must not truncate.
+        let text = draw(&panel, 100, 24);
         assert!(text.contains("Issue #1"), "detail title missing: {text:?}");
+        // Design §5 meta header: assignee badge line + created/updated/closed
+        // timestamps (fixture: Live("tui"), 2026-08-27 12:00, closed = —).
+        assert!(
+            text.contains("[working: tui]"),
+            "assignee badge missing from detail meta header: {text:?}"
+        );
+        assert!(
+            text.contains("created 2026-08-27 12:00")
+                && text.contains("updated 2026-08-27 12:00")
+                && text.contains("closed —"),
+            "timestamp line missing from detail meta header: {text:?}"
+        );
     }
 
     #[test]

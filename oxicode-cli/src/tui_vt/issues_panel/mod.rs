@@ -79,6 +79,11 @@ pub(crate) struct IssueRow {
     pub priority: Priority,
     pub labels: Vec<String>,
     pub assignee_badge: Option<AssigneeBadge>,
+    /// Snapshot of `IssueMeta` timestamps at `refresh()` time (design §5
+    /// Detail meta header). Carried read-only; never written back.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub closed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,6 +152,9 @@ impl IssuesPanelState {
                         AssigneeBadge::Stale(a.session)
                     }
                 }),
+                created_at: issue.meta.created_at,
+                updated_at: issue.meta.updated_at,
+                closed_at: issue.meta.closed_at,
             })
             .collect();
         self.selected = self.selected.min(self.rows.len().saturating_sub(1));
