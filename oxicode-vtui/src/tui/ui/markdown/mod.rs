@@ -12,6 +12,93 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
+// Per-line syntax-highlight memo for `render_code_block`. Same `(lang, line,
+// width, theme)` triple → same highlight output; LLMs re-streaming a code
+// block pay zero cost the second time around. Bounded at 4096 entries so a
+// runaway stream can't OOM the UI thread; cleared on theme changes via the
+// `theme_epoch` key (active syntax theme name) so re-themes never serve a
+// stale palette.
+type SyntectMemoMap =
+    std::collections::HashMap<(String, String, usize, String), Vec<InlineSegment>>;
+thread_local! {
+    static SYNTECT_LINE_MEMO: std::cell::RefCell<SyntectMemoMap> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+const SYNTECT_MEMO_CAP: usize = 4096;
+fn memo_get(lang: &str, line: &str, width: usize, theme: &str) -> Option<Vec<InlineSegment>> {
+    SYNTECT_LINE_MEMO.with(|m| {
+        m.borrow()
+            .get(&(lang.to_string(), line.to_string(), width, theme.to_string()))
+            .cloned()
+    })
+}
+
+fn memo_put(lang: &str, line: &str, width: usize, theme: &str, segs: Vec<InlineSegment>) {
+    SYNTECT_LINE_MEMO.with(|m| {
+        let mut map = m.borrow_mut();
+        if map.len() >= SYNTECT_MEMO_CAP {
+            // Clear-and-rebuild rather than tracking insertion: a stream
+            // that hammers the same 200 lines repeatedly would otherwise
+            // evict the lines it's about to re-request.
+            map.clear();
+        }
+        map.insert(
+            (lang.to_string(), line.to_string(), width, theme.to_string()),
+            segs,
+        );
+    });
+}
+
+/// Increment-only fast-path cache for the streaming assistant render site.
+///
+/// Holds the last `(text, width)` pair plus the lines `render_markdown`
+/// produced for it. `render_markdown_cached` is a thin wrapper that
+/// returns the cached lines when the new call's `(text, width)` exactly
+/// equals the cached one — the streaming typewriter advances a few bytes
+/// each frame, but most frames the visible message and viewport are
+/// unchanged, so the equality fast-path is the common case. Anything else
+/// (different text, different width, first call) falls through to the
+/// full renderer and refreshes the cache.
+#[derive(Default, Debug)]
+pub struct MdRenderCache {
+    prev_text: String,
+    prev_width: usize,
+    lines: Vec<Vec<InlineSegment>>,
+    /// Fast-path hit counter; exposed via `debug_hits` so the streaming
+    /// render tests can assert the cache is being consulted.
+    hits: usize,
+}
+
+impl MdRenderCache {
+    /// Number of times the fast path returned the cached lines without
+    /// invoking `render_markdown`. Test-only accessor — kept on the type
+    /// so the test module can read it without a `pub(crate)` escape.
+    pub fn debug_hits(&self) -> usize {
+        self.hits
+    }
+}
+
+/// Cached counterpart of [`render_markdown`]. When `(text, width)` matches
+/// the previous call, returns a clone of the cached lines without invoking
+/// the full parser — the streaming typewriter re-renders many times per
+/// second but most frames have not actually changed. A miss always
+/// refreshes the cache.
+pub fn render_markdown_cached(
+    text: &str,
+    width: usize,
+    cache: &mut MdRenderCache,
+) -> Vec<Vec<InlineSegment>> {
+    if width == cache.prev_width && text == cache.prev_text && !cache.lines.is_empty() {
+        cache.hits += 1;
+        return cache.lines.clone();
+    }
+    let lines = render_markdown(text, width);
+    cache.prev_text = text.to_string();
+    cache.prev_width = width;
+    cache.lines = lines.clone();
+    lines
+}
+
 /// Parse markdown text into styled InlineSegment lines.
 ///
 /// `width` is the usable cell width of the destination surface. Tables
@@ -44,10 +131,12 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<Vec<InlineSegment>> {
                     tb.rows.push(std::mem::take(&mut tb.current_row));
                 }
                 Event::End(TagEnd::TableHead) => {
-                    // Header row was already pushed into `rows` on End(TableRow);
-                    // move it out into `header` and clear rows for the body.
-                    if !tb.rows.is_empty() && tb.header.is_empty() {
-                        tb.header = tb.rows.remove(0);
+                    // pulldown-cmark 0.13 does not emit End(TableRow) for the
+                    // head — the head IS the row, so the accumulated cells
+                    // are still in `current_row`. Move them straight into
+                    // `header` so the body parser starts clean.
+                    if tb.header.is_empty() {
+                        tb.header = std::mem::take(&mut tb.current_row);
                     }
                 }
                 Event::End(TagEnd::Table) => {
@@ -68,7 +157,7 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<Vec<InlineSegment>> {
                 Event::End(TagEnd::CodeBlock) => {
                     let cb = code_buf.take().unwrap();
                     flush_line(&mut cur, &mut lines);
-                    let block_lines = render_code_block(&cb.code, cb.lang.as_deref(), ss);
+                    let block_lines = render_code_block(&cb.code, cb.lang.as_deref(), ss, width);
                     lines.extend(block_lines);
                     lines.push(Vec::new());
                 }
@@ -258,10 +347,20 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<Vec<InlineSegment>> {
 }
 
 /// Render a code block with syntect syntax highlighting.
+///
+/// `width == 0` preserves the historical "no wrap" behavior so internal
+/// callers (and tests) that don't pass a viewport still work. Any other
+/// value hard-wraps the highlighted output at display-width boundaries —
+/// LLMs frequently emit tables inside code fences, and the un-wrapped
+/// version overflowed the terminal before this parameter existed.
+/// Wrapping happens *after* syntax highlighting so each chunk keeps its
+/// token color; tabs expand to four spaces first to keep the math
+/// simple (syntect preserves tabs verbatim and a tab stop is variable).
 pub fn render_code_block(
     code: &str,
     lang: Option<&str>,
     ss: &SyntaxSet,
+    width: usize,
 ) -> Vec<Vec<InlineSegment>> {
     let syntax = lang
         .and_then(|l| ss.find_syntax_by_token(l))
@@ -270,9 +369,10 @@ pub fn render_code_block(
     // InspiredGitHub). Many UI themes map to names outside that set; fall back
     // to a real bundled dark theme rather than the plain `Theme::default()` so
     // code is always colored (see `theme::syntax::get_active_syntax_theme`).
+    let theme_name: &'static str = crate::get_active_syntax_theme();
     let theme = THEME_SET
         .themes
-        .get(crate::get_active_syntax_theme())
+        .get(theme_name)
         .or_else(|| THEME_SET.themes.get("base16-ocean.dark"))
         .cloned()
         .unwrap_or_default();
@@ -281,29 +381,149 @@ pub fn render_code_block(
     let mut lines = Vec::new();
 
     for line in syntect::util::LinesWithEndings::from(code) {
-        if let Ok(ranges) = h.highlight_line(line, ss) {
-            let segs: Vec<InlineSegment> = ranges
-                .into_iter()
-                .map(|(s, t)| {
-                    let fg = s.foreground;
-                    InlineSegment {
-                        text: t.to_string(),
-                        style: Arc::new(
-                            InlineTextStyle::default()
-                                .with_color(Some(AnsiColorEnum::Rgb(RgbColor(fg.r, fg.g, fg.b)))),
-                        ),
-                    }
-                })
-                .collect();
-            lines.push(segs);
+        // Per-line highlight cache: streaming assistants re-render the
+        // same code block every frame while tokens trickle in. The
+        // wrapped output is keyed by `(lang, line, width, theme)` so a
+        // re-emit of an already-highlighted line is a clone instead of
+        // a syntect pass. The cache busts when the active syntax theme
+        // changes (keyed into the tuple) — see `SYNTECT_LINE_MEMO`.
+        let cache_key_lang = lang.unwrap_or("");
+        let highlighted: Vec<InlineSegment> =
+            if let Some(seg) = memo_get(cache_key_lang, line, width, theme_name) {
+                seg
+            } else if let Ok(ranges) = h.highlight_line(line, ss) {
+                let seg: Vec<InlineSegment> =
+                    ranges
+                        .into_iter()
+                        .map(|(s, t)| {
+                            let fg = s.foreground;
+                            InlineSegment {
+                                text: t.to_string(),
+                                style: Arc::new(InlineTextStyle::default().with_color(Some(
+                                    AnsiColorEnum::Rgb(RgbColor(fg.r, fg.g, fg.b)),
+                                ))),
+                            }
+                        })
+                        .collect();
+                memo_put(cache_key_lang, line, width, theme_name, seg.clone());
+                seg
+            } else {
+                vec![InlineSegment {
+                    text: line.to_string(),
+                    style: Arc::new(InlineTextStyle::default()),
+                }]
+            };
+        if width == 0 {
+            lines.push(highlighted);
         } else {
-            lines.push(vec![InlineSegment {
-                text: line.to_string(),
-                style: Arc::new(InlineTextStyle::default()),
-            }]);
+            for wrapped in wrap_segments_to_rows(&highlighted, width) {
+                lines.push(wrapped);
+            }
         }
     }
     lines
+}
+
+/// Soft-wrap a flat segment list into rows that each fit `width` (display
+/// cells). Splits a segment mid-text when crossing a boundary so styles
+/// stay attached to their content; expands `\t` to four spaces on the way
+/// through so a tab character never silently costs one cell and gets
+/// pushed off the edge by adjacent chars.
+fn wrap_segments_to_rows(segs: &[InlineSegment], width: usize) -> Vec<Vec<InlineSegment>> {
+    let mut rows: Vec<Vec<InlineSegment>> = Vec::new();
+    let mut cur_row: Vec<InlineSegment> = Vec::new();
+    let mut cur_buf = String::new();
+    let mut cur_style: Option<Arc<InlineTextStyle>> = None;
+    let mut cur_w: usize = 0;
+
+    for seg in segs {
+        for ch in seg.text.chars() {
+            if ch == '\t' {
+                // Pad to the next 4-cell boundary so visual indentation
+                // lines up with the source's intent.
+                let pad = 4 - (cur_w % 4);
+                for _ in 0..pad {
+                    if cur_w + 1 > width {
+                        flush_wrap_chunk(
+                            &mut cur_buf,
+                            &mut cur_style,
+                            &mut cur_row,
+                            &mut rows,
+                            &mut cur_w,
+                        );
+                    }
+                    cur_buf.push(' ');
+                    if cur_style.is_none() {
+                        cur_style = Some(Arc::clone(&seg.style));
+                    }
+                    cur_w += 1;
+                }
+                continue;
+            }
+            let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
+            // Zero-width characters: always attach to the current chunk.
+            if ch_w == 0 {
+                cur_buf.push(ch);
+                if cur_style.is_none() {
+                    cur_style = Some(Arc::clone(&seg.style));
+                }
+                continue;
+            }
+            // Char wider than the row by itself: drop (preferable to a
+            // terminal-breaking overflow when the viewport is narrow).
+            if ch_w > width {
+                continue;
+            }
+            if cur_w + ch_w > width {
+                flush_wrap_chunk(
+                    &mut cur_buf,
+                    &mut cur_style,
+                    &mut cur_row,
+                    &mut rows,
+                    &mut cur_w,
+                );
+            }
+            cur_buf.push(ch);
+            if cur_style.is_none() {
+                cur_style = Some(Arc::clone(&seg.style));
+            }
+            cur_w += ch_w;
+        }
+    }
+    flush_wrap_chunk(
+        &mut cur_buf,
+        &mut cur_style,
+        &mut cur_row,
+        &mut rows,
+        &mut cur_w,
+    );
+    if rows.is_empty() {
+        rows.push(Vec::new());
+    }
+    rows
+}
+
+/// Flush the in-progress chunk to `cur_row`, and push the row to `rows`
+/// when it has content. Resets `cur_w` to 0.
+fn flush_wrap_chunk(
+    buf: &mut String,
+    style: &mut Option<Arc<InlineTextStyle>>,
+    row: &mut Vec<InlineSegment>,
+    rows: &mut Vec<Vec<InlineSegment>>,
+    used: &mut usize,
+) {
+    if !buf.is_empty()
+        && let Some(s) = style.take()
+    {
+        row.push(InlineSegment {
+            text: std::mem::take(buf),
+            style: s,
+        });
+    }
+    if !row.is_empty() {
+        rows.push(std::mem::take(row));
+    }
+    *used = 0;
 }
 /// Render a GFM table with box-drawing borders, fitted to `max_w`.
 ///
@@ -333,8 +553,11 @@ fn render_table(header: &[String], rows: &[Vec<String>], max_w: usize) -> Vec<Ve
         }
     }
 
-    // Fit: total = Σ(w + 2) + (n − 1) + 2 border chars = Σw + 3n.
-    let chrome = 3 * num_cols;
+    // Fit: total = Σ(w + 2) + (n − 1) + 2 border chars = Σw + 3n + 1.
+    // The +1 accounts for inter-column separators being n − 1, not n;
+    // the old formula (3n) under-budgeted by one cell and the last
+    // column silently grew past the viewport on narrow widths.
+    let chrome = 3 * num_cols + 1;
     let budget = max_w.saturating_sub(chrome);
     while col_width.iter().sum::<usize>() > budget {
         // Take one cell from the widest column; stop once every column
@@ -606,8 +829,8 @@ mod tests {
         );
     }
 
+    #[test]
     fn table_fits_the_given_width_and_wraps_cells() {
-        // A 4-column table with one column much wider than the viewport
         // — natural width overflows — must shrink to fit. Border rows
         // never exceed the width, and the long cell wraps inside its
         // column instead of breaking the table.
@@ -653,6 +876,153 @@ mod tests {
         assert!(
             unicode_width::UnicodeWidthStr::width(top.as_str()) <= 200,
             "natural width exceeds viewport"
+        );
+    }
+    #[test]
+    fn code_block_hard_wraps_to_given_width() {
+        // 200-char ASCII line inside a ``` fence — must wrap to the
+        // requested width and never overflow it. Concatenated row text
+        // contains the full original line so the wrap is lossless.
+        let line: String = "a".repeat(200);
+        let md = format!("```\n{line}\n```\n");
+        let out = render_markdown(&md, 80);
+        let rows: Vec<String> = out.iter().map(|l| line_text(l)).collect();
+        assert!(!rows.is_empty(), "code block produced no rows");
+        for (i, row) in rows.iter().enumerate() {
+            let w = unicode_width::UnicodeWidthStr::width(row.as_str());
+            assert!(w <= 80, "code row {i} overflows: {w} > 80\n{row}");
+        }
+        let joined: String = rows.join("");
+        assert!(
+            joined.contains(&line),
+            "concatenated code rows must contain the full original line\njoined={joined:?}\nwant={line:?}"
+        );
+    }
+
+    #[test]
+    fn code_block_width_zero_keeps_natural_lines() {
+        // width == 0 preserves the old "no wrap" behavior so existing
+        // callers (tests, internal markdown channels) keep working.
+        let line: String = "z".repeat(40);
+        let md = format!("```\n{line}\n```\n");
+        let out = render_markdown(&md, 0);
+        let rows: Vec<String> = out.iter().map(|l| line_text(l)).collect();
+        assert!(
+            rows.iter().any(|r| r.contains(&line)),
+            "width 0 must preserve natural-length lines, got {rows:?}"
+        );
+    }
+
+    // ── T6: incremental streaming markdown render cache ───────────────────
+
+    /// Flatten a rendered line/segment list to a row of plain text
+    /// so we can compare two renderings for equality on `text` alone
+    /// without depending on `InlineSegment: PartialEq` (which is not
+    /// derived on the protocol type — see
+    /// `oxicode_vtui_compat::ui_protocol::style::InlineSegment`).
+    fn flatten_lines(lines: &[Vec<InlineSegment>]) -> Vec<String> {
+        lines.iter().map(|l| line_text(l)).collect()
+    }
+
+    #[test]
+    fn cached_prefix_reuses_lines() {
+        // First render populates the cache (cold).
+        let mut cache = MdRenderCache::default();
+        let _ = render_markdown_cached("hello", 80, &mut cache);
+        assert_eq!(
+            cache.debug_hits(),
+            0,
+            "first call is a cold render (no cache hit)"
+        );
+
+        // Identical (text, width) pair → fast-path hit; the hit counter
+        // increments and the returned lines equal the cold render.
+        let again = render_markdown_cached("hello", 80, &mut cache);
+        assert_eq!(
+            cache.debug_hits(),
+            1,
+            "identical input must register a cache hit"
+        );
+        assert_eq!(
+            flatten_lines(&again),
+            flatten_lines(&render_markdown("hello", 80)),
+            "fast-path output equals fresh render"
+        );
+
+        // Append tokens (streaming assistant flow) → cache updates, no
+        // hit; a third identical call again hits the cache.
+        let _ = render_markdown_cached("hello world", 80, &mut cache);
+        assert_eq!(
+            cache.debug_hits(),
+            1,
+            "different text does not register a hit"
+        );
+        let _ = render_markdown_cached("hello world", 80, &mut cache);
+        assert_eq!(
+            cache.debug_hits(),
+            2,
+            "second identical call after a miss must hit again"
+        );
+    }
+
+    #[test]
+    fn cached_result_equals_fresh_render() {
+        // Property: for a streaming assistant flow that appends tokens
+        // across 5 frames, every cached output equals the fresh render
+        // for the same (text, width). The cache must never produce
+        // divergent lines from the source renderer.
+        let mut cache = MdRenderCache::default();
+        let base = "The quick brown fox jumps over the lazy dog.";
+        let appends = ["", " Stream chunk one.", " More.", " Even more."];
+        let mut text = base.to_string();
+        let width = 40usize;
+        for (i, suffix) in std::iter::once("")
+            .chain(appends.iter().copied())
+            .enumerate()
+        {
+            if i > 0 {
+                text.push_str(suffix);
+            }
+            let cached = render_markdown_cached(&text, width, &mut cache);
+            let fresh = render_markdown(&text, width);
+            assert_eq!(
+                flatten_lines(&cached),
+                flatten_lines(&fresh),
+                "cached output diverges from fresh render at step {i}: text={text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn width_change_busts_cache() {
+        // First render at width 80.
+        let mut cache = MdRenderCache::default();
+        let _baseline = render_markdown_cached("# title\n\nbody", 80, &mut cache);
+        assert_eq!(cache.debug_hits(), 0);
+
+        // Same text at width 40 must NOT hit — the wrapped output
+        // differs and the cache must invalidate.
+        let narrowed = render_markdown_cached("# title\n\nbody", 40, &mut cache);
+        assert_eq!(
+            cache.debug_hits(),
+            0,
+            "width change must NOT register a fast-path hit"
+        );
+        assert_eq!(
+            flatten_lines(&narrowed),
+            flatten_lines(&render_markdown("# title\n\nbody", 40)),
+            "narrowed output equals fresh render"
+        );
+
+        // Same text at the original width 80 — first time after the
+        // bust, this is again a miss; second identical call hits.
+        let _ = render_markdown_cached("# title\n\nbody", 80, &mut cache);
+        assert_eq!(cache.debug_hits(), 0, "miss after width bust");
+        let _ = render_markdown_cached("# title\n\nbody", 80, &mut cache);
+        assert_eq!(
+            cache.debug_hits(),
+            1,
+            "subsequent identical input must hit again"
         );
     }
 }

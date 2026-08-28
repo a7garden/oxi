@@ -289,10 +289,34 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub mermaid_render_enabled: bool,
 
+    /// Inline image previews in the TUI (kitty / iTerm2 graphics
+    /// protocols). Kill-switch for terminals that misrender image
+    /// escapes. Default: true.
+    #[serde(default = "default_true")]
+    pub inline_images: bool,
+
     /// Enable the Commit tool with optional LLM analysis.
     /// Default: false (opt-in, LLM cost).
     #[serde(default = "default_false")]
     pub commit_tool_enabled: bool,
+
+    /// Run the bash tool inside a real PTY so ANSI SGR color sequences
+    /// survive in command output (F-9, audit 2026-08-24). Default: false.
+    ///
+    /// **Currently inert.** The agent crate (`oxicode-agent`) cannot see
+    /// cli settings today — `ToolContext` carries no settings field, and
+    /// `Settings::apply_env()` is a no-op. The only live gate is the
+    /// `OXICODE_BASH_PTY=1` environment variable, which is checked
+    /// directly in `BashTool::execute`. Setting `bash_pty = true` in
+    /// your settings file is silently ignored and emits a one-time
+    /// `tracing::warn!` at settings load. The field is reserved for the
+    /// eventual cli→agent settings plumbing — once that ships, the
+    /// setting will be respected automatically.
+    ///
+    /// To opt in today: export `OXICODE_BASH_PTY=1` in the environment
+    /// before invoking oxicode.
+    #[serde(default = "default_false")]
+    pub bash_pty: bool,
 
     // ── Hindsight memory (④) ─────────────────────────────────────────
     /// Enable session-spanning memory tools (retain/recall/reflect/edit)
@@ -450,7 +474,9 @@ impl Default for Settings {
             snapcompact_enabled: false,
             advisor: AdvisorSettings::default(),
             mermaid_render_enabled: true,
+            inline_images: true,
             commit_tool_enabled: false,
+            bash_pty: false,
             ttsr_enabled: false,
             ttsr_interrupt_mode: default_ttsr_mode(),
             model_roles: HashMap::new(),
@@ -654,6 +680,15 @@ impl Settings {
         settings = Self::migrate(settings)?;
 
         // 5. Validate settings — placeholder for future validation
+
+        // F-9 (audit 2026-08-24): nudge users who opt in via the setting
+        // but whose value is silently ignored until cli→agent settings
+        // plumbing lands. The env var path still works.
+        if settings.bash_pty {
+            tracing::warn!(
+                "settings.bash_pty = true is currently inert — the agent tool                  cannot see cli settings yet. To enable PTY-backed bash right                  now, export OXICODE_BASH_PTY=1 in your environment."
+            );
+        }
 
         Ok(settings)
     }
@@ -1160,6 +1195,16 @@ fn parse_boolish(s: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    /// `inline_images` kill-switch: default ON, and a settings file that
+    /// sets it false loads the override (serde contract pin).
+    #[test]
+    fn inline_images_defaults_true_and_reads_override() {
+        use super::*;
+        assert!(Settings::default().inline_images, "previews on by default");
+        let s: Settings = toml::from_str("inline_images = false").unwrap();
+        assert!(!s.inline_images, "settings file can disable previews");
+    }
+
     use super::*;
     use std::io::Write as IoWrite;
     use std::sync::Mutex;

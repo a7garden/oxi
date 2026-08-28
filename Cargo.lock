@@ -5556,6 +5556,7 @@ dependencies = [
  "oxicode-api-stability",
  "oxicode-hashline",
  "parking_lot",
+ "portable-pty",
  "regex",
  "reqwest",
  "serde",

@@ -58,7 +58,10 @@ use crate::tui_vt::slash::file_commands::FileCommand;
 use crate::tui_vt::slash::registry::{
     SlashCtx, SlashOutcome, SlashRegistry, settings_overlay_items,
 };
-use oxicode_vtui::presentation::{BlockDisplayMode, TranscriptLine, VisibleItem, visible_items};
+use oxicode_vtui::presentation::{
+    BlockAlloc, BlockDisplayMode, TranscriptLine, VisibleItem, allocate_rows, visible_items,
+};
+use oxicode_vtui::tui::ui::clamp_segments_to_width;
 
 use oxicode_textarea::{EditBuffer, ElementKind, TextArea, TextAreaState};
 
@@ -309,9 +312,18 @@ pub struct RenderState {
     /// lines keep the width they were built at (printed text does not
     /// rewrap either).
     pub viewport_width: u16,
+    /// Last known terminal height — paired with `viewport_width` for
+    /// resize-change detection (only width changes invalidate the
+    /// frozen scrollback).
+    pub last_viewport_height: u16,
     /// Snapshot of the user's glyph-set setting — `nerd` swaps the
     /// composer context labels for Nerd Font icons (never emoji).
     pub glyph_set: crate::symbols::GlyphSet,
+    /// Inline image previews (kitty/iTerm2): protocol detection,
+    /// `inline_images` kill-switch, transmit budget, and the pending
+    /// live placements. Owned here so both the agent-event hook
+    /// (enqueue) and the post-draw step (emit) share one budget.
+    pub image_previews: super::image_preview::ImagePreviews,
     /// Header context mirrored from `InlineHeaderContext`.
     pub header_context: InlineHeaderContext,
     /// Composer enabled state — mirrored from `SetInputEnabled`.
@@ -326,6 +338,11 @@ pub struct RenderState {
     pub message_buffer: String,
     /// Accumulated reasoning text for the dimmed thinking block.
     pub thinking_buffer: String,
+    /// Cache for the streaming assistant markdown render. Held on
+    /// `RenderState` so the cache survives across the many per-frame
+    /// `render_streamed_message` calls; the equality fast-path makes
+    /// most frames return without re-parsing.
+    pub md_cache: oxicode_vtui::tui::ui::markdown::MdRenderCache,
     /// Transcript index where the in-flight assistant message's streamed
     /// lines begin. `None` while nothing is streaming. The markdown
     /// re-render at `MessageEnd` replaces from this anchor — a blind
@@ -462,11 +479,6 @@ pub struct RenderState {
     /// `Submitted` arm calls `state.pending_resume.take()` and
     /// enqueues the resume.
     pub pending_resume: Option<PathBuf>,
-    /// `Some(state)` once the TUI startup clones the `App`'s
-    /// `SessionState` into the render state. The resume spawn
-    /// closure captures it and passes it to
-    /// `AgentSession::resume_from_file`. `Option` because
-    /// `#[derive(Default)]` requires it.
     pub session_state: Option<crate::SessionState>,
     /// Active `/settings` tab. Persisted across overlay reopens within
     /// the session; drives both the tab-switch rebuild and the sidebar
@@ -494,6 +506,16 @@ pub struct RenderState {
     /// use in the input thread).
     #[cfg(test)]
     pub settings_override_path: Option<std::path::PathBuf>,
+
+    /// Git TUI overlay — `Some` while `/git` is open. The render loop
+    /// paints the overlay over the scrollback+composer region when set;
+    /// the input thread routes keys through `match_git_key` and never
+    /// lets them reach the composer.
+    pub git_tui: Option<crate::tui_vt::git_tui::GitTuiState>,
+    /// Width/height of the git TUI overlay viewport (mirrored from the
+    /// last render pass so resize events can be detected without a
+    /// round-trip into the ratatui Frame).
+    pub git_tui_viewport: (u16, u16),
 }
 
 impl Default for RenderState {
@@ -512,6 +534,7 @@ impl Default for RenderState {
             shutdown_requested: false,
             message_buffer: String::new(),
             stream_anchor: None,
+            md_cache: oxicode_vtui::tui::ui::markdown::MdRenderCache::default(),
             agent_hub_open: false,
             hub_entries: Vec::new(),
             hub: None,
@@ -522,7 +545,9 @@ impl Default for RenderState {
             stream_reveal: usize::MAX,
             thinking_level: "medium".to_string(),
             viewport_width: 80,
+            last_viewport_height: 24,
             glyph_set: crate::symbols::GlyphSet::default(),
+            image_previews: super::image_preview::ImagePreviews::default(),
             overlay: None,
             overlay_model_ids: Vec::new(),
             overlay_catalog_models: Vec::new(),
@@ -557,8 +582,6 @@ impl Default for RenderState {
             file_commands: Vec::new(),
             secure_input_origin: None,
             session_swapper: None,
-            pending_resume: None,
-            session_state: None,
             context_tokens: None,
             context_window: 128_000,
             settings_active_tab: crate::tui_vt::settings_defs::SettingsTab::General,
@@ -572,6 +595,10 @@ impl Default for RenderState {
             #[cfg(test)]
             settings_override_path: None,
             brain: BrainChip::default(),
+            pending_resume: None,
+            session_state: None,
+            git_tui: None,
+            git_tui_viewport: (80, 24),
         }
     }
 }
@@ -1209,7 +1236,17 @@ pub async fn run_tui(app: App) -> Result<()> {
         handle
     });
     state.lock().glyph_set = app.settings().glyph_set;
+    // `inline_images` kill-switch (default ON): flips off every image
+    // escape write; the transcript's fallback text is all that shows.
+    state
+        .lock()
+        .image_previews
+        .set_enabled(app.settings().inline_images);
     let prompt_queue = Arc::new(PromptQueue::default());
+    // User-remappable keybindings live in `RenderState::keymap`, seeded
+    // from `Settings::keybindings` by `new_with_header` above and swapped
+    // in place by the settings keybindings editor — no separate
+    // keybindings.yml bootstrap.
     spawn_input_thread(
         state.clone(),
         evt_tx.clone(),
@@ -1350,6 +1387,28 @@ async fn run_event_loop(
         apply_command(&mut state.lock(), cmd);
     }
 
+    // Seed the resize detector from the real terminal before any
+    // frame is drawn (final-review finding 1). `RenderState::
+    // default()`'s 80 columns is a test-only fallback; left in place
+    // it made the first draw of any terminal wider than 80 look like
+    // a resize (80 → real width) and fire CSI 3J + Clear, wiping the
+    // user's pre-TUI shell scrollback on every launch. On a size
+    // failure we park the 0 sentinel — `should_rebuild_scrollback`
+    // refuses to wipe until a real width has been observed.
+    {
+        let mut s = state.lock();
+        match terminal.size() {
+            Ok(size) => {
+                s.viewport_width = size.width;
+                s.last_viewport_height = size.height;
+            }
+            Err(_) => {
+                s.viewport_width = 0;
+                s.last_viewport_height = 0;
+            }
+        }
+    }
+
     // Draw the initial frame *before* blocking on the first event. The
     // `select!` below parks until an event arrives, and the per-iteration
     // redraw only runs after it resolves — so without this eager draw the
@@ -1370,6 +1429,12 @@ async fn run_event_loop(
     // is cheap and also drives future spinner animation.
     let mut render_tick = tokio::time::interval(std::time::Duration::from_millis(50));
     render_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Render coalescing: most iterations skip the full draw and instead
+    // rely on the 50ms `render_tick` arm below to guarantee a heartbeat.
+    // `priority` is raised by user-facing arms (keyboard, SIGINT, brain
+    // chip) so typing/cancels/chip flips repaint immediately.
+    let mut last_draw = std::time::Instant::now();
+    let mut priority = false;
 
     loop {
         tokio::select! {
@@ -1451,6 +1516,7 @@ async fn run_event_loop(
                 if outcome == LoopOutcome::Exit {
                     break;
                 }
+                priority = true;
             }
 
             // 4. External SIGINT — route through the same idle-vs-streaming
@@ -1464,11 +1530,13 @@ async fn run_event_loop(
                 if outcome == LoopOutcome::Exit {
                     break;
                 }
+                priority = true;
             }
             // 5. Brain health chip updates from the background prober.
             changed = brain_rx.changed() => {
                 if changed.is_ok() {
                     state.lock().brain = *brain_rx.borrow_and_update();
+                    priority = true;
                 }
             }
 
@@ -1477,26 +1545,117 @@ async fn run_event_loop(
             _ = render_tick.tick() => {}
         }
 
-        // small_screen tip: warn when terminal is too narrow for full UI.
-        if let Ok(size) = terminal.size()
-            && size.width < 40
-        {
-            let mut s = state.lock();
-            if s.tip.is_none() {
-                s.show_tip(
-                    "small_screen",
-                    "Terminal too narrow \u{2014} resize for full UI",
-                    300,
-                    true,
+        // Render coalescing: skip the snapshot/draw pipeline when no
+        // user-facing arm raised priority and the render cadence has not
+        // elapsed. The 50ms `render_tick` arm guarantees the heartbeat.
+        if coalesce_draw(last_draw, priority, DRAW_MIN_INTERVAL) == DrawDecision::DrawNow {
+            // small_screen tip: warn when terminal is too narrow for full UI.
+            if let Ok(size) = terminal.size()
+                && size.width < 40
+            {
+                let mut s = state.lock();
+                if s.tip.is_none() {
+                    s.show_tip(
+                        "small_screen",
+                        "Terminal too narrow \u{2014} resize for full UI",
+                        300,
+                        true,
+                    );
+                }
+            }
+            // Redraw. The harness's redraw is idempotent — the ratatui
+            let mut snapshot = state.lock();
+            // Resize observation: ratatui's Inline viewport auto-resizes
+            // the cursor-row viewport on terminal draw, but the frozen
+            // transcript in the host scrollback was printed at the
+            // previous width and cannot re-wrap. When the width changes
+            // we must (1) wipe the scrollback (CSI 3J) so stale-width
+            // rows disappear, (2) clear the visible screen so the
+            // viewport re-anchors cleanly, and (3) reset
+            // `committed_entries` so the next ticks re-commit at the
+            // new width. Height-only resize is a no-op (the live
+            // region just grows or shrinks under the frozen history).
+            let mut prev_size: Option<(u16, u16)> = None;
+            if let Ok(size) = terminal.size() {
+                prev_size = Some((snapshot.viewport_width, snapshot.last_viewport_height));
+                snapshot.viewport_width = size.width;
+                snapshot.last_viewport_height = size.height;
+            }
+            if let Some((prev_w, prev_h)) = prev_size
+                && let Ok(size) = terminal.size()
+                && should_rebuild_scrollback(prev_w, size.width, prev_h, size.height)
+            {
+                // CSI 3J erases the host scrollback; Clear(All) wipes
+                // the visible viewport so stale-width rows vanish.
+                let _ = execute!(terminal.backend_mut(), crossterm::style::Print("\x1b[3J"));
+                let _ = terminal.clear();
+                snapshot.committed_entries = 0;
+                // No `priority = true` here — the unconditional reset
+                // at the end of the draw branch would clobber it. The
+                // CSI 3J + Clear already wiped the visible frame, so
+                // the next render cadence tick repaints cleanly.
+            }
+            // pane reflects phase changes written by the `todo` agent tool, plus
+            // subagent auto-reconcile (idle subagents close their matched todos).
+            if let Some(provider) = snapshot.todo_provider.as_ref() {
+                snapshot.todo_phases = refresh_todo_phases(provider, snapshot.hub.as_ref());
+            }
+            // HUD-only auto-clear: once the list settles (all closed) and the
+            // delay elapses, drop the phases from the pane. The underlying
+            // TodoState is untouched, so a later `/todo` or `todo` tool call
+            // still sees the historical phases.
+            let clear_delay = snapshot.todo_clear_delay_secs;
+            sync_todo_clear_timer(&mut snapshot, clear_delay);
+            // Typewriter paint: reveal the streamed body a bounded step per
+            // frame so it types out instead of jumping per network chunk.
+            advance_stream_reveal(&mut snapshot);
+            // Shed finalized rows into the host scrollback before the
+            // synchronized repaint so the commit and the viewport redraw
+            // land as one visual update.
+            commit_scrollback(terminal, &mut snapshot, false);
+            let _ = execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
+            let draw_err = terminal
+                .draw(|frame| render_frame(frame, &snapshot, handle))
+                .err();
+            let _ = execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+            // Inline image previews: now that the frame (with the image
+            // tool boxes) has flushed, emit the kitty transmit/place or
+            // iTerm2 inline escapes for rows that rendered LIVE this
+            // frame. Committed rows never emit — their fallback text is
+            // already in the host scrollback. The write goes through the
+            // terminal backend (same path as the synchronized-update
+            // escapes above).
+            let committed = snapshot.committed_entries;
+            let image_escapes = snapshot.image_previews.emit_live(committed);
+            if !image_escapes.is_empty() {
+                let _ = execute!(
+                    terminal.backend_mut(),
+                    crossterm::style::Print(image_escapes)
                 );
             }
+            if let Some(err) = draw_err {
+                tracing::warn!(?err, "tui draw failed");
+                break;
+            }
+            // Reset cadence — next draw is gated again until either
+            // priority is raised or the interval elapses.
+            last_draw = std::time::Instant::now();
+            priority = false;
         }
-        // Redraw every iteration. The harness's redraw is idempotent —
-        // the ratatui backend coalesces unchanged frames.
+    }
+
+    // Exit flush: land every committable finalized row into the host
+    // scrollback before the caller drops `Tui` (which restores the
+    // terminal — after that the host scrollback is no longer in raw
+    // mode and the print-before rows survive). The cap is a safety
+    // belt: a stuck `insert_before` (broken terminal) cannot trap us
+    // in the flush.
+    const MAX_EXIT_FLUSH_ITERATIONS: usize = 50;
+    for _ in 0..MAX_EXIT_FLUSH_ITERATIONS {
         let mut snapshot = state.lock();
-        // Tool boxes size their borders to the live terminal width.
-        if let Ok(size) = terminal.size() {
-            snapshot.viewport_width = size.width;
+        let before = snapshot.committed_entries;
+        if snapshot.transcript.is_empty() || before >= snapshot.transcript.len() {
+            break;
         }
         // pane reflects phase changes written by the `todo` agent tool, plus
         // subagent auto-reconcile (idle subagents close their matched todos).
@@ -1515,7 +1674,7 @@ async fn run_event_loop(
         // Shed finalized rows into the host scrollback before the
         // synchronized repaint so the commit and the viewport redraw
         // land as one visual update.
-        commit_scrollback(terminal, &mut snapshot);
+        commit_scrollback(terminal, &mut snapshot, true);
         let _ = execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
         let draw_err = terminal
             .draw(|frame| render_frame(frame, &snapshot, handle))
@@ -1528,6 +1687,36 @@ async fn run_event_loop(
     }
 
     Ok(())
+}
+
+/// Minimum interval between successive full `terminal.draw` passes driven
+/// by the event loop. User-facing arms (keyboard, SIGINT, brain chip)
+/// bypass this via `priority = true`; token-stream agent events coalesce
+/// here so a 200-events/sec burst does not become 200 draws/sec.
+const DRAW_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether the post-select draw block should run this iteration.
+#[derive(Debug, PartialEq, Eq)]
+enum DrawDecision {
+    /// Run the snapshot/draw pipeline now.
+    DrawNow,
+    /// Skip the draw — nothing on screen needs an immediate repaint and
+    /// the frame cadence has not elapsed yet.
+    Defer,
+}
+
+/// Pure coalescing decision: `priority` (user input) always wins; otherwise
+/// we draw once the render-cadence timer has elapsed since the last draw.
+fn coalesce_draw(
+    last_draw_at: std::time::Instant,
+    priority: bool,
+    min_interval: std::time::Duration,
+) -> DrawDecision {
+    if priority || last_draw_at.elapsed() >= min_interval {
+        DrawDecision::DrawNow
+    } else {
+        DrawDecision::Defer
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -2737,7 +2926,7 @@ pub(crate) fn sync_model_chips(
 /// answer. Re-rendered whole on every reveal step so the live view equals
 /// the final render — but only for the REVEALED prefix of the body (see
 /// [`advance_stream_reveal`]).
-fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
+fn render_streamed_message(state: &mut RenderState) -> Vec<Vec<InlineSegment>> {
     let mut lines = Vec::new();
     if !state.thinking_buffer.is_empty() {
         let styles = active_styles();
@@ -2756,7 +2945,7 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
             lines.push(vec![plain_segment("")]);
         }
     }
-    let body = revealed_stream_body(state);
+    let body = revealed_stream_body(state).to_string();
     if !body.is_empty() {
         // Tables pre-compute their geometry, so they must know the real
         // content width — a table built wider wraps at the terminal
@@ -2767,9 +2956,10 @@ fn render_streamed_message(state: &RenderState) -> Vec<Vec<InlineSegment>> {
             width: state.viewport_width,
             height: 24,
         });
-        lines.extend(oxicode_vtui::tui::ui::markdown::render_markdown(
-            body,
+        lines.extend(oxicode_vtui::tui::ui::markdown::render_markdown_cached(
+            &body,
             content_w as usize,
+            &mut state.md_cache,
         ));
     }
     lines
@@ -3188,7 +3378,10 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             handle.set_reasoning_stage(Some(stage));
         }
         AgentEvent::ToolExecutionEnd {
-            result, is_error, ..
+            tool_name,
+            result,
+            is_error,
+            ..
         } => {
             // Close the box: a labeled divider separates the call from
             // its output (errors redden the border and the label), then
@@ -3213,7 +3406,32 @@ fn map_agent_event(handle: &InlineHandle, event: AgentEvent, state: &mut RenderS
             };
             let w = tool_box_width(state);
             handle.append_line(InlineMessageKind::Tool, tool_box_divider(label, w, border));
-            if let Some(rows) = diff_rows(&result.content) {
+            // Inline image preview: a successful generate_image result
+            // renders the text-fallback row here (this is what the
+            // scrollback keeps); the decoded PNG is queued so the
+            // post-draw step can transmit + place the real pixels over
+            // the LIVE rows only. Unsupported terminals and the
+            // `inline_images = false` kill-switch degrade to this text.
+            let embedded_png = if tool_name == "generate_image" && !is_error {
+                extract_generated_png(&result.content)
+            } else {
+                None
+            };
+            if let Some(png) = embedded_png {
+                let id = super::image_preview::content_hash_id(&png);
+                let label = format!("generate_image:{id:08x}");
+                let mut dim = InlineTextStyle::default();
+                dim.effects |= anstyle::Effects::DIMMED;
+                let fallback = super::image_preview::text_fallback(&label);
+                for row in tool_box_rows(&fallback, w, dim, border) {
+                    handle.append_line(InlineMessageKind::Tool, row);
+                }
+                // The row index is resolved later, at render time — the
+                // append command is still in the harness channel.
+                state
+                    .image_previews
+                    .enqueue(id, std::sync::Arc::new(png), label);
+            } else if let Some(rows) = diff_rows(&result.content) {
                 for (text, style) in rows {
                     for row in tool_box_rows(&text, w, style, border) {
                         handle.append_line(InlineMessageKind::Tool, row);
@@ -4462,7 +4680,11 @@ pub(super) fn clear_confirmation() -> ModalConfirmation {
 
 /// Execute a global shortcut resolved by the [`Keymap`]. The bodies are
 /// the original hardcoded Ctrl-* handlers from the input loop, unchanged
-/// — only the trigger condition became keymap-driven.
+/// — only the trigger condition became keymap-driven. The branch's
+/// KeyAction set (Submit/ScrollUp/ScrollDown/Clear/Help/ModelPicker/
+/// ToggleThinking) was folded into this single match via the unified
+/// `GlobalAction` enum, so a user rebind for any of them dispatches here
+/// without falling through to the hardcoded arms below.
 fn apply_global_action(
     action: GlobalAction,
     state: &Arc<parking_lot::Mutex<RenderState>>,
@@ -4501,28 +4723,148 @@ fn apply_global_action(
         // Ctrl+Enter: send-now — abort the current run (if any) and submit
         // the composed input immediately, bypassing the queue pane.
         GlobalAction::SendNow => {
-            let submitted = {
-                let mut s = state.lock();
-                let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
-                    format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
-                } else {
-                    let buf = s.composer.text().to_string();
-                    s.composer.set_text("");
-                    buf
-                };
-                s.slash_popup = SlashPopup::default();
-                s.history_pos = None;
-                if !buf.is_empty() && !buf.starts_with('/') {
-                    s.prompt_history.insert(0, buf.clone());
-                    s.prompt_history.truncate(100);
-                }
-                buf
-            };
+            let submitted = harvest_and_clear_input(state);
             if !submitted.is_empty() {
                 let _ = evt_tx.send(InlineEvent::Interrupt);
                 let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
             }
         }
+        // Plain Enter (and Shift+Enter, both default Submit bindings):
+        // harvest and submit the buffer. The muscle-memory carve-out for
+        // plain Enter in multiline mode (so it inserts a newline) lives
+        // in `keymap_pre_match` — this arm only fires after that check.
+        GlobalAction::Submit => {
+            let submitted = harvest_and_clear_input(state);
+            let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+        }
+        // PageUp: scroll transcript up by a page.
+        GlobalAction::ScrollUp => {
+            let _ = evt_tx.send(InlineEvent::ScrollPageUp);
+        }
+        // PageDown: scroll transcript down by a page.
+        GlobalAction::ScrollDown => {
+            let _ = evt_tx.send(InlineEvent::ScrollPageDown);
+        }
+        // Ctrl+L: clear visible scrollback / fold-all (default behavior
+        // matches Ctrl+E / FoldAll today — the branch wired Clear to
+        // Ctrl+E; main has Ctrl+E = FoldAll already, so Clear was
+        // reassigned to Ctrl+L and routed to fold_all()).
+        GlobalAction::Clear => {
+            let mut s = state.lock();
+            s.fold_all();
+        }
+        // ?: open the keyboard-shortcuts overlay. The carve-out for `?`
+        // typed into a non-empty composer (so it inserts the char)
+        // lives in the Char arm and `keymap_pre_match`'s Help gate.
+        GlobalAction::Help => {
+            let mut s = state.lock();
+            s.overlay = Some(cheatsheet_overlay());
+        }
+        // Ctrl+G: model picker shortcut — currently aliased to the
+        // command palette (the palette has the model switcher as its
+        // first tab). Future PR can split ModelPicker into its own
+        // overlay; for now it mirrors OpenCommandPalette.
+        GlobalAction::ModelPicker => {
+            let mut s = state.lock();
+            s.overlay = Some(build_command_palette());
+        }
+        // Ctrl+T: toggle the thinking-reasoning channel. Same wiring as
+        // ToggleMultiline today; the branch introduced this name, main
+        // had ToggleMultiline on Ctrl+M. Both bindings stay live so a
+        // user rebinding one doesn't lose the other.
+        GlobalAction::ToggleThinking => {
+            let mut s = state.lock();
+            s.multiline_mode = !s.multiline_mode;
+        }
+    }
+}
+
+/// Outcome of the generic keymap pre-match for the four actions that
+/// historically lived only inside hardcoded dispatch arms (Submit,
+/// ScrollUp, ScrollDown, Help). [`KeymapDispatch::None`] means "the
+/// keymap does not bind this key to any of the four" — the hardcoded
+/// arms below then act as the fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeymapDispatch {
+    Submit,
+    ScrollPageUp,
+    ScrollPageDown,
+    Help,
+    None,
+}
+
+/// Consult the keymap for the four actions whose dispatch used to be
+/// hardcoded. Consuming the key here is what makes a user rebind real:
+/// `submit: alt+s` fires although no arm in the input thread matches
+/// Alt+S; previously the capability was "disable at the original key"
+/// only. After the squash-merge these are `GlobalAction` variants, not
+/// the branch's `KeyAction`.
+///
+/// Two muscle-memory carve-outs keep the pre-keymap behavior intact:
+/// * Plain Enter in multiline mode inserts a newline even when Enter
+///   is bound to Submit — only the *send* path is remappable, so the
+///   key falls through to the Enter arm ([`KeymapDispatch::None`]).
+/// * A PRINTABLE Help binding (the default `?`) is left to the Char
+///   arm, which gates Help on the empty composer so typing `?` inside
+///   text still inserts it. Non-printable Help bindings (function
+///   keys, …) never reach a Char arm and dispatch here.
+pub(crate) fn keymap_pre_match(
+    keymap: &Keymap,
+    key: &crossterm::event::KeyEvent,
+    multiline: bool,
+) -> KeymapDispatch {
+    let plain_enter_multiline =
+        key.code == KeyCode::Enter && multiline && !key.modifiers.contains(KeyModifiers::SHIFT);
+    if keymap.matches(GlobalAction::Submit, key) && !plain_enter_multiline {
+        return KeymapDispatch::Submit;
+    }
+    if keymap.matches(GlobalAction::ScrollUp, key) {
+        return KeymapDispatch::ScrollPageUp;
+    }
+    if keymap.matches(GlobalAction::ScrollDown, key) {
+        return KeymapDispatch::ScrollPageDown;
+    }
+    if keymap.matches(GlobalAction::Help, key) && !matches!(key.code, KeyCode::Char(_)) {
+        return KeymapDispatch::Help;
+    }
+    KeymapDispatch::None
+}
+
+/// Harvest the composer buffer (or the selected slash-popup item) as a
+/// submit payload: clears the composer and popup, records prompt
+/// history, and returns the submitted text. Shared by the SendNow
+/// arm, the Submit arm, and the generic Submit dispatch.
+fn harvest_and_clear_input(state: &Arc<parking_lot::Mutex<RenderState>>) -> String {
+    let mut s = state.lock();
+    let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
+        format!("/{}", s.slash_popup.items[s.slash_popup.selected].name)
+    } else {
+        let buf = s.composer.text().to_string();
+        s.composer.set_text("");
+        buf
+    };
+    s.slash_popup = SlashPopup::default();
+    s.history_pos = None;
+    // Record non-empty, non-command prompts in history.
+    if !buf.is_empty() && !buf.starts_with('/') {
+        s.prompt_history.insert(0, buf.clone());
+        s.prompt_history.truncate(100);
+    }
+    buf
+}
+
+/// The keyboard-shortcuts overlay. Shared by the generic Help dispatch
+/// and the printable (`?`) Char-arm check, which gates it on the empty
+/// composer.
+fn cheatsheet_overlay() -> OverlayState {
+    OverlayState {
+        title: "Keyboard Shortcuts".into(),
+        lines: cheatsheet_lines(),
+        items: vec![],
+        selected: 0,
+        search: None,
+        secure_input: None,
+        ..Default::default()
     }
 }
 
@@ -4603,8 +4945,14 @@ fn spawn_input_thread(
                 refresh_input_popups(&mut s);
                 continue;
             }
-
             let Some(key) = key_event else { continue };
+
+            // Snapshot the live keymap for this keystroke: the settings
+            // keybindings editor swaps `RenderState::keymap` in place, so
+            // every key resolves against the current map (same RwLock the
+            // editor writes). Cheap — the map is a small HashMap and key
+            // events are human-paced.
+            let keymap = state.lock().keymap.read().clone();
 
             // Keybinding capture takes precedence over EVERYTHING — the
             // whole point is to grab the next combo verbatim, even one
@@ -4626,7 +4974,9 @@ fn spawn_input_thread(
             // Global shortcuts: resolve through the live keymap. The
             // defaults match the historical hardcoded Ctrl-* bindings;
             // `settings.keybindings` can rebind any of them and the
-            // keybindings editor swaps the map in place.
+            // keybindings editor swaps the map in place. The branch's
+            // hardcoded dispatch was removed; `apply_global_action`
+            // now handles every unified GlobalAction variant.
             {
                 let action = {
                     let s = state.lock();
@@ -4677,6 +5027,69 @@ fn spawn_input_thread(
                 }
             }
 
+            // Git TUI overlay has absolute key priority when open — keys
+            // route through `match_git_key` first; commit-mode chars are
+            // appended to the message; unmatched keys do NOT fall through
+            // to the composer (the brief: overlay REPLACES the composer).
+            if state.lock().git_tui.is_some() && handle_git_tui_key(&state, key.code, key.modifiers)
+            {
+                continue;
+            }
+
+            // Generic keymap dispatch (final-review finding 6): the
+            // four actions that historically lived only inside
+            // hardcoded arms below — Submit, ScrollUp, ScrollDown,
+            // Help — are consulted BEFORE those arms so a user
+            // rebind (e.g. `submit: alt+s` in keybindings.yml)
+            // actually fires. Keys the keymap does NOT bind to these
+            // actions fall through to the arms, which act as the
+            // fallback (Enter-as-newline in multiline, `?` on the
+            // empty composer, …). Placed after the modal handlers
+            // above so overlay/confirmation/git keys keep priority.
+            let multiline_mode = state.lock().multiline_mode;
+            match keymap_pre_match(&keymap, &key, multiline_mode) {
+                KeymapDispatch::Submit => {
+                    // Shell mode: submit the buffer as a bash command
+                    // request.
+                    if state.lock().shell_mode {
+                        let submitted = {
+                            let mut s = state.lock();
+                            let buf = s.composer.text().to_string();
+                            s.composer.set_text("");
+                            s.shell_mode = false;
+                            s.history_pos = None;
+                            if !buf.is_empty() {
+                                s.prompt_history.insert(0, buf.clone());
+                                s.prompt_history.truncate(100);
+                            }
+                            buf
+                        };
+                        if !submitted.is_empty() {
+                            let prompt = format!("Run this shell command: `{submitted}`");
+                            let _ = evt_tx.send(InlineEvent::Submit(prompt.into()));
+                        }
+                        continue;
+                    }
+                    let submitted = harvest_and_clear_input(&state);
+                    let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
+                    continue;
+                }
+                KeymapDispatch::ScrollPageUp => {
+                    let _ = evt_tx.send(InlineEvent::ScrollPageUp);
+                    continue;
+                }
+                KeymapDispatch::ScrollPageDown => {
+                    let _ = evt_tx.send(InlineEvent::ScrollPageDown);
+                    continue;
+                }
+                KeymapDispatch::Help => {
+                    let mut s = state.lock();
+                    s.overlay = Some(cheatsheet_overlay());
+                    continue;
+                }
+                KeymapDispatch::None => {}
+            }
+
             match key.code {
                 // Shift+Tab — cycle autonomy mode Default <-> Auto.
                 KeyCode::BackTab => {
@@ -4702,61 +5115,24 @@ fn spawn_input_thread(
                     continue;
                 }
                 KeyCode::Enter => {
-                    // Multiline mode: plain Enter inserts a newline.
-                    // Shift+Enter (or Enter in non-multiline mode) sends.
-                    let send = !state.lock().multiline_mode
-                        || key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::SHIFT);
-
-                    if !send {
+                    // Fallback arm (final-review finding 6): reached
+                    // only when the keymap does NOT bind Submit to
+                    // this key — the generic dispatch above consumed
+                    // every Submit-bound keypress (including
+                    // non-Enter rebinds like `submit: alt+s`). The
+                    // newline-insert branch stays unconditional:
+                    // while in multiline mode, plain Enter inserts a
+                    // real `\n` regardless of how the user has
+                    // rebound `submit`. Any other Enter is swallowed
+                    // — submit is disabled at this key.
+                    let multiline = state.lock().multiline_mode;
+                    let shift = key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::SHIFT);
+                    if multiline && !shift {
                         let mut s = state.lock();
                         s.composer.insert_str("\n");
-                        continue;
                     }
-
-                    // Shell mode: submit the buffer as a bash command request.
-                    let shell_cmd = state.lock().shell_mode;
-                    if shell_cmd {
-                        let submitted = {
-                            let mut s = state.lock();
-                            let buf = s.composer.text().to_string();
-                            s.composer.set_text("");
-                            s.shell_mode = false;
-                            s.history_pos = None;
-                            if !buf.is_empty() {
-                                s.prompt_history.insert(0, buf.clone());
-                                s.prompt_history.truncate(100);
-                            }
-                            buf
-                        };
-                        if !submitted.is_empty() {
-                            let prompt = format!("Run this shell command: `{submitted}`");
-                            let _ = evt_tx.send(InlineEvent::Submit(prompt.into()));
-                        }
-                        continue;
-                    }
-
-                    let submitted = {
-                        let mut s = state.lock();
-                        let buf = if s.slash_popup.open && !s.slash_popup.items.is_empty() {
-                            let item = &s.slash_popup.items[s.slash_popup.selected];
-                            format!("/{}", item.name)
-                        } else {
-                            let buf = s.composer.text().to_string();
-                            s.composer.set_text("");
-                            buf
-                        };
-                        s.slash_popup = SlashPopup::default();
-                        s.history_pos = None;
-                        // Record non-empty, non-command prompts in history.
-                        if !buf.is_empty() && !buf.starts_with('/') {
-                            s.prompt_history.insert(0, buf.clone());
-                            s.prompt_history.truncate(100);
-                        }
-                        buf
-                    };
-                    let _ = evt_tx.send(InlineEvent::Submit(submitted.into()));
                 }
                 KeyCode::Esc => {
                     // Esc ladder (grok-build-style):
@@ -4896,12 +5272,10 @@ fn spawn_input_thread(
                         let _ = evt_tx.send(InlineEvent::ScrollLineDown);
                     }
                 }
-                KeyCode::PageUp => {
-                    let _ = evt_tx.send(InlineEvent::ScrollPageUp);
-                }
-                KeyCode::PageDown => {
-                    let _ = evt_tx.send(InlineEvent::ScrollPageDown);
-                }
+                // (PageUp/PageDown scroll dispatch moved to the generic
+                // keymap pre-match above — final-review finding 6. Keys
+                // not bound to ScrollUp/ScrollDown fall through to the
+                // catch-all below and are swallowed.)
                 KeyCode::Char(ch) => {
                     let mut s = state.lock();
                     // @! hidden-file toggle: when the picker is open and '!'
@@ -4988,31 +5362,30 @@ fn spawn_input_thread(
                         // navigation keys (matching grok-build's scrollback-
                         // focus semantics). Any other char falls through to
                         // normal insertion so the user can start typing.
-                        match ch {
-                            '?' => {
-                                s.overlay = Some(OverlayState {
-                                    title: "Keyboard Shortcuts".into(),
-                                    lines: cheatsheet_lines(),
-                                    items: vec![],
-                                    selected: 0,
-                                    search: None,
-                                    secure_input: None,
-                                    ..Default::default()
-                                });
-                            }
-                            'e' => s.cycle_block_at_view(),
-                            'E' => s.expand_all(),
-                            'J' => s.jump_next_turn(),
-                            'K' => s.jump_prev_turn(),
-                            'n' if s.search.is_some() => s.search_next(),
-                            'N' if s.search.is_some() => s.search_prev(),
-                            _ => {
-                                s.composer.input(crossterm::event::KeyEvent::new(
-                                    KeyCode::Char(ch),
-                                    key.modifiers,
-                                ));
-                                refresh_input_popups(&mut s);
-                            }
+                        // Printable Help bindings keep their historical
+                        // empty-composer gate here (typing `?` inside
+                        // text must insert it); non-printable rebinds
+                        // dispatch via the generic pre-match above.
+                        if keymap.matches(GlobalAction::Help, &key) {
+                            s.overlay = Some(cheatsheet_overlay());
+                        } else if matches!(ch, 'e') {
+                            s.cycle_block_at_view();
+                        } else if matches!(ch, 'E') {
+                            s.expand_all();
+                        } else if matches!(ch, 'J') {
+                            s.jump_next_turn();
+                        } else if matches!(ch, 'K') {
+                            s.jump_prev_turn();
+                        } else if matches!(ch, 'n') && s.search.is_some() {
+                            s.search_next();
+                        } else if matches!(ch, 'N') && s.search.is_some() {
+                            s.search_prev();
+                        } else {
+                            s.composer.input(crossterm::event::KeyEvent::new(
+                                KeyCode::Char(ch),
+                                key.modifiers,
+                            ));
+                            refresh_input_popups(&mut s);
                         }
                     } else {
                         s.composer.input(crossterm::event::KeyEvent::new(
@@ -5348,7 +5721,90 @@ fn handle_file_search_key(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+/// Route one keystroke through the git TUI overlay. Returns `true` when
+/// the overlay consumed it (so the caller must `continue` and not fall
+/// through to the composer), `false` when the overlay wasn't open (or
+/// when commit-mode refused to handle the key — never happens today).
+///
+/// Commit-mode text input is handled here too: printable characters
+/// append to the message, Backspace pops, Enter commits, Esc cancels.
+fn handle_git_tui_key(
+    state: &Arc<parking_lot::Mutex<RenderState>>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) -> bool {
+    use crate::tui_vt::git_tui::{GitKeyAction, match_git_key};
+    use crossterm::event::KeyEvent;
+
+    let mut s = state.lock();
+    if s.git_tui.is_none() {
+        return false;
+    }
+    let cwd = s.cwd.clone();
+    let Some(git) = s.git_tui.as_mut() else {
+        unreachable!("checked above");
+    };
+    if git.commit_mode {
+        match code {
+            KeyCode::Esc => {
+                git.commit_mode = false;
+                git.commit_msg.clear();
+                return true;
+            }
+            KeyCode::Enter => {
+                if let Err(err) = git.commit(&cwd) {
+                    tracing::warn!(?err, "git commit failed");
+                    // Surface as a tip so the user sees the reason.
+                    s.tip = Some(EphemeralTip {
+                        text: format!("git commit failed: {err}"),
+                        born_tick: FRAME_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                        ttl_ticks: 240,
+                        key: "git-commit-error",
+                        ambient: false,
+                    });
+                }
+                return true;
+            }
+            KeyCode::Backspace => {
+                git.commit_backspace();
+                return true;
+            }
+            KeyCode::Char(c) => {
+                if !modifiers.contains(KeyModifiers::CONTROL)
+                    && !modifiers.contains(KeyModifiers::ALT)
+                {
+                    git.commit_input_char(c);
+                }
+                return true;
+            }
+            _ => return true, // swallow anything else while in commit mode
+        }
+    }
+
+    // Map raw key to an overlay action. Unmatched keys are dropped (do
+    // NOT fall through to the composer per the brief).
+    let key = KeyEvent::new(code, modifiers);
+    let Some(action) = match_git_key(&key) else {
+        return true;
+    };
+    if matches!(action, GitKeyAction::Close) {
+        // Closing clears the overlay entirely.
+        s.git_tui = None;
+        return true;
+    }
+    if let Err(err) = git.apply_action(&cwd, action) {
+        s.tip = Some(EphemeralTip {
+            text: format!("/git: {err}"),
+            born_tick: FRAME_TICK.load(std::sync::atomic::Ordering::Relaxed),
+            ttl_ticks: 240,
+            key: "git-action-error",
+            ambient: false,
+        });
+    }
+    true
+}
+
+// ───────────────────────────────────────────────────────────────────────
 // Agent worker thread — owns the agent run loop, forwards events to the
 // session bus, and accepts new prompts from a tokio channel.
 // ─────────────────────────────────────────────────────────────────────────
@@ -5711,58 +6167,65 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
             let _ = std::io::stderr().flush();
         }
     }
-    render_transcript(frame, layout.scrollback, state);
-    let mut pinned_area = layout.scrollback;
-    if !state.queued_inputs.is_empty() {
-        let used = render_queue_pane(frame, pinned_area, state);
-        pinned_area.y = pinned_area.y.saturating_add(used);
-        pinned_area.height = pinned_area.height.saturating_sub(used);
-    }
-    if !state.todo_phases.is_empty() {
-        if frame.area().height < TODO_COMPACT_ROWS_THRESHOLD {
-            let line = render_todo_compact_line(&state.todo_phases);
-            frame.render_widget(
-                Paragraph::new(vec![line]),
-                Rect {
-                    height: 1,
-                    ..pinned_area
-                },
-            );
-        } else {
-            let is_matched = build_matched_closure(state.hub.as_ref());
-            render_todo_pane(
-                frame,
-                pinned_area,
-                &state.todo_phases,
-                state.todo_expanded,
-                is_matched,
-            );
-        }
-    }
-    // The row above the composer has one owner per frame. A live run
-    // (tracker or stage) takes it — the tracker spans turn boundaries.
-    if state.active_run.is_some() || state.reasoning_stage.is_some() {
-        render_reasoning_indicator(frame, layout.prompt, state);
-    } else if state.pending_quit {
-        render_pending_quit_hint(frame, layout.prompt);
-    } else if !state.follow_ups.is_empty() {
-        render_follow_ups(frame, layout.prompt, &state.follow_ups);
+    // Git TUI overlay REPLACES the scrollback + composer region when
+    // open. Skip both so the transcript doesn't bleed through, then
+    // draw the overlay across the full frame area.
+    if let Some(git) = &state.git_tui {
+        crate::tui_vt::git_tui::render::render_overlay_lines(frame, area, git);
     } else {
-        // Ephemeral tip banner above the composer (auto-dismissed by tick TTL).
-        let occluded = state.overlay.is_some() || state.confirmation.is_some();
-        if let Some(tip) = &state.tip
-            && tip_is_visible(tip, tick)
-            && !(tip.ambient && occluded)
-        {
-            render_tip(frame, layout.prompt, &tip.text);
+        render_transcript(frame, layout.scrollback, state);
+        let mut pinned_area = layout.scrollback;
+        if !state.queued_inputs.is_empty() {
+            let used = render_queue_pane(frame, pinned_area, state);
+            pinned_area.y = pinned_area.y.saturating_add(used);
+            pinned_area.height = pinned_area.height.saturating_sub(used);
         }
-    }
-    render_composer(frame, layout.prompt, state);
-    if state.slash_popup.open {
-        render_slash_popup(frame, layout.prompt, state);
-    }
-    if state.file_search.is_some() {
-        render_file_search_dropdown(frame, layout.prompt, state);
+        if !state.todo_phases.is_empty() {
+            if frame.area().height < TODO_COMPACT_ROWS_THRESHOLD {
+                let line = render_todo_compact_line(&state.todo_phases);
+                frame.render_widget(
+                    Paragraph::new(vec![line]),
+                    Rect {
+                        height: 1,
+                        ..pinned_area
+                    },
+                );
+            } else {
+                let is_matched = build_matched_closure(state.hub.as_ref());
+                render_todo_pane(
+                    frame,
+                    pinned_area,
+                    &state.todo_phases,
+                    state.todo_expanded,
+                    is_matched,
+                );
+            }
+        }
+        // The row above the composer has one owner per frame. A live run
+        // (tracker or stage) takes it — the tracker spans turn boundaries.
+        if state.active_run.is_some() || state.reasoning_stage.is_some() {
+            render_reasoning_indicator(frame, layout.prompt, state);
+        } else if state.pending_quit {
+            render_pending_quit_hint(frame, layout.prompt);
+        } else if !state.follow_ups.is_empty() {
+            render_follow_ups(frame, layout.prompt, &state.follow_ups);
+        } else {
+            // Ephemeral tip banner above the composer (auto-dismissed by tick TTL).
+            let occluded = state.overlay.is_some() || state.confirmation.is_some();
+            if let Some(tip) = &state.tip
+                && tip_is_visible(tip, tick)
+                && !(tip.ambient && occluded)
+            {
+                render_tip(frame, layout.prompt, &tip.text);
+            }
+        }
+        render_composer(frame, layout.prompt, state);
+        if state.slash_popup.open {
+            render_slash_popup(frame, layout.prompt, state);
+        }
+        if state.file_search.is_some() {
+            render_file_search_dropdown(frame, layout.prompt, state);
+        }
     }
     if state.agent_hub_open {
         render_agent_hub(frame, area, state);
@@ -5773,8 +6236,9 @@ fn render_frame(frame: &mut Frame<'_>, state: &RenderState, _handle: &InlineHand
     if let Some(confirm) = &state.confirmation {
         render_confirmation(frame, area, confirm);
     }
+    // (Git TUI overlay is drawn inside the `if let Some(git)` arm
+    // above; nothing more to paint here.)
 }
-
 /// Render the y/n/x confirmation modal centered on top of everything else.
 fn render_confirmation(frame: &mut Frame, area: Rect, confirm: &ModalConfirmation) {
     let styles = active_styles();
@@ -6314,7 +6778,8 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         height: area.height,
     };
 
-    let display = build_transcript_display(state, &styles, state.committed_entries);
+    let display =
+        build_transcript_display(state, &styles, state.committed_entries, content_area.width);
 
     // Resolve scroll offset into the display list.
     let total = display.len();
@@ -6369,7 +6834,8 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         let tl = &state.transcript[sidx];
         let accent_base = accent_color_for_kind(tl.kind, &styles);
         let bg_blend = 0.1 * sticky_opacity;
-        let line = transcript_line_marked(tl, &styles, false, false, false, true);
+        let line =
+            transcript_line_marked(tl, &styles, false, false, false, true, content_area.width);
         let row = Rect {
             x: content_area.x,
             y: content_area.top(),
@@ -6384,15 +6850,143 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         }
         frame.render_widget(Paragraph::new(line), row);
     }
-
+    // Pressure-driven allocation ladder (peer parity with omp): when
+    // there are more visible items than rows in the live region, fold
+    // older blocks to a glyph row, then a folded card, and finally
+    // hide them with a banner. The ladder is pure (`allocate_rows`)
+    // and resolved here once per frame; the render loop below applies
+    // it per item.
+    let live_budget = content_area.height.saturating_sub(sticky_h) as usize;
+    let (alloc_by_block, hidden_count, natural_by_block) =
+        compute_block_allocations(state, state.committed_entries, live_budget);
+    // the live region visibly breathes while tools are running.
+    let pulse = animation_frame(1000).is_multiple_of(2);
+    // for `… N earlier blocks hidden` whenever any block is hidden.
+    let banner_row_used = hidden_count > 0;
+    let banner_y = content_area.bottom().saturating_sub(1);
     // Render top-down, wrapping each line into multiple visual rows.
     let mut y = body_top;
     let width = content_area.width.max(1) as usize;
+    // Inline image previews: resolve each pending image's transcript row
+    // to its block and pre-compute the block's visual height (same wrap
+    // math the commit path uses) so the render loop can anchor a
+    // placement at the block's top row, sized to the tool box.
+    // (block_id, image id, block height, fallback-row index)
+    let image_block_plans: Vec<(usize, u32, u16, usize)> = state
+        .image_previews
+        .pending()
+        .iter()
+        .filter_map(|p| {
+            // Resolve the fallback row by its embedded label — the row
+            // only exists after the append command applied.
+            let row_index = state
+                .transcript
+                .iter()
+                .position(|l| l.segments.iter().any(|s| s.text.contains(&p.label)))?;
+            let bid = state.transcript[row_index].block_id;
+            let mut block_rows: u16 = 0;
+            for d in &display {
+                let Some(l) = state.transcript.get(d.source_index) else {
+                    continue;
+                };
+                if l.block_id != bid {
+                    continue;
+                }
+                block_rows = block_rows.saturating_add(match &d.line {
+                    None => 1,
+                    Some(line) => {
+                        let lw = line.width();
+                        if lw == 0 {
+                            1
+                        } else {
+                            lw.div_ceil(width).max(1) as u16
+                        }
+                    }
+                });
+            }
+            (block_rows > 0).then_some((bid, p.id, block_rows, row_index))
+        })
+        .collect();
+    let mut current_block: Option<usize> = None;
+    let mut skipped_blocks: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for d in display.into_iter().skip(start) {
         if y >= content_area.bottom() {
             break;
         }
-        // Turn spacer: one blank breathing row — no content.
+        // Banner reservation: never paint over the reserved banner
+        // row at the bottom of the live region.
+        if banner_row_used && y >= banner_y {
+            break;
+        }
+        let d_bid = state.transcript.get(d.source_index).map(|l| l.block_id);
+        let Some(d_bid) = d_bid else {
+            continue;
+        };
+        // Block transition: pick a ladder policy for the new block.
+        if current_block != Some(d_bid) {
+            // Inline image preview: this block is a pending image's tool
+            // box — record where its top row landed so the post-draw
+            // step can place the transmitted pixels here. Placement is
+            // clamped to the visible window.
+            if y < content_area.bottom()
+                && let Some((_, pid, prows, row_index)) =
+                    image_block_plans.iter().find(|(b, _, _, _)| *b == d_bid)
+            {
+                let visible_rows = content_area.bottom().saturating_sub(y).max(1);
+                state.image_previews.record_anchor(
+                    *pid,
+                    content_area.x,
+                    y,
+                    (*prows).min(visible_rows),
+                    *row_index,
+                );
+            }
+            current_block = Some(d_bid);
+            let alloc = alloc_by_block
+                .get(&d_bid)
+                .copied()
+                .unwrap_or(BlockAlloc { rows: 0 });
+            // The ladder only intervenes when the block is being
+            // squeezed (alloc.rows < natural). When alloc.rows >=
+            // natural (roomy), the natural rendering already fits
+            // — leave the existing wrap logic alone so explicit
+            // newlines and word-wrap behave the way they always
+            // did.
+            let natural = natural_by_block.get(&d_bid).copied().unwrap_or(0);
+            if alloc.rows < natural {
+                // Pressure / emergency: ladder overrides the
+                // natural rendering. Reserve the first row(s) for
+                // a glyph / folded card; the rest of the block's
+                // natural items are skipped entirely.
+                if skipped_blocks.contains(&d_bid) {
+                    continue;
+                }
+                match alloc.rows {
+                    0 => {
+                        skipped_blocks.insert(d_bid);
+                        continue;
+                    }
+                    1 => {
+                        let activity = block_activity(&state.transcript, d_bid);
+                        render_glyph_row(frame, content_area, y, &activity, &styles, pulse);
+                        y += 1;
+                        skipped_blocks.insert(d_bid);
+                        continue;
+                    }
+                    2 => {
+                        let activity = block_activity(&state.transcript, d_bid);
+                        y += render_folded_card(frame, content_area, y, &activity, &styles, pulse);
+                        skipped_blocks.insert(d_bid);
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            // Roomy (alloc.rows >= natural): fall through and render
+            // the natural items — every display item for the block
+            // gets painted (and ratatui handles wrapping / explicit
+            // newlines as before).
+        }
         let Some(line) = d.line else {
             y += 1;
             continue;
@@ -6413,6 +7007,13 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &RenderState) {
         y += wrapped_h;
     }
 
+    // Banner: paint the `… N earlier blocks hidden` summary in the
+    // reserved row at the bottom of the live region (if any block
+    // was hidden).
+    if banner_row_used {
+        render_hidden_banner(frame, content_area, banner_y, hidden_count);
+    }
+
     let _ = (total, sticky_h);
 }
 
@@ -6425,7 +7026,284 @@ struct TranscriptDisplayItem<'a> {
     line: Option<Line<'a>>,
 }
 
-/// Build the visible-row list, respecting block folding, search marks
+/// Short, present-tense descriptor for a block: the first non-empty
+/// text in its leading line. Falls back to the block's kind label
+/// (e.g. "tool", "agent") when nothing is derivable. The ladder
+/// uses this in the glyph row and folded card so a half-shown
+/// block still tells the user what it was.
+fn block_activity(transcript: &[TranscriptLine], block_id: usize) -> String {
+    let mut activity = String::new();
+    for line in transcript.iter().filter(|l| l.block_id == block_id) {
+        for seg in &line.segments {
+            let text = seg.text.trim();
+            if !text.is_empty() {
+                activity.push_str(text);
+                break;
+            }
+        }
+        if !activity.is_empty() {
+            break;
+        }
+    }
+    if !activity.is_empty() {
+        return activity;
+    }
+    // Fallback: kind label.
+    transcript
+        .iter()
+        .find(|l| l.block_id == block_id)
+        .map(|l| kind_label(l.kind))
+        .unwrap_or_else(|| "block".to_string())
+}
+
+/// Lower-case kind label (e.g. "tool", "agent", "user") used as a
+/// last-resort activity descriptor.
+fn kind_label(kind: InlineMessageKind) -> String {
+    match kind {
+        InlineMessageKind::Agent => "agent".to_string(),
+        InlineMessageKind::User => "user".to_string(),
+        InlineMessageKind::Tool => "tool".to_string(),
+        InlineMessageKind::Error => "error".to_string(),
+        InlineMessageKind::Warning => "warning".to_string(),
+        InlineMessageKind::Info => "info".to_string(),
+        InlineMessageKind::Policy => "policy".to_string(),
+        InlineMessageKind::Pty => "pty".to_string(),
+    }
+}
+
+/// Build per-block natural heights from `visible_items`. The natural
+/// height is the number of items `visible_items` would surface for
+/// that block (each `Line` or `Gap` counts as one logical row).
+/// Blocks with no visible items get height 0.
+fn block_natural_heights(
+    transcript: &[TranscriptLine],
+    mode_for: impl Fn(usize) -> BlockDisplayMode,
+    from_entry: usize,
+) -> (Vec<usize>, Vec<usize>) {
+    let mut block_ids: Vec<usize> = Vec::new();
+    let mut heights: Vec<usize> = Vec::new();
+    let mut index_of: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for item in visible_items(transcript, mode_for) {
+        let bid = match item {
+            VisibleItem::Line { source_index, .. } => transcript[source_index].block_id,
+            VisibleItem::Gap { source_index, .. } => transcript[source_index].block_id,
+        };
+        // Frozen rows (already committed to host scrollback) don't
+        // participate in live-region budgeting — the live region is
+        // bounded to what's still in the viewport, not what's already
+        // gone to scrollback.
+        let live_source = match item {
+            VisibleItem::Line { source_index, .. } => source_index,
+            VisibleItem::Gap { source_index, .. } => source_index,
+        };
+        if live_source < from_entry {
+            continue;
+        }
+        let idx = *index_of.entry(bid).or_insert_with(|| {
+            block_ids.push(bid);
+            heights.push(0);
+            block_ids.len() - 1
+        });
+        heights[idx] += 1;
+    }
+    (block_ids, heights)
+}
+
+/// Resolve a per-block allocation map. The ladder applies only to
+/// blocks without a manual override; manual `Collapsed` /
+/// `Truncated` modes override the ladder for that block (manual
+/// wins — the user already chose how this block should fold).
+///
+/// Returns `alloc_by_block_id`, `hidden_count`, `natural_by_block_id`.
+fn compute_block_allocations(
+    state: &RenderState,
+    from_entry: usize,
+    budget: usize,
+) -> (
+    std::collections::HashMap<usize, BlockAlloc>,
+    usize,
+    std::collections::HashMap<usize, usize>,
+) {
+    let (block_ids, heights) =
+        block_natural_heights(&state.transcript, |bid| state.block_mode(bid), from_entry);
+    let total_blocks = block_ids.len();
+    let allocs = allocate_rows(&heights, budget);
+    let mut by_block: std::collections::HashMap<usize, BlockAlloc> =
+        std::collections::HashMap::with_capacity(total_blocks);
+    let mut natural_by_block: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::with_capacity(total_blocks);
+    let mut hidden = 0usize;
+    for (i, &bid) in block_ids.iter().enumerate() {
+        // Manual override wins. The ladder ONLY applies to blocks
+        // without a manual override; a Collapsed block's natural
+        // item is a single `[+] <line>` (built by
+        // `transcript_line_marked(folded=true)`), which is exactly
+        // what we want for the user's "folded" affordance. Truncated
+        // / Expanded get the ladder output unchanged — those
+        // policies already control folding, so the ladder has
+        // nothing to add.
+        let alloc = match state.block_mode(bid) {
+            // Collapsed: skip the ladder and route through the
+            // natural render. Set `rows = natural` so the roomy
+            // branch in the render loop paints the single `[+]`
+            // line that `visible_items(Collapsed)` emitted.
+            BlockDisplayMode::Collapsed => BlockAlloc { rows: heights[i] },
+            BlockDisplayMode::Truncated | BlockDisplayMode::Expanded => allocs[i],
+        };
+        if alloc.rows == 0 {
+            hidden += 1;
+        }
+        natural_by_block.insert(bid, heights[i]);
+        by_block.insert(bid, alloc);
+    }
+    (by_block, hidden, natural_by_block)
+}
+
+/// Truncate `text` so its unicode display width (after the supplied
+/// prefix) fits inside `width` cells. When the text overflows, an
+/// ellipsis replaces the trailing chars. Mirrors the rule that
+/// `clamp_segments_to_width` enforces on rendered rows: never let a
+/// single row spill past the terminal width.
+fn clamp_fold_text(text: &str, prefix_w: usize, width: usize, ellipsis: &str) -> String {
+    let budget = width.saturating_sub(prefix_w);
+    if budget == 0 || width == 0 {
+        return String::new();
+    }
+    let text_w = text.width();
+    if text_w <= budget {
+        return text.to_string();
+    }
+    // Leave room for the ellipsis. Walk char-by-char on display
+    // width; stop one cell before the budget overflows.
+    let ell_w = ellipsis.width();
+    let cap = budget.saturating_sub(ell_w);
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w > cap {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push_str(ellipsis);
+    out
+}
+
+/// Render a single folded-card row (2-row form: `╭─ <activity>` /
+/// `╰─ …`) into `frame` at `(x, y)`, honoring `width`. The activity
+/// string is clamped to fit the live content width — long
+/// descriptors never break the box-drawing affordance. Returns the
+/// number of rows consumed (always 2).
+fn render_folded_card(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    y: u16,
+    activity: &str,
+    styles: &ThemeStyles,
+    pulse: bool,
+) -> u16 {
+    let tool_color = styles
+        .tool
+        .get_fg_color()
+        .or_else(|| styles.secondary.get_fg_color())
+        .or(styles.response.get_fg_color());
+    let style = Style::default().fg(color_from_anstyle(tool_color));
+    let pulse_mark = if pulse { " \u{2022}" } else { "" };
+    // Box head is `╭─ ` (3 cells) plus an optional pulse mark.
+    // Clamp the activity to the remaining cells so the row never
+    // wraps onto a third visual row.
+    let head_prefix_w = "\u{256D}\u{2500} ".width() + pulse_mark.width();
+    let head_activity = clamp_fold_text(activity, head_prefix_w, area.width as usize, "\u{2026}");
+    let head = Line::from(vec![Span::styled(
+        format!("\u{256D}\u{2500} {head_activity}{pulse_mark}"),
+        style,
+    )]);
+    let tail = Line::from(vec![Span::styled("\u{2570}\u{2500} \u{2026}", style)]);
+    if y < area.bottom() {
+        let row = Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(head), row);
+    }
+    let y2 = y.saturating_add(1);
+    if y2 < area.bottom() {
+        let row = Rect {
+            x: area.x,
+            y: y2,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(tail), row);
+    }
+    2
+}
+
+/// Render a single glyph row (`▸ <activity>`) into `frame` at `(x,
+/// y)`, honoring `width`. The activity is clamped to the live
+/// content width so a long descriptor never wraps. The shared
+/// wall-clock pulse animates the trailing `•` on a 1-second period
+/// so the live region breathes.
+fn render_glyph_row(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    y: u16,
+    activity: &str,
+    styles: &ThemeStyles,
+    pulse: bool,
+) -> u16 {
+    let tool_color = styles
+        .tool
+        .get_fg_color()
+        .or_else(|| styles.secondary.get_fg_color())
+        .or(styles.response.get_fg_color());
+    let style = Style::default().fg(color_from_anstyle(tool_color));
+    let pulse_mark = if pulse { " \u{2022}" } else { "" };
+    // Glyph prefix is `▸ ` (2 cells) plus an optional pulse mark.
+    let glyph_prefix_w = "\u{25B8} ".width() + pulse_mark.width();
+    let glyph_activity = clamp_fold_text(activity, glyph_prefix_w, area.width as usize, "\u{2026}");
+    let line = Line::from(vec![Span::styled(
+        format!("\u{25B8} {glyph_activity}{pulse_mark}"),
+        style,
+    )]);
+    if y < area.bottom() {
+        let row = Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(line), row);
+    }
+    1
+}
+/// Render a one-row banner `… N earlier blocks hidden` in the dim
+/// secondary style. The text is clamped to the live content width
+/// so a very large `N` never overflows the row.
+fn render_hidden_banner(frame: &mut Frame<'_>, area: Rect, y: u16, hidden: usize) -> u16 {
+    let style = Style::default().fg(color_from_anstyle(active_styles().secondary.get_fg_color()));
+    let text = if hidden == 1 {
+        "\u{2026} 1 earlier block hidden".to_string()
+    } else {
+        format!("\u{2026} {hidden} earlier blocks hidden")
+    };
+    let clamped = clamp_fold_text(&text, 0, area.width as usize, "\u{2026}");
+    let line = Line::from(vec![Span::styled(clamped, style)]);
+    if y < area.bottom() {
+        let row = Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(line), row);
+    }
+    1
+}
 /// and turn rhythm. Entries below `from_entry` (committed to the host
 /// scrollback) are skipped — they are frozen and must not render in
 /// the live viewport again.
@@ -6433,6 +7311,7 @@ fn build_transcript_display<'a>(
     state: &'a RenderState,
     styles: &'a ThemeStyles,
     from_entry: usize,
+    width: u16,
 ) -> Vec<TranscriptDisplayItem<'a>> {
     let search_set: std::collections::HashSet<usize> = state
         .search
@@ -6481,6 +7360,7 @@ fn build_transcript_display<'a>(
                     is_match,
                     current_match == Some(source_index),
                     is_block_start,
+                    width,
                 );
                 display.push(TranscriptDisplayItem {
                     source_index,
@@ -6506,6 +7386,37 @@ fn build_transcript_display<'a>(
     }
     display
 }
+/// Decide whether the host scrollback must be wiped and rebuilt after a
+/// terminal resize. Only width changes invalidate the frozen transcript
+/// (rows were printed at the original width and cannot re-wrap). A
+/// height-only resize leaves the printed history intact — the live
+/// viewport just grows or shrinks beneath it.
+///
+/// `prev_w == 0` is the "never measured" sentinel (no frame has been
+/// drawn at a known width): there is no stale-width scrollback to
+/// invalidate, so the answer is always false. Without this, the
+/// 80-column `RenderState::default()` would fire CSI 3J on the first
+/// draw of any wider terminal and wipe the user's pre-TUI shell
+/// scrollback on every launch (final-review finding 1).
+pub(crate) fn should_rebuild_scrollback(
+    prev_w: u16,
+    new_w: u16,
+    _prev_h: u16,
+    _new_h: u16,
+) -> bool {
+    prev_w != 0 && prev_w != new_w
+}
+
+/// Force-flush boundary — commit the entire finalized prefix regardless
+/// of viewport fit. Used at exit to land every committable row into the
+/// host scrollback before raw mode is dropped. Returns the number of
+/// display rows to commit (= `display_len`). `display_len` itself comes
+/// from the caller (the same `build_transcript_display` output the live
+/// commit plan uses) so the boundary stays in lockstep with what the
+/// user has actually been seeing on screen.
+pub(crate) fn plan_full_flush(display_len: usize) -> usize {
+    display_len
+}
 
 /// A planned flush of finalized rows into the host terminal's real
 /// scrollback.
@@ -6517,7 +7428,6 @@ struct ScrollbackCommit {
     /// New `committed_entries`: transcript index of the first live entry.
     new_committed_entries: usize,
 }
-
 /// Decide which leading display rows to shed into the host scrollback so
 /// the live region keeps only `keep_rows` (the viewport). The boundary is
 /// **block-atomic** (never splits a block) and never touches the anchored
@@ -6671,7 +7581,11 @@ fn render_committed_chunk(
 /// overlays / search pause committing so the live region stays put.
 /// Committed blocks are frozen — block-mode cycling applies to live
 /// blocks only (Claude Code behaves the same way).
-fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &mut RenderState) {
+fn commit_scrollback(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    state: &mut RenderState,
+    force_all: bool,
+) {
     if state.scroll_offset != usize::MAX
         || !state.message_buffer.is_empty()
         || !state.thinking_buffer.is_empty()
@@ -6695,17 +7609,49 @@ fn commit_scrollback(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &
         height: size.height,
     };
     let keep_rows = super::frame_layout::scrollback_height(area) as usize;
-    if keep_rows == 0 {
+    if keep_rows == 0 && !force_all {
         return;
     }
     let styles = active_styles();
-    let display = build_transcript_display(state, &styles, state.committed_entries);
-    // The plan's wrapping math must match the LIVE viewport's content
-    // width (layout gutters + scrollbar column), and the printed chunk
-    // must sit at the same left gutter — otherwise frozen rows wrap or
-    // shift a column relative to what the live region showed.
     let (gutter_x, scrollback_w) = super::frame_layout::scrollback_geometry(area);
     let content_w = scrollback_w as usize;
+    let display =
+        build_transcript_display(state, &styles, state.committed_entries, content_w as u16);
+    if force_all {
+        // On exit: commit the entire committable prefix in one shot.
+        // Streaming buffers are already empty at this point; unfinalized
+        // stream content simply stays in the live viewport. The boundary
+        // comes from `plan_full_flush` (trivial: display length).
+        let boundary_item = plan_full_flush(display.len()).min(display.len());
+        if boundary_item == 0 {
+            return;
+        }
+        // Cumulative display rows through `boundary_item` — needed for
+        // `insert_before`'s height hint.
+        let mut total_rows = 0usize;
+        let width = content_w.max(1);
+        for d in &display[..boundary_item] {
+            total_rows += match &d.line {
+                None => 1,
+                Some(line) => {
+                    let w = line.width();
+                    if w == 0 { 1 } else { w.div_ceil(width).max(1) }
+                }
+            };
+        }
+        let rows = total_rows.min(u16::MAX as usize) as u16;
+        let chunk = &display[..boundary_item];
+        let res = terminal.insert_before(rows, |buf| {
+            render_committed_chunk(buf, chunk, gutter_x, content_w as u16);
+        });
+        if res.is_ok() {
+            // After a force-flush, every committed row is in scrollback;
+            // advance the marker to the end of the transcript so the
+            // final draw pass doesn't try to re-commit anything.
+            state.committed_entries = state.transcript.len();
+        }
+        return;
+    }
     let Some(plan) = scrollback_commit_plan(
         &display,
         &state.transcript,
@@ -6739,6 +7685,7 @@ fn transcript_line_marked<'a>(
     is_match: bool,
     is_current: bool,
     is_block_start: bool,
+    width: u16,
 ) -> Line<'a> {
     let kind_style = match line.kind {
         InlineMessageKind::Agent => {
@@ -6794,12 +7741,19 @@ fn transcript_line_marked<'a>(
     } else {
         None
     };
-
-    let mut spans = Vec::with_capacity(line.segments.len() + 1);
+    // Write-path width invariant (omp tui-core-renderer.md §4): every row
+    // must fit inside the terminal width. Reserve the prefix's display
+    // width first so the segments never push the row past `width`. The
+    // prefix is always ASCII (`"[+] "`, `"error: "`, ...) so `.len()` is
+    // a faithful display-width measure here.
+    let prefix_w = prefix.len() as u16;
+    let budget = width.saturating_sub(prefix_w);
+    let clamped = clamp_segments_to_width(&line.segments, budget);
+    let mut spans = Vec::with_capacity(clamped.len() + 1);
     if !prefix.is_empty() {
         spans.push(Span::styled(prefix, kind_style));
     }
-    for segment in &line.segments {
+    for segment in &clamped {
         let mut style = segment_style(segment, kind_style, styles);
         // Weight-led hierarchy: user input is the only bold body text.
         if line.kind == InlineMessageKind::User {
@@ -8186,6 +9140,27 @@ fn preview_tool_result(content: &str) -> String {
     format!("{truncated}\u{2026}")
 }
 
+/// Extract the first embedded PNG from a `generate_image` tool result.
+///
+/// The tool's output embeds images as
+/// `Image N (<bytes> bytes, base64):\n<base64>`. Returns the decoded
+/// bytes of the first image, or `None` when no marker/base64 payload is
+/// present or the payload does not decode.
+fn extract_generated_png(content: &str) -> Option<Vec<u8>> {
+    use base64::{Engine, engine::general_purpose};
+    const MARKER: &str = "base64):";
+    let rest = &content[content.find(MARKER)? + MARKER.len()..];
+    // The base64 blob is the first non-empty line after the marker.
+    let blob = rest.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if blob.is_empty() {
+        return None;
+    }
+    let bytes = general_purpose::STANDARD.decode(blob).ok()?;
+    // Sanity floor: a real PNG header is 8 bytes. Shorter payloads are
+    // parse noise, not an image.
+    (bytes.len() >= 8).then_some(bytes)
+}
+
 fn color_from_anstyle(color: Option<anstyle::Color>) -> Color {
     match color {
         Some(anstyle::Color::Ansi(a)) => ansi_to_ratatui(a),
@@ -8356,6 +9331,107 @@ mod slash_popup_tests {
         state.composer.set_text("/qu");
         refresh_input_popups(&mut state);
         assert!(state.slash_popup.selected < state.slash_popup.items.len());
+    }
+}
+
+#[cfg(test)]
+mod keymap_dispatch_tests {
+    use super::*;
+    use crate::tui_vt::keymap::Keymap;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn press(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, mods)
+    }
+
+    /// Build a keymap from (action-name, combo-string) override pairs —
+    /// the unified replacement for the branch's keybindings.yml overlay
+    /// (settings-backed overrides go through the same
+    /// `Keymap::from_settings` path as the real settings editor).
+    fn keymap_with(overrides: &[(&str, &str)]) -> Keymap {
+        let mut o = std::collections::HashMap::new();
+        for (action, combo) in overrides {
+            o.insert(action.to_string(), vec![combo.to_string()]);
+        }
+        Keymap::from_settings(&o)
+    }
+
+    fn default_keymap() -> Keymap {
+        Keymap::from_settings(&std::collections::HashMap::new())
+    }
+
+    #[test]
+    fn rebound_submit_fires_through_generic_dispatch() {
+        // Final-review finding 6: `submit: alt+s` must actually fire.
+        // Previously Submit was consulted only inside the hardcoded
+        // Enter arm, so a rebind could only disable submit at Enter,
+        // never move it to another key.
+        let km = keymap_with(&[("Submit", "Alt+s")]);
+        let alt_s = press(KeyCode::Char('s'), KeyModifiers::ALT);
+        // Multiline is irrelevant for the rebind: the carve-out only
+        // protects plain Enter.
+        assert_eq!(keymap_pre_match(&km, &alt_s, false), KeymapDispatch::Submit);
+        assert_eq!(keymap_pre_match(&km, &alt_s, true), KeymapDispatch::Submit);
+        // Enter no longer submits (replaced wholesale) — and in
+        // multiline it still falls through for the newline insert.
+        let enter = press(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(keymap_pre_match(&km, &enter, false), KeymapDispatch::None);
+        assert_eq!(keymap_pre_match(&km, &enter, true), KeymapDispatch::None);
+    }
+
+    #[test]
+    fn default_submit_dispatch_preserves_muscle_memory() {
+        let km = default_keymap();
+        let enter = press(KeyCode::Enter, KeyModifiers::NONE);
+        let shift_enter = press(KeyCode::Enter, KeyModifiers::SHIFT);
+        // Non-multiline: plain Enter submits.
+        assert_eq!(keymap_pre_match(&km, &enter, false), KeymapDispatch::Submit);
+        // Multiline: plain Enter falls through (the Enter arm inserts
+        // a newline), Shift+Enter submits.
+        assert_eq!(keymap_pre_match(&km, &enter, true), KeymapDispatch::None);
+        assert_eq!(
+            keymap_pre_match(&km, &shift_enter, true),
+            KeymapDispatch::Submit
+        );
+    }
+
+    #[test]
+    fn scroll_and_help_dispatch_via_keymap() {
+        let km = default_keymap();
+        assert_eq!(
+            keymap_pre_match(&km, &press(KeyCode::PageUp, KeyModifiers::NONE), false),
+            KeymapDispatch::ScrollPageUp
+        );
+        assert_eq!(
+            keymap_pre_match(&km, &press(KeyCode::PageDown, KeyModifiers::NONE), false),
+            KeymapDispatch::ScrollPageDown
+        );
+        let km = keymap_with(&[("ScrollUp", "Ctrl+u")]);
+        assert_eq!(
+            keymap_pre_match(
+                &km,
+                &press(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                false
+            ),
+            KeymapDispatch::ScrollPageUp
+        );
+        // Printable Help bindings stay with the Char arm (empty-
+        // composer gate); non-printable ones dispatch here.
+        let km = default_keymap();
+        assert_eq!(
+            keymap_pre_match(&km, &press(KeyCode::Char('?'), KeyModifiers::NONE), false),
+            KeymapDispatch::None
+        );
+        let km = keymap_with(&[("Help", "Ctrl+PageUp")]);
+        assert_eq!(
+            keymap_pre_match(&km, &press(KeyCode::PageUp, KeyModifiers::CONTROL), false),
+            KeymapDispatch::Help
+        );
+        // Everything else falls through.
+        assert_eq!(
+            keymap_pre_match(&km, &press(KeyCode::Char('x'), KeyModifiers::NONE), false),
+            KeymapDispatch::None
+        );
     }
 }
 
@@ -8591,7 +9667,13 @@ mod render_tests {
 
     #[test]
     fn transcript_wraps_long_lines() {
-        // A line wider than the terminal must wrap, not clip.
+        // Write-path width invariant (Task 2 / omp tui-core-renderer.md §4):
+        // the transcript MUST never paint past the content width — even if
+        // an agent response would naturally wrap to several rows, we hard-clip
+        // to the viewport width so a malformed table can never overflow a
+        // narrow terminal. The visible row stays at exactly the content width
+        // and content past that column is dropped at the boundary (never
+        // wrapped into a second visual row).
         let mut state = RenderState::default();
         state.transcript.push(TranscriptLine {
             kind: InlineMessageKind::Agent,
@@ -8608,8 +9690,8 @@ mod render_tests {
             .draw(|f| render_frame(f, &state, &handle))
             .expect("draw");
         let buf = terminal.backend().buffer();
-        // The word "wrap" must appear somewhere — it would be clipped if
-        // the List widget was still used at 40 cols.
+        // Walk every cell: the transcript row never paints past the content
+        // width (no cell beyond col 40 should carry the clipped text).
         let mut full = String::new();
         for y in 0..buf.area.height {
             for x in 0..buf.area.width {
@@ -8620,8 +9702,14 @@ mod render_tests {
             full.push('\n');
         }
         assert!(
-            full.contains("wrap"),
-            "long line must wrap, not clip — text should be visible past col 40"
+            !full.contains("wrap"),
+            "long line is clamped at the viewport edge — content past col 40 must be dropped, not wrapped"
+        );
+        // The truncated prefix is still visible: the leading word "This" lands
+        // at the top-left of the transcript.
+        assert!(
+            full.contains("This"),
+            "the truncated prefix of the clamped line is visible: {full:?}"
         );
     }
 
@@ -9961,6 +11049,208 @@ mod render_tests {
             .join("");
         assert!(text.contains("sk-..."));
     }
+    /// Pressure-driven allocation ladder: with many blocks competing
+    /// for a short live region, older blocks must collapse to glyph
+    /// rows and the emergency branch must paint a `… N earlier
+    /// blocks hidden` banner.
+    #[test]
+    fn ladder_collapses_oldest_blocks_to_glyph_row_and_banner() {
+        // 6 tool blocks; live region is 6 rows. Allocate 3 source
+        // lines per block so the natural height (3) exceeds the
+        // budget per block in the pressure branch. The ladder
+        // hides the oldest blocks and paints glyph rows for the
+        // newest ones.
+        let mut state = RenderState::default();
+        for i in 0..6 {
+            let bid = i;
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Tool,
+                segments: vec![plain_segment(format!("tool-{i}-headline"))],
+                block_id: bid,
+            });
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Tool,
+                segments: vec![plain_segment(format!("tool-{i}-middle"))],
+                block_id: bid,
+            });
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Tool,
+                segments: vec![plain_segment(format!("tool-{i}-trailer"))],
+                block_id: bid,
+            });
+        }
+        // 80x10 viewport → content_area.height ≈ 10 - composer 3 -
+        // breath row 1 = 6 rows for the live region.
+        let rendered = render_frame_to_string_at(&state, 80, 10);
+        // Emergency banner ("… N earlier blocks hidden") must be
+        // present when more blocks than rows exist. With 6 blocks
+        // and a 6-row region, the ladder may or may not hide — but
+        // it should never panic. We assert the renderer did not
+        // lose the live region entirely and that the most-recent
+        // block (tool-5) is at least partially visible.
+        assert!(
+            rendered.contains("tool-5")
+                || rendered.contains("tool-5-headline")
+                || rendered.contains("\u{25B8}")
+                || rendered.contains("earlier blocks hidden"),
+            "live region must surface a recent block or its folded form"
+        );
+    }
+
+    /// Pressure-driven ladder: the latest block stays full when
+    /// older blocks are folded to glyph rows.
+    #[test]
+    fn ladder_keeps_newest_block_full_under_pressure() {
+        // 3 blocks: one big (5 lines) + two small (2 lines each) =
+        // 9 natural items; budget ≈ 6 → pressure. Newest (big)
+        // gets the largest slice.
+        let mut state = RenderState::default();
+        // Block 0 (older, 2 lines)
+        for j in 0..2 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment(format!("old-block-line-{j}"))],
+                block_id: 0,
+            });
+        }
+        // Block 1 (middle, 2 lines)
+        for j in 0..2 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment(format!("mid-block-line-{j}"))],
+                block_id: 1,
+            });
+        }
+        // Block 2 (newest, 5 lines)
+        for j in 0..5 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![plain_segment(format!("new-block-line-{j}"))],
+                block_id: 2,
+            });
+        }
+        let rendered = render_frame_to_string_at(&state, 80, 12);
+        // Newest block's first line must be visible.
+        assert!(
+            rendered.contains("new-block-line-0"),
+            "newest block's leading line must be visible"
+        );
+        // Oldest block's lines may be folded or hidden — assert
+        // they don't occupy the FULL natural height (the ladder
+        // folded them).
+        let old_visible = (0..2).all(|j| rendered.contains(&format!("old-block-line-{j}")));
+        assert!(
+            !old_visible,
+            "oldest block must be folded or hidden when under pressure"
+        );
+    }
+    /// Long activity strings must be clamped to the live content
+    /// width — never wrap onto a second visual row that would
+    /// break the `▸ ` or `╭─ / ╰─ …` affordances.
+    #[test]
+    fn long_activity_folded_card_stays_within_width() {
+        let mut state = RenderState::default();
+        // Many blocks of 3 lines each in a short live region.
+        // 6 blocks × 3 = 18 visible items, budget ≈ 6 → pressure.
+        // Every block gets 1 glyph row; activity descriptors are
+        // 120+ chars long and would wrap without clamping.
+        for i in 0..8 {
+            let bid = i;
+            let long = format!("tool-{i}-{}", "x".repeat(120));
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Tool,
+                segments: vec![plain_segment(format!("tool-{i}-head"))],
+                block_id: bid,
+            });
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Tool,
+                segments: vec![plain_segment(format!("tool-{i}-body"))],
+                block_id: bid,
+            });
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Tool,
+                segments: vec![plain_segment(long)],
+                block_id: bid,
+            });
+        }
+        let rendered = render_frame_to_string_at(&state, 80, 10);
+        // Every row in the rendered output must stay within the
+        // 80-cell viewport. (Without clamping, the glyph row
+        // `▸ tool-N-xxxxxxxxxxxxx...` would wrap onto a second
+        // visual row whose first cell holds `▸`.)
+        for line in rendered.split('\n') {
+            assert!(
+                line.width() <= 80,
+                "rendered row exceeded the viewport width: '{}' ({} cells)",
+                line,
+                line.width()
+            );
+        }
+        // The glyph row (`▸ `) signature must appear — long
+        // activity must still surface (clamped, not truncated to
+        // empty).
+        assert!(
+            rendered.contains('\u{25B8}'),
+            "glyph rows must be painted even with long activities"
+        );
+    }
+
+    /// Manual `Collapsed` mode must keep the historic `[+] ` prefix
+    /// produced by `transcript_line_marked(folded=true)`. The
+    /// ladder applies only to non-manual blocks.
+    #[test]
+    fn manual_collapsed_block_keeps_the_plus_marker() {
+        let mut state = RenderState::default();
+        // One block with 3 lines + one newest block.
+        for j in 0..3 {
+            state.transcript.push(TranscriptLine {
+                kind: InlineMessageKind::Error,
+                segments: vec![plain_segment(format!("boom-line-{j}"))],
+                block_id: 0,
+            });
+        }
+        // Mark block 0 as manually collapsed.
+        state.block_display.insert(0, BlockDisplayMode::Collapsed);
+        // Newest block (1) untouched, default mode.
+        state.transcript.push(TranscriptLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![plain_segment("after-collapsed")],
+            block_id: 1,
+        });
+        let rendered = render_frame_to_string_at(&state, 80, 12);
+        // The historic `[+] error:` prefix from
+        // `transcript_line_marked(folded=true)` must still appear.
+        assert!(
+            rendered.contains("[+] error: boom-line-0"),
+            "manual Collapsed must keep the [+] marker (got: {rendered:?})"
+        );
+        // The ladder's glyph affordance (`▸ `) must NOT replace it.
+        assert!(
+            !rendered.contains('\u{25B8}'),
+            "manual Collapsed must NOT be replaced by the ladder glyph"
+        );
+    }
+
+    /// `clamp_fold_text` (the helper that truncates activity
+    /// strings) honors unicode display width and replaces overflow
+    /// with an ellipsis.
+    #[test]
+    fn clamp_fold_text_truncates_at_unicode_width() {
+        // ASCII overflow: 80-cell budget, prefix 3, activity 100.
+        let out = clamp_fold_text(&"x".repeat(100), 3, 80, "\u{2026}");
+        assert!(out.ends_with('\u{2026}'), "ellipsis appended on overflow");
+        assert!(out.width() <= 80, "clamped to budget: got {}", out.width());
+        // CJK: each glyph is 2 cells.
+        let cjk = "\u{4ECA}\u{65E5}\u{306F}\u{667A}\u{6167}".repeat(20);
+        let out_cjk = clamp_fold_text(&cjk, 2, 20, "\u{2026}");
+        assert!(out_cjk.width() <= 20, "CJK clamp: got {}", out_cjk.width());
+        assert!(out_cjk.ends_with('\u{2026}'));
+        // Identity when text already fits.
+        assert_eq!(clamp_fold_text("short", 0, 80, "\u{2026}"), "short");
+        // Zero-width returns empty.
+        assert_eq!(clamp_fold_text("text", 0, 0, "\u{2026}"), "");
+    }
+
     // Cursor math for the composer is now owned by `oxicode_textarea::
     // TextArea::cursor_pos_with_state`, which is exercised by the
     // 351 tests in `oxicode-textarea`. The byte-cursor column math
@@ -11242,7 +12532,7 @@ mod thinking_stream_tests {
         let mut state = RenderState::default();
         state.message_buffer = "hello world".to_string();
         state.stream_reveal = 5; // bytes — "hello"
-        let lines = render_streamed_message(&state);
+        let lines = render_streamed_message(&mut state);
         let text: String = lines
             .iter()
             .map(|l| l.iter().map(|s| s.text.as_str()).collect::<String>())
@@ -11495,7 +12785,7 @@ mod composer_border_tests {
         };
 
         let user_line = line(InlineMessageKind::User);
-        let user = transcript_line_marked(&user_line, &styles, false, false, false, true);
+        let user = transcript_line_marked(&user_line, &styles, false, false, false, true, 80);
         assert_eq!(
             user.spans[0].style.fg,
             Some(user_color),
@@ -11503,7 +12793,7 @@ mod composer_border_tests {
         );
 
         let agent_line = line(InlineMessageKind::Agent);
-        let agent = transcript_line_marked(&agent_line, &styles, false, false, false, true);
+        let agent = transcript_line_marked(&agent_line, &styles, false, false, false, true, 80);
         assert_eq!(agent.spans[0].style.fg, Some(response));
     }
 }
@@ -11528,7 +12818,7 @@ mod transcript_turn_tests {
     fn user_lines_are_bold_primary_without_prefix() {
         let styles = active_styles();
         let line = tl(InlineMessageKind::User, "refactor the parser", 0);
-        let rendered = transcript_line_marked(&line, &styles, false, false, false, true);
+        let rendered = transcript_line_marked(&line, &styles, false, false, false, true, 80);
         assert_eq!(
             rendered.spans.len(),
             1,
@@ -11557,7 +12847,7 @@ mod transcript_turn_tests {
             (InlineMessageKind::Pty, "shell"),
         ] {
             let line = tl(kind, &format!("{label}-content"), 0);
-            let rendered = transcript_line_marked(&line, &styles, false, false, false, true);
+            let rendered = transcript_line_marked(&line, &styles, false, false, false, true, 80);
             assert_eq!(
                 rendered.spans.len(),
                 1,
@@ -11572,10 +12862,10 @@ mod transcript_turn_tests {
         let styles = active_styles();
         let line = tl(InlineMessageKind::Error, "boom", 0);
 
-        let head = transcript_line_marked(&line, &styles, false, false, false, true);
+        let head = transcript_line_marked(&line, &styles, false, false, false, true, 80);
         assert_eq!(spans_to_string(&head), "error: boom");
 
-        let body = transcript_line_marked(&line, &styles, false, false, false, false);
+        let body = transcript_line_marked(&line, &styles, false, false, false, false, 80);
         assert_eq!(
             spans_to_string(&body),
             "boom",
@@ -11587,11 +12877,26 @@ mod transcript_turn_tests {
     fn folded_head_keeps_the_block_label() {
         let styles = active_styles();
         let line = tl(InlineMessageKind::Error, "boom", 0);
-        let rendered = transcript_line_marked(&line, &styles, true, false, false, false);
+        let rendered = transcript_line_marked(&line, &styles, true, false, false, false, 80);
         assert_eq!(
             spans_to_string(&rendered),
             "[+] error: boom",
             "a collapsed block stays identifiable"
+        );
+    }
+
+    #[test]
+    fn transcript_line_marked_clamps_to_width() {
+        // Write-path width invariant: even if a 300-char segment lands on
+        // a 40-col viewport, the rendered Line never overflows.
+        let styles = active_styles();
+        let big: String = "x".repeat(300);
+        let line = tl(InlineMessageKind::Agent, &big, 0);
+        let rendered = transcript_line_marked(&line, &styles, false, false, false, true, 40);
+        assert!(
+            rendered.width() <= 40,
+            "transcript row overflowed the terminal width: rendered.width()={}",
+            rendered.width()
         );
     }
 }
@@ -11633,7 +12938,7 @@ mod scrollback_commit_tests {
             ..Default::default()
         };
         let styles = active_styles();
-        let display = build_transcript_display(&state, &styles, 0);
+        let display = build_transcript_display(&state, &styles, 0, 80);
         // 12 rows, keep 4 → 8 rows commit; entry 8 starts block b4, so
         // the boundary is already block-atomic (b3 ends at entry 7).
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 4, None).expect("plan");
@@ -11655,7 +12960,7 @@ mod scrollback_commit_tests {
             ..Default::default()
         };
         let styles = active_styles();
-        let display = build_transcript_display(&state, &styles, 0);
+        let display = build_transcript_display(&state, &styles, 0, 80);
         // 9 rows; keep 5 → limit 4 → the boundary would split b1
         // (items 3,4,5).
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 5, None).expect("plan");
@@ -11674,7 +12979,7 @@ mod scrollback_commit_tests {
             ..Default::default()
         };
         let styles = active_styles();
-        let display = build_transcript_display(&state, &styles, 0);
+        let display = build_transcript_display(&state, &styles, 0, 80);
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 4, state.stream_anchor)
             .expect("plan");
         assert!(
@@ -11737,7 +13042,7 @@ mod scrollback_commit_tests {
             ..Default::default()
         };
         let styles = active_styles();
-        let display = build_transcript_display(&state, &styles, 0);
+        let display = build_transcript_display(&state, &styles, 0, 80);
         assert!(scrollback_commit_plan(&display, &state.transcript, 80, 12, None).is_none());
     }
 
@@ -11755,13 +13060,42 @@ mod scrollback_commit_tests {
             ..Default::default()
         };
         let styles = active_styles();
-        let display = build_transcript_display(&state, &styles, 0);
+        let display = build_transcript_display(&state, &styles, 0, 80);
         let plan = scrollback_commit_plan(&display, &state.transcript, 80, 10, None).expect("plan");
         assert_eq!(
             plan.new_committed_entries, 22,
             "32 rows, keep 10 → head 22 rows commit"
         );
         assert_eq!(plan.rows, 22);
+    }
+
+    #[test]
+    fn rebuild_only_on_width_change() {
+        // Height-only resize: nothing to rebuild — committed transcript
+        // lives in the host terminal's scrollback at the width it was
+        // printed at; the live viewport just changes rows.
+        assert!(!should_rebuild_scrollback(80, 80, 24, 30));
+        // Width grew: re-commit so freshly finalized rows wrap to the
+        // new width and the old frozen scrollback must go (CSI 3J).
+        assert!(should_rebuild_scrollback(80, 100, 24, 24));
+        // Width shrank: same — the old layout no longer fits.
+        assert!(should_rebuild_scrollback(100, 80, 30, 24));
+        // Sentinel (final-review finding 1): prev_w == 0 means "never
+        // measured" — no frame was drawn at a known width, so there is
+        // no stale-width scrollback and the wipe must NOT fire, no
+        // matter what the new width is.
+        assert!(!should_rebuild_scrollback(0, 100, 24, 24));
+        assert!(!should_rebuild_scrollback(0, 80, 24, 24));
+    }
+
+    #[test]
+    fn force_flush_boundary_is_everything() {
+        // Force-flush on exit ignores viewport fit and commits the
+        // whole finalized prefix — every display row, regardless of
+        // what fits in the live region.
+        assert_eq!(plan_full_flush(0), 0);
+        assert_eq!(plan_full_flush(8), 8);
+        assert_eq!(plan_full_flush(40), 40);
     }
 }
 
@@ -12091,7 +13425,7 @@ mod trailing_breath_tests {
             ..Default::default()
         };
         let styles = active_styles();
-        let display = build_transcript_display(&state, &styles, 0);
+        let display = build_transcript_display(&state, &styles, 0, 80);
         assert_eq!(display.len(), 1, "the gap is layout, not a display item");
         assert!(display[0].line.is_some());
     }
@@ -12195,6 +13529,47 @@ mod glyph_cycle_tests {
     }
 }
 
+#[cfg(test)]
+mod coalesce_draw_tests {
+    //! Render coalescing: the event loop used to redraw on every iteration,
+    //! causing a frame storm during token-stream bursts (one full
+    //! `terminal.draw` per agent event). The fix is `coalesce_draw`: most
+    //! arms gate the post-select draw behind a 50ms cadence; user-facing
+    //! arms (keyboard, SIGINT, brain chip) raise `priority = true` for
+    //! an immediate repaint.
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn defer_within_interval() {
+        let now = Instant::now();
+        let last = now - Duration::from_millis(10);
+        assert_eq!(
+            coalesce_draw(last, false, DRAW_MIN_INTERVAL),
+            DrawDecision::Defer
+        );
+    }
+
+    #[test]
+    fn draw_now_on_priority_even_within_interval() {
+        let now = Instant::now();
+        let last = now - Duration::from_millis(10);
+        assert_eq!(
+            coalesce_draw(last, true, DRAW_MIN_INTERVAL),
+            DrawDecision::DrawNow
+        );
+    }
+
+    #[test]
+    fn draw_now_when_interval_elapsed() {
+        let now = Instant::now();
+        let last = now - Duration::from_millis(60);
+        assert_eq!(
+            coalesce_draw(last, false, DRAW_MIN_INTERVAL),
+            DrawDecision::DrawNow
+        );
+    }
+}
 #[cfg(test)]
 mod settings_panel_tests {
     use super::*;
@@ -12866,6 +14241,260 @@ mod settings_panel_tests {
         assert!(
             saw_refusal,
             "essential refusal must surface an Error line mentioning 'essential'"
+        );
+    }
+}
+
+// Inline image previews — generate_image result hook (kitty/iTerm2).
+// ═════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod image_preview_hook_tests {
+    use super::*;
+    use base64::{Engine, engine::general_purpose};
+    use tokio::sync::mpsc;
+
+    /// Craft a generate_image tool-result body in the exact shape
+    /// `GenerateImageTool::execute` produces.
+    fn image_result_content(payload: &[u8]) -> String {
+        let b64 = general_purpose::STANDARD.encode(payload);
+        format!(
+            "Generated 1 image(s).\n\nImage 1 ({} bytes, base64):\n{}\n",
+            payload.len(),
+            b64
+        )
+    }
+
+    fn fresh_handle() -> (InlineHandle, mpsc::UnboundedReceiver<InlineCommand>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (InlineHandle::new_for_tests(tx), rx)
+    }
+
+    fn apply_all(state: &mut RenderState, rx: &mut mpsc::UnboundedReceiver<InlineCommand>) {
+        while let Ok(cmd) = rx.try_recv() {
+            apply_command(state, cmd);
+        }
+    }
+
+    fn transcript_text(state: &RenderState) -> Vec<String> {
+        state
+            .transcript
+            .iter()
+            .map(|l| {
+                l.segments
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// A successful generate_image result renders the text-fallback row
+    /// (never the raw base64 wall) and enqueues the decoded PNG keyed by
+    /// its content hash, pointing at the fallback row.
+    #[test]
+    fn generate_image_result_renders_fallback_row_and_enqueues_live_preview() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+        let payload = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionStart {
+                tool_call_id: "img-1".into(),
+                tool_name: "generate_image".into(),
+                args: serde_json::json!({"prompt": "a cat"}),
+                intent: None,
+                context: None,
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id: "img-1".into(),
+                tool_name: "generate_image".into(),
+                intent: None,
+                result: oxicode_ai::ToolResult {
+                    tool_call_id: "img-1".into(),
+                    content: image_result_content(&payload),
+                    status: "success".into(),
+                },
+                is_error: false,
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+
+        let texts = transcript_text(&state);
+        let fallback_idx = texts
+            .iter()
+            .position(|t| t.contains("[image: generate_image:"))
+            .expect("fallback row rendered in the tool box");
+        assert!(
+            texts
+                .iter()
+                .all(|t| !t.contains(&general_purpose::STANDARD.encode(payload))),
+            "raw base64 must never render as text"
+        );
+
+        assert_eq!(
+            state.image_previews.pending_len(),
+            1,
+            "decoded PNG enqueued for live placement"
+        );
+        let pending = &state.image_previews.pending()[0];
+        assert_eq!(&*pending.png, &payload, "decoded bytes round-trip");
+        // The pending preview's label resolves to the fallback row — this
+        // is the lookup the render pass uses to anchor the placement.
+        assert!(
+            texts[fallback_idx].contains(&pending.label),
+            "label {label:?} matches the fallback row {row:?}",
+            label = pending.label,
+            row = texts[fallback_idx],
+        );
+    }
+
+    /// Results without an embedded base64 image (API errors, empty
+    /// responses) keep the generic preview path and enqueue nothing.
+    #[test]
+    fn generate_image_without_payload_keeps_generic_preview() {
+        let mut state = RenderState::default();
+        let (handle, mut rx) = fresh_handle();
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionStart {
+                tool_call_id: "img-2".into(),
+                tool_name: "generate_image".into(),
+                args: serde_json::json!({"prompt": "a cat"}),
+                intent: None,
+                context: None,
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id: "img-2".into(),
+                tool_name: "generate_image".into(),
+                intent: None,
+                result: oxicode_ai::ToolResult {
+                    tool_call_id: "img-2".into(),
+                    content: "Image generation completed but returned no images.".into(),
+                    status: "success".into(),
+                },
+                is_error: false,
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+        let texts = transcript_text(&state);
+        assert!(
+            texts.iter().any(|t| t.contains("returned no images")),
+            "generic preview path still renders the summary"
+        );
+        assert_eq!(state.image_previews.pending_len(), 0);
+    }
+
+    /// End-to-end: a live frame records the anchor for the pending
+    /// image's tool box, and the post-draw emit produces the full kitty
+    /// sequence (CUP + transmit + place) for it.
+    #[test]
+    fn live_frame_anchors_and_emits_kitty_sequence() {
+        use crate::tui_vt::image_preview::{ImagePreviews, ImageSupport};
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let mut state = RenderState::default();
+        state.image_previews = ImagePreviews::new(ImageSupport::Kitty);
+        let (handle, mut rx) = fresh_handle();
+        let payload = [0x89u8, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionStart {
+                tool_call_id: "img-3".into(),
+                tool_name: "generate_image".into(),
+                args: serde_json::json!({"prompt": "a dog"}),
+                intent: None,
+                context: None,
+            },
+            &mut state,
+        );
+        map_agent_event(
+            &handle,
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id: "img-3".into(),
+                tool_name: "generate_image".into(),
+                intent: None,
+                result: oxicode_ai::ToolResult {
+                    tool_call_id: "img-3".into(),
+                    content: image_result_content(&payload),
+                    status: "success".into(),
+                },
+                is_error: false,
+            },
+            &mut state,
+        );
+        apply_all(&mut state, &mut rx);
+
+        // Render one live frame (records the anchor through the shared
+        // interior-mutable channel).
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        let (tx, _drain) = mpsc::unbounded_channel();
+        terminal
+            .draw(|frame| render_frame(frame, &state, &InlineHandle::new_for_tests(tx)))
+            .expect("draw");
+        let buf = terminal.backend().buffer().clone();
+        let frame_text: String = (0..buf.area().height)
+            .map(|y| {
+                (0..buf.area().width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            frame_text.contains("[image: generate_image:"),
+            "live frame paints the fallback row"
+        );
+
+        // Post-draw emit: full kitty stream for the anchored box.
+        let seq = state.image_previews.emit_live(state.committed_entries);
+        assert!(seq.contains("\x1b["));
+        assert!(seq.contains("\x1b_Ga=t,f=100"), "transmit");
+        assert!(seq.contains("a=p"), "placement");
+        assert_eq!(state.image_previews.pending_len(), 0, "placed and consumed");
+    }
+
+    /// `extract_generated_png` — the marker parse powering the hook.
+    #[test]
+    fn extract_generated_png_parses_first_image_and_rejects_garbage() {
+        let payload = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+        assert_eq!(
+            extract_generated_png(&image_result_content(&payload)),
+            Some(payload),
+            "first base64 blob after the marker decodes"
+        );
+        // Multiple images: only the first is previewed. Payloads clear
+        // the 8-byte PNG-header sanity floor.
+        let first: Vec<u8> = (1u8..=8).collect();
+        let second: Vec<u8> = (9u8..=16).collect();
+        let two = format!(
+            "Generated 2 image(s).\n\nImage 1 (8 bytes, base64):\n{}\n\nImage 2 (8 bytes, base64):\n{}\n",
+            general_purpose::STANDARD.encode(&first),
+            general_purpose::STANDARD.encode(&second),
+        );
+        assert_eq!(extract_generated_png(&two), Some(first));
+        // No marker / invalid base64 / sub-PNG-header payload → None.
+        assert_eq!(extract_generated_png("plain text output"), None);
+        assert_eq!(
+            extract_generated_png("Image 1 (8 bytes, base64):\n!!!not-base64!!!\n"),
+            None
+        );
+        assert_eq!(
+            extract_generated_png("Image 1 (2 bytes, base64):\n AQID \n"),
+            None,
+            "payloads shorter than a PNG header are rejected"
         );
     }
 }

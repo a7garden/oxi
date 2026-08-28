@@ -161,6 +161,267 @@ fn validate_cwd(dir: &str, workspace: Option<&Path>) -> Result<PathBuf, String> 
     Ok(path.to_path_buf())
 }
 
+// ── F-9: PTY-backed bash execution preserves ANSI SGR, drops other CSI/OSC ─
+
+/// Outcome of a PTY-backed command run. The output is filtered to keep SGR
+/// color escapes (`ESC [ ... m`) and drop cursor-motion / screen-control
+/// sequences so the bytes are safe to embed in the agent transcript.
+#[cfg(unix)]
+#[derive(Debug, Clone)]
+pub struct PtyOutcome {
+    /// Filtered PTY output (SGR kept, other CSI / OSC dropped).
+    pub output: String,
+    /// Exit status of the child, if available (None for signal kills).
+    pub exit_code: Option<i32>,
+}
+
+/// Filter PTY bytes: keep SGR (`ESC [ ... m`) sequences, drop all other CSI
+/// (`ESC [ ... <letter>`) and OSC (`ESC ] ... BEL|ST`) escapes. Non-control
+/// bytes pass through unchanged.
+///
+/// Downstream renderers (TUI transcript, logs) treat `ESC [ 31m` red text as
+/// meaningful, but `ESC [ 2J` clear-screen and `ESC [ H` cursor-home are noise
+/// that would corrupt transcript diffs.
+#[cfg(unix)]
+fn ansi_filter(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b != 0x1b {
+            out.push(b);
+            i += 1;
+            continue;
+        }
+        if i + 1 >= bytes.len() {
+            out.push(b);
+            i += 1;
+            continue;
+        }
+        match bytes[i + 1] {
+            b'[' => {
+                // CSI: ESC [ <params> <final byte 0x40..=0x7e>
+                let mut j = i + 2;
+                while j < bytes.len() && !(0x40..=0x7e).contains(&bytes[j]) {
+                    j += 1;
+                }
+                if j < bytes.len() {
+                    if bytes[j] == b'm' {
+                        out.extend_from_slice(&bytes[i..=j]);
+                    }
+                    i = j + 1;
+                } else {
+                    i += 1;
+                }
+            }
+            b']' => {
+                // OSC: ESC ] <payload> terminated by BEL (0x07) or ST (ESC \).
+                let mut j = i + 2;
+                while j < bytes.len() {
+                    if bytes[j] == 0x07 {
+                        j += 1;
+                        break;
+                    }
+                    if bytes[j] == 0x1b && j + 1 < bytes.len() && bytes[j + 1] == b'\\' {
+                        j += 2;
+                        break;
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            _ => {
+                // ESC followed by something we don't recognize. Drop the
+                // ESC; the next byte is kept verbatim.
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Run a command inside a real PTY (portable-pty). Output is merged (stderr
+/// is folded into stdout via `exec 2>&1`) and filtered. Returns the filtered
+/// output and the child's exit code.
+///
+/// Low-level helper used by the bash tool when `OXICODE_BASH_PTY=1` is set.
+/// Does NOT enforce `BLOCKED_ENV_VARS` or workspace CWD policy — those
+/// concerns live in the calling tool.
+#[cfg(unix)]
+pub async fn run_in_pty(
+    cmd: &str,
+    cwd: &Path,
+    timeout: Duration,
+    abort: oneshot::Receiver<()>,
+) -> Result<PtyOutcome, ToolError> {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("failed to open PTY: {e}"))?;
+
+    // Single bash invocation: merge stderr into stdout inside the shell,
+    // then run the user's command. This avoids juggling two PTY readers.
+    // portable-pty already calls setsid() in the spawned child, so the
+    // bash process becomes its own session / process-group leader —
+    // signalling the whole group (negative pid) reaches bash AND any
+    // descendants, leaving no orphans holding the PTY slave fd open
+    // (which would hang read_thread.join()).
+    let wrapped = format!("exec 2>&1; {cmd}");
+    let mut builder = CommandBuilder::new("bash");
+    builder.arg("-c");
+    builder.arg(&wrapped);
+    builder.cwd(cwd);
+
+    let mut child = pair
+        .slave
+        .spawn_command(builder)
+        .map_err(|e| format!("failed to spawn PTY child: {e}"))?;
+
+    // Clone a kill handle so the timeout / abort path can stop the child
+    // without owning the Child.
+    let mut killer = child.clone_killer();
+    let pid = child.process_id();
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("failed to clone PTY reader: {e}"))?;
+    drop(pair.slave);
+
+    // Reader thread: blocking std::io::Read until EOF or error.
+    let (read_tx, read_rx) = std::sync::mpsc::channel::<String>();
+    let read_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => buf.push_str(&String::from_utf8_lossy(&chunk[..n])),
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    // EIO on Linux when the slave side closes — treat as EOF.
+                    break;
+                }
+            }
+        }
+        let _ = read_tx.send(buf);
+    });
+
+    // Wait thread: blocking wait for the child.
+    let wait_thread = std::thread::spawn(move || child.wait());
+
+    // Bridge the oneshot abort signal into a polled AtomicBool so we can
+    // race it against the wait timeout without spawning a tokio task. The
+    // bridge thread blocks on `try_recv` until either the sender fires
+    // or the channel is dropped — whichever comes first.
+    let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let abort_flag = abort_flag.clone();
+        std::thread::spawn(move || {
+            let mut abort = abort;
+            loop {
+                match abort.try_recv() {
+                    Ok(_) => {
+                        abort_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        return;
+                    }
+                    Err(oneshot::error::TryRecvError::Closed) => return,
+                    Err(oneshot::error::TryRecvError::Empty) => {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
+            }
+        });
+    }
+
+    let timeout_at = std::time::Instant::now() + timeout;
+    let wait_handle = wait_thread;
+    let (status_opt, timed_out, aborted): (Option<portable_pty::ExitStatus>, bool, bool) = loop {
+        if wait_handle.is_finished() {
+            let join_result = wait_handle.join();
+            let status = match join_result {
+                Ok(Ok(s)) => Some(s),
+                _ => None,
+            };
+            break (status, false, false);
+        }
+        if std::time::Instant::now() >= timeout_at {
+            pty_kill_process_group(pid, &mut killer);
+            break (None, true, false);
+        }
+        if abort_flag.load(std::sync::atomic::Ordering::SeqCst) {
+            pty_kill_process_group(pid, &mut killer);
+            break (None, true, true);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    // Drain any partial output, then join the reader thread with a bounded
+    // timeout. Killing the process group closes the slave fd, so the
+    // reader's blocking read returns EOF and the thread terminates — but
+    // cap the join wait so we never hang the agent loop if something is
+    // wrong.
+    let raw = read_rx
+        .recv_timeout(Duration::from_millis(500))
+        .unwrap_or_default();
+    let join_deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !read_thread.is_finished() && std::time::Instant::now() < join_deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // If the reader thread is still alive after 2s, leak it rather than
+    // hanging the agent loop. The OS reclaims it when the group is torn
+    // down.
+    drop(read_thread);
+
+    if aborted {
+        let filtered = ansi_filter(&raw);
+        return Err(format!("Command aborted; partial output:\n{filtered}"));
+    }
+    if timed_out {
+        let filtered = ansi_filter(&raw);
+        return Err(format!(
+            "Command timed out after {} seconds; partial output:\n{filtered}",
+            timeout.as_secs(),
+        ));
+    }
+
+    let filtered = ansi_filter(&raw);
+    Ok(PtyOutcome {
+        output: filtered,
+        exit_code: status_opt.map(|s| s.exit_code() as i32),
+    })
+}
+
+/// Send SIGKILL to the bash process group (negative pid → group) when a
+/// pid is available, falling back to the portable-pty kill trait. Used by
+/// both timeout and abort paths.
+#[cfg(unix)]
+fn pty_kill_process_group(
+    pid: Option<u32>,
+    killer: &mut Box<dyn portable_pty::ChildKiller + Send + Sync>,
+) {
+    if let Some(pid) = pid {
+        // SAFETY: pid is a live owned child process at the time of the call.
+        // portable-pty calls setsid() in the spawned child, so a negative
+        // pid targets bash + its descendants (the process group).
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    } else {
+        let _ = killer.kill();
+    }
+}
+
 /// Default timeout in seconds
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
@@ -583,6 +844,79 @@ impl AgentTool for BashTool {
         // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
 
+        // F-9 (audit 2026-08-24): PTY-backed bash execution preserves ANSI
+        // SGR color sequences in command output. Off by default; opt-in via
+        // `OXICODE_BASH_PTY=1` (the matching `bash_pty` setting in
+        // oxicode-cli is informational — the agent tool cannot see cli
+        // settings today; the env var is the only live override).
+        //
+        // Stderr is merged into stdout inside the PTY command, so the
+        // existing combined-output / truncation / timing pipeline still
+        // works unchanged.
+        #[cfg(unix)]
+        if std::env::var_os("OXICODE_BASH_PTY").as_deref() == Some(std::ffi::OsStr::new("1")) {
+            let work_dir = match cwd {
+                Some(dir) if !dir.is_empty() => validate_cwd(dir, Some(root))?,
+                _ => root.to_path_buf(),
+            };
+            let timeout_secs = timeout.unwrap_or(DEFAULT_TIMEOUT_SECS);
+            let start = Instant::now();
+            if let Some(cb) = &progress_cb {
+                cb(format!("Executing (pty): {}", command));
+            }
+            // Convert optional abort into a concrete oneshot::Receiver<()>.
+            // If the caller didn't provide one, create a fresh channel and
+            // immediately drop the sender so the receiver reports Closed
+            // (treated as "never aborts" by the bridge thread).
+            let abort_rx = match signal {
+                Some(rx) => rx,
+                None => {
+                    let (tx, rx) = oneshot::channel();
+                    drop(tx);
+                    rx
+                }
+            };
+            let outcome = run_in_pty(
+                command,
+                &work_dir,
+                Duration::from_secs(timeout_secs),
+                abort_rx,
+            )
+            .await;
+            let elapsed = start.elapsed();
+            if let Some(cb) = &progress_cb {
+                cb(format!(
+                    "Process (pty) completed in {}",
+                    Self::format_duration(elapsed)
+                ));
+            }
+            return match outcome {
+                Ok(o) => {
+                    let combined = if o.output.is_empty() {
+                        "(no output)".to_string()
+                    } else {
+                        o.output
+                    };
+                    let truncation =
+                        truncate::truncate_head(&combined, &TruncationOptions::default());
+                    let mut output = Self::build_output(&truncation, elapsed, o.exit_code);
+                    if let Some(reason) = is_dangerous_command(command) {
+                        output.push_str(&format!("\n{}", reason));
+                    }
+                    if o.exit_code == Some(0) {
+                        Ok(AgentToolResult::success(output))
+                    } else {
+                        Ok(AgentToolResult::error(output))
+                    }
+                }
+                Err(e) => {
+                    let mut output = format!("\n\n{}", e);
+                    output.push_str(&format!("\nTook {}", Self::format_duration(elapsed)));
+                    Ok(AgentToolResult::error(output))
+                }
+            };
+        }
+
         Self::run_command(root, command, cwd, env, timeout, &progress_cb, signal).await
     }
 
@@ -1000,5 +1334,128 @@ mod tests {
         let r = result.expect("non-dangerous command must succeed when strict is off");
         assert!(r.success, "echo hi must succeed: {}", r.output);
         assert!(!r.output.contains("OXICODE_STRICT_BASH"));
+    }
+
+    // ── F-9: PTY-backed bash execution preserves ANSI SGR, drop CSI/OSC ─
+
+    /// Run a command through a real PTY and assert that the SGR color sequence
+    /// `\x1b[31m` survives the capture. Pipe-based execution strips these bytes;
+    /// the PTY path is the only way to keep colorized output for downstream
+    /// renderers that respect SGR.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pty_preserves_color_codes() {
+        let cwd = std::env::current_dir().expect("current_dir");
+        let (_tx, rx) = oneshot::channel::<()>();
+        let outcome = run_in_pty(
+            "printf '\\x1b[31mred\\x1b[0m'",
+            &cwd,
+            Duration::from_secs(10),
+            rx,
+        )
+        .await
+        .expect("run_in_pty");
+        assert!(
+            outcome.output.contains("\x1b[31m"),
+            "PTY output must preserve the \\x1b[31m SGR escape; got: {:?}",
+            outcome.output
+        );
+        assert!(
+            outcome.output.contains("red"),
+            "PTY output must contain the printed text; got: {:?}",
+            outcome.output
+        );
+    }
+
+    /// Run a command that emits a CSI screen-clear escape and assert that the
+    /// filter strips the control sequence while preserving the text. The
+    /// filter keeps SGR (`ESC [ ... m`) and drops other CSI / OSC sequences
+    /// so that cursor motion and screen-control bytes don't leak into the
+    /// agent transcript.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pty_strips_cursor_motion() {
+        let cwd = std::env::current_dir().expect("current_dir");
+        let (_tx, rx) = oneshot::channel::<()>();
+        let outcome = run_in_pty(
+            "printf '\\x1b[2Jhello\\x1b[H'",
+            &cwd,
+            Duration::from_secs(10),
+            rx,
+        )
+        .await
+        .expect("run_in_pty");
+        assert!(
+            !outcome.output.contains("\x1b[2J"),
+            "PTY output must drop the screen-clear CSI; got: {:?}",
+            outcome.output
+        );
+        assert!(
+            !outcome.output.contains("\x1b[H"),
+            "PTY output must drop the cursor-home CSI; got: {:?}",
+            outcome.output
+        );
+        assert!(
+            outcome.output.contains("hello"),
+            "PTY output must contain the printed text; got: {:?}",
+            outcome.output
+        );
+    }
+
+    // ── F-9 round 2: process-group kill on timeout ─────────────────
+
+    /// Assert that run_in_pty respects a deadline. When the user command
+    /// outlives the deadline the function returns Err(...) AND returns
+    /// promptly — a hung child holding the PTY slave fd would hang
+    /// read_thread.join() indefinitely.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pty_timeout_kills_process_group_promptly() {
+        let cwd = std::env::current_dir().expect("current_dir");
+        let (_tx, rx) = oneshot::channel::<()>();
+        let start = std::time::Instant::now();
+        let result = run_in_pty("sleep 30", &cwd, Duration::from_millis(200), rx).await;
+        let elapsed = start.elapsed();
+        let err = result.expect_err("sleep 30 must time out within 200ms budget");
+        // Bounded: must return within 5 seconds even if the process group
+        // kill fails for any reason.
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "run_in_pty took {elapsed:?} after timeout — likely a hang on join"
+        );
+        assert!(
+            err.contains("timed out") || err.contains("Timeout"),
+            "error must mention the timeout: {err}"
+        );
+    }
+
+    /// Assert the abort signal path tears the PTY child down. The abort
+    /// signal fires immediately, the PTY group is killed, run_in_pty
+    /// returns Err(...) promptly with an `aborted` message.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pty_abort_signal_tears_down_promptly() {
+        let cwd = std::env::current_dir().expect("current_dir");
+        let (tx, rx) = oneshot::channel::<()>();
+        let start = std::time::Instant::now();
+        // Fire the abort on a std::thread (not tokio::spawn) — run_in_pty
+        // is async but its body is purely blocking, so a tokio::spawn-ed
+        // task wouldn't be polled until run_in_pty returns to an await
+        // point. A real OS thread sends independently.
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = tx.send(());
+        });
+        let result = run_in_pty("sleep 30", &cwd, Duration::from_secs(30), rx).await;
+        let elapsed = start.elapsed();
+        let err = result.expect_err("sleep 30 must be aborted by signal");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "abort took {elapsed:?} — likely a hang on join"
+        );
+        assert!(
+            err.contains("aborted") || err.contains("Aborted"),
+            "error must mention the abort: {err}"
+        );
     }
 }

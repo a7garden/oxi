@@ -6233,3 +6233,22 @@ fn shift_number_trusts_terminal_character() {
     t.input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT));
     assert_eq!(t.text(), "/");
 }
+
+// ===== Hangul Compatibility Jamo width regression =====
+//
+// omp 18.0.4 fixed a cursor-drift bug in its Orca renderer where
+// Hangul Compatibility Jamo consonants were reported as 1 cell wide;
+// modern fixed-width terminals render them as 2 cells. Under our
+// pinned unicode-width 0.2.2, the 93 Hangul Compatibility Jamo
+// consonants (e.g. Kiyeok U+3131, Ssangkiyeok U+3132, Rieul U+314F)
+// already return width 2 — only the two filler codepoints at the
+// ends of the block (U+3130, U+318F) and the filler U+3164 are 1/0.
+// This test pins the consonants so a future bump in unicode-width
+// or a regression in our own cursor math is caught immediately.
+#[test]
+fn hangul_compatibility_jamo_width_is_two_cells() {
+    // Spot-check three consonants spanning the block: Kiyeok, Ssangkiyeok, Rieul.
+    assert_eq!(unicode_width::UnicodeWidthChar::width('\u{3131}'), Some(2));
+    assert_eq!(unicode_width::UnicodeWidthChar::width('\u{3132}'), Some(2));
+    assert_eq!(unicode_width::UnicodeWidthChar::width('\u{314F}'), Some(2));
+}

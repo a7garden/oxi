@@ -25,6 +25,7 @@ pub(crate) fn register_extra(registry: &mut SlashRegistry) {
     registry.register(Box::new(HooksCommand));
     registry.register(Box::new(InfoCommand));
     registry.register(Box::new(ExportCommand));
+    registry.register(Box::new(GitCommand));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -785,11 +786,43 @@ impl SlashCommand for ExportCommand {
         SlashOutcome::Handled
     }
 }
+// ───────────────────────────────────────────────────────────────────────
+// /git — open the interactive git TUI overlay
+// ───────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────
+/// `/git` opens the interactive git overlay (`status`, `diff`, staging,
+/// commit). Load errors are surfaced as inline reply lines so the user
+/// can see why a load failed (missing git binary, non-repo cwd, etc.)
+/// without the TUI silently no-op'ing.
+struct GitCommand;
+
+impl SlashCommand for GitCommand {
+    fn name(&self) -> &'static str {
+        "git"
+    }
+    fn description(&self) -> &'static str {
+        "Open the interactive git TUI (status, diff, stage, commit)"
+    }
+    fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
+        let cwd = ctx.state.cwd.clone();
+        match crate::tui_vt::git_tui::GitTuiState::load(&cwd) {
+            Ok(state) => {
+                ctx.state.git_tui = Some(state);
+            }
+            Err(err) => {
+                ctx.reply(
+                    oxicode_vtui::tui::core::InlineMessageKind::Error,
+                    format!("/git: failed to load git state: {err}"),
+                );
+            }
+        }
+        SlashOutcome::Handled
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
 // Tests
-// ─────────────────────────────────────────────────────────────────────────
-
+// ───────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,4 +930,23 @@ mod tests {
     // `custom_provider_default_api` integration test in
     // `oxicode-cli/src/store/settings.rs`; the persistence path is a
     // straight `Settings::save()` call.
+
+    /// `/git` must register via `register_extra` so the registry's full
+    /// built-in list includes a `git` command. We construct a fresh
+    /// `SlashRegistry` and run `register_extra` against it — same code
+    /// path `register_all` uses to populate the runtime registry.
+    #[test]
+    fn git_slash_command_registers() {
+        // `builtins()` is the same code path `register_all` uses, so a
+        // `git` command must be present in the resulting registry.
+        let mut names: Vec<&str> = super::super::registry::SlashRegistry::builtin_commands()
+            .into_iter()
+            .map(|(n, _, _)| n)
+            .collect();
+        names.sort();
+        assert!(
+            names.contains(&"git"),
+            "git command must register via register_extra (got {names:?})"
+        );
+    }
 }

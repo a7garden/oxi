@@ -4,8 +4,10 @@
 //! dependency. It is the seam between oxicode's event/state layer and its
 //! ratatui views.
 
+pub mod allocation;
 pub mod renderable;
 pub mod transcript;
 
+pub use allocation::{BlockAlloc, allocate_rows};
 pub use renderable::{Column, Renderable, TextCell};
 pub use transcript::{BlockDisplayMode, TranscriptLine, VisibleItem, visible_items};
