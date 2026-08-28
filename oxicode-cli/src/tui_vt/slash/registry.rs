@@ -227,10 +227,26 @@ pub(crate) fn settings_overlay_items(
             SettingWidget::Toggle | SettingWidget::Cycle => {
                 Some(InlineListSelection::ConfigAction(format!("{:?}", def.key)))
             }
-            // Text/SubmenuSelect/Multiselect/Pointer rows stay
-            // read-only here; their editors route through the
-            // overlay-event path in main_loop.rs.
-            _ => None,
+            // Text/SubmenuSelect/Multiselect each get their own
+            // selection variant: the editor opens on Enter with the
+            // SettingKey Debug name as the payload, routed via the
+            // matching arm in `handle_inline_event`.
+            SettingWidget::Text => Some(InlineListSelection::SettingTextEdit(format!(
+                "{:?}",
+                def.key
+            ))),
+            SettingWidget::SubmenuSelect(_) => Some(InlineListSelection::SettingSubmenuOpen(
+                format!("{:?}", def.key),
+            )),
+            SettingWidget::Multiselect => Some(InlineListSelection::SettingMultiselect(format!(
+                "{:?}",
+                def.key
+            ))),
+            // Pointer + MapEditor rows stay read-only here (MapEditor
+            // is expanded above into per-entry rows with their own
+            // selection variants; Pointer rows are owned by
+            // slash commands).
+            SettingWidget::MapEditor | SettingWidget::Pointer => None,
         };
         items.push(InlineListItem {
             title: def.label.to_string(),
@@ -1647,7 +1663,17 @@ mod tests {
                     SettingWidget::Toggle | SettingWidget::Cycle => {
                         Some(InlineListSelection::ConfigAction(format!("{:?}", def.key)))
                     }
-                    _ => None,
+                    SettingWidget::Text => Some(InlineListSelection::SettingTextEdit(format!(
+                        "{:?}",
+                        def.key
+                    ))),
+                    SettingWidget::SubmenuSelect(_) => Some(
+                        InlineListSelection::SettingSubmenuOpen(format!("{:?}", def.key)),
+                    ),
+                    SettingWidget::Multiselect => Some(InlineListSelection::SettingMultiselect(
+                        format!("{:?}", def.key),
+                    )),
+                    SettingWidget::MapEditor | SettingWidget::Pointer => None,
                 };
                 assert_eq!(item.selection.as_ref(), expected.as_ref());
                 assert!(

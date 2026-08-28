@@ -476,6 +476,14 @@ pub struct RenderState {
     /// new dependency, and the per-keystroke read-lock cost is
     /// negligible.
     pub keymap: Arc<parking_lot::RwLock<crate::tui_vt::keymap::Keymap>>,
+    /// Test-only sandbox: when `Some`, the keybindings commit path
+    /// writes `Settings` to this path via `Settings::save_to` instead
+    /// of touching the real `~/.oxicode/settings.{json,toml}`. The
+    /// production TUI leaves this at `None`; only unit tests set it.
+    /// Thread-safety is the same as `RenderState` itself (single-thread
+    /// use in the input thread).
+    #[cfg(test)]
+    pub settings_override_path: Option<std::path::PathBuf>,
 }
 
 impl Default for RenderState {
@@ -547,6 +555,8 @@ impl Default for RenderState {
             keymap: Arc::new(parking_lot::RwLock::new(Keymap::from_settings(
                 &std::collections::HashMap::new(),
             ))),
+            #[cfg(test)]
+            settings_override_path: None,
             brain: BrainChip::default(),
         }
     }
@@ -571,6 +581,11 @@ pub enum SecureInputOrigin {
     /// Model-roles map editor: the submitted text is the model pattern
     /// for `role`.
     ModelRoleValue { role: String },
+    /// Generic settings-panel text editor: the submitted text is
+    /// committed via `settings_defs::apply_change` for the named
+    /// SettingKey. Empty input clears the override (where the field
+    /// is `Option`); invalid input is rejected with an inline error.
+    TextEdit(crate::tui_vt::settings_defs::SettingKey),
 }
 
 /// In-transcript search state.
@@ -1612,6 +1627,10 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
                     Some(InlineListSelection::ConfigAction(_))
                         | Some(InlineListSelection::SettingsTab(_))
                         | Some(InlineListSelection::SettingsSection(_))
+                        | Some(InlineListSelection::SettingKeyCapture(_))
+                        | Some(InlineListSelection::SettingTextEdit(_))
+                        | Some(InlineListSelection::SettingSubmenuOpen(_))
+                        | Some(InlineListSelection::SettingMultiselect(_))
                 )
             }) {
                 let (hydrated, rows) = build_settings_overlay(state.settings_active_tab, None);
@@ -1987,9 +2006,31 @@ fn commit_keybindings(
 ) -> anyhow::Result<()> {
     let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
     crate::tui_vt::settings_defs::set_action_combos(&mut settings, action, combos);
-    settings.save()?;
+    save_settings_sandboxed(state, &settings)?;
     *state.keymap.write() = Keymap::from_settings(&settings.keybindings);
     Ok(())
+}
+
+/// Persist `settings`, honoring the test-only
+/// `RenderState::settings_override_path` sandbox: when set, the write
+/// lands in the tempdir path via `Settings::save_to` instead of the
+/// real `~/.oxicode/settings.{json,toml}`. Production code paths never
+/// set the override, so they always take the plain `save()` branch.
+fn save_settings_sandboxed(
+    state: &RenderState,
+    settings: &crate::store::settings::Settings,
+) -> anyhow::Result<()> {
+    #[cfg(test)]
+    {
+        if let Some(path) = state.settings_override_path.as_ref() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            return settings.save_to(path);
+        }
+    }
+    let _ = state; // production builds don't read the sandbox field
+    settings.save()
 }
 
 /// `d` on a keybinding-combo row: remove that combo. Guarded — the
@@ -2175,6 +2216,291 @@ fn try_start_new_model_role(state: &mut RenderState) -> bool {
     } else {
         false
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Settings panel editors: Text / SubmenuSelect / Multiselect (Final-fix wave)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Open the unmasked text-prompt overlay for a `Text` widget row. The
+/// submitted text is routed through `SecureInputOrigin::TextEdit(key)`
+/// so the `OverlaySubmission::SecureInput` consumer commits via
+/// `settings_defs::apply_change` (parse-validated per-key).
+fn open_text_edit_prompt(state: &mut RenderState, key: SettingKey) {
+    let current = crate::store::settings::Settings::load()
+        .map(|s| get_display_value(key, &s))
+        .unwrap_or_default();
+    state.secure_input_origin = Some(SecureInputOrigin::TextEdit(key));
+    state.overlay = Some(text_prompt_overlay(
+        format!("Edit {}", label_for_setting(key)),
+        format!(
+            "Enter the new value for {} (Esc to cancel). Empty clears the override              when the field supports it.",
+            label_for_setting(key)
+        ),
+        "value",
+        None,
+        if current == "default" {
+            None
+        } else {
+            Some(current.as_str())
+        },
+    ));
+}
+
+/// Open the submenu-select overlay for a `SubmenuSelect` widget row:
+/// a child list of the widget's allowed strings; the active value is
+/// marked in the badge.
+fn open_submenu_select_prompt(state: &mut RenderState, key: SettingKey) {
+    let Some(options) = submenu_options_for(key) else {
+        // Defensive: a stray SettingSubmenuOpen against a non-submenu
+        // key shouldn't happen, but if it does, surface the mismatch
+        // and reopen the panel so the user is never stuck on a dead
+        // overlay.
+        reopen_settings_panel(
+            state,
+            state.settings_active_tab,
+            Some(format!("'{:?}' is not a submenu-select setting", key)),
+        );
+        return;
+    };
+    let current = crate::store::settings::Settings::load()
+        .map(|s| get_display_value(key, &s))
+        .unwrap_or_default();
+    let items: Vec<OverlayListItem> = options
+        .iter()
+        .map(|opt| InlineListItem {
+            title: (*opt).to_string(),
+            subtitle: None,
+            badge: if *opt == current {
+                Some("current".to_string())
+            } else {
+                None
+            },
+            indent: 0,
+            selection: Some(InlineListSelection::ConfigAction(format!(
+                "SubmenuCommit:{:?}:{}",
+                key, opt
+            ))),
+            search_value: None,
+        })
+        .map(overlay_item_from)
+        .collect();
+    let label = label_for_setting(key);
+    state.overlay = Some(OverlayState {
+        title: format!("Pick value for {label}"),
+        lines: vec![format!("Esc cancels — current: {current}")],
+        items,
+        selected: options.iter().position(|o| *o == current).unwrap_or(0),
+        ..Default::default()
+    });
+    state.settings_map_rows.clear();
+}
+
+/// Source the registered tool list (live `ToolRegistry`) and open the
+/// multiselect overlay for `DisabledTools`. Essential tools are shown
+/// with their badge but cannot be toggled off (the input handler
+/// refuses the toggle with an Error line).
+fn open_disabled_tools_multiselect(
+    state: &mut RenderState,
+    session: &crate::app::agent_session::AgentSessionHandle,
+) {
+    let mut tools = session.agent_ref().tools().get_tools();
+    tools.sort_by(|a, b| a.name().cmp(b.name()));
+    let settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let disabled: std::collections::HashSet<String> =
+        settings.disabled_tools.iter().cloned().collect();
+    let items: Vec<OverlayListItem> = tools
+        .iter()
+        .map(|t| {
+            let name = t.name();
+            let is_disabled = disabled.contains(name);
+            InlineListItem {
+                title: name.to_string(),
+                subtitle: Some(t.description().to_string()),
+                badge: Some(if t.essential() {
+                    if is_disabled {
+                        "essential — locked".to_string()
+                    } else {
+                        "essential".to_string()
+                    }
+                } else if is_disabled {
+                    "disabled".to_string()
+                } else {
+                    "enabled".to_string()
+                }),
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction(format!(
+                    "DisabledToolToggle:{}",
+                    name
+                ))),
+                search_value: None,
+            }
+        })
+        .map(overlay_item_from)
+        .collect();
+    let disabled_count = items
+        .iter()
+        .filter(|i| {
+            i.badge
+                .as_deref()
+                .map(|b| b == "disabled" || b == "essential — locked")
+                .unwrap_or(false)
+        })
+        .count();
+    state.overlay = Some(OverlayState {
+        title: "Disabled tools".into(),
+        lines: vec![format!(
+            "{disabled_count} disabled — Enter/Space toggles, Esc closes"
+        )],
+        items,
+        selected: 0,
+        ..Default::default()
+    });
+    state.settings_map_rows.clear();
+}
+
+/// Commit a `Text` widget edit: `apply_change` parses the input,
+/// `Settings::save` persists, and the panel reopens with a status
+/// line. Returns the outcome string for the caller to surface. The
+/// session is required only for `sync_settings_live`; callers that
+/// don't need live sync (e.g. model defaults — no live propagation
+/// today) can pass a real handle from `handle_inline_event`'s scope.
+/// Tests pass `&RenderState::default()` and skip the live sync via
+/// the `with_session` toggle.
+fn commit_text_edit(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    session: Option<&crate::app::agent_session::AgentSessionHandle>,
+    key: SettingKey,
+    text: String,
+) -> (anyhow::Result<()>, String) {
+    let label = label_for_setting(key);
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let outcome =
+        crate::tui_vt::settings_defs::apply_change(key, &mut settings, text.trim().to_string())
+            .and_then(|_| save_settings_sandboxed(state, &settings));
+    let new_display = get_display_value(key, &settings);
+    match &outcome {
+        Ok(()) => {
+            if let Some(session) = session {
+                // Best-effort live sync — `apply_change` already validated
+                // the parse; sync failures don't undo the save.
+                if let Err(e) = sync_settings_live(state, session, key, &settings) {
+                    handle.append_line(
+                        InlineMessageKind::Error,
+                        vec![plain_segment(format!("{label}: {e}"))],
+                    );
+                }
+            }
+            let status = format!("{label}: {new_display}");
+            // Match the ConfigAction path's transcript feedback: a
+            // saved scalar edit is surfaced as an Info line, not just
+            // the panel status.
+            handle.append_line(InlineMessageKind::Info, vec![plain_segment(status.clone())]);
+            reopen_settings_panel(state, state.settings_active_tab, Some(status.clone()));
+            (Ok(()), status)
+        }
+        Err(e) => {
+            let msg = format!("{label}: {e}");
+            handle.append_line(InlineMessageKind::Error, vec![plain_segment(msg.clone())]);
+            (Err(anyhow::anyhow!("{e}")), msg)
+        }
+    }
+}
+
+/// Commit a `SubmenuSelect` widget edit: write the chosen option,
+/// persist, reopen the panel with the new badge.
+fn commit_submenu_choice(
+    state: &mut RenderState,
+    key: SettingKey,
+    value: String,
+) -> anyhow::Result<String> {
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    crate::tui_vt::settings_defs::apply_change(key, &mut settings, value.clone())?;
+    save_settings_sandboxed(state, &settings)?;
+    let new_display = get_display_value(key, &settings);
+    let label = label_for_setting(key);
+    let status = format!("{label}: {new_display}");
+    reopen_settings_panel(state, state.settings_active_tab, Some(status.clone()));
+    Ok(status)
+}
+
+/// Toggle one tool in `Settings::disabled_tools`. Returns the outcome
+/// string for the caller to surface (success or refusal for
+/// essential tools).
+fn commit_disabled_tool_toggle(
+    state: &mut RenderState,
+    handle: &InlineHandle,
+    session: &crate::app::agent_session::AgentSessionHandle,
+    tool: String,
+    essential: bool,
+    currently_disabled: bool,
+) {
+    let label = label_for_setting(SettingKey::DisabledTools);
+    if essential {
+        handle.append_line(
+            InlineMessageKind::Error,
+            vec![plain_segment(format!(
+                "'{tool}' is essential and cannot be disabled"
+            ))],
+        );
+        // Refresh the overlay so the user's failed toggle doesn't show
+        // a stale badge.
+        open_disabled_tools_multiselect(state, session);
+        return;
+    }
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    let new_enabled = currently_disabled; // toggling from disabled → enabled
+    crate::tui_vt::settings_defs::toggle_disabled_tool(&mut settings, &tool, new_enabled);
+    match save_settings_sandboxed(state, &settings) {
+        Ok(()) => {
+            let new_state = if new_enabled { "enabled" } else { "disabled" };
+            handle.append_line(
+                InlineMessageKind::Info,
+                vec![plain_segment(format!("{label}: '{tool}' {new_state}"))],
+            );
+            open_disabled_tools_multiselect(state, session);
+        }
+        Err(e) => {
+            handle.append_line(
+                InlineMessageKind::Error,
+                vec![plain_segment(format!("{label}: failed to save: {e}"))],
+            );
+        }
+    }
+}
+
+/// Human label for a SettingKey — mirrors the row label the user
+/// sees on the panel, used in overlay titles and status messages.
+fn label_for_setting(key: SettingKey) -> &'static str {
+    SETTING_DEFS
+        .iter()
+        .find(|d| d.key == key)
+        .map(|d| d.label)
+        .unwrap_or("setting")
+}
+
+/// Parse a `SettingKey::Debug`-formatted name (the payload the panel
+/// ships through `InlineListSelection::SettingTextEdit` et al.) back
+/// into a typed key. Returns `None` for unrecognized names; callers
+/// must surface that as an Error line (no silent no-op).
+fn parse_setting_key(name: &str) -> Option<SettingKey> {
+    SETTING_DEFS
+        .iter()
+        .map(|d| d.key)
+        .find(|k| format!("{k:?}") == name)
+}
+
+/// The allowed option list for a `SubmenuSelect` key, looked up from
+/// its def. Returns `None` for non-submenu keys.
+fn submenu_options_for(key: SettingKey) -> Option<&'static [&'static str]> {
+    SETTING_DEFS
+        .iter()
+        .find(|d| d.key == key)
+        .and_then(|d| match d.widget {
+            SettingWidget::SubmenuSelect(opts) => Some(opts),
+            _ => None,
+        })
 }
 
 /// Sidebar section index an item belongs to: the group of the last
@@ -3000,6 +3326,7 @@ pub(crate) fn open_secure_prompt(
             provider.clone()
         }
         SecureInputOrigin::ModelRoleKey | SecureInputOrigin::ModelRoleValue { .. } => return,
+        SecureInputOrigin::TextEdit(_) => return,
     };
     state.secure_input_origin = Some(origin);
     handle.show_modal(
@@ -3504,8 +3831,80 @@ fn handle_inline_event(
                     // emitted by `settings_overlay_items`; dispatch goes
                     // through the def table (`apply_change`), never a
                     // per-name match.
-                    if let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
-                        &sub
+                    // Synthetic ConfigAction payloads emitted by the
+                    // panel editors: handled FIRST so they never reach
+                    // the generic `ConfigAction(name)` arm (which would
+                    // treat `SubmenuCommit:…` / `DisabledToolToggle:…`
+                    // as a bogus SettingKey name and error out).
+                    let synthetic_dispatched = if let OverlaySubmission::Selection(
+                        InlineListSelection::ConfigAction(payload),
+                    ) = &sub
+                    {
+                        if let Some(rest) = payload.strip_prefix("SubmenuCommit:") {
+                            if let Some((key_str, value)) = rest.split_once(':') {
+                                if let Some(key) = parse_setting_key(key_str) {
+                                    match commit_submenu_choice(state, key, value.to_string()) {
+                                        Ok(status) => {
+                                            handle.append_line(
+                                                InlineMessageKind::Info,
+                                                vec![plain_segment(status.clone())],
+                                            );
+                                            opened_new_overlay = state.overlay.is_some();
+                                        }
+                                        Err(e) => handle.append_line(
+                                            InlineMessageKind::Error,
+                                            vec![plain_segment(format!(
+                                                "Failed to save setting: {e}"
+                                            ))],
+                                        ),
+                                    }
+                                } else {
+                                    handle.append_line(
+                                        InlineMessageKind::Error,
+                                        vec![plain_segment(format!(
+                                            "Unknown setting key in submenu commit: {key_str}"
+                                        ))],
+                                    );
+                                }
+                            } else {
+                                handle.append_line(
+                                    InlineMessageKind::Error,
+                                    vec![plain_segment(format!(
+                                        "Malformed submenu commit payload: {payload}"
+                                    ))],
+                                );
+                            }
+                            true
+                        } else if let Some(tool) = payload.strip_prefix("DisabledToolToggle:") {
+                            let essential = session
+                                .agent_ref()
+                                .tools()
+                                .get_tools()
+                                .into_iter()
+                                .find(|t| t.name() == tool)
+                                .is_some_and(|t| t.essential());
+                            let currently_disabled = crate::store::settings::Settings::load()
+                                .map(|s| s.disabled_tools.iter().any(|t| t == tool))
+                                .unwrap_or(false);
+                            commit_disabled_tool_toggle(
+                                state,
+                                handle,
+                                session,
+                                tool.to_string(),
+                                essential,
+                                currently_disabled,
+                            );
+                            opened_new_overlay = state.overlay.is_some();
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    if !synthetic_dispatched
+                        && let OverlaySubmission::Selection(InlineListSelection::ConfigAction(key)) =
+                            &sub
                     {
                         let def = SETTING_DEFS.iter().find(|d| format!("{:?}", d.key) == *key);
                         match def {
@@ -3616,6 +4015,68 @@ fn handle_inline_event(
                             handle.append_line(
                                 InlineMessageKind::Error,
                                 vec![plain_segment(format!("Unknown keybinding action: {name}"))],
+                            );
+                        }
+                    }
+                    // Settings-panel text editor: open the prompt; the
+                    // submitted text arrives via the SecureInput arm
+                    // below (`SecureInputOrigin::TextEdit(key)`).
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingTextEdit(
+                        key_name,
+                    )) = &sub
+                    {
+                        if let Some(key) = parse_setting_key(key_name) {
+                            open_text_edit_prompt(state, key);
+                            opened_new_overlay = true;
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting key: {key_name}"))],
+                            );
+                        }
+                    }
+                    // Settings-panel submenu-select: open a child list
+                    // whose selections arrive as synthetic
+                    // `ConfigAction("SubmenuCommit:Key:value")` payloads
+                    // routed by the ConfigAction arm below.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingSubmenuOpen(
+                        key_name,
+                    )) = &sub
+                    {
+                        if let Some(key) = parse_setting_key(key_name) {
+                            open_submenu_select_prompt(state, key);
+                            opened_new_overlay = true;
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting key: {key_name}"))],
+                            );
+                        }
+                    }
+                    // Settings-panel multiselect: open a tool list
+                    // sourced live from `session.agent_ref().tools()`;
+                    // selections arrive as synthetic
+                    // `ConfigAction("DisabledToolToggle:tool")` payloads.
+                    if let OverlaySubmission::Selection(InlineListSelection::SettingMultiselect(
+                        key_name,
+                    )) = &sub
+                    {
+                        if let Some(parsed) = parse_setting_key(key_name) {
+                            if parsed == SettingKey::DisabledTools {
+                                open_disabled_tools_multiselect(state, session);
+                                opened_new_overlay = true;
+                            } else {
+                                handle.append_line(
+                                    InlineMessageKind::Error,
+                                    vec![plain_segment(format!(
+                                        "'{parsed:?}' has no multiselect editor"
+                                    ))],
+                                );
+                            }
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown setting key: {key_name}"))],
                             );
                         }
                     }
@@ -3762,6 +4223,16 @@ fn handle_inline_event(
                                     opened_new_overlay = true;
                                 }
                             }
+                            SecureInputOrigin::TextEdit(key) => {
+                                let (_outcome, _msg) = commit_text_edit(
+                                    state,
+                                    handle,
+                                    Some(session),
+                                    key,
+                                    text.clone(),
+                                );
+                                opened_new_overlay = state.overlay.is_some();
+                            }
                             SecureInputOrigin::ModelRoleValue { role } => {
                                 let model = text.trim().to_string();
                                 let outcome = if model.is_empty() {
@@ -3837,6 +4308,9 @@ fn handle_inline_event(
                                     SecureInputOrigin::ModelRoleKey
                                     | SecureInputOrigin::ModelRoleValue { .. } => {
                                         unreachable!("auth branch reached with a model-role origin")
+                                    }
+                                    SecureInputOrigin::TextEdit(_) => {
+                                        unreachable!("auth branch reached with a text-edit origin")
                                     }
                                 };
                                 handle
@@ -9142,6 +9616,40 @@ mod provider_overlay_tests {
         }
     }
 
+    /// Minimal `AgentTool` fixture: name + essential flag, execute is a
+    /// stub. Used by `make_session_with_tools_for_tests`.
+    struct StubEssentialTool {
+        name: &'static str,
+        essential: bool,
+    }
+    #[async_trait::async_trait]
+    impl oxicode_agent::AgentTool for StubEssentialTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn label(&self) -> &str {
+            self.name
+        }
+        fn description(&self) -> &str {
+            "stub tool for multiselect editor tests"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object", "properties": {} })
+        }
+        fn essential(&self) -> bool {
+            self.essential
+        }
+        async fn execute(
+            &self,
+            _id: &str,
+            _params: serde_json::Value,
+            _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+            _ctx: &oxicode_agent::ToolContext,
+        ) -> Result<oxicode_agent::AgentToolResult, String> {
+            Ok(oxicode_agent::AgentToolResult::success("ok"))
+        }
+    }
+
     fn make_session() -> AgentSessionHandle {
         let provider = Arc::new(StubProvider);
         let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
@@ -9150,6 +9658,36 @@ mod provider_overlay_tests {
             config,
             Arc::new(oxicode_agent::ToolRegistry::new()),
         ));
+        let settings = Settings::default();
+        let session_manager = SessionManager::in_memory("/tmp/test_providers");
+        let session = AgentSession::new(
+            agent,
+            settings,
+            session_manager,
+            "/tmp/test_providers".to_string(),
+            crate::SessionState::default(),
+        );
+        session.clone_handle()
+    }
+
+    /// Session fixture with a registry holding one essential (`bash`)
+    /// and one optional (`commit`) tool — used by the settings-panel
+    /// multiselect editor tests (they source their row list from the
+    /// live registry). `pub(super)` so sibling test mods can reuse the
+    /// provider stub without duplicating it.
+    pub(super) fn make_session_with_tools_for_tests() -> AgentSessionHandle {
+        let provider = Arc::new(StubProvider);
+        let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+        let registry = oxicode_agent::ToolRegistry::new();
+        registry.register_arc(Arc::new(StubEssentialTool {
+            name: "bash",
+            essential: true,
+        }));
+        registry.register_arc(Arc::new(StubEssentialTool {
+            name: "commit",
+            essential: false,
+        }));
+        let agent = Arc::new(Agent::new(provider, config, Arc::new(registry)));
         let settings = Settings::default();
         let session_manager = SessionManager::in_memory("/tmp/test_providers");
         let session = AgentSession::new(
@@ -9395,6 +9933,9 @@ mod provider_overlay_tests {
             }
             SecureInputOrigin::ModelRoleKey | SecureInputOrigin::ModelRoleValue { .. } => {
                 unreachable!("model-role origins have no provider")
+            }
+            SecureInputOrigin::TextEdit(_) => {
+                unreachable!("text-edit origin has no provider")
             }
         };
         assert_eq!(provider_of(&set), "openai");
@@ -11029,8 +11570,13 @@ mod glyph_cycle_tests {
 #[cfg(test)]
 mod settings_panel_tests {
     use super::*;
+    use crate::app::agent_session::AgentSessionHandle;
     use crate::store::settings::Settings;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn make_session_with_tools() -> AgentSessionHandle {
+        super::provider_overlay_tests::make_session_with_tools_for_tests()
+    }
     use oxicode_vtui::tui::core::InlineListSelection;
     use ratatui::{Terminal, backend::TestBackend};
 
@@ -11246,6 +11792,18 @@ mod settings_panel_tests {
             InlineListSelection::SettingKeyCapture("OpenCommandPalette".into()),
             InlineListSelection::SettingKeyCapture("OpenCommandPalette".into())
         );
+        assert_eq!(
+            InlineListSelection::SettingTextEdit("ToolTimeoutSecs".into()),
+            InlineListSelection::SettingTextEdit("ToolTimeoutSecs".into())
+        );
+        assert_eq!(
+            InlineListSelection::SettingSubmenuOpen("AdvisorSyncBacklog".into()),
+            InlineListSelection::SettingSubmenuOpen("AdvisorSyncBacklog".into())
+        );
+        assert_eq!(
+            InlineListSelection::SettingMultiselect("DisabledTools".into()),
+            InlineListSelection::SettingMultiselect("DisabledTools".into())
+        );
     }
 
     /// Capturing a new combo for `OpenCommandPalette` is additive: the
@@ -11255,9 +11813,38 @@ mod settings_panel_tests {
     /// capture prompt, the simulated `KeyEvent` is fed straight to
     /// `handle_key_capture`, and the live `RenderState::keymap` is the
     /// single source of truth the test inspects.
+    ///
+    /// SANDBOXED: writes go to a tempdir `settings.json` via the
+    /// `settings_override_path` hook so the real `~/.oxicode/settings.*`
+    /// is never touched (the previous version of this test polluted the
+    /// developer's live config — see final-review finding 1).
     #[test]
     fn key_capture_appends_combo_and_keeps_default_resolving() {
+        // Snapshot the real ~/.oxicode settings.json mtime so the
+        // post-condition assertion catches accidental leakage.
+        let real_settings = dirs::home_dir()
+            .map(|h| h.join(".oxicode").join("settings.json"))
+            .filter(|p| p.exists());
+        let real_settings_mtime_before = real_settings
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        let real_settings_sha_before = real_settings
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                b.hash(&mut h);
+                h.finish()
+            });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+
         let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
         // Open the capture overlay for OpenCommandPalette — same
         // selection variant `handle_inline_event` would dispatch from
         // the settings panel.
@@ -11305,6 +11892,49 @@ mod settings_panel_tests {
             Some("Captured Alt+p for OpenCommandPalette")
         );
         assert_eq!(state.settings_active_tab, SettingsTab::Keybindings);
+
+        // Sandbox assertion: the tempdir received the write, the real
+        // `~/.oxicode/settings.json` is untouched (no mtime or
+        // content change).
+        let sandbox_contents = std::fs::read_to_string(&sandbox)
+            .expect("sandbox settings.json must exist after capture");
+        assert!(
+            sandbox_contents.contains("OpenCommandPalette"),
+            "sandbox file must contain the captured keybinding override; got {sandbox_contents}"
+        );
+        assert!(
+            sandbox_contents.contains("Alt+p"),
+            "sandbox file must contain the captured Alt+p combo; got {sandbox_contents}"
+        );
+        if let Some(before) = real_settings_mtime_before {
+            let after = real_settings
+                .as_ref()
+                .and_then(|p| std::fs::metadata(p).ok())
+                .and_then(|m| m.modified().ok())
+                .expect("real settings.json must still exist after capture");
+            assert_eq!(
+                before, after,
+                "real ~/.oxicode/settings.json mtime must not change (sandbox leak)"
+            );
+        }
+        if let (Some(before), Some(after)) = (
+            real_settings_sha_before,
+            real_settings
+                .as_ref()
+                .and_then(|p| std::fs::read(p).ok())
+                .map(|b| {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut h = DefaultHasher::new();
+                    b.hash(&mut h);
+                    h.finish()
+                }),
+        ) {
+            assert_eq!(
+                before, after,
+                "real ~/.oxicode/settings.json content must not change (sandbox leak)"
+            );
+        }
     }
 
     /// The remove-last-binding guard refuses to drop the final combo of
@@ -11370,6 +12000,244 @@ mod settings_panel_tests {
                 .unwrap_or(false),
             "panel must explain why the removal was refused; got {:?}",
             overlay.lines
+        );
+    }
+
+    // ── Final-fix wave: Text / SubmenuSelect / Multiselect editors ────
+
+    /// `commit_text_edit` with valid numeric input: the value is
+    /// parsed, persisted to the SANDBOX path, and the panel reopens
+    /// with a status line showing the new value.
+    #[test]
+    fn text_edit_commit_valid_input() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+
+        let (outcome, _msg) = commit_text_edit(
+            &mut state,
+            &handle,
+            None,
+            SettingKey::SessionHistorySize,
+            "300".to_string(),
+        );
+        assert!(outcome.is_ok(), "valid numeric input must commit");
+
+        // The sandbox file received the write with the new value.
+        let contents = std::fs::read_to_string(&sandbox).expect("sandbox written");
+        let saved: Settings = serde_json::from_str(&contents).expect("sandbox parses");
+        assert_eq!(
+            saved.session_history_size, 300,
+            "sandbox must hold session_history_size=300"
+        );
+
+        // The panel reopened with a status line naming the new value.
+        let overlay = state.overlay.as_ref().expect("panel reopened");
+        assert!(
+            overlay
+                .lines
+                .first()
+                .map(|l| l.contains("300"))
+                .unwrap_or(false),
+            "status line must show the new value; got {:?}",
+            overlay.lines
+        );
+        // And the transcript Info line was emitted.
+        let mut saw_info = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { kind, .. } = cmd
+                && matches!(kind, InlineMessageKind::Info)
+            {
+                saw_info = true;
+            }
+        }
+        assert!(saw_info, "commit must surface an Info line");
+    }
+
+    /// `commit_text_edit` with INVALID input: the parse fails, nothing
+    /// is persisted (no sandbox file), and the failure surfaces as an
+    /// Error line — never a silent no-op.
+    #[test]
+    fn text_edit_commit_invalid_input_is_rejected() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+
+        let (outcome, msg) = commit_text_edit(
+            &mut state,
+            &handle,
+            None,
+            SettingKey::SessionHistorySize,
+            "not-a-number".to_string(),
+        );
+        assert!(outcome.is_err(), "non-numeric input must be rejected");
+        assert!(
+            msg.contains("invalid") || msg.contains("ParseError") || !msg.is_empty(),
+            "rejection must carry a reason; got {msg}"
+        );
+        // No write happened.
+        assert!(
+            !sandbox.exists(),
+            "rejected input must not persist anything"
+        );
+        // The failure surfaced as an Error line.
+        let mut saw_error = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { kind, .. } = cmd
+                && matches!(kind, InlineMessageKind::Error)
+            {
+                saw_error = true;
+            }
+        }
+        assert!(saw_error, "rejection must surface an Error line");
+    }
+
+    /// `open_submenu_select_prompt` builds the option list from the
+    /// def's `SubmenuSelect` options with the current value marked, and
+    /// `commit_submenu_choice` persists the choice and reopens the
+    /// panel.
+    #[test]
+    fn submenu_select_commit_for_sync_backlog() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+
+        // Open the submenu: rows for off/sync/async, current marked.
+        open_submenu_select_prompt(&mut state, SettingKey::AdvisorSyncBacklog);
+        let overlay = state.overlay.as_ref().expect("submenu overlay opens");
+        assert_eq!(overlay.items.len(), 3, "off/sync/async rows");
+        let titles: Vec<&str> = overlay.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["off", "sync", "async"]);
+        // Every row carries a SubmenuCommit selection payload.
+        for item in &overlay.items {
+            let sel = item.selection.as_ref().expect("row is selectable");
+            match sel {
+                InlineListSelection::ConfigAction(p) => {
+                    assert!(
+                        p.starts_with("SubmenuCommit:AdvisorSyncBacklog:"),
+                        "payload must address the key; got {p}"
+                    );
+                }
+                other => panic!("expected ConfigAction, got {other:?}"),
+            }
+        }
+
+        // Commit "async" through the commit helper.
+        let status = commit_submenu_choice(
+            &mut state,
+            SettingKey::AdvisorSyncBacklog,
+            "async".to_string(),
+        )
+        .expect("valid option commits");
+        assert!(status.contains("async"), "status names the new value");
+
+        // The sandbox file holds the new value.
+        let contents = std::fs::read_to_string(&sandbox).expect("sandbox written");
+        assert!(
+            contents.contains("async"),
+            "sandbox must hold the async choice: {contents}"
+        );
+        // The panel reopened with the status line.
+        let overlay = state.overlay.as_ref().expect("panel reopened");
+        assert!(
+            overlay
+                .lines
+                .first()
+                .map(|l| l.contains("async"))
+                .unwrap_or(false),
+            "status line must show the new value"
+        );
+    }
+
+    /// The multiselect editor toggles a non-essential tool into (and
+    /// out of) `disabled_tools`, persisting through the sandbox, and
+    /// REFUSES an essential tool with an Error line and no write.
+    #[test]
+    fn multiselect_toggles_tool_and_refuses_essential() {
+        let session = make_session_with_tools();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sandbox = tmp.path().join("settings.json");
+        let mut state = RenderState::default();
+        state.settings_override_path = Some(sandbox.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+
+        // The overlay lists the registry's tools (bash + commit from
+        // the fixture), sorted, with essential badges.
+        open_disabled_tools_multiselect(&mut state, &session);
+        let overlay = state.overlay.as_ref().expect("multiselect opens");
+        let titles: Vec<&str> = overlay.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["bash", "commit"], "registry tools, sorted");
+        let bash = &overlay.items[0];
+        assert_eq!(bash.badge.as_deref(), Some("essential"));
+        let commit = &overlay.items[1];
+        assert_eq!(commit.badge.as_deref(), Some("enabled"));
+
+        // Toggle the optional tool OFF (disable): commit ∈ disabled_tools.
+        commit_disabled_tool_toggle(
+            &mut state,
+            &handle,
+            &session,
+            "commit".to_string(),
+            false, // not essential
+            false, // currently enabled
+        );
+        let saved: Settings = serde_json::from_str(&std::fs::read_to_string(&sandbox).unwrap())
+            .expect("sandbox parses");
+        assert!(
+            saved.disabled_tools.iter().any(|t| t == "commit"),
+            "toggle must add 'commit' to disabled_tools; got {:?}",
+            saved.disabled_tools
+        );
+
+        // Toggle it back ON (enable): commit ∉ disabled_tools.
+        commit_disabled_tool_toggle(
+            &mut state,
+            &handle,
+            &session,
+            "commit".to_string(),
+            false, // not essential
+            true,  // currently disabled
+        );
+        let saved: Settings = serde_json::from_str(&std::fs::read_to_string(&sandbox).unwrap())
+            .expect("sandbox parses");
+        assert!(
+            !saved.disabled_tools.iter().any(|t| t == "commit"),
+            "toggle must remove 'commit' from disabled_tools; got {:?}",
+            saved.disabled_tools
+        );
+
+        // Essential refusal: an Error line is emitted, no write happens.
+        let before = std::fs::read_to_string(&sandbox).unwrap();
+        commit_disabled_tool_toggle(
+            &mut state,
+            &handle,
+            &session,
+            "bash".to_string(),
+            true,  // essential
+            false, // currently enabled
+        );
+        let after = std::fs::read_to_string(&sandbox).unwrap();
+        assert_eq!(before, after, "essential refusal must not write");
+        let mut saw_refusal = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { kind, segments } = cmd
+                && matches!(kind, InlineMessageKind::Error)
+                && segments.iter().any(|s| s.text.contains("essential"))
+            {
+                saw_refusal = true;
+            }
+        }
+        assert!(
+            saw_refusal,
+            "essential refusal must surface an Error line mentioning 'essential'"
         );
     }
 }

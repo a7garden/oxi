@@ -76,10 +76,16 @@ pub enum SettingKey {
     AdvisorEnabled,
     AdvisorSyncBacklog,
     AdvisorImmuneTurns,
+    // Model defaults (Text) — spec §5 / §8. Empty input clears the
+    // override (sets the field back to `None`); non-empty input is
+    // parsed and range-validated before commit. Both fields are
+    // Optional on `Settings`; the panel only ever shows them as Text,
+    // never a Toggle.
+    DefaultTemperature,
+    MaxResponseTokens,
     // Map editors (Tasks 5/6)
     ModelRoles,
     Keybindings,
-    // Pointer rows (read-only)
     Theme,
     Model,
     CustomProviders,
@@ -178,6 +184,24 @@ pub const SETTING_DEFS: &[SettingDef] = &[
         label: "Thinking level",
         description: "Reasoning effort",
         widget: SettingWidget::Cycle,
+        condition: None,
+    },
+    SettingDef {
+        key: SettingKey::DefaultTemperature,
+        tab: SettingsTab::Model,
+        group: "Defaults",
+        label: "Temperature",
+        description: "0.0-2.0 (empty = model default)",
+        widget: SettingWidget::Text,
+        condition: None,
+    },
+    SettingDef {
+        key: SettingKey::MaxResponseTokens,
+        tab: SettingsTab::Model,
+        group: "Defaults",
+        label: "Max response tokens",
+        description: "Per-response cap (empty = model default)",
+        widget: SettingWidget::Text,
         condition: None,
     },
     SettingDef {
@@ -460,6 +484,17 @@ pub fn get_display_value(key: SettingKey, s: &Settings) -> String {
         AdvisorEnabled => s.advisor.enabled.to_string(),
         AdvisorSyncBacklog => s.advisor.sync_backlog.clone(),
         AdvisorImmuneTurns => s.advisor.immune_turns.to_string(),
+        // Model defaults (Text). `None` renders as "default" so the
+        // user can distinguish "unset, model picks the value" from a
+        // numeric override.
+        DefaultTemperature => s
+            .default_temperature
+            .map(|v| format!("{v}"))
+            .unwrap_or_else(|| "default".to_string()),
+        MaxResponseTokens => s
+            .max_response_tokens
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "default".to_string()),
         ModelRoles => format!("{}", s.model_roles.len()),
         Keybindings => format!("{}", s.keybindings.len()),
         Theme => s.theme.clone(),
@@ -521,6 +556,36 @@ pub fn apply_change(key: SettingKey, s: &mut Settings, new: String) -> anyhow::R
         AdvisorImmuneTurns => s.advisor.immune_turns = new.parse()?,
         TtsrInterruptMode => s.ttsr_interrupt_mode = new,
         AdvisorSyncBacklog => s.advisor.sync_backlog = new,
+        // Model defaults (Text). Empty input clears the override
+        // (back to `None`); non-empty input is parsed + range-checked.
+        DefaultTemperature => {
+            let trimmed = new.trim();
+            if trimmed.is_empty() {
+                s.default_temperature = None;
+            } else {
+                let v: f64 = trimmed.parse().map_err(|e| {
+                    anyhow::anyhow!("invalid temperature '{trimmed}': {e} (expected 0.0–2.0)")
+                })?;
+                if !(0.0..=2.0).contains(&v) {
+                    anyhow::bail!("temperature {v} out of range 0.0–2.0");
+                }
+                s.default_temperature = Some(v);
+            }
+        }
+        MaxResponseTokens => {
+            let trimmed = new.trim();
+            if trimmed.is_empty() {
+                s.max_response_tokens = None;
+            } else {
+                let v: usize = trimmed
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("invalid max response tokens '{trimmed}': {e}"))?;
+                if v == 0 {
+                    anyhow::bail!("max_response_tokens must be > 0 (empty to clear)");
+                }
+                s.max_response_tokens = Some(v);
+            }
+        }
         // Structured editors own these maps — a stray scalar call must
         // be loud, never a silent no-op.
         DisabledTools => anyhow::bail!("disabled_tools edited via its multiselect"),
@@ -745,6 +810,94 @@ mod tests {
                 "{key:?} should reject scalar edits",
             );
         }
+    }
+
+    /// Round-trip the two Model-tab Text defaults (final-fix wave):
+    /// `default_temperature` parses + range-checks + displays, empty
+    /// input clears the override back to `None` ("default"), and
+    /// out-of-range values are rejected.
+    #[test]
+    fn default_temperature_round_trips() {
+        let mut s = Settings::default();
+        assert_eq!(
+            get_display_value(SettingKey::DefaultTemperature, &s),
+            "default",
+            "None renders as 'default'"
+        );
+        apply_change(SettingKey::DefaultTemperature, &mut s, "0.7".into()).unwrap();
+        assert_eq!(s.default_temperature, Some(0.7));
+        assert_eq!(get_display_value(SettingKey::DefaultTemperature, &s), "0.7");
+        // Empty input clears the override.
+        apply_change(SettingKey::DefaultTemperature, &mut s, "  ".into()).unwrap();
+        assert_eq!(s.default_temperature, None);
+        assert_eq!(
+            get_display_value(SettingKey::DefaultTemperature, &s),
+            "default"
+        );
+        // Out-of-range and non-numeric inputs are rejected.
+        assert!(
+            apply_change(SettingKey::DefaultTemperature, &mut s, "2.5".into()).is_err(),
+            "above 2.0 must be rejected"
+        );
+        assert!(
+            apply_change(SettingKey::DefaultTemperature, &mut s, "-0.1".into()).is_err(),
+            "below 0.0 must be rejected"
+        );
+        assert!(
+            apply_change(SettingKey::DefaultTemperature, &mut s, "warm".into()).is_err(),
+            "non-numeric must be rejected"
+        );
+        // Boundary values are accepted.
+        apply_change(SettingKey::DefaultTemperature, &mut s, "0".into()).unwrap();
+        assert_eq!(s.default_temperature, Some(0.0));
+        apply_change(SettingKey::DefaultTemperature, &mut s, "2.0".into()).unwrap();
+        assert_eq!(s.default_temperature, Some(2.0));
+    }
+
+    /// Round-trip `max_response_tokens`: parse + display, empty clears
+    /// to `None`, zero and non-numeric inputs are rejected.
+    #[test]
+    fn max_response_tokens_round_trips() {
+        let mut s = Settings::default();
+        assert_eq!(
+            get_display_value(SettingKey::MaxResponseTokens, &s),
+            "default"
+        );
+        apply_change(SettingKey::MaxResponseTokens, &mut s, "8192".into()).unwrap();
+        assert_eq!(s.max_response_tokens, Some(8192));
+        assert_eq!(get_display_value(SettingKey::MaxResponseTokens, &s), "8192");
+        // Empty input clears the override.
+        apply_change(SettingKey::MaxResponseTokens, &mut s, "".into()).unwrap();
+        assert_eq!(s.max_response_tokens, None);
+        // Zero and non-numeric are rejected.
+        assert!(
+            apply_change(SettingKey::MaxResponseTokens, &mut s, "0".into()).is_err(),
+            "zero must be rejected (empty clears, zero caps everything)"
+        );
+        assert!(
+            apply_change(SettingKey::MaxResponseTokens, &mut s, "many".into()).is_err(),
+            "non-numeric must be rejected"
+        );
+    }
+
+    /// Both new defs render on the Model tab under the Defaults group
+    /// as Text widgets (spec §8).
+    #[test]
+    fn model_defaults_defs_exist_as_text() {
+        let s = Settings::default();
+        let model_defs: Vec<&SettingDef> = defs_for_tab(SettingsTab::Model, &s);
+        let temp = model_defs
+            .iter()
+            .find(|d| d.key == SettingKey::DefaultTemperature)
+            .expect("DefaultTemperature def on Model tab");
+        assert_eq!(temp.group, "Defaults");
+        assert!(matches!(temp.widget, SettingWidget::Text));
+        let tokens = model_defs
+            .iter()
+            .find(|d| d.key == SettingKey::MaxResponseTokens)
+            .expect("MaxResponseTokens def on Model tab");
+        assert_eq!(tokens.group, "Defaults");
+        assert!(matches!(tokens.widget, SettingWidget::Text));
     }
 
     /// `toggle_disabled_tool` is idempotent: adding an already-absent
