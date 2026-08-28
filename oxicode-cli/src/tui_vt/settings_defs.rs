@@ -3,16 +3,22 @@
 //! Task 1 of the settings-panel rewrite. Owns the static metadata
 //! (key, tab, group, label, description, widget kind, conditional
 //! visibility) for every editable setting plus the typed accessors
-//! `get_display_value` / `apply_change`. Later tasks (the renderer,
-//! the per-widget editors, the map-editor screens) consume this table
-//! and never reach into `Settings` fields directly.
+//! `get_display_value` / `apply_change`. The renderer, the per-widget
+//! editors, and the map-editor screens consume this table and never
+//! reach into `Settings` fields directly.
+//!
+//! The two `MapEditor` settings (`keybindings`, `model_roles`) are
+//! structured-editor territory: their rows expand into per-entry lists
+//! ([`SettingsMapRow`]) and their commits go through the typed helpers
+//! below (`set_action_combos`, `set_model_role`, `remove_model_role`),
+//! never through the scalar `apply_change`.
 //!
 //! Constraints carried from the task brief:
 //! - `Settings` itself is unchanged — this module adds ACCESS, not
 //!   persisted state.
 //! - `apply_change` for `DisabledTools` / `ModelRoles` / `Keybindings`
 //!   must `bail!` so a stray scalar call is loud, never a silent no-op
-//!   (their editors land in Tasks 5/6).
+//!   (their structured editors own those fields).
 
 use crate::store::settings::{Settings, ThinkingLevel};
 use std::str::FromStr;
@@ -478,7 +484,7 @@ pub fn get_display_value(key: SettingKey, s: &Settings) -> String {
 /// Returns `Err` on:
 /// - parse failure (unknown cycle variant, non-numeric text)
 /// - edits to `DisabledTools` / `ModelRoles` / `Keybindings` (their
-///   structured editors are Tasks 5/6 — must not silently no-op)
+///   structured editors own those fields — must not silently no-op)
 /// - edits to any `Pointer` row (read-only by design)
 pub fn apply_change(key: SettingKey, s: &mut Settings, new: String) -> anyhow::Result<()> {
     use SettingKey::*;
@@ -515,11 +521,11 @@ pub fn apply_change(key: SettingKey, s: &mut Settings, new: String) -> anyhow::R
         AdvisorImmuneTurns => s.advisor.immune_turns = new.parse()?,
         TtsrInterruptMode => s.ttsr_interrupt_mode = new,
         AdvisorSyncBacklog => s.advisor.sync_backlog = new,
-        // Editors land in Tasks 5/6 — a stray scalar call here must be
-        // loud, never a silent no-op.
-        DisabledTools => anyhow::bail!("disabled_tools edited via its multiselect (Task 5)"),
-        ModelRoles => anyhow::bail!("model_roles edited via its map-editor (Task 6)"),
-        Keybindings => anyhow::bail!("keybindings edited via its map-editor (Task 6)"),
+        // Structured editors own these maps — a stray scalar call must
+        // be loud, never a silent no-op.
+        DisabledTools => anyhow::bail!("disabled_tools edited via its multiselect"),
+        ModelRoles => anyhow::bail!("model_roles edited via its map-editor"),
+        Keybindings => anyhow::bail!("keybindings edited via its map-editor"),
         // Pointer rows are read-only by design (slash-command driven).
         Theme | Model | CustomProviders | Hooks | ExtensionPaths | SkillPaths | PromptPaths
         | ThemePaths => anyhow::bail!("read-only"),
@@ -536,6 +542,59 @@ pub fn toggle_disabled_tool(s: &mut Settings, tool: &str, enabled: bool) {
     } else if !s.disabled_tools.iter().any(|t| t == tool) {
         s.disabled_tools.push(tool.to_string());
     }
+}
+
+/// Row-kind metadata for the map-editor expansions, index-aligned with
+/// the items emitted by
+/// [`settings_overlay_items`](crate::tui_vt::slash::registry::settings_overlay_items).
+///
+/// `None` entries are ordinary rows (group headings, scalar setting
+/// rows); the settings panel's input handling consults this table to
+/// route `Enter` / `d` / `n` on map rows without needing a new
+/// cross-crate `InlineListSelection` variant per map entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SettingsMapRow {
+    /// Keybindings tab: an action header row (Enter opens the
+    /// key-capture submenu).
+    KeybindingAction(crate::tui_vt::keymap::GlobalAction),
+    /// Keybindings tab: one bound combo of the action (`d` removes it).
+    KeybindingCombo(crate::tui_vt::keymap::GlobalAction, String),
+    /// Model tab: one `model_roles` entry (Enter edits the value, `d`
+    /// deletes the role).
+    ModelRole(String),
+}
+
+/// Record `action`'s full effective combo list in
+/// `settings.keybindings`. When the list is identical to the built-in
+/// default the override entry is removed instead, so the persisted map
+/// stays minimal (`Keymap::from_settings` re-seeds defaults anyway).
+pub fn set_action_combos(
+    s: &mut Settings,
+    action: crate::tui_vt::keymap::GlobalAction,
+    combos: Vec<String>,
+) {
+    let defaults: Vec<String> = crate::tui_vt::keymap::DEFAULT_KEYBINDINGS
+        .iter()
+        .filter(|(a, _)| *a == action)
+        .map(|(_, combo)| (*combo).to_string())
+        .collect();
+    if combos == defaults {
+        s.keybindings.remove(action.name());
+    } else {
+        s.keybindings.insert(action.name().to_string(), combos);
+    }
+}
+
+/// Insert or update one `model_roles` entry.
+pub fn set_model_role(s: &mut Settings, role: &str, model: String) {
+    s.model_roles.insert(role.to_string(), model);
+}
+
+/// Remove one `model_roles` entry. Returns whether the role existed.
+/// Unlike keybindings there is no last-entry guard — an empty
+/// `model_roles` is a perfectly valid state.
+pub fn remove_model_role(s: &mut Settings, role: &str) -> bool {
+    s.model_roles.remove(role).is_some()
 }
 
 #[cfg(test)]

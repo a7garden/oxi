@@ -172,10 +172,28 @@ impl SlashRegistry {
 /// whenever the group label changes, then one row per def with its live
 /// value from [`get_display_value`] as the badge. `Toggle` and `Cycle`
 /// rows submit a `ConfigAction` carrying the `SettingKey` Debug name;
-/// the remaining widget kinds render read-only until their editors are
-/// wired into the overlay-event path (Task 5).
-pub(crate) fn settings_overlay_items(tab: SettingsTab, settings: &Settings) -> Vec<InlineListItem> {
+/// `Text` / `SubmenuSelect` / `Multiselect` / `Pointer` rows stay
+/// read-only here (their editors route through the overlay-event path
+/// in `main_loop.rs`).
+///
+/// The two `MapEditor` defs expand in place into per-entry rows:
+/// - `Keybindings` → one action row per `GlobalAction` (Enter opens the
+///   key-capture submenu) plus one indented row per bound combo.
+/// - `ModelRoles` → one row per role.
+///
+/// Returns the items plus a parallel `SettingsMapRow` table (index
+/// aligned, `None` for ordinary rows) that the settings panel's input
+/// handling consults for `Enter` / `d` / `n` on map rows.
+pub(crate) fn settings_overlay_items(
+    tab: SettingsTab,
+    settings: &Settings,
+) -> (
+    Vec<InlineListItem>,
+    Vec<Option<crate::tui_vt::settings_defs::SettingsMapRow>>,
+) {
+    use crate::tui_vt::settings_defs::{SettingKey, SettingsMapRow};
     let mut items: Vec<InlineListItem> = Vec::new();
+    let mut rows: Vec<Option<SettingsMapRow>> = Vec::new();
     let mut last_group: Option<&'static str> = None;
     for def in defs_for_tab(tab, settings) {
         if last_group != Some(def.group) {
@@ -187,7 +205,21 @@ pub(crate) fn settings_overlay_items(tab: SettingsTab, settings: &Settings) -> V
                 selection: None,
                 search_value: None,
             });
+            rows.push(None);
             last_group = Some(def.group);
+        }
+        // Map editors expand into per-entry rows; the generic def row
+        // never renders for them.
+        match (def.widget, def.key) {
+            (SettingWidget::MapEditor, SettingKey::Keybindings) => {
+                expand_keybinding_rows(settings, &mut items, &mut rows);
+                continue;
+            }
+            (SettingWidget::MapEditor, SettingKey::ModelRoles) => {
+                expand_model_role_rows(settings, &mut items, &mut rows);
+                continue;
+            }
+            _ => {}
         }
         let selection = match def.widget {
             // Toggle/Cycle commit through the ConfigAction path (the
@@ -195,8 +227,9 @@ pub(crate) fn settings_overlay_items(tab: SettingsTab, settings: &Settings) -> V
             SettingWidget::Toggle | SettingWidget::Cycle => {
                 Some(InlineListSelection::ConfigAction(format!("{:?}", def.key)))
             }
-            // Submenu/multiselect/map-editor/pointer rows stay read-only
-            // here; Task 5 routes their selection variants.
+            // Text/SubmenuSelect/Multiselect/Pointer rows stay
+            // read-only here; their editors route through the
+            // overlay-event path in main_loop.rs.
             _ => None,
         };
         items.push(InlineListItem {
@@ -207,8 +240,85 @@ pub(crate) fn settings_overlay_items(tab: SettingsTab, settings: &Settings) -> V
             selection,
             search_value: Some(format!("{} {} {:?}", def.label, def.description, def.key)),
         });
+        rows.push(None);
     }
-    items
+    (items, rows)
+}
+
+/// Expand the `Keybindings` MapEditor def: one action row per
+/// `GlobalAction` (Enter → key-capture submenu, selection carries the
+/// action name) followed by one indented row per bound combo. The
+/// combo list comes from a keymap hydrated exactly like the live one
+/// (defaults + user overrides), so the rows mirror what the next
+/// keystroke actually resolves.
+fn expand_keybinding_rows(
+    settings: &Settings,
+    items: &mut Vec<InlineListItem>,
+    rows: &mut Vec<Option<crate::tui_vt::settings_defs::SettingsMapRow>>,
+) {
+    use crate::tui_vt::settings_defs::SettingsMapRow;
+    let keymap = crate::tui_vt::keymap::Keymap::from_settings(&settings.keybindings);
+    for action in crate::tui_vt::keymap::GlobalAction::all() {
+        let name = action.name();
+        items.push(InlineListItem {
+            title: name.to_string(),
+            subtitle: Some("Enter: capture a new combo".into()),
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::SettingKeyCapture(name.to_string())),
+            search_value: Some(name.to_string()),
+        });
+        rows.push(Some(SettingsMapRow::KeybindingAction(action)));
+        for combo in keymap.action_combos(action) {
+            let combo = combo.to_string();
+            items.push(InlineListItem {
+                title: combo.clone(),
+                subtitle: Some("d: remove".into()),
+                badge: None,
+                indent: 1,
+                selection: None,
+                search_value: Some(format!("{name} {combo}")),
+            });
+            rows.push(Some(SettingsMapRow::KeybindingCombo(action, combo)));
+        }
+    }
+}
+
+/// Expand the `ModelRoles` MapEditor def into one row per role
+/// (sorted by role so the list — and tests — stay deterministic):
+/// Enter edits the value, `d` deletes the role, `n` anywhere on the
+/// Model tab starts a new role. An empty map renders a hint row.
+fn expand_model_role_rows(
+    settings: &Settings,
+    items: &mut Vec<InlineListItem>,
+    rows: &mut Vec<Option<crate::tui_vt::settings_defs::SettingsMapRow>>,
+) {
+    use crate::tui_vt::settings_defs::SettingsMapRow;
+    if settings.model_roles.is_empty() {
+        items.push(InlineListItem {
+            title: "(no model roles)".into(),
+            subtitle: Some("n: add a role".into()),
+            badge: None,
+            indent: 1,
+            selection: None,
+            search_value: Some("model roles".into()),
+        });
+        rows.push(None);
+        return;
+    }
+    let mut roles: Vec<(&String, &String)> = settings.model_roles.iter().collect();
+    roles.sort();
+    for (role, model) in roles {
+        items.push(InlineListItem {
+            title: role.clone(),
+            subtitle: Some("Enter: edit \u{b7} d: delete".into()),
+            badge: Some(model.clone()),
+            indent: 0,
+            selection: None,
+            search_value: Some(format!("{role} {model}")),
+        });
+        rows.push(Some(SettingsMapRow::ModelRole(role.clone())));
+    }
 }
 
 /// `/settings` — open the settings panel overlay.
@@ -230,9 +340,11 @@ impl SlashCommand for SettingsCommand {
     }
     fn execute(&self, _args: &str, ctx: &mut SlashCtx<'_>) -> SlashOutcome {
         let settings = Settings::load().unwrap_or_default();
-        // Task 5 wires the live tab state; default to the first tab so
-        // this compiles standalone.
-        let items = settings_overlay_items(SettingsTab::General, &settings);
+        // `handle_inline_event`'s ShowOverlay hydration replaces this
+        // flat list with the full tabbed panel (on the live tab); this
+        // request just carries the first tab's rows for harnesses that
+        // render the request verbatim.
+        let (items, _rows) = settings_overlay_items(SettingsTab::General, &settings);
 
         let search = InlineListSearchConfig {
             label: "Filter settings".into(),
@@ -1500,7 +1612,7 @@ mod tests {
         let defs = defs_for_tab(SettingsTab::General, &settings);
         assert!(!defs.is_empty(), "General tab must define settings");
 
-        let items = settings_overlay_items(SettingsTab::General, &settings);
+        let items = settings_overlay_items(SettingsTab::General, &settings).0;
         assert!(!items.is_empty());
 
         // Walk the emitted items against the table: heading rows (no

@@ -195,6 +195,13 @@ impl Keymap {
     pub fn set_action(&mut self, action: GlobalAction, combos: Vec<KeyCombo>) {
         self.bindings.insert(action, combos);
     }
+
+    /// The live combo list for `action` (defaults + user overrides,
+    /// merged). The Keybindings map-editor reads this to append to or
+    /// remove from the effective list.
+    pub fn action_combos(&self, action: GlobalAction) -> &[KeyCombo] {
+        self.bindings.get(&action).map(Vec::as_slice).unwrap_or(&[])
+    }
 }
 
 #[cfg(test)]

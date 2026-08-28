@@ -17,7 +17,7 @@ use anyhow::Result;
 use crossterm::{
     cursor::{Hide, Show},
     event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
         KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
     },
@@ -49,9 +49,10 @@ use unicode_width::UnicodeWidthStr;
 use crate::App;
 use crate::app::agent_hub_registry::HubEntry;
 use crate::app::agent_session::SessionEvent;
-use crate::tui_vt::keymap::{GlobalAction, Keymap};
+use crate::tui_vt::keymap::{GlobalAction, KeyCombo, Keymap};
 use crate::tui_vt::settings_defs::{
-    SETTING_DEFS, SettingKey, SettingWidget, SettingsTab, defs_for_tab, get_display_value,
+    SETTING_DEFS, SettingKey, SettingWidget, SettingsMapRow, SettingsTab, defs_for_tab,
+    get_display_value,
 };
 use crate::tui_vt::slash::file_commands::FileCommand;
 use crate::tui_vt::slash::registry::{
@@ -461,6 +462,14 @@ pub struct RenderState {
     /// the session; drives both the tab-switch rebuild and the sidebar
     /// highlight.
     pub settings_active_tab: crate::tui_vt::settings_defs::SettingsTab,
+    /// Row-kind table for the settings panel's map editors
+    /// (Keybindings / Model roles), index-aligned with
+    /// `overlay.items` while the tabbed panel is open. Built by the
+    /// same pass that builds the items; consulted by the input thread
+    /// to route `Enter` / `d` / `n` on map rows. Empty (or stale —
+    /// every consumer re-checks length alignment) for non-settings
+    /// overlays.
+    pub settings_map_rows: Vec<Option<SettingsMapRow>>,
     /// Live global-shortcut resolver, seeded from
     /// `Settings::keybindings` at TUI startup and swapped in place by
     /// the keybindings editor. `parking_lot::RwLock` (not ArcSwap) — no
@@ -531,6 +540,7 @@ impl Default for RenderState {
             context_tokens: None,
             context_window: 128_000,
             settings_active_tab: crate::tui_vt::settings_defs::SettingsTab::General,
+            settings_map_rows: Vec::new(),
             // Default bindings only — `new_with_header` (the real TUI
             // startup) layers `Settings::keybindings` on top, keeping
             // `Default` free of disk I/O for tests.
@@ -543,9 +553,8 @@ impl Default for RenderState {
 }
 
 /// Where a secure prompt came from. The `SecureInput` overlay has just one
-/// payload (the API key text); the origin discriminates the post-commit
-/// follow-up so the user gets a contextual message instead of a generic
-/// "saved" line.
+/// payload (the text); the origin discriminates the post-commit follow-up
+/// so the user gets a contextual flow instead of a generic "saved" line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SecureInputOrigin {
     /// User picked a provider row and chose "Set API key" (or hit Enter
@@ -556,6 +565,12 @@ pub enum SecureInputOrigin {
     /// chaining straight into the key prompt so they can finish the
     /// setup without another navigation step.
     NewlyAdded { provider: String },
+    /// Model-roles map editor: the user pressed `n` — the submitted
+    /// text is the new ROLE name; the value prompt follows.
+    ModelRoleKey,
+    /// Model-roles map editor: the submitted text is the model pattern
+    /// for `role`.
+    ModelRoleValue { role: String },
 }
 
 /// In-transcript search state.
@@ -630,6 +645,12 @@ pub struct OverlayState {
     /// Index of the active section into `sections`, synced to the group
     /// of the currently selected item.
     pub active_section: usize,
+    /// Keybinding-capture mode (settings panel only): `Some(action
+    /// name)` while the "press a key combo" prompt is up. The input
+    /// thread intercepts the next key BEFORE global-shortcut resolution
+    /// so even a combo that currently triggers an action is captured
+    /// verbatim. Esc cancels.
+    pub key_capture: Option<String>,
 }
 
 /// Secure (masked) single-line input state carried by an overlay.
@@ -1581,7 +1602,10 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
             // The `/settings` panel arrives as the flat Task-4 list; its
             // rows are the only producers of ConfigAction selections.
             // Hydrate the full tabbed/sidebar overlay from the def table
-            // (reopening on the last active tab) instead.
+            // (reopening on the last active tab) instead. Map-editor row
+            // metadata rides along with the hydration; every other
+            // overlay invalidates it.
+            let mut map_rows = Vec::new();
             if overlay.items.iter().any(|it| {
                 matches!(
                     it.selection,
@@ -1590,9 +1614,12 @@ fn apply_command(state: &mut RenderState, cmd: InlineCommand) -> bool {
                         | Some(InlineListSelection::SettingsSection(_))
                 )
             }) {
-                overlay = build_settings_overlay(state.settings_active_tab, None);
+                let (hydrated, rows) = build_settings_overlay(state.settings_active_tab, None);
+                overlay = hydrated;
+                map_rows = rows;
             }
             state.overlay = Some(overlay);
+            state.settings_map_rows = map_rows;
         }
         InlineCommand::CloseOverlay => {
             state.overlay = None;
@@ -1708,15 +1735,16 @@ const SETTINGS_TABS: &[(SettingsTab, &str)] = &[
 /// per def via [`settings_overlay_items`] — the same row builder the
 /// `/settings` slash command uses, hydrated with the tab/sidebar state.
 /// `keep_search` preserves the live filter across tab switches.
+///
+/// Returns the overlay plus the map-row table (index-aligned with the
+/// items) for the input thread's `Enter` / `d` / `n` routing.
 fn build_settings_overlay(
     tab: SettingsTab,
     keep_search: Option<OverlaySearchState>,
-) -> OverlayState {
+) -> (OverlayState, Vec<Option<SettingsMapRow>>) {
     let settings = crate::store::settings::Settings::load().unwrap_or_default();
-    let items: Vec<OverlayListItem> = settings_overlay_items(tab, &settings)
-        .into_iter()
-        .map(overlay_item_from)
-        .collect();
+    let (items, map_rows) = settings_overlay_items(tab, &settings);
+    let items: Vec<OverlayListItem> = items.into_iter().map(overlay_item_from).collect();
     let mut sections: Vec<String> = Vec::new();
     for def in defs_for_tab(tab, &settings) {
         if sections.last().map(String::as_str) != Some(def.group) {
@@ -1727,25 +1755,49 @@ fn build_settings_overlay(
         .iter()
         .position(|(t, _)| *t == tab)
         .unwrap_or(0);
-    OverlayState {
-        title: "Settings".into(),
-        lines: vec!["Browse settings by group; filter with the search bar.".into()],
-        items,
-        selected: 0,
-        search: keep_search.or(Some(OverlaySearchState {
-            label: "Filter settings".into(),
-            placeholder: Some("Type to filter".into()),
-            value: String::new(),
-        })),
-        secure_input: None,
-        tabs: SETTINGS_TABS
-            .iter()
-            .map(|(_, name)| name.to_string())
-            .collect(),
-        active_tab,
-        sections,
-        active_section: 0,
+    (
+        OverlayState {
+            title: "Settings".into(),
+            lines: vec!["Browse settings by group; filter with the search bar.".into()],
+            items,
+            selected: 0,
+            search: keep_search.or(Some(OverlaySearchState {
+                label: "Filter settings".into(),
+                placeholder: Some("Type to filter".into()),
+                value: String::new(),
+            })),
+            secure_input: None,
+            tabs: SETTINGS_TABS
+                .iter()
+                .map(|(_, name)| name.to_string())
+                .collect(),
+            active_tab,
+            sections,
+            active_section: 0,
+            key_capture: None,
+        },
+        map_rows,
+    )
+}
+
+/// Reopen (or switch) the settings panel on `tab`, replacing the first
+/// context line with `status` when given. Keeps the live search filter,
+/// syncs `settings_active_tab`, and refreshes the map-row table — the
+/// single assignment path for the tabbed panel so the rows can never
+/// drift from the items.
+fn reopen_settings_panel(state: &mut RenderState, tab: SettingsTab, status: Option<String>) {
+    let keep_search = state.overlay.as_ref().and_then(|o| o.search.clone());
+    state.settings_active_tab = tab;
+    let (mut overlay, map_rows) = build_settings_overlay(tab, keep_search);
+    if let Some(status) = status {
+        if overlay.lines.is_empty() {
+            overlay.lines.push(status);
+        } else {
+            overlay.lines[0] = status;
+        }
     }
+    state.overlay = Some(overlay);
+    state.settings_map_rows = map_rows;
 }
 
 /// Switch the settings overlay to `SETTINGS_TABS[tab_idx]`: rebuild items
@@ -1759,7 +1811,9 @@ fn switch_settings_tab(state: &mut RenderState, tab_idx: usize) {
     };
     let search = state.overlay.as_ref().and_then(|o| o.search.clone());
     state.settings_active_tab = tab;
-    state.overlay = Some(build_settings_overlay(tab, search));
+    let (overlay, map_rows) = build_settings_overlay(tab, search);
+    state.overlay = Some(overlay);
+    state.settings_map_rows = map_rows;
 }
 
 /// Jump the settings overlay's selection to the first row of sidebar
@@ -1769,7 +1823,7 @@ fn switch_settings_tab(state: &mut RenderState, tab_idx: usize) {
 fn jump_settings_section(state: &mut RenderState, section_idx: usize) {
     let tab = state.settings_active_tab;
     let search = state.overlay.as_ref().and_then(|o| o.search.clone());
-    let mut overlay = build_settings_overlay(tab, search);
+    let (mut overlay, map_rows) = build_settings_overlay(tab, search);
     if let Some(target) = overlay.sections.get(section_idx).cloned() {
         // Heading rows (title-only items, per the settings_overlay_items
         // convention) delimit groups; the first selectable row after the
@@ -1791,6 +1845,336 @@ fn jump_settings_section(state: &mut RenderState, section_idx: usize) {
         }
     }
     state.overlay = Some(overlay);
+    state.settings_map_rows = map_rows;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Keybindings map editor (capture / remove / live swap)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The "press a key combo" prompt shown after selecting an action row.
+/// `key_capture` marks capture mode for the input thread.
+fn build_key_capture_overlay(action_name: &str) -> OverlayState {
+    OverlayState {
+        title: format!("Keybinding: {action_name}"),
+        lines: vec![format!(
+            "Press a key combo for {action_name} (Esc to cancel)\u{2026}"
+        )],
+        key_capture: Some(action_name.to_string()),
+        ..Default::default()
+    }
+}
+
+/// Serialize an incoming key event into its canonical `KeyCombo` text.
+///
+/// Only `Ctrl` / `Alt` / `Shift` survive (SUPER & co. would never
+/// round-trip through `KeyCombo::parse`), and a shifted lowercase char
+/// is uppercased — the same canonicalization `parse` applies — so the
+/// serialization always round-trips. Kitty note (Task 2): with
+/// `OXICODE_KITTY_KEYBOARD` the terminal already clears SHIFT on
+/// shifted chars (they arrive uppercase), which this normalization is
+/// self-consistent with.
+fn key_event_to_combo_text(key: KeyEvent) -> Option<(String, KeyCombo)> {
+    use crossterm::event::KeyCode as Kc;
+    let mods = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let code = match key.code {
+        // Canonical shifted-letter form: uppercase char (crossterm's
+        // `normalize_case` shape), SHIFT retained.
+        Kc::Char(c) if c.is_ascii_lowercase() && mods.contains(KeyModifiers::SHIFT) => {
+            Kc::Char(c.to_ascii_uppercase())
+        }
+        other => other,
+    };
+    let combo = KeyCombo {
+        code,
+        modifiers: mods,
+    };
+    let text = combo.to_string();
+    // Reject anything that cannot round-trip through `KeyCombo::parse`
+    // (F-keys, arrows, Home/End, …): persisting them would write a
+    // binding that never resolves.
+    (KeyCombo::parse(&text) == Some(combo.clone())).then_some((text, combo))
+}
+
+/// Handle the next key while the key-capture prompt is open. Esc (no
+/// Ctrl/Alt) cancels back to the Keybindings tab; any other key is
+/// validated (`key_event_to_combo_text` + a Ctrl/Alt requirement, since
+/// an unmodified key would hijack typing) and, when valid, appended to
+/// the action's live combo list, persisted, and swapped into
+/// `RenderState::keymap`. Rejections keep the prompt open with the
+/// reason as its only line.
+fn handle_key_capture(state: &mut RenderState, key: KeyEvent) {
+    let Some(action_name) = state.overlay.as_ref().and_then(|o| o.key_capture.clone()) else {
+        return;
+    };
+    let Some(action) = GlobalAction::from_name(&action_name) else {
+        // Unreachable unless a capture overlay is built by hand with a
+        // bogus name — fail closed by closing the prompt.
+        state.overlay = None;
+        state.settings_map_rows.clear();
+        return;
+    };
+    // Esc cancels without capturing.
+    if key.code == KeyCode::Esc
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        reopen_settings_panel(state, SettingsTab::Keybindings, None);
+        return;
+    }
+    let Some((text, _combo)) = key_event_to_combo_text(key) else {
+        set_capture_prompt_line(
+            state,
+            "That key can't be captured (F-keys and arrows don't round-trip). \
+             Try another combo, Esc to cancel\u{2026}",
+        );
+        return;
+    };
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        set_capture_prompt_line(
+            state,
+            &format!(
+                "'{text}' has no Ctrl or Alt — it would hijack typing. \
+                 Try another combo, Esc to cancel\u{2026}"
+            ),
+        );
+        return;
+    }
+    // Append to the action's LIVE combo list (defaults + overrides),
+    // deduped: capturing an already-bound combo is a no-op edit.
+    let mut combos: Vec<String> = state
+        .keymap
+        .read()
+        .action_combos(action)
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
+    if !combos.iter().any(|c| c == &text) {
+        combos.push(text.clone());
+    }
+    match commit_keybindings(state, action, combos) {
+        Ok(()) => reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!("Captured {text} for {action_name}")),
+        ),
+        Err(e) => set_capture_prompt_line(
+            state,
+            &format!("Failed to save keybindings: {e} — Esc to cancel\u{2026}"),
+        ),
+    }
+}
+
+fn set_capture_prompt_line(state: &mut RenderState, line: &str) {
+    if let Some(overlay) = state.overlay.as_mut() {
+        overlay.lines = vec![line.to_string()];
+    }
+}
+
+/// Persist `action`'s new combo list and swap the rebuilt keymap into
+/// `RenderState::keymap` so the change takes effect on the very next
+/// keystroke — no restart. The keymap swap only happens after a
+/// successful save (never persist a binding the disk state disagrees
+/// with).
+fn commit_keybindings(
+    state: &mut RenderState,
+    action: GlobalAction,
+    combos: Vec<String>,
+) -> anyhow::Result<()> {
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
+    crate::tui_vt::settings_defs::set_action_combos(&mut settings, action, combos);
+    settings.save()?;
+    *state.keymap.write() = Keymap::from_settings(&settings.keybindings);
+    Ok(())
+}
+
+/// `d` on a keybinding-combo row: remove that combo. Guarded — the
+/// final combo of an action is refused (an action with zero keys is a
+/// silent trap: the user could no longer trigger it, or reach this
+/// panel to fix it). A remove that lands back on the default list
+/// drops the override entry entirely.
+fn remove_keybinding_combo(state: &mut RenderState, action: GlobalAction, combo: &str) {
+    let current: Vec<String> = state
+        .keymap
+        .read()
+        .action_combos(action)
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
+    if current.len() <= 1 {
+        reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!(
+                "Refusing to remove the last combo for {} — add another first (Enter on the \
+                 action row)",
+                action.name()
+            )),
+        );
+        return;
+    }
+    let next: Vec<String> = current
+        .iter()
+        .filter(|c| c.as_str() != combo)
+        .cloned()
+        .collect();
+    if next.len() == current.len() {
+        // Not bound (stale row) — nothing to do.
+        return;
+    }
+    match commit_keybindings(state, action, next) {
+        Ok(()) => reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!("Removed {combo} from {}", action.name())),
+        ),
+        Err(e) => reopen_settings_panel(
+            state,
+            SettingsTab::Keybindings,
+            Some(format!("Failed to save keybindings: {e}")),
+        ),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Model roles map editor (n / Enter / d + text prompts)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Open the unmasked text prompt for a model-role value (Enter on a
+/// role row). Prefills the current model pattern so Enter-as-no-op is a
+/// cheap round-trip.
+fn open_model_role_value_prompt(state: &mut RenderState, role: &str) {
+    let current = crate::store::settings::Settings::load()
+        .map(|s| s.model_roles.get(role).cloned())
+        .ok()
+        .flatten();
+    state.secure_input_origin = Some(SecureInputOrigin::ModelRoleValue {
+        role: role.to_string(),
+    });
+    state.overlay = Some(text_prompt_overlay(
+        format!("Model for role '{role}'"),
+        "Enter the model pattern (provider/model). Enter saves, Esc cancels.".into(),
+        "model",
+        Some("provider/model".into()),
+        current.as_deref(),
+    ));
+    state.settings_map_rows.clear();
+}
+
+/// Open the unmasked text prompt naming a NEW model role (`n`).
+fn open_model_role_key_prompt(state: &mut RenderState) {
+    state.secure_input_origin = Some(SecureInputOrigin::ModelRoleKey);
+    state.overlay = Some(text_prompt_overlay(
+        "New model role".to_string(),
+        "Name the role (e.g. fast, reviewer). Enter continues, Esc cancels.".into(),
+        "role",
+        Some("role name".into()),
+        None,
+    ));
+    state.settings_map_rows.clear();
+}
+
+/// Single-line unmasked text prompt built directly on the secure-input
+/// machinery (`mask_input: false` renders the value in the clear).
+fn text_prompt_overlay(
+    title: String,
+    line: String,
+    label: &str,
+    placeholder: Option<String>,
+    prefill: Option<&str>,
+) -> OverlayState {
+    let mut editor = EditBuffer::new();
+    if let Some(text) = prefill {
+        let _ = editor.insert_str(text);
+    }
+    OverlayState {
+        title,
+        lines: vec![line],
+        secure_input: Some(OverlaySecureInput {
+            config: SecurePromptConfig {
+                label: label.to_string(),
+                placeholder,
+                mask_input: false,
+            },
+            editor,
+        }),
+        ..Default::default()
+    }
+}
+
+/// Whether the settings panel (tabbed overlay + fresh map-row table) is
+/// open — the precondition for the map-editor hotkeys.
+fn settings_map_editor_active(state: &RenderState) -> bool {
+    state.overlay.as_ref().is_some_and(|o| {
+        o.tabs.len() > 1
+            && o.key_capture.is_none()
+            && state.settings_map_rows.len() == o.items.len()
+    })
+}
+
+/// The map-row (if any) currently selected in the settings panel.
+fn selected_settings_map_row(state: &RenderState) -> Option<SettingsMapRow> {
+    if !settings_map_editor_active(state) {
+        return None;
+    }
+    let selected = state.overlay.as_ref().map(|o| o.selected)?;
+    state.settings_map_rows.get(selected).cloned().flatten()
+}
+
+/// `Enter` on a model-role row opens the value prompt. Returns whether
+/// the key was consumed (input thread only calls this for Enter).
+fn try_edit_model_role(state: &mut RenderState) -> bool {
+    match selected_settings_map_row(state) {
+        Some(SettingsMapRow::ModelRole(role)) => {
+            open_model_role_value_prompt(state, &role);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// `d` on a map row: remove a keybinding combo (guarded — see
+/// [`remove_keybinding_combo`]) or delete a model role. Returns whether
+/// the key was consumed.
+fn try_remove_settings_map_row(state: &mut RenderState) -> bool {
+    match selected_settings_map_row(state) {
+        Some(SettingsMapRow::KeybindingCombo(action, combo)) => {
+            remove_keybinding_combo(state, action, &combo);
+            true
+        }
+        Some(SettingsMapRow::ModelRole(role)) => {
+            let status = match crate::store::settings::Settings::load() {
+                Ok(mut settings) => {
+                    let existed =
+                        crate::tui_vt::settings_defs::remove_model_role(&mut settings, &role);
+                    match settings.save() {
+                        Ok(()) if existed => format!("Removed model role '{role}'"),
+                        Ok(()) => format!("Role '{role}' was already gone"),
+                        Err(e) => format!("Failed to save model roles: {e}"),
+                    }
+                }
+                Err(e) => format!("Failed to load settings: {e}"),
+            };
+            reopen_settings_panel(state, SettingsTab::Model, Some(status));
+            true
+        }
+        _ => false,
+    }
+}
+
+/// `n` on the Model tab starts a new model role (name first, then the
+/// model pattern). Returns whether the key was consumed.
+fn try_start_new_model_role(state: &mut RenderState) -> bool {
+    if settings_map_editor_active(state) && state.settings_active_tab == SettingsTab::Model {
+        open_model_role_key_prompt(state);
+        true
+    } else {
+        false
+    }
 }
 
 /// Sidebar section index an item belongs to: the group of the last
@@ -1841,12 +2225,17 @@ fn next_cycle_value(key: SettingKey, s: &crate::store::settings::Settings) -> Op
 /// eagerly, so an overlay edit takes effect without a restart. Everything
 /// else is re-read from disk on the next turn
 /// (`AgentSession::rebuild_system_prompt` already reloads on demand).
+///
+/// Returns `Err` only when a live propagation genuinely failed (the
+/// advisor toggle can refuse to start/stop) — the caller surfaces that
+/// instead of a silent success; the disk value is already saved at that
+/// point, so the message says what the user must do (restart).
 fn sync_settings_live(
     state: &mut RenderState,
     session: &crate::app::agent_session::AgentSessionHandle,
     key: SettingKey,
     settings: &crate::store::settings::Settings,
-) {
+) -> anyhow::Result<()> {
     match key {
         SettingKey::ThinkingLevel => {
             session.set_thinking_level(settings.thinking_level);
@@ -1855,10 +2244,22 @@ fn sync_settings_live(
         SettingKey::GlyphSet => state.glyph_set = settings.glyph_set,
         SettingKey::AutoCompaction => session.set_auto_compaction(settings.auto_compaction),
         SettingKey::AdvisorEnabled if session.is_advisor_enabled() != settings.advisor.enabled => {
-            let _ = session.set_advisor_enabled(settings.advisor.enabled);
+            session
+                .set_advisor_enabled(settings.advisor.enabled)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "failed to {} the advisor live: {e} (saved; restart to apply)",
+                        if settings.advisor.enabled {
+                            "enable"
+                        } else {
+                            "disable"
+                        }
+                    )
+                })?;
         }
         _ => {}
     }
+    Ok(())
 }
 
 /// Map a `SessionEvent` to the matching `InlineHandle` calls. This is the
@@ -2587,17 +2988,18 @@ pub(crate) fn next_provider_actions(has_key: bool, oauth_capable: bool) -> Vec<A
 /// The caller must consume the boolean return value the same way it does
 /// for `handle_auth_action`: `true` means a new overlay was opened, so
 /// the previously-open overlay must NOT be closed in the same submit
-/// pass (the cmd channel processes `ShowOverlay` and `CloseOverlay` in
-/// submit order).
 pub(crate) fn open_secure_prompt(
     state: &mut RenderState,
     handle: &InlineHandle,
     origin: SecureInputOrigin,
 ) {
+    // Model-role prompts are built by their own (unmasked, prefilled)
+    // builders; this auth-specific helper is never called with them.
     let provider = match &origin {
         SecureInputOrigin::SetKey { provider } | SecureInputOrigin::NewlyAdded { provider } => {
             provider.clone()
         }
+        SecureInputOrigin::ModelRoleKey | SecureInputOrigin::ModelRoleValue { .. } => return,
     };
     state.secure_input_origin = Some(origin);
     handle.show_modal(
@@ -3130,17 +3532,30 @@ fn handle_inline_event(
                                     ) {
                                         Ok(()) => match settings.save() {
                                             Ok(()) => {
-                                                sync_settings_live(
+                                                if let Err(e) = sync_settings_live(
                                                     state, session, def.key, &settings,
-                                                );
-                                                handle.append_line(
-                                                    InlineMessageKind::Info,
-                                                    vec![plain_segment(format!(
-                                                        "{}: {}",
-                                                        def.label,
-                                                        get_display_value(def.key, &settings)
-                                                    ))],
-                                                );
+                                                ) {
+                                                    // Saved, but the live
+                                                    // toggle failed — an
+                                                    // Error line, never a
+                                                    // silent success.
+                                                    handle.append_line(
+                                                        InlineMessageKind::Error,
+                                                        vec![plain_segment(format!(
+                                                            "{}: {e}",
+                                                            def.label
+                                                        ))],
+                                                    );
+                                                } else {
+                                                    handle.append_line(
+                                                        InlineMessageKind::Info,
+                                                        vec![plain_segment(format!(
+                                                            "{}: {}",
+                                                            def.label,
+                                                            get_display_value(def.key, &settings)
+                                                        ))],
+                                                    );
+                                                }
                                             }
                                             Err(e) => handle.append_line(
                                                 InlineMessageKind::Error,
@@ -3184,19 +3599,25 @@ fn handle_inline_event(
                         jump_settings_section(state, *idx);
                         opened_new_overlay = state.overlay.is_some();
                     }
-                    // Keybinding capture submenu — the capture flow is
-                    // Task 6's map editor; acknowledge instead of silently
-                    // dropping the selection.
+                    // Keybinding capture: selecting an action row opens
+                    // the "press a key combo" prompt. The INPUT thread
+                    // consumes the next key before global-shortcut
+                    // resolution (`handle_key_capture`) and commits
+                    // through the keybindings map editor.
                     if let OverlaySubmission::Selection(InlineListSelection::SettingKeyCapture(
                         name,
                     )) = &sub
                     {
-                        handle.append_line(
-                            InlineMessageKind::Info,
-                            vec![plain_segment(format!(
-                                "Keybinding capture for {name} is not wired yet"
-                            ))],
-                        );
+                        if GlobalAction::from_name(name).is_some() {
+                            state.overlay = Some(build_key_capture_overlay(name));
+                            state.settings_map_rows.clear();
+                            opened_new_overlay = true;
+                        } else {
+                            handle.append_line(
+                                InlineMessageKind::Error,
+                                vec![plain_segment(format!("Unknown keybinding action: {name}"))],
+                            );
+                        }
                     }
                     // Session picker: enqueue the selected session. The next
                     // Submit event drains it before normal composer dispatch.
@@ -3313,44 +3734,115 @@ fn handle_inline_event(
                         opened_new_overlay |=
                             handle_auth_action(provider, action, &auth, handle, state);
                     }
-                    // Secure (masked) prompt committed by the user. The
+                    // Text/secure prompt committed by the user. The
                     // matching open prompt must have stashed
                     // `state.secure_input_origin`; we trust that field
-                    // here because every prompt path goes through
-                    // `open_secure_prompt` (SetApiKey, add_custom_provider)
-                    // which sets it before opening the modal.
+                    // here because every prompt path sets it before
+                    // opening the modal (`open_secure_prompt` for auth,
+                    // the model-role prompt builders for the map
+                    // editor).
                     if let OverlaySubmission::SecureInput(text) = &sub
                         && let Some(origin) = state.secure_input_origin.take()
                     {
-                        let provider = match &origin {
-                            SecureInputOrigin::SetKey { provider }
-                            | SecureInputOrigin::NewlyAdded { provider } => provider.clone(),
-                        };
-                        let auth = crate::store::auth_storage::shared_auth_storage();
-                        auth.set_api_key(&provider, text.clone());
-                        // The agent keeps a constructed provider instance. Saving a
-                        // key alone is not enough for an already-open session: ask
-                        // the resolver for a fresh provider immediately so the next
-                        // message uses this credential without a restart or model
-                        // switch.
-                        let refreshed = session.refresh_api_key();
-                        let msg = match origin {
-                            SecureInputOrigin::SetKey { .. } => format!(
-                                "Saved API key for '{provider}'. {}",
-                                match refreshed {
-                                    Ok(()) => "Ready to retry your message.",
-                                    Err(_) => "Restart this session before retrying.",
+                        match origin {
+                            SecureInputOrigin::ModelRoleKey => {
+                                // Phase 1 of the new-role flow: the text
+                                // is the role NAME — chain straight into
+                                // the value prompt.
+                                let role = text.trim().to_string();
+                                if role.is_empty() {
+                                    handle.append_line(
+                                        InlineMessageKind::Error,
+                                        vec![plain_segment(
+                                            "Model role name can't be empty".to_string(),
+                                        )],
+                                    );
+                                } else {
+                                    open_model_role_value_prompt(state, &role);
+                                    opened_new_overlay = true;
                                 }
-                            ),
-                            SecureInputOrigin::NewlyAdded { .. } => format!(
-                                "Added and configured '{provider}'. {}",
-                                match refreshed {
-                                    Ok(()) => "Use /models to choose a model, or send a message.",
-                                    Err(_) => "Restart this session before using it.",
+                            }
+                            SecureInputOrigin::ModelRoleValue { role } => {
+                                let model = text.trim().to_string();
+                                let outcome = if model.is_empty() {
+                                    Err("model pattern can't be empty".to_string())
+                                } else {
+                                    crate::store::settings::Settings::load()
+                                        .map_err(|e| e.to_string())
+                                        .and_then(|mut settings| {
+                                            crate::tui_vt::settings_defs::set_model_role(
+                                                &mut settings,
+                                                &role,
+                                                model.clone(),
+                                            );
+                                            settings.save().map_err(|e| e.to_string())
+                                        })
+                                };
+                                match outcome {
+                                    Ok(()) => {
+                                        handle.append_line(
+                                            InlineMessageKind::Info,
+                                            vec![plain_segment(format!(
+                                                "Model role '{role}' \u{2192} {model}"
+                                            ))],
+                                        );
+                                        reopen_settings_panel(
+                                            state,
+                                            SettingsTab::Model,
+                                            Some(format!("Saved '{role}' \u{2192} {model}")),
+                                        );
+                                        opened_new_overlay = true;
+                                    }
+                                    Err(e) => handle.append_line(
+                                        InlineMessageKind::Error,
+                                        vec![plain_segment(format!(
+                                            "Failed to save model role '{role}': {e}"
+                                        ))],
+                                    ),
                                 }
-                            ),
-                        };
-                        handle.append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
+                            }
+                            origin @ (SecureInputOrigin::SetKey { .. }
+                            | SecureInputOrigin::NewlyAdded { .. }) => {
+                                let provider = match &origin {
+                                    SecureInputOrigin::SetKey { provider }
+                                    | SecureInputOrigin::NewlyAdded { provider } => {
+                                        provider.clone()
+                                    }
+                                    _ => unreachable!("auth arm only matches auth origins"),
+                                };
+                                let auth = crate::store::auth_storage::shared_auth_storage();
+                                auth.set_api_key(&provider, text.clone());
+                                // The agent keeps a constructed provider instance. Saving a
+                                // key alone is not enough for an already-open session: ask
+                                // the resolver for a fresh provider immediately so the next
+                                // message uses this credential without a restart or model
+                                // switch.
+                                let refreshed = session.refresh_api_key();
+                                let msg = match origin {
+                                    SecureInputOrigin::SetKey { .. } => format!(
+                                        "Saved API key for '{provider}'. {}",
+                                        match refreshed {
+                                            Ok(()) => "Ready to retry your message.",
+                                            Err(_) => "Restart this session before retrying.",
+                                        }
+                                    ),
+                                    SecureInputOrigin::NewlyAdded { .. } => format!(
+                                        "Added and configured '{provider}'. {}",
+                                        match refreshed {
+                                            Ok(()) =>
+                                                "Use /models to choose a model, or send a message.",
+                                            Err(_) => "Restart this session before using it.",
+                                        }
+                                    ),
+                                    SecureInputOrigin::ModelRoleKey
+                                    | SecureInputOrigin::ModelRoleValue { .. } => {
+                                        unreachable!("auth branch reached with a model-role origin")
+                                    }
+                                };
+                                handle
+                                    .append_line(InlineMessageKind::Info, vec![plain_segment(msg)]);
+                            }
+                        }
                     }
                     state.overlay_catalog_models.clear();
                     state.overlay_providers.clear();
@@ -3601,10 +4093,27 @@ fn spawn_input_thread(
 
             let Some(key) = key_event else { continue };
 
+            // Keybinding capture takes precedence over EVERYTHING — the
+            // whole point is to grab the next combo verbatim, even one
+            // that currently resolves to a global action (that's how
+            // you re-examine an existing binding) or lands in the
+            // overlay/search handling below.
+            {
+                let capturing = {
+                    let s = state.lock();
+                    s.overlay.as_ref().is_some_and(|o| o.key_capture.is_some())
+                };
+                if capturing {
+                    let mut s = state.lock();
+                    handle_key_capture(&mut s, key);
+                    continue;
+                }
+            }
+
             // Global shortcuts: resolve through the live keymap. The
             // defaults match the historical hardcoded Ctrl-* bindings;
-            // `settings.keybindings` can rebind any of them and Task 6's
-            // editor swaps the map in place.
+            // `settings.keybindings` can rebind any of them and the
+            // keybindings editor swaps the map in place.
             {
                 let action = {
                     let s = state.lock();
@@ -4120,6 +4629,30 @@ fn handle_overlay_key(
         }
         return true;
     }
+
+    // Settings map-editor hotkeys. These operate on `RenderState`
+    // directly (they persist + rebuild the panel), so the overlay
+    // borrow from the secure branch must end first. Only active with no
+    // search filter — while filtering, letters keep typing into the
+    // search box (the helpers re-check that the tabbed panel is open
+    // and the selected row is a map row).
+    let search_empty = s
+        .overlay
+        .as_ref()
+        .and_then(|o| o.search.as_ref())
+        .is_none_or(|search| search.value.is_empty());
+    let map_row_consumed = match code {
+        KeyCode::Enter if try_edit_model_role(&mut s) => true,
+        KeyCode::Char('d') if search_empty && try_remove_settings_map_row(&mut s) => true,
+        KeyCode::Char('n') if search_empty && try_start_new_model_role(&mut s) => true,
+        _ => false,
+    };
+    if map_row_consumed {
+        return true;
+    }
+    let Some(overlay) = s.overlay.as_mut() else {
+        return false;
+    };
 
     match code {
         KeyCode::Esc => {
@@ -5129,6 +5662,12 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, overlay: &OverlayState) {
 
     // Items.
     if filtered.is_empty() {
+        // The key-capture prompt is items-free by design — the prompt
+        // line above IS the UI; a "(no items)" placeholder would be
+        // noise.
+        if overlay.key_capture.is_some() {
+            return;
+        }
         let row_area = Rect {
             x: inner.left(),
             y: row,
@@ -8848,21 +9387,18 @@ mod provider_overlay_tests {
         };
         // `provider` must be reachable regardless of variant so the
         // `OverlaySubmission::SecureInput` consumer can route the key
-        // without a per-variant branch.
-        assert_eq!(
-            match &set {
-                SecureInputOrigin::SetKey { provider }
-                | SecureInputOrigin::NewlyAdded { provider } => provider,
-            },
-            "openai"
-        );
-        assert_eq!(
-            match &added {
-                SecureInputOrigin::SetKey { provider }
-                | SecureInputOrigin::NewlyAdded { provider } => provider,
-            },
-            "minimax"
-        );
+        // without a per-variant branch. (The model-role origins carry
+        // no provider — they route through their own arm.)
+        let provider_of = |o: &SecureInputOrigin| match o {
+            SecureInputOrigin::SetKey { provider } | SecureInputOrigin::NewlyAdded { provider } => {
+                provider.clone()
+            }
+            SecureInputOrigin::ModelRoleKey | SecureInputOrigin::ModelRoleValue { .. } => {
+                unreachable!("model-role origins have no provider")
+            }
+        };
+        assert_eq!(provider_of(&set), "openai");
+        assert_eq!(provider_of(&added), "minimax");
         // Variants are distinct (so the follow-up message can branch).
         assert_ne!(set, added);
     }
@@ -8972,7 +9508,7 @@ mod provider_overlay_tests {
         );
         // Rows come from the def table for the Model tab.
         let settings = Settings::load().unwrap_or_default();
-        let expected = settings_overlay_items(SettingsTab::Model, &settings);
+        let expected = settings_overlay_items(SettingsTab::Model, &settings).0;
         assert_eq!(overlay.items.len(), expected.len());
         assert_eq!(
             overlay
@@ -10493,6 +11029,7 @@ mod glyph_cycle_tests {
 #[cfg(test)]
 mod settings_panel_tests {
     use super::*;
+    use crate::store::settings::Settings;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use oxicode_vtui::tui::core::InlineListSelection;
     use ratatui::{Terminal, backend::TestBackend};
@@ -10586,6 +11123,7 @@ mod settings_panel_tests {
             active_tab: 1,
             sections: vec!["Defaults".into(), "Pointers".into()],
             active_section: 0,
+            key_capture: None,
         };
         terminal
             .draw(|f| render_overlay(f, f.area(), &overlay))
@@ -10707,6 +11245,131 @@ mod settings_panel_tests {
         assert_eq!(
             InlineListSelection::SettingKeyCapture("OpenCommandPalette".into()),
             InlineListSelection::SettingKeyCapture("OpenCommandPalette".into())
+        );
+    }
+
+    /// Capturing a new combo for `OpenCommandPalette` is additive: the
+    /// next `Keymap::resolve` call resolves BOTH the new combo and the
+    /// original default `Ctrl+P`. The capture path drives the round
+    /// trip end-to-end — `SettingKeyCapture` selection opens the
+    /// capture prompt, the simulated `KeyEvent` is fed straight to
+    /// `handle_key_capture`, and the live `RenderState::keymap` is the
+    /// single source of truth the test inspects.
+    #[test]
+    fn key_capture_appends_combo_and_keeps_default_resolving() {
+        let mut state = RenderState::default();
+        // Open the capture overlay for OpenCommandPalette — same
+        // selection variant `handle_inline_event` would dispatch from
+        // the settings panel.
+        state.overlay = Some(build_key_capture_overlay(
+            GlobalAction::OpenCommandPalette.name(),
+        ));
+        state.settings_map_rows.clear();
+
+        // Pre-condition: the default resolves, the new combo doesn't.
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        let alt_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT);
+        assert_eq!(
+            state.keymap.read().resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette)
+        );
+        assert_eq!(state.keymap.read().resolve(alt_p), None);
+
+        // Drive the capture flow with an Alt+P press.
+        handle_key_capture(&mut state, alt_p);
+
+        // Post-condition: both combos resolve (additive merge into the
+        // live keymap) — and the panel has been rebuilt back on the
+        // Keybindings tab with a success status, not the capture
+        // prompt.
+        let keymap = state.keymap.read();
+        assert_eq!(
+            keymap.resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette)
+        );
+        assert_eq!(
+            keymap.resolve(alt_p),
+            Some(GlobalAction::OpenCommandPalette)
+        );
+        drop(keymap);
+        let overlay = state
+            .overlay
+            .as_ref()
+            .expect("capture commits reopen the panel on Keybindings");
+        assert!(
+            overlay.key_capture.is_none(),
+            "capture prompt must be closed"
+        );
+        assert_eq!(
+            overlay.lines.first().map(String::as_str),
+            Some("Captured Alt+p for OpenCommandPalette")
+        );
+        assert_eq!(state.settings_active_tab, SettingsTab::Keybindings);
+    }
+
+    /// The remove-last-binding guard refuses to drop the final combo of
+    /// an action — an action with zero keys would be a silent trap
+    /// (the user could neither trigger it nor reach this panel to fix
+    /// it). We pre-bind `OpenCommandPalette` to a single combo (the
+    /// default) and confirm `remove_keybinding_combo` no-ops the
+    /// removal while surfacing the reason in the panel status.
+    #[test]
+    fn remove_keybinding_combo_refuses_to_drop_the_last_combo() {
+        let mut state = RenderState::default();
+        // Force a single-combo state: replace OpenCommandPalette's
+        // list with just `Ctrl+p` (the default minus all other
+        // combos the action doesn't have — the point is that the
+        // list ends up at length 1).
+        let mut settings = Settings::default();
+        crate::tui_vt::settings_defs::set_action_combos(
+            &mut settings,
+            GlobalAction::OpenCommandPalette,
+            vec!["Ctrl+p".to_string()],
+        );
+        *state.keymap.write() = Keymap::from_settings(&settings.keybindings);
+        assert_eq!(
+            state
+                .keymap
+                .read()
+                .action_combos(GlobalAction::OpenCommandPalette)
+                .len(),
+            1,
+            "test setup: action must start with exactly one combo"
+        );
+
+        // Place the panel somewhere (the guard reopens it, but
+        // starting state should be observable).
+        state.settings_active_tab = SettingsTab::Keybindings;
+
+        remove_keybinding_combo(&mut state, GlobalAction::OpenCommandPalette, "Ctrl+p");
+
+        // The combo is still live — the guard refused the removal.
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert_eq!(
+            state.keymap.read().resolve(ctrl_p),
+            Some(GlobalAction::OpenCommandPalette),
+            "the guard must not let OpenCommandPalette go combo-less"
+        );
+        assert_eq!(
+            state
+                .keymap
+                .read()
+                .action_combos(GlobalAction::OpenCommandPalette)
+                .len(),
+            1,
+            "no combo was removed"
+        );
+        // The reason is surfaced as the panel status line so the user
+        // knows why nothing happened.
+        let overlay = state.overlay.as_ref().expect("reopen leaves the panel up");
+        assert!(
+            overlay
+                .lines
+                .first()
+                .map(|l| l.contains("Refusing to remove the last combo"))
+                .unwrap_or(false),
+            "panel must explain why the removal was refused; got {:?}",
+            overlay.lines
         );
     }
 }
