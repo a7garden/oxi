@@ -16,16 +16,31 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 [![GitHub release](https://img.shields.io/github/v/release/project-oxi/oxicode?style=flat-square&include_prereleases&label=release)](https://github.com/project-oxi/oxicode/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
 [![GitHub stars](https://img.shields.io/github/stars/project-oxi/oxicode?style=flat-square)](https://github.com/project-oxi/oxicode/stargazers)
-[![Rust](https://img.shields.io/badge/Rust-1.96%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/))
+[![Rust](https://img.shields.io/badge/Rust-1.96%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/)
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-1.5-blue?style=flat-square)](docs/rfcs/RFC-005-CI-CD-INFRA.md)
 
-[Getting Started](#getting-started) · [Architecture](#architecture) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+[Install](#install) · [Quick start](#quick-start) · [Architecture](#architecture) · [Configuration](#configuration) · [Oxi ecosystem](#oxi-ecosystem) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 ---
 
-## Why oxicode?
+## Table of contents
+
+- [Highlights](#highlights)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Architecture](#architecture)
+- [Oxi ecosystem](#oxi-ecosystem)
+- [Oxi Foundation host](#oxi-foundation-host)
+- [Configuration](#configuration)
+- [CLI reference](#cli-reference)
+- [Built-in skills](#built-in-skills)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Highlights
 
 oxicode is a Rust port of [pi](https://github.com/earendil-works/pi), re-implementing its core architecture — unified LLM API, agent runtime, tool calling, terminal UI, and session persistence — in idiomatic Rust with Tokio, Ratatui, and Serde.
 
@@ -43,9 +58,7 @@ It brings the power of LLM-based coding assistants directly to your terminal —
 | 📦 **Package manager** | Install, update, and manage skill/extension packages |
 | 🤖 **Multi-agent SDK** | Build multi-agent pipelines with the oxicode-sdk builder pattern |
 
-## Getting Started
-
-### Install
+## Install
 
 **cargo install** (any Rust toolchain ≥ 1.96):
 ```bash
@@ -87,6 +100,8 @@ cp target/release/oxicode /usr/local/bin/
 curl -fsSL https://github.com/project-oxi/oxicode/releases/latest/download/SHA256SUMS -o SHA256SUMS
 sha256sum -c SHA256SUMS 2>/dev/null | grep aarch64-apple-darwin
 ```
+
+## Quick start
 
 ### Configure
 
@@ -130,6 +145,15 @@ graph LR
 | [**oxicode-sdk**](oxicode-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |
 | [**oxicode-cli**](oxicode-cli/) | CLI binary — ties everything together (TUI + RPC + port composition root) |
 
+## Oxi ecosystem
+
+oxicode owns the terminal coding runtime and SDK. It uses
+[oxibrain](https://github.com/a7garden/oxibrain) for durable local memory,
+works with [oxios](https://github.com/project-oxi/oxios) when orchestration is
+needed, and can act on the shared plain-text vault managed by
+[oximemo](https://github.com/project-oxi/oximemo). The integrations use public
+CLI or client contracts; they do not share storage internals.
+
 ## Oxi Foundation host
 
 oxicode is an **Oxi Foundation v1 host**. It resolves provider profiles and
@@ -156,10 +180,10 @@ the host role is part of a three-host agreement with `oxibrain` (durable
 memory) and `oxios` (orchestration).
 
 If no Foundation installation is present, oxicode runs in offline mode
-with environment-variable credentials only. The oxibrain daemon is
-discovered via its unix socket (`~/.oxi/brain/oxibrain.sock`, override
-`OXIBRAIN_SOCKET`); when the socket is absent the memory tools degrade to
-typed unavailable errors — there is no local fallback store. Existing
+with environment-variable credentials only. It reaches oxibrain through its
+agent-first CLI or a caller-owned `oxibrain admin serve --stdio` child; when the
+brain is unavailable, memory tools degrade to typed unavailable errors — there
+is no local fallback store. Existing
 `~/.oxicode/auth.json` credentials can be migrated one-time into the
 Keychain via `oxicode config migrate-foundation`, and legacy
 `~/.oxicode/memory/items.jsonl` memories via `oxicode migrate brain`.
@@ -237,14 +261,18 @@ Commands:
 ## Development
 
 ```bash
-cargo build                          # Debug build
-cargo build --release                # Release binary
-cargo test --workspace               # Run all tests (2,000+)
-cargo clippy --workspace -- -D warnings   # Lint
-cargo fmt --all -- --check           # Format check
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+cargo test --workspace --doc
+cargo audit
+cargo deny check
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide and
+[AGENTS.md](AGENTS.md) for the project architecture and quality gates.
 
 ## FAQ
 
