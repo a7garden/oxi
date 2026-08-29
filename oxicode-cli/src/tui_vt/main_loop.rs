@@ -5001,15 +5001,27 @@ fn spawn_input_thread(
                 }
             }
 
-            // Confirmation modal takes priority over everything except
-            // Ctrl+C (handled above): y/Enter confirms, n/x/Esc cancels.
-            // The `/issue` panel sits *below* confirmation so that when
-            // Ctrl+C-armed quit confirmation pops over the panel, y/n
-            // still work and the dialog stays visible.
+            // Confirmation modal takes priority over composer keys, but the
+            // keymap's Interrupt binding (default Ctrl+C) outranks it: the
+            // event loop's Ctrl+C policy treats "confirmation open" as
+            // confirm-quit, so the two-press quit path must see the second
+            // Ctrl+C even with the modal up. Resolving through the keymap
+            // (not a hardcoded Ctrl+C) keeps user rebinds working. The
+            // `/issue` panel sits *below* confirmation so that when a
+            // Ctrl+C-armed quit confirmation pops over the panel, y/n still
+            // work and the dialog stays visible.
             {
                 let s = state.lock();
                 if s.confirmation.is_some() {
                     drop(s);
+                    let interrupt = {
+                        let s = state.lock();
+                        matches!(s.keymap.read().resolve(key), Some(GlobalAction::Interrupt))
+                    };
+                    if interrupt {
+                        let _ = evt_tx.send(InlineEvent::Interrupt);
+                        continue;
+                    }
                     handle_confirmation_key(&state, &evt_tx, &issue_action_tx, key.code);
                     continue;
                 }
