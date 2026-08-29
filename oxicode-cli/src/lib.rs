@@ -206,18 +206,18 @@ pub struct App {
     /// Shared local issue store (`.oxicode/issues/`). Cloned cheaply (inner `Arc`).
     /// Used by the agent `issue` tool, the TUI indicator, and the `oxicode issue`
     /// CLI subcommand.
-    issue_store: Option<crate::store::issues::FileIssueStore>,
+    issue_store: Option<oxicode_sdk::FileIssueStore>,
     /// Process-wide liveness identity used by every issue-ownership surface
     /// in this process (agent tool's `ToolContext.session_id`, TUI panel,
     /// slash-command `/issue` handlers). See
-    /// [`crate::store::issues::liveness::TUI_OWNERSHIP_ID`] for the TUI value.
+    /// [`oxicode_sdk::liveness::TUI_OWNERSHIP_ID`] for the TUI value.
     ownership_session_id: String,
     /// Alive-lock held for the lifetime of `App`. Dropped with `App`, releasing
     /// the OS-held flock so any other process sees this session as dead once
     /// we exit (including `kill -9` / crash / normal exit). Only held when
     /// `issue_store` is available.
     #[allow(dead_code)]
-    liveness_guard: Option<crate::store::issues::liveness::AliveGuard>,
+    liveness_guard: Option<oxicode_sdk::liveness::AliveGuard>,
     /// Cached `default` persona body, resolved once in `from_oxicode` so
     /// synchronous prompt rebuilds can reuse it without awaiting the port.
     persona_body: RwLock<Option<String>>,
@@ -267,7 +267,7 @@ impl App {
     /// `ownership_session_id` is the per-process liveness identity used by
     /// the agent's `issue` tool (`ToolContext.session_id`), the TUI panel,
     /// and the `/issue` slash command. In TUI mode this MUST equal
-    /// [`crate::store::issues::liveness::TUI_OWNERSHIP_ID`] so the panel and
+    /// [`oxicode_sdk::liveness::TUI_OWNERSHIP_ID`] so the panel and
     /// agent see the same flock holder. In print / RPC mode, a stable
     /// process-scoped id (e.g. `proc-<pid>-<uuid>`) is appropriate.
     ///
@@ -431,7 +431,7 @@ impl App {
         // command surfaces a clear error in that case.
         let issue_store = std::env::current_dir()
             .ok()
-            .map(|cwd| crate::store::issues::FileIssueStore::open_from_cwd(&cwd))
+            .map(|cwd| oxicode_sdk::FileIssueStore::open_from_cwd(&cwd))
             .and_then(|r| {
                 r.map_err(|e| tracing::warn!("issue store unavailable: {e}"))
                     .ok()
@@ -439,7 +439,7 @@ impl App {
 
         // Register the `issue` agent tool when the store is available.
         if let Some(store) = issue_store.clone() {
-            let tool = std::sync::Arc::new(crate::tools::IssueTool::new(store));
+            let tool = std::sync::Arc::new(oxicode_sdk::IssueTool::new(store));
             agent.tools().register_arc(tool);
         }
 
@@ -500,7 +500,7 @@ impl App {
     }
 
     /// Get a clone of the local issue store, if one was opened successfully.
-    pub fn issue_store(&self) -> Option<crate::store::issues::FileIssueStore> {
+    pub fn issue_store(&self) -> Option<oxicode_sdk::FileIssueStore> {
         self.issue_store.clone()
     }
 
@@ -668,16 +668,16 @@ impl App {
 /// Extracted from `App::from_oxicode` so the single-lock invariant (defect #13 fix)
 /// can be unit-tested without standing up a full `Oxicode` engine.
 pub(crate) fn acquire_ownership_guard(
-    issue_store: Option<&crate::store::issues::FileIssueStore>,
+    issue_store: Option<&oxicode_sdk::FileIssueStore>,
     ownership_id: &str,
-) -> Option<crate::store::issues::liveness::AliveGuard> {
+) -> Option<oxicode_sdk::liveness::AliveGuard> {
     let store = issue_store?;
     if ownership_id.is_empty() {
         // Defensive: never hold a lock under the empty string — that was the
         // #13 bug shape (empty owner is never alive, so ownership was bypassed).
         return None;
     }
-    crate::store::issues::liveness::acquire(&store.issues_dir(), ownership_id).ok()
+    oxicode_sdk::liveness::acquire(&store.issues_dir(), ownership_id).ok()
 }
 
 #[cfg(test)]
@@ -687,8 +687,8 @@ mod tests {
     //! helper (the single chokepoint `from_oxicode` delegates to) rather than
     //! standing up a full `Oxicode` engine.
     use super::*;
-    use crate::store::issues::FileIssueStore;
-    use crate::store::issues::liveness;
+    use oxicode_sdk::FileIssueStore;
+    use oxicode_sdk::liveness;
 
     fn tmp_store() -> (tempfile::TempDir, FileIssueStore) {
         let tmp = tempfile::tempdir().unwrap();

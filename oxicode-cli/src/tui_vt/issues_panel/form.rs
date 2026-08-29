@@ -7,7 +7,7 @@
 //! `mod.rs`/`input.rs` means the tests run instantly and without a
 //! `parking_lot::Mutex` plumbing.
 
-use crate::store::issues::Priority;
+use oxicode_sdk::Priority;
 
 pub(crate) fn cycle_priority(p: Priority, forward: bool) -> Priority {
     use Priority::*;

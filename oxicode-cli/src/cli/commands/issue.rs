@@ -6,8 +6,8 @@ use anyhow::Result;
 /// Handle `oxicode issue …` subcommands. Opens the local issue store rooted at
 /// the project and dispatches to the requested action.
 pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
-    use crate::store::issues::{IssueFilter, Priority, Status};
-    use crate::tools::format_issue_full;
+    use oxicode_sdk::format_issue_full;
+    use oxicode_sdk::{IssueFilter, Priority, Status};
 
     let cwd = std::env::current_dir()?;
 
@@ -15,14 +15,14 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
     // because the store constructor runs its own lazy reap — opening one here
     // would double-reap and underreport the count we actually removed.
     if let IssueCommands::Reap = action {
-        let dir = crate::store::issues::issues_dir(&cwd);
-        let removed = crate::store::issues::liveness::reap_orphans(&dir)
+        let dir = oxicode_sdk::issues_dir(&cwd);
+        let removed = oxicode_sdk::liveness::reap_orphans(&dir)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         println!("reaped {removed} dead alive-lock file(s)");
         return Ok(());
     }
 
-    let store = crate::store::issues::FileIssueStore::open_from_cwd(&cwd)?;
+    let store = oxicode_sdk::FileIssueStore::open_from_cwd(&cwd)?;
 
     match action {
         IssueCommands::List { all, label, text } => {
@@ -38,7 +38,7 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
                 println!("(no issues)");
             } else {
                 for i in &issues {
-                    println!("{}", crate::tools::format_issue_line(i));
+                    println!("{}", oxicode_sdk::format_issue_line(i));
                 }
             }
         }
@@ -76,12 +76,11 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0)
             );
-            let _guard =
-                crate::store::issues::liveness::acquire(&store.issues_dir(), &session).ok();
+            let _guard = oxicode_sdk::liveness::acquire(&store.issues_dir(), &session).ok();
             let (issue, current_hash) = store.read(*id)?;
             if let Some(a) = &issue.meta.assigned_to
                 && a.session != session
-                && crate::store::issues::liveness::is_session_alive(&store.issues_dir(), &a.session)
+                && oxicode_sdk::liveness::is_session_alive(&store.issues_dir(), &a.session)
             {
                 anyhow::bail!(
                     "issue #{id} is currently being worked on by session {} (since {}); cannot close from CLI",

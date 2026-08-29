@@ -4,7 +4,7 @@
 //! match). Unknown `priority=` values are ignored (filter falls back to no
 //! priority constraint) rather than erroring — this is a live-typing buffer.
 
-use crate::store::issues::{IssueFilter, Priority, Status};
+use oxicode_sdk::{IssueFilter, Priority, Status};
 
 pub(crate) fn parse_issue_filter(input: &str, status_filter: Option<Status>) -> IssueFilter {
     let mut priority = None;

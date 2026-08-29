@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::store::issues::{FileIssueStore, IssueFilter, IssuePatch, Priority, Status, liveness};
+use oxicode_sdk::{FileIssueStore, IssueFilter, IssuePatch, Priority, Status, liveness};
 mod filter_parse;
 // Consumed by `input::FilterInput` Enter handler in Task 6.
 pub(crate) use filter_parse::parse_issue_filter;
@@ -163,8 +163,8 @@ impl IssuesPanelState {
     /// Union of the status toggle and the `/` filter-modal fields (design §4).
     /// `None` in `status_filter` flows through as `None` here, matching the
     /// design's "All" view (no status constraint).
-    fn effective_filter(&self) -> crate::store::issues::IssueFilter {
-        crate::store::issues::IssueFilter {
+    fn effective_filter(&self) -> oxicode_sdk::IssueFilter {
+        oxicode_sdk::IssueFilter {
             status: self.status_filter,
             ..self.extra_filter.clone()
         }
@@ -229,7 +229,7 @@ pub(crate) fn dispatch_action(
                 // `Conflict` from any step re-runs the sequence; `start`
                 // is idempotent for the same caller, so a retry after a
                 // close-side conflict is safe.
-                crate::tools::issue_tool::cas_retry(&store, id, hash, |h| {
+                oxicode_sdk::cas_retry(&store, id, hash, |h| {
                     let store = store.clone();
                     let caller = caller.clone();
                     async move {
@@ -244,7 +244,7 @@ pub(crate) fn dispatch_action(
                 .await
             }
             IssueActionRequest::Reopen { id, hash } => {
-                crate::tools::issue_tool::cas_retry(&store, id, hash, |h| {
+                oxicode_sdk::cas_retry(&store, id, hash, |h| {
                     let store = store.clone();
                     async move { store.reopen(id, h).await }
                 })
@@ -256,7 +256,7 @@ pub(crate) fn dispatch_action(
                 caller,
                 hash,
             } => {
-                crate::tools::issue_tool::cas_retry(&store, id, hash, |h| {
+                oxicode_sdk::cas_retry(&store, id, hash, |h| {
                     let store = store.clone();
                     let patch = patch.clone();
                     let caller = caller.clone();
@@ -300,7 +300,7 @@ mod tests {
 #[cfg(test)]
 mod refresh_tests {
     use super::*;
-    use crate::store::issues::{FileIssueStore, Priority};
+    use oxicode_sdk::{FileIssueStore, Priority};
 
     fn tmp_store() -> (tempfile::TempDir, FileIssueStore) {
         let tmp = tempfile::tempdir().unwrap();
@@ -346,7 +346,7 @@ mod refresh_tests {
 #[cfg(test)]
 mod dispatch_tests {
     use super::*;
-    use crate::store::issues::{FileIssueStore, IssuePatch, Priority};
+    use oxicode_sdk::{FileIssueStore, IssuePatch, Priority};
     use std::sync::Arc;
 
     #[tokio::test]

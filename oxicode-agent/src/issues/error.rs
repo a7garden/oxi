@@ -15,27 +15,43 @@ pub enum IssueError {
     /// `content_hash` supplied did not match the current on-disk content.
     /// The caller should re-read and retry.
     #[error("issue #{id} was modified since last read; re-read and retry")]
-    Conflict { id: u32 },
+    Conflict {
+        /// Id of the modified issue.
+        id: u32,
+    },
 
     /// Another live session holds the assignment for this issue.
     #[error("issue #{id} is currently being worked on by session {owner}")]
     Assigned {
+        /// Id of the contended issue.
         id: u32,
+        /// Session id currently holding the assignment.
         owner: String,
+        /// When the current assignment was taken.
         acquired_at: DateTime<Utc>,
     },
 
     /// The caller does not hold the assignment required for this mutation.
     #[error("issue #{id} is not assigned to session {caller}; run `start` first")]
-    NotAssigned { id: u32, caller: String },
+    NotAssigned {
+        /// Id of the issue being mutated.
+        id: u32,
+        /// Session id that attempted the mutation.
+        caller: String,
+    },
 
     /// Issue id not found.
     #[error("issue #{id} not found")]
-    NotFound { id: u32 },
+    NotFound {
+        /// Id that could not be resolved.
+        id: u32,
+    },
 
+    /// Underlying I/O failure.
     #[error(transparent)]
     Io(#[from] io::Error),
 
+    /// Any other failure.
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

@@ -1,13 +1,17 @@
-//! Filter predicates for [`crate::store::issues::FileIssueStore::list`].
+//! Filter predicates for [`crate::issues::FileIssueStore::list`].
 
-use crate::store::issues::types::{Issue, Priority, Status};
+use crate::issues::types::{Issue, Priority, Status};
 
 /// Filter for `list`. All fields optional (None = no constraint).
 #[derive(Debug, Clone, Default)]
 pub struct IssueFilter {
+    /// Constrain by status.
     pub status: Option<Status>,
+    /// Constrain by priority.
     pub priority: Option<Priority>,
+    /// Constrain to issues carrying this label.
     pub label: Option<String>,
+    /// Constrain to issues assigned to this session id.
     pub assigned_to_session: Option<String>,
     /// Text substring match on title (case-insensitive).
     pub text: Option<String>,

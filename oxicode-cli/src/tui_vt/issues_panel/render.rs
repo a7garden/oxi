@@ -31,8 +31,8 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, panel: &IssuesPanelState) {
     let title = format!(
         "Issues \u{2014} {} ({}){}",
         match panel.status_filter {
-            Some(crate::store::issues::Status::Open) => "open",
-            Some(crate::store::issues::Status::Closed) => "closed",
+            Some(oxicode_sdk::Status::Open) => "open",
+            Some(oxicode_sdk::Status::Closed) => "closed",
             None => "all",
         },
         panel.rows.len(),
@@ -281,7 +281,7 @@ mod render_tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::store::issues::{Priority, Status};
+    use oxicode_sdk::{Priority, Status};
 
     fn sample_row() -> IssueRow {
         use chrono::TimeZone;

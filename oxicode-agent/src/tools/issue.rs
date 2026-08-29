@@ -18,13 +18,11 @@
 
 use std::sync::Arc;
 
+use crate::{AgentTool, AgentToolResult, ToolContext};
 use async_trait::async_trait;
-use oxicode_agent::{AgentTool, AgentToolResult, ToolContext};
 use serde_json::{Value, json};
 
-use crate::store::issues::{
-    FileIssueStore, Issue, IssueError, IssueFilter, IssuePatch, Priority, Status,
-};
+use crate::issues::{FileIssueStore, Issue, IssueError, IssueFilter, IssuePatch, Priority, Status};
 
 /// The `issue` tool. One registration, multiple actions.
 #[derive(Debug, Clone)]
@@ -394,7 +392,7 @@ const MAX_CAS_ATTEMPTS: u32 = 4;
 /// and never retries on its own (principle: strictness in the store, recovery
 /// in the tool). This helper owns the recovery — re-reading a fresh hash after
 /// each conflict and retrying up to [`MAX_CAS_ATTEMPTS`] times.
-pub(crate) async fn cas_retry<T, F, Fut>(
+pub async fn cas_retry<T, F, Fut>(
     store: &FileIssueStore,
     id: u32,
     agent_hash: Option<String>,

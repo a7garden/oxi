@@ -48,7 +48,7 @@ pub fn acquire(issues_dir: &Path, session_id: &str) -> io::Result<AliveGuard> {
 }
 
 /// Returns `true` iff a live process currently holds the alive-lock for
-/// `session_id`. Used to decide whether an [`crate::store::issues::Assignment`]
+/// `session_id`. Used to decide whether an [`crate::issues::Assignment`]
 /// is still valid.
 pub fn is_session_alive(issues_dir: &Path, session_id: &str) -> bool {
     let path = alive_path(issues_dir, session_id);
@@ -163,6 +163,7 @@ pub struct AliveGuard {
 }
 
 impl AliveGuard {
+    /// Path of the alive-lock file this guard holds.
     pub fn path(&self) -> &Path {
         &self.path
     }

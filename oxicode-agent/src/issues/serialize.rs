@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::Utc;
 
-use crate::store::issues::types::{Issue, IssueMeta, Priority, Status};
+use crate::issues::types::{Issue, IssueMeta, Priority, Status};
 
 const FRONTMATTER_DELIM: &str = "---";
 

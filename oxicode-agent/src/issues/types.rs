@@ -10,8 +10,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
+    /// Issue is open (work not complete).
     #[default]
     Open,
+    /// Issue is closed (resolved or abandoned).
     Closed,
 }
 
@@ -28,10 +30,14 @@ impl fmt::Display for Status {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {
+    /// Low urgency.
     Low,
+    /// Default priority.
     #[default]
     Medium,
+    /// High urgency.
     High,
+    /// Drop everything.
     Critical,
 }
 
@@ -50,7 +56,7 @@ impl fmt::Display for Priority {
 ///
 /// `None` means the issue is free. `Some` means a session has claimed it via
 /// `start`. Validity of an assignment is determined by process liveness (see
-/// [`crate::store::issues::liveness::is_session_alive`]) — there is no expiry
+/// [`crate::issues::liveness::is_session_alive`]) — there is no expiry
 /// timestamp.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Assignment {
@@ -64,26 +70,38 @@ pub struct Assignment {
 /// A reference to a synced GitHub issue. Populated only after Phase 6 sync.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubRef {
+    /// `owner/repo` of the synced issue.
     pub repo: String,
+    /// GitHub issue number.
     pub number: u64,
+    /// Canonical URL.
     pub url: String,
 }
 
 /// YAML frontmatter for an issue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueMeta {
+    /// Monotonic id assigned by the store.
     pub id: u32,
+    /// One-line summary.
     pub title: String,
+    /// Open/closed state.
     #[serde(default)]
     pub status: Status,
+    /// Urgency ordering.
     #[serde(default)]
     pub priority: Priority,
+    /// Free-form tags.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Human assignee (informational; distinct from [`Assignment`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<String>,
+    /// Creation timestamp.
     pub created_at: DateTime<Utc>,
+    /// Last mutation timestamp.
     pub updated_at: DateTime<Utc>,
+    /// When closed, if closed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_at: Option<DateTime<Utc>>,
     /// Session ids linked to this issue (worked-on or referencing sessions).
@@ -100,6 +118,7 @@ pub struct IssueMeta {
 /// An in-memory issue: metadata + markdown body + the file path it came from.
 #[derive(Debug, Clone)]
 pub struct Issue {
+    /// Structured metadata (frontmatter).
     pub meta: IssueMeta,
     /// Raw markdown body (everything after the `---` frontmatter block).
     pub body: String,
@@ -119,7 +138,7 @@ impl Issue {
     }
 }
 
-/// A precise update payload for [`crate::store::issues::FileIssueStore::apply_patch`].
+/// A precise update payload for [`crate::issues::FileIssueStore::apply_patch`].
 ///
 /// Every field is `Option`: `None` = keep the existing value, `Some` = replace
 /// it. `labels` is the only field with a meaningful empty state —
@@ -129,7 +148,7 @@ impl Issue {
 /// full set.
 ///
 /// Used by the `issue` tool's `update` action (via
-/// [`crate::store::issues::FileIssueStore::apply_patch`]) and is the
+/// [`crate::issues::FileIssueStore::apply_patch`]) and is the
 /// recommended mutation surface for callers that want precise keep-vs-replace
 /// semantics.
 #[derive(Debug, Clone, Default)]
@@ -139,7 +158,7 @@ pub struct IssuePatch {
     /// Replace the markdown body.
     pub body: Option<String>,
     /// Replace the status. Setting [`Status::Open`] also clears `closed_at`
-    /// (see [`crate::store::issues::FileIssueStore::apply_patch`], which fixes
+    /// (see [`crate::issues::FileIssueStore::apply_patch`], which fixes
     /// the latent reopen bug #4).
     pub status: Option<Status>,
     /// Replace the priority.

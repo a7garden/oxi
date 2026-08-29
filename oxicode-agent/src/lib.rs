@@ -49,6 +49,8 @@ pub mod config;
 pub mod error;
 /// Event types emitted during the agent loop.
 pub mod events;
+
+pub mod issues;
 /// MCP (Model Context Protocol) integration.
 pub mod mcp;
 /// Model identifier constants and helpers.
@@ -137,6 +139,15 @@ pub use tools::todo::{
     InitListEntry, TodoCompletionTransition, TodoItem, TodoOp, TodoPhase, TodoStatus, TodoTool,
     TodoUpdateResult,
 };
+
+/// Local issue tracking: file-backed store, types, and the `issue` agent tool.
+#[oxicode_stable(since = "0.77.0")]
+pub use issues::{
+    Assignment, FileIssueStore, GithubRef, Issue, IssueError, IssueFilter, IssueMeta, IssuePatch,
+    IssueSummary, Priority, Status,
+};
+#[oxicode_stable(since = "0.77.0")]
+pub use tools::issue::{IssueTool, cas_retry, format_issue_full, format_issue_line};
 
 #[oxicode_unstable(feature = "agent-pool")]
 pub use tools::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};

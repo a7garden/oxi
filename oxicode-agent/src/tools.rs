@@ -927,6 +927,8 @@ pub mod http_client;
 pub mod hub_tool;
 /// Inspect Image tool — analyze images using Vision LLM capabilities.
 pub mod inspect_image_tool;
+/// Local issue management tool backed by the `.oxicode/issues/` store.
+pub mod issue;
 /// Learn tool — capture a reusable lesson to memory and optionally create a managed skill.
 pub mod learn_tool;
 /// Directory listing tool.

@@ -38,7 +38,7 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // we can include it in the SessionStart hook context (and pass it to
     // App::from_oxicode on the same path).
     let ownership_session_id = if is_tui_mode(args) {
-        crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string()
+        oxicode_sdk::liveness::TUI_OWNERSHIP_ID.to_string()
     } else {
         format!(
             "proc-{}-{}",

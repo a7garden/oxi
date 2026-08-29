@@ -456,7 +456,7 @@ pub struct RenderState {
     /// `/issue` panel state. `None` = panel closed.
     pub(crate) issues_panel: Option<crate::tui_vt::issues_panel::IssuesPanelState>,
     /// Cached issue store handle, opened lazily on first `/issue` use.
-    pub issue_store: Option<std::sync::Arc<crate::store::issues::FileIssueStore>>,
+    pub issue_store: Option<std::sync::Arc<oxicode_sdk::FileIssueStore>>,
     /// Per-tip-key show counter — suppresses ambient tips after SEEN_CAP views.
     pub seen_tips: std::collections::HashMap<&'static str, u32>,
     /// User-defined slash commands loaded once at startup from
@@ -5500,7 +5500,7 @@ fn handle_confirmation_key(
                             .and_then(|store| store.read(id).ok())
                             .map(|(_, h)| h);
                         (
-                            crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string(),
+                            oxicode_sdk::liveness::TUI_OWNERSHIP_ID.to_string(),
                             hash,
                             s.cwd.clone(),
                         )

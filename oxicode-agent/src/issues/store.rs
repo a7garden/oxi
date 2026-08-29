@@ -8,14 +8,14 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use parking_lot::RwLock;
 
-use crate::store::fs_util::atomic_write;
-use crate::store::issues::error::IssueError;
-use crate::store::issues::filter::IssueFilter;
-use crate::store::issues::liveness;
-use crate::store::issues::serialize::{
+use crate::issues::atomic_write;
+use crate::issues::error::IssueError;
+use crate::issues::filter::IssueFilter;
+use crate::issues::liveness;
+use crate::issues::serialize::{
     content_hash, issue_filename, issues_dir, parse_issue, serialize_issue,
 };
-use crate::store::issues::types::{Assignment, Issue, IssueMeta, IssuePatch, Priority, Status};
+use crate::issues::types::{Assignment, Issue, IssueMeta, IssuePatch, Priority, Status};
 
 /// Cached directory listing, so the status-bar indicator doesn't readdir the
 /// issues dir every render frame. `dir_mtime` is the single invalidation
@@ -44,16 +44,21 @@ struct Cache {
 /// Cheap to construct — values come straight from the in-memory cache.
 #[derive(Debug, Clone)]
 pub struct IssueSummary {
+    /// Number of open issues.
     pub open_count: usize,
+    /// Open issues currently assigned to a live session.
     pub locked_open_count: usize,
+    /// Highest priority among open issues (`None` if none open).
     pub top_priority: Option<Priority>,
     /// Highest priority among open + *unassigned* issues (#10). Distinct from
     /// `top_priority` (overall open max): excludes issues someone works on.
     pub top_free_priority: Option<Priority>,
+    /// Title of the most recently updated open issue.
     pub latest_open_title: Option<String>,
 }
 
 impl IssueSummary {
+    /// True when there are no open issues.
     pub fn is_empty(&self) -> bool {
         self.open_count == 0
     }
@@ -63,19 +68,6 @@ impl IssueSummary {
 struct Inner {
     issues_dir: PathBuf,
     cache: Cache,
-}
-
-impl Cache {
-    fn empty() -> Self {
-        Self {
-            open_count: 0,
-            latest_open_title: None,
-            locked_open_count: 0,
-            top_priority: None,
-            top_free_priority: None,
-            dir_mtime: None,
-        }
-    }
 }
 
 impl std::fmt::Debug for Inner {
@@ -382,7 +374,7 @@ impl FileIssueStore {
         let path_for_closure = path.clone();
         let store = self.clone();
         // Serialize same-file writes within this process.
-        oxicode_agent::tools::file_mutation_queue::global_mutation_queue()
+        crate::tools::file_mutation_queue::global_mutation_queue()
             .with_queue(&path, move || async move {
                 let path = path_for_closure;
                 let raw = fs::read_to_string(&path)?;
@@ -801,7 +793,7 @@ mod tests {
     async fn reopen_flips_closed_to_open() {
         let (_tmp, store) = tmp_store();
         let issues_dir = store.issues_dir();
-        let _guard = crate::store::issues::liveness::acquire(&issues_dir, "tui").unwrap();
+        let _guard = crate::issues::liveness::acquire(&issues_dir, "tui").unwrap();
         store
             .create("T".into(), "b".into(), Priority::Low, vec![], None)
             .unwrap();

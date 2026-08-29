@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use crate::store::issues::FileIssueStore;
 use crate::tui_vt::main_loop::RenderState;
+use oxicode_sdk::FileIssueStore;
 
 pub(crate) fn get_or_open_store(state: &mut RenderState) -> anyhow::Result<Arc<FileIssueStore>> {
     if let Some(store) = &state.issue_store {
         return Ok(store.clone());
     }
-    let dir = crate::store::issues::issues_dir(&state.cwd);
+    let dir = oxicode_sdk::issues_dir(&state.cwd);
     let store = Arc::new(FileIssueStore::open(dir)?);
     state.issue_store = Some(store.clone());
     Ok(store)

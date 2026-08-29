@@ -42,7 +42,7 @@ pub(crate) fn handle_issues_panel_key(
                 panel.status_filter = if panel.status_filter.is_some() {
                     None
                 } else {
-                    Some(crate::store::issues::Status::Open)
+                    Some(oxicode_sdk::Status::Open)
                 };
                 let store = s.issue_store.clone();
                 if let (Some(store), Some(panel)) = (store, s.issues_panel.as_mut()) {
@@ -340,8 +340,8 @@ fn start_edit(s: &mut parking_lot::MutexGuard<'_, crate::tui_vt::main_loop::Rend
         return;
     };
     if let Some(a) = &issue.meta.assigned_to
-        && a.session != crate::store::issues::liveness::TUI_OWNERSHIP_ID
-        && crate::store::issues::liveness::is_session_alive(&store.issues_dir(), &a.session)
+        && a.session != oxicode_sdk::liveness::TUI_OWNERSHIP_ID
+        && oxicode_sdk::liveness::is_session_alive(&store.issues_dir(), &a.session)
     {
         panel.error = Some(format!(
             "issue #{id} is being worked on by session {}",
@@ -415,7 +415,7 @@ fn submit_form(
                 body,
                 priority,
                 labels,
-                Some(crate::store::issues::liveness::TUI_OWNERSHIP_ID),
+                Some(oxicode_sdk::liveness::TUI_OWNERSHIP_ID),
             ) {
                 Ok(_issue) => {
                     if let Some(panel) = s.issues_panel.as_mut() {
@@ -438,7 +438,7 @@ fn submit_form(
             // Edit path — async (CAS-guarded by `apply_patch`); queue an
             // action and let the event loop dispatch it (Task 9 replaces
             // the no-op `dispatch_action` with a real store call).
-            let patch = crate::store::issues::IssuePatch {
+            let patch = oxicode_sdk::IssuePatch {
                 title: Some(title),
                 body: Some(body),
                 priority: Some(priority),
@@ -448,7 +448,7 @@ fn submit_form(
             let _ = issue_action_tx.send(IssueActionRequest::ApplyPatch {
                 id,
                 patch,
-                caller: Some(crate::store::issues::liveness::TUI_OWNERSHIP_ID.to_string()),
+                caller: Some(oxicode_sdk::liveness::TUI_OWNERSHIP_ID.to_string()),
                 hash: content_hash,
             });
             if let Some(panel) = s.issues_panel.as_mut() {

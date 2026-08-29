@@ -289,6 +289,17 @@ pub use oxicode_agent::tools::todo::{TodoItem, TodoOp, TodoPhase, TodoStatus, To
 #[oxicode_stable(since = "0.63.0")]
 pub use oxicode_agent::{TodoStateProvider, TodoTool};
 
+// ── Issue tool + store (agent-scoped, observable by SDK consumers) ─────
+pub use oxicode_agent::issues::liveness;
+#[oxicode_stable(since = "0.77.0")]
+pub use oxicode_agent::issues::{
+    Assignment, FileIssueStore, GithubRef, Issue, IssueError, IssueFilter, IssueMeta, IssuePatch,
+    IssueSummary, Priority, Status,
+};
+pub use oxicode_agent::issues::{content_hash, issues_dir};
+#[oxicode_stable(since = "0.77.0")]
+pub use oxicode_agent::tools::issue::{IssueTool, cas_retry, format_issue_full, format_issue_line};
+
 // ── Capability traits + agent tools (single-dependency pattern) ───────
 //
 // A pure-`oxicode-sdk` consumer (no `oxicode-agent` direct dep) can implement these
