@@ -611,7 +611,7 @@ pub fn toggle_disabled_tool(s: &mut Settings, tool: &str, enabled: bool) {
 
 /// Row-kind metadata for the map-editor expansions, index-aligned with
 /// the items emitted by
-/// [`settings_overlay_items`](crate::tui_vt::slash::registry::settings_overlay_items).
+/// `settings_overlay_items` (crate::tui_vt::slash::registry).
 ///
 /// `None` entries are ordinary rows (group headings, scalar setting
 /// rows); the settings panel's input handling consults this table to

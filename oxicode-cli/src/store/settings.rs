@@ -488,18 +488,17 @@ impl Default for Settings {
 impl Settings {
     // ── Paths ────────────────────────────────────────────────────────
 
-    /// Get the global settings directory path (`~/.oxicode`).
+    /// Get the global settings directory path (`~/.oxi/oxicode`).
     pub fn settings_dir() -> Result<PathBuf> {
-        let base = dirs::home_dir().context("Cannot determine home directory")?;
-        Ok(base.join(".oxicode"))
+        oxicode_catalog::product_env::home_dir().context("Cannot determine oxicode home directory")
     }
 
-    /// Get the global settings TOML file path (`~/.oxicode/settings.toml`).
+    /// Get the global settings TOML file path (`~/.oxi/oxicode/settings.toml`).
     pub fn settings_toml_path() -> Result<PathBuf> {
         Ok(Self::settings_dir()?.join("settings.toml"))
     }
 
-    /// Get the global settings JSON file path (`~/.oxicode/settings.json`).
+    /// Get the global settings JSON file path (`~/.oxi/oxicode/settings.json`).
     pub fn settings_json_path() -> Result<PathBuf> {
         Ok(Self::settings_dir()?.join("settings.json"))
     }

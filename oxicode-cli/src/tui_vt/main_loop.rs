@@ -457,6 +457,12 @@ pub struct RenderState {
     pub(crate) issues_panel: Option<crate::tui_vt::issues_panel::IssuesPanelState>,
     /// Cached issue store handle, opened lazily on first `/issue` use.
     pub issue_store: Option<std::sync::Arc<oxicode_sdk::FileIssueStore>>,
+    /// This TUI process's liveness identity (`tui-<pid>-<uuid>`), injected
+    /// from `App::ownership_session_id` at startup. Every issue-panel /
+    /// slash-command write names the flock holder through this field — NOT
+    /// a shared constant — so parallel TUIs claim issues independently.
+    /// Empty only in tests that build a bare `RenderState::default()`.
+    pub ownership_session_id: String,
     /// Per-tip-key show counter — suppresses ambient tips after SEEN_CAP views.
     pub seen_tips: std::collections::HashMap<&'static str, u32>,
     /// User-defined slash commands loaded once at startup from
@@ -583,6 +589,7 @@ impl Default for RenderState {
             cwd: PathBuf::new(),
             file_search: None,
             issues_panel: None,
+            ownership_session_id: String::new(),
             issue_store: None,
             seen_tips: std::collections::HashMap::new(),
             file_commands: Vec::new(),
@@ -1202,6 +1209,7 @@ pub async fn run_tui(app: App) -> Result<()> {
     let state = Arc::new(parking_lot::Mutex::new(RenderState::new_with_header(
         header,
     )));
+    state.lock().ownership_session_id = app.ownership_session_id().to_string();
     state.lock().cwd = cwd.clone();
     state.lock().catalog = Some(app.catalog());
     state.lock().file_commands = crate::tui_vt::slash::file_commands::load_file_commands(&cwd);
@@ -5511,11 +5519,7 @@ fn handle_confirmation_key(
                             .as_ref()
                             .and_then(|store| store.read(id).ok())
                             .map(|(_, h)| h);
-                        (
-                            oxicode_sdk::liveness::TUI_OWNERSHIP_ID.to_string(),
-                            hash,
-                            s.cwd.clone(),
-                        )
+                        (s.ownership_session_id.clone(), hash, s.cwd.clone())
                     };
                     let _ = cwd; // store is already rooted; kept for clarity/future use
                     let _ = issue_action_tx.send(

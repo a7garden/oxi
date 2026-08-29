@@ -38,13 +38,9 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // we can include it in the SessionStart hook context (and pass it to
     // App::from_oxicode on the same path).
     let ownership_session_id = if is_tui_mode(args) {
-        oxicode_sdk::liveness::TUI_OWNERSHIP_ID.to_string()
+        tui_ownership_id()
     } else {
-        format!(
-            "proc-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        )
+        proc_ownership_id()
     };
 
     // Load hooks: global hooks (`~/.oxicode/settings.toml` -> `[[hooks]]`)
@@ -686,9 +682,35 @@ fn register_router_provider() {
     oxicode_sdk::router::register_router(&ai_cfg);
 }
 
+/// Unique liveness identity for THIS TUI process: `tui-<pid>-<uuid>`.
+///
+/// Historically every TUI shared the constant id `"tui"`. With parallel
+/// interactive sessions that collapsed into a single identity — the second
+/// TUI's flock acquisition failed silently and both sessions passed the
+/// `require_owner` check (both *were* "tui"), so ownership exclusivity was
+/// unenforceable between them. A unique id per process restores it: each
+/// TUI holds its own flock, and a foreign assignment fails liveness the way
+/// `proc-*` assignments always did.
+pub(crate) fn tui_ownership_id() -> String {
+    format!(
+        "tui-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
+/// Unique liveness identity for a headless (print / RPC / single-prompt) run.
+pub(crate) fn proc_ownership_id() -> String {
+    format!(
+        "proc-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
 /// Decide whether this run is the TUI (interactive) mode. Mirrors the
 /// dispatch in [`dispatch_run_mode`]: print / RPC / single-prompt are
-/// non-TUI. Used by [`build_app`] to pick the canonical liveness identity.
+/// non-TUI. Used by [`build_app`] to pick the per-process liveness identity.
 fn is_tui_mode(args: &CliArgs) -> bool {
     if matches!(args.mode.as_deref(), Some("json" | "rpc")) || args.print {
         return false;
@@ -721,5 +743,18 @@ mod tests {
         use crate::store::settings::Settings;
         let s = Settings::default();
         assert!(s.hooks.is_empty());
+    }
+
+    #[test]
+    fn tui_ownership_ids_are_unique_and_prefixed() {
+        // Per-process TUI identity: two TUIs on the same machine must never
+        // share one flock name — that collision silently broke issue
+        // ownership exclusivity between parallel interactive sessions.
+        let a = tui_ownership_id();
+        let b = tui_ownership_id();
+        assert!(a.starts_with("tui-"), "prefix missing: {a}");
+        assert!(b.starts_with("tui-"), "prefix missing: {b}");
+        assert_ne!(a, b, "ids must be unique per call (pid + uuid)");
+        assert!(!a.contains(' '), "no whitespace: {a}");
     }
 }

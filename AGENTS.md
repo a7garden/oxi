@@ -501,15 +501,26 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   `.oxicode/issues/.alive/<session_id>`. For this to actually protect anything,
   the identity must (a) be **non-empty** and (b) **match a flock the process
   holds**. `oxicode-cli` enforces both by construction:
-  - `bootstrap.rs::build_app` picks the identity — `liveness::TUI_OWNERSHIP_ID`
-    ("tui") in TUI mode, `proc-<pid>-<uuid>` otherwise.
+  - `bootstrap.rs::build_app` picks the identity — `tui-<pid>-<uuid>` in TUI
+    mode, `proc-<pid>-<uuid>` otherwise. Both are unique per process: a
+    shared identity across parallel sessions would collapse ownership
+    exclusivity (the historical constant `"tui"` did exactly that — the
+    second TUI's flock failed silently and both sessions passed
+    `require_owner` as the same caller).
   - `App::from_oxicode(..., ownership_session_id)` acquires the flock for `App`'s
     lifetime AND sets `AgentConfig.session_id = Some(ownership_session_id)`,
     which `agent.rs` threads into `AgentLoopConfig.session_id` →
     `ToolContext.session_id`.
-  - `liveness::TUI_OWNERSHIP_ID` is the single source of truth; the TUI panel's
-    `IssuesPanelOverlay::session_id()` references it so the agent tool, the
-    panel, and the `/issue` slash command all see one consistent flock holder.
+  - `App::ownership_session_id` is the single source of truth. It is injected
+    into `RenderState.ownership_session_id` (TUI) — the panel and the `/issue`
+    slash command name the flock holder through that field, never through a
+    shared constant. Flock acquisition failure is logged loudly
+    (`acquire_ownership_guard`), never silently ignored.
+  - Liveness provenance: `liveness::acquire` records `OwnerInfo`
+    (session/pid/host/cwd/started) INSIDE the `.alive/<session_id>` lock
+    file; `read_owner_info` reads it back and `format_issue_full` surfaces it
+    (`lock: pid N on host (cwd: …)`). Absent/legacy-empty payload means
+    "unknown holder", not "dead".
   - **Do NOT** re-introduce a hardcoded `session_id: None` in `agent.rs`'s
     `AgentLoopConfig` construction (that was the #13 bug — it made every agent
     `start` write an empty-string owner that was instantly reclaimable).

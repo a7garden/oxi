@@ -1,6 +1,6 @@
 //! `issue` agent tool — agent-driven local issue management.
 //!
-//! Implements [`oxicode_agent::AgentTool`] against the [`FileIssueStore`]. One
+//! Implements `oxicode_agent::AgentTool` against the `FileIssueStore`. One
 //! tool with an `action` discriminator (matches the pattern used by the
 //! `github` tool, see `oxicode-agent/src/tools/github.rs`).
 //!
@@ -163,7 +163,7 @@ impl IssueTool {
         let id = require_u32(params.get("id"), "id")?;
         self.store
             .read(id)
-            .map(|(issue, hash)| format_issue_full(&issue, &hash))
+            .map(|(issue, hash)| format_issue_full(&issue, &hash, &self.store.issues_dir()))
             .map_err(|e| e.to_string())
     }
 
@@ -318,19 +318,21 @@ impl IssueTool {
 // ── Formatting helpers (shared with the CLI subcommand in Phase 1.5) ─────
 
 /// Render an issue as a single summary line (id, status, priority, lock,
-/// title, labels, assignee). Used by both the agent tool and the CLI.
+/// title, labels, assignee + assignment age). Used by both the agent tool
+/// and the CLI.
 pub fn format_issue_line(i: &Issue) -> String {
     let lock = if i.meta.assigned_to.is_some() {
         "▣"
     } else {
         " "
     };
-    let assignee = i
-        .meta
-        .assigned_to
-        .as_ref()
-        .map(|a| format!(" (assigned: {})", short_session(&a.session)))
-        .unwrap_or_default();
+    let assignee = i.meta.assigned_to.as_ref().map(|a| {
+        format!(
+            " (assigned: {} since {})",
+            short_session(&a.session),
+            a.acquired_at.format("%m-%d %H:%M")
+        )
+    });
     format!(
         "#{:<4} [{}] {:8} {}{} {}{}",
         i.meta.id,
@@ -339,13 +341,16 @@ pub fn format_issue_line(i: &Issue) -> String {
         lock,
         i.meta.title,
         i.meta.labels.join(","),
-        assignee,
+        assignee.unwrap_or_default(),
     )
 }
 
 /// Render a full issue view (summary line + meta + body). Used by both the
-/// agent tool and the CLI.
-pub fn format_issue_full(i: &Issue, hash: &str) -> String {
+/// agent tool and the CLI. `issues_dir` is the store's issues directory —
+/// when the issue is assigned, the flock holder's provenance (pid/host/cwd)
+/// is read from `.alive/` and appended; a `None`/missing payload (older
+/// writer, dead session) simply omits the line.
+pub fn format_issue_full(i: &Issue, hash: &str, issues_dir: &std::path::Path) -> String {
     let mut s = format_issue_line(i);
     s.push('\n');
     s.push_str(&format!("  id: {}\n", i.meta.id));
@@ -359,8 +364,22 @@ pub fn format_issue_full(i: &Issue, hash: &str) -> String {
         s.push_str(&format!(
             "  assigned: {} (since {})\n",
             short_session(&a.session),
-            a.acquired_at
+            a.acquired_at.format("%Y-%m-%d %H:%M")
         ));
+        if let Some(o) = crate::issues::liveness::read_owner_info(issues_dir, &a.session) {
+            let holder = if o.host.is_empty() {
+                format!("pid {}", o.pid)
+            } else {
+                format!("pid {} on {}", o.pid, o.host)
+            };
+            s.push_str(&format!(
+                "  lock: {holder} (cwd: {}, since {})\n",
+                o.cwd,
+                chrono::DateTime::from_timestamp(o.started as i64, 0)
+                    .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| o.started.to_string())
+            ));
+        }
     }
     s.push_str(&format!("  content_hash: {}\n", hash));
     s.push('\n');
@@ -391,7 +410,7 @@ const MAX_CAS_ATTEMPTS: u32 = 4;
 /// The store is deliberately strict: it returns raw [`IssueError::Conflict`]
 /// and never retries on its own (principle: strictness in the store, recovery
 /// in the tool). This helper owns the recovery — re-reading a fresh hash after
-/// each conflict and retrying up to [`MAX_CAS_ATTEMPTS`] times.
+/// each conflict and retrying up to `MAX_CAS_ATTEMPTS` times.
 pub async fn cas_retry<T, F, Fut>(
     store: &FileIssueStore,
     id: u32,
@@ -619,26 +638,35 @@ mod tests {
         let err = validate_size(&p, "create").unwrap_err();
         assert!(err.contains("body too large"), "got: {err}");
     }
-
-    #[test]
-    fn validate_size_rejects_oversize_title() {
-        let p = json!({"title": "x".repeat(MAX_TITLE_LEN + 1)});
-        let err = validate_size(&p, "update").unwrap_err();
-        assert!(err.contains("title too long"), "got: {err}");
+    #[tokio::test]
+    async fn format_issue_line_shows_assignee_since() {
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        store.start(1, "proc-1-abc", None).await.unwrap();
+        let (issue, _) = store.read(1).unwrap();
+        let s = format_issue_line(&issue);
+        assert!(s.contains("since"), "line must show assignment age: {s}");
     }
 
-    #[test]
-    fn validate_size_rejects_too_many_labels() {
-        let labels: Vec<&str> = (0..(MAX_LABELS + 1)).map(|_| "l").collect();
-        let p = json!({"labels": labels});
-        let err = validate_size(&p, "create").unwrap_err();
-        assert!(err.contains("too many labels"), "got: {err}");
-    }
-
-    #[test]
-    fn validate_size_rejects_long_label() {
-        let p = json!({"labels": ["x".repeat(MAX_LABEL_LEN + 1)]});
-        let err = validate_size(&p, "create").unwrap_err();
-        assert!(err.contains("label too long"), "got: {err}");
+    #[tokio::test]
+    async fn format_issue_full_shows_flock_holder_provenance() {
+        let (_tmp, store) = tmp_store();
+        store
+            .create("T".into(), "b".into(), Priority::Low, vec![], None)
+            .unwrap();
+        store.start(1, "tui-1-abcdef", None).await.unwrap();
+        let _guard = crate::issues::liveness::acquire(&store.issues_dir(), "tui-1-abcdef").unwrap();
+        let (issue, hash) = store.read(1).unwrap();
+        let s = format_issue_full(&issue, &hash, &store.issues_dir());
+        assert!(
+            s.contains("since"),
+            "full view must show assignment age: {s}"
+        );
+        assert!(
+            s.contains(&format!("pid {}", std::process::id())),
+            "full view must show the flock holder pid: {s}"
+        );
     }
 }

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.78.0] - 2026-08-29
+
+### Fixed
+
+- **Per-process TUI ownership identity.** Every TUI used to share the
+  constant liveness id `"tui"` (and a failed flock acquisition was silently
+  ignored), so two parallel interactive sessions collapsed into one owner:
+  the second TUI passed `require_owner` on issues the first had claimed and
+  could mutate them. The identity is now `tui-<pid>-<uuid>` (unique per
+  process, same scheme as headless `proc-*`), the shared constant is gone,
+  all in-TUI surfaces name the holder through `RenderState.ownership_session_id`,
+  and a failed flock acquisition logs a warning instead of being swallowed.
+
+- **Flock-holder provenance.** `liveness::acquire` now records owner
+  metadata (session, pid, host, cwd, started-at) inside the
+  `.alive/<session_id>` lock file itself; `read_owner_info` reads it back
+  and `format_issue_full` shows it (`lock: pid N on host …`). Issue lines
+  now show the assignment age (`assigned: xxx since MM-DD HH:MM`) in both
+  the agent tool and `oxicode issue` output, and the panel's edit-gate
+  error includes the claim age.
+
+- **`oxicode issue close`/`reopen` recover from stale hashes.** The CLI is
+  a single-shot CAS caller, so an outdated `--hash` (or a file mutated
+  between read and write) failed outright. Both subcommands now run through
+  `cas_retry`, re-reading a fresh hash on conflict — matching the agent
+  tool's and the TUI panel's behavior.
+
+
+## [0.77.0] - 2026-08-29
+
 ### Fixed
 
 - **Model context windows now follow models.dev end to end.** Four bugs

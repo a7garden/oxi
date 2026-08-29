@@ -10,17 +10,6 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
-/// Single source of truth for the liveness identity used by the TUI
-/// (and any in-TUI operations: agent tool, `/issue` slash command, panel).
-///
-/// Invariant: in TUI mode, [`crate::App::ownership_session_id`] MUST equal
-/// this constant. The TUI panel's
-/// `crate::tui::overlay::IssuesPanelOverlay::session_id()` references it,
-/// and the agent's `ToolContext.session_id` is set from it, so the flock
-/// acquired by `App` is the same one the panel and agent use to check
-/// `is_session_alive`. Keep the two in sync.
-pub const TUI_OWNERSHIP_ID: &str = "tui";
-
 /// Path of the alive-lock file for `session_id` under `issues_dir`.
 pub fn alive_path(issues_dir: &Path, session_id: &str) -> PathBuf {
     issues_dir.join(".alive").join(session_id)
@@ -44,7 +33,82 @@ pub fn acquire(issues_dir: &Path, session_id: &str) -> io::Result<AliveGuard> {
     let fd = file.as_raw_fd();
     // Failure (EWOULDBLOCK/EAGAIN) means another live process holds it.
     try_flock_exclusive(fd)?;
+    // Record *who* holds the lock, in the lock file itself. Best-effort:
+    // the flock is the source of truth for liveness; this payload only adds
+    // human-readable provenance (pid/host/cwd/started) for display surfaces.
+    write_owner_info(&file, session_id);
     Ok(AliveGuard { _file: file, path })
+}
+
+/// Provenance of a live alive-lock holder, persisted inside the lock file.
+///
+/// Written by [`acquire`] right after the exclusive flock is taken; read
+/// back with [`read_owner_info`]. The lock file doubles as the storage so
+/// there is exactly one artifact per session — the existing orphan reaper
+/// ([`reap_orphans`]) and the RAII unlink in [`AliveGuard::drop`] clean it
+/// up with no extra bookkeeping.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OwnerInfo {
+    /// Owning session id (same as the lock-file name).
+    pub session: String,
+    /// OS pid of the holder.
+    pub pid: u32,
+    /// Hostname of the holder (empty when gethostname fails).
+    pub host: String,
+    /// Working directory at acquisition time.
+    pub cwd: String,
+    /// Unix seconds at acquisition time.
+    pub started: u64,
+}
+
+/// Read back the [`OwnerInfo`] recorded by [`acquire`] for `session_id`.
+///
+/// Returns `None` when the lock file is missing (dead session) or holds no
+/// parseable payload (written by an older oxicode, before this metadata
+/// existed) — callers must treat `None` as "unknown holder", not "dead".
+pub fn read_owner_info(issues_dir: &Path, session_id: &str) -> Option<OwnerInfo> {
+    let data = fs::read_to_string(alive_path(issues_dir, session_id)).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Overwrite the lock file's payload with the [`OwnerInfo`] JSON.
+///
+/// Best-effort — any I/O error is swallowed because liveness comes from the
+/// flock, never from the payload.
+fn write_owner_info(file: &fs::File, session_id: &str) {
+    use std::io::{Seek, SeekFrom, Write};
+    let info = OwnerInfo {
+        session: session_id.to_string(),
+        pid: std::process::id(),
+        host: hostname(),
+        cwd: std::env::current_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        started: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    let Ok(bytes) = serde_json::to_vec(&info) else {
+        return;
+    };
+    let mut f: &fs::File = file;
+    let _ = f.seek(SeekFrom::Start(0));
+    let _ = file.set_len(0);
+    let _ = f.write_all(&bytes);
+}
+
+/// Local hostname, or `""` when gethostname fails/truncates.
+fn hostname() -> String {
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` is a valid 256-byte array; gethostname writes at most
+    // `buf.len()` bytes and NUL-terminates (truncating the name if needed).
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return String::new();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).into_owned()
 }
 
 /// Returns `true` iff a live process currently holds the alive-lock for
@@ -272,5 +336,29 @@ mod tests {
             is_session_alive(&dir, "alive-session"),
             "live lock must survive reap"
         );
+    }
+
+    #[test]
+    fn acquire_writes_readable_owner_info() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let g = acquire(&dir, "owner-check").unwrap();
+        let info = read_owner_info(&dir, "owner-check").expect("owner info must be recorded");
+        assert_eq!(info.session, "owner-check");
+        assert_eq!(info.pid, std::process::id());
+        assert!(info.started > 0, "started must be unix seconds");
+        // Dropping the guard unlinks the lock file — owner info goes with it.
+        drop(g);
+        assert!(read_owner_info(&dir, "owner-check").is_none());
+    }
+
+    #[test]
+    fn read_owner_info_missing_or_garbage_is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        assert!(read_owner_info(&dir, "nope").is_none());
+        fs::create_dir_all(dir.join(".alive")).unwrap();
+        fs::write(dir.join(".alive").join("junk"), b"not json").unwrap();
+        assert!(read_owner_info(&dir, "junk").is_none());
     }
 }

@@ -330,6 +330,7 @@ pub(crate) fn handle_issues_panel_key(
 /// CAS-guarded later). No-ops when the store is missing or the read fails;
 /// the caller consumes the key either way.
 fn start_edit(s: &mut parking_lot::MutexGuard<'_, crate::tui_vt::main_loop::RenderState>, id: u32) {
+    let this_session = s.ownership_session_id.clone();
     let Some(store) = s.issue_store.clone() else {
         return;
     };
@@ -340,12 +341,13 @@ fn start_edit(s: &mut parking_lot::MutexGuard<'_, crate::tui_vt::main_loop::Rend
         return;
     };
     if let Some(a) = &issue.meta.assigned_to
-        && a.session != oxicode_sdk::liveness::TUI_OWNERSHIP_ID
+        && a.session != this_session
         && oxicode_sdk::liveness::is_session_alive(&store.issues_dir(), &a.session)
     {
         panel.error = Some(format!(
-            "issue #{id} is being worked on by session {}",
-            a.session
+            "issue #{id} is being worked on by session {} (since {})",
+            a.session,
+            a.acquired_at.format("%m-%d %H:%M")
         ));
         return;
     }
@@ -415,7 +417,7 @@ fn submit_form(
                 body,
                 priority,
                 labels,
-                Some(oxicode_sdk::liveness::TUI_OWNERSHIP_ID),
+                Some(s.ownership_session_id.as_str()),
             ) {
                 Ok(_issue) => {
                     if let Some(panel) = s.issues_panel.as_mut() {
@@ -448,7 +450,8 @@ fn submit_form(
             let _ = issue_action_tx.send(IssueActionRequest::ApplyPatch {
                 id,
                 patch,
-                caller: Some(oxicode_sdk::liveness::TUI_OWNERSHIP_ID.to_string()),
+                caller: (!s.ownership_session_id.is_empty())
+                    .then(|| s.ownership_session_id.clone()),
                 hash: content_hash,
             });
             if let Some(panel) = s.issues_panel.as_mut() {

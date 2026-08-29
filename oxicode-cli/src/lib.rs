@@ -209,8 +209,8 @@ pub struct App {
     issue_store: Option<oxicode_sdk::FileIssueStore>,
     /// Process-wide liveness identity used by every issue-ownership surface
     /// in this process (agent tool's `ToolContext.session_id`, TUI panel,
-    /// slash-command `/issue` handlers). See
-    /// [`oxicode_sdk::liveness::TUI_OWNERSHIP_ID`] for the TUI value.
+    /// slash-command `/issue` handlers). Unique per process in every mode:
+    /// `tui-<pid>-<uuid>` in TUI, `proc-<pid>-<uuid>` in headless runs.
     ownership_session_id: String,
     /// Alive-lock held for the lifetime of `App`. Dropped with `App`, releasing
     /// the OS-held flock so any other process sees this session as dead once
@@ -266,10 +266,10 @@ impl App {
     ///
     /// `ownership_session_id` is the per-process liveness identity used by
     /// the agent's `issue` tool (`ToolContext.session_id`), the TUI panel,
-    /// and the `/issue` slash command. In TUI mode this MUST equal
-    /// [`oxicode_sdk::liveness::TUI_OWNERSHIP_ID`] so the panel and
-    /// agent see the same flock holder. In print / RPC mode, a stable
-    /// process-scoped id (e.g. `proc-<pid>-<uuid>`) is appropriate.
+    /// and the `/issue` slash command. It must be unique per process in
+    /// every mode (`tui-<pid>-<uuid>` / `proc-<pid>-<uuid>`) so two parallel
+    /// sessions never share one flock name — a shared name silently broke
+    /// ownership exclusivity between them.
     ///
     /// `session_state` is the pre-built [`SessionState`] passed into the
     /// agent's `with_session_hooks` call. When `None`, fresh state is
@@ -305,9 +305,8 @@ impl App {
         // resolver consults the wired AuthProvider port directly.
 
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
-            dirs::home_dir()
+            oxicode_catalog::product_env::home_dir()
                 .unwrap_or_default()
-                .join(".oxicode")
                 .join("skills")
         });
         let skills = SkillManager::load_from_dir(&skills_dir).unwrap_or_else(|e| {
@@ -677,7 +676,22 @@ pub(crate) fn acquire_ownership_guard(
         // #13 bug shape (empty owner is never alive, so ownership was bypassed).
         return None;
     }
-    oxicode_sdk::liveness::acquire(&store.issues_dir(), ownership_id).ok()
+    match oxicode_sdk::liveness::acquire(&store.issues_dir(), ownership_id) {
+        Ok(guard) => Some(guard),
+        Err(e) => {
+            // Non-fatal (reads and ownership checks still work), but the
+            // process is not recognized as a live flock holder while the
+            // lock is missing — its assignments stay contestable. Surface
+            // it loudly instead of the historical silent `.ok()`.
+            tracing::warn!(
+                ownership_id,
+                error = %e,
+                "issue liveness flock acquisition failed; this session's \
+                 ownership claims are contestable while the lock is missing"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]

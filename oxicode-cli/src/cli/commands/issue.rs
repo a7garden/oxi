@@ -44,7 +44,7 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
         }
         IssueCommands::Show { id } => {
             let (issue, hash) = store.read(*id)?;
-            println!("{}", format_issue_full(&issue, &hash));
+            println!("{}", format_issue_full(&issue, &hash, &store.issues_dir()));
         }
         IssueCommands::New {
             title,
@@ -89,13 +89,7 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
                 );
             }
             let effective_hash = hash.clone().unwrap_or(current_hash);
-            store
-                .start(*id, &session, Some(effective_hash))
-                .await
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let (_, fresh_hash) = store.read(*id)?;
-            let closed = store
-                .close(*id, &session, Some(fresh_hash))
+            let closed = close_issue(&store, *id, &session, Some(effective_hash))
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             println!("closed issue #{}: {}", closed.meta.id, closed.meta.title);
@@ -105,8 +99,7 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
                 Some(h) => h,
                 None => store.read(*id)?.1,
             };
-            let reopened = store
-                .reopen(*id, Some(effective_hash))
+            let reopened = reopen_issue(&store, *id, Some(effective_hash))
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             println!(
@@ -117,4 +110,99 @@ pub async fn handle_issue(action: &IssueCommands) -> Result<()> {
         IssueCommands::Reap => unreachable!("reap handled before store open"),
     }
     Ok(())
+}
+
+/// Claim + close in one bounded-CAS sequence (mirrors the TUI panel's
+/// dispatcher: `start` → re-read a fresh hash → `close`). The CLI is a
+/// single-shot caller, but a stale hash from an earlier `read` is still
+/// advisory — `cas_retry` re-reads and retries instead of failing.
+async fn close_issue(
+    store: &oxicode_sdk::FileIssueStore,
+    id: u32,
+    session: &str,
+    hash: Option<String>,
+) -> std::result::Result<oxicode_sdk::Issue, oxicode_sdk::IssueError> {
+    oxicode_sdk::cas_retry(store, id, hash, |h| {
+        let store = store.clone();
+        let session = session.to_string();
+        async move {
+            store.start(id, &session, h).await?;
+            let (_, fresh_hash) = store.read(id)?;
+            store.close(id, &session, Some(fresh_hash)).await
+        }
+    })
+    .await
+}
+
+/// Reopen under bounded-CAS retry (same stale-hash recovery as
+/// [`close_issue`]).
+async fn reopen_issue(
+    store: &oxicode_sdk::FileIssueStore,
+    id: u32,
+    hash: Option<String>,
+) -> std::result::Result<oxicode_sdk::Issue, oxicode_sdk::IssueError> {
+    oxicode_sdk::cas_retry(store, id, hash, |h| {
+        let store = store.clone();
+        async move { store.reopen(id, h).await }
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_store() -> (tempfile::TempDir, oxicode_sdk::FileIssueStore) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".oxicode").join("issues");
+        std::fs::create_dir_all(&dir).unwrap();
+        (tmp, oxicode_sdk::FileIssueStore::open(dir).unwrap())
+    }
+
+    #[tokio::test]
+    async fn close_issue_recovers_from_stale_hash() {
+        let (_tmp, store) = tmp_store();
+        store
+            .create(
+                "T".into(),
+                "b".into(),
+                oxicode_sdk::Priority::Low,
+                vec![],
+                None,
+            )
+            .unwrap();
+        let (_, stale) = store.read(1).unwrap();
+        // Self-claim mutates the file → `stale` is now outdated.
+        store.start(1, "cli-test", None).await.unwrap();
+
+        let closed = close_issue(&store, 1, "cli-test", Some(stale))
+            .await
+            .expect("stale hash must be recovered by CAS retry");
+        assert_eq!(closed.meta.status, oxicode_sdk::Status::Closed);
+    }
+
+    #[tokio::test]
+    async fn reopen_issue_recovers_from_stale_hash() {
+        let (_tmp, store) = tmp_store();
+        store
+            .create(
+                "T".into(),
+                "b".into(),
+                oxicode_sdk::Priority::Low,
+                vec![],
+                None,
+            )
+            .unwrap();
+        store.start(1, "cli-test", None).await.unwrap();
+        let (_, stale) = store.read(1).unwrap();
+        store
+            .close(1, "cli-test", Some(stale.clone()))
+            .await
+            .unwrap();
+
+        let reopened = reopen_issue(&store, 1, Some(stale))
+            .await
+            .expect("stale hash must be recovered by CAS retry");
+        assert_eq!(reopened.meta.status, oxicode_sdk::Status::Open);
+    }
 }

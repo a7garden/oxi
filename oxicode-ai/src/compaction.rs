@@ -924,7 +924,7 @@ impl CompactionManager {
     }
 
     /// Update the context window (e.g. after a model switch changed the
-    /// real capacity). Affects subsequent [`should_compact`] checks.
+    /// real capacity). Affects subsequent `should_compact` checks.
     pub fn set_context_window(&mut self, context_window: usize) {
         self.context_window = context_window;
     }

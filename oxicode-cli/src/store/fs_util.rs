@@ -1,7 +1,7 @@
 //! Atomic write helpers shared across `store/*`.
 //!
 //! Replaces the per-module `atomic_write` copies that lived in
-//! [`super::issues`] and [`super::session`]. Those copies named the temp file
+//! `super::issues` and [`super::session`]. Those copies named the temp file
 //! `tmp.<pid>`, which collides under PID-namespace recycling (containers) or
 //! fork+exec where two live processes can share a PID and stomp each other's
 //! temp. The temp name here is `<path>.tmp.<pid>.<uuid>` — PID kept for
