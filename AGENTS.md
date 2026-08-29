@@ -522,7 +522,9 @@ CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + crates.io publish
   path; on conflict it re-reads a fresh hash and retries). Consequence: **a
   stale `content_hash` from an earlier `read` is advisory, not fatal** — the tool
   auto-reconciles. If you add a new mutating store op the agent can call, route
-  it through `cas_retry` (see `issue_tool.rs`). Direct `oxicode issue` CLI calls do
+  it through `cas_retry` (see `oxicode-agent/src/tools/issue.rs`; since 2026-08-29 the
+  issue store + tool live in `oxicode-agent/src/issues/` and are re-exported through
+  `oxicode-sdk` — the TUI panel and CLI stay in `oxicode-cli`). Direct `oxicode issue` CLI calls do
   **not** retry (CLI is a single-shot caller; re-read manually on conflict).
   `IssuePatch` (absent=keep, `Some([])`=clear labels, `Some`=replace) is the
   precise mutation surface — prefer `apply_patch`/`reopen`/`close` over
