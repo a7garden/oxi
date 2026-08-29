@@ -352,6 +352,11 @@ mod tests {
             assert!(status.success(), "git {args:?} failed: {status}");
         };
         run(&["init", "--quiet"]);
+        // Local identity: the app's own `git commit` runs WITHOUT the
+        // fixture's env vars, so on CI runners with no global git identity
+        // the commit fails with "Author identity unknown".
+        run(&["config", "user.name", "tester"]);
+        run(&["config", "user.email", "tester@example.com"]);
         std::fs::write(dir.join(filename), content).unwrap();
         run(&["add", "--", filename]);
         run(&["commit", "--quiet", "-m", "init"]);
