@@ -5540,7 +5540,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-agent"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5573,7 +5573,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-ai"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5618,7 +5618,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-api-stability"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5627,7 +5627,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-catalog"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "dirs",
  "filetime",
@@ -5645,7 +5645,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-cli"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -5709,7 +5709,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-hashline"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "async-trait",
  "lru 0.18.2",
@@ -5725,7 +5725,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-lsp"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "async-lsp",
  "async-process",
@@ -5742,7 +5742,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-sdk"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5779,7 +5779,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-snapcompact"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "fontdue",
  "png 0.17.16",
@@ -5791,7 +5791,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-textarea"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "crossterm",
  "fuzzy-matcher",
@@ -5808,7 +5808,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-vtui"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -5851,7 +5851,7 @@ dependencies = [
 
 [[package]]
 name = "oxicode-vtui-compat"
-version = "0.77.0"
+version = "0.78.0"
 dependencies = [
  "anstyle",
  "anyhow",
