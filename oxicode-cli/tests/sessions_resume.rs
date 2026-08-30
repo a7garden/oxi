@@ -68,7 +68,9 @@ fn read_until_contains(
     }
 }
 
-/// Write a hermetic stub session file at `~/.oxicode/sessions/{id}.jsonl`
+/// Write a hermetic stub session file into the crate's canonical sessions
+/// directory (`oxi_home::read_path("sessions")` — i.e. `~/.oxi/oxicode/`
+/// after the unified-home migration, with legacy fallback preserved)
 /// using the crate's real types — the JSONL form is then guaranteed to
 /// round-trip through `SessionManager::open` and the resume worker.
 ///
@@ -87,10 +89,14 @@ fn write_stub_session() {
         SessionMessageEntry,
     };
 
-    let dir = dirs::home_dir()
-        .expect("home dir must be resolvable for stub write")
-        .join(".oxicode")
-        .join("sessions");
+    // Resolve via the runtime's canonical-first resolver: on migrated
+    // homes (canonical `sessions/` already exists) the legacy
+    // `~/.oxicode/sessions/` is never read, so writing the stub there
+    // would make the resume lookup miss it. On a fresh legacy-only
+    // home, read_path itself falls back to the legacy dir — matching
+    // what the binary will read.
+    let dir = oxicode_catalog::oxi_home::read_path(std::path::Path::new("sessions"))
+        .expect("oxicode home must be resolvable for stub write");
     let file = dir.join(format!("{STUB_SESSION_ID}.jsonl"));
 
     if file.exists() {
