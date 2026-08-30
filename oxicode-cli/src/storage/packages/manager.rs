@@ -37,10 +37,14 @@ pub struct PackageManager {
 }
 
 impl PackageManager {
-    /// Create a new PackageManager using the default packages directory
+    /// Create a new PackageManager using the canonical packages directory
+    /// (`<oxicode_home>/packages`). Reads fall back read-only to the legacy
+    /// `~/.oxicode/packages` while the canonical dir is absent; installs
+    /// always write canonical.
     pub fn new() -> Result<Self> {
-        let base = dirs::home_dir().context("Cannot determine home directory")?;
-        let packages_dir = base.join(".oxicode").join("packages");
+        let base = oxicode_catalog::oxi_home::oxicode_home()
+            .context("Cannot determine oxicode home directory")?;
+        let packages_dir = base.join("packages");
         let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let mut mgr = Self {
             packages_dir,
@@ -99,10 +103,27 @@ impl PackageManager {
     /// packages remain usable) but the affected package is treated as
     /// un-installed.
     fn load_installed(&mut self) -> Result<()> {
+        // Canonical-first. When the canonical packages dir is absent entirely
+        // (pre-unified-layout install), scan the legacy dir read-only.
         if !self.packages_dir.exists() {
+            if let Some(legacy_dir) = Self::legacy_packages_dir().filter(|d| d.exists()) {
+                self.scan_installed(&legacy_dir)?;
+            }
             return Ok(());
         }
-        for entry in fs::read_dir(&self.packages_dir)? {
+        let dir = self.packages_dir.clone();
+        self.scan_installed(&dir)
+    }
+
+    /// Legacy read-only packages dir (`<legacy_home>/packages`); `None` when
+    /// no legacy home exists (e.g. under an explicit `$OXICODE_HOME`).
+    fn legacy_packages_dir() -> Option<PathBuf> {
+        oxicode_catalog::oxi_home::legacy_home_dir().map(|h| h.join("packages"))
+    }
+
+    /// Scan `dir` for installed packages into the in-memory `installed` map.
+    fn scan_installed(&mut self, dir: &Path) -> Result<()> {
+        for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let manifest_path = entry.path().join(MANIFEST_NAME);
             if manifest_path.exists() {
@@ -156,9 +177,17 @@ impl PackageManager {
         Ok(())
     }
 
-    /// Load lockfile from disk
+    /// Load lockfile from disk (canonical-first; legacy read-only fallback
+    /// while the canonical packages dir is absent).
     fn load_lockfile(&mut self) -> Result<()> {
-        let lock_path = self.packages_dir.join(LOCKFILE_NAME);
+        let lock_path = if self.packages_dir.exists() {
+            self.packages_dir.join(LOCKFILE_NAME)
+        } else {
+            Self::legacy_packages_dir()
+                .filter(|d| d.join(LOCKFILE_NAME).exists())
+                .unwrap_or_else(|| self.packages_dir.clone())
+                .join(LOCKFILE_NAME)
+        };
         if let Some(lock) = Lockfile::read(&lock_path)? {
             self.lockfile = lock;
         }
@@ -1115,17 +1144,14 @@ impl PackageManager {
     /// Exposed so callers can pass the right path into
     /// `resolve_with_config`.
     pub fn runtime_config_path(&self) -> PathBuf {
-        // Same location as `~/.oxicode/runtime.json` regardless of
-        // `packages_dir`, matching `RuntimeConfig::global_path`.
-        match dirs::home_dir() {
-            Some(h) => h
-                .join(".oxicode")
-                .join(super::runtime_config::RUNTIME_CONFIG_FILE),
-            None => self
-                .packages_dir
-                .join("..")
-                .join(super::runtime_config::RUNTIME_CONFIG_FILE),
-        }
+        // Canonical home's runtime config, matching `RuntimeConfig::global_path`;
+        // falls back read-only to the legacy home for pre-unified installs.
+        oxicode_catalog::oxi_home::read_path(Path::new(super::runtime_config::RUNTIME_CONFIG_FILE))
+            .unwrap_or_else(|| {
+                self.packages_dir
+                    .join("..")
+                    .join(super::runtime_config::RUNTIME_CONFIG_FILE)
+            })
     }
 
     /// Canonical path for the project overrides file given the

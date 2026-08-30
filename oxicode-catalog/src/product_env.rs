@@ -7,10 +7,12 @@
 //! inherits the `oxicode` namespace (`~/.oxicode/`) — including a *different*
 //! product's catalog overrides — which is a library-layer coupling smell.
 //!
-//! The product home directory is resolved via the `OXICODE_HOME` environment
-//! variable, falling back to `$HOME/.oxicode`. This mirrors
-//! `oxicode_sdk::ports::fs::home_dir`, which delegates here so the leaf
-//! library and the SDK agree on a single resolution path.
+//! The product home directory is resolved via the unified Oxi home layout:
+//! `OXICODE_HOME` wins; otherwise `$OXI_HOME/oxicode`; otherwise
+//! `$HOME/.oxi/oxicode`. This mirrors `oxicode_sdk::ports::fs::home_dir`,
+//! which delegates here so the leaf library and the SDK agree on a single
+//! resolution path. See [`crate::oxi_home`] for the full layout contract
+//! (including the read-only `~/.oxicode` legacy fallback for readers).
 //!
 //! # Why env-var, not a typed global
 //!
@@ -35,21 +37,32 @@ use std::path::{Path, PathBuf};
 /// Pure (no environment access) so it is trivially testable without racing
 /// the process-global environment under parallel test runners.
 ///
+/// Resolve a product home directory from explicit + user-home inputs.
+///
+/// Pure (no environment access) so it is trivially testable without racing
+/// the process-global environment under parallel test runners.
+///
 /// - If `oxicode_home` is set and non-empty, it wins (treated as an absolute path).
-/// - Otherwise `$user_home/.oxicode`.
-/// - `None` if neither is available.
-fn resolve_home(oxicode_home: Option<&str>, user_home: Option<&Path>) -> Option<PathBuf> {
-    if let Some(p) = oxicode_home.filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(p));
+/// - Otherwise `<oxi_home>/oxicode` (the already-resolved unified Oxi home).
+/// - Otherwise `$user_home/.oxi/oxicode`.
+/// - `None` if none of the above is available.
+fn resolve_home(
+    oxicode_home: Option<&str>,
+    oxi_home: Option<&Path>,
+    user_home: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(p) = crate::oxi_home::resolve_oxicode_home(oxicode_home, oxi_home) {
+        return Some(p);
     }
-    user_home.map(|h| h.join(".oxicode"))
+    crate::oxi_home::resolve_oxi_home(None, user_home).map(|h| h.join("oxicode"))
 }
 
 /// The product home directory.
 ///
-/// Resolution order:
+/// Resolution order (the unified Oxi home layout):
 /// 1. `OXICODE_HOME` environment variable — absolute path, if set and non-empty.
-/// 2. `$HOME/.oxicode` via [`dirs::home_dir`].
+/// 2. `$OXI_HOME/oxicode`.
+/// 3. `$HOME/.oxi/oxicode` via [`dirs::home_dir`].
 ///
 /// Returns [`Err`] only when neither `OXICODE_HOME` nor a usable home directory
 /// is available (extremely rare — no home directory at all).
@@ -58,18 +71,21 @@ fn resolve_home(oxicode_home: Option<&str>, user_home: Option<&Path>) -> Option<
 ///
 /// ```
 /// # use oxicode_catalog::product_env::home_dir;
-/// // In a normal environment this resolves to either $OXICODE_HOME or ~/.oxicode.
+/// // In a normal environment this resolves to $OXICODE_HOME, $OXI_HOME/oxicode,
+/// // or ~/.oxi/oxicode.
 /// let _ = home_dir();
 /// ```
 pub fn home_dir() -> std::io::Result<PathBuf> {
+    let oxi = crate::oxi_home::oxi_home();
     resolve_home(
         std::env::var("OXICODE_HOME").ok().as_deref(),
+        oxi.as_deref(),
         dirs::home_dir().as_deref(),
     )
     .ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "neither OXICODE_HOME nor HOME is set",
+            "neither OXICODE_HOME nor OXI_HOME nor HOME is set",
         )
     })
 }
@@ -106,31 +122,46 @@ mod tests {
     fn oxicode_home_wins_when_set() {
         let got = resolve_home(
             Some("/custom/oxios"),
-            Some(PathBuf::from("/home/u").as_path()),
+            Some(Path::new("/home/u/.oxi")),
+            Some(Path::new("/home/u")),
         );
         assert_eq!(got, Some(PathBuf::from("/custom/oxios")));
     }
 
     #[test]
     fn empty_oxicode_home_falls_through() {
-        let got = resolve_home(Some(""), Some(PathBuf::from("/home/u").as_path()));
-        assert_eq!(got, Some(PathBuf::from("/home/u/.oxicode")));
+        let got = resolve_home(
+            Some(""),
+            Some(Path::new("/home/u/.oxi")),
+            Some(Path::new("/home/u")),
+        );
+        assert_eq!(got, Some(PathBuf::from("/home/u/.oxi/oxicode")));
     }
 
     #[test]
-    fn defaults_to_user_home_dot_oxicode() {
-        let got = resolve_home(None, Some(PathBuf::from("/home/u").as_path()));
-        assert_eq!(got, Some(PathBuf::from("/home/u/.oxicode")));
+    fn defaults_to_oxi_home_oxicode() {
+        let got = resolve_home(
+            None,
+            Some(Path::new("/home/u/.oxi")),
+            Some(Path::new("/home/u")),
+        );
+        assert_eq!(got, Some(PathBuf::from("/home/u/.oxi/oxicode")));
     }
 
     #[test]
-    fn none_when_both_absent() {
-        assert_eq!(resolve_home(None, None), None);
+    fn falls_back_to_user_home_when_oxi_home_absent() {
+        let got = resolve_home(None, None, Some(Path::new("/home/u")));
+        assert_eq!(got, Some(PathBuf::from("/home/u/.oxi/oxicode")));
+    }
+
+    #[test]
+    fn none_when_all_absent() {
+        assert_eq!(resolve_home(None, None, None), None);
     }
 
     #[test]
     fn subpaths_compose_from_resolved_home() {
-        let home = resolve_home(Some("/x"), None).unwrap();
+        let home = resolve_home(Some("/x"), None, None).unwrap();
         assert_eq!(
             home.join("catalog").join("overrides.toml"),
             PathBuf::from("/x/catalog/overrides.toml")
@@ -143,12 +174,12 @@ mod tests {
     }
 
     /// Smoke test: `home_dir()` resolves in any normal environment (where
-    /// either `OXICODE_HOME` or `HOME` is set). Does not mutate the environment,
-    /// so it is safe under parallel test runners.
+    /// `OXICODE_HOME`, `OXI_HOME`, or `HOME` is set). Does not mutate the
+    /// environment, so it is safe under parallel test runners.
     #[test]
     fn home_dir_resolves_in_ci() {
         let resolved = home_dir();
-        // Either OXICODE_HOME or HOME is set in every CI/dev environment.
+        // One of OXICODE_HOME / OXI_HOME / HOME is set in every CI/dev environment.
         assert!(resolved.is_ok(), "expected a resolvable home dir");
     }
 }

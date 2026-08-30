@@ -182,11 +182,9 @@ impl CreateAgentSessionServicesOptions {
     }
 }
 
-/// Get the default agent directory (`~/.oxicode`).
+/// Get the default agent directory (the canonical oxicode home).
 pub fn get_default_agent_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".oxicode"))
-        .unwrap_or_else(|| PathBuf::from(".oxicode"))
+    oxicode_catalog::oxi_home::oxicode_home().unwrap_or_else(|| PathBuf::from(".oxicode"))
 }
 
 /// Create cwd-bound runtime services.
@@ -1235,8 +1233,12 @@ mod tests {
 
     #[test]
     fn test_get_default_agent_dir() {
-        let dir = get_default_agent_dir();
-        assert!(dir.to_string_lossy().contains(".oxicode"));
+        // Canonical-first: the default agent dir is the resolved oxicode
+        // home, whatever override is active (env-independent assertion).
+        assert_eq!(
+            get_default_agent_dir(),
+            oxicode_catalog::oxi_home::oxicode_home().unwrap()
+        );
     }
 
     #[test]

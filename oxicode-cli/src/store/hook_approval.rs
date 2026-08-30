@@ -51,15 +51,18 @@ impl std::fmt::Debug for HookApprovalRegistry {
 }
 
 impl HookApprovalRegistry {
-    /// Load from `~/.oxicode/hooks_approved.toml`. If the file does not
-    /// exist or is corrupt, return an empty registry.
+    /// Load from the canonical hooks-approval file, falling back read-only
+    /// to the legacy `~/.oxicode/<file>` when the canonical file is absent.
+    /// If neither exists or is corrupt, return an empty registry. Persistence
+    /// always targets the canonical path.
     pub fn load_or_default() -> Self {
-        let path = match default_approval_path() {
-            Ok(p) => p,
-            Err(_) => return Self::empty(),
+        let Some(path) = default_approval_path().ok() else {
+            return Self::empty();
         };
-        let entries = std::fs::read_to_string(&path)
+        let entries = approval_read_path()
             .ok()
+            .filter(|p| p.exists())
+            .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| toml::from_str::<ApprovalFile>(&s).ok())
             .map(|f| f.entries)
             .unwrap_or_default();
@@ -127,9 +130,16 @@ pub fn hash_settings(content: &str) -> String {
 }
 
 fn default_approval_path() -> io::Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?;
-    Ok(home.join(".oxicode").join(APPROVAL_FILENAME))
+    oxicode_catalog::oxi_home::oxicode_home()
+        .map(|h| h.join(APPROVAL_FILENAME))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "oxicode home not found"))
+}
+
+/// Read path for the approval file: canonical when it exists, else the
+/// legacy `~/.oxicode/<file>` when present.
+fn approval_read_path() -> io::Result<PathBuf> {
+    oxicode_catalog::oxi_home::read_path(Path::new(APPROVAL_FILENAME))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "oxicode home not found"))
 }
 
 fn canonical_key(p: &Path) -> String {

@@ -14,6 +14,7 @@
 
 pub mod api;
 pub mod catalog;
+pub mod oxi_home;
 pub mod product_env;
 pub use api::Api;
 // Re-export the catalog's public API at the crate root for ergonomic access

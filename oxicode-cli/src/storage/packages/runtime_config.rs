@@ -62,11 +62,11 @@ impl RuntimeConfig {
         }
     }
 
-    /// Resolve the canonical `~/.oxicode/runtime.json` path.
+    /// Resolve the canonical `runtime.json` path under the oxicode home.
     pub fn global_path() -> Result<PathBuf> {
-        let base =
-            dirs::home_dir().context("Cannot determine home directory for RuntimeConfig path")?;
-        Ok(base.join(".oxicode").join(RUNTIME_CONFIG_FILE))
+        let base = oxicode_catalog::oxi_home::oxicode_home()
+            .context("Cannot determine oxicode home directory")?;
+        Ok(base.join(RUNTIME_CONFIG_FILE))
     }
 
     /// Read from `path`. Returns `RuntimeConfig::new()` if the file is absent

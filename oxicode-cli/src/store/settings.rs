@@ -2,7 +2,8 @@
 //!
 //! Settings are loaded in layers (later layers override earlier):
 //! 1. Built-in defaults
-//! 2. Global config: `~/.oxicode/settings.toml`
+//! 2. Global config: canonical home `settings.{json,toml}` (default
+//!    `~/.oxi/oxicode/`; legacy `~/.oxicode/` read-only fallback)
 //! 3. Project config: `.oxicode/settings.toml` (walked up to repo root)
 //! 4. Environment variables (`OXICODE_*` prefix)
 //! 5. CLI arguments
@@ -82,7 +83,7 @@ pub enum EditFormat {
 }
 /// A custom OpenAI-compatible provider configuration.
 ///
-/// Custom providers are loaded from `~/.oxicode/settings.toml` via `[[custom_provider]]` sections
+/// Custom providers are loaded from the global settings file via `[[custom_provider]]` sections
 /// and registered at runtime so that models like `minimax/minimax-m2.5` can be used directly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomProvider {
@@ -176,7 +177,7 @@ pub struct Settings {
     #[serde(default = "default_session_history_size")]
     pub session_history_size: usize,
 
-    /// Directory for storing sessions (default: `~/.oxicode/sessions`)
+    /// Directory for storing sessions (default: canonical home `sessions/`)
     pub session_dir: Option<PathBuf>,
 
     // ── Behaviour flags ──────────────────────────────────────────────
@@ -488,17 +489,85 @@ impl Default for Settings {
 impl Settings {
     // ── Paths ────────────────────────────────────────────────────────
 
-    /// Get the global settings directory path (`~/.oxi/oxicode`).
+    /// Get the global settings directory path (the canonical oxicode home:
+    /// `$OXICODE_HOME`, else `$OXI_HOME/oxicode`, else `~/.oxi/oxicode`).
     pub fn settings_dir() -> Result<PathBuf> {
         oxicode_catalog::product_env::home_dir().context("Cannot determine oxicode home directory")
     }
 
-    /// Get the global settings TOML file path (`~/.oxi/oxicode/settings.toml`).
+    /// Canonical-only global settings file path (existing format wins, JSON
+    /// preferred).
+    ///
+    /// Unlike [`Self::settings_path`], this never resolves into the legacy
+    /// home — use it as the write target.
+    fn canonical_settings_path() -> Result<PathBuf> {
+        let json_path = Self::settings_json_path()?;
+        if json_path.exists() {
+            return Ok(json_path);
+        }
+        let toml_path = Self::settings_toml_path()?;
+        if toml_path.exists() {
+            return Ok(toml_path);
+        }
+        Ok(json_path)
+    }
+
+    /// Legacy read-only settings dir (pre-unified-layout `~/.oxicode`).
+    ///
+    /// `None` when no legacy home exists (or an explicit `$OXICODE_HOME`
+    /// opts out of legacy merging).
+    fn legacy_settings_dir() -> Option<PathBuf> {
+        oxicode_catalog::oxi_home::legacy_home_dir()
+    }
+
+    /// Pure settings-file resolution used by [`Self::settings_path`] and
+    /// [`Self::settings_path_with_preference`].
+    ///
+    /// Canonical candidates first (`prefer_json` sets the priority), then
+    /// the legacy dir read-only, then the canonical preferred default (the
+    /// write target).
+    fn resolve_settings_path_in(
+        canonical_dir: &std::path::Path,
+        legacy_dir: Option<&std::path::Path>,
+        prefer_json: bool,
+    ) -> PathBuf {
+        let json = canonical_dir.join("settings.json");
+        let toml = canonical_dir.join("settings.toml");
+        let (primary, secondary) = if prefer_json {
+            (&json, &toml)
+        } else {
+            (&toml, &json)
+        };
+        if primary.exists() {
+            return primary.clone();
+        }
+        if secondary.exists() {
+            return secondary.clone();
+        }
+        if let Some(legacy) = legacy_dir {
+            let legacy_json = legacy.join("settings.json");
+            let legacy_toml = legacy.join("settings.toml");
+            let (legacy_primary, legacy_secondary) = if prefer_json {
+                (&legacy_json, &legacy_toml)
+            } else {
+                (&legacy_toml, &legacy_json)
+            };
+            if legacy_primary.exists() {
+                return legacy_primary.clone();
+            }
+            if legacy_secondary.exists() {
+                return legacy_secondary.clone();
+            }
+        }
+        primary.clone()
+    }
+
+    /// Get the global settings TOML file path (`<settings_dir>/settings.toml`).
     pub fn settings_toml_path() -> Result<PathBuf> {
         Ok(Self::settings_dir()?.join("settings.toml"))
     }
 
-    /// Get the global settings JSON file path (`~/.oxi/oxicode/settings.json`).
+    /// Get the global settings JSON file path (`<settings_dir>/settings.json`).
     pub fn settings_json_path() -> Result<PathBuf> {
         Ok(Self::settings_dir()?.join("settings.json"))
     }
@@ -508,53 +577,31 @@ impl Settings {
     /// Returns the path to the settings file that should be used.
     /// If both JSON and TOML exist, JSON is returned (takes priority).
     /// If only one exists, that path is returned.
-    /// If neither exists, returns the JSON path by default.
+    /// If neither exists in the canonical home, falls back read-only to the
+    /// legacy home (`~/.oxicode/settings.{json,toml}`) when present.
+    /// Otherwise returns the canonical JSON path by default (the write target).
     pub fn settings_path() -> Result<PathBuf> {
-        let json_path = Self::settings_json_path()?;
-        let toml_path = Self::settings_toml_path()?;
-
-        if json_path.exists() && toml_path.exists() {
-            // Both exist: JSON takes priority
-            tracing::debug!("Both settings.json and settings.toml exist, using settings.json");
-            return Ok(json_path);
-        }
-
-        if json_path.exists() {
-            return Ok(json_path);
-        }
-
-        if toml_path.exists() {
-            return Ok(toml_path);
-        }
-
-        // Neither exists: default to JSON
-        Ok(json_path)
+        let dir = Self::settings_dir()?;
+        Ok(Self::resolve_settings_path_in(
+            &dir,
+            Self::legacy_settings_dir().as_deref(),
+            true,
+        ))
     }
 
     /// Get the effective settings file path, preferring the specified format.
     ///
     /// If `prefer_json` is true, checks JSON first; otherwise checks TOML first.
-    /// Returns the first existing file, or the preferred path if neither exists.
+    /// Returns the first existing file, or — when the canonical home has
+    /// neither — the legacy home's file (read-only) when present. Falls back
+    /// to the canonical preferred path otherwise.
     pub fn settings_path_with_preference(prefer_json: bool) -> Result<PathBuf> {
-        let json_path = Self::settings_json_path()?;
-        let toml_path = Self::settings_toml_path()?;
-
-        let (primary, secondary) = if prefer_json {
-            (&json_path, &toml_path)
-        } else {
-            (&toml_path, &json_path)
-        };
-
-        if primary.exists() {
-            return Ok(primary.clone());
-        }
-
-        if secondary.exists() {
-            return Ok(secondary.clone());
-        }
-
-        // Neither exists: return preferred path
-        Ok(primary.clone())
+        let dir = Self::settings_dir()?;
+        Ok(Self::resolve_settings_path_in(
+            &dir,
+            Self::legacy_settings_dir().as_deref(),
+            prefer_json,
+        ))
     }
 
     /// Detect the settings file format from its path.
@@ -592,7 +639,7 @@ impl Settings {
 
     /// Resolve the effective session directory.
     ///
-    /// Priority: `session_dir` field → `~/.oxicode/sessions`.
+    /// Priority: `session_dir` field → canonical home `sessions/`.
     pub fn effective_session_dir(&self) -> Result<PathBuf> {
         if let Some(ref dir) = self.session_dir {
             return Ok(dir.clone());
@@ -605,7 +652,8 @@ impl Settings {
     /// Load settings, applying all layers:
     ///
     /// 1. Built-in defaults
-    /// 2. Global `~/.oxicode/settings.toml`
+    /// 2. Global canonical settings (`$OXICODE_HOME`, else `~/.oxi/oxicode/`; legacy
+    ///    `~/.oxicode/` read-only fallback)
     /// 3. Project `.oxicode/settings.toml`
     /// 4. Environment variable overrides
     ///
@@ -643,7 +691,8 @@ impl Settings {
     /// 6. TUI language policy validation.
     ///
     /// Passing `global_override = None` keeps the default behavior of
-    /// reading the user's real `~/.oxicode/settings.{toml,json}`. Tests pass
+    /// reading the user's real global settings (canonical home, with legacy
+    /// read-only fallback). Tests pass
     /// `Some(custom_path)` or rely on the real path being absent to get
     /// pure defaults. (The test suite uses `Some(specific_path)` semantics
     /// by passing a temp path; passing `None` is also valid for "skip the
@@ -656,7 +705,7 @@ impl Settings {
         let mut settings = Settings::default();
 
         // 2. Layer global config (override takes precedence; None = use real
-        //    `~/.oxicode/settings.*` if present)
+        //    canonical home settings if present, legacy read-only fallback)
         let resolved_global: Option<std::path::PathBuf> = match global_override {
             Some(p) => Some(p.to_path_buf()),
             None => Self::settings_path().ok(),
@@ -739,7 +788,7 @@ impl Settings {
     /// Apply environment variable overrides in-place.
     ///
     /// DEPRECATED: Environment variable overrides are being phased out in favor
-    /// of file-based configuration (`~/.oxicode/settings.toml`). This method is
+    /// of file-based configuration (the global settings file). This method is
     /// kept for CI/CD compatibility but should not be relied upon for local
     /// development. Use `oxicode config set` or `oxicode setup` instead.
     ///
@@ -779,11 +828,13 @@ impl Settings {
 
     /// Save settings to the global config file.
     ///
-    /// Uses the format of the existing file if present, otherwise saves as JSON.
-    /// Preserves backward compatibility with existing TOML files.
+    /// Preserves the format of the existing canonical file; otherwise saves
+    /// as JSON. Writes always land in the canonical home — a legacy
+    /// `~/.oxicode` file is never modified (see [`Self::settings_path`] for
+    /// the read-side fallback).
     pub fn save(&self) -> Result<()> {
         let dir = Self::settings_dir()?;
-        let path = Self::settings_path()?;
+        let path = Self::canonical_settings_path()?;
 
         if !dir.exists() {
             fs::create_dir_all(&dir).with_context(|| {
@@ -1194,6 +1245,64 @@ fn parse_boolish(s: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    /// Canonical settings exist → legacy dir never consulted.
+    #[test]
+    fn resolve_settings_path_prefers_canonical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical");
+        let legacy = tmp.path().join("legacy");
+        std::fs::create_dir_all(&canonical).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(canonical.join("settings.toml"), "theme = \"x\"").unwrap();
+        std::fs::write(legacy.join("settings.json"), "{}").unwrap();
+
+        let got = Settings::resolve_settings_path_in(&canonical, Some(&legacy), true);
+        assert_eq!(got, canonical.join("settings.toml"));
+    }
+
+    /// Canonical empty → legacy JSON wins over legacy TOML when prefer_json.
+    #[test]
+    fn resolve_settings_path_falls_back_to_legacy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical");
+        let legacy = tmp.path().join("legacy");
+        std::fs::create_dir_all(&canonical).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("settings.json"), "{}").unwrap();
+        std::fs::write(legacy.join("settings.toml"), "theme = \"x\"").unwrap();
+
+        let json = Settings::resolve_settings_path_in(&canonical, Some(&legacy), true);
+        assert_eq!(json, legacy.join("settings.json"));
+        let toml = Settings::resolve_settings_path_in(&canonical, Some(&legacy), false);
+        assert_eq!(toml, legacy.join("settings.toml"));
+    }
+
+    /// Neither exists → canonical preferred default (the write target).
+    #[test]
+    fn resolve_settings_path_defaults_to_canonical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical");
+        std::fs::create_dir_all(&canonical).unwrap();
+
+        let got = Settings::resolve_settings_path_in(&canonical, None, true);
+        assert_eq!(got, canonical.join("settings.json"));
+    }
+
+    /// Write target (`canonical_settings_path`) never resolves to legacy.
+    #[test]
+    fn save_targets_canonical_dir() {
+        // `save()` resolves its write path via `canonical_settings_path`,
+        // which only considers `<settings_dir>/settings.{json,toml}`.
+        // Pin the contract structurally: canonical JSON present → JSON path.
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical");
+        std::fs::create_dir_all(&canonical).unwrap();
+        std::fs::write(canonical.join("settings.toml"), "theme = \"x\"").unwrap();
+
+        let json = Settings::resolve_settings_path_in(&canonical, None, true);
+        assert_eq!(json, canonical.join("settings.toml"));
+    }
+
     /// `inline_images` kill-switch: default ON, and a settings file that
     /// sets it false loads the override (serde contract pin).
     #[test]
@@ -1371,7 +1480,7 @@ theme = "dracula"
             "OXICODE_EXTENSIONS_ENABLED",
         ]);
         let tmp = tempfile::tempdir().unwrap();
-        // Pass a nonexistent global path so the real `~/.oxicode/settings.*`
+        // Pass a nonexistent global path so the user's real global settings
         // never leaks into the test. (`Settings::load_from` reads the
         // real global config when present, which is what made this test
         // fail when the user's global set `thinking_level = "high"`.)

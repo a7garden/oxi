@@ -2005,8 +2005,8 @@ impl SessionManager {
 
     /// Create a new SessionManager (async for backward compatibility)
     pub async fn new_async() -> Result<Self> {
-        let home = dirs::home_dir().context("Cannot find home directory")?;
-        let base_dir = home.join(".oxicode");
+        let base_dir = oxicode_catalog::oxi_home::oxicode_home()
+            .context("Cannot determine oxicode home directory")?;
         let sessions_dir = base_dir.join("sessions");
         tokio::fs::create_dir_all(&sessions_dir).await?;
         let cwd = std::env::current_dir()
@@ -2325,8 +2325,8 @@ pub fn get_default_session_dir(cwd: &str) -> String {
 }
 
 fn get_agent_dir() -> String {
-    dirs::home_dir()
-        .map(|h| h.join(".oxicode").to_string_lossy().to_string())
+    oxicode_catalog::oxi_home::oxicode_home()
+        .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|| ".oxicode".to_string())
 }
 

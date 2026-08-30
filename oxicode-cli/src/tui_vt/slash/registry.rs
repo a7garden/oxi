@@ -381,11 +381,11 @@ impl SlashCommand for SettingsCommand {
 /// Selecting a session enqueues a resume that fires on the next Enter.
 struct SessionsCommand;
 
-/// Resolve the TUI's session storage directory (mirrors the CLI's
-/// `~/.oxicode/sessions`).
+/// Resolve the TUI's session storage directory (mirrors the CLI's canonical
+/// `sessions/` dir, with the legacy `~/.oxicode/sessions/` read-only fallback
+/// so pre-migration sessions still show up in the picker).
 pub(crate) fn sessions_dir() -> std::path::PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".oxicode").join("sessions"))
+    oxicode_catalog::oxi_home::read_path(std::path::Path::new("sessions"))
         .unwrap_or_else(|| std::path::PathBuf::from(".oxicode/sessions"))
 }
 

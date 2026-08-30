@@ -886,16 +886,16 @@ impl WasmExtensionManager {
 
     // ── Discovery ──────────────────────────────────────────────────
 
-    /// Discover `.wasm` files in standard extension directories.
+    /// Discover `.wasm` files in the canonical extensions directory (with
+    /// legacy read-only fallback) and project-local directories.
     pub fn discover(cwd: &Path) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        // ~/.oxicode/extensions/
-        if let Some(home) = dirs::home_dir() {
-            let dir = home.join(".oxicode").join("extensions");
-            if dir.is_dir() {
-                Self::discover_in_dir(&dir, &mut paths);
-            }
+        // Canonical extensions dir, else legacy (pre-unified-layout installs).
+        if let Some(dir) = oxicode_catalog::oxi_home::read_path(Path::new("extensions"))
+            && dir.is_dir()
+        {
+            Self::discover_in_dir(&dir, &mut paths);
         }
 
         // .oxicode/extensions/ (project-local)

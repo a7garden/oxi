@@ -53,16 +53,13 @@ pub mod migrate;
 
 use std::path::{Path, PathBuf};
 
-/// Resolve the oxicode home directory. Honors `OXICODE_HOME`; falls
-/// back to `~/.oxicode`. The Foundation host is independent:
-/// `OXICODE_HOME` only affects oxicode-local paths (legacy memory,
-/// migration checkpoints, etc.) and does not change the Foundation
-/// root.
+/// Resolve the oxicode home directory through the unified Oxi home layout
+/// (`$OXICODE_HOME`, else `<oxi_home>/oxicode`, else `~/.oxi/oxicode`).
+/// The Foundation host is independent: `OXICODE_HOME`/`OXI_HOME` only
+/// affect oxicode-local paths (legacy memory, migration checkpoints, etc.)
+/// and do not change the Foundation root.
 pub fn fetch_oxicode_home() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("OXICODE_HOME") {
-        return Some(PathBuf::from(home));
-    }
-    dirs::home_dir().map(|h| h.join(".oxicode"))
+    oxicode_catalog::oxi_home::oxicode_home()
 }
 
 /// Canonical subdirectory name under the host's `$HOME` (or

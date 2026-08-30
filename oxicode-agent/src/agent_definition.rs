@@ -1,11 +1,13 @@
 //! Agent definition file parsing and validation.
 //!
 //! Loads agent definitions from markdown files with YAML frontmatter.
-//! Discovery searches `~/.oxicode/agents/` (user) and `.oxicode/agents/` (project).
+//! Discovery searches the canonical user agents dir (`$OXICODE_HOME`, else
+//! `<oxi_home>/oxicode`; legacy `~/.oxicode/agents/` read-only fallback) and
+//! `.oxicode/agents/` (project).
 //!
 //! Supports two directory layouts (subdirectory takes priority on collision):
-//! - Flat file: `~/.oxicode/agents/scout.md`
-//! - Subdirectory: `~/.oxicode/agents/scout/agent.md`
+//! - Flat file: `<agents dir>/scout.md`
+//! - Subdirectory: `<agents dir>/scout/agent.md`
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -51,7 +53,7 @@ fn default_max_depth() -> u8 {
 /// Agent visibility scope for discovery queries.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentScope {
-    /// Only user-level agents (~/.oxicode/agents/)
+    /// Only user-level agents (canonical home `agents/`)
     #[default]
     User,
     /// Only project-level agents (.oxicode/agents/)
@@ -206,19 +208,19 @@ impl AgentDiscovery {
     /// Discover agent definitions from global and project directories.
     ///
     /// Search order (project overrides user on collision):
-    /// 1. Global: ~/.oxicode/agents/
-    /// 2. Project: .oxicode/agents/ (walks up to .git boundary)
+    /// 1. Global: canonical `<oxicode_home>/agents/` (legacy
+    ///    `~/.oxicode/agents/` read-only fallback)
+    /// 2. Project: `.oxicode/agents/` (walks up to .git boundary)
     ///
     /// Within each directory, subdirectory format (`<name>/agent.md`) takes
     /// priority over flat files (`<name>.md`) on name collision.
     pub fn discover(cwd: &Path, scope: AgentScope) -> Result<Vec<(String, AgentDefinition)>> {
         let mut agents = HashMap::new();
 
-        // 1. Global: ~/.oxicode/agents/
+        // 1. Global: canonical agents dir (legacy read-only fallback).
         if (scope == AgentScope::User || scope == AgentScope::Both)
-            && let Some(home) = dirs::home_dir()
+            && let Some(global_dir) = oxicode_ai::oxi_home::read_path(Path::new("agents"))
         {
-            let global_dir = home.join(".oxicode/agents");
             Self::discover_from_dir(&global_dir, "user", &mut agents)?;
         }
 

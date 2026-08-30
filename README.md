@@ -193,10 +193,17 @@ Keychain via `oxicode config migrate-foundation`, and legacy
 Settings are layered — later layers override earlier ones:
 
 ```
-defaults → ~/.oxicode/settings.toml → .oxicode/settings.toml → env vars → CLI flags
+defaults → <canonical home>/settings.{toml,json} → .oxicode/settings.toml → env vars → CLI flags
 ```
 
-Example `~/.oxicode/settings.toml`:
+The canonical home is `$OXICODE_HOME`, else `$OXI_HOME/oxicode`, else
+`~/.oxi/oxicode`. Pre-unified-layout installs under the legacy
+`~/.oxicode/` keep working: readers fall back to it read-only until you
+run `oxicode migrate home` (journaled, resumable, copy-only; inspect the
+plan first with `oxicode migrate home --dry-run`, and check the layout
+with `oxicode doctor`).
+
+Example `<canonical home>/settings.toml`:
 
 ```toml
 default_model = "anthropic/claude-sonnet-4-20250514"
@@ -291,7 +298,7 @@ Yes. Each crate is published independently: `oxicode-ai` (LLM API), `oxicode-age
 <details>
 <summary><strong>How do sessions work?</strong></summary>
 
-Sessions are stored as append-only JSONL files in `~/.oxicode/sessions/`. Each session is a tree — you can fork from any point to explore alternative paths without losing history. Use `oxicode sessions` to list, `oxicode tree` to inspect, and `oxicode fork` to branch.
+Sessions are stored as append-only JSONL files in the canonical home's `sessions/` directory (default `~/.oxi/oxicode/sessions/`). Each session is a tree — you can fork from any point to explore alternative paths without losing history. Use `oxicode sessions` to list, `oxicode tree` to inspect, and `oxicode fork` to branch.
 </details>
 
 <details>

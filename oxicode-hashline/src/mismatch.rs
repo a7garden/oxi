@@ -145,7 +145,10 @@ pub enum HashlineError {
     /// No block resolver configured (block-ops feature only).
     #[cfg(feature = "block-ops")]
     #[error("Block resolver unavailable for {path}")]
-    BlockResolverUnavailable { path: String },
+    BlockResolverUnavailable {
+        /// Path of the file whose block operation lacked a resolver.
+        path: String,
+    },
 }
 
 impl HashlineError {

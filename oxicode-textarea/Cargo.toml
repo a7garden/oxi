@@ -1,6 +1,6 @@
 [package]
 name = "oxicode-textarea"
-version = "0.78.0"
+version = "0.79.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,6 +17,7 @@ textwrap = { workspace = true }
 tui-scrollbar = { workspace = true }
 unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 fuzzy-matcher = { workspace = true }
@@ -32,4 +33,4 @@ rand = { workspace = true }
 # future use. See `textarea.rs:2092`.
 [features]
 default = []
-debug-logs = []
+debug-logs = ["dep:tracing"]

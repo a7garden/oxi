@@ -126,9 +126,9 @@ across 70+ providers, with models.dev as the source of truth (see
 `data/catalog/README.md`):
 - **SNAP (Layer 1)** — embedded models.dev snapshot `_snapshot.json.gz`
   (`include_bytes!`-ed; works fully offline on first run).
-- **LIVE (Layer 2.5)** — runtime cache `~/.oxicode/cache/models-dev.json` (ETag-aware
+- **LIVE (Layer 2.5)** — runtime cache `<home>/cache/models-dev.json` (canonical oxicode home; ETag-aware
   conditional GET, ~1h mtime window). `catalog/models_dev.rs`.
-- **Layer 2** — user overrides (`~/.oxicode/catalog/overrides.toml`).
+- **Layer 2** — user overrides (`<home>/catalog/overrides.toml`.
 - **LOCAL (Layer 3)** — runtime `/v1/models` discovery for local servers
   (ollama/lmstudio/vllm/sglang).
   Gates: `OXICODE_MODELS_DEV`, `OXICODE_MODELS_DEV_URL`, `OXICODE_MODELS_DEV_DISABLE_FETCH`,
@@ -412,15 +412,15 @@ cargo test --workspace --doc         # Doc tests
 
 | Purpose | Path |
 |---------|------|
-| Global config | `~/.oxicode/settings.toml` |
-| Project config | `.oxicode/settings.toml` |
-| Sessions | `~/.oxicode/sessions/` |
-| Extensions | `~/.oxicode/extensions/` |
-| Skills | `~/.oxicode/skills/<name>/SKILL.md` |
-| **models.dev cache** | `~/.oxicode/cache/models-dev.json` (~1h mtime window, atomic writes) |
+| Global config | `<home>/settings.{toml,json}` — canonical `$OXICODE_HOME` / `$OXI_HOME`/`oxicode` / `~/.oxi/oxicode`; legacy `~/.oxicode` read-only fallback |
+| Project config | `.oxicode/settings.toml` (project-local, separate namespace) |
+| Sessions | `<home>/sessions/` (canonical; legacy read-only fallback) |
+| Extensions | `<home>/extensions/` (canonical; legacy read-only fallback) |
+| Skills | `<home>/skills/<name>/SKILL.md` (canonical; legacy read-only fallback) |
+| **models.dev cache** | `<home>/cache/models-dev.json` (~1h mtime window, atomic writes) |
 | **oxibrain socket** | `~/.oxi/brain/oxibrain.sock` (override: `OXIBRAIN_SOCKET`) |
 | MCP config | `~/.config/oxicode/mcp.json` or `.oxicode/mcp.json` |
-| Logs | `~/.oxicode/logs/` |
+| Logs | `<home>/logs/` |
 | Nextest config | `.config/nextest.toml` |
 | Pre-commit config | `.pre-commit-config.yaml` |
 | Issue labels | `.github/labels.yml` (synced by `labels.yml` workflow) |

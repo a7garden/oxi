@@ -442,46 +442,69 @@ pub(crate) fn initial_brain_chip(
 mod memory_backend_tests {
     use super::*;
 
-    #[cfg(unix)]
+    /// These tests mutate the process-global `OXIBRAIN_SOCKET` env var;
+    /// cargo runs tests on parallel threads, so they must serialize or they
+    /// observe each other's sockets (flaky `is_some`/`is_none` failures).
+    static ENV_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
     fn test_settings() -> crate::store::settings::Settings {
         let mut s = crate::store::settings::Settings::default();
         s.memory_enabled = true;
         s
     }
 
+    /// Run `f` with `OXIBRAIN_SOCKET` set to `value` (removed when `None`),
+    /// holding the env lock and cleaning the variable up afterwards.
     #[cfg(unix)]
-    #[test]
-    fn brain_backend_returned_when_socket_present() {
-        // Bind a real unix socket in a tempdir so the daemon-present gate
-        // sees an actual socket file, not a regular file.
-        let dir = tempfile::TempDir::new().unwrap();
-        let sock = dir.path().join("oxibrain.sock");
-        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    fn with_socket_env<T>(value: Option<&std::path::Path>, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock();
         unsafe {
-            std::env::set_var("OXIBRAIN_SOCKET", &sock);
+            match value {
+                Some(p) => std::env::set_var("OXIBRAIN_SOCKET", p),
+                None => std::env::remove_var("OXIBRAIN_SOCKET"),
+            }
         }
-        let backend = create_memory_backend(&test_settings());
-        assert!(backend.is_some(), "socket present ⇒ brain backend");
+        let out = f();
         unsafe {
             std::env::remove_var("OXIBRAIN_SOCKET");
         }
+        out
+    }
+
+    /// Bind a real unix socket in a leaked tempdir so the socket file
+    /// outlives the helper (the daemon-present gate stats the path).
+    #[cfg(unix)]
+    fn bind_real_socket() -> std::path::PathBuf {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = dir.path().join("oxibrain.sock");
+        std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        std::mem::forget(dir);
+        sock
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn brain_backend_returned_when_socket_present() {
+        // A real unix socket must pass the daemon-present gate.
+        let sock = bind_real_socket();
+        with_socket_env(Some(&sock), || {
+            let backend = create_memory_backend(&test_settings());
+            assert!(backend.is_some(), "socket present ⇒ brain backend");
+        });
     }
 
     #[cfg(unix)]
     #[test]
     fn absent_socket_returns_none() {
         let dir = tempfile::TempDir::new().unwrap();
-        unsafe {
-            std::env::set_var("OXIBRAIN_SOCKET", dir.path().join("missing.sock"));
-        }
-        let backend = create_memory_backend(&test_settings());
-        assert!(
-            backend.is_none(),
-            "absent socket ⇒ no local durable fallback (plan §5.h)"
-        );
-        unsafe {
-            std::env::remove_var("OXIBRAIN_SOCKET");
-        }
+        let missing = dir.path().join("missing.sock");
+        with_socket_env(Some(&missing), || {
+            let backend = create_memory_backend(&test_settings());
+            assert!(
+                backend.is_none(),
+                "absent socket ⇒ no local durable fallback (plan §5.h)"
+            );
+        });
     }
 
     #[cfg(unix)]
@@ -490,17 +513,13 @@ mod memory_backend_tests {
         let dir = tempfile::TempDir::new().unwrap();
         let fake = dir.path().join("oxibrain.sock");
         std::fs::write(&fake, b"not a socket").unwrap();
-        unsafe {
-            std::env::set_var("OXIBRAIN_SOCKET", &fake);
-        }
-        let backend = create_memory_backend(&test_settings());
-        assert!(
-            backend.is_none(),
-            "regular file must not pass the socket gate"
-        );
-        unsafe {
-            std::env::remove_var("OXIBRAIN_SOCKET");
-        }
+        with_socket_env(Some(&fake), || {
+            let backend = create_memory_backend(&test_settings());
+            assert!(
+                backend.is_none(),
+                "regular file must not pass the socket gate"
+            );
+        });
     }
 
     #[test]

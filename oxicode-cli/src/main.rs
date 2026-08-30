@@ -43,6 +43,7 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
             yes,
             include_project,
         } => handle_reset(*yes, *include_project)?,
+        Commands::Doctor => handle_doctor()?,
         Commands::Export { session_id, output } => {
             handle_export(session_id.as_deref(), output.as_deref())?
         }

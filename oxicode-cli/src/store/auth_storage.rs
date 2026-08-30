@@ -277,8 +277,15 @@ pub trait AuthStorageBackend: Send + Sync {
 // ============================================================================
 
 /// File-based auth storage backend
+///
+/// Writes always target `path` (the canonical home). `legacy_read_path` is a
+/// read-only fallback (`~/.oxicode/auth.json` on pre-unified-layout installs)
+/// consulted only while the canonical file does not exist yet.
 pub struct FileAuthStorage {
     path: PathBuf,
+    /// Read-only legacy fallback; `None` when absent or when an explicit
+    /// `$OXICODE_HOME` override opts out of legacy merging.
+    legacy_read_path: Option<PathBuf>,
     cache: RwLock<Option<String>>,
 }
 
@@ -287,13 +294,40 @@ impl FileAuthStorage {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
+            legacy_read_path: None,
             cache: RwLock::new(None),
         }
     }
 
-    /// Get the default auth file path (uses ~/.oxicode/auth.json for consistency with settings)
+    /// Create the default file backend with legacy read fallback wired in.
+    ///
+    /// `None` only when no home can be resolved at all.
+    pub fn with_default_paths() -> Option<Self> {
+        Some(Self::with_legacy_fallback(
+            Self::default_path()?,
+            Self::legacy_default_path(),
+        ))
+    }
+
+    /// Create a file backend with an explicit legacy read fallback
+    /// (canonical-first reads; testable without touching the environment).
+    pub fn with_legacy_fallback(path: PathBuf, legacy_read_path: Option<PathBuf>) -> Self {
+        Self {
+            path,
+            legacy_read_path,
+            cache: RwLock::new(None),
+        }
+    }
+
+    /// Canonical write target: `<oxicode_home>/auth.json`.
     pub fn default_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|p| p.join(".oxicode").join("auth.json"))
+        oxicode_catalog::oxi_home::oxicode_home().map(|h| h.join("auth.json"))
+    }
+
+    /// Legacy read-only path: `<legacy_home>/auth.json` when the legacy home
+    /// exists; `None` otherwise (including under an explicit `$OXICODE_HOME`).
+    pub fn legacy_default_path() -> Option<PathBuf> {
+        oxicode_catalog::oxi_home::legacy_home_dir().map(|h| h.join("auth.json"))
     }
 
     /// Get the storage path
@@ -304,11 +338,17 @@ impl FileAuthStorage {
 
 impl AuthStorageBackend for FileAuthStorage {
     fn read(&self) -> AuthResult<Option<String>> {
-        if !self.path.exists() {
+        // Canonical-first; fall back to the read-only legacy file only while
+        // the canonical file does not exist yet (pre-migration installs).
+        let read_path = if self.path.exists() {
+            &self.path
+        } else if let Some(legacy) = self.legacy_read_path.as_ref().filter(|p| p.exists()) {
+            legacy
+        } else {
             return Ok(None);
-        }
+        };
 
-        match std::fs::read_to_string(&self.path) {
+        match std::fs::read_to_string(read_path) {
             Ok(content) => {
                 *self.cache.write() = Some(content.clone());
                 Ok(Some(content))
@@ -321,7 +361,6 @@ impl AuthStorageBackend for FileAuthStorage {
         // Ensure parent directory exists with restricted permissions
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| AuthError::WriteError(e.to_string()))?;
-
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -490,8 +529,8 @@ pub struct AuthStorage {
 impl AuthStorage {
     /// Create a new auth storage with default file backend
     pub fn new() -> Self {
-        let file_storage = FileAuthStorage::default_path()
-            .map(|p| Arc::new(FileAuthStorage::new(p)) as Arc<dyn AuthStorageBackend>);
+        let file_storage = FileAuthStorage::with_default_paths()
+            .map(|s| Arc::new(s) as Arc<dyn AuthStorageBackend>);
 
         let credentials = if let Some(ref storage) = file_storage {
             match storage.read() {
@@ -1341,6 +1380,60 @@ mod tests {
             storage.get_api_key("anthropic"),
             Some("sk-test123".to_string())
         );
+    }
+
+    /// Reads prefer the canonical file while it exists.
+    #[test]
+    fn file_backend_reads_canonical_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("auth.json");
+        let legacy = tmp.path().join("legacy-auth.json");
+        std::fs::write(&canonical, r#"{"canonical":true}"#).unwrap();
+        std::fs::write(&legacy, r#"{"legacy":true}"#).unwrap();
+
+        let backend = FileAuthStorage::with_legacy_fallback(canonical, Some(legacy));
+        let content = backend.read().unwrap().unwrap();
+        assert!(content.contains("canonical"));
+        assert!(!content.contains("legacy"));
+    }
+
+    /// While the canonical file is absent, reads fall back to the read-only
+    /// legacy file — and writes land in the canonical file.
+    #[test]
+    fn file_backend_falls_back_to_legacy_read_and_writes_canonical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("auth.json");
+        let legacy = tmp.path().join("legacy-auth.json");
+        std::fs::write(&legacy, r#"{"legacy":true}"#).unwrap();
+
+        let backend = FileAuthStorage::with_legacy_fallback(canonical.clone(), Some(legacy));
+        let content = backend.read().unwrap().unwrap();
+        assert!(content.contains("legacy"));
+
+        // Write targets the canonical path, never the legacy file.
+        backend.write(r#"{"fresh":1}"#).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&canonical).unwrap(),
+            r#"{"fresh":1}"#
+        );
+        assert_eq!(
+            std::fs::read_to_string(backend.legacy_read_path.as_ref().unwrap()).unwrap(),
+            r#"{"legacy":true}"#,
+            "legacy file must remain untouched"
+        );
+
+        // Once the canonical file exists, reads use it again.
+        let content = backend.read().unwrap().unwrap();
+        assert!(content.contains("fresh"));
+    }
+
+    /// No canonical file, no legacy file → read returns None.
+    #[test]
+    fn file_backend_read_none_when_both_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("auth.json");
+        let backend = FileAuthStorage::with_legacy_fallback(canonical, None);
+        assert_eq!(backend.read().unwrap(), None);
     }
 
     #[test]

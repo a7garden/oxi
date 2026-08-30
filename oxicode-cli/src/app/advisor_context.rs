@@ -52,8 +52,9 @@ pub fn assemble_advisor_system_prompt(cwd: &str) -> String {
     }
 
     // ── WATCHDOG.md attention files ──
-    // omp `discoverWatchdogFiles` — user-level (~/.oxicode/WATCHDOG.md) first,
-    // then project levels walking cwd → home (ancestor → leaf).
+    // omp `discoverWatchdogFiles` — user-level (canonical home WATCHDOG.md,
+    // legacy read-only fallback) first, then project levels walking
+    // cwd → home (ancestor → leaf).
     let watchdogs = discover_watchdog_files(Path::new(cwd));
     for (display_path, content) in watchdogs {
         out.push_str(&format!(
@@ -65,24 +66,27 @@ pub fn assemble_advisor_system_prompt(cwd: &str) -> String {
     out
 }
 
-/// Discover WATCHDOG.md files: the user-level file (`~/.oxicode/WATCHDOG.md`) plus
-/// any walking up from `cwd` toward the home directory. Returns
-/// `(display_path, content)` pairs, user-level first then ancestor → leaf.
-/// omp `discoverWatchdogFiles`.
+/// Discover WATCHDOG.md files: the user-level file (canonical home, with
+/// legacy read-only fallback) plus any walking up from `cwd` toward the home
+/// directory. Returns `(display_path, content)` pairs, user-level first then
+/// ancestor → leaf. omp `discoverWatchdogFiles`.
 fn discover_watchdog_files(cwd: &Path) -> Vec<(String, String)> {
     let mut items: Vec<(String, String)> = Vec::new();
     let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
-    // 1. User level: ~/.oxicode/WATCHDOG.md
-    if let Some(home) = dirs::home_dir() {
-        let user_path = home.join(".oxicode").join("WATCHDOG.md");
-        if let Some(content) = read_watchdog(&user_path) {
-            seen.insert(user_path.clone());
-            let display = user_path.display().to_string();
-            items.push((display, content));
-        }
+    // 1. User level: <oxicode_home>/WATCHDOG.md (legacy read-only fallback).
+    let home = dirs::home_dir();
+    if let Some(user_path) = oxicode_catalog::oxi_home::read_path(Path::new("WATCHDOG.md"))
+        && let Some(content) = read_watchdog(&user_path)
+    {
+        seen.insert(user_path.clone());
+        let display = user_path.display().to_string();
+        items.push((display, content));
+    }
 
-        // 2. Project levels: walk cwd → home, collecting WATCHDOG.md
+    // 2. Project levels: walk cwd → home, collecting WATCHDOG.md
+    if let Some(home) = home {
+        // ancestor → leaf (outermost first)
         let mut current = Some(cwd);
         let mut ascending: Vec<PathBuf> = Vec::new();
         while let Some(dir) = current
@@ -91,7 +95,6 @@ fn discover_watchdog_files(cwd: &Path) -> Vec<(String, String)> {
             ascending.push(dir.to_path_buf());
             current = dir.parent();
         }
-        // ancestor → leaf (outermost first)
         for dir in ascending.into_iter().rev() {
             let candidate = dir.join("WATCHDOG.md");
             if seen.contains(&candidate) {

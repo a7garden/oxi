@@ -5,7 +5,32 @@ All notable changes to the oxicode project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.79.0] — 2026-08-30
+
+### Added
+
+- **Unified Oxi home layout (`~/.oxi/oxicode`).** The canonical oxicode
+  home is now resolved through one resolver: `oxicode_home()` =
+  `$OXICODE_HOME`, else `$OXI_HOME/oxicode`, else `$HOME/.oxi/oxicode`
+  (`oxicode-catalog/src/oxi_home.rs`, re-exported as
+  `oxicode_ai::oxi_home`). All runtime defaults (auth, settings, sessions,
+  skills, extensions, packages, agents, WATCHDOG.md, slash commands,
+  runtime config, hook approvals) route through it; readers fall back
+  read-only to the legacy `~/.oxicode` when the canonical item is absent,
+  and an explicit `$OXICODE_HOME` never silently merges legacy. Writes
+  always land in the canonical home.
+- **`oxicode migrate home [--dry-run]`.** Journaled, resumable,
+  copy-only migration of the legacy home into the unified layout
+  (`oxicode-cli/src/home_migrate.rs`). Preflight reports
+  `NothingToDo`/`Ready`/`AlreadyMigrated`/`Conflict` (content mismatch ⇒
+  abort, both paths reported); the journal
+  (`<oxi_home>/oxicode.migration-journal.json`) is written atomically
+  before the first mutation; per-file idempotent copy (size + SHA-256
+  skip, `.part-<pid>` + fsync + rename); verify step re-walks both trees.
+  The legacy source is never modified or deleted. `oxicode doctor` (new)
+  prints the active home resolution, legacy presence, and migration
+  status; `oxicode reset` now targets the canonical home (legacy only
+  when the canonical home is absent).
 
 ## [0.78.0] - 2026-08-29
 

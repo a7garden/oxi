@@ -57,16 +57,17 @@ fn is_shared_library(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Discover extension shared libraries in `~/.oxicode/extensions/` and extra paths.
+/// Discover extension shared libraries in the canonical extensions directory
+/// (legacy `~/.oxicode/extensions/` read-only fallback) and extra paths.
 pub fn discover_extensions(cwd: &Path, extra_paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // ~/.oxicode/extensions/
-    if let Some(home) = dirs::home_dir() {
-        let ext_dir = home.join(".oxicode").join("extensions");
-        if ext_dir.is_dir() {
-            discover_in_dir(&ext_dir, &mut paths);
-        }
+    // Canonical extensions dir, else legacy (pre-unified-layout installs).
+    let user_ext_dir = oxicode_catalog::oxi_home::read_path(Path::new("extensions"));
+    if let Some(ext_dir) = user_ext_dir
+        && ext_dir.is_dir()
+    {
+        discover_in_dir(&ext_dir, &mut paths);
     }
 
     // .oxicode/extensions/ (project-local)

@@ -155,6 +155,9 @@ pub enum Commands {
         #[arg(long)]
         include_project: bool,
     },
+    /// Print home-layout diagnostics (oxi home, canonical oxicode home,
+    /// legacy presence, migration status)
+    Doctor,
     /// Export a session to HTML
     Export {
         /// Session ID or prefix (default: most recent for this project)
@@ -214,6 +217,17 @@ pub enum Commands {
 pub enum MigrationCommands {
     /// Migrate legacy durable memory to the oxibrain daemon.
     Brain(MigrateBrainArgs),
+    /// Migrate the legacy `~/.oxicode` home into the unified Oxi home
+    /// (`<oxi_home>/oxicode`). Journaled, resumable, copy-only.
+    Home(MigrateHomeArgs),
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct MigrateHomeArgs {
+    /// Print the migration plan (source, destination, bytes, conflicts,
+    /// required action) without touching the filesystem.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]

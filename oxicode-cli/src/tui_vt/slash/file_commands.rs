@@ -246,9 +246,10 @@ fn scan_dir(dir: &Path, out: &mut Vec<FileCommand>, seen: &mut HashSet<String>) 
     }
 }
 
-/// Load all file-based commands from project (`.oxicode/commands/`) and
-/// user (`~/.oxicode/commands/`) directories. Project entries take
-/// precedence on name collision (scanned first).
+/// Load all file-based commands from project (`.oxicode/commands/`) and user
+/// (canonical home `commands/`, with legacy `~/.oxicode/commands/` read-only
+/// fallback) directories. Project entries take precedence on name collision
+/// (scanned first).
 pub fn load_file_commands(cwd: &Path) -> Vec<FileCommand> {
     let mut commands = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -257,9 +258,8 @@ pub fn load_file_commands(cwd: &Path) -> Vec<FileCommand> {
     let project_dir = cwd.join(".oxicode").join("commands");
     scan_dir(&project_dir, &mut commands, &mut seen);
 
-    // 2. User: ~/.oxicode/commands/
-    if let Some(home) = dirs::home_dir() {
-        let user_dir = home.join(".oxicode").join("commands");
+    // 2. User: canonical commands dir (legacy read-only fallback).
+    if let Some(user_dir) = oxicode_catalog::oxi_home::read_path(Path::new("commands")) {
         scan_dir(&user_dir, &mut commands, &mut seen);
     }
 

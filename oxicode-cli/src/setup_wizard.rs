@@ -1464,18 +1464,10 @@ pub async fn run() -> Result<()> {
     let models = load_models(catalog.as_ref(), Some(&allowed));
     let themes = load_themes();
 
-    let auth_path = crate::store::auth_storage::AuthStorage::default_path().unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".oxicode")
-            .join("auth.json")
-    });
-    let settings_path = crate::store::settings::Settings::settings_path().unwrap_or_else(|_| {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".oxicode")
-            .join("settings.json")
-    });
+    let auth_path = crate::store::auth_storage::AuthStorage::default_path()
+        .unwrap_or_else(|| PathBuf::from("auth.json"));
+    let settings_path = crate::store::settings::Settings::settings_json_path()
+        .unwrap_or_else(|_| PathBuf::from("settings.json"));
 
     // Find the index of the current default model
     let current_model = crate::store::settings::Settings::load()

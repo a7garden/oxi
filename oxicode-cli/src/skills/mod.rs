@@ -1,7 +1,8 @@
 //! Skills system for oxicode CLI
 //!
 //! Skills are on-demand capability packages stored as markdown files.
-//! Each skill lives in its own directory under `~/.oxicode/skills/<name>/SKILL.md`.
+//! Each skill lives in its own directory under the canonical home's
+//! `skills/<name>/SKILL.md` (legacy `~/.oxicode/skills/` read-only fallback).
 //!
 //! When a skill is invoked, its content is appended to the system prompt,
 //! giving the agent additional context and instructions for that skill.
@@ -271,10 +272,18 @@ impl SkillManager {
         self.skills.is_empty()
     }
 
-    /// Get the default skills directory path (~/.oxicode/skills/).
+    /// Get the canonical skills directory path (`<oxicode_home>/skills/`).
     pub fn skills_dir() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Cannot determine home directory")?;
-        Ok(home.join(".oxicode").join("skills"))
+        let home = oxicode_catalog::oxi_home::oxicode_home()
+            .context("Cannot determine oxicode home directory")?;
+        Ok(home.join("skills"))
+    }
+
+    /// Read path for the skills directory: canonical when it exists, else
+    /// the legacy `~/.oxicode/skills/` when present.
+    pub fn skills_read_dir() -> Result<PathBuf> {
+        oxicode_catalog::oxi_home::read_path(Path::new("skills"))
+            .context("Cannot determine oxicode home directory")
     }
 
     /// Discover skills from multiple sources: global, project, ancestor dirs, and settings.
@@ -282,8 +291,8 @@ impl SkillManager {
         let mut skills = HashMap::new();
         let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
-        // 1. Global: ~/.oxicode/skills/
-        if let Ok(global_dir) = Self::skills_dir() {
+        // 1. Global: canonical skills dir (legacy read-only fallback).
+        if let Ok(global_dir) = Self::skills_read_dir() {
             Self::discover_from_dir(&global_dir, &mut skills, &mut seen_paths)?;
         }
 
@@ -584,8 +593,8 @@ mod tests {
     #[test]
     fn test_skills_dir() {
         let dir = SkillManager::skills_dir().unwrap();
-        assert!(dir.to_string_lossy().contains(".oxicode"));
-        assert!(dir.to_string_lossy().contains("skills"));
+        // Canonical home (`$OXICODE_HOME`, else `<oxi_home>/oxicode`) + "skills".
+        assert!(dir.to_string_lossy().ends_with("skills"));
     }
 
     // --- New tests for RFC-004 T2 features ---

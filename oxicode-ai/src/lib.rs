@@ -48,10 +48,12 @@ mod error;
 mod high_level;
 mod messages;
 pub mod oauth;
-/// Product home-directory resolution (`OXICODE_HOME` / `~/.oxicode`).
+pub mod oxi_home;
+/// Product home-directory resolution (`OXICODE_HOME` / unified Oxi home).
 // `product_env` moved to oxicode-catalog (it owns catalog cache/override dirs);
 // re-exported here so `oxicode_ai::product_env` and `oxicode_sdk::ports::fs::path`
-// (which delegates here) keep working.
+// (which delegates here) keep working. The unified home layout lives in
+// `oxi_home` (also owned by oxicode-catalog, re-exported above).
 pub use oxicode_catalog::product_env;
 pub mod provider_registry;
 mod providers;

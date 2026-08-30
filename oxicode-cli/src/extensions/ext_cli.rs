@@ -5,7 +5,7 @@
 //! `oxicode ext update`             — update all or specific extension
 //! `oxicode ext remove user/repo`   — uninstall extension
 //!
-//! Metadata stored in `~/.oxicode/extensions/registry.json`.
+//! Metadata stored in the canonical extensions registry (`registry.json`).
 
 use crate::util::http_client::shared_http_client;
 use anyhow::{Context, Result};
@@ -34,9 +34,10 @@ pub struct ExtensionRegistry {
 }
 
 impl ExtensionRegistry {
-    /// Load registry from `~/.oxicode/extensions/registry.json`.
+    /// Load registry from the canonical extensions registry, falling back
+    /// read-only to the legacy home when the canonical file is absent.
     pub fn load() -> Result<Self> {
-        let path = Self::registry_path()?;
+        let path = Self::registry_read_path()?;
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -57,19 +58,28 @@ impl ExtensionRegistry {
         Ok(())
     }
 
-    /// Path to `~/.oxicode/extensions/registry.json`.
+    /// Canonical registry path (`<oxicode_home>/extensions/registry.json`) —
+    /// the write target. Reads should use [`Self::registry_read_path`].
     pub fn registry_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Cannot determine home directory")?;
-        Ok(home
-            .join(".oxicode")
-            .join("extensions")
-            .join("registry.json"))
+        let home = oxicode_catalog::oxi_home::oxicode_home()
+            .context("Cannot determine oxicode home directory")?;
+        Ok(home.join("extensions").join("registry.json"))
     }
 
-    /// Path to `~/.oxicode/extensions/`.
+    /// Read path for the registry: canonical when it exists, else the legacy
+    /// `~/.oxicode/extensions/registry.json` when present.
+    pub fn registry_read_path() -> Result<PathBuf> {
+        oxicode_catalog::oxi_home::read_path(Path::new("extensions/registry.json"))
+            .context("Cannot determine oxicode home directory")
+    }
+
+    /// Canonical extensions directory (`<oxicode_home>/extensions/`) — the
+    /// install/remove target. Discovery readers fall back to the legacy
+    /// directory separately.
     pub fn extensions_dir() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Cannot determine home directory")?;
-        Ok(home.join(".oxicode").join("extensions"))
+        let home = oxicode_catalog::oxi_home::oxicode_home()
+            .context("Cannot determine oxicode home directory")?;
+        Ok(home.join("extensions"))
     }
 }
 

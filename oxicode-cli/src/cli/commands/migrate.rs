@@ -25,13 +25,129 @@
 
 use std::path::PathBuf;
 
-use crate::cli::{MigrateBrainArgs, MigrationCommands};
+use crate::cli::{MigrateBrainArgs, MigrateHomeArgs, MigrationCommands};
 
 /// Top-level dispatcher. Returns the exit code.
 pub async fn handle_migrate(cmd: MigrationCommands) -> i32 {
     match cmd {
         MigrationCommands::Brain(args) => handle_migrate_brain(args).await,
+        MigrationCommands::Home(args) => handle_migrate_home(args),
     }
+}
+
+/// `oxicode migrate home` — legacy `~/.oxicode` → unified Oxi home.
+///
+/// Journaled, resumable, copy-only (see [`crate::home_migrate`]). Safe to
+/// re-run at any point; `--dry-run` prints the plan and mutates nothing.
+fn handle_migrate_home(args: MigrateHomeArgs) -> i32 {
+    use crate::home_migrate::{MigrationState, RunOutcome};
+    use oxicode_catalog::oxi_home;
+
+    println!("Oxi home layout migration");
+    println!("-------------------------");
+    println!("dry-run: {}", args.dry_run);
+
+    let Some(source) = oxi_home::legacy_home_dir() else {
+        println!("source:              <no legacy home>");
+        if std::env::var_os("OXICODE_HOME").is_some() {
+            println!(
+                "required action:     nothing to do (explicit OXICODE_HOME never merges legacy)"
+            );
+        } else {
+            println!("required action:     nothing to do");
+        }
+        return 0;
+    };
+    let Some(destination) = oxi_home::oxicode_home() else {
+        eprintln!("error: cannot resolve the canonical oxicode home");
+        return 1;
+    };
+    let Some(journal_path) = oxi_home::migration_journal_path() else {
+        eprintln!("error: cannot resolve the oxi home for the migration journal");
+        return 1;
+    };
+
+    // Preflight summary — cheap, read-only, always printed.
+    let plan = match crate::home_migrate::preflight(&source, &destination) {
+        Ok(plan) => plan,
+        Err(e) => {
+            eprintln!("error: preflight failed: {e}");
+            return 1;
+        }
+    };
+    println!("source:              {} (legacy)", source.display());
+    println!("destination:         {}", destination.display());
+    println!("journal:             {}", journal_path.display());
+    println!("files:               {}", plan.file_count);
+    println!("bytes:               {}", plan.total_bytes);
+
+    let outcome = match crate::home_migrate::run(&source, &destination, &journal_path, args.dry_run)
+    {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+
+    match outcome {
+        RunOutcome::DryRun(plan) => match plan.state {
+            MigrationState::NothingToDo => {
+                println!("state:               nothing to do");
+                println!("required action:     none");
+            }
+            MigrationState::Ready => {
+                println!(
+                    "state:               ready ({} file(s) to copy)",
+                    plan.pending.len()
+                );
+                println!("required action:     rerun without --dry-run to migrate");
+            }
+            MigrationState::AlreadyMigrated => {
+                println!("state:               already migrated (destination identical)");
+                println!("required action:     none");
+            }
+            MigrationState::Conflict { conflicts } => {
+                println!("state:               conflict");
+                for (src, dst) in &conflicts {
+                    println!("  differs:");
+                    println!("    source:      {}", src.display());
+                    println!("    destination: {}", dst.display());
+                }
+                println!(
+                    "required action:     resolve the differing files manually (nothing was touched)"
+                );
+            }
+        },
+        RunOutcome::NothingToDo => {
+            println!("state:               nothing to do");
+            println!("required action:     none");
+        }
+        RunOutcome::Conflict { conflicts } => {
+            println!("state:               conflict (nothing was touched)");
+            for (src, dst) in &conflicts {
+                println!("  differs:");
+                println!("    source:      {}", src.display());
+                println!("    destination: {}", dst.display());
+            }
+            println!("required action:     resolve the differing files manually");
+            return 1;
+        }
+        RunOutcome::AlreadyMigrated { completed_journal } => {
+            println!("state:               already migrated (destination identical)");
+            if completed_journal {
+                println!("journal:             stale in_progress entry marked complete");
+            }
+            println!("required action:     none");
+        }
+        RunOutcome::Copied { copied, skipped } => {
+            println!("copied:              {copied} file(s)");
+            println!("skipped (identical): {skipped} file(s)");
+            println!("required action:     none — legacy home left intact");
+        }
+    }
+
+    0
 }
 
 async fn handle_migrate_brain(args: MigrateBrainArgs) -> i32 {

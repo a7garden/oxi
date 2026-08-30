@@ -18,10 +18,14 @@ pub fn handle_reset(yes: bool, include_project: bool) -> Result<()> {
     use std::io::{self, Write};
 
     // ── Collect targets ──────────────────────────────────────────
+    // Canonical home (`$OXICODE_HOME`, else `$OXI_HOME/oxicode`, else
+    // `~/.oxi/oxicode`). The legacy `~/.oxicode` is only touched when the
+    // canonical home does not exist (pre-unified-layout installs).
+    let oxicode_dir = oxicode_catalog::oxi_home::oxicode_home()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine oxicode home directory"))?;
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
 
-    let oxicode_dir = home.join(".oxicode");
     let config_oxicode_dir = dirs::config_dir()
         .unwrap_or_else(|| home.join(".config"))
         .join("oxicode");
@@ -29,70 +33,16 @@ pub fn handle_reset(yes: bool, include_project: bool) -> Result<()> {
         .unwrap_or_else(|| home.join(".cache"))
         .join("oxicode");
 
-    let mut targets: Vec<ResetTarget> = vec![];
-
-    // ~/.oxicode/ — split into sub-items for clarity
-    if oxicode_dir.exists() {
-        let sub_items = [
-            ("settings.toml", "global settings"),
-            ("settings.json", "global settings (JSON)"),
-            ("auth.json", "credentials (API keys, OAuth tokens)"),
-            ("sessions", "session history"),
-            ("skills", "skills"),
-            ("extensions", "extensions"),
-            ("packages", "packages"),
-        ];
-        let mut has_sub = false;
-        for (name, desc) in &sub_items {
-            let p = oxicode_dir.join(name);
-            if p.exists() {
-                has_sub = true;
-                targets.push(ResetTarget {
-                    label: format!("~/.oxicode/{}", name),
-                    path: p,
-                    description: desc.to_string(),
-                });
-            }
-        }
-        // If no known sub-items found, target the whole directory
-        if !has_sub {
-            targets.push(ResetTarget {
-                label: "~/.oxicode".to_string(),
-                path: oxicode_dir.clone(),
-                description: "oxicode home (settings, sessions, skills, extensions, packages)"
-                    .to_string(),
-            });
-        }
-    }
-
-    // ~/.config/oxicode/ — MCP config, alternative auth location
-    if config_oxicode_dir.exists() {
-        targets.push(ResetTarget {
-            label: display_path(&config_oxicode_dir),
-            path: config_oxicode_dir,
-            description: "MCP config, credentials".to_string(),
-        });
-    }
-
-    // ~/.cache/oxicode/ — logs
-    if cache_oxicode_dir.exists() {
-        targets.push(ResetTarget {
-            label: display_path(&cache_oxicode_dir),
-            path: cache_oxicode_dir,
-            description: "logs, cache".to_string(),
-        });
-    }
-
-    // Project-local .oxicode/
     let project_oxicode = std::env::current_dir().unwrap_or_default().join(".oxicode");
-    let mut project_target: Option<ResetTarget> = None;
-    if include_project && project_oxicode.exists() {
-        project_target = Some(ResetTarget {
-            label: display_path(&project_oxicode),
-            path: project_oxicode.clone(),
-            description: "project settings".to_string(),
-        });
-    }
+    let (targets, project_target) = collect_reset_targets(
+        &oxicode_dir,
+        oxicode_catalog::oxi_home::legacy_home_dir().as_deref(),
+        oxicode_catalog::oxi_home::migration_journal_path().as_deref(),
+        &config_oxicode_dir,
+        &cache_oxicode_dir,
+        &project_oxicode,
+        include_project,
+    );
 
     let total_count = targets.len() + usize::from(project_target.is_some());
     if total_count == 0 {
@@ -200,6 +150,108 @@ pub fn handle_reset(yes: bool, include_project: bool) -> Result<()> {
     Ok(())
 }
 
+/// Pure target collection for the reset command (testable with injected
+/// paths).
+///
+/// - The canonical oxicode home is reset when it exists; the legacy
+///   `~/.oxicode` only when the canonical home is absent.
+/// - The home-layout migration journal is collected when present (it is
+///   stale once the canonical home is gone).
+/// - `config_dir`/`cache_dir` handling is unchanged (always collected when
+///   present).
+/// - The project-local `.oxicode/` is collected only with `include_project`.
+fn collect_reset_targets(
+    oxicode_dir: &Path,
+    legacy_dir: Option<&Path>,
+    journal_path: Option<&Path>,
+    config_dir: &Path,
+    cache_dir: &Path,
+    project_dir: &Path,
+    include_project: bool,
+) -> (Vec<ResetTarget>, Option<ResetTarget>) {
+    let mut targets: Vec<ResetTarget> = vec![];
+
+    // Canonical home (or legacy, when canonical is absent) — split into
+    // sub-items for clarity.
+    let home_dir_to_reset: Option<&Path> = if oxicode_dir.exists() {
+        Some(oxicode_dir)
+    } else {
+        legacy_dir
+    };
+    if let Some(reset_dir) = home_dir_to_reset {
+        let sub_items = [
+            ("settings.toml", "global settings"),
+            ("settings.json", "global settings (JSON)"),
+            ("auth.json", "credentials (API keys, OAuth tokens)"),
+            ("sessions", "session history"),
+            ("skills", "skills"),
+            ("extensions", "extensions"),
+            ("packages", "packages"),
+        ];
+        let mut has_sub = false;
+        for (name, desc) in &sub_items {
+            let p = reset_dir.join(name);
+            if p.exists() {
+                has_sub = true;
+                targets.push(ResetTarget {
+                    label: display_path(&p),
+                    path: p,
+                    description: desc.to_string(),
+                });
+            }
+        }
+        // If no known sub-items found, target the whole directory
+        if !has_sub {
+            targets.push(ResetTarget {
+                label: display_path(reset_dir),
+                path: reset_dir.to_path_buf(),
+                description: "oxicode home (settings, sessions, skills, extensions, packages)"
+                    .to_string(),
+            });
+        }
+    }
+
+    // Home-layout migration journal.
+    if let Some(journal) = journal_path
+        && journal.exists()
+    {
+        targets.push(ResetTarget {
+            label: display_path(journal),
+            path: journal.to_path_buf(),
+            description: "home-layout migration journal".to_string(),
+        });
+    }
+
+    // ~/.config/oxicode/ — MCP config, alternative auth location
+    if config_dir.exists() {
+        targets.push(ResetTarget {
+            label: display_path(config_dir),
+            path: config_dir.to_path_buf(),
+            description: "MCP config, credentials".to_string(),
+        });
+    }
+
+    // ~/.cache/oxicode/ — logs
+    if cache_dir.exists() {
+        targets.push(ResetTarget {
+            label: display_path(cache_dir),
+            path: cache_dir.to_path_buf(),
+            description: "logs, cache".to_string(),
+        });
+    }
+
+    let mut project_target: Option<ResetTarget> = None;
+    if include_project && project_dir.exists() {
+        project_target = Some(ResetTarget {
+            label: display_path(project_dir),
+            path: project_dir.to_path_buf(),
+            description: "project settings".to_string(),
+        });
+    }
+
+    (targets, project_target)
+}
+
 /// Remove a file or directory (including all contents).
 pub fn remove_path(path: &Path) -> Result<()> {
     if path.is_dir() {
@@ -280,4 +332,105 @@ pub fn walkdir_recursive(dir: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Canonical home present → legacy home is NOT targeted.
+    #[test]
+    fn canonical_home_wins_over_legacy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical-home");
+        let legacy = tmp.path().join("legacy-home");
+        let config = tmp.path().join("config");
+        let cache = tmp.path().join("cache");
+        let project = tmp.path().join("project").join(".oxicode");
+        std::fs::create_dir_all(&canonical).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(canonical.join("auth.json"), "{}").unwrap();
+        std::fs::write(legacy.join("auth.json"), "{}").unwrap();
+
+        let (targets, _) = collect_reset_targets(
+            &canonical,
+            Some(&legacy),
+            None,
+            &config,
+            &cache,
+            &project,
+            false,
+        );
+
+        let paths: Vec<&Path> = targets.iter().map(|t| t.path.as_path()).collect();
+        assert!(paths.contains(&canonical.join("auth.json").as_path()));
+        assert!(
+            !paths.iter().any(|p| p.starts_with(&legacy)),
+            "legacy home must not be reset while the canonical home exists"
+        );
+    }
+
+    /// Canonical home absent → legacy home is targeted.
+    #[test]
+    fn legacy_home_targeted_when_canonical_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical-home");
+        let legacy = tmp.path().join("legacy-home");
+        let config = tmp.path().join("config");
+        let cache = tmp.path().join("cache");
+        let project = tmp.path().join("project").join(".oxicode");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("auth.json"), "{}").unwrap();
+
+        let (targets, _) = collect_reset_targets(
+            &canonical,
+            Some(&legacy),
+            None,
+            &config,
+            &cache,
+            &project,
+            false,
+        );
+
+        let paths: Vec<&Path> = targets.iter().map(|t| t.path.as_path()).collect();
+        assert!(paths.contains(&legacy.join("auth.json").as_path()));
+        assert!(!paths.iter().any(|p| p.starts_with(&canonical)));
+    }
+
+    /// Journal is collected when present; project dir only with the flag.
+    #[test]
+    fn journal_and_project_targeting() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = tmp.path().join("canonical-home");
+        let config = tmp.path().join("config");
+        let cache = tmp.path().join("cache");
+        let project = tmp.path().join("project").join(".oxicode");
+        std::fs::create_dir_all(&canonical).unwrap();
+        let journal = tmp.path().join("oxicode.migration-journal.json");
+        std::fs::write(&journal, "{}").unwrap();
+
+        let (targets, project_target) = collect_reset_targets(
+            &canonical,
+            None,
+            Some(&journal),
+            &config,
+            &cache,
+            &project,
+            false,
+        );
+        assert!(targets.iter().any(|t| t.path == journal));
+        assert!(project_target.is_none());
+
+        std::fs::create_dir_all(&project).unwrap();
+        let (_, project_target) = collect_reset_targets(
+            &canonical,
+            None,
+            Some(&journal),
+            &config,
+            &cache,
+            &project,
+            true,
+        );
+        assert!(project_target.is_some());
+    }
 }

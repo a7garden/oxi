@@ -20,6 +20,7 @@
 pub mod bootstrap;
 pub mod cli;
 pub mod foundation;
+pub mod home_migrate;
 pub mod internal_urls;
 pub mod lsp;
 pub mod main_dispatch;
@@ -304,7 +305,7 @@ impl App {
         // Provider-name and api_key lookups removed in 0.55.0 — the SDK
         // resolver consults the wired AuthProvider port directly.
 
-        let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
+        let skills_dir = SkillManager::skills_read_dir().unwrap_or_else(|_| {
             oxicode_catalog::product_env::home_dir()
                 .unwrap_or_default()
                 .join("skills")

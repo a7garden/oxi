@@ -4,6 +4,7 @@
 //! `main.rs` dispatches the match arm to the appropriate function here.
 
 pub mod config;
+pub mod doctor;
 pub mod export;
 pub mod ext;
 pub mod issue;
@@ -13,8 +14,8 @@ pub mod pkg;
 pub mod reset;
 pub mod sessions;
 pub mod setup;
-
 pub use config::*;
+pub use doctor::*;
 pub use export::*;
 pub use ext::*;
 pub use issue::*;
