@@ -66,10 +66,19 @@ pub fn revive_plan(report: &BrainControlReport) -> ReviveAction {
     }
 }
 
-/// Locate the `oxibrain` binary: `~/.cargo/bin` first (cargo-installed),
-/// then `PATH`.
+/// Locate the `oxibrain` binary: the ecosystem-standard managed install
+/// (`~/.oxi/oxibrain/bin/oxibrain`) first, then `~/.cargo/bin`
+/// (cargo-installed), then `PATH`.
 pub fn find_oxibrain_binary() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("HOME") {
+        let mut managed = PathBuf::from(&home);
+        managed.push(".oxi");
+        managed.push("oxibrain");
+        managed.push("bin");
+        managed.push("oxibrain");
+        if managed.is_file() {
+            return Some(managed);
+        }
         let mut p = PathBuf::from(home);
         p.push(".cargo");
         p.push("bin");
@@ -141,8 +150,9 @@ pub async fn revive() -> Result<String, String> {
     let plan = revive_plan(&report);
     match plan {
         ReviveAction::InstallNeeded => Err(
-            "oxibrain binary not found — install it first (e.g. `cargo install oxibrain` \
-             from the oxibrain repo), then run /brain again"
+            "oxibrain binary not found — install it first (`oxios brain install`, \
+             or `cargo install oxibrain-cli`; managed location \
+             ~/.oxi/oxibrain/bin/oxibrain), then run /brain again"
                 .to_string(),
         ),
         ReviveAction::BootstrapPlist(plist) => {
