@@ -24,7 +24,8 @@ path = "src/lib.rs"
 oxicode-ai = { version = "0.79.0", path = "../oxicode-ai" }
 oxicode-catalog = { version = "0.79.0", path = "../oxicode-catalog" }
 oxicode-agent = { version = "0.79.0", path = "../oxicode-agent" }
-oxicode-sdk = { version = "0.79.0", path = "../oxicode-sdk", features = ["router", "role-routing", "role-switching", "url-resolver"] }
+oxicode-sdk = { version = "0.79.0", path = "../oxicode-sdk", features = ["router", "role-routing", "role-switching", "url-resolver", "behavior"] }
+oxicode-hashline = { version = "0.79.0", path = "../oxicode-hashline" }
 oxicode-vtui = { version = "0.79.0", path = "../oxicode-vtui" }
 oxicode-vtui-compat = { version = "0.79.0", path = "../oxicode-vtui-compat" }
 oxicode-textarea = { version = "0.79.0", path = "../oxicode-textarea" }

@@ -17,14 +17,15 @@
 
 // ─── Root-level entry modules ───────────────────────────────────────────────
 // cli must be pub for main.rs binary
+pub mod behavior;
 pub mod bootstrap;
 pub mod cli;
 pub mod foundation;
 pub mod home_migrate;
-pub mod managed_install;
 pub mod internal_urls;
 pub mod lsp;
 pub mod main_dispatch;
+pub mod managed_install;
 pub mod mcp_credentials;
 pub mod oauth_listener;
 pub mod oauth_refresh;
@@ -227,6 +228,9 @@ pub struct App {
     /// the runtime and the agent's session-level closures share the SAME
     /// state (see [`SessionState`] doc).
     session_state: SessionState,
+    /// Behavior-pack composition (manifest + requested config patch) when
+    /// the `coding-omp-v1` pack installed successfully.
+    behavior: Option<crate::behavior::BehaviorComposition>,
 }
 // ─── System prompt builder ───────────────────────────────────────────────────
 fn build_system_prompt(
@@ -283,6 +287,7 @@ impl App {
         settings: Settings,
         ownership_session_id: String,
         session_state: Option<SessionState>,
+        behavior: Option<crate::behavior::BehaviorComposition>,
     ) -> Result<Self> {
         let session_state = session_state.unwrap_or_default();
         // Resolve the default persona once from the wired
@@ -318,6 +323,25 @@ impl App {
 
         let body_str = persona.as_ref().map(|p| p.system_prompt.clone());
         let system_prompt = build_system_prompt(settings.thinking_level, &[], body_str.as_deref());
+        // coding-omp-v1 prompt layers prepend to the composed system prompt.
+        let system_prompt = behavior
+            .as_ref()
+            .map(|b| {
+                let base = system_prompt.as_str();
+                let layers = b
+                    .patch
+                    .prompt_layers
+                    .iter()
+                    .map(|l| l.body.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                if layers.is_empty() {
+                    base.to_string()
+                } else {
+                    format!("{layers}\n\n{base}")
+                }
+            })
+            .unwrap_or(system_prompt);
         let compaction_strategy = if settings.auto_compaction {
             oxicode_sdk::CompactionStrategy::Threshold(0.8)
         } else {
@@ -329,6 +353,9 @@ impl App {
             description: Some("oxicode CLI agent".to_string()),
             model_id: model_id.clone(),
             system_prompt: Some(system_prompt),
+            snapshot_store: behavior
+                .as_ref()
+                .and_then(|b| b.patch.snapshot_store.clone()),
             timeout_seconds: settings.tool_timeout_seconds,
             temperature: settings.effective_temperature(),
             max_tokens: settings.effective_max_tokens(),
@@ -457,6 +484,7 @@ impl App {
             liveness_guard: None, // set below once issue_store is known
             persona_body: RwLock::new(persona.as_ref().map(|p| p.system_prompt.clone())),
             session_state,
+            behavior,
         })
         .map(|mut app| {
             // Acquire the process-wide liveness flock now that issue_store exists.

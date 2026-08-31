@@ -5675,6 +5675,7 @@ dependencies = [
  "oxicode-agent",
  "oxicode-ai",
  "oxicode-catalog",
+ "oxicode-hashline",
  "oxicode-lsp",
  "oxicode-sdk",
  "oxicode-textarea",

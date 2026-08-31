@@ -92,7 +92,9 @@ pub async fn handle_update(check: bool) -> Result<()> {
                 "✅ oxicode converged into the managed layout at {} (cargo bin repointed).",
                 launcher.display(),
             ),
-            Ok(None) => println!("✅ oxicode updated successfully. Restart to use the new version."),
+            Ok(None) => {
+                println!("✅ oxicode updated successfully. Restart to use the new version.")
+            }
             Err(e) => println!(
                 "warning: oxicode updated but adopt into the managed layout failed: {e} \
                  (the cargo-installed binary still works at its previous location)"
@@ -119,7 +121,11 @@ fn report_layout_status() {
     let launcher = managed_install::launcher_path(&home);
     if launcher.is_file() {
         let target = std::fs::read_link(&launcher).unwrap_or_default();
-        println!("managed layout: {} → {}", launcher.display(), target.display());
+        println!(
+            "managed layout: {} → {}",
+            launcher.display(),
+            target.display()
+        );
         let versions = managed_install::versions_dir(&home);
         if let Ok(entries) = std::fs::read_dir(&versions) {
             let mut names: Vec<String> = entries
@@ -128,14 +134,28 @@ fn report_layout_status() {
                 .filter(|n: &String| managed_install::parse_version_dir(n).is_some())
                 .collect();
             names.sort();
-            println!("versions:       {}", if names.is_empty() { "(none)".into() } else { names.join(", ") });
+            println!(
+                "versions:       {}",
+                if names.is_empty() {
+                    "(none)".into()
+                } else {
+                    names.join(", ")
+                }
+            );
         }
     } else {
         println!("managed layout: (no launcher at {})", launcher.display());
     }
     let shadows = shadow_roots();
     if !shadows.is_empty() {
-        println!("shadowed by:    {}", shadows.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+        println!(
+            "shadowed by:    {}",
+            shadows
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
 }
 
@@ -145,7 +165,9 @@ async fn adopt_into_managed_layout() -> Result<Option<PathBuf>> {
         return Ok(None);
     };
     let cargo_bin = managed_install::cargo_oxicode_bin();
-    let Some(cargo_bin) = cargo_bin else { return Ok(None) };
+    let Some(cargo_bin) = cargo_bin else {
+        return Ok(None);
+    };
     if !cargo_bin.is_file() {
         return Ok(None);
     }
@@ -159,7 +181,7 @@ async fn adopt_into_managed_layout() -> Result<Option<PathBuf>> {
         move || managed_install::adopt_binary(&home, &cargo_bin, &version, Some(&relink))
     })
     .await
- .context("managed layout adopt task panicked")??;
+    .context("managed layout adopt task panicked")??;
     Ok(Some(launcher))
 }
 
@@ -170,8 +192,7 @@ fn shadow_roots() -> Vec<PathBuf> {
     use crate::managed_install;
     let mut out = Vec::new();
     let winner = managed_install::launcher_path(
-        &oxicode_catalog::oxi_home::oxicode_home()
-            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        &oxicode_catalog::oxi_home::oxicode_home().unwrap_or_else(|| std::path::PathBuf::from(".")),
     );
     let mut seen = Vec::new();
     let push = |path: PathBuf, seen: &mut Vec<PathBuf>, out: &mut Vec<PathBuf>| {

@@ -10,7 +10,6 @@ use crate::cli::CliArgs;
 use crate::print_mode;
 use crate::store::settings::Settings;
 use anyhow::Result;
-use std::path::PathBuf;
 use tracing;
 
 /// Build a wired `App` from CLI args. All the wiring that used to be
@@ -196,9 +195,43 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // on this state living across both ends.
     let session_state = crate::SessionState::default();
 
-    let mut app =
-        crate::App::from_oxicode(oxicode, settings, ownership_session_id, Some(session_state))
-            .await?;
+    // Register built-in tools + the coding-omp-v1 behavior pack on the
+    // engine's SHARED tool registry BEFORE App/Agent construction so the
+    // pack's AgentConfig patch (snapshot store, prompt layers) applies
+    // when the AgentConfig is built.
+    let tools = oxicode.tools();
+    let cwd = cwd_now.clone();
+    let behavior = register_builtin_tools(
+        &tools,
+        &cwd,
+        args,
+        &settings.disabled_tools,
+        &settings.model_roles,
+    );
+    if let Some(b) = &behavior {
+        tracing::info!(
+            packs = %b
+                .manifest
+                .packs
+                .iter()
+                .map(|p| p.0.as_str())
+                .collect::<Vec<_>>()
+                .join("+"),
+            tools = b.manifest.tools.len(),
+            degraded = b.manifest.degraded.len(),
+            level = ?b.manifest.compatibility_level(),
+            "behavior pack installed"
+        );
+    }
+
+    let mut app = crate::App::from_oxicode(
+        oxicode,
+        settings,
+        ownership_session_id,
+        Some(session_state),
+        behavior,
+    )
+    .await?;
 
     // Fire-and-forget OAuth refresh: if the active provider has a stored
     // OAuth credential that is expired (or within 60 s of expiry), ask the
@@ -244,17 +277,6 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
             }
         }
     }
-
-    // Register built-in tools on the agent's tool registry.
-    let tools = app.agent_tools();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    register_builtin_tools(
-        &tools,
-        &cwd,
-        args,
-        &app.settings().disabled_tools,
-        &app.settings().model_roles,
-    );
 
     // Native headless browser (opt-in via the `native-browser` cargo feature).
     // Constructs the pure-Rust `oxibrowser-core` engine and registers the
@@ -526,7 +548,7 @@ fn register_builtin_tools(
     args: &CliArgs,
     disabled_tools: &[String],
     model_roles: &std::collections::HashMap<String, String>,
-) {
+) -> Option<crate::behavior::BehaviorComposition> {
     let builtin_registry = if let Some(ref tools_str) = args.tools {
         let names: Vec<&str> = tools_str.split(',').map(|s| s.trim()).collect();
         oxicode_agent::ToolRegistry::with_selected_tools(cwd.to_path_buf(), &names)
@@ -556,6 +578,16 @@ fn register_builtin_tools(
         tools.register_arc(commit);
         tracing::debug!("CommitTool upgraded to commit-role model");
     }
+
+    // coding-omp-v1 behavior pack: canonical coding tools installed through
+    // the SDK's host installer interception point, overwriting the legacy
+    // instances of the same names. The returned manifest + config patch feed
+    // App::from_oxicode (snapshot store, prompt layers) and /info surfacing.
+    let allow: Option<Vec<String>> = args
+        .tools
+        .as_deref()
+        .map(|s| s.split(',').map(|t| t.trim().to_string()).collect());
+    crate::behavior::install_coding_omp_v1(tools, cwd, allow.as_deref(), disabled_tools)
 }
 
 /// Discover and load WASM extensions, registering their tools.

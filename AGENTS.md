@@ -374,6 +374,25 @@ Extension system (`src/extensions/types.rs`):
 4. Register in `ToolRegistry::with_builtins_cwd()`.
 5. Mark `essential()` as `true` if it cannot be disabled.
 
+
+### Behavior Packs (`coding-omp-v1`)
+
+The canonical coding composition is the `coding-omp-v1` behavior pack
+(`oxicode-sdk/src/behavior/packs/coding_omp_v1.rs`, feature `behavior`).
+The CLI installs it through the SDK's host installer interception point
+(`oxicode-cli/src/behavior.rs`) before App/Agent construction.
+
+- `ToolRegistry::with_builtins_cwd` remains a low-level convenience; it is
+  NOT a `coding-omp-v1` behavior guarantee and must not be described as one.
+- Do not hardcode the pack's tool list outside `behavior/packs/` — the
+  descriptor table there is the single source of truth.
+- Tool changes that alter coding semantics require a descriptor id bump
+  (e.g. `edit.hashline.v1` → `edit.hashline.v2`) plus a ledger review; a
+  replacement must declare `replaces` and schema compatibility.
+- The compatibility ledger (`omp@v18.0.11` target) may only advance from
+  `Partial`/`Unavailable` to `Equivalent` when the named fixture scenario
+  in `oxicode-sdk/tests/behavior/` passes. Hosts can render ledger statuses
+  but never upgrade them.
 ### Adding a New Port Implementation
 
 1. Implement the port trait from `oxicode_sdk::ports::*`.

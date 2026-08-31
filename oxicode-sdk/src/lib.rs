@@ -34,10 +34,12 @@ use oxicode_api_stability::{internal as oxicode_internal, stable as oxicode_stab
 // default (no-feature) build none survive, so the import is conditionally unused.
 #[allow(unused_imports)]
 use oxicode_api_stability::unstable as oxicode_unstable;
-
 pub mod agent_builder;
 pub mod agent_definition;
 pub mod agent_group;
+/// Behavior packs — portable, versioned coding-behavior contracts.
+#[cfg(feature = "behavior")]
+pub mod behavior;
 pub mod bridge;
 pub mod builder;
 pub mod closure_tool;
@@ -65,7 +67,6 @@ pub mod snapcompact_compactor;
 pub mod tool_factory;
 pub mod url_resolver;
 pub mod workflow_dsl;
-pub mod workflow_engine;
 
 // Re-export core SDK types
 #[oxicode_stable(since = "0.63.0")]
@@ -83,6 +84,15 @@ pub use url_resolver::SdkUrlResolver;
 #[cfg(feature = "workflow-dsl")]
 #[oxicode_unstable(feature = "workflow-dsl")]
 pub use workflow_engine::{StepOutput, WorkflowEngine, WorkflowResult};
+// Behavior packs (feature `behavior`).
+#[cfg(feature = "behavior")]
+#[oxicode_unstable(feature = "behavior")]
+pub use behavior::{
+    BehaviorInstallError, BehaviorPack, BehaviorPackId, BehaviorToolDescriptor, CapabilityClass,
+    CompatibilityContract, ExtensionKind, ExtensionScope, FeatureStatus, LedgerEntry,
+    PortRequirement, PortRequirementKind, PromptLayerSpec, RuntimeExtensionSpec, SideEffectClass,
+    ToolFactory, ToolImplementationId, ToolStateScope,
+};
 
 // Re-export port types — products implement these traits.
 // Note: Some names conflict with existing modules (e.g. `EventBus` is also a

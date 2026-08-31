@@ -5,6 +5,48 @@ All notable changes to the oxicode project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Behavior packs: `oxicode_sdk::behavior` (feature `behavior`).** A
+  behavior pack is a declarative, versioned contract — tool descriptors
+  (implementation id + model-visible name + advisory capability/side-effect
+  classes + port requirements + state scope), runtime extension specs with
+  declared lifetimes, prompt layers, and a machine-readable compatibility
+  ledger — installed through a host-controlled `BehaviorToolInstaller`
+  interception point. `BehaviorPackResolver` resolves packs
+  deterministically (explicit `replaces` overlays; duplicate model-visible
+  names rejected). Installs produce an `InstalledBehaviorManifest` with
+  structured degradation records and an honest compatibility rollup,
+  distinct from the lifecycle `ToolManifest`. Design:
+  `docs/designs/2026-08-31-omp-compatible-behavior-pack-design.md`.
+- **`coding-omp-v1` reference pack.** 16 canonical coding tools
+  (read/write/edit/bash/grep/find/ls/ast_grep/ast_edit/web_search/
+  get_search_results/todo/subagent/lsp/eval/debug), seven declared
+  extensions (HashlineState required; LSP/Shell/Eval/Debug/TTSR/
+  Delegation optional), a coding-discipline prompt layer, and a ledger
+  pinned to `omp@v18.0.11`: read/write/search + hashline anchors
+  Equivalent (fixture-evidenced); LSP/TTSR/delegation Partial;
+  persistent shell/eval/DAP Unavailable (legacy per-call bash, stateless
+  eval, and scaffold debug still ship as the pack tools; the
+  `ShellSession`/`EvalKernel`/`DebugService` contracts are declared in
+  `oxicode-agent/src/runtime/` with no implementations yet).
+- **CLI consumes `coding-omp-v1`.** The engine's shared tool registry is
+  composed before App/Agent construction: legacy builtins register first,
+  then the pack installer overwrites the same names with pack-built
+  equivalents and applies the patch (session-local hashline snapshot
+  store — newly wired for the CLI — plus the prompt layer). `--tools` and
+  `disabled_tools` surface as structured `DisabledByHost` degradations.
+  Startup logs `behavior pack installed` with tool/degradation counts and
+  the compatibility level.
+- **Behavior fixtures (CI).** Deterministic scenarios in
+  `oxicode-sdk/tests/behavior/`: stale-anchor recovery,
+  honest-degradation report, duplicate/overlay replacement end-to-end,
+  host-denial bypass-proof, child-agent runner contract, LSP mock
+  actions, TTSR patch + rule matching. No network, paid model, TUI, or
+  OMP binary required.
+
 ## [0.79.0] — 2026-08-30
 
 ### Added

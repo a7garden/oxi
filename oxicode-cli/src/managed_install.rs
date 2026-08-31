@@ -42,7 +42,9 @@ pub fn parse_version_dir(name: &str) -> Option<(u64, u64, u64)> {
 /// (`oxicode 0.79.0`, `oxicode 0.79.0 (commit…)`).
 pub fn version_from_version_output(text: &str) -> Option<String> {
     let raw = text.trim().trim_start_matches('v');
-    let token = raw.split_whitespace().find(|s| parse_version_dir(s).is_some())?;
+    let token = raw
+        .split_whitespace()
+        .find(|s| parse_version_dir(s).is_some())?;
     Some(token.to_string())
 }
 
@@ -77,9 +79,8 @@ pub fn adopt_binary(
                 .with_context(|| format!("copy {} → {}", binary.display(), target.display()))?;
             let _ = std::fs::remove_file(binary);
         } else {
-            return Err(e).with_context(|| {
-                format!("move {} → {}", binary.display(), target.display())
-            });
+            return Err(e)
+                .with_context(|| format!("move {} → {}", binary.display(), target.display()));
         }
     }
     #[cfg(unix)]
@@ -114,9 +115,8 @@ pub(crate) fn flip_launcher(launcher: &Path, version: &str) -> Result<()> {
     let _ = std::fs::remove_file(&tmp_link);
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(&target, &tmp_link).with_context(|| {
-            format!("symlink {} → {}", tmp_link.display(), target.display())
-        })?;
+        std::os::unix::fs::symlink(&target, &tmp_link)
+            .with_context(|| format!("symlink {} → {}", tmp_link.display(), target.display()))?;
     }
     #[cfg(not(unix))]
     {
@@ -147,7 +147,9 @@ pub(crate) fn repoint(path: &Path, launcher: &Path) -> Result<()> {
         // Already pointing at the launcher (by basename — `~/.cargo/bin/oxicode`
         // lives in a different directory than `<home>/bin/oxicode`, so we
         // match on file name) or at the same target the launcher itself
-        if launcher.file_name().is_some_and(|name| std::path::Path::new(name) == target.as_path())
+        if launcher
+            .file_name()
+            .is_some_and(|name| std::path::Path::new(name) == target.as_path())
         {
             return Ok(());
         }
@@ -157,12 +159,9 @@ pub(crate) fn repoint(path: &Path, launcher: &Path) -> Result<()> {
     let _ = std::fs::remove_file(&tmp);
     #[cfg(unix)]
     {
-        let launcher_name = launcher
-            .file_name()
-            .context("launcher has no file name")?;
-        std::os::unix::fs::symlink(launcher_name, &tmp).with_context(|| {
-            format!("symlink {} → {}", tmp.display(), launcher_name.display())
-        })?;
+        let launcher_name = launcher.file_name().context("launcher has no file name")?;
+        std::os::unix::fs::symlink(launcher_name, &tmp)
+            .with_context(|| format!("symlink {} → {}", tmp.display(), launcher_name.display()))?;
     }
     #[cfg(not(unix))]
     {
@@ -174,21 +173,16 @@ pub(crate) fn repoint(path: &Path, launcher: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn prune_versions(
-    home: &Path,
-    current: &str,
-    keep: usize,
-) -> Result<Vec<String>> {
+pub(crate) fn prune_versions(home: &Path, current: &str, keep: usize) -> Result<Vec<String>> {
     let versions = versions_dir(home);
     let mut installed: Vec<((u64, u64, u64), String)> = Vec::new();
     if !versions.exists() {
         return Ok(vec![]);
     }
-    for entry in std::fs::read_dir(&versions)
-        .with_context(|| format!("read_dir {}", versions.display()))?
+    for entry in
+        std::fs::read_dir(&versions).with_context(|| format!("read_dir {}", versions.display()))?
     {
-        let entry =
-            entry.with_context(|| format!("read_dir entry in {}", versions.display()))?;
+        let entry = entry.with_context(|| format!("read_dir entry in {}", versions.display()))?;
         if !entry.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }

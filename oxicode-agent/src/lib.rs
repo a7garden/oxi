@@ -57,6 +57,8 @@ pub mod mcp;
 pub mod model_id;
 /// Fault-recovery primitives (circuit breaker, fallback chains).
 pub mod recovery;
+/// Shared stateful coding runtime contracts (persistent shell / eval kernel / debug service).
+pub mod runtime;
 /// Agent state machine and shared mutable state.
 pub mod state;
 /// Shared streaming retry logic.
@@ -148,6 +150,8 @@ pub use issues::{
 };
 #[oxicode_stable(since = "0.77.0")]
 pub use tools::issue::{IssueTool, cas_retry, format_issue_full, format_issue_line};
+
+pub use runtime::{DebugService, EvalKernel, EvalLanguage, EvalOutput, ShellOutput, ShellSession};
 
 #[oxicode_unstable(feature = "agent-pool")]
 pub use tools::{AgentHubStatus, AgentInfo, AgentKind, AgentPoolProvider};

@@ -72,6 +72,7 @@ unstable = [
     "subagent",
     "agent-hub",
     "lsp",
+    "behavior",
 ]
 circuit-breaker = []
 mcp-spawn-validator = []
@@ -87,6 +88,7 @@ memory = []
 subagent = []
 agent-hub = []
 lsp = []
+behavior = []
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
