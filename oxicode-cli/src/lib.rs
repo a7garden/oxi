@@ -21,6 +21,7 @@ pub mod bootstrap;
 pub mod cli;
 pub mod foundation;
 pub mod home_migrate;
+pub mod managed_install;
 pub mod internal_urls;
 pub mod lsp;
 pub mod main_dispatch;

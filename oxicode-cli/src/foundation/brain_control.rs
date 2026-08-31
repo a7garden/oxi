@@ -69,32 +69,69 @@ pub fn revive_plan(report: &BrainControlReport) -> ReviveAction {
 /// Locate the `oxibrain` binary: the ecosystem-standard managed install
 /// (`~/.oxi/oxibrain/bin/oxibrain`) first, then `~/.cargo/bin`
 /// (cargo-installed), then `PATH`.
+///
+/// If the binary resolves at the managed location *and* shows up in a
+/// cargo bin or PATH entry as well, [`warn_shadowed_roots`] logs the
+/// shadowed path names once per process so the operator can clean them
+/// up (`cargo uninstall oxibrain-cli`, or `rm <path>`).
 pub fn find_oxibrain_binary() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut managed = PathBuf::from(&home);
+    use std::path::PathBuf;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(h) = &home {
+        let mut managed = h.clone();
         managed.push(".oxi");
         managed.push("oxibrain");
         managed.push("bin");
         managed.push("oxibrain");
-        if managed.is_file() {
-            return Some(managed);
-        }
-        let mut p = PathBuf::from(home);
+        candidates.push(managed);
+        let mut p = h.clone();
         p.push(".cargo");
         p.push("bin");
         p.push("oxibrain");
-        if p.is_file() {
-            return Some(p);
+        candidates.push(p);
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            candidates.push(dir.join("oxibrain"));
         }
     }
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join("oxibrain");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
+    let hits: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|c| c.is_file())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let winner = hits.first().cloned()?;
+    Some(winner)
+}
+
+/// Log a once-per-process warning naming the additional `oxibrain`
+/// binaries that resolved in recognized roots after the first hit.
+fn warn_shadowed_roots(winner: &std::path::Path, hits: &[std::path::PathBuf]) {
+    use std::sync::Once;
+    static WARNED: Once = Once::new();
+    let others: Vec<&std::path::Path> = hits
+        .iter()
+        .skip(1)
+        .map(|p| p.as_path())
+        .filter(|p| *p != winner)
+        .collect();
+    if others.is_empty() {
+        return;
     }
-    None
+    WARNED.call_once(|| {
+        let names = others
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        tracing::warn!(
+            winner = %winner.display(),
+            shadows = %names,
+            "oxibrain resolved at the managed launcher; shadowed copies exist — consider `cargo uninstall oxibrain-cli` or `rm <path>` to converge"
+        );
+    });
 }
 
 /// Whether the launchd service is loaded (macOS). Non-macOS: false.

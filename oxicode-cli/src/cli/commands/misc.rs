@@ -3,6 +3,7 @@
 
 use crate::store::settings::Settings;
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Handle `oxicode completions <bash|zsh|fish>` — print shell completion script.
@@ -50,7 +51,15 @@ pub async fn handle_install(source: &str) -> Result<()> {
     Ok(())
 }
 
-/// Handle `oxicode update [--check]` — check for and install updates.
+/// Handle `oxicode update [--check]` — refresh the binary and converge it
+/// into the ecosystem-standard managed layout
+/// (`~/.oxi/oxicode/{bin,versions}`).
+///
+/// The fetch channel is `cargo install oxicode-cli --force` — crates.io and
+/// `binstall` already sign and pre-build the binary. Once the new
+/// binary is in place, [`managed_install::adopt_binary`] moves it under
+/// `~/.oxi/oxicode/versions/<v>/`, flips the launcher, repoints the
+/// cargo bin copy at the launcher, and prunes older versions (keep 2).
 pub async fn handle_update(check: bool) -> Result<()> {
     #[cfg(feature = "self-update")]
     {
@@ -60,11 +69,12 @@ pub async fn handle_update(check: bool) -> Result<()> {
         println!("Current version: v{current}");
 
         if check {
+            report_layout_status();
             return Ok(());
         }
 
-        // Use cargo install via `cargo install oxicode-cli --force`
-        println!("Updating oxicode...");
+        // 1. Fetch through the supported distribution channel.
+        println!("Updating oxicode via `cargo install oxicode-cli --force`...");
         let status = tokio::process::Command::new("cargo")
             .args(["install", "oxicode-cli", "--force"])
             .stdout(std::process::Stdio::inherit())
@@ -73,10 +83,21 @@ pub async fn handle_update(check: bool) -> Result<()> {
             .await?;
 
         if !status.success() {
-            anyhow::bail!("Update failed: cargo install exited with {status}");
+            anyhow::bail!("Update failed: cargo install exited {status}");
         }
 
-        println!("✅ oxicode updated successfully. Restart to use the new version.");
+        // 2. Adopt the freshly-installed binary into the managed layout.
+        match adopt_into_managed_layout().await {
+            Ok(Some(launcher)) => println!(
+                "✅ oxicode converged into the managed layout at {} (cargo bin repointed).",
+                launcher.display(),
+            ),
+            Ok(None) => println!("✅ oxicode updated successfully. Restart to use the new version."),
+            Err(e) => println!(
+                "warning: oxicode updated but adopt into the managed layout failed: {e} \
+                 (the cargo-installed binary still works at its previous location)"
+            ),
+        }
         Ok(())
     }
 
@@ -85,6 +106,93 @@ pub async fn handle_update(check: bool) -> Result<()> {
         let _ = check;
         anyhow::bail!("Self-update is not available (compiled without `self-update` feature)");
     }
+}
+
+/// Print the current managed-layout status: launcher, current version,
+/// known shadow roots. Used by `oxicode update --check`.
+fn report_layout_status() {
+    use crate::managed_install;
+    let Some(home) = oxicode_catalog::oxi_home::oxicode_home() else {
+        println!("managed layout: (no resolvable Oxi home — set $OXI_HOME or $OXICODE_HOME)");
+        return;
+    };
+    let launcher = managed_install::launcher_path(&home);
+    if launcher.is_file() {
+        let target = std::fs::read_link(&launcher).unwrap_or_default();
+        println!("managed layout: {} → {}", launcher.display(), target.display());
+        let versions = managed_install::versions_dir(&home);
+        if let Ok(entries) = std::fs::read_dir(&versions) {
+            let mut names: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_string_lossy().into_owned().into())
+                .filter(|n: &String| managed_install::parse_version_dir(n).is_some())
+                .collect();
+            names.sort();
+            println!("versions:       {}", if names.is_empty() { "(none)".into() } else { names.join(", ") });
+        }
+    } else {
+        println!("managed layout: (no launcher at {})", launcher.display());
+    }
+    let shadows = shadow_roots();
+    if !shadows.is_empty() {
+        println!("shadowed by:    {}", shadows.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+    }
+}
+
+async fn adopt_into_managed_layout() -> Result<Option<PathBuf>> {
+    use crate::managed_install;
+    let Some(home) = oxicode_catalog::oxi_home::oxicode_home() else {
+        return Ok(None);
+    };
+    let cargo_bin = managed_install::cargo_oxicode_bin();
+    let Some(cargo_bin) = cargo_bin else { return Ok(None) };
+    if !cargo_bin.is_file() {
+        return Ok(None);
+    }
+    let Some(version) = managed_install::version_of(&cargo_bin) else {
+        return Ok(None);
+    };
+    let launcher = tokio::task::spawn_blocking({
+        let home = home.clone();
+        let cargo_bin = cargo_bin.clone();
+        let relink = cargo_bin.clone();
+        move || managed_install::adopt_binary(&home, &cargo_bin, &version, Some(&relink))
+    })
+    .await
+ .context("managed layout adopt task panicked")??;
+    Ok(Some(launcher))
+}
+
+/// Other recognized `oxicode` locations (cargo bin, alternate PATH
+/// entries, legacy `~/.oxicode` if it held a binary) — for shadow
+/// diagnostics. Excludes the managed launcher.
+fn shadow_roots() -> Vec<PathBuf> {
+    use crate::managed_install;
+    let mut out = Vec::new();
+    let winner = managed_install::launcher_path(
+        &oxicode_catalog::oxi_home::oxicode_home()
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    );
+    let mut seen = Vec::new();
+    let push = |path: PathBuf, seen: &mut Vec<PathBuf>, out: &mut Vec<PathBuf>| {
+        if path == winner || !path.is_file() || seen.contains(&path) {
+            return;
+        }
+        seen.push(path.clone());
+        out.push(path);
+    };
+    if let Some(cargo_bin) = managed_install::cargo_oxicode_bin() {
+        push(cargo_bin, &mut seen, &mut out);
+    }
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            push(dir.join("oxicode"), &mut seen, &mut out);
+        }
+    }
+    if let Some(legacy) = oxicode_catalog::oxi_home::legacy_home_dir() {
+        push(legacy.join("bin/oxicode"), &mut seen, &mut out);
+    }
+    out
 }
 
 /// Handle `oxicode commit [--push] [--dry-run] [-c <context>]`.
