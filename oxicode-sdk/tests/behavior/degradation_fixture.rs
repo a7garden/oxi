@@ -55,12 +55,12 @@ fn degradation_report_is_honest() {
     expected_degraded.sort_unstable();
     assert_eq!(degraded, expected_degraded);
 
-    // Ledger: 9 entries, worst status Unavailable — never advertised as
-    // fully OMP-equivalent while Unavailable rows remain.
+    // Ledger: 9 entries, worst status Partial — never advertised as fully
+    // OMP-equivalent while Partial rows remain.
     assert_eq!(manifest.compatibility.entries.len(), 9);
     assert_eq!(
         manifest.compatibility_level(),
-        oxicode_sdk::behavior::FeatureStatus::Unavailable
+        oxicode_sdk::behavior::FeatureStatus::Partial
     );
     for entry in manifest
         .compatibility

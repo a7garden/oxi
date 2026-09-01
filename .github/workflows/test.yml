@@ -40,6 +40,8 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: cargo nextest run --workspace --profile ci
+      - name: Run behavior pack tests
+        run: cargo nextest run -p oxicode-sdk --features behavior --profile ci
 
   test-doc:
     name: Doc Tests

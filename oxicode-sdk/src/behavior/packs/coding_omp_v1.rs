@@ -92,24 +92,30 @@ fn ledger() -> CompatibilityContract {
             ),
             entry(
                 "persistent-shell",
-                FeatureStatus::Unavailable,
-                &[],
-                "Pack bash tool is the legacy per-invocation implementation. ShellSession \
-                 contract declared; no persistent implementation.",
+                FeatureStatus::Partial,
+                &["behavior::persistent_shell_session_contract"],
+                "PersistentShellSession (persistent bash, marker protocol, group-SIGINT \
+                 cancel via trap, bounded output, reset) is implemented and \
+                 contract-tested; the exposed bash tool still runs legacy per-invocation \
+                 semantics — routing pending.",
             ),
             entry(
                 "persistent-eval",
-                FeatureStatus::Unavailable,
-                &[],
-                "Pack eval tool runs a fresh process per call. EvalKernel contract declared; \
-                 no persistent implementation.",
+                FeatureStatus::Partial,
+                &["behavior::persistent_eval_kernel_contract"],
+                "Python/JavaScript persistent kernels (state continuity across cells, \
+                 error capture, explicit reset) are implemented and contract-tested; the \
+                 exposed eval tool still spawns a fresh process per call — routing \
+                 pending.",
             ),
             entry(
                 "dap-debugging",
-                FeatureStatus::Unavailable,
-                &[],
-                "Pack debug tool is a validated scaffold. DebugService contract declared; no \
-                 DAP host.",
+                FeatureStatus::Partial,
+                &["behavior::dap_service_protocol_scenario"],
+                "DapDebugService drives a real DAP lifecycle (initialize, launch, stopped \
+                 observability, breakpoints/stack/variables, continue, terminate) against \
+                 a scripted python3 adapter; the exposed debug tool remains a validated \
+                 scaffold and the real-adapter matrix is untested — routing pending.",
             ),
             entry(
                 "ttsr",
@@ -480,11 +486,11 @@ mod tests {
         assert_eq!(status("lsp"), FeatureStatus::Partial);
         assert_eq!(status("ttsr"), FeatureStatus::Partial);
         assert_eq!(status("delegation"), FeatureStatus::Partial);
-        assert_eq!(status("persistent-shell"), FeatureStatus::Unavailable);
-        assert_eq!(status("persistent-eval"), FeatureStatus::Unavailable);
-        assert_eq!(status("dap-debugging"), FeatureStatus::Unavailable);
+        assert_eq!(status("persistent-shell"), FeatureStatus::Partial);
+        assert_eq!(status("persistent-eval"), FeatureStatus::Partial);
+        assert_eq!(status("dap-debugging"), FeatureStatus::Partial);
         assert_eq!(status("host-product-tools"), FeatureStatus::NotApplicable);
-        assert_eq!(l.rollup(), FeatureStatus::Unavailable);
+        assert_eq!(l.rollup(), FeatureStatus::Partial);
         for e in l
             .entries
             .iter()
@@ -533,7 +539,7 @@ mod tests {
             manifest.prompt_layers,
             vec![DISCIPLINE_LAYER_ID.to_string()]
         );
-        assert_eq!(manifest.compatibility_level(), FeatureStatus::Unavailable);
+        assert_eq!(manifest.compatibility_level(), FeatureStatus::Partial);
     }
 
     #[test]

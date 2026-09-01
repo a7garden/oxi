@@ -1,11 +1,19 @@
-//! Shared stateful coding runtime contracts.
-//!
-//! These traits declare the persistent shell / eval kernel / debug service
-//! capabilities required by the `coding-omp-v1` behavior pack (see
-//! `docs/designs/2026-08-31-omp-compatible-behavior-pack-design.md`,
-//! "Coding extensions"). No implementations ship yet — hosts and future
-//! pack extensions implement them. Until then the SDK behavior installer
-//! reports those extensions as degraded/unavailable in its manifest.
+//! Shared stateful coding runtimes for the `coding-omp-v1` behavior pack
+//! (see `docs/designs/2026-08-31-omp-compatible-behavior-pack-design.md`,
+//! "Coding extensions"): the [`ShellSession`]/[`EvalKernel`]/[`DebugService`]
+//! contracts plus the bundled reference implementations —
+//! [`PersistentShellSession`], [`PythonEvalKernel`]/[`JavaScriptEvalKernel`],
+//! and [`DapDebugService`]. Until a host wires them into
+//! `BehaviorSessionServices`, the SDK behavior installer reports those
+//! extensions as degraded in its manifest.
+
+pub mod dap;
+pub mod eval_kernel;
+pub mod shell;
+
+pub use dap::{DapClient, DapDebugService};
+pub use eval_kernel::{JavaScriptEvalKernel, PythonEvalKernel};
+pub use shell::PersistentShellSession;
 
 use async_trait::async_trait;
 use std::time::Duration;

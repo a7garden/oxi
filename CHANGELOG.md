@@ -27,11 +27,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extensions (HashlineState required; LSP/Shell/Eval/Debug/TTSR/
   Delegation optional), a coding-discipline prompt layer, and a ledger
   pinned to `omp@v18.0.11`: read/write/search + hashline anchors
-  Equivalent (fixture-evidenced); LSP/TTSR/delegation Partial;
-  persistent shell/eval/DAP Unavailable (legacy per-call bash, stateless
-  eval, and scaffold debug still ship as the pack tools; the
-  `ShellSession`/`EvalKernel`/`DebugService` contracts are declared in
-  `oxicode-agent/src/runtime/` with no implementations yet).
+  Equivalent (fixture-evidenced); LSP/TTSR/delegation Partial; persistent
+  shell/eval/DAP Partial — the `ShellSession`/`EvalKernel`/`DebugService`
+  contracts now ship reference implementations (see below), while the
+  exposed pack tools keep legacy per-call semantics until tool routing
+  lands.
+- **Persistent coding runtimes (`oxicode-agent/src/runtime/`).**
+  `PersistentShellSession`: one long-lived `bash --noprofile --norc` per
+  session (own process group, `trap : INT`), marker-terminated commands so
+  cwd/env persist across calls, group-SIGINT cancel surfacing exit 130,
+  bounded output, explicit reset. `PythonEvalKernel` (`python3 -q -u -i`)
+  and `JavaScriptEvalKernel` (`node -i`, bun fallback): persistent
+  interpreter/REPL state across cells with inline (filesystem-free) cell
+  shipping, bounded stderr-tail error capture, and explicit reset.
+  `DapClient`/`DapDebugService`: Content-Length framed DAP over stdio with
+  a full launch lifecycle (initialize → launch/attach → `stopped`
+  observability → typed-passthrough requests → terminate). All three are
+  contract-tested by new behavior fixtures
+  (`persistent_shell_session_contract`, `persistent_eval_kernel_contract`,
+  `dap_service_protocol_scenario`); hosts wire them through
+  `BehaviorSessionServices` — the CLI keeps them unwired for now.
 - **CLI consumes `coding-omp-v1`.** The engine's shared tool registry is
   composed before App/Agent construction: legacy builtins register first,
   then the pack installer overwrites the same names with pack-built

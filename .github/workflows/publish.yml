@@ -102,6 +102,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: cargo nextest
         run: cargo nextest run --workspace --profile ci
+      - name: cargo nextest (behavior)
+        run: cargo nextest run -p oxicode-sdk --features behavior --profile ci
 
   # ── Publish in topological order ─────────────────────────────
   # Matrix with max-parallel: 1 enforces topological order: leaves first

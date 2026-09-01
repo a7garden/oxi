@@ -154,10 +154,7 @@ mod behavior_tests {
         ]
         .into();
         assert_eq!(degraded, expected);
-        assert_eq!(
-            comp.manifest.compatibility_level(),
-            FeatureStatus::Unavailable
-        );
+        assert_eq!(comp.manifest.compatibility_level(), FeatureStatus::Partial);
         assert_eq!(comp.patch.prompt_layers.len(), 1);
     }
 

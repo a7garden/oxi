@@ -1,6 +1,6 @@
 # OMP-Compatible Coding Behavior Packs
 
-**Status:** Adopted (behavior-pack API + `coding-omp-v1` + fixtures shipped; persistent shell/eval/DAP remain follow-up)  
+**Status:** Adopted (behavior-pack API + `coding-omp-v1` + fixtures shipped; persistent shell/eval/DAP reference runtimes implemented and ledger-advanced to Partial — exposed tool routing remains follow-up)
 **Date:** 2026-08-31  
 **Owners:** Oxicode maintainers  
 **Depends on:** \`oxicode-agent\`, \`oxicode-sdk\`, \`oxicode-hashline\`, \`oxicode-lsp\`

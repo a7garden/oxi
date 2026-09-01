@@ -104,6 +104,7 @@ jobs:
         run: |
           cargo nextest run --workspace \
             -E 'not (test(slow) | test(/^net_/) | test(requires_network) | test(/^bench_/))'
+          cargo nextest run -p oxicode-sdk --features behavior
 
   audit:
     name: Security Audit
