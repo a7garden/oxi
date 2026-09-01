@@ -19,6 +19,7 @@
 //! while the proxy wiring is being built.
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMode};
@@ -399,317 +400,386 @@ fn validate_action_params(action: &str, params: &Value) -> Result<(), ToolError>
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
+/// `debug` agent tool routed through a real [`DebugService`](crate::runtime::DebugService).
+///
+/// Same action surface as the [`DebugTool`] scaffold, but every operation
+/// drives an actual DAP session: `launch`/`attach` start adapter processes,
+/// breakpoint/stepping/inspection actions issue DAP requests, and
+/// `terminate` tears the session down. The pack picks this variant when the
+/// host provides a `DebugService` and falls back to the scaffold otherwise.
+pub struct DapDebugTool {
+    service: Arc<dyn crate::runtime::DebugService>,
+    sessions: std::sync::Mutex<Vec<String>>,
+}
 
-    fn ctx() -> ToolContext {
-        ToolContext::default()
+/// Adapter enum value → DAP adapter command line.
+fn adapter_command(adapter: &str) -> Vec<String> {
+    match adapter {
+        "gdb" => vec!["gdb".into(), "--interpreter=dap".into(), "-q".into()],
+        "lldb-dap" => vec!["lldb-dap".into()],
+        "debugpy" => vec!["python3".into(), "-m".into(), "debugpy.adapter".into()],
+        "dlv" => vec!["dlv".into(), "dap".into()],
+        other => vec![other.to_string()],
     }
+}
 
-    #[tokio::test]
-    async fn rejects_missing_action() {
-        let result = DebugTool.execute("c1", json!({}), None, &ctx()).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("action"), "unexpected error: {err}");
-    }
-
-    #[tokio::test]
-    async fn rejects_empty_action() {
-        let result = DebugTool
-            .execute("c2", json!({"action": "   "}), None, &ctx())
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn rejects_unknown_action() {
-        let result = DebugTool
-            .execute("c3", json!({"action": "rerun"}), None, &ctx())
-            .await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("rerun"), "unexpected error: {err}");
-        assert!(err.contains("Supported actions"), "unexpected error: {err}");
-    }
-
-    #[tokio::test]
-    async fn launch_requires_program() {
-        let result = DebugTool
-            .execute("c4", json!({"action": "launch"}), None, &ctx())
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("program"));
-    }
-
-    #[tokio::test]
-    async fn launch_rejects_non_array_args() {
-        let result = DebugTool
-            .execute(
-                "c5",
-                json!({"action": "launch", "program": "./bin/app", "args": "not-an-array"}),
-                None,
-                &ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("args"));
-    }
-
-    #[tokio::test]
-    async fn attach_requires_adapter() {
-        let result = DebugTool
-            .execute("c6", json!({"action": "attach"}), None, &ctx())
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("adapter"));
-    }
-
-    #[tokio::test]
-    async fn set_breakpoint_requires_file_and_line() {
-        let result = DebugTool
-            .execute(
-                "c7",
-                json!({"action": "set_breakpoint", "file": "src/main.rs"}),
-                None,
-                &ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("line"));
-
-        let result = DebugTool
-            .execute(
-                "c8",
-                json!({"action": "set_breakpoint", "line": 42}),
-                None,
-                &ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("file"));
-    }
-
-    #[tokio::test]
-    async fn stack_trace_requires_thread_id() {
-        let result = DebugTool
-            .execute("c9", json!({"action": "stack_trace"}), None, &ctx())
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("thread_id"));
-    }
-
-    #[tokio::test]
-    async fn evaluate_requires_expression_and_frame() {
-        let result = DebugTool
-            .execute(
-                "c10",
-                json!({"action": "evaluate", "frame_id": 7}),
-                None,
-                &ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("expression"));
-
-        let result = DebugTool
-            .execute(
-                "c11",
-                json!({"action": "evaluate", "expression": "x + 1"}),
-                None,
-                &ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("frame_id"));
-    }
-
-    #[tokio::test]
-    async fn launch_with_program_succeeds() {
-        let result = DebugTool
-            .execute(
-                "c12",
+/// Map a tool action to the DAP request command + arguments built from
+/// the tool parameters. Returns `None` for actions that are not plain
+/// DAP requests (lifecycle actions are handled by the service).
+fn dap_request(action: &str, params: &Value) -> Option<(String, Value)> {
+    let thread_id = || params.get("thread_id").cloned().unwrap_or(json!(0));
+    let frame_id = || params.get("frame_id").cloned().unwrap_or(json!(0));
+    match action {
+        "set_breakpoint" => {
+            let mut bp = json!({ "line": params.get("line").cloned().unwrap_or(json!(0)) });
+            if let Some(condition) = params.get("condition").filter(|v| !v.is_null()) {
+                bp["condition"] = condition.clone();
+            }
+            Some((
+                "setBreakpoints".to_string(),
                 json!({
-                    "action": "launch",
-                    "program": "./target/debug/app",
-                    "args": ["--flag", "value"],
-                    "adapter": "lldb-dap"
+                    "source": { "path": params.get("file").cloned().unwrap_or(json!("")) },
+                    "breakpoints": [bp],
                 }),
-                None,
-                &ctx(),
-            )
-            .await
-            .expect("launch should succeed");
-        assert!(result.success);
-        assert!(result.output.contains("`launch`"));
-        assert!(result.output.contains("lldb-dap"));
-        assert!(result.output.contains("./target/debug/app"));
-        // Scaffold does NOT execute — it just acknowledges the request.
-        assert!(result.output.contains("xd://debug"));
+            ))
+        }
+        // DAP removes breakpoints by re-setting the file's breakpoint list.
+        "remove_breakpoint" => Some((
+            "setBreakpoints".to_string(),
+            json!({
+                "source": { "path": params.get("file").cloned().unwrap_or(json!("")) },
+                "breakpoints": [],
+            }),
+        )),
+        "continue" => Some(("continue".to_string(), json!({ "threadId": thread_id() }))),
+        "pause" => Some(("pause".to_string(), json!({ "threadId": thread_id() }))),
+        "step_in" => Some(("stepIn".to_string(), json!({ "threadId": thread_id() }))),
+        "step_over" => Some(("next".to_string(), json!({ "threadId": thread_id() }))),
+        "step_out" => Some(("stepOut".to_string(), json!({ "threadId": thread_id() }))),
+        "threads" => Some(("threads".to_string(), json!({}))),
+        "stack_trace" => Some(("stackTrace".to_string(), json!({ "threadId": thread_id() }))),
+        "scopes" => Some(("scopes".to_string(), json!({ "frameId": frame_id() }))),
+        "variables" => {
+            // DAP walks variables by reference handle; the frame id is the
+            // entry handle when the model has not obtained one from scopes.
+            let reference = params
+                .get("variable_ref")
+                .filter(|v| !v.is_null())
+                .cloned()
+                .unwrap_or_else(frame_id);
+            Some((
+                "variables".to_string(),
+                json!({ "variablesReference": reference }),
+            ))
+        }
+        "evaluate" => Some((
+            "evaluate".to_string(),
+            json!({
+                "expression": params.get("expression").cloned().unwrap_or(json!("")),
+                "frameId": frame_id(),
+            }),
+        )),
+        _ => None,
     }
+}
 
-    #[tokio::test]
-    async fn set_breakpoint_with_condition_succeeds() {
-        let result = DebugTool
-            .execute(
-                "c13",
-                json!({
-                    "action": "set_breakpoint",
-                    "file": "src/main.rs",
-                    "line": 42,
-                    "condition": "i == 10"
-                }),
-                None,
-                &ctx(),
-            )
-            .await
-            .expect("set_breakpoint should succeed");
-        assert!(result.success);
-        assert!(result.output.contains("set_breakpoint"));
-    }
-
-    #[tokio::test]
-    async fn sessions_action_succeeds_without_extras() {
-        let result = DebugTool
-            .execute("c14", json!({"action": "sessions"}), None, &ctx())
-            .await
-            .expect("sessions should succeed");
-        assert!(result.success);
-        // Sessions probes available adapters — output mentions adapters.
-        assert!(
-            result.output.contains("adapter") || result.output.contains("debug"),
-            "unexpected output: {}",
-            result.output
-        );
-    }
-
-    #[tokio::test]
-    async fn guidance_text_matches_per_action() {
-        let result = DebugTool
-            .execute(
-                "c15",
-                json!({"action": "evaluate", "expression": "x + 1", "frame_id": 7}),
-                None,
-                &ctx(),
-            )
-            .await
-            .expect("evaluate should succeed");
-        assert!(result.output.contains("xd://debug"));
-        assert!(result.output.contains("evaluate"));
-    }
-
-    #[tokio::test]
-    async fn metadata_carries_scaffold_flag_and_action() {
-        let result = DebugTool
-            .execute(
-                "c16",
-                json!({
-                    "action": "set_breakpoint",
-                    "file": "main.rs",
-                    "line": 10
-                }),
-                None,
-                &ctx(),
-            )
-            .await
-            .expect("set_breakpoint should succeed");
-        let meta = result.metadata.expect("metadata should be set");
-        assert_eq!(meta["action"], json!("set_breakpoint"));
-        assert!(meta["guidance"].as_str().unwrap().contains("xd://debug"));
-    }
-
-    #[test]
-    fn schema_lists_required_action_and_enum() {
-        let schema = DebugTool.parameters_schema();
-        let required = schema.get("required").and_then(|v| v.as_array());
-        assert_eq!(
-            required.and_then(|r| r.first()).and_then(|v| v.as_str()),
-            Some("action"),
-            "schema must mark `action` as required"
-        );
-
-        let actions: Vec<&str> = schema
-            .pointer("/properties/action/enum")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default();
-
-        for expected in [
-            "attach",
-            "continue",
-            "launch",
-            "pause",
-            "stack_trace",
-            "step_in",
-            "step_over",
-            "step_out",
-            "terminate",
-            "threads",
-            "variables",
-            "evaluate",
-            "scopes",
-            "set_breakpoint",
-            "remove_breakpoint",
-            "sessions",
-        ] {
-            assert!(
-                actions.contains(&expected),
-                "schema enum is missing `{expected}`"
-            );
+impl DapDebugTool {
+    /// Route operations through `service`.
+    pub fn new(service: Arc<dyn crate::runtime::DebugService>) -> Self {
+        Self {
+            service,
+            sessions: std::sync::Mutex::new(Vec::new()),
         }
     }
 
-    #[test]
-    fn schema_adapters_match_supported_set() {
-        let schema = DebugTool.parameters_schema();
-        let adapters: Vec<&str> = schema
-            .pointer("/properties/adapter/enum")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default();
-        for expected in ["gdb", "lldb-dap", "debugpy", "dlv"] {
-            assert!(
-                adapters.contains(&expected),
-                "adapter enum missing `{expected}`"
-            );
-        }
+    fn track_session(&self, id: String) {
+        // SAFETY: a poisoned lock means the previous holder panicked while
+        // holding it — a real bug that must surface, not be swallowed.
+        #[allow(clippy::expect_used)]
+        self.sessions
+            .lock()
+            .expect("session list poisoned")
+            .push(id);
     }
 
-    #[test]
-    fn schema_declares_dap_integer_properties() {
-        // The validator requires `thread_id` and `frame_id`, and the
-        // guidance text references `variable_ref` — all three must be
-        // declared in the schema so the model can send them.
-        let schema = DebugTool.parameters_schema();
-        for field in ["thread_id", "frame_id", "variable_ref"] {
-            let ty = schema
-                .pointer(&format!("/properties/{field}/type"))
-                .and_then(|v| v.as_str());
-            assert_eq!(
-                ty,
-                Some("number"),
-                "schema must declare `{field}` as a number"
-            );
-        }
+    fn forget_session(&self, id: &str) {
+        #[allow(clippy::expect_used)]
+        self.sessions
+            .lock()
+            .expect("session list poisoned")
+            .retain(|s| s != id);
     }
 
-    #[test]
-    fn is_supported_action_matches_constant() {
-        for action in DebugTool::ACTIONS {
-            assert!(DebugTool::is_supported_action(action));
-        }
-        assert!(!DebugTool::is_supported_action("fly"));
-        assert!(!DebugTool::is_supported_action(""));
+    fn listed_sessions(&self) -> Vec<String> {
+        #[allow(clippy::expect_used)]
+        self.sessions.lock().expect("session list poisoned").clone()
     }
 
-    #[test]
-    fn intent_and_mode_are_pinned() {
-        assert_eq!(DebugTool.intent(), Some("Drive a debugger via DAP"));
-        assert!(matches!(
-            DebugTool.execution_mode(),
-            ToolExecutionMode::SequentialOnly
-        ));
+    /// The session a non-lifecycle action targets: explicit `session`
+    /// param, else the most recently started session.
+    fn target_session(&self, explicit: Option<&str>) -> Result<String, ToolError> {
+        if let Some(id) = explicit {
+            return Ok(id.to_string());
+        }
+        #[allow(clippy::expect_used)]
+        self.sessions
+            .lock()
+            .expect("session list poisoned")
+            .last()
+            .cloned()
+            .ok_or_else(|| "No active debug session — call `launch` or `attach` first".to_string())
+    }
+}
+
+#[async_trait]
+impl AgentTool for DapDebugTool {
+    fn name(&self) -> &str {
+        "debug"
+    }
+
+    fn label(&self) -> &str {
+        "Debug (DAP, routed)"
+    }
+
+    fn essential(&self) -> bool {
+        false
+    }
+
+    fn description(&self) -> &str {
+        "Drive a real debugger through the Debug Adapter Protocol (DAP). \
+         `launch`/`attach` start adapter sessions; breakpoint, stepping, \
+         inspection, and evaluation actions issue live DAP requests and \
+         return the adapter's JSON responses; `terminate` ends the session. \
+         Pass the `session` id returned by `launch`/`attach` to target a \
+         specific session; the most recent one is used by default."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "attach",
+                        "continue",
+                        "launch",
+                        "pause",
+                        "stack_trace",
+                        "step_in",
+                        "step_over",
+                        "step_out",
+                        "terminate",
+                        "threads",
+                        "variables",
+                        "evaluate",
+                        "scopes",
+                        "set_breakpoint",
+                        "remove_breakpoint",
+                        "sessions"
+                    ],
+                    "description": "DAP action to perform. Session lifecycle: `sessions`, `launch`, `attach`, `terminate`. Breakpoints: `set_breakpoint`, `remove_breakpoint`. Execution control: `continue`, `pause`, `step_in`, `step_over`, `step_out`. Inspection: `threads`, `stack_trace`, `scopes`, `variables`, `evaluate`."
+                },
+                "session": {
+                    "type": "string",
+                    "description": "Session id returned by `launch`/`attach`. Defaults to the most recent session."
+                },
+                "program": {
+                    "type": "string",
+                    "description": "Path to the debug target binary/script. Required for `launch`."
+                },
+                "args": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Arguments forwarded to the program under debug. Honoured by `launch`."
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the debug target. Honoured by `launch`/`attach` when the adapter supports it."
+                },
+                "adapter": {
+                    "type": "string",
+                    "enum": ["gdb", "lldb-dap", "debugpy", "dlv"],
+                    "description": "DAP adapter to use. `gdb`/`lldb-dap` for native binaries, `debugpy` for Python, `dlv` for Go. Defaults to an adapter inferred from the program extension when unset."
+                },
+                "adapter_command": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Explicit adapter command line (argv) overriding the `adapter` preset — for custom or bundled adapters."
+                },
+                "expression": {
+                    "type": "string",
+                    "description": "Expression to evaluate. Used by `evaluate`."
+                },
+                "file": {
+                    "type": "string",
+                    "description": "Source file path. Required for `set_breakpoint` / `remove_breakpoint`."
+                },
+                "line": {
+                    "type": "number",
+                    "description": "Source line (1-based). Required for `set_breakpoint` / `remove_breakpoint`."
+                },
+                "condition": {
+                    "type": "string",
+                    "description": "Breakpoint condition expression. Used with `set_breakpoint`."
+                },
+                "thread_id": {
+                    "type": "number",
+                    "description": "Thread id (from `threads`). Required for `continue`, `pause`, `step_in`, `step_over`, `step_out`, and `stack_trace`."
+                },
+                "frame_id": {
+                    "type": "number",
+                    "description": "Stack frame id (from `stack_trace`). Required for `scopes`, `variables`, and `evaluate`."
+                },
+                "variable_ref": {
+                    "type": "number",
+                    "description": "Variable reference handle (from `variables`). Used to fetch nested members when omitted on the top scope."
+                }
+            },
+            "required": ["action"]
+        })
+    }
+
+    fn intent(&self) -> Option<&str> {
+        Some("Drive a real debugger via DAP")
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // A debug session is a single mutable resource shared across the
+        // model: two parallel step / set_breakpoint calls would race on the
+        // same DAP client.
+        ToolExecutionMode::SequentialOnly
+    }
+
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        params: Value,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let action = params
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required parameter: action".to_string())?
+            .trim();
+        if action.is_empty() {
+            return Err("Parameter `action` must be a non-empty string".to_string());
+        }
+        if !DebugTool::is_supported_action(action) {
+            return Err(format!(
+                "Unsupported debug action: `{}`. Supported actions: {}",
+                action,
+                DebugTool::ACTIONS.join(", ")
+            ));
+        }
+        validate_action_params(action, &params)?;
+        let explicit_session = params.get("session").and_then(|v| v.as_str());
+
+        // ── Session lifecycle ──────────────────────────────────────
+        match action {
+            "sessions" => {
+                let sessions = self.listed_sessions();
+                let text = if sessions.is_empty() {
+                    "No active debug sessions. Use `launch` or `attach` to start one.".to_string()
+                } else {
+                    format!(
+                        "Active debug sessions (most recent last):\n{}",
+                        sessions
+                            .iter()
+                            .rev()
+                            .map(|s| format!("- {s}"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                };
+                return Ok(AgentToolResult::success(text).with_metadata(json!({
+                    "sessions": sessions,
+                })));
+            }
+            "launch" | "attach" => {
+                let adapter_argv: Vec<String> = params
+                    .get("adapter_command")
+                    .and_then(|v| v.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_else(|| {
+                        adapter_command(
+                            params
+                                .get("adapter")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("lldb-dap"),
+                        )
+                    });
+                let adapter_label = params
+                    .get("adapter")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("custom");
+                let mut config = json!({
+                    "type": adapter_label,
+                    "request": action,
+                    "adapter": adapter_argv,
+                });
+                if let Some(obj) = config.as_object_mut() {
+                    for (key, value) in params.as_object().into_iter().flatten() {
+                        if key != "action"
+                            && key != "adapter"
+                            && key != "adapter_command"
+                            && key != "session"
+                        {
+                            obj.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                let session = self
+                    .service
+                    .start(&config)
+                    .await
+                    .map_err(|e| -> ToolError { format!("DAP start failed: {e}") })?;
+                self.track_session(session.clone());
+                let text = format!(
+                    "Debug session started ({action}, adapter: {adapter_label}).\nsession: {session}\n\
+                     The adapter reports `stopped` once the target is ready; use `threads`, \
+                     `set_breakpoint`, `continue`, `stack_trace`, `variables`, `evaluate`, \
+                     stepping actions, and `terminate` against this session."
+                );
+                return Ok(AgentToolResult::success(text).with_metadata(json!({
+                    "session": session,
+                    "request": action,
+                })));
+            }
+            "terminate" => {
+                let id = self.target_session(explicit_session)?;
+                self.service
+                    .terminate(&id)
+                    .await
+                    .map_err(|e| -> ToolError { format!("DAP terminate failed: {e}") })?;
+                self.forget_session(&id);
+                return Ok(AgentToolResult::success(format!(
+                    "Debug session terminated: {id}"
+                )));
+            }
+            _ => {}
+        }
+
+        // ── Plain DAP requests ─────────────────────────────────────
+        let Some((command, args)) = dap_request(action, &params) else {
+            return Err(format!("Action `{action}` is not mapped to a DAP request"));
+        };
+        let target = self.target_session(explicit_session)?;
+        let body = self
+            .service
+            .request(&target, &command, &args)
+            .await
+            .map_err(|e| -> ToolError { format!("DAP {command} failed: {e}") })?;
+        let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+        Ok(
+            AgentToolResult::success(format!("{action} → {command}\n{pretty}"))
+                .with_metadata(json!({ "session": target, "command": command, "body": body })),
+        )
     }
 }

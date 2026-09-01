@@ -5,6 +5,39 @@ All notable changes to the oxicode project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Tool routing for the persistent runtimes.** The `coding-omp-v1` pack
+  now routes its exposed `bash`/`eval`/`debug` tools through the host's
+  persistent runtimes when wired (`BehaviorSessionServices`): the bash
+  tool executes in one long-lived session (cwd/env persist across calls,
+  OMP session semantics), the eval tool keeps interpreter state across
+  cells with functional `reset`, and the debug tool drives real DAP
+  sessions (launch/attach, breakpoints, stepping, inspection, evaluate,
+  terminate) returning adapter JSON. Without services, the legacy
+  per-invocation implementations are used and the manifest degrades
+  honestly, exactly as before. Implementation ids bumped per the
+  replacement policy: `bash.session.v1` (replaces `bash.process.v1`),
+  `eval.kernel.v2` (replaces `eval.kernel.v1`), `debug.dap.v2` (replaces
+  `debug.dap.v1`). New routed-tool fixtures
+  (`routed_bash_session_persistence`, `routed_eval_kernel_persistence`,
+  `routed_debug_dap_lifecycle`, `routed_tools_fall_back_to_legacy`)
+  advance persistent-shell/eval/dap-debugging to **Equivalent**; the CLI
+  now wires the runtimes (all lazily spawned). The bundled shell session
+  merges stderr into stdout (`exec 2>&1`) so tool output carries
+  diagnostics.
+
+### Changed
+
+- `chacha20` 0.10.1 (yanked) → 0.10.2 via `cargo update` (transitive of
+  lopdf → printpdf → oxibrowser-render, `native-browser` feature path).
+- `RUSTSEC-2026-0269` (wasmtime 41.x sandbox escape, same extism 1.21
+  pin) and `RUSTSEC-2026-0253` (lru 0.16.4 panic-soundness via
+  azul-layout → printpdf, no 0.16.x fix) tracked in `.cargo/audit.toml`
+  and `deny.toml` with justifications — `cargo audit` is clean again.
+
 ## [0.80.0] — 2026-09-01
 
 ### Added

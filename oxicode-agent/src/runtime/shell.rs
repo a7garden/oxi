@@ -10,8 +10,9 @@
 //! no-op `trap : INT`. [`ShellSession::cancel`] SIGINTs the whole group —
 //! bash swallows the signal (trap) and survives to run the marker line,
 //! while the foreground command inherits the DEFAULT disposition and dies,
-//! surfacing as exit code 130. Output is bounded; the bound is reported
-//! via `ShellOutput::truncated`.
+//! surfacing as exit code 130. The session init also merges stderr into
+//! stdout (`exec 2>&1`), so command diagnostics arrive in one stream.
+//! Output is bounded; the bound is reported via `ShellOutput::truncated`.
 //!
 //! Known edge (documented, same class as OMP): a command that consumes
 //! stdin itself will swallow the marker line — such commands should read
@@ -98,8 +99,8 @@ impl PersistentShellSession {
             .stdout
             .take()
             .ok_or_else(|| std::io::Error::other("no stdout"))?;
-        // Stderr is drained (bounded) and discarded — commands that need it
-        // redirect explicitly.
+        // The session init (`exec 2>&1`) merges stderr into stdout; this
+        // drain only guards pre-init writes and is bounded.
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr);
@@ -166,11 +167,13 @@ impl super::ShellSession for PersistentShellSession {
         let deadline = Instant::now() + timeout;
         let mut proc = self.take_proc().map_err(|e| format!("spawn bash: {e}"))?;
         if !proc.initialized {
-            // No-op INT trap: bash survives group SIGINT (so the marker
-            // runs) while child commands inherit the DEFAULT disposition
-            // and die with exit code 130.
+            // Session init: (1) merge stderr into stdout so callers see
+            // diagnostics in one stream, and (2) install a no-op INT trap —
+            // bash survives group SIGINT (so the marker runs) while child
+            // commands inherit the DEFAULT disposition and die with exit
+            // code 130.
             proc.stdin
-                .write_all(b"trap : INT\n")
+                .write_all(b"exec 2>&1\ntrap : INT\n")
                 .await
                 .map_err(|e| format!("bash init write: {e}"))?;
             proc.stdin
@@ -322,6 +325,34 @@ mod tests {
             !out.stdout.contains("sub"),
             "reset must restore root: {out:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn cancel_after_multiple_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(PersistentShellSession::new(dir.path().to_path_buf()));
+        let _ = session
+            .execute("echo one", Duration::from_secs(5))
+            .await
+            .unwrap();
+        let _ = session
+            .execute("echo two", Duration::from_secs(5))
+            .await
+            .unwrap();
+        let worker_session = session.clone();
+        let worker = tokio::spawn(async move {
+            worker_session
+                .execute("sleep 30", Duration::from_secs(60))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        session.cancel();
+        let out = tokio::time::timeout(Duration::from_secs(10), worker)
+            .await
+            .expect("execute must return")
+            .expect("join")
+            .expect("execute ok");
+        assert_eq!(out.exit_code, 130, "{out:?}");
     }
 
     #[tokio::test]

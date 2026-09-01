@@ -887,6 +887,8 @@ pub mod ast_edit;
 pub mod ast_grep;
 /// Bash shell execution tool.
 pub mod bash;
+/// Persistent-session bash tool (pack-routed `ShellSession` backend).
+pub mod bash_session;
 /// Browser tools (engine abstraction always compiled).
 pub mod browse;
 /// Checkpoint and Rewind tools — save/restore investigation state.

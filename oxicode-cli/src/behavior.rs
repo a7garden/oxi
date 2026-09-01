@@ -81,8 +81,18 @@ pub fn install_coding_omp_v1(
             }
         }
     }
+    // Wire the persistent coding runtimes: all three spawn lazily on
+    // first use, so an idle session pays nothing. The pack routes bash/
+    // eval/debug through them; without them those tools keep the legacy
+    // per-invocation semantics and the manifest degrades honestly.
     let services = BehaviorSessionServices::new(cwd.to_path_buf())
         .with_snapshot_store(Arc::new(InMemorySnapshotStore::new()) as Arc<dyn SnapshotStore>)
+        .with_shell_session(Arc::new(
+            oxicode_agent::runtime::PersistentShellSession::new(cwd.to_path_buf()),
+        ))
+        .with_eval_kernel(Arc::new(oxicode_agent::runtime::PythonEvalKernel::new()))
+        .with_eval_kernel(Arc::new(oxicode_agent::runtime::JavaScriptEvalKernel::new()))
+        .with_debug_service(Arc::new(oxicode_agent::runtime::DapDebugService::new()))
         .with_disabled_tools(disabled);
     let resolved = match resolver.resolve(&[pack_id], &services) {
         Ok(r) => r,
@@ -144,15 +154,7 @@ mod behavior_tests {
             .iter()
             .map(|d| d.feature.as_str())
             .collect();
-        let expected: HashSet<&str> = [
-            "shell-session",
-            "eval-kernel",
-            "debug-service",
-            "ttsr-engine",
-            "lsp-host",
-            "delegation",
-        ]
-        .into();
+        let expected: HashSet<&str> = ["ttsr-engine", "lsp-host", "delegation"].into();
         assert_eq!(degraded, expected);
         assert_eq!(comp.manifest.compatibility_level(), FeatureStatus::Partial);
         assert_eq!(comp.patch.prompt_layers.len(), 1);

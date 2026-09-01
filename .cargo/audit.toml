@@ -49,8 +49,20 @@ ignore = [
     # wasmtime 41.0.4 — type-index mixup between engines (medium).
     # Same extism 1.21 pin as the entries above.
     "RUSTSEC-2026-0222",
+    # wasmtime 41.0.4 — filesystem sandbox escape when paths or symlinks
+    # contain trailing slashes (2026-08-20). Same extism 1.21 pin; fixed
+    # only in wasmtime >=46, no 41.x backport.
+    "RUSTSEC-2026-0269",
 
     # ── transitive dependencies (no fix available) ──────────────────
+
+    # lru 0.16.4 — potential use-after-free via panic in LruCache::pop()
+    # (unsound, not exploitable). Transitive via azul-layout → printpdf →
+    # oxibrowser-render, only under the non-default `native-browser`
+    # feature. azul-layout pins lru ^0.16 and 0.16.4 is the latest 0.16.x;
+    # the fix (lru >=0.17) is semver-incompatible. Re-evaluate on the next
+    # azul-layout bump.
+    "RUSTSEC-2026-0253",
 
     # rsa ~0.9.10 — Marvin Attack timing sidechannel (medium)
     # Transitive via jsonschema → referencing. Server-side only.

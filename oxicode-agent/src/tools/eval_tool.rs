@@ -11,6 +11,7 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMode};
@@ -195,6 +196,170 @@ impl AgentTool for EvalTool {
         };
 
         Ok(AgentToolResult::success(result_text))
+    }
+}
+
+/// `eval` agent tool routed through persistent [`EvalKernel`]s.
+///
+/// Schema-compatible with [`EvalTool`]; cells execute in one long-lived
+/// interpreter per language, so imports and variables persist across
+/// calls and `reset: true` actually drops kernel state. The pack picks
+/// this variant when the host provides eval kernels and falls back to
+/// the per-call [`EvalTool`] otherwise.
+pub struct KernelEvalTool {
+    kernels: Vec<Arc<dyn crate::runtime::EvalKernel>>,
+}
+
+impl KernelEvalTool {
+    /// Route cells through `kernels` (one per supported language).
+    pub fn new(kernels: Vec<Arc<dyn crate::runtime::EvalKernel>>) -> Self {
+        Self { kernels }
+    }
+
+    fn kernel_for(&self, language: &str) -> Option<Arc<dyn crate::runtime::EvalKernel>> {
+        let wanted = match language {
+            "py" => crate::runtime::EvalLanguage::Python,
+            "js" => crate::runtime::EvalLanguage::JavaScript,
+            _ => return None,
+        };
+        self.kernels
+            .iter()
+            .find(|k| k.language() == wanted)
+            .cloned()
+    }
+}
+
+#[async_trait]
+impl AgentTool for KernelEvalTool {
+    fn name(&self) -> &str {
+        "eval"
+    }
+
+    fn label(&self) -> &str {
+        "Eval (persistent kernel)"
+    }
+
+    fn essential(&self) -> bool {
+        false
+    }
+
+    fn description(&self) -> &str {
+        "Execute code in Python (`py`) or JavaScript (`js`) inside a \
+         persistent kernel: imports and variable definitions persist \
+         across calls. Use `reset: true` to drop the kernel state before \
+         a cell. Errors are captured and reported without killing the \
+         kernel. Use `bash` for shell-level work."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "language": {
+                    "type": "string",
+                    "enum": ["py", "js"],
+                    "description": "Language runtime: `py` (Python 3) or `js` (JavaScript / Node or Bun)",
+                    "default": "py"
+                },
+                "code": {
+                    "type": "string",
+                    "description": "Code to execute. Imports and variable definitions persist across calls."
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional cell label for readability in the transcript"
+                },
+                "reset": {
+                    "type": "boolean",
+                    "description": "Reset the kernel/session before executing this cell",
+                    "default": false
+                }
+            },
+            "required": ["code"]
+        })
+    }
+
+    fn intent(&self) -> Option<&str> {
+        Some("Execute code in a persistent kernel")
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // One interpreter per language = shared mutable state.
+        ToolExecutionMode::SequentialOnly
+    }
+
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        params: Value,
+        _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError> {
+        let code = params
+            .get("code")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required parameter: code".to_string())?;
+        if code.trim().is_empty() {
+            return Err("Parameter `code` must be a non-empty string".to_string());
+        }
+
+        let language = params
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("py");
+
+        let kernel = self
+            .kernel_for(language)
+            .ok_or_else(|| format!("No persistent kernel available for language `{language}`"))?;
+
+        let timeout = std::time::Duration::from_secs(
+            params
+                .get("timeout")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(120),
+        );
+
+        if params
+            .get("reset")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            kernel
+                .reset()
+                .await
+                .map_err(|e| -> ToolError { format!("kernel reset failed: {e}") })?;
+        }
+
+        let out = kernel
+            .execute(code, timeout)
+            .await
+            .map_err(|e| -> ToolError { format!("kernel execution failed: {e}") })?;
+
+        let mut parts = Vec::new();
+        if !out.stdout.trim().is_empty() {
+            parts.push(format!("── stdout ──\n{}", out.stdout.trim()));
+        }
+        if !out.stderr.trim().is_empty() {
+            parts.push(format!("── stderr ──\n{}", out.stderr.trim()));
+        }
+        if let Some(error) = &out.error {
+            parts.push(format!("── error ──\n{error}"));
+        }
+        if out.truncated {
+            parts.push("[Kernel output bound applied]".to_string());
+        }
+
+        let text = if parts.is_empty() {
+            "Cell executed successfully (no output)".to_string()
+        } else {
+            parts.join("\n")
+        };
+
+        if out.error.is_some() {
+            Ok(AgentToolResult::error(text))
+        } else {
+            Ok(AgentToolResult::success(text))
+        }
     }
 }
 

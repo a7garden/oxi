@@ -45,7 +45,7 @@ const BLOCKED_ENV_VARS: &[&str] = &[
 /// Check if a command contains dangerous patterns.
 /// Returns a warning string if dangerous patterns are detected, or None if safe.
 /// This does NOT block execution - it only emits a warning.
-fn is_dangerous_command(command: &str) -> Option<String> {
+pub(crate) fn is_dangerous_command(command: &str) -> Option<String> {
     let cmd_lower = command.to_lowercase();
     let mut warnings: Vec<String> = Vec::new();
 
@@ -124,7 +124,7 @@ fn is_dangerous_command(command: &str) -> Option<String> {
 
 /// Validate that a working directory is within the allowed workspace.
 /// Returns an error message if the path is invalid/escapes, or the resolved path on success.
-fn validate_cwd(dir: &str, workspace: Option<&Path>) -> Result<PathBuf, String> {
+pub(crate) fn validate_cwd(dir: &str, workspace: Option<&Path>) -> Result<PathBuf, String> {
     let path = Path::new(dir);
 
     // Reject path traversal
@@ -449,7 +449,7 @@ impl BashTool {
     }
 
     /// Format a duration for human-readable display
-    fn format_duration(duration: Duration) -> String {
+    pub(crate) fn format_duration(duration: Duration) -> String {
         let secs = duration.as_secs();
         let millis = duration.subsec_millis();
         if secs >= 60 {
@@ -466,7 +466,7 @@ impl BashTool {
     }
 
     /// Build the output string with optional truncation notice and timing.
-    fn build_output(
+    pub(crate) fn build_output(
         truncation: &TruncationResult,
         elapsed: Duration,
         exit_code: Option<i32>,

@@ -8,5 +8,6 @@ mod duplicate_fixture;
 mod eval_fixture;
 mod hashline_fixture;
 mod lsp_fixture;
+mod routing_fixture;
 mod shell_fixture;
 mod ttsr_fixture;

@@ -9,13 +9,15 @@
 
 use std::sync::Arc;
 
+use crate::behavior::installer::BehaviorSessionServices;
 use oxicode_agent::AgentTool;
 use oxicode_agent::tools::ast_edit::AstEditTool;
 use oxicode_agent::tools::ast_grep::AstGrepTool;
 use oxicode_agent::tools::bash::BashTool;
-use oxicode_agent::tools::debug_tool::DebugTool;
+use oxicode_agent::tools::bash_session::SessionBashTool;
+use oxicode_agent::tools::debug_tool::{DapDebugTool, DebugTool};
 use oxicode_agent::tools::edit::EditTool;
-use oxicode_agent::tools::eval_tool::EvalTool;
+use oxicode_agent::tools::eval_tool::{EvalTool, KernelEvalTool};
 use oxicode_agent::tools::find::FindTool;
 use oxicode_agent::tools::grep::GrepTool;
 use oxicode_agent::tools::ls::LsTool;
@@ -92,30 +94,42 @@ fn ledger() -> CompatibilityContract {
             ),
             entry(
                 "persistent-shell",
-                FeatureStatus::Partial,
-                &["behavior::persistent_shell_session_contract"],
-                "PersistentShellSession (persistent bash, marker protocol, group-SIGINT \
-                 cancel via trap, bounded output, reset) is implemented and \
-                 contract-tested; the exposed bash tool still runs legacy per-invocation \
-                 semantics — routing pending.",
+                FeatureStatus::Equivalent,
+                &[
+                    "behavior::persistent_shell_session_contract",
+                    "behavior::routed_bash_session_persistence",
+                ],
+                "bash.session.v1 (replaces bash.process.v1) routes the exposed bash tool \
+                 through PersistentShellSession when the host provides a ShellSession: cwd/env \
+                 persist across separate tool calls, abort surfaces 130 while the session \
+                 survives, output is bounded. Without the service the tool falls back to the \
+                 legacy per-invocation implementation and the manifest degrades honestly.",
             ),
             entry(
                 "persistent-eval",
-                FeatureStatus::Partial,
-                &["behavior::persistent_eval_kernel_contract"],
-                "Python/JavaScript persistent kernels (state continuity across cells, \
-                 error capture, explicit reset) are implemented and contract-tested; the \
-                 exposed eval tool still spawns a fresh process per call — routing \
-                 pending.",
+                FeatureStatus::Equivalent,
+                &[
+                    "behavior::persistent_eval_kernel_contract",
+                    "behavior::routed_eval_kernel_persistence",
+                ],
+                "eval.kernel.v2 (replaces eval.kernel.v1) routes the exposed eval tool through \
+                 the host's EvalKernel services (python3 / node+fallback): state persists across \
+                 cells, errors are captured as cell output, `reset` drops kernel state. Without \
+                 kernels the tool falls back to the legacy fresh-process implementation.",
             ),
             entry(
                 "dap-debugging",
-                FeatureStatus::Partial,
-                &["behavior::dap_service_protocol_scenario"],
-                "DapDebugService drives a real DAP lifecycle (initialize, launch, stopped \
-                 observability, breakpoints/stack/variables, continue, terminate) against \
-                 a scripted python3 adapter; the exposed debug tool remains a validated \
-                 scaffold and the real-adapter matrix is untested — routing pending.",
+                FeatureStatus::Equivalent,
+                &[
+                    "behavior::dap_service_protocol_scenario",
+                    "behavior::routed_debug_dap_lifecycle",
+                ],
+                "debug.dap.v2 (replaces debug.dap.v1) routes the exposed debug tool through \
+                 DapDebugService: launch/attach start real DAP sessions and breakpoint, \
+                 stepping, inspection, evaluation, and termination issue live DAP requests. \
+                 Proven against a scripted python3 adapter; real-adapter coverage (gdb, \
+                 lldb-dap, debugpy, dlv) remains fixture work, and without a DebugService the \
+                 tool falls back to the validated guidance scaffold.",
             ),
             entry(
                 "ttsr",
@@ -245,14 +259,30 @@ pub fn pack() -> Result<BehaviorPack, BehaviorInstallError> {
                 .essential(),
             simple_tool(|p| Arc::new(EditTool::with_cwd(p.to_path_buf()))),
         )?
+        // bash: routed through the host's persistent ShellSession when one
+        // is provided (OMP-style session semantics — cwd/env persist);
+        // legacy per-invocation fallback otherwise. Semantics changed with
+        // the routing, so the implementation id is bumped and declares the
+        // lineage per the replacement policy.
         .with_tool(
-            descriptor("bash.process.v1", "bash")
+            descriptor("bash.session.v1", "bash")
                 .capability(CapabilityClass::Process)
                 .side_effect(SideEffectClass::ProcessSpawning)
                 .state_scope(ToolStateScope::ShellSession)
                 .port(PortRequirementKind::ShellSession, false)
+                .replaces("bash.process.v1")
                 .essential(),
-            simple_tool(|p| Arc::new(BashTool::with_cwd(p.to_path_buf()))),
+            {
+                let legacy = simple_tool(|p| Arc::new(BashTool::with_cwd(p.to_path_buf())));
+                Arc::new(move |services: &BehaviorSessionServices| {
+                    match services.shell_session.clone() {
+                        Some(session) => {
+                            Ok(Arc::new(SessionBashTool::new(session)) as Arc<dyn AgentTool>)
+                        }
+                        None => legacy(services),
+                    }
+                }) as ToolFactory
+            },
         )?
         .with_tool(
             descriptor("grep.search.v1", "grep")
@@ -322,21 +352,42 @@ pub fn pack() -> Result<BehaviorPack, BehaviorInstallError> {
                 .port(PortRequirementKind::LspProvider, false),
             Arc::new(|_| Ok(Arc::new(LspTool) as Arc<dyn AgentTool>)),
         )?
+        // eval: persistent kernels when the host provides them (state
+        // persists across cells, `reset` drops kernel state); legacy
+        // fresh-process fallback otherwise. Id bumped per the replacement
+        // policy — routed cells change the exposed semantics.
         .with_tool(
-            descriptor("eval.kernel.v1", "eval")
+            descriptor("eval.kernel.v2", "eval")
                 .capability(CapabilityClass::Process)
                 .side_effect(SideEffectClass::ProcessSpawning)
                 .state_scope(ToolStateScope::EvalKernel)
-                .port(PortRequirementKind::EvalKernel, false),
-            Arc::new(|_| Ok(Arc::new(EvalTool) as Arc<dyn AgentTool>)),
+                .port(PortRequirementKind::EvalKernel, false)
+                .replaces("eval.kernel.v1"),
+            Arc::new(|services: &BehaviorSessionServices| {
+                if services.eval_kernels.is_empty() {
+                    Ok(Arc::new(EvalTool) as Arc<dyn AgentTool>)
+                } else {
+                    Ok(Arc::new(KernelEvalTool::new(services.eval_kernels.clone()))
+                        as Arc<dyn AgentTool>)
+                }
+            }),
         )?
+        // debug: real DAP sessions when the host provides a DebugService;
+        // the validated guidance scaffold otherwise. Id bumped per the
+        // replacement policy.
         .with_tool(
-            descriptor("debug.dap.v1", "debug")
+            descriptor("debug.dap.v2", "debug")
                 .capability(CapabilityClass::Process)
                 .side_effect(SideEffectClass::ProcessSpawning)
                 .state_scope(ToolStateScope::DebugTarget)
-                .port(PortRequirementKind::DebugService, false),
-            Arc::new(|_| Ok(Arc::new(DebugTool) as Arc<dyn AgentTool>)),
+                .port(PortRequirementKind::DebugService, false)
+                .replaces("debug.dap.v1"),
+            Arc::new(
+                |services: &BehaviorSessionServices| match services.debug_service.clone() {
+                    Some(service) => Ok(Arc::new(DapDebugTool::new(service)) as Arc<dyn AgentTool>),
+                    None => Ok(Arc::new(DebugTool) as Arc<dyn AgentTool>),
+                },
+            ),
         )
 }
 
@@ -411,9 +462,9 @@ mod tests {
         };
         // ids
         assert_eq!(by_name("edit").id.0, "edit.hashline.v1");
-        assert_eq!(by_name("bash").id.0, "bash.process.v1");
-        assert_eq!(by_name("eval").id.0, "eval.kernel.v1");
-        assert_eq!(by_name("debug").id.0, "debug.dap.v1");
+        assert_eq!(by_name("bash").id.0, "bash.session.v1");
+        assert_eq!(by_name("eval").id.0, "eval.kernel.v2");
+        assert_eq!(by_name("debug").id.0, "debug.dap.v2");
         // essentials
         for n in ["read", "write", "edit", "bash", "grep", "find", "ls"] {
             assert!(by_name(n).essential, "{n} must be essential");
@@ -486,9 +537,9 @@ mod tests {
         assert_eq!(status("lsp"), FeatureStatus::Partial);
         assert_eq!(status("ttsr"), FeatureStatus::Partial);
         assert_eq!(status("delegation"), FeatureStatus::Partial);
-        assert_eq!(status("persistent-shell"), FeatureStatus::Partial);
-        assert_eq!(status("persistent-eval"), FeatureStatus::Partial);
-        assert_eq!(status("dap-debugging"), FeatureStatus::Partial);
+        assert_eq!(status("persistent-shell"), FeatureStatus::Equivalent);
+        assert_eq!(status("persistent-eval"), FeatureStatus::Equivalent);
+        assert_eq!(status("dap-debugging"), FeatureStatus::Equivalent);
         assert_eq!(status("host-product-tools"), FeatureStatus::NotApplicable);
         assert_eq!(l.rollup(), FeatureStatus::Partial);
         for e in l
